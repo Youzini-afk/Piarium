@@ -2,9 +2,12 @@ import type {
   ExtensionUiResponse,
   HostHandshakeParams,
   HostHandshakeResult,
+  ImageAttachment,
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  ProviderAuthType,
+  ProviderDescriptor,
   SessionSnapshot,
   SessionSummary,
 } from "./types.js";
@@ -15,15 +18,15 @@ export interface HostMethodMap {
     result: { aborted: boolean };
   };
   "agent.followUp": {
-    params: { images?: string[]; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "agent.prompt": {
-    params: { images?: string[]; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "agent.steer": {
-    params: { images?: string[]; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "command.execute": {
@@ -54,6 +57,22 @@ export interface HostMethodMap {
     params: { modelId: string; provider: string; sessionId: string };
     result: SessionSnapshot;
   };
+  "project.trust.respond": {
+    params: { remember: boolean; requestId: string; trusted: boolean };
+    result: { accepted: boolean };
+  };
+  "provider.list": {
+    params: Record<string, never>;
+    result: ProviderDescriptor[];
+  };
+  "provider.login": {
+    params: { providerId: string; type: ProviderAuthType };
+    result: { authenticated: boolean };
+  };
+  "provider.logout": {
+    params: { providerId: string };
+    result: { authenticated: false };
+  };
   "package.install": {
     params: { source: string };
     result: PackageDescriptor;
@@ -81,6 +100,18 @@ export interface HostMethodMap {
   "session.list": {
     params: { cwd?: string };
     result: SessionSummary[];
+  };
+  "session.entries": {
+    params: { branchOnly?: boolean; sessionId: string };
+    result: JsonValue;
+  };
+  "session.fork": {
+    params: { entryId: string; position?: "before" | "at"; sessionId: string };
+    result: { cancelled: boolean; editorText?: string; snapshot: SessionSnapshot };
+  };
+  "session.navigate": {
+    params: { sessionId: string; summarize?: boolean; targetId: string };
+    result: { cancelled: boolean; editorText?: string; snapshot: SessionSnapshot };
   };
   "session.open": {
     params: { cwd?: string; sessionFile?: string; sessionId?: string };

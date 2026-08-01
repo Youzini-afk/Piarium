@@ -1,6 +1,6 @@
 # Security model
 
-Status: Phase 0 baseline
+Status: Phase 1 controls in place
 
 Last updated: 2026-08-02
 
@@ -68,3 +68,15 @@ extension process.
 - Installer upgrade/uninstall data-retention test.
 
 Security-sensitive behavior changes require an architecture note and focused regression test.
+
+## Temporary upstream dependency repair
+
+Pi `0.83.0` publishes an npm shrinkwrap that pins `brace-expansion` `5.0.7`, even when the
+application-level override requests the patched `5.0.8`. Piarium keeps `5.0.8` as a direct,
+locked dependency and repairs that one nested installation in `postinstall`. `security:check`
+fails closed if the resolved Pi copy is still below `5.0.8`. Remove this narrowly scoped repair
+after Pi publishes a dependency tree containing `brace-expansion >=5.0.8`.
+
+The root `allowScripts` policy pins approval to esbuild `0.28.1`, whose postinstall validates its
+platform binary. The no-op Google GenAI preinstall and protobufjs postinstall are explicitly denied;
+new or changed dependency lifecycle scripts remain visible during clean install.

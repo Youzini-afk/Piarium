@@ -2,7 +2,7 @@
 
 Each phase is a separately tested, committed, and pushed recovery point.
 
-## Phase 0 — Foundation
+## Phase 0 — Foundation (complete)
 
 - Architecture, security, and contribution contracts.
 - npm workspaces and TypeScript quality baseline.
@@ -12,7 +12,7 @@ Each phase is a separately tested, committed, and pushed recovery point.
 Acceptance: clean install; formatting, typecheck, tests, and build pass; protocol rejects malformed
 or oversized frames.
 
-## Phase 1 — Pi host
+## Phase 1 — Pi host (complete)
 
 - Runtime discovery for bundled/system/source/custom Pi.
 - Direct SDK worker lifecycle and handshake.

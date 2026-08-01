@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: accepted for Phase 0
+Status: implemented through Phase 1
 
 Last updated: 2026-08-02
 

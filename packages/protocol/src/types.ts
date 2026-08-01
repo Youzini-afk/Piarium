@@ -46,6 +46,21 @@ export interface ModelDescriptor {
   supportsThinking?: boolean;
 }
 
+export interface ImageAttachment {
+  data: string;
+  mimeType: string;
+}
+
+export type ProviderAuthType = "api_key" | "oauth";
+
+export interface ProviderDescriptor {
+  authTypes: ProviderAuthType[];
+  configured: boolean;
+  id: string;
+  name: string;
+  source?: string;
+}
+
 export interface PackageDescriptor {
   enabled: boolean;
   name: string;
@@ -76,7 +91,11 @@ export type ExtensionUiMethod =
   | "setStatus"
   | "setWidget"
   | "setTitle"
-  | "setEditorText";
+  | "setEditorText"
+  | "setWorkingMessage"
+  | "setWorkingVisible"
+  | "setWorkingIndicator"
+  | "setHiddenThinkingLabel";
 
 export interface ExtensionUiRequest {
   id?: string;
@@ -99,6 +118,12 @@ export interface SessionSnapshot {
   model?: ModelDescriptor;
   sessionId: string;
   thinkingLevel?: string;
+}
+
+export interface ProjectTrustRequest {
+  cwd: string;
+  id: string;
+  reason: "project-resources";
 }
 
 export interface ProtocolErrorData {

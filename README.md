@@ -11,9 +11,10 @@ message/file checkpoints into one local interface.
 
 ## Status
 
-Piarium is under active development. The repository currently contains the architecture,
-versioned host protocol, and quality baseline. See [the roadmap](docs/roadmap.md) for delivery
-phases.
+Piarium is under active development. Phase 1 is complete: the repository contains the architecture,
+bounded protocol, runtime discovery, and an isolated Pi `0.83.0` SDK host with sessions, providers,
+settings, packages, commands, project trust, and generic extension UI. See
+[the roadmap](docs/roadmap.md) for delivery phases.
 
 ## Product principles
 
@@ -27,7 +28,7 @@ phases.
 - **Windows-first, cross-platform by design:** Windows is the first packaged target without
   baking platform assumptions into the protocol or UI domain.
 
-## Planned repository layout
+## Repository layout
 
 ```text
 apps/
@@ -60,6 +61,9 @@ Requirements:
 npm install
 npm run check
 npm run build
+npm run test:dist
 ```
 
 Architecture decisions are recorded in [docs/architecture.md](docs/architecture.md).
+Maintained extension compatibility evidence is recorded in
+[docs/extension-compatibility.md](docs/extension-compatibility.md).

@@ -3,6 +3,11 @@
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "@piarium/protocol": ["packages/protocol/src/index.ts"]
+    },
     "lib": ["ES2023"],
     "strict": true,
     "noUncheckedIndexedAccess": true,

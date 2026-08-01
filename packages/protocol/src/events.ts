@@ -1,6 +1,7 @@
 import type {
   ExtensionUiRequest,
   JsonValue,
+  ProjectTrustRequest,
   ProtocolErrorData,
   RuntimeDescriptor,
   SessionSnapshot,
@@ -24,6 +25,11 @@ export interface HostEventMap {
   };
   "host.ready": {
     runtime: RuntimeDescriptor;
+  };
+  "project.trust.request": ProjectTrustRequest;
+  "provider.auth.event": {
+    event: JsonValue;
+    providerId: string;
   };
   "package.progress": {
     message: string;

@@ -1,0 +1,120 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import { type CommandResult, discoverPiRuntimes } from "../src/runtime-discovery.js";
+
+describe("discoverPiRuntimes", () => {
+  it("reports bundled, system, and source runtimes with compatibility", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-runtime-"));
+    try {
+      const source = join(root, "pi");
+      const custom = join(root, "custom-pi");
+      const customNode = join(root, "node.exe");
+      await mkdir(join(source, "packages", "coding-agent"), { recursive: true });
+      await mkdir(custom, { recursive: true });
+      await writeFile(
+        join(source, "packages", "coding-agent", "package.json"),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.83.0" }),
+      );
+      await writeFile(
+        join(custom, "package.json"),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.83.0" }),
+      );
+      await writeFile(customNode, "");
+      const commandRunner = async (command: string): Promise<CommandResult> => {
+        if (command === customNode) {
+          return { exitCode: 0, stderr: "", stdout: "v24.18.0\n" };
+        }
+        if (command === "where.exe") {
+          return {
+            exitCode: 0,
+            stderr: "",
+            stdout: "C:\\tools\\pi\r\nC:\\tools\\pi.ps1\r\nC:\\tools\\pi.cmd\r\n",
+          };
+        }
+        return { exitCode: 0, stderr: "", stdout: "0.82.1\n" };
+      };
+
+      const candidates = await discoverPiRuntimes({
+        commandRunner,
+        customRuntimes: [{ id: "developer", nodePath: customNode, packageRoot: custom }],
+        env: {},
+        platform: "win32",
+        sourcePaths: [source],
+      });
+
+      assert.equal(candidates[0]?.id, "bundled");
+      assert.equal(candidates[0]?.compatible, true);
+      assert.equal(candidates[1]?.command, "C:\\tools\\pi.cmd");
+      assert.equal(candidates[1]?.version, "0.82.1");
+      assert.equal(candidates[1]?.compatible, true);
+      assert.equal(candidates[2]?.version, "0.83.0");
+      assert.equal(candidates[2]?.packageRoot, source);
+      assert.equal(candidates[3]?.id, "custom:developer");
+      assert.equal(candidates[3]?.available, true);
+      assert.equal(candidates[3]?.compatible, true);
+      assert.equal(candidates[3]?.packageRoot, custom);
+      assert.equal(candidates[3]?.nodePath, customNode);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("returns diagnostic candidates instead of throwing", async () => {
+    const candidates = await discoverPiRuntimes({
+      commandRunner: async () => ({ exitCode: 1, stderr: "not found", stdout: "" }),
+      env: {},
+      platform: "win32",
+      sourcePaths: [join(tmpdir(), "missing-piarium-source")],
+    });
+
+    assert.equal(candidates[1]?.available, false);
+    assert.match(candidates[1]?.issue ?? "", /not found on PATH/i);
+    assert.equal(candidates[2]?.available, false);
+    assert.match(candidates[2]?.issue ?? "", /package\.json/i);
+  });
+
+  it("does not treat a prerelease at the minimum version as compatible", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-prerelease-"));
+    try {
+      await mkdir(join(root, "packages", "coding-agent"), { recursive: true });
+      await writeFile(
+        join(root, "packages", "coding-agent", "package.json"),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.82.1-rc.1" }),
+      );
+      const candidates = await discoverPiRuntimes({
+        commandRunner: async () => ({ exitCode: 1, stderr: "not found", stdout: "" }),
+        env: {},
+        platform: "win32",
+        sourcePaths: [root],
+      });
+      assert.equal(candidates[2]?.available, true);
+      assert.equal(candidates[2]?.compatible, false);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("executes a Windows cmd shim whose path requires quoting", {
+    skip: process.platform !== "win32",
+  }, async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-runtime-"));
+    const bin = join(root, "bin with spaces");
+    const previousPath = process.env.PATH;
+    try {
+      await mkdir(bin, { recursive: true });
+      await writeFile(join(bin, "pi.cmd"), "@echo off\r\necho 0.82.1\r\n");
+      process.env.PATH = `${bin};${previousPath ?? ""}`;
+      const candidates = await discoverPiRuntimes({ env: {}, platform: "win32" });
+      assert.equal(candidates[1]?.available, true);
+      assert.equal(candidates[1]?.version, "0.82.1");
+      assert.equal(candidates[1]?.command, join(bin, "pi.cmd"));
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+});
