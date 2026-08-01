@@ -39,7 +39,7 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | narrow context-isolated preload API
+    | authenticated Piarium v1 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
@@ -67,13 +67,19 @@ Piarium broker owns Pi workers and maps one live worker to each opened top-level
 separate catalog worker for discovery. Recovery adds session/workspace leases. A worker crash
 cannot crash the renderer, and a renderer reload does not terminate an active task.
 
-`@piarium/runtime-broker` is now the single process client for this boundary. It validates protocol
+`@piarium/runtime-broker` is now the single process client for the worker boundary. It validates protocol
 frames and event sequence numbers, correlates bounded requests, denies project trust by default,
 owns catalog/per-session workers, and performs graceful then process-tree shutdown. Electron starts
 and handshakes the catalog worker whenever the local runtime is available, verifies that packaged
 worker files are unpacked, and awaits broker disposal during ordinary quit, update, relaunch, hard
-signals, and startup failure. The OpenChamber UI does not consume the broker yet; that direct
-session/provider migration is the next slice.
+signals, and startup failure.
+
+`@piarium/runtime-client` is the browser-safe surface client. The Web server exposes the same
+Pi-native method names through `/api/piarium/runtime/ws`; it validates every untrusted parameter,
+removes worker-only shutdown/trust methods, authenticates UI cookies/client or short-lived URL
+tokens, checks Origin, bounds payloads and concurrency, and forwards worker events with explicit
+`{workerId, role, sessionId}` routing. The private relay explicitly allowlists this socket and
+continues to carry it through the existing encrypted tunnel without injecting credentials.
 
 ### 4.3 Session workers
 
@@ -96,15 +102,18 @@ server backend and current command set are not yet sufficient as the sole produc
 
 ## 5. Versioned host protocol
 
-`@piarium/protocol` defines newline-delimited JSON envelopes:
+`@piarium/protocol` defines the private worker JSONL envelopes and the message-oriented surface
+envelopes:
 
 - request: `{v, kind:"request", id, method, params}`
 - response: `{v, kind:"response", id, ok, result|error}`
-- event: `{v, kind:"event", seq, event, data}`
+- worker event: `{v, kind:"event", seq, event, data}`
+- surface event: `{v, kind:"event", seq, source:{workerId,role,sessionId?}, event, data}`
 
-Unknown methods and events are preserved as protocol errors, not silently ignored. Request IDs are
-unique within a connection. Event sequence numbers are monotonic within a worker lifetime. Large
-binary/file payloads use a separate bounded stream or file grant rather than JSONL.
+Unknown methods and malformed routed events are protocol errors, not silently ignored. Request IDs
+are unique within a connection. Event sequence numbers are monotonic within each worker lifetime
+and clients track them independently by worker ID. Large binary/file payloads use a separate
+bounded stream or file grant rather than JSONL.
 
 An initial handshake negotiates protocol version and capabilities. UI disables unavailable
 actions instead of guessing from runtime versions.

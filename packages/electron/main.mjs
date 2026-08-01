@@ -467,8 +467,8 @@ const shutdownBackgroundServices = async ({ allowDuringUpdate = false } = {}) =>
       if (!allowDuringUpdate && state.installingUpdate) {
         return;
       }
-      await shutdownPiRuntime();
       await killSidecar();
+      await shutdownPiRuntime();
       if (state.notificationListener) {
         state.notificationListener.stop();
         state.notificationListener = null;
@@ -1610,6 +1610,11 @@ const spawnLocalServer = async () => {
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
+  await ensurePiRuntime();
+  if (!state.piRuntimeBroker) {
+    throw new Error('Pi runtime broker is unavailable after startup');
+  }
+
   const { startWebUiServer } = await import('@openchamber/web/server/index.js');
 
   const handle = await startWebUiServer({
@@ -1619,6 +1624,7 @@ const spawnLocalServer = async () => {
     attachSignals: false,
     exitOnShutdown: false,
     apiOnly: false,
+    piRuntimeBroker: state.piRuntimeBroker,
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({

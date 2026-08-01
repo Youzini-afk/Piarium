@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import type { Server } from "http";
+import type { PiRuntimeBroker } from "@piarium/runtime-broker";
 
 export interface WebUiServerController {
   expressApp: Express;
@@ -17,6 +18,7 @@ export interface StartWebUiServerOptions {
   attachSignals?: boolean;
   exitOnShutdown?: boolean;
   uiPassword?: string | null;
+  piRuntimeBroker?: PiRuntimeBroker;
 }
 
 export declare function startWebUiServer(

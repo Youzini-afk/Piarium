@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import type { PiRuntimeBrokerEvent } from "../src/index.js";
-import { PiRuntimeBroker } from "../src/index.js";
+import {
+  dispatchRuntimeRequest,
+  PiRuntimeBroker,
+  RuntimeDispatchError,
+} from "../src/index.js";
 
 const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/src/main.ts");
 
@@ -23,6 +27,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
     }\n`,
   );
   const events: PiRuntimeBrokerEvent[] = [];
+  const subscribedEvents: PiRuntimeBrokerEvent[] = [];
   const broker = new PiRuntimeBroker({
     agentDir,
     client: {
@@ -40,15 +45,25 @@ test("broker owns catalog and per-session Pi workers", async () => {
     hostEntry: HOST_ENTRY,
     promptForProjectTrust: async () => ({ remember: false, trusted: true }),
   });
+  const unsubscribe = broker.subscribe((event) => subscribedEvents.push(event));
 
   try {
-    const handshake = await broker.warmup();
+    const handshake = await dispatchRuntimeRequest(broker, "host.handshake", {
+      clientName: "surface-test",
+      clientVersion: "0.1.0",
+      mode: "test",
+      protocolVersions: [1],
+    });
     assert.equal(handshake.protocolVersion, 1);
     assert.equal(broker.catalogStarted, true);
     assert.deepEqual(await broker.listSessions(workspace), []);
 
     const created = await broker.createSession(workspace, "Broker smoke");
     assert.deepEqual(broker.activeSessionIds, [created.sessionId]);
+    const models = await dispatchRuntimeRequest(broker, "model.list", {
+      sessionId: created.sessionId,
+    });
+    assert.ok(Array.isArray(models));
     const commands = await broker.requestForSession(created.sessionId, "command.list", {
       sessionId: created.sessionId,
     });
@@ -75,7 +90,17 @@ test("broker owns catalog and per-session Pi workers", async () => {
     assert.equal((await broker.closeSession(created.sessionId)).closed, true);
     assert.deepEqual(broker.activeSessionIds, []);
     assert.ok(events.some((event) => event.kind === "host"));
+    assert.ok(subscribedEvents.some((event) => event.kind === "host"));
+    await assert.rejects(
+      dispatchRuntimeRequest(broker, "session.open", {}),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeDispatchError);
+        assert.equal(error.code, "invalid_params");
+        return true;
+      },
+    );
   } finally {
+    unsubscribe();
     await broker.dispose();
     assert.equal(broker.workerCount, 0);
     await rm(root, { force: true, recursive: true });

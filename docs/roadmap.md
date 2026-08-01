@@ -62,8 +62,11 @@ retained before engine surgery begins.
 
 ## Phase 5 — Direct Pi-native engine migration
 
-- Implemented foundation: reusable Pi protocol client and catalog/per-session worker broker;
-  Electron owns its handshake, packaged entry verification, and bounded shutdown lifecycle.
+- Implemented foundation: reusable Pi protocol client, browser-safe surface client, and
+  catalog/per-session worker broker; Electron owns its handshake, packaged entry verification,
+  and bounded shutdown lifecycle. The authenticated WebSocket gateway now shares that broker with
+  web/desktop/mobile, validates every public method, routes per-worker event sequences, and works
+  through the existing encrypted relay allowlist.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.

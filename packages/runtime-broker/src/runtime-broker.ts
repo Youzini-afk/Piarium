@@ -51,7 +51,7 @@ export interface PiRuntimeBrokerOptions {
   client: Omit<HostHandshakeParams, "protocolVersions">;
   cwd?: string;
   discovery?: RuntimeDiscoveryOptions;
-  emit(event: PiRuntimeBrokerEvent): void;
+  emit?(event: PiRuntimeBrokerEvent): void;
   environment?: NodeJS.ProcessEnv;
   execArgv?: string[];
   hostEntry: string;
@@ -75,6 +75,7 @@ export type PiCatalogMethod =
 
 export class PiRuntimeBroker {
   readonly #clients = new Set<PiHostClient>();
+  readonly #listeners = new Set<(event: PiRuntimeBrokerEvent) => void>();
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
   #catalog: PiHostClient | undefined;
@@ -83,6 +84,7 @@ export class PiRuntimeBroker {
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
+    if (options.emit) this.#listeners.add(options.emit);
   }
 
   get activeSessionIds(): string[] {
@@ -99,6 +101,14 @@ export class PiRuntimeBroker {
 
   discoverRuntimes(): Promise<RuntimeCandidate[]> {
     return discoverPiRuntimes(this.#options.discovery);
+  }
+
+  subscribe(listener: (event: PiRuntimeBrokerEvent) => void): () => void {
+    if (this.#disposed) throw new Error("Pi runtime broker is disposed");
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
   }
 
   async warmup(): Promise<HostHandshakeResult> {
@@ -199,6 +209,7 @@ export class PiRuntimeBroker {
     this.#sessions.clear();
     this.#catalog = undefined;
     await Promise.allSettled(clients.map((client) => client.dispose()));
+    this.#listeners.clear();
   }
 
   async #getCatalog(): Promise<PiHostClient> {
@@ -362,10 +373,12 @@ export class PiRuntimeBroker {
   }
 
   #emit(event: PiRuntimeBrokerEvent): void {
-    try {
-      this.#options.emit(event);
-    } catch {
-      // Surface callbacks are observational and must not break worker ownership.
+    for (const listener of this.#listeners) {
+      try {
+        listener(event);
+      } catch {
+        // Surface callbacks are observational and must not break worker ownership.
+      }
     }
   }
 }

@@ -50,6 +50,28 @@ export interface HostEventMap {
   "session.snapshot": SessionSnapshot;
 }
 
+export const HOST_EVENTS = [
+  "agent.event",
+  "extension.ui.dismiss",
+  "extension.ui.request",
+  "host.error",
+  "host.log",
+  "host.ready",
+  "package.progress",
+  "project.trust.request",
+  "provider.auth.event",
+  "recovery.changed",
+  "recovery.status",
+  "session.closed",
+  "session.snapshot",
+] as const satisfies readonly (keyof HostEventMap)[];
+
+const HOST_EVENT_SET = new Set<string>(HOST_EVENTS);
+
 export type HostEvent = keyof HostEventMap;
 
 export type HostEventData<E extends HostEvent> = HostEventMap[E];
+
+export function isHostEvent(value: unknown): value is HostEvent {
+  return typeof value === "string" && HOST_EVENT_SET.has(value);
+}

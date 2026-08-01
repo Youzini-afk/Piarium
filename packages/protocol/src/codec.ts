@@ -1,4 +1,10 @@
 import type { WireEnvelope } from "./envelopes.js";
+import { isHostEvent } from "./events.js";
+import {
+  isRuntimeEventEnvelope,
+  isRuntimeMethod,
+  type RuntimeWireEnvelope,
+} from "./runtime.js";
 import { type JsonValue, PIARIUM_PROTOCOL_VERSION } from "./types.js";
 
 const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
@@ -82,6 +88,32 @@ export function decodeEnvelope(frame: string): WireEnvelope {
 
 export function encodeEnvelope(envelope: WireEnvelope): string {
   return `${JSON.stringify(envelope)}\n`;
+}
+
+/** Decode one frame received from a Piarium surface transport. */
+export function decodeRuntimeEnvelope(frame: string): RuntimeWireEnvelope {
+  const envelope = decodeEnvelope(frame);
+  if (envelope.kind === "request" && !isRuntimeMethod(envelope.method)) {
+    throw new ProtocolDecodeError(
+      "unsupported_method",
+      `Unsupported runtime method: ${String(envelope.method)}`,
+    );
+  }
+  if (envelope.kind === "event" && !isRuntimeEventEnvelope(envelope)) {
+    throw new ProtocolDecodeError("invalid_envelope", "runtime event.source is required");
+  }
+  if (envelope.kind === "event" && !isHostEvent(envelope.event)) {
+    throw new ProtocolDecodeError(
+      "unsupported_event",
+      `Unsupported runtime event: ${String(envelope.event)}`,
+    );
+  }
+  return envelope as RuntimeWireEnvelope;
+}
+
+/** Encode one message-oriented surface frame (WebSocket/postMessage). */
+export function encodeRuntimeEnvelope(envelope: RuntimeWireEnvelope): string {
+  return JSON.stringify(envelope);
 }
 
 export interface JsonLineDecoderOptions {

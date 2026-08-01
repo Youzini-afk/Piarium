@@ -307,6 +307,7 @@ const isUrlAuthReadableHttpPath = (pathname) => {
 const isUrlAuthWebSocketPath = (pathname) => {
   return pathname === '/api/event/ws'
     || pathname === '/api/global/event/ws'
+    || pathname === '/api/piarium/runtime/ws'
     || pathname === '/api/openchamber/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
@@ -546,11 +547,24 @@ export const createUiAuth = ({
       return null;
     };
 
+    const resolveWebSocketAuthContext = async (req) => {
+      if (!requireClientAuth) {
+        const cookies = parseCookies(req.headers?.cookie);
+        if (cookies[cookieName]) {
+          return { type: 'session', token: cookies[cookieName] };
+        }
+      }
+      const clientAuth = await authenticateClientRequest(req);
+      if (clientAuth) return clientAuthContext(clientAuth);
+      return requireClientAuth ? null : { type: 'anonymous', token: 'anonymous' };
+    };
+
     return {
       enabled: false,
       requireAuth,
       requireSessionAuth,
       resolveAuthContext,
+      resolveWebSocketAuthContext,
       handleSessionStatus: async (req, res) => {
         if (requireClientAuth) {
           const clientAuth = await authenticateClientRequest(req);
@@ -787,6 +801,8 @@ export const createUiAuth = ({
     return clientAuth ? clientAuthContext(clientAuth) : null;
   };
 
+  const resolveWebSocketAuthContext = async (req) => resolveAuthContext(req, null);
+
   const handleUrlAuthToken = async (req, res) => {
     const sessionToken = await resolveAuthenticatedSessionToken(req, { allowUrlToken: false });
     if (!sessionToken) {
@@ -963,6 +979,7 @@ export const createUiAuth = ({
     requireAuth,
     requireSessionAuth,
     resolveAuthContext,
+    resolveWebSocketAuthContext,
     handleSessionStatus,
     handleSessionCreate,
     handleUrlAuthToken,

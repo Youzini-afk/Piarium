@@ -86,7 +86,8 @@ test('Electron startup and shutdown own the Pi runtime lifecycle', async () => {
   assert.match(main, /await ensurePiRuntime\(\)/);
   assert.match(
     main,
-    /await shutdownPiRuntime\(\);[\s\S]*await killSidecar\(\);/,
+    /await killSidecar\(\);[\s\S]*await shutdownPiRuntime\(\);/,
   );
+  assert.match(main, /await ensurePiRuntime\(\);[\s\S]*piRuntimeBroker: state\.piRuntimeBroker/);
   assert.match(main, /await shutdownBackgroundServices\(\);[\s\S]*app\.exit\(1\)/);
 });

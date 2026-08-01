@@ -13,20 +13,23 @@
   },
   "scripts": {
     "dev": "bun run build:watch",
-    "dev:server": "bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
-    "dev:server:watch": "nodemon --watch server --ext js --exec \"bun server/index.js --port ${OPENCHAMBER_PORT:-3001}\"",
+    "dev:server": "bun run prepare:pi-runtime && bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
+    "dev:server:watch": "bun run prepare:pi-runtime && nodemon --watch server --ext js --exec \"bun server/index.js --port ${OPENCHAMBER_PORT:-3001}\"",
     "build": "vite build",
     "build:watch": "vite build --watch",
     "type-check": "tsc --noEmit",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",
     "test": "vitest run",
-    "start": "node bin/cli.js serve"
+    "prepare:pi-runtime": "bun run --cwd ../runtime-broker build",
+    "start": "bun run prepare:pi-runtime && node bin/cli.js serve"
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "@konbakuyomu/smart-search": "^0.1.14",
     "@octokit/rest": "^22.0.1",
     "@opencode-ai/sdk": "1.18.9",
+    "@piarium/protocol": "workspace:*",
+    "@piarium/runtime-broker": "workspace:*",
     "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.6.0",
     "better-sqlite3": "^12.10.0",

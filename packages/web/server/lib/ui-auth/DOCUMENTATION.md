@@ -19,6 +19,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
   - `requireAuth(req, res, next)`
   - `handleSessionStatus(req, res)`
   - `handleSessionCreate(req, res)`
+  - `resolveWebSocketAuthContext(req)`
   - `handlePasskeyStatus(req, res)`
   - `handlePasskeyRegistrationOptions(req, res)`
   - `handlePasskeyRegistrationVerify(req, res)`

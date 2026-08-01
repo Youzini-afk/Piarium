@@ -1,0 +1,31 @@
+{
+  "name": "@piarium/runtime-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-safe Piarium runtime protocol client.",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun run --cwd ../protocol build && tsc -p tsconfig.build.json",
+    "test": "tsx --test test/**/*.test.ts",
+    "test:dist": "bun run build && node --test test/dist-smoke.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@piarium/protocol": "0.1.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

@@ -100,6 +100,8 @@ import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
+import { createWebPiRuntimeBroker } from './lib/pi-runtime/broker.js';
+import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
@@ -1630,6 +1632,36 @@ async function main(options = {}) {
     isRequestOriginAllowed,
   });
 
+  const ownsPiRuntimeBroker = !options.piRuntimeBroker;
+  const piRuntimeBroker = options.piRuntimeBroker || createWebPiRuntimeBroker({
+    agentDir: process.env.PIARIUM_AGENT_DIR,
+    clientVersion: OPENCHAMBER_VERSION,
+    cwd: process.cwd(),
+    emit: (event) => {
+      if (event.kind === 'diagnostic') {
+        const write = event.level === 'error' ? console.warn : console.info;
+        write('[pi-runtime]', event.message, { role: event.role, workerId: event.workerId });
+      } else if (event.kind === 'worker.exit') {
+        console.warn('[pi-runtime] worker exited', {
+          code: event.code,
+          expected: event.expected,
+          role: event.role,
+          sessionId: event.sessionId || null,
+          signal: event.signal,
+          workerId: event.workerId,
+        });
+      }
+    },
+  });
+  await piRuntimeBroker.warmup();
+  const piRuntimeGateway = createPiRuntimeGateway({
+    server,
+    broker: piRuntimeBroker,
+    uiAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+  });
+
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
 
@@ -1830,7 +1862,11 @@ async function main(options = {}) {
         port: managed ? openCodePort : null,
       };
     },
-    stop: (shutdownOptions = {}) => {
+    stop: async (shutdownOptions = {}) => {
+      await piRuntimeGateway.stop();
+      if (ownsPiRuntimeBroker) {
+        await piRuntimeBroker.dispose();
+      }
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       try {

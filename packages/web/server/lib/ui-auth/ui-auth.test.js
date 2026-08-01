@@ -127,6 +127,25 @@ describe('ui auth client credential seam', () => {
     await auth.requireAuth(deniedReq, deniedRes, () => {});
     expect(deniedRes.statusCode).toBe(401);
     expect(deniedRes.body).toEqual({ error: 'Client authentication required', locked: true, clientAuthRequired: true });
+    expect(await auth.resolveWebSocketAuthContext(deniedReq)).toBe(null);
+    expect(await auth.resolveWebSocketAuthContext({
+      method: 'GET',
+      headers: { cookie: 'oc_ui_session=attacker-controlled' },
+    })).toBe(null);
+    expect(await auth.resolveWebSocketAuthContext(allowedReq)).toMatchObject({
+      type: 'client',
+      token: 'client:remote-session',
+    });
+  });
+
+  it('allows anonymous WebSockets only for explicitly unauthenticated local runtimes', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth();
+
+    expect(await auth.resolveWebSocketAuthContext({ headers: {} })).toEqual({
+      type: 'anonymous',
+      token: 'anonymous',
+    });
   });
 
   it('reports authenticated client session status with bearer credentials', async () => {
@@ -220,6 +239,17 @@ describe('ui auth client credential seam', () => {
       headers: { upgrade: 'websocket' },
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
+
+    const piRuntimeWsReq = {
+      method: 'GET',
+      path: '/api/piarium/runtime/ws',
+      url: `/api/piarium/runtime/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    };
+    expect(await auth.resolveWebSocketAuthContext(piRuntimeWsReq)).toMatchObject({
+      type: 'client',
+      token: 'client:device-1',
+    });
 
     const dictationHttpReq = {
       method: 'GET',
