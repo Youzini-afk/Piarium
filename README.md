@@ -11,10 +11,14 @@ message/file checkpoints into one local interface.
 
 ## Status
 
-Piarium is under active development. Phase 2 is complete: the repository contains the architecture,
-bounded protocol, isolated Pi `0.83.0` SDK workers, and a secure Electron/React desktop MVP for
-projects, sessions, chat streaming, tools, models, providers, settings, packages, and generic
-extension UI. See [the roadmap](docs/roadmap.md) for delivery phases.
+Piarium is under active development. Its bounded protocol, isolated Pi `0.83.0` SDK host, secure
+desktop broker, and transactional conversation/workspace recovery core are implemented and tested.
+
+The product base is the maintainer's OpenChamber fork at commit `f551150e5`. That fork is imported
+into this repository and directly refactored from OpenCode to Pi; the source fork remains read-only.
+Custom providers, remote/cloud access, workspace tools, settings, session UX, and multi-surface
+support remain product requirements. See [the migration contract](docs/openchamber-pi-migration.md)
+and [the roadmap](docs/roadmap.md).
 
 ## Product principles
 
@@ -37,7 +41,6 @@ packages/
   protocol/       Versioned desktop-to-host wire protocol
   pi-host/        Isolated Node worker that embeds the Pi SDK
   recovery/       Message and workspace checkpoint engine
-  ui/             Shared product UI and domain components
 docs/
   architecture.md
   phase-2-desktop.md
@@ -66,5 +69,6 @@ npm run test:dist
 ```
 
 Architecture decisions are recorded in [docs/architecture.md](docs/architecture.md).
+Recovery guarantees are recorded in [docs/recovery.md](docs/recovery.md).
 Maintained extension compatibility evidence is recorded in
 [docs/extension-compatibility.md](docs/extension-compatibility.md).

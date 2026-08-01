@@ -1,14 +1,15 @@
 # Piarium architecture
 
-Status: implemented through Phase 2
+Status: Pi host and recovery core implemented; OpenChamber product-base migration in progress
 
 Last updated: 2026-08-02
 
 ## 1. Context
 
-Piarium is a graphical workspace for Pi. It borrows interaction ideas and selected presentation
-components from OpenChamber, but it does not emulate the OpenCode SDK. Pi sessions, models,
-packages, tools, commands, and extension UI are represented as Pi-native domain concepts.
+Piarium is a graphical workspace for Pi built from the maintainer's OpenChamber fork. The fork's
+product shell and custom capabilities are retained while its OpenCode engine, contracts, and
+terminology are directly replaced with Pi-native domain types and services. The source fork is a
+read-only input; all edits and history live in the Piarium repository.
 
 The first release targets a local Windows desktop. The process and protocol boundaries must also
 support a future remote host, browser client, and companion mobile client without moving extension
@@ -36,11 +37,11 @@ execution into an untrusted renderer.
 ## 4. Process model
 
 ```text
-React renderer
+OpenChamber-derived React renderer
     |
     | narrow context-isolated preload API
     v
-Electron main / runtime broker
+OpenChamber-derived Electron/web shell + Piarium broker
     |
     | Piarium protocol v1 over a private child-process IPC pipe
     v
@@ -56,14 +57,15 @@ Pi session worker (Node >=22.19)
 
 The renderer contains presentation and local view state only. It never imports Pi packages, reads
 credential files, spawns commands, or loads extension code. Every native operation crosses a
-typed preload capability.
+typed preload or Pi runtime capability. OpenCode SDK types are removed from feature code rather
+than preserved behind a compatibility facade.
 
-### 4.2 Electron main and broker
+### 4.2 Electron/web shell and broker
 
-The broker owns windows, lifecycle, native dialogs, and workers. In Phase 2 it maps one live worker
-to each opened top-level session and uses a separate catalog worker for session discovery. Phase 3
-adds the session-writer and workspace-recovery leases. A worker crash cannot crash the renderer,
-and a renderer reload does not terminate an active task.
+The retained shell owns windows, web/mobile/remote bootstrap, packaging, and native dialogs. The
+Piarium broker owns Pi workers and maps one live worker to each opened top-level session, with a
+separate catalog worker for discovery. Recovery adds session/workspace leases. A worker crash
+cannot crash the renderer, and a renderer reload does not terminate an active task.
 
 ### 4.3 Session workers
 
@@ -200,9 +202,23 @@ always visible. A source mismatch is a diagnostic state, never silently repaired
 - Shutdown is asynchronous and bounded; Pi runtime disposal and active recovery transactions are
   awaited before force termination.
 
-## 12. UI direction
+## 12. OpenChamber product-base migration
 
-OpenChamber informs density, navigation, split views, composer behavior, terminal, files, and Git
-presentation. Piarium owns its domain model and data flow. Selected MIT components may be migrated
-with attribution after removing OpenCode assumptions; the OpenChamber sync/session/provider stack
-is not copied.
+The maintainer's OpenChamber fork is copied into Piarium as the authoritative application base.
+Its UI, session UX, desktop/web/mobile/VS Code surfaces, custom providers, remote/cloud access,
+workspace operations, terminal, Git, settings, archive restore, and security customizations are
+preserved unless a reviewed Pi-native implementation is demonstrably equivalent.
+
+This is a direct migration, not a permanent compatibility stack:
+
+1. copy only from the reviewed clean fork commit without modifying the source worktree;
+2. replace OpenCode SDK domain types with Piarium-owned Pi session/message/event/provider types;
+3. rewrite the sync, lifecycle, provider, command, permission, and question paths against Pi;
+4. delete the OpenCode child process, proxy, watcher, downloaded CLI, configuration, and dead code;
+5. retain platform services and fork features, adapting each to the new Pi-native data flow;
+6. connect Piarium recovery at OpenChamber's unified per-message revert action and expose detailed
+   history in the right sidebar/settings.
+
+The exact source and non-regression contract are recorded in
+[openchamber-pi-migration.md](openchamber-pi-migration.md). Copied MIT material retains its license
+notice and will be rebranded before public release.

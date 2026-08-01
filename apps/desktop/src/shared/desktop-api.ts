@@ -8,6 +8,12 @@ import type {
   PackageDescriptor,
   ProviderAuthType,
   ProviderDescriptor,
+  RecoveryApplyResult,
+  RecoveryCheckpoint,
+  RecoveryListResult,
+  RecoveryMode,
+  RecoveryPoint,
+  RecoveryPreview,
   SessionSnapshot,
   SessionSummary,
 } from "@piarium/protocol";
@@ -16,6 +22,12 @@ export interface ProjectDescriptor {
   lastOpenedAt: string;
   name: string;
   path: string;
+}
+
+export type RecoveryDefaultMode = "ask" | "both" | "conversation";
+
+export interface AppPreferences {
+  recoveryDefault: RecoveryDefaultMode;
 }
 
 export interface DesktopAppInfo {
@@ -66,6 +78,7 @@ export interface DesktopApi {
     position?: "before" | "at",
   ): Promise<{ cancelled: boolean; editorText?: string; snapshot: SessionSnapshot }>;
   getAppInfo(): Promise<DesktopAppInfo>;
+  getPreferences(): Promise<AppPreferences>;
   getEntries(sessionId: string, branchOnly?: boolean): Promise<JsonValue>;
   getRecentProjects(): Promise<ProjectDescriptor[]>;
   getSettings(sessionId: string): Promise<JsonValue>;
@@ -98,8 +111,20 @@ export interface DesktopApi {
     images?: ImageAttachment[],
   ): Promise<{ accepted: boolean }>;
   removePackage(sessionId: string, source: string): Promise<{ removed: boolean }>;
+  applyRecovery(sessionId: string, planId: string): Promise<RecoveryApplyResult>;
+  createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryCheckpoint>;
+  getRecovery(sessionId: string): Promise<RecoveryListResult>;
+  previewRecovery(
+    sessionId: string,
+    targetKind: "checkpoint" | "turn",
+    targetId: string,
+    point: RecoveryPoint,
+    mode: RecoveryMode,
+  ): Promise<RecoveryPreview>;
+  redoRecovery(sessionId: string): Promise<RecoveryApplyResult>;
   respondToExtensionUi(sessionId: string, response: ExtensionUiResponse): Promise<boolean>;
   selectModel(sessionId: string, provider: string, modelId: string): Promise<SessionSnapshot>;
+  setRecoveryDefault(mode: RecoveryDefaultMode): Promise<AppPreferences>;
   steer(
     sessionId: string,
     text: string,
@@ -107,6 +132,7 @@ export interface DesktopApi {
   ): Promise<{ accepted: boolean }>;
   updatePackages(sessionId: string, source?: string): Promise<PackageDescriptor[]>;
   updateSettings(sessionId: string, patch: JsonValue): Promise<JsonValue>;
+  undoRecovery(sessionId: string): Promise<RecoveryApplyResult>;
 }
 
 export const DESKTOP_EVENT_CHANNEL = "piarium:event";
@@ -120,6 +146,7 @@ export const IPC_CHANNELS = {
   followUp: "piarium:agent:follow-up",
   forkSession: "piarium:session:fork",
   getAppInfo: "piarium:app:info",
+  getPreferences: "piarium:preferences:get",
   getEntries: "piarium:session:entries",
   getRecentProjects: "piarium:project:recent",
   getSettings: "piarium:settings:get",
@@ -137,9 +164,16 @@ export const IPC_CHANNELS = {
   openSession: "piarium:session:open",
   prompt: "piarium:agent:prompt",
   removePackage: "piarium:package:remove",
+  applyRecovery: "piarium:recovery:apply",
+  createRecoveryCheckpoint: "piarium:recovery:checkpoint-create",
+  getRecovery: "piarium:recovery:list",
+  previewRecovery: "piarium:recovery:preview",
+  redoRecovery: "piarium:recovery:redo",
   respondToExtensionUi: "piarium:extension-ui:respond",
   selectModel: "piarium:model:select",
+  setRecoveryDefault: "piarium:preferences:recovery-default",
   steer: "piarium:agent:steer",
   updatePackages: "piarium:package:update",
   updateSettings: "piarium:settings:update",
+  undoRecovery: "piarium:recovery:undo",
 } as const;

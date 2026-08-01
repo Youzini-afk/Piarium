@@ -6,7 +6,8 @@
     "baseUrl": ".",
     "ignoreDeprecations": "6.0",
     "paths": {
-      "@piarium/protocol": ["packages/protocol/src/index.ts"]
+      "@piarium/protocol": ["packages/protocol/src/index.ts"],
+      "@piarium/recovery": ["packages/recovery/src/index.ts"]
     },
     "lib": ["ES2023"],
     "strict": true,

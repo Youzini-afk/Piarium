@@ -3,6 +3,7 @@ import type {
   JsonValue,
   ProjectTrustRequest,
   ProtocolErrorData,
+  RecoveryStatus,
   RuntimeDescriptor,
   SessionSnapshot,
 } from "./types.js";
@@ -30,6 +31,12 @@ export interface HostEventMap {
   "provider.auth.event": {
     event: JsonValue;
     providerId: string;
+  };
+  "recovery.changed": {
+    sessionId: string;
+  };
+  "recovery.status": RecoveryStatus & {
+    sessionId: string;
   };
   "package.progress": {
     message: string;

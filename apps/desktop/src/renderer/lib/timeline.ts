@@ -165,6 +165,7 @@ export function normalizeTimeline(entries: JsonValue): TimelineItem[] {
     }
     if (rawType === "custom") {
       const customType = string(entry.customType);
+      if (customType === "piarium.recovery.turn/v1") continue;
       result.push({
         ...(customType === undefined ? {} : { customType }),
         id,

@@ -6,6 +6,7 @@ interface TimelineProps {
   liveTools: LiveTool[];
   onFork(entryId: string): void;
   onNavigate(entryId: string): void;
+  onRecover(entryId: string): void;
   timeline: TimelineItem[];
 }
 
@@ -42,11 +43,13 @@ function TimelineCard({
   item,
   onFork,
   onNavigate,
+  onRecover,
   streaming = false,
 }: {
   item: TimelineItem;
   onFork(entryId: string): void;
   onNavigate(entryId: string): void;
+  onRecover(entryId: string): void;
   streaming?: boolean;
 }) {
   if (item.kind === "meta") {
@@ -99,6 +102,9 @@ function TimelineCard({
               <button onClick={() => onFork(item.id)} title="从此前分叉" type="button">
                 ⑂
               </button>
+              <button onClick={() => onRecover(item.id)} title="恢复到此轮" type="button">
+                ⌁
+              </button>
             </span>
           ) : null}
         </div>
@@ -143,6 +149,7 @@ export function Timeline(props: TimelineProps) {
           key={item.id}
           onFork={props.onFork}
           onNavigate={props.onNavigate}
+          onRecover={props.onRecover}
         />
       ))}
       {props.liveAssistant ? (
@@ -150,6 +157,7 @@ export function Timeline(props: TimelineProps) {
           item={props.liveAssistant}
           onFork={props.onFork}
           onNavigate={props.onNavigate}
+          onRecover={props.onRecover}
           streaming
         />
       ) : null}

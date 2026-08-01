@@ -43,6 +43,10 @@ function assertSender(event: IpcMainInvokeEvent, window: BrowserWindow | undefin
 
 export function registerIpcHandlers(options: IpcHandlerOptions): () => void {
   const channels: string[] = [];
+  const recoveryPreviews = new Map<
+    string,
+    { mode: "both" | "conversation" | "files"; sessionId: string; totalChanges: number }
+  >();
   const handle = (
     channel: string,
     listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown,
@@ -64,6 +68,13 @@ export function registerIpcHandlers(options: IpcHandlerOptions): () => void {
     runtimes: await options.broker.discoverRuntimes(),
   }));
   handle(IPC_CHANNELS.getRecentProjects, () => options.store.getRecentProjects());
+  handle(IPC_CHANNELS.getPreferences, () => options.store.getPreferences());
+  handle(IPC_CHANNELS.setRecoveryDefault, (_event, mode) => {
+    if (mode !== "ask" && mode !== "both" && mode !== "conversation") {
+      throw new TypeError("recovery default must be ask, conversation, or both");
+    }
+    return options.store.setRecoveryDefault(mode);
+  });
   handle(IPC_CHANNELS.chooseProject, async () => {
     const parent = options.getWindow();
     const dialogOptions: OpenDialogOptions = {
@@ -292,8 +303,103 @@ export function registerIpcHandlers(options: IpcHandlerOptions): () => void {
       parsed as never,
     );
   });
+  handle(IPC_CHANNELS.getRecovery, (_event, sessionId) => {
+    const id = expectString(sessionId, "sessionId");
+    return options.broker.requestForSession(id, "recovery.list", { sessionId: id });
+  });
+  handle(
+    IPC_CHANNELS.previewRecovery,
+    async (_event, sessionId, targetKind, targetId, point, mode) => {
+      const id = expectString(sessionId, "sessionId");
+      if (targetKind !== "checkpoint" && targetKind !== "turn") {
+        throw new TypeError("targetKind must be checkpoint or turn");
+      }
+      if (point !== "before" && point !== "after") {
+        throw new TypeError("point must be before or after");
+      }
+      if (mode !== "conversation" && mode !== "files" && mode !== "both") {
+        throw new TypeError("mode must be conversation, files, or both");
+      }
+      const preview = await options.broker.requestForSession(id, "recovery.preview", {
+        mode,
+        point,
+        sessionId: id,
+        targetId: expectString(targetId, "targetId"),
+        targetKind,
+      });
+      recoveryPreviews.set(preview.planId, {
+        mode: preview.mode,
+        sessionId: id,
+        totalChanges: preview.totalChanges,
+      });
+      return preview;
+    },
+  );
+  handle(IPC_CHANNELS.applyRecovery, async (_event, sessionId, planId) => {
+    const id = expectString(sessionId, "sessionId");
+    const plan = expectString(planId, "planId");
+    const preview = recoveryPreviews.get(plan);
+    if (preview && preview.sessionId !== id) throw new Error("Recovery preview session mismatch");
+    if (preview?.mode !== "conversation") {
+      const parent = options.getWindow();
+      const confirmationOptions: MessageBoxOptions = {
+        buttons: ["创建安全快照并恢复", "取消"],
+        cancelId: 1,
+        defaultId: 1,
+        detail: `${preview?.totalChanges ?? "已预览的"} 个文件变化。Piarium 会先重新校验并创建可撤销的安全快照。`,
+        message: "确认同时恢复工作区文件？",
+        noLink: true,
+        type: "warning",
+      };
+      const confirmation =
+        parent && !parent.isDestroyed()
+          ? await dialog.showMessageBox(parent, confirmationOptions)
+          : await dialog.showMessageBox(confirmationOptions);
+      if (confirmation.response !== 0) throw new Error("Recovery cancelled");
+    }
+    try {
+      return await options.broker.requestForSession(id, "recovery.apply", {
+        planId: plan,
+        sessionId: id,
+      });
+    } finally {
+      recoveryPreviews.delete(plan);
+    }
+  });
+  for (const [channel, method, label] of [
+    [IPC_CHANNELS.undoRecovery, "recovery.undo", "撤销上一次恢复"],
+    [IPC_CHANNELS.redoRecovery, "recovery.redo", "重做上一次恢复"],
+  ] as const) {
+    handle(channel, async (_event, sessionId) => {
+      const id = expectString(sessionId, "sessionId");
+      const parent = options.getWindow();
+      const confirmationOptions: MessageBoxOptions = {
+        buttons: [label, "取消"],
+        cancelId: 1,
+        defaultId: 1,
+        detail: "消息位置与文件状态将作为同一事务处理。",
+        message: `${label}？`,
+        noLink: true,
+        type: "warning",
+      };
+      const confirmation =
+        parent && !parent.isDestroyed()
+          ? await dialog.showMessageBox(parent, confirmationOptions)
+          : await dialog.showMessageBox(confirmationOptions);
+      if (confirmation.response !== 0) throw new Error("Recovery cancelled");
+      return options.broker.requestForSession(id, method, { sessionId: id });
+    });
+  }
+  handle(IPC_CHANNELS.createRecoveryCheckpoint, (_event, sessionId, name) => {
+    const id = expectString(sessionId, "sessionId");
+    return options.broker.requestForSession(id, "recovery.checkpoint.create", {
+      name: expectString(name, "name"),
+      sessionId: id,
+    });
+  });
 
   return () => {
+    recoveryPreviews.clear();
     for (const channel of channels) ipcMain.removeHandler(channel);
   };
 }

@@ -68,8 +68,15 @@ describe("timeline normalization", () => {
         type: "custom",
       },
       {
-        id: "summary",
+        customType: "piarium.recovery.turn/v1",
+        data: { id: "turn" },
+        id: "internal-recovery",
         parentId: "custom",
+        type: "custom",
+      },
+      {
+        id: "summary",
+        parentId: "internal-recovery",
         summary: "Earlier work",
         type: "compaction",
       },

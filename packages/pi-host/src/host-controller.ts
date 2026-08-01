@@ -26,7 +26,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
   extensionUi: true,
   models: true,
   packages: true,
-  recovery: false,
+  recovery: true,
   sessions: true,
   settings: true,
 };
@@ -305,6 +305,43 @@ export class HostController {
       case "provider.logout":
         await this.#sessionHost.logoutProvider(readString(params, "providerId"));
         return { authenticated: false };
+      case "recovery.list":
+        return this.#sessionHost.listRecovery(readString(params, "sessionId"));
+      case "recovery.preview": {
+        const targetKind = readString(params, "targetKind");
+        const point = readString(params, "point");
+        const mode = readString(params, "mode");
+        if (targetKind !== "checkpoint" && targetKind !== "turn") {
+          throw new HostError("invalid_params", "targetKind must be checkpoint or turn");
+        }
+        if (point !== "before" && point !== "after") {
+          throw new HostError("invalid_params", "point must be before or after");
+        }
+        if (mode !== "conversation" && mode !== "files" && mode !== "both") {
+          throw new HostError("invalid_params", "mode must be conversation, files, or both");
+        }
+        return this.#sessionHost.previewRecovery(
+          readString(params, "sessionId"),
+          targetKind,
+          readString(params, "targetId"),
+          point,
+          mode,
+        );
+      }
+      case "recovery.apply":
+        return this.#sessionHost.applyRecovery(
+          readString(params, "sessionId"),
+          readString(params, "planId"),
+        );
+      case "recovery.undo":
+        return this.#sessionHost.undoRecovery(readString(params, "sessionId"));
+      case "recovery.redo":
+        return this.#sessionHost.redoRecovery(readString(params, "sessionId"));
+      case "recovery.checkpoint.create":
+        return this.#sessionHost.createRecoveryCheckpoint(
+          readString(params, "sessionId"),
+          readString(params, "name"),
+        );
       case "settings.get":
         return this.#sessionHost.getSettings();
       case "settings.update":

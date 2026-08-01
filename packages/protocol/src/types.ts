@@ -68,6 +68,73 @@ export interface PackageDescriptor {
   version?: string;
 }
 
+export type RecoveryMode = "conversation" | "files" | "both";
+
+export type RecoveryPoint = "before" | "after";
+
+export interface RecoveryTurn {
+  afterCommit: string;
+  beforeCommit: string;
+  completedAt: string;
+  hasImages: boolean;
+  id: string;
+  parentLeafId: string | null;
+  resultLeafId: string;
+  sessionId: string;
+  startedAt: string;
+  userEntryId: string;
+}
+
+export interface RecoveryCheckpoint {
+  commit: string;
+  createdAt: string;
+  id: string;
+  leafId: string | null;
+  name: string;
+  sessionId: string;
+}
+
+export type RecoveryFileChangeKind = "added" | "deleted" | "modified" | "type-changed";
+
+export interface RecoveryFileChange {
+  kind: RecoveryFileChangeKind;
+  path: string;
+}
+
+export interface RecoveryStatus {
+  available: boolean;
+  canRedo: boolean;
+  canUndo: boolean;
+  gitPath?: string;
+  issue?: string;
+  root?: string;
+}
+
+export interface RecoveryListResult extends RecoveryStatus {
+  checkpoints: RecoveryCheckpoint[];
+  turns: RecoveryTurn[];
+}
+
+export interface RecoveryPreview {
+  changes: RecoveryFileChange[];
+  currentLeafId: string | null;
+  expiresAt: string;
+  mode: RecoveryMode;
+  planId: string;
+  point: RecoveryPoint;
+  targetId: string;
+  targetKind: "checkpoint" | "turn";
+  totalChanges: number;
+  truncated: boolean;
+}
+
+export interface RecoveryApplyResult {
+  cancelled: boolean;
+  editorText?: string;
+  mode: RecoveryMode;
+  snapshot: SessionSnapshot;
+}
+
 export interface HostHandshakeParams {
   clientName: string;
   clientVersion: string;

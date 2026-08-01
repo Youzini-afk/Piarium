@@ -8,9 +8,13 @@ import {
 
 const api: DesktopApi = {
   abort: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.abort, sessionId),
+  applyRecovery: (sessionId, planId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.applyRecovery, sessionId, planId),
   chooseProject: () => ipcRenderer.invoke(IPC_CHANNELS.chooseProject),
   closeSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.closeSession, sessionId),
   createSession: (cwd, name) => ipcRenderer.invoke(IPC_CHANNELS.createSession, cwd, name),
+  createRecoveryCheckpoint: (sessionId, name) =>
+    ipcRenderer.invoke(IPC_CHANNELS.createRecoveryCheckpoint, sessionId, name),
   executeCommand: (sessionId, command) =>
     ipcRenderer.invoke(IPC_CHANNELS.executeCommand, sessionId, command),
   followUp: (sessionId, text, images) =>
@@ -18,9 +22,11 @@ const api: DesktopApi = {
   forkSession: (sessionId, entryId, position) =>
     ipcRenderer.invoke(IPC_CHANNELS.forkSession, sessionId, entryId, position),
   getAppInfo: () => ipcRenderer.invoke(IPC_CHANNELS.getAppInfo),
+  getPreferences: () => ipcRenderer.invoke(IPC_CHANNELS.getPreferences),
   getEntries: (sessionId, branchOnly) =>
     ipcRenderer.invoke(IPC_CHANNELS.getEntries, sessionId, branchOnly),
   getRecentProjects: () => ipcRenderer.invoke(IPC_CHANNELS.getRecentProjects),
+  getRecovery: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getRecovery, sessionId),
   getSettings: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getSettings, sessionId),
   getSnapshot: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getSnapshot, sessionId),
   installPackage: (sessionId, source) =>
@@ -45,18 +51,23 @@ const api: DesktopApi = {
   openSession: (input) => ipcRenderer.invoke(IPC_CHANNELS.openSession, input),
   prompt: (sessionId, text, images) =>
     ipcRenderer.invoke(IPC_CHANNELS.prompt, sessionId, text, images),
+  previewRecovery: (sessionId, targetKind, targetId, point, mode) =>
+    ipcRenderer.invoke(IPC_CHANNELS.previewRecovery, sessionId, targetKind, targetId, point, mode),
+  redoRecovery: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.redoRecovery, sessionId),
   removePackage: (sessionId, source) =>
     ipcRenderer.invoke(IPC_CHANNELS.removePackage, sessionId, source),
   respondToExtensionUi: (sessionId, response) =>
     ipcRenderer.invoke(IPC_CHANNELS.respondToExtensionUi, sessionId, response),
   selectModel: (sessionId, provider, modelId) =>
     ipcRenderer.invoke(IPC_CHANNELS.selectModel, sessionId, provider, modelId),
+  setRecoveryDefault: (mode) => ipcRenderer.invoke(IPC_CHANNELS.setRecoveryDefault, mode),
   steer: (sessionId, text, images) =>
     ipcRenderer.invoke(IPC_CHANNELS.steer, sessionId, text, images),
   updatePackages: (sessionId, source) =>
     ipcRenderer.invoke(IPC_CHANNELS.updatePackages, sessionId, source),
   updateSettings: (sessionId, patch) =>
     ipcRenderer.invoke(IPC_CHANNELS.updateSettings, sessionId, patch),
+  undoRecovery: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.undoRecovery, sessionId),
 };
 
 contextBridge.exposeInMainWorld("piarium", api);

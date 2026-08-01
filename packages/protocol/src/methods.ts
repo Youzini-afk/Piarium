@@ -8,6 +8,12 @@ import type {
   PackageDescriptor,
   ProviderAuthType,
   ProviderDescriptor,
+  RecoveryApplyResult,
+  RecoveryCheckpoint,
+  RecoveryListResult,
+  RecoveryMode,
+  RecoveryPoint,
+  RecoveryPreview,
   SessionSnapshot,
   SessionSummary,
 } from "./types.js";
@@ -72,6 +78,36 @@ export interface HostMethodMap {
   "provider.logout": {
     params: { providerId: string };
     result: { authenticated: false };
+  };
+  "recovery.apply": {
+    params: { planId: string; sessionId: string };
+    result: RecoveryApplyResult;
+  };
+  "recovery.checkpoint.create": {
+    params: { name: string; sessionId: string };
+    result: RecoveryCheckpoint;
+  };
+  "recovery.list": {
+    params: { sessionId: string };
+    result: RecoveryListResult;
+  };
+  "recovery.preview": {
+    params: {
+      mode: RecoveryMode;
+      point: RecoveryPoint;
+      sessionId: string;
+      targetId: string;
+      targetKind: "checkpoint" | "turn";
+    };
+    result: RecoveryPreview;
+  };
+  "recovery.redo": {
+    params: { sessionId: string };
+    result: RecoveryApplyResult;
+  };
+  "recovery.undo": {
+    params: { sessionId: string };
+    result: RecoveryApplyResult;
   };
   "package.install": {
     params: { source: string };

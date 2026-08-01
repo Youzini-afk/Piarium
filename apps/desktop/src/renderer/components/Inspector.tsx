@@ -1,5 +1,6 @@
 import type { JsonValue, SessionSnapshot } from "@piarium/protocol";
 import { useMemo, useState } from "react";
+import type { RecoveryDefaultMode } from "../../shared/desktop-api.js";
 import type { InspectorData } from "../state/use-piarium.js";
 
 interface InspectorProps {
@@ -7,7 +8,9 @@ interface InspectorProps {
   loading: boolean;
   onClose(): void;
   onError(error: unknown): void;
+  onRecoveryDefault(mode: RecoveryDefaultMode): void;
   onRefresh(): Promise<void> | void;
+  recoveryDefault: RecoveryDefaultMode;
   session: SessionSnapshot;
 }
 
@@ -254,6 +257,30 @@ export function Inspector(props: InspectorProps) {
 
         {tab === "settings" ? (
           <div className="panel-stack">
+            <section className="setting-card recovery-default-setting">
+              <div className="setting-card-heading">
+                <div>
+                  <strong>消息回退默认行为</strong>
+                  <small>点击消息旁的 ⌁ 时使用</small>
+                </div>
+              </div>
+              <label className="field-label">
+                <span>默认范围</span>
+                <select
+                  onChange={(event) =>
+                    props.onRecoveryDefault(event.target.value as RecoveryDefaultMode)
+                  }
+                  value={props.recoveryDefault}
+                >
+                  <option value="conversation">仅回退会话</option>
+                  <option value="both">会话与文件一起回退</option>
+                  <option value="ask">每次询问</option>
+                </select>
+              </label>
+              <p className="setting-help">
+                文件回退始终先创建安全快照并再次确认；仅会话回退保留原分支，可撤销。
+              </p>
+            </section>
             <label className="field-label">
               <span>默认思考级别</span>
               <select

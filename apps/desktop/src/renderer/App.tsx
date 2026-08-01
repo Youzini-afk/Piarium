@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Composer } from "./components/Composer.js";
 import { ExtensionDialog } from "./components/ExtensionDialog.js";
 import { Inspector } from "./components/Inspector.js";
+import { RecoveryCenter } from "./components/RecoveryCenter.js";
 import { Sidebar } from "./components/Sidebar.js";
 import { Timeline } from "./components/Timeline.js";
 import { usePiarium } from "./state/use-piarium.js";
@@ -9,6 +10,8 @@ import { usePiarium } from "./state/use-piarium.js";
 export function App() {
   const state = usePiarium();
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [recoveryEntryId, setRecoveryEntryId] = useState<string>();
   const timelineScroll = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const element = timelineScroll.current;
@@ -16,8 +19,23 @@ export function App() {
   });
 
   const openInspector = () => {
+    setRecoveryOpen(false);
     setInspectorOpen(true);
     void state.refreshInspector();
+  };
+
+  const openRecovery = (entryId?: string) => {
+    setInspectorOpen(false);
+    setRecoveryEntryId(entryId);
+    setRecoveryOpen(true);
+    state.setRecoveryPreview(undefined);
+    void state.refreshRecovery();
+  };
+
+  const recoverFromMessage = (entryId: string) => {
+    void state.quickRecover(entryId).then((result) => {
+      if (result === "ask") openRecovery(entryId);
+    });
   };
 
   if (state.loading) {
@@ -33,7 +51,7 @@ export function App() {
   }
 
   return (
-    <div className={`app-shell${inspectorOpen ? " inspector-open" : ""}`}>
+    <div className={`app-shell${inspectorOpen || recoveryOpen ? " inspector-open" : ""}`}>
       <Sidebar
         activeSession={state.activeSession}
         busyAction={state.busyAction}
@@ -46,7 +64,7 @@ export function App() {
         sessions={state.sessions}
       />
 
-      <main className="workspace">
+      <main className="workspace" data-session-id={state.activeSession?.sessionId}>
         <header className="workspace-header">
           <div className="workspace-heading">
             <strong>
@@ -67,6 +85,9 @@ export function App() {
                 </span>
                 <button className="header-button" onClick={openInspector} type="button">
                   调节
+                </button>
+                <button className="header-button" onClick={() => openRecovery()} type="button">
+                  恢复
                 </button>
               </>
             ) : null}
@@ -144,6 +165,7 @@ export function App() {
                 liveTools={state.liveTools}
                 onFork={(entryId) => void state.fork(entryId)}
                 onNavigate={(entryId) => void state.navigate(entryId)}
+                onRecover={recoverFromMessage}
                 timeline={state.timeline}
               />
             </div>
@@ -182,8 +204,33 @@ export function App() {
           loading={state.inspectorLoading}
           onClose={() => setInspectorOpen(false)}
           onError={state.reportError}
+          onRecoveryDefault={(mode) => void state.setRecoveryDefault(mode)}
           onRefresh={state.refreshInspector}
           session={state.activeSession}
+          recoveryDefault={state.preferences.recoveryDefault}
+        />
+      ) : null}
+
+      {recoveryOpen && state.activeSession ? (
+        <RecoveryCenter
+          data={state.recovery}
+          defaultMode={state.preferences.recoveryDefault}
+          highlightedEntryId={recoveryEntryId}
+          loading={state.recoveryLoading}
+          onApply={() => void state.applyRecovery()}
+          onCheckpoint={state.createRecoveryCheckpoint}
+          onClose={() => {
+            setRecoveryOpen(false);
+            setRecoveryEntryId(undefined);
+            state.setRecoveryPreview(undefined);
+          }}
+          onHistory={(direction) => void state.moveRecoveryHistory(direction)}
+          onPreview={(targetKind, targetId, point, mode) =>
+            void state.previewRecovery(targetKind, targetId, point, mode)
+          }
+          onResetPreview={() => state.setRecoveryPreview(undefined)}
+          preview={state.recoveryPreview}
+          timeline={state.timeline}
         />
       ) : null}
 

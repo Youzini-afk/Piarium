@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type * as PiAiCompat from "@earendil-works/pi-ai/compat";
-import {
-  type CreateAgentSessionRuntimeFactory,
-  createAgentSessionFromServices,
-  createAgentSessionServices,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@piarium/protocol";
 import { SessionHost } from "../src/session-host.js";
 
@@ -28,12 +24,7 @@ describe("SessionHost prompt streaming", () => {
     const faux = registerFauxProvider();
     faux.setResponses([fauxAssistantMessage("hello from Piarium")]);
     const model = faux.getModel();
-    const runtimeFactory: CreateAgentSessionRuntimeFactory = async ({
-      cwd,
-      sessionManager,
-      sessionStartEvent,
-    }) => {
-      const services = await createAgentSessionServices({ agentDir, cwd });
+    const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
         api: model.api,
         baseUrl: model.baseUrl,
@@ -54,21 +45,15 @@ describe("SessionHost prompt streaming", () => {
       await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key", {
         allowNetwork: false,
       });
-      const created = await createAgentSessionFromServices({
-        model,
-        services,
-        sessionManager,
-        ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
-      });
-      return { ...created, diagnostics: services.diagnostics, services };
+      return { model };
     };
     const host = new SessionHost({
       agentDir,
+      configureServices,
       emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
         events.push({ data, event });
       },
       projectTrustOverride: true,
-      runtimeFactory,
     });
 
     try {
@@ -109,6 +94,10 @@ describe("SessionHost prompt streaming", () => {
           ? userEntry.id
           : undefined;
       assert.ok(userEntryId);
+      const recovery = await host.listRecovery(snapshot.sessionId);
+      assert.equal(recovery.available, true);
+      assert.equal(recovery.turns.length, 1);
+      assert.equal(recovery.turns[0]?.userEntryId, userEntryId);
       const forked = await host.fork(snapshot.sessionId, userEntryId, "at");
       assert.equal(forked.cancelled, false);
       assert.notEqual(forked.snapshot.sessionId, snapshot.sessionId);

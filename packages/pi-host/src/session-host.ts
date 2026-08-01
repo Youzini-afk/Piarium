@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import {
   type AgentSession,
   type AgentSessionRuntime,
+  type AgentSessionServices,
   type CreateAgentSessionRuntimeFactory,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
@@ -22,13 +23,21 @@ import type {
   PackageDescriptor,
   ProviderAuthType,
   ProviderDescriptor,
+  RecoveryApplyResult,
+  RecoveryCheckpoint,
+  RecoveryListResult,
+  RecoveryMode,
+  RecoveryPoint,
+  RecoveryPreview,
   SessionSnapshot,
   SessionSummary,
 } from "@piarium/protocol";
+import { RecoveryCoordinator } from "@piarium/recovery";
 import { HostError } from "./errors.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
+import { createRecoveryExtension } from "./recovery-extension.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -48,6 +57,9 @@ const WRITABLE_SETTINGS = new Set([
 
 export interface SessionHostOptions {
   agentDir: string;
+  configureServices?: (
+    services: AgentSessionServices,
+  ) => Promise<{ model?: NonNullable<AgentSession["model"]> }>;
   emit: EventEmitter;
   projectTrustOverride?: boolean;
   runtimeFactory?: CreateAgentSessionRuntimeFactory;
@@ -99,6 +111,7 @@ function requireSettingType(
 
 export class SessionHost {
   readonly #agentDir: string;
+  readonly #configureServices: SessionHostOptions["configureServices"];
   readonly #emit: EventEmitter;
   readonly #projectTrustOverride: boolean | undefined;
   readonly #runtimeFactory: CreateAgentSessionRuntimeFactory | undefined;
@@ -106,11 +119,13 @@ export class SessionHost {
   readonly trust: ProjectTrustController;
   readonly ui: ExtensionUiBridge;
   #runtime: AgentSessionRuntime | undefined;
+  #recovery: RecoveryCoordinator | undefined;
   #unsubscribe: (() => void) | undefined;
   #disposed = false;
 
   constructor(options: SessionHostOptions) {
     this.#agentDir = resolve(options.agentDir);
+    this.#configureServices = options.configureServices;
     this.#emit = options.emit;
     this.#projectTrustOverride = options.projectTrustOverride;
     this.#runtimeFactory = options.runtimeFactory;
@@ -279,6 +294,77 @@ export class SessionHost {
     const wasBusy = !this.session.isIdle;
     await this.session.abort();
     return wasBusy;
+  }
+
+  async listRecovery(sessionId: string): Promise<RecoveryListResult> {
+    this.assertSession(sessionId);
+    const conflict = this.#legacyRecoveryConflict();
+    if (conflict) {
+      return {
+        available: false,
+        canRedo: false,
+        canUndo: false,
+        checkpoints: [],
+        issue: conflict,
+        turns: [],
+      };
+    }
+    await this.recovery.reconcileSession(sessionId, this.session.sessionManager.getEntries());
+    return this.recovery.list(sessionId, this.session.sessionManager.getLeafId());
+  }
+
+  async previewRecovery(
+    sessionId: string,
+    targetKind: "checkpoint" | "turn",
+    targetId: string,
+    point: RecoveryPoint,
+    mode: RecoveryMode,
+  ): Promise<RecoveryPreview> {
+    this.#assertRecoveryReady(sessionId);
+    return this.recovery.preview({
+      currentLeafId: this.session.sessionManager.getLeafId(),
+      mode,
+      point,
+      sessionId,
+      targetId,
+      targetKind,
+    });
+  }
+
+  async applyRecovery(sessionId: string, planId: string): Promise<RecoveryApplyResult> {
+    this.#assertRecoveryReady(sessionId);
+    return this.recovery.apply({
+      currentLeafId: this.session.sessionManager.getLeafId(),
+      navigate: (targetLeafId) => this.#navigateForRecovery(targetLeafId),
+      planId,
+      sessionId,
+      snapshot: () => this.snapshot(),
+    });
+  }
+
+  async undoRecovery(sessionId: string): Promise<RecoveryApplyResult> {
+    this.#assertRecoveryReady(sessionId);
+    return this.recovery.undo({
+      currentLeafId: this.session.sessionManager.getLeafId(),
+      navigate: (targetLeafId) => this.#navigateForRecovery(targetLeafId),
+      sessionId,
+      snapshot: () => this.snapshot(),
+    });
+  }
+
+  async redoRecovery(sessionId: string): Promise<RecoveryApplyResult> {
+    this.#assertRecoveryReady(sessionId);
+    return this.recovery.redo({
+      currentLeafId: this.session.sessionManager.getLeafId(),
+      navigate: (targetLeafId) => this.#navigateForRecovery(targetLeafId),
+      sessionId,
+      snapshot: () => this.snapshot(),
+    });
+  }
+
+  async createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryCheckpoint> {
+    this.#assertRecoveryReady(sessionId);
+    return this.recovery.createCheckpoint(sessionId, this.session.sessionManager.getLeafId(), name);
   }
 
   listCommands(sessionId: string): Array<{ description?: string; name: string; source?: string }> {
@@ -552,9 +638,42 @@ export class SessionHost {
       const settingsManager = SettingsManager.create(cwd, agentDir, {
         projectTrusted: initialTrust,
       });
+      const recovery = new RecoveryCoordinator({
+        agentDir,
+        cwd,
+        onChanged: (sessionId) => this.#emit("recovery.changed", { sessionId }),
+        onStatus: (sessionId, available, issue) =>
+          this.#emit("recovery.status", {
+            available,
+            canRedo: false,
+            canUndo: false,
+            ...(issue === undefined ? {} : { issue }),
+            sessionId,
+          }),
+      });
+      this.#recovery = recovery;
       const services = await createAgentSessionServices({
         agentDir,
         cwd,
+        resourceLoaderOptions: {
+          extensionFactories: [
+            {
+              factory: createRecoveryExtension(recovery),
+              hidden: true,
+              name: "piarium-recovery",
+            },
+          ],
+          extensionsOverride: (base) => {
+            const index = base.extensions.findIndex(
+              (extension) => extension.path === "<inline:piarium-recovery>",
+            );
+            if (index > 0) {
+              const [internal] = base.extensions.splice(index, 1);
+              if (internal) base.extensions.unshift(internal);
+            }
+            return base;
+          },
+        },
         settingsManager,
         ...(shouldPrompt
           ? {
@@ -568,7 +687,9 @@ export class SessionHost {
             }
           : {}),
       });
+      const configured = await this.#configureServices?.(services);
       const created = await createAgentSessionFromServices({
+        ...(configured?.model === undefined ? {} : { model: configured.model }),
         services,
         sessionManager,
         ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
@@ -682,5 +803,47 @@ export class SessionHost {
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();
+    this.#recovery = undefined;
+  }
+
+  get recovery(): RecoveryCoordinator {
+    if (!this.#recovery) throw new HostError("recovery_unavailable", "Recovery is unavailable");
+    return this.#recovery;
+  }
+
+  #assertRecoveryReady(sessionId: string): void {
+    this.assertSession(sessionId);
+    if (!this.session.isIdle) {
+      throw new HostError("session_busy", "Wait for the active Pi run before using recovery");
+    }
+    const conflict = this.#legacyRecoveryConflict();
+    if (conflict) throw new HostError("recovery_conflict", conflict);
+  }
+
+  #legacyRecoveryConflict(): string | undefined {
+    const legacyRecoveryPackages = ["pi-workspace-history", "pi-wtf"];
+    const configured = this.#packageManager()
+      .listConfiguredPackages()
+      .some((entry) =>
+        legacyRecoveryPackages.some((name) => entry.source.toLowerCase().includes(name)),
+      );
+    const loaded = this.runtime.services.resourceLoader
+      .getExtensions()
+      .extensions.some((extension) =>
+        legacyRecoveryPackages.some((name) =>
+          `${extension.path} ${extension.resolvedPath}`.toLowerCase().includes(name),
+        ),
+      );
+    return configured || loaded
+      ? "Legacy pi-workspace-history or pi-wtf recovery is active. Disable it before using Piarium recovery so only one engine owns session and workspace restores."
+      : undefined;
+  }
+
+  async #navigateForRecovery(targetLeafId: string) {
+    const result = await this.session.navigateTree(targetLeafId, { summarize: false });
+    return {
+      cancelled: result.cancelled,
+      ...(result.editorText === undefined ? {} : { editorText: result.editorText }),
+    };
   }
 }

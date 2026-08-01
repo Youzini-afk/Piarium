@@ -1,13 +1,23 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
-import type { ProjectDescriptor } from "../shared/desktop-api.js";
+import type {
+  AppPreferences,
+  ProjectDescriptor,
+  RecoveryDefaultMode,
+} from "../shared/desktop-api.js";
 
 interface AppState {
+  preferences: AppPreferences;
   recentProjects: ProjectDescriptor[];
   version: 1;
 }
 
-const EMPTY_STATE: AppState = { recentProjects: [], version: 1 };
+const DEFAULT_PREFERENCES: AppPreferences = { recoveryDefault: "ask" };
+const EMPTY_STATE: AppState = {
+  preferences: DEFAULT_PREFERENCES,
+  recentProjects: [],
+  version: 1,
+};
 
 export class AppStore {
   readonly #path: string;
@@ -23,6 +33,14 @@ export class AppStore {
       const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<AppState>;
       if (parsed.version !== 1 || !Array.isArray(parsed.recentProjects)) return;
       this.#state = {
+        preferences: {
+          recoveryDefault:
+            parsed.preferences?.recoveryDefault === "conversation" ||
+            parsed.preferences?.recoveryDefault === "both" ||
+            parsed.preferences?.recoveryDefault === "ask"
+              ? parsed.preferences.recoveryDefault
+              : DEFAULT_PREFERENCES.recoveryDefault,
+        },
         recentProjects: parsed.recentProjects
           .filter(
             (entry): entry is ProjectDescriptor =>
@@ -43,6 +61,16 @@ export class AppStore {
 
   getRecentProjects(): ProjectDescriptor[] {
     return structuredClone(this.#state.recentProjects);
+  }
+
+  getPreferences(): AppPreferences {
+    return structuredClone(this.#state.preferences);
+  }
+
+  async setRecoveryDefault(recoveryDefault: RecoveryDefaultMode): Promise<AppPreferences> {
+    this.#state.preferences = { recoveryDefault };
+    await this.#persist();
+    return this.getPreferences();
   }
 
   async openProject(path: string): Promise<ProjectDescriptor> {

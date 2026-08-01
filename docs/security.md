@@ -1,6 +1,6 @@
 # Security model
 
-Status: Phase 1 controls in place
+Status: Pi host, desktop boundary, and recovery controls in place; OpenChamber migration review active
 
 Last updated: 2026-08-02
 
@@ -68,6 +68,11 @@ extension process.
 - Installer upgrade/uninstall data-retention test.
 
 Security-sensitive behavior changes require an architecture note and focused regression test.
+
+The OpenChamber fork migration must preserve its stronger workspace containment, remote-client
+capabilities and allowed-directory policy, external-access audit, renderer origin gates, and
+awaited background shutdown semantics. Deleting an OpenCode-specific module does not authorize
+deleting the security boundary that module currently enforces.
 
 ## Temporary upstream dependency repair
 

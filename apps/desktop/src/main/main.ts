@@ -135,6 +135,9 @@ async function runSmoke(window: BrowserWindow): Promise<void> {
   try {
     const result = (await window.webContents.executeJavaScript(`(async () => {
       const info = await window.piarium.getAppInfo();
+      const preferences = await window.piarium.getPreferences();
+      const updatedPreferences = await window.piarium.setRecoveryDefault("conversation");
+      await window.piarium.setRecoveryDefault("ask");
       const project = await window.piarium.openProject(${JSON.stringify(workspace)});
       const session = await window.piarium.createSession(project.path, "Electron smoke");
       const snapshot = await window.piarium.getSnapshot(session.sessionId);
@@ -145,6 +148,8 @@ async function runSmoke(window: BrowserWindow): Promise<void> {
         cwd: snapshot.cwd,
         entries: Array.isArray(entries),
         info,
+        preferences,
+        updatedPreferences,
         node: typeof process
       };
     })()`)) as {
@@ -153,11 +158,15 @@ async function runSmoke(window: BrowserWindow): Promise<void> {
       entries?: unknown;
       info?: { protocolVersion?: unknown };
       node?: unknown;
+      preferences?: { recoveryDefault?: unknown };
+      updatedPreferences?: { recoveryDefault?: unknown };
     };
     if (
       result.api !== true ||
       result.node !== "undefined" ||
       result.info?.protocolVersion !== 1 ||
+      result.preferences?.recoveryDefault !== "ask" ||
+      result.updatedPreferences?.recoveryDefault !== "conversation" ||
       result.cwd !== workspace ||
       result.entries !== true
     ) {
@@ -189,6 +198,25 @@ async function runSmoke(window: BrowserWindow): Promise<void> {
       if (ready !== true) throw new Error("Desktop capture journey did not reach the composer");
       window.showInactive();
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+      if (process.env.PIARIUM_CAPTURE_RECOVERY === "1") {
+        const recoveryReady = await window.webContents.executeJavaScript(`(async () => {
+          const sessionId = document.querySelector(".workspace")?.dataset.sessionId;
+          if (!sessionId) throw new Error("Active session id was not exposed to the renderer DOM");
+          await window.piarium.createRecoveryCheckpoint(sessionId, "Electron smoke checkpoint");
+          const recoveryButton = [...document.querySelectorAll(".workspace-header .header-button")]
+            .find((button) => button.textContent?.trim() === "恢复");
+          if (!recoveryButton) throw new Error("Recovery button was not found");
+          recoveryButton.click();
+          const deadline = Date.now() + 15000;
+          while (Date.now() < deadline) {
+            if (document.querySelector(".recovery-panel")) return true;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          throw new Error("Timed out waiting for the recovery center");
+        })()`);
+        if (recoveryReady !== true) throw new Error("Recovery center capture journey failed");
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+      }
       const image = await window.webContents.capturePage();
       await writeFile(resolve(process.env.PIARIUM_CAPTURE_PATH), image.toPNG());
     }
@@ -221,6 +249,7 @@ async function bootstrap(): Promise<void> {
   const store = new AppStore(join(app.getPath("userData"), "piarium.json"));
   await store.load();
   broker = new RuntimeBroker({
+    ...(isSmoke ? { agentDir: join(app.getPath("userData"), "pi-agent") } : {}),
     emit: (event) => {
       const window = mainWindow;
       if (window && !window.isDestroyed()) window.webContents.send(DESKTOP_EVENT_CHANNEL, event);

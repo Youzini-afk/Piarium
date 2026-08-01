@@ -35,17 +35,46 @@ with a fake provider, exercises extension UI, and shuts down without a child pro
 Acceptance: local Windows development build can configure a model, create/switch/fork a session,
 stream a response, answer an extension UI request, abort, and reopen after restart.
 
-## Phase 3 — Recovery center
+## Phase 3 — Recovery core (complete)
 
 - Per-turn before/after workspace checkpoints.
 - Conversation-only, files-only, combined restore, fork, undo, redo, and named checkpoints.
 - Diff preview, safety checkpoint, retention, ignore policy, transaction journal, and leases.
-- Compatibility command wrappers for workspace-history and pi-wtf workflows.
+- Conflict detection and migration path for workspace-history and pi-wtf recovery ownership.
 
 Acceptance: destructive and crash-injection tests prove rollback; two workers cannot write the same
 session/workspace; ignored secrets are not captured; Windows Unicode paths pass.
 
-## Phase 4 — Ecosystem integrations
+## Phase 4 — OpenChamber fork product base
+
+- Import the clean `Youzini-afk/openchamber` fork snapshot into Piarium with provenance and MIT
+  attribution; keep every source fork worktree read-only.
+- Preserve custom providers, remote/cloud access, workspace security, archive restore, delayed child
+  sessions, session UX, Electron/web/mobile/VS Code surfaces, and reviewed fork customizations.
+- Adopt the mature build and product shell without copying tracked secrets, obsolete release
+  identities, or OpenCode branding into Piarium artifacts.
+
+Acceptance: the imported product shell builds in Piarium and fork-specific regression coverage is
+retained before engine surgery begins.
+
+## Phase 5 — Direct Pi-native engine migration
+
+- Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
+  command, permission, and question contracts.
+- Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.
+- Delete the OpenCode child lifecycle, proxy, watcher, downloaded CLI, provider persistence, and
+  obsolete code after each Pi-native replacement passes focused tests.
+- Preserve local/remote authentication, workspace containment, audit, reconnect, materialization,
+  queue, parent/child session, revert, fork, and archive behavior.
+
+Acceptance: the OpenChamber-derived product runs its complete chat/session/provider journey on Pi
+without starting or bundling OpenCode and without a permanent OpenCode compatibility facade.
+
+## Phase 6 — Recovery UX and ecosystem integrations
+
+- Connect message rollback to conversation-only, conversation+files, or always-ask policy.
+- Put diff/checkpoint/history management in the right sidebar/settings while retaining the existing
+  timeline, reverted-message dock, undo/redo, and fork UX.
 
 - Subagent tree, controls, artifacts, and parent-session result projection.
 - Magic Context configuration, memory/session views, and diagnostics.
@@ -55,12 +84,12 @@ session/workspace; ignored secrets are not captured; Windows Unicode paths pass.
 Acceptance: each adapter has an unavailable/degraded state, version compatibility diagnostics, and
 an integration smoke test without exposing credentials.
 
-## Phase 5 — Windows release
+## Phase 7 — Windows release
 
 - Bundled compatible Node/Pi worker runtime.
 - Git/Git Bash/npm/Pi discovery and guided repair.
 - NSIS installer, upgrade/uninstall behavior, logs, crash recovery, and update metadata.
 - Packaged-app smoke tests and artifact checks.
 
-Acceptance: install on a clean Windows user profile, run the Phase 2–4 smoke journey, restart with
+Acceptance: install on a clean Windows user profile, run the Phase 4–6 smoke journey, restart with
 active history intact, upgrade in place, and uninstall without deleting user projects or sessions.

@@ -4,11 +4,22 @@ import type {
   ModelDescriptor,
   PackageDescriptor,
   ProviderDescriptor,
+  RecoveryApplyResult,
+  RecoveryListResult,
+  RecoveryMode,
+  RecoveryPoint,
+  RecoveryPreview,
   SessionSnapshot,
   SessionSummary,
 } from "@piarium/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DesktopAppInfo, DesktopEvent, ProjectDescriptor } from "../../shared/desktop-api.js";
+import type {
+  AppPreferences,
+  DesktopAppInfo,
+  DesktopEvent,
+  ProjectDescriptor,
+  RecoveryDefaultMode,
+} from "../../shared/desktop-api.js";
 import { normalizeLiveAssistant, normalizeTimeline, type TimelineItem } from "../lib/timeline.js";
 
 export interface ToastMessage {
@@ -41,6 +52,16 @@ const EMPTY_INSPECTOR: InspectorData = {
   settings: null,
 };
 
+const EMPTY_RECOVERY: RecoveryListResult = {
+  available: true,
+  canRedo: false,
+  canUndo: false,
+  checkpoints: [],
+  turns: [],
+};
+
+const DEFAULT_PREFERENCES: AppPreferences = { recoveryDefault: "ask" };
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -55,6 +76,10 @@ function toJson(value: unknown): JsonValue {
   }
 }
 
+function recoveryWasCancelled(error: unknown): boolean {
+  return /Recovery cancelled/i.test(error instanceof Error ? error.message : String(error));
+}
+
 function eventSessionId(event: DesktopEvent): string | undefined {
   if (event.kind === "worker.exit") return event.sessionId;
   const data = record(event.envelope.data);
@@ -64,6 +89,7 @@ function eventSessionId(event: DesktopEvent): string | undefined {
 export function usePiarium() {
   const [appInfo, setAppInfo] = useState<DesktopAppInfo>();
   const [recentProjects, setRecentProjects] = useState<ProjectDescriptor[]>([]);
+  const [preferences, setPreferences] = useState<AppPreferences>(DEFAULT_PREFERENCES);
   const [project, setProject] = useState<ProjectDescriptor>();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState<SessionSnapshot>();
@@ -82,13 +108,22 @@ export function usePiarium() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [inspector, setInspector] = useState<InspectorData>(EMPTY_INSPECTOR);
   const [inspectorLoading, setInspectorLoading] = useState(false);
+  const [recovery, setRecovery] = useState<RecoveryListResult>(EMPTY_RECOVERY);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryPreview, setRecoveryPreview] = useState<RecoveryPreview>();
   const activeSessionRef = useRef<SessionSnapshot | undefined>(undefined);
+  const recoveryRef = useRef<RecoveryListResult>(EMPTY_RECOVERY);
   const entriesTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const toastSequence = useRef(0);
 
   const setActive = useCallback((snapshot: SessionSnapshot | undefined) => {
     activeSessionRef.current = snapshot;
     setActiveSession(snapshot);
+  }, []);
+
+  const setRecoveryState = useCallback((value: RecoveryListResult) => {
+    recoveryRef.current = value;
+    setRecovery(value);
   }, []);
 
   const updateActive = useCallback(
@@ -137,6 +172,22 @@ export function usePiarium() {
     return listed;
   }, []);
 
+  const refreshRecovery = useCallback(async () => {
+    const snapshot = activeSessionRef.current;
+    if (!snapshot) return undefined;
+    setRecoveryLoading(true);
+    try {
+      const value = await window.piarium.getRecovery(snapshot.sessionId);
+      if (activeSessionRef.current?.sessionId === snapshot.sessionId) setRecoveryState(value);
+      return value;
+    } catch (error) {
+      reportError(error);
+      return undefined;
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }, [reportError, setRecoveryState]);
+
   const activateProject = useCallback(
     async (nextProject: ProjectDescriptor) => {
       setProject(nextProject);
@@ -144,19 +195,26 @@ export function usePiarium() {
       setTimeline([]);
       setLiveAssistant(undefined);
       setLiveTools({});
+      setRecoveryState(EMPTY_RECOVERY);
+      setRecoveryPreview(undefined);
       setOffline(false);
       await refreshSessions(nextProject.path);
     },
-    [refreshSessions, setActive],
+    [refreshSessions, setActive, setRecoveryState],
   );
 
   useEffect(() => {
     let mounted = true;
-    void Promise.all([window.piarium.getAppInfo(), window.piarium.getRecentProjects()])
-      .then(async ([info, recents]) => {
+    void Promise.all([
+      window.piarium.getAppInfo(),
+      window.piarium.getRecentProjects(),
+      window.piarium.getPreferences(),
+    ])
+      .then(async ([info, recents, storedPreferences]) => {
         if (!mounted) return;
         setAppInfo(info);
         setRecentProjects(recents);
+        setPreferences(storedPreferences);
         const first = recents[0];
         if (first) await activateProject(first);
       })
@@ -269,6 +327,19 @@ export function usePiarium() {
         setWorkingMessage(envelope.data.message);
         return;
       }
+      if (envelope.event === "recovery.changed") {
+        if (envelope.data.sessionId === activeSessionRef.current?.sessionId) {
+          void refreshRecovery();
+        }
+        return;
+      }
+      if (envelope.event === "recovery.status") {
+        if (envelope.data.sessionId === activeSessionRef.current?.sessionId) {
+          const { sessionId: _sessionId, ...status } = envelope.data;
+          setRecoveryState({ ...recoveryRef.current, ...status });
+        }
+        return;
+      }
       if (envelope.event !== "agent.event" || !sessionId) return;
       if (sessionId !== activeSessionRef.current?.sessionId) return;
       const agentEvent = record(envelope.data.event);
@@ -349,7 +420,16 @@ export function usePiarium() {
       unsubscribe();
       if (entriesTimer.current) clearTimeout(entriesTimer.current);
     };
-  }, [pushToast, refreshSessions, reportError, scheduleEntries, setActive, updateActive]);
+  }, [
+    pushToast,
+    refreshRecovery,
+    refreshSessions,
+    reportError,
+    scheduleEntries,
+    setActive,
+    setRecoveryState,
+    updateActive,
+  ]);
 
   const chooseProject = useCallback(async () => {
     try {
@@ -394,12 +474,13 @@ export function usePiarium() {
           ...current.filter((session) => session.id !== snapshot.sessionId),
         ]);
       }
+      void refreshRecovery();
     } catch (error) {
       reportError(error);
     } finally {
       setBusyAction(undefined);
     }
-  }, [busyAction, project, refreshSessions, reportError, setActive]);
+  }, [busyAction, project, refreshRecovery, refreshSessions, reportError, setActive]);
 
   const openSession = useCallback(
     async (session: SessionSummary) => {
@@ -416,13 +497,169 @@ export function usePiarium() {
         setLiveTools({});
         setOffline(false);
         await loadEntries(snapshot.sessionId);
+        void refreshRecovery();
       } catch (error) {
         reportError(error);
       } finally {
         setBusyAction(undefined);
       }
     },
-    [busyAction, loadEntries, reportError, setActive],
+    [busyAction, loadEntries, refreshRecovery, reportError, setActive],
+  );
+
+  const previewRecovery = useCallback(
+    async (
+      targetKind: "checkpoint" | "turn",
+      targetId: string,
+      point: RecoveryPoint,
+      mode: RecoveryMode,
+    ) => {
+      const snapshot = activeSessionRef.current;
+      if (!snapshot) return;
+      setRecoveryLoading(true);
+      try {
+        setRecoveryPreview(
+          await window.piarium.previewRecovery(
+            snapshot.sessionId,
+            targetKind,
+            targetId,
+            point,
+            mode,
+          ),
+        );
+      } catch (error) {
+        reportError(error);
+      } finally {
+        setRecoveryLoading(false);
+      }
+    },
+    [reportError],
+  );
+
+  const consumeRecoveryResult = useCallback(
+    async (result: RecoveryApplyResult) => {
+      setActive(result.snapshot);
+      setOffline(false);
+      if (result.editorText !== undefined) setDraft(result.editorText);
+      await loadEntries(result.snapshot.sessionId);
+      await refreshRecovery();
+    },
+    [loadEntries, refreshRecovery, setActive],
+  );
+
+  const quickRecover = useCallback(
+    async (entryId: string): Promise<"applied" | "ask" | "failed"> => {
+      if (preferences.recoveryDefault === "ask") return "ask";
+      const snapshot = activeSessionRef.current;
+      if (!snapshot) return "failed";
+      let data = recoveryRef.current;
+      let turn = data.turns.find(
+        (candidate) => candidate.userEntryId === entryId || candidate.resultLeafId === entryId,
+      );
+      if (!turn) {
+        data = (await refreshRecovery()) ?? data;
+        turn = data.turns.find(
+          (candidate) => candidate.userEntryId === entryId || candidate.resultLeafId === entryId,
+        );
+      }
+      if (!turn) {
+        pushToast("这个消息节点还没有可用的恢复快照", "warning");
+        return "failed";
+      }
+      const mode: RecoveryMode = preferences.recoveryDefault === "both" ? "both" : "conversation";
+      setRecoveryLoading(true);
+      try {
+        const preview = await window.piarium.previewRecovery(
+          snapshot.sessionId,
+          "turn",
+          turn.id,
+          "before",
+          mode,
+        );
+        const result = await window.piarium.applyRecovery(snapshot.sessionId, preview.planId);
+        if (result.cancelled) return "failed";
+        await consumeRecoveryResult(result);
+        pushToast(mode === "both" ? "会话与文件已回退" : "会话已回退", "success");
+        return "applied";
+      } catch (error) {
+        if (!recoveryWasCancelled(error)) reportError(error);
+        return "failed";
+      } finally {
+        setRecoveryLoading(false);
+      }
+    },
+    [consumeRecoveryResult, preferences.recoveryDefault, pushToast, refreshRecovery, reportError],
+  );
+
+  const applyRecovery = useCallback(async () => {
+    const snapshot = activeSessionRef.current;
+    if (!snapshot || !recoveryPreview) return;
+    setRecoveryLoading(true);
+    try {
+      const result = await window.piarium.applyRecovery(snapshot.sessionId, recoveryPreview.planId);
+      if (!result.cancelled) {
+        setRecoveryPreview(undefined);
+        await consumeRecoveryResult(result);
+        pushToast("恢复已完成，可随时撤销", "success");
+      }
+    } catch (error) {
+      if (!recoveryWasCancelled(error)) reportError(error);
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }, [consumeRecoveryResult, pushToast, recoveryPreview, reportError]);
+
+  const moveRecoveryHistory = useCallback(
+    async (direction: "redo" | "undo") => {
+      const snapshot = activeSessionRef.current;
+      if (!snapshot) return;
+      setRecoveryLoading(true);
+      try {
+        const result =
+          direction === "undo"
+            ? await window.piarium.undoRecovery(snapshot.sessionId)
+            : await window.piarium.redoRecovery(snapshot.sessionId);
+        await consumeRecoveryResult(result);
+        pushToast(direction === "undo" ? "已撤销恢复" : "已重做恢复", "success");
+      } catch (error) {
+        if (!recoveryWasCancelled(error)) reportError(error);
+      } finally {
+        setRecoveryLoading(false);
+      }
+    },
+    [consumeRecoveryResult, pushToast, reportError],
+  );
+
+  const createRecoveryCheckpoint = useCallback(
+    async (name: string) => {
+      const snapshot = activeSessionRef.current;
+      if (!snapshot) return false;
+      setRecoveryLoading(true);
+      try {
+        await window.piarium.createRecoveryCheckpoint(snapshot.sessionId, name);
+        await refreshRecovery();
+        pushToast("检查点已创建", "success");
+        return true;
+      } catch (error) {
+        reportError(error);
+        return false;
+      } finally {
+        setRecoveryLoading(false);
+      }
+    },
+    [pushToast, refreshRecovery, reportError],
+  );
+
+  const setRecoveryDefault = useCallback(
+    async (mode: RecoveryDefaultMode) => {
+      try {
+        setPreferences(await window.piarium.setRecoveryDefault(mode));
+        pushToast("默认回退方式已更新", "success");
+      } catch (error) {
+        reportError(error);
+      }
+    },
+    [pushToast, reportError],
   );
 
   const send = useCallback(async () => {
@@ -526,11 +763,13 @@ export function usePiarium() {
 
   return {
     abort,
+    applyRecovery,
     activeSession,
     appInfo,
     busyAction,
     chooseProject,
     createSession,
+    createRecoveryCheckpoint,
     draft,
     extensionRequest,
     extensionStatuses,
@@ -545,10 +784,17 @@ export function usePiarium() {
     offline,
     openRecentProject,
     openSession,
+    previewRecovery,
+    preferences,
+    quickRecover,
     project,
     queue,
+    recovery,
+    recoveryLoading,
+    recoveryPreview,
     recentProjects,
     refreshInspector,
+    refreshRecovery,
     refreshSessions,
     reportError,
     respondToExtension,
@@ -556,8 +802,11 @@ export function usePiarium() {
     sessions,
     setDraft,
     setInspector,
+    setRecoveryPreview,
+    setRecoveryDefault,
     timeline,
     toasts,
     workingMessage,
+    moveRecoveryHistory,
   };
 }
