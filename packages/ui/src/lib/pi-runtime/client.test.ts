@@ -3,6 +3,7 @@ import {
   createRuntimeSuccessResponse,
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
+  PIARIUM_PROTOCOL_VERSION,
 } from '@piarium/protocol';
 import type { RuntimeWebSocket } from '@piarium/runtime-client';
 import { createPiRuntimeConnection } from './client';
@@ -31,7 +32,7 @@ class HandshakeSocket implements RuntimeWebSocket {
             settings: true,
           },
           hostVersion: '0.1.0',
-          protocolVersion: 1,
+          protocolVersion: PIARIUM_PROTOCOL_VERSION,
           runtime: {
             agentDir: 'C:/agent',
             nodePath: 'node',

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
 
 const HOST_ENTRY = fileURLToPath(new URL("../dist/main.js", import.meta.url));
 
@@ -70,9 +71,9 @@ test("compiled host handshakes and shuts down over stdio", async () => {
           clientName: "dist-smoke-test",
           clientVersion: "0.0.0",
           mode: "test",
-          protocolVersions: [1],
+          protocolVersions: [PIARIUM_PROTOCOL_VERSION],
         },
-        v: 1,
+        v: PIARIUM_PROTOCOL_VERSION,
       })}\n`,
     );
     const handshake = await waitFor(
@@ -80,7 +81,7 @@ test("compiled host handshakes and shuts down over stdio", async () => {
       "Compiled host did not answer the handshake",
     );
     assert.equal(handshake.ok, true);
-    assert.equal(handshake.result.protocolVersion, 1);
+    assert.equal(handshake.result.protocolVersion, PIARIUM_PROTOCOL_VERSION);
 
     const exited = new Promise((resolve) =>
       child.once("exit", (code, signal) => resolve({ code, signal })),
@@ -91,7 +92,7 @@ test("compiled host handshakes and shuts down over stdio", async () => {
         kind: "request",
         method: "host.shutdown",
         params: {},
-        v: 1,
+        v: PIARIUM_PROTOCOL_VERSION,
       })}\n`,
     );
     const shutdown = await waitFor(

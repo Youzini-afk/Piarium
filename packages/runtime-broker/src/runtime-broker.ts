@@ -11,6 +11,7 @@ import type {
   HostMethod,
   HostMethodParams,
   HostMethodResult,
+  ProviderAuthResponse,
   ProjectTrustRequest,
   SessionSnapshot,
 } from "@piarium/protocol";
@@ -201,6 +202,17 @@ export class PiRuntimeBroker {
     return result.accepted;
   }
 
+  async respondToProviderAuth(
+    sessionId: string,
+    response: ProviderAuthResponse,
+  ): Promise<boolean> {
+    const result = await this.#workerForSession(sessionId).request(
+      "provider.auth.respond",
+      response,
+    );
+    return result.accepted;
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -253,8 +265,7 @@ export class PiRuntimeBroker {
   }
 
   #createClient(role: "catalog" | "session"): PiHostClient {
-    let client: PiHostClient;
-    client = new PiHostClient({
+    const client = new PiHostClient({
       ...(this.#options.agentDir === undefined ? {} : { agentDir: this.#options.agentDir }),
       ...(this.#options.cwd === undefined ? {} : { cwd: this.#options.cwd }),
       ...(this.#options.environment === undefined

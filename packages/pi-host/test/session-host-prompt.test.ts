@@ -66,8 +66,8 @@ describe("SessionHost prompt streaming", () => {
         ),
       );
       const entries = host.entries(snapshot.sessionId, true);
-      assert.ok(Array.isArray(entries));
-      const userEntry = entries.find(
+      assert.equal(entries.scope, "branch");
+      const userEntry = entries.entries.find(
         (entry) =>
           typeof entry === "object" &&
           entry !== null &&

@@ -141,12 +141,11 @@
         "piarium-host": "./dist/main.js",
       },
       "dependencies": {
+        "@earendil-works/pi-agent-core": "0.83.0",
+        "@earendil-works/pi-ai": "0.83.0",
         "@earendil-works/pi-coding-agent": "0.83.0",
         "@piarium/protocol": "0.1.0",
         "@piarium/recovery": "0.1.0",
-      },
-      "devDependencies": {
-        "@earendil-works/pi-ai": "0.83.0",
       },
     },
     "packages/protocol": {

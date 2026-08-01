@@ -24,19 +24,20 @@
     "./host": "./dist/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "build:dependencies": "bun run --cwd ../protocol build && bun run --cwd ../recovery build",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test test/**/*.test.ts",
-    "test:dist": "node --test test/dist-smoke.test.mjs",
+    "test:dist": "bun run build && node --test test/dist-smoke.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.83.0",
+    "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@piarium/protocol": "0.1.0",
     "@piarium/recovery": "0.1.0"
-  },
-  "devDependencies": {
-    "@earendil-works/pi-ai": "0.83.0"
   },
   "engines": {
     "node": ">=22.19.0"

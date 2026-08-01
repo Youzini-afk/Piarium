@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 1 as const;
+export const PIARIUM_PROTOCOL_VERSION = 2 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -9,6 +9,18 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 export type HostMode = "desktop" | "headless" | "mobile" | "test" | "vscode" | "web";
 
 export type RuntimeSourceKind = "bundled" | "system" | "source" | "custom";
+
+export const THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export interface HostCapabilities {
   extensionUi: boolean;
@@ -38,12 +50,29 @@ export interface SessionSummary {
 }
 
 export interface ModelDescriptor {
-  contextWindow?: number;
+  api: string;
+  available: boolean;
+  baseUrl: string;
+  contextWindow: number;
+  cost: {
+    cacheRead: number;
+    cacheWrite: number;
+    input: number;
+    output: number;
+    tiers?: Array<{
+      cacheRead: number;
+      cacheWrite: number;
+      input: number;
+      inputTokensAbove: number;
+      output: number;
+    }>;
+  };
   id: string;
+  input: Array<"text" | "image">;
+  maxTokens: number;
   name: string;
   provider: string;
-  supportsImages?: boolean;
-  supportsThinking?: boolean;
+  supportedThinkingLevels: ThinkingLevel[];
 }
 
 export interface ImageAttachment {
@@ -52,14 +81,6 @@ export interface ImageAttachment {
 }
 
 export type ProviderAuthType = "api_key" | "oauth";
-
-export interface ProviderDescriptor {
-  authTypes: ProviderAuthType[];
-  configured: boolean;
-  id: string;
-  name: string;
-  source?: string;
-}
 
 export interface PackageDescriptor {
   enabled: boolean;
@@ -182,9 +203,11 @@ export interface SessionSnapshot {
   activeTools: string[];
   busy: boolean;
   cwd: string;
+  leafId: string | null;
   model?: ModelDescriptor;
+  name?: string;
   sessionId: string;
-  thinkingLevel?: string;
+  thinkingLevel: ThinkingLevel;
 }
 
 export interface ProjectTrustRequest {

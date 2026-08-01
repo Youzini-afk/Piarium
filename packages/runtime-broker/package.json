@@ -18,6 +18,7 @@
   "scripts": {
     "build:dependencies": "bun run --cwd ../protocol build && bun run --cwd ../recovery build && bun run --cwd ../pi-host build",
     "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test test/**/*.test.ts",
     "test:dist": "bun run build && node --test test/dist-smoke.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",

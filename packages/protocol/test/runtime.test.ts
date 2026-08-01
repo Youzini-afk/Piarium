@@ -6,6 +6,7 @@ import {
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
   isRuntimeMethod,
+  PIARIUM_PROTOCOL_VERSION,
   ProtocolDecodeError,
 } from "../src/index.js";
 
@@ -34,7 +35,13 @@ describe("surface runtime protocol", () => {
     assert.throws(
       () =>
         decodeRuntimeEnvelope(
-          '{"v":1,"kind":"request","id":"x","method":"host.shutdown","params":{}}',
+          JSON.stringify({
+            id: "x",
+            kind: "request",
+            method: "host.shutdown",
+            params: {},
+            v: PIARIUM_PROTOCOL_VERSION,
+          }),
         ),
       (error: unknown) => {
         assert.ok(error instanceof ProtocolDecodeError);
@@ -45,14 +52,27 @@ describe("surface runtime protocol", () => {
     assert.throws(
       () =>
         decodeRuntimeEnvelope(
-          '{"v":1,"kind":"event","seq":0,"event":"session.closed","data":{"sessionId":"s"}}',
+          JSON.stringify({
+            data: { sessionId: "s" },
+            event: "session.closed",
+            kind: "event",
+            seq: 0,
+            v: PIARIUM_PROTOCOL_VERSION,
+          }),
         ),
       /event.source/,
     );
     assert.throws(
       () =>
         decodeRuntimeEnvelope(
-          '{"v":1,"kind":"event","seq":0,"event":"unknown","data":{},"source":{"role":"catalog","workerId":"w"}}',
+          JSON.stringify({
+            data: {},
+            event: "unknown",
+            kind: "event",
+            seq: 0,
+            source: { role: "catalog", workerId: "w" },
+            v: PIARIUM_PROTOCOL_VERSION,
+          }),
         ),
       (error: unknown) => {
         assert.ok(error instanceof ProtocolDecodeError);

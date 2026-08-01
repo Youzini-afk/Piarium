@@ -21,6 +21,7 @@ describe("RecoveryCoordinator", () => {
       activeTools: [],
       busy: false,
       cwd,
+      leafId,
       sessionId,
       thinkingLevel: "off",
     });
@@ -137,6 +138,7 @@ describe("RecoveryCoordinator", () => {
             activeTools: [],
             busy: false,
             cwd,
+            leafId: "user",
             sessionId,
             thinkingLevel: "off",
           }),

@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import {
   createRequest,
   type EventEnvelope,
+  PIARIUM_PROTOCOL_VERSION,
   ProtocolDecodeError,
   type ResponseEnvelope,
   type SessionSnapshot,
@@ -31,6 +32,20 @@ describe("HostController", () => {
     await writeFile(
       join(cwd, ".pi", "extensions", "ui-test.ts"),
       `export default function extension(pi: any) {
+        pi.registerProvider("piarium-test-provider", {
+          name: "Piarium Test Provider",
+          baseUrl: "https://provider.invalid/v1",
+          api: "openai-completions",
+          models: [{
+            id: "test-model",
+            name: "Test Model",
+            reasoning: false,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 8192,
+            maxTokens: 1024,
+          }],
+        });
         pi.registerCommand("ui-test", {
           description: "Exercise the Piarium extension UI bridge",
           handler: async (_args: string, ctx: any) => {
@@ -52,7 +67,7 @@ describe("HostController", () => {
           clientName: "host-test",
           clientVersion: "0.0.0",
           mode: "test",
-          protocolVersions: [1],
+          protocolVersions: [PIARIUM_PROTOCOL_VERSION],
         }),
       );
       const handshake = await transport.waitFor((entry) => isResponse(entry, "handshake"));
@@ -83,6 +98,66 @@ describe("HostController", () => {
       assert.ok(
         (commands.result as Array<{ name: string }>).some((command) => command.name === "ui-test"),
       );
+
+      transport.receive(createRequest("providers", "provider.list", {}));
+      const providers = await transport.waitFor((entry) => isResponse(entry, "providers"));
+      assert.ok(providers.kind === "response" && providers.ok);
+      const provider = (
+        providers.result as Array<{
+          auth: { configured: boolean; methods: Array<{ label: string; type: string }> };
+          id: string;
+          modelCount: number;
+        }>
+      ).find((entry) => entry.id === "piarium-test-provider");
+      assert.ok(provider);
+      assert.equal(provider.auth.configured, false);
+      assert.deepEqual(provider.auth.methods.map((method) => method.type), ["api_key"]);
+      assert.equal(provider.modelCount, 1);
+
+      transport.receive(
+        createRequest("provider-login", "provider.login", {
+          providerId: "piarium-test-provider",
+          type: "api_key",
+        }),
+      );
+      const authPrompt = await transport.waitFor(
+        (entry) =>
+          isEvent(entry, "provider.auth.prompt") &&
+          entry.event === "provider.auth.prompt" &&
+          entry.data.providerId === "piarium-test-provider",
+      );
+      assert.ok(authPrompt.kind === "event" && authPrompt.event === "provider.auth.prompt");
+      assert.equal(authPrompt.data.prompt.type, "secret");
+      transport.receive(
+        createRequest("provider-auth-response", "provider.auth.respond", {
+          requestId: authPrompt.data.prompt.requestId,
+          value: "test-api-key",
+        }),
+      );
+      const authResponse = await transport.waitFor((entry) =>
+        isResponse(entry, "provider-auth-response"),
+      );
+      assert.ok(authResponse.kind === "response" && authResponse.ok);
+      const loggedIn = await transport.waitFor((entry) => isResponse(entry, "provider-login"));
+      assert.ok(loggedIn.kind === "response" && loggedIn.ok);
+
+      transport.receive(createRequest("models", "model.list", {}));
+      const models = await transport.waitFor((entry) => isResponse(entry, "models"));
+      assert.ok(models.kind === "response" && models.ok);
+      const model = (
+        models.result as Array<{
+          available: boolean;
+          id: string;
+          provider: string;
+          supportedThinkingLevels: string[];
+        }>
+      ).find(
+        (entry) =>
+          entry.provider === "piarium-test-provider" && entry.id === "test-model",
+      );
+      assert.ok(model);
+      assert.equal(model.available, true);
+      assert.deepEqual(model.supportedThinkingLevels, ["off"]);
 
       transport.receive(
         createRequest("execute", "command.execute", {
@@ -149,7 +224,7 @@ describe("HostController", () => {
         kind: "request",
         method: "session.create",
         params: {},
-        v: 1,
+        v: PIARIUM_PROTOCOL_VERSION,
       } as WireEnvelope);
       const response = await transport.waitFor((entry) => isResponse(entry, "invalid"));
       assert.ok(response.kind === "response" && !response.ok);

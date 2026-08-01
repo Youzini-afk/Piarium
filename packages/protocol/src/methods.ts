@@ -7,7 +7,6 @@ import type {
   ModelDescriptor,
   PackageDescriptor,
   ProviderAuthType,
-  ProviderDescriptor,
   RecoveryApplyResult,
   RecoveryCheckpoint,
   RecoveryListResult,
@@ -17,6 +16,8 @@ import type {
   SessionSnapshot,
   SessionSummary,
 } from "./types.js";
+import type { ProviderAuthResponse, ProviderDescriptor } from "./auth.js";
+import type { SessionEntriesResult } from "./session.js";
 
 export interface HostMethodMap {
   "agent.abort": {
@@ -70,6 +71,10 @@ export interface HostMethodMap {
   "provider.list": {
     params: Record<string, never>;
     result: ProviderDescriptor[];
+  };
+  "provider.auth.respond": {
+    params: ProviderAuthResponse;
+    result: { accepted: boolean };
   };
   "provider.login": {
     params: { providerId: string; type: ProviderAuthType };
@@ -139,7 +144,7 @@ export interface HostMethodMap {
   };
   "session.entries": {
     params: { branchOnly?: boolean; sessionId: string };
-    result: JsonValue;
+    result: SessionEntriesResult;
   };
   "session.fork": {
     params: { entryId: string; position?: "before" | "at"; sessionId: string };

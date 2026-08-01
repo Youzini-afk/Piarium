@@ -7,10 +7,15 @@ import type {
   RuntimeDescriptor,
   SessionSnapshot,
 } from "./types.js";
+import type {
+  ProviderAuthEvent,
+  ProviderAuthPromptRequest,
+} from "./auth.js";
+import type { PiAgentEvent } from "./session.js";
 
 export interface HostEventMap {
   "agent.event": {
-    event: JsonValue;
+    event: PiAgentEvent;
     sessionId: string;
   };
   "extension.ui.dismiss": {
@@ -28,10 +33,17 @@ export interface HostEventMap {
     runtime: RuntimeDescriptor;
   };
   "project.trust.request": ProjectTrustRequest;
-  "provider.auth.event": {
-    event: JsonValue;
+  "provider.auth.dismiss": {
     providerId: string;
+    requestId: string;
+    sessionId: string;
   };
+  "provider.auth.event": {
+    event: ProviderAuthEvent;
+    providerId: string;
+    sessionId: string;
+  };
+  "provider.auth.prompt": ProviderAuthPromptRequest;
   "recovery.changed": {
     sessionId: string;
   };
@@ -59,7 +71,9 @@ export const HOST_EVENTS = [
   "host.ready",
   "package.progress",
   "project.trust.request",
+  "provider.auth.dismiss",
   "provider.auth.event",
+  "provider.auth.prompt",
   "recovery.changed",
   "recovery.status",
   "session.closed",

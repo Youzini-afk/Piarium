@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
 import { PiRuntimeBroker } from "../dist/index.js";
 
 const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/dist/main.js");
@@ -23,7 +24,7 @@ test("compiled broker handshakes with and disposes the compiled Pi host", async 
 
   try {
     const handshake = await broker.warmup();
-    assert.equal(handshake.protocolVersion, 1);
+    assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
     assert.equal(handshake.runtime.piVersion, "0.83.0");
     assert.deepEqual(await broker.listSessions(agentDir), []);
   } finally {

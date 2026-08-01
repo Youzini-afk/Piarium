@@ -14,6 +14,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type {
   HostEvent,
   HostEventData,
@@ -29,14 +30,22 @@ import type {
   RecoveryMode,
   RecoveryPoint,
   RecoveryPreview,
+  SessionEntriesResult,
   SessionSnapshot,
   SessionSummary,
+  ThinkingLevel,
 } from "@piarium/protocol";
 import { RecoveryCoordinator } from "@piarium/recovery";
 import { HostError } from "./errors.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
+import { ProviderAuthBridge } from "./provider-auth-bridge.js";
+import {
+  projectAgentEvent,
+  projectProviderAuthEvent,
+  projectSessionEntry,
+} from "./protocol-projector.js";
 import { createRecoveryExtension } from "./recovery-extension.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
@@ -71,15 +80,39 @@ function getSessionDir(cwd: string, agentDir: string): string {
   return join(resolve(agentDir), "sessions", safePath);
 }
 
-function toModelDescriptor(model: AgentSession["model"]): ModelDescriptor | undefined {
+function toModelDescriptor(
+  model: AgentSession["model"],
+  available: boolean,
+): ModelDescriptor | undefined {
   if (!model) return undefined;
   return {
+    api: model.api,
+    available,
+    baseUrl: model.baseUrl,
     contextWindow: model.contextWindow,
+    cost: {
+      cacheRead: model.cost.cacheRead,
+      cacheWrite: model.cost.cacheWrite,
+      input: model.cost.input,
+      output: model.cost.output,
+      ...(model.cost.tiers === undefined
+        ? {}
+        : {
+            tiers: model.cost.tiers.map((tier) => ({
+              cacheRead: tier.cacheRead,
+              cacheWrite: tier.cacheWrite,
+              input: tier.input,
+              inputTokensAbove: tier.inputTokensAbove,
+              output: tier.output,
+            })),
+          }),
+    },
     id: model.id,
+    input: [...model.input],
+    maxTokens: model.maxTokens,
     name: model.name,
     provider: model.provider,
-    supportsImages: model.input.includes("image"),
-    supportsThinking: model.reasoning,
+    supportedThinkingLevels: getSupportedThinkingLevels(model) as ThinkingLevel[],
   };
 }
 
@@ -118,6 +151,7 @@ export class SessionHost {
   readonly #trustStore: ProjectTrustStore;
   readonly trust: ProjectTrustController;
   readonly ui: ExtensionUiBridge;
+  readonly auth: ProviderAuthBridge;
   #runtime: AgentSessionRuntime | undefined;
   #recovery: RecoveryCoordinator | undefined;
   #unsubscribe: (() => void) | undefined;
@@ -132,6 +166,7 @@ export class SessionHost {
     this.#trustStore = new ProjectTrustStore(this.#agentDir);
     this.trust = new ProjectTrustController(options.emit);
     this.ui = new ExtensionUiBridge(options.emit, () => this.sessionId ?? "host");
+    this.auth = new ProviderAuthBridge(options.emit);
   }
 
   get sessionId(): string | undefined {
@@ -194,23 +229,41 @@ export class SessionHost {
 
   snapshot(): SessionSnapshot {
     const session = this.session;
-    const model = toModelDescriptor(session.model);
+    const selectedModel = session.model;
+    const availableModels = this.runtime.services.modelRuntime.getAvailableSnapshot();
+    const model = toModelDescriptor(
+      selectedModel,
+      selectedModel === undefined
+        ? false
+        : availableModels.some(
+            (candidate) =>
+              candidate.provider === selectedModel.provider && candidate.id === selectedModel.id,
+          ),
+    );
+    const name = session.sessionManager.getSessionName();
     return {
       activeTools: session.getActiveToolNames(),
       busy: !session.isIdle,
       cwd: this.runtime.cwd,
+      leafId: session.sessionManager.getLeafId(),
       ...(model === undefined ? {} : { model }),
+      ...(name === undefined ? {} : { name }),
       sessionId: session.sessionId,
-      thinkingLevel: session.thinkingLevel,
+      thinkingLevel: session.thinkingLevel as ThinkingLevel,
     };
   }
 
-  entries(sessionId: string, branchOnly: boolean): JsonValue {
+  entries(sessionId: string, branchOnly: boolean): SessionEntriesResult {
     this.assertSession(sessionId);
     const entries = branchOnly
       ? this.session.sessionManager.getBranch()
       : this.session.sessionManager.getEntries();
-    return toJsonValue(entries);
+    return {
+      entries: entries.map(projectSessionEntry),
+      leafId: this.session.sessionManager.getLeafId(),
+      scope: branchOnly ? "branch" : "all",
+      sessionId,
+    };
   }
 
   async fork(
@@ -399,9 +452,13 @@ export class SessionHost {
   }
 
   listModels(): ModelDescriptor[] {
-    return this.runtime.services.modelRuntime
+    const runtime = this.runtime.services.modelRuntime;
+    const available = new Set(
+      runtime.getAvailableSnapshot().map((model) => `${model.provider}\u0000${model.id}`),
+    );
+    return runtime
       .getModels()
-      .map((model) => toModelDescriptor(model))
+      .map((model) => toModelDescriptor(model, available.has(`${model.provider}\u0000${model.id}`)))
       .filter((model): model is ModelDescriptor => model !== undefined);
   }
 
@@ -421,17 +478,34 @@ export class SessionHost {
     const runtime = this.runtime.services.modelRuntime;
     return runtime.getProviders().map((provider) => {
       const status = runtime.getProviderAuthStatus(provider.id);
-      const authTypes: ProviderAuthType[] = [];
-      if (provider.auth.apiKey) authTypes.push("api_key");
-      if (provider.auth.oauth) authTypes.push("oauth");
+      const methods: ProviderDescriptor["auth"]["methods"] = [];
+      if (provider.auth.apiKey?.login) {
+        methods.push({ label: provider.auth.apiKey.name, type: "api_key" });
+      }
+      if (provider.auth.oauth) {
+        methods.push({
+          label: provider.auth.oauth.loginLabel ?? provider.auth.oauth.name,
+          type: "oauth",
+        });
+      }
+      let modelCount = 0;
+      try {
+        modelCount = provider.getModels().length;
+      } catch {
+        // A broken extension provider remains visible with an empty catalog.
+      }
       return {
-        authTypes,
-        configured: status.configured,
+        auth: {
+          configured: status.configured,
+          ...(status.label === undefined ? {} : { label: status.label }),
+          methods,
+          ...(status.source === undefined ? {} : { source: status.source }),
+        },
+        ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
+        dynamicModels: typeof provider.refreshModels === "function",
         id: provider.id,
+        modelCount,
         name: provider.name,
-        ...(status.configured && "source" in status && status.source
-          ? { source: status.source }
-          : {}),
       };
     });
   }
@@ -439,35 +513,15 @@ export class SessionHost {
   async loginProvider(providerId: string, type: ProviderAuthType): Promise<boolean> {
     const modelRuntime = this.runtime.services.modelRuntime;
     type LoginInteraction = Parameters<typeof modelRuntime.login>[2];
+    const sessionId = this.session.sessionId;
     const interaction: LoginInteraction = {
-      prompt: async (prompt) => {
-        const options = prompt.signal ? { signal: prompt.signal } : undefined;
-        const payload =
-          prompt.type === "select"
-            ? {
-                message: prompt.message,
-                options: prompt.options.map((option) => ({
-                  ...(option.description === undefined ? {} : { description: option.description }),
-                  id: option.id,
-                  label: option.label,
-                })),
-              }
-            : {
-                message: prompt.message,
-                placeholder: prompt.placeholder ?? null,
-                secret: prompt.type === "secret",
-              };
-        const value = await this.ui.request(
-          prompt.type === "select" ? "select" : "input",
-          toJsonValue(payload),
-          options,
-        );
-        if (typeof value !== "string")
-          throw new HostError("auth_cancelled", "Authentication was cancelled");
-        return value;
-      },
+      prompt: (prompt) => this.auth.prompt(providerId, sessionId, prompt),
       notify: (event) => {
-        this.#emit("provider.auth.event", { event: toJsonValue(event), providerId });
+        this.#emit("provider.auth.event", {
+          event: projectProviderAuthEvent(event),
+          providerId,
+          sessionId,
+        });
       },
     };
     await modelRuntime.login(providerId, type, interaction);
@@ -602,6 +656,7 @@ export class SessionHost {
     if (this.#disposed) return;
     this.#disposed = true;
     this.ui.cancelAll();
+    this.auth.cancelAll();
     this.trust.cancelAll();
     await this.#disposeRuntime();
   }
@@ -621,6 +676,7 @@ export class SessionHost {
       this.#unsubscribe?.();
       this.#unsubscribe = undefined;
       this.ui.cancelAll();
+      this.auth.cancelAll();
     });
     await this.#bindSession();
   }
@@ -739,7 +795,10 @@ export class SessionHost {
       uiContext: this.ui.createContext(),
     });
     this.#unsubscribe = session.subscribe((event) => {
-      this.#emit("agent.event", { event: toJsonValue(event), sessionId: session.sessionId });
+      this.#emit("agent.event", {
+        event: projectAgentEvent(event),
+        sessionId: session.sessionId,
+      });
       if (
         event.type === "agent_start" ||
         event.type === "agent_end" ||
@@ -800,6 +859,7 @@ export class SessionHost {
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     this.ui.cancelAll();
+    this.auth.cancelAll();
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();

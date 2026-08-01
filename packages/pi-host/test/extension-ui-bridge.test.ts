@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { EventEnvelope, HostEvent, HostEventData } from "@piarium/protocol";
+import {
+  type EventEnvelope,
+  type HostEvent,
+  type HostEventData,
+  PIARIUM_PROTOCOL_VERSION,
+} from "@piarium/protocol";
 import { ExtensionUiBridge } from "../src/extension-ui-bridge.js";
 
 function createHarness() {
@@ -8,7 +13,13 @@ function createHarness() {
   let sequence = 0;
   const bridge = new ExtensionUiBridge(
     <E extends HostEvent>(event: E, data: HostEventData<E>) => {
-      events.push({ data, event, kind: "event", seq: sequence++, v: 1 } as EventEnvelope);
+      events.push({
+        data,
+        event,
+        kind: "event",
+        seq: sequence++,
+        v: PIARIUM_PROTOCOL_VERSION,
+      } as EventEnvelope);
     },
     () => "session-1",
   );

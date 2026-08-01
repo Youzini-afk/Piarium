@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
 import type { PiRuntimeBrokerEvent } from "../src/index.js";
 import {
   dispatchRuntimeRequest,
@@ -52,9 +53,9 @@ test("broker owns catalog and per-session Pi workers", async () => {
       clientName: "surface-test",
       clientVersion: "0.1.0",
       mode: "test",
-      protocolVersions: [1],
+      protocolVersions: [PIARIUM_PROTOCOL_VERSION],
     });
-    assert.equal(handshake.protocolVersion, 1);
+    assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
     assert.equal(broker.catalogStarted, true);
     assert.deepEqual(await broker.listSessions(workspace), []);
 
@@ -76,9 +77,9 @@ test("broker owns catalog and per-session Pi workers", async () => {
       branchOnly: true,
       sessionId: created.sessionId,
     });
-    assert.ok(Array.isArray(entries));
+    assert.equal(entries.scope, "branch");
     assert.ok(
-      entries.some(
+      entries.entries.some(
         (entry) =>
           typeof entry === "object" &&
           entry !== null &&

@@ -7,6 +7,7 @@ import {
   decodeEnvelope,
   encodeEnvelope,
   JsonLineDecoder,
+  PIARIUM_PROTOCOL_VERSION,
   ProtocolDecodeError,
 } from "../src/index.js";
 
@@ -16,7 +17,7 @@ describe("protocol envelopes", () => {
       clientName: "test",
       clientVersion: "0.0.0",
       mode: "test",
-      protocolVersions: [1],
+      protocolVersions: [PIARIUM_PROTOCOL_VERSION],
     });
 
     assert.deepEqual(decodeEnvelope(encodeEnvelope(request).trimEnd()), request);
@@ -40,11 +41,20 @@ describe("protocol envelopes", () => {
       },
     );
     assert.throws(
-      () => decodeEnvelope('{"v":2,"kind":"request","id":"x","method":"x","params":{}}'),
+      () => decodeEnvelope('{"v":999,"kind":"request","id":"x","method":"x","params":{}}'),
       /Unsupported protocol version/,
     );
     assert.throws(
-      () => decodeEnvelope('{"v":1,"kind":"event","seq":-1,"event":"x","data":{}}'),
+      () =>
+        decodeEnvelope(
+          JSON.stringify({
+            data: {},
+            event: "x",
+            kind: "event",
+            seq: -1,
+            v: PIARIUM_PROTOCOL_VERSION,
+          }),
+        ),
       /event.seq/,
     );
   });

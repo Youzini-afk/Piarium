@@ -4,6 +4,7 @@ import {
   type HostMode,
   type ImageAttachment,
   type JsonValue,
+  type ProviderAuthResponse,
   type RuntimeMethod,
   type RuntimeMethodResult,
 } from "@piarium/protocol";
@@ -106,6 +107,19 @@ function requireExtensionResponse(record: Record<string, unknown>): ExtensionUiR
     ...(cancelled === undefined ? {} : { cancelled }),
     requestId: requireString(response, "requestId"),
     ...(response.value === undefined ? {} : { value: response.value as JsonValue }),
+  };
+}
+
+function requireProviderAuthResponse(record: Record<string, unknown>): ProviderAuthResponse {
+  const response = requireRecord(record.response);
+  const cancelled = optionalBoolean(response, "cancelled");
+  if (response.value !== undefined && typeof response.value !== "string") {
+    throw new RuntimeDispatchError("invalid_params", "response.value must be a string");
+  }
+  return {
+    ...(cancelled === undefined ? {} : { cancelled }),
+    requestId: requireString(response, "requestId"),
+    ...(response.value === undefined ? {} : { value: response.value }),
   };
 }
 
@@ -262,6 +276,14 @@ async function dispatchRuntimeRequestUnchecked(
     case "provider.list": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "provider.list", {});
+    }
+    case "provider.auth.respond": {
+      const sessionId = requireString(input, "sessionId");
+      const accepted = await broker.respondToProviderAuth(
+        sessionId,
+        requireProviderAuthResponse(input),
+      );
+      return { accepted };
     }
     case "provider.login": {
       const sessionId = requireString(input, "sessionId");

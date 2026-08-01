@@ -12,6 +12,7 @@ import {
   type ProtocolErrorData,
   type ProtocolVersion,
 } from "./types.js";
+import type { ProviderAuthResponse } from "./auth.js";
 
 type DirectRuntimeMethod =
   | "agent.abort"
@@ -77,6 +78,10 @@ export type RuntimeMethodMap = Pick<HostMethodMap, DirectRuntimeMethod> &
       result: HostHandshakeResult;
     };
     "model.select": HostMethodMap["model.select"];
+    "provider.auth.respond": {
+      params: { response: ProviderAuthResponse; sessionId: string };
+      result: HostMethodMap["provider.auth.respond"]["result"];
+    };
   };
 
 export const RUNTIME_METHODS = [
@@ -95,6 +100,7 @@ export const RUNTIME_METHODS = [
   "package.remove",
   "package.update",
   "provider.list",
+  "provider.auth.respond",
   "provider.login",
   "provider.logout",
   "recovery.apply",

@@ -44,7 +44,7 @@
     "postinstall": "node ./fix-deprecation.js && patch-package && node ./scripts/repair-pi-shrinkwrap.mjs",
     "security:check": "node ./scripts/repair-pi-shrinkwrap.mjs --check",
     "test:pi": "bun run --filter '@piarium/*' test",
-    "test:pi:dist": "bun run --filter '@piarium/*' test:dist",
+    "test:pi:dist": "bun run --sequential --filter '@piarium/*' test:dist",
     "check:pi": "bun run security:check && bun run --filter '@piarium/*' type-check && bun run test:pi",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",

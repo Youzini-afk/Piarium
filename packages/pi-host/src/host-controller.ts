@@ -10,6 +10,7 @@ import {
   type ImageAttachment,
   type JsonValue,
   PIARIUM_PROTOCOL_VERSION,
+  type ProviderAuthResponse,
   ProtocolDecodeError,
   type RequestEnvelope,
   type RuntimeDescriptor,
@@ -34,6 +35,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
 const OUT_OF_BAND_METHODS = new Set([
   "agent.abort",
   "extension.ui.respond",
+  "provider.auth.respond",
   "project.trust.respond",
 ]);
 
@@ -196,7 +198,10 @@ export class HostController {
         readString(params, "clientVersion");
         readString(params, "mode");
         if (!versions.includes(PIARIUM_PROTOCOL_VERSION)) {
-          throw new HostError("unsupported_version", "Client does not support Piarium protocol v1");
+          throw new HostError(
+            "unsupported_version",
+            `Client does not support Piarium protocol v${PIARIUM_PROTOCOL_VERSION}`,
+          );
         }
         return {
           capabilities: HOST_CAPABILITIES,
@@ -290,6 +295,18 @@ export class HostController {
         );
       case "provider.list":
         return this.#sessionHost.listProviders();
+      case "provider.auth.respond": {
+        const cancelled = readBoolean(params, "cancelled", { optional: true });
+        if (params.value !== undefined && typeof params.value !== "string") {
+          throw new HostError("invalid_params", "value must be a string");
+        }
+        const response: ProviderAuthResponse = {
+          requestId: readString(params, "requestId"),
+          ...(cancelled === undefined ? {} : { cancelled }),
+          ...(params.value === undefined ? {} : { value: params.value }),
+        };
+        return { accepted: this.#sessionHost.auth.respond(response) };
+      }
       case "provider.login": {
         const type = readString(params, "type");
         if (type !== "api_key" && type !== "oauth") {

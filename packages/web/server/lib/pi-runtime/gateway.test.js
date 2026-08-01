@@ -5,6 +5,7 @@ import {
   createRuntimeRequest,
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
+  PIARIUM_PROTOCOL_VERSION,
 } from '@piarium/protocol';
 import { WebSocket } from 'ws';
 import { createPiRuntimeGateway, PI_RUNTIME_WS_PATH } from './gateway.js';
@@ -49,7 +50,7 @@ const handshake = async (socket, id = 'handshake') => {
     clientName: 'gateway-test',
     clientVersion: '0.1.0',
     mode: 'test',
-    protocolVersions: [1],
+    protocolVersions: [PIARIUM_PROTOCOL_VERSION],
   })));
   return responsePromise;
 };
@@ -71,7 +72,7 @@ const createBroker = () => {
         settings: true,
       },
       hostVersion: '0.1.0',
-      protocolVersion: 1,
+      protocolVersion: PIARIUM_PROTOCOL_VERSION,
       runtime: {
         agentDir: 'C:/agent',
         nodePath: 'node',
@@ -119,7 +120,7 @@ describe('Pi runtime gateway', () => {
       id: 'handshake-1',
       kind: 'response',
       ok: true,
-      result: { protocolVersion: 1 },
+      result: { protocolVersion: PIARIUM_PROTOCOL_VERSION },
     });
     socket.close();
   });
@@ -170,7 +171,13 @@ describe('Pi runtime gateway', () => {
     const { url } = await setup();
     const socket = await openSocket(url);
     const responsePromise = nextMessage(socket);
-    socket.send('{"v":1,"kind":"request","id":"shutdown-1","method":"host.shutdown","params":{}}');
+    socket.send(JSON.stringify({
+      id: 'shutdown-1',
+      kind: 'request',
+      method: 'host.shutdown',
+      params: {},
+      v: PIARIUM_PROTOCOL_VERSION,
+    }));
 
     expect(await responsePromise).toMatchObject({
       id: 'shutdown-1',

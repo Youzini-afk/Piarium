@@ -39,7 +39,7 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v1 WebSocket/postMessage surface protocol
+    | authenticated Piarium v2 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
@@ -81,6 +81,12 @@ tokens, checks Origin, bounds payloads and concurrency, and forwards worker even
 `{workerId, role, sessionId}` routing. The private relay explicitly allowlists this socket and
 continues to carry it through the existing encrypted tunnel without injecting credentials.
 
+Protocol v2 does not forward Pi SDK objects verbatim. The host projects the append-only session
+tree, messages, tool calls/results, streaming updates, compaction, retry state, model metadata, and
+provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,
+thinking/text signatures, callback functions, `AbortSignal`, and credential objects remain inside
+the worker. Arbitrary extension/tool details cross only through the bounded JSON sanitizer.
+
 ### 4.3 Session workers
 
 Each hot top-level session runs in its own Node worker process and embeds the public Pi SDK. This
@@ -114,6 +120,11 @@ Unknown methods and malformed routed events are protocol errors, not silently ig
 are unique within a connection. Event sequence numbers are monotonic within each worker lifetime
 and clients track them independently by worker ID. Large binary/file payloads use a separate
 bounded stream or file grant rather than JSONL.
+
+`session.entries` returns `{sessionId, scope, leafId, entries}`. The leaf and every entry's
+`id/parentId` preserve Pi's branch graph; `scope:"branch"` is the active path and `scope:"all"`
+contains the complete append-only tree. Streaming `agent.event` messages contain one canonical
+message plus a compact typed delta instead of duplicating Pi's mutable `partial` object.
 
 An initial handshake negotiates protocol version and capabilities. UI disables unavailable
 actions instead of guessing from runtime versions.
