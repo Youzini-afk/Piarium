@@ -18,7 +18,9 @@ Its Electron lifecycle owns the Pi worker broker directly, and an authenticated 
 WebSocket surface plus browser client now carries that broker across desktop/web/mobile and the
 encrypted relay. Protocol v2 now exposes Pi's tree conversation, streaming lifecycle, model
 catalog, and provider-owned authentication as Piarium DTOs without leaking SDK-only callbacks or
-credential material. Replacement of the remaining OpenCode UI state paths is the active phase.
+Pi credential objects. The host now owns layered native Pi provider configuration and secured model
+discovery while keeping credentials in Pi AuthStorage. Replacement of the remaining OpenCode UI
+state paths is the active phase.
 
 The product base is the maintainer's OpenChamber fork at commit `f551150e5`. That fork is imported
 into this repository and is being directly refactored from OpenCode to Pi; the source fork remains read-only.

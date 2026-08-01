@@ -146,6 +146,7 @@
         "@earendil-works/pi-coding-agent": "0.83.0",
         "@piarium/protocol": "0.1.0",
         "@piarium/recovery": "0.1.0",
+        "jsonc-parser": "^3.3.1",
       },
     },
     "packages/protocol": {

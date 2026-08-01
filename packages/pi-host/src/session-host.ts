@@ -22,8 +22,13 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  ProviderConfigDeleteScope,
+  ProviderConfigDetails,
+  ProviderConfigInput,
+  ProviderConfigScope,
   ProviderAuthType,
   ProviderDescriptor,
+  ProviderModelDiscoveryResult,
   RecoveryApplyResult,
   RecoveryCheckpoint,
   RecoveryListResult,
@@ -41,6 +46,8 @@ import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
 import { ProviderAuthBridge } from "./provider-auth-bridge.js";
+import { ProviderConfigurationManager } from "./provider-configuration.js";
+import { discoverProviderModels } from "./provider-model-discovery.js";
 import {
   projectAgentEvent,
   projectProviderAuthEvent,
@@ -147,6 +154,7 @@ export class SessionHost {
   readonly #configureServices: SessionHostOptions["configureServices"];
   readonly #emit: EventEmitter;
   readonly #projectTrustOverride: boolean | undefined;
+  readonly #providerConfiguration: ProviderConfigurationManager;
   readonly #runtimeFactory: CreateAgentSessionRuntimeFactory | undefined;
   readonly #trustStore: ProjectTrustStore;
   readonly trust: ProjectTrustController;
@@ -163,6 +171,7 @@ export class SessionHost {
     this.#emit = options.emit;
     this.#projectTrustOverride = options.projectTrustOverride;
     this.#runtimeFactory = options.runtimeFactory;
+    this.#providerConfiguration = new ProviderConfigurationManager({ agentDir: this.#agentDir });
     this.#trustStore = new ProjectTrustStore(this.#agentDir);
     this.trust = new ProjectTrustController(options.emit);
     this.ui = new ExtensionUiBridge(options.emit, () => this.sessionId ?? "host");
@@ -451,7 +460,11 @@ export class SessionHost {
     return { executed: true };
   }
 
-  listModels(): ModelDescriptor[] {
+  async listModels(): Promise<ModelDescriptor[]> {
+    await this.#providerConfiguration.apply(
+      this.runtime.services.modelRuntime,
+      this.runtime.cwd,
+    );
     const runtime = this.runtime.services.modelRuntime;
     const available = new Set(
       runtime.getAvailableSnapshot().map((model) => `${model.provider}\u0000${model.id}`),
@@ -468,13 +481,21 @@ export class SessionHost {
     modelId: string,
   ): Promise<SessionSnapshot> {
     this.assertSession(sessionId);
+    await this.#providerConfiguration.apply(
+      this.runtime.services.modelRuntime,
+      this.runtime.cwd,
+    );
     const model = this.runtime.services.modelRuntime.getModel(provider, modelId);
     if (!model) throw new HostError("model_not_found", `Unknown model: ${provider}/${modelId}`);
     await this.session.setModel(model);
     return this.snapshot();
   }
 
-  listProviders(): ProviderDescriptor[] {
+  async listProviders(): Promise<ProviderDescriptor[]> {
+    await this.#providerConfiguration.apply(
+      this.runtime.services.modelRuntime,
+      this.runtime.cwd,
+    );
     const runtime = this.runtime.services.modelRuntime;
     return runtime.getProviders().map((provider) => {
       const status = runtime.getProviderAuthStatus(provider.id);
@@ -512,6 +533,7 @@ export class SessionHost {
 
   async loginProvider(providerId: string, type: ProviderAuthType): Promise<boolean> {
     const modelRuntime = this.runtime.services.modelRuntime;
+    await this.#providerConfiguration.apply(modelRuntime, this.runtime.cwd);
     type LoginInteraction = Parameters<typeof modelRuntime.login>[2];
     const sessionId = this.session.sessionId;
     const interaction: LoginInteraction = {
@@ -530,6 +552,62 @@ export class SessionHost {
 
   async logoutProvider(providerId: string): Promise<void> {
     await this.runtime.services.modelRuntime.logout(providerId);
+  }
+
+  async getProviderConfiguration(providerId: string): Promise<ProviderConfigDetails> {
+    const runtime = this.runtime.services.modelRuntime;
+    await this.#providerConfiguration.apply(runtime, this.runtime.cwd);
+    return this.#providerConfiguration.getDetails(runtime, this.runtime.cwd, providerId);
+  }
+
+  async upsertProviderConfiguration(
+    scope: ProviderConfigScope,
+    config: ProviderConfigInput,
+  ): Promise<ProviderConfigDetails> {
+    const runtime = this.runtime.services.modelRuntime;
+    const details = await this.#providerConfiguration.upsert(
+      runtime,
+      this.runtime.cwd,
+      scope,
+      config,
+    );
+    this.#emit("provider.config.changed", {
+      providerId: config.id,
+      scope,
+      sessionId: this.session.sessionId,
+    });
+    return details;
+  }
+
+  async deleteProviderConfiguration(
+    providerId: string,
+    scope: ProviderConfigDeleteScope,
+  ): Promise<ProviderConfigDetails> {
+    const runtime = this.runtime.services.modelRuntime;
+    if (scope === "auth" || scope === "all") {
+      await runtime.logout(providerId);
+    }
+    const details =
+      scope === "auth"
+        ? await this.#providerConfiguration.getDetails(runtime, this.runtime.cwd, providerId)
+        : await this.#providerConfiguration.delete(runtime, this.runtime.cwd, providerId, scope);
+    this.#emit("provider.config.changed", {
+      providerId,
+      scope,
+      sessionId: this.session.sessionId,
+    });
+    return details;
+  }
+
+  async discoverProviderModels(providerId: string): Promise<ProviderModelDiscoveryResult> {
+    const runtime = this.runtime.services.modelRuntime;
+    await this.#providerConfiguration.apply(runtime, this.runtime.cwd);
+    return discoverProviderModels({
+      configuration: this.#providerConfiguration,
+      cwd: this.runtime.cwd,
+      providerId,
+      runtime,
+    });
   }
 
   listPackages(): PackageDescriptor[] {
@@ -743,6 +821,13 @@ export class SessionHost {
             }
           : {}),
       });
+      const providerWarnings = await this.#providerConfiguration.apply(
+        services.modelRuntime,
+        cwd,
+      );
+      services.diagnostics.push(
+        ...providerWarnings.map((message) => ({ message, type: "warning" as const })),
+      );
       const configured = await this.#configureServices?.(services);
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),

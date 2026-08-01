@@ -43,7 +43,7 @@ OpenChamber-derived React renderer
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v1 over a private child-process IPC pipe
+    | Piarium protocol v2 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -86,6 +86,21 @@ tree, messages, tool calls/results, streaming updates, compaction, retry state, 
 provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,
 thinking/text signatures, callback functions, `AbortSignal`, and credential objects remain inside
 the worker. Arbitrary extension/tool details cross only through the bounded JSON sanitizer.
+
+Provider configuration is also Pi-native. The user layer is Pi's canonical
+`<agentDir>/models.json`; the trusted project layer is `<workspace>/.pi/models.json`; an operator may
+add a `PIARIUM_MODELS_CONFIG` layer. Project and operator definitions are applied through
+`ModelRuntime.registerProvider()` in `user → project → operator` order, without translating through
+an OpenCode schema. UI-added API keys use Pi's locked `AuthStorage` flow and are never returned with
+provider metadata. Existing literal/env/command keys in native configuration layers remain intact
+and usable but are redacted from the surface protocol.
+
+Remote model discovery is a separate privileged operation. It uses the provider's host-owned auth
+and never accepts a key in ordinary request parameters. HTTP, HTTPS, localhost, LAN, and URL basic
+authentication remain available for explicitly configured providers. Redirects are followed up to
+five hops; authentication headers are removed on cross-origin redirects. A 60-second timeout and
+64 MiB response ceiling protect the worker from a permanently stalled or unbounded endpoint without
+imposing a model-count limit. Google keys are sent in `x-goog-api-key`, not in the URL.
 
 ### 4.3 Session workers
 
@@ -134,7 +149,7 @@ actions instead of guessing from runtime versions.
 | Data | Authority | Piarium behavior |
 | --- | --- | --- |
 | Pi session tree/messages | Pi SessionManager JSONL | Read/navigate via SDK; destructive edits only in recovery transactions |
-| Models/auth | Pi ModelRuntime/AuthStorage | Never mirror secrets into renderer storage |
+| Models/auth | Pi ModelRuntime/AuthStorage + layered native `models.json` | Never mirror secrets into renderer storage; preserve source provenance |
 | Pi settings/packages | Pi SettingsManager/PackageManager | Typed operations with source/provenance shown |
 | App metadata | Atomic Piarium JSON (Phase 2), recovery database later | Recent projects now; archive, pin, tags, and view preferences later |
 | Workspace checkpoints | Recovery store + shadow Git | Per real workspace and Pi session; separate from project `.git` |

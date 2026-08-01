@@ -26,6 +26,7 @@ export interface HostCapabilities {
   extensionUi: boolean;
   models: boolean;
   packages: boolean;
+  providerConfiguration: boolean;
   recovery: boolean;
   sessions: boolean;
   settings: boolean;

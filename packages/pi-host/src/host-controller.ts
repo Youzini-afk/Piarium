@@ -9,7 +9,11 @@ import {
   type HostEventData,
   type ImageAttachment,
   type JsonValue,
+  parseProviderConfigInput,
   PIARIUM_PROTOCOL_VERSION,
+  type ProviderConfigDeleteScope,
+  type ProviderConfigInput,
+  ProviderConfigValidationError,
   type ProviderAuthResponse,
   ProtocolDecodeError,
   type RequestEnvelope,
@@ -27,6 +31,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
   extensionUi: true,
   models: true,
   packages: true,
+  providerConfiguration: true,
   recovery: true,
   sessions: true,
   settings: true,
@@ -60,6 +65,37 @@ function readImages(record: Record<string, unknown>): ImageAttachment[] | undefi
 
 function optionalString(record: Record<string, unknown>, key: string): string | undefined {
   return readString(record, key, { optional: true });
+}
+
+function readProviderConfig(value: unknown): ProviderConfigInput {
+  try {
+    return parseProviderConfigInput(value);
+  } catch (error) {
+    if (error instanceof ProviderConfigValidationError) {
+      throw new HostError("invalid_params", error.message);
+    }
+    throw error;
+  }
+}
+
+function readProviderConfigScope(value: string): "user" | "project" | "custom" {
+  if (value !== "user" && value !== "project" && value !== "custom") {
+    throw new HostError("invalid_params", "scope must be user, project, or custom");
+  }
+  return value;
+}
+
+function readProviderDeleteScope(value: string): ProviderConfigDeleteScope {
+  if (
+    value !== "user" &&
+    value !== "project" &&
+    value !== "custom" &&
+    value !== "auth" &&
+    value !== "all"
+  ) {
+    throw new HostError("invalid_params", "scope must be user, project, custom, auth, or all");
+  }
+  return value;
 }
 
 export class HostController {
@@ -295,6 +331,20 @@ export class HostController {
         );
       case "provider.list":
         return this.#sessionHost.listProviders();
+      case "provider.config.get":
+        return this.#sessionHost.getProviderConfiguration(readString(params, "providerId"));
+      case "provider.config.upsert":
+        return this.#sessionHost.upsertProviderConfiguration(
+          readProviderConfigScope(readString(params, "scope")),
+          readProviderConfig(params.config),
+        );
+      case "provider.config.delete":
+        return this.#sessionHost.deleteProviderConfiguration(
+          readString(params, "providerId"),
+          readProviderDeleteScope(readString(params, "scope")),
+        );
+      case "provider.models.discover":
+        return this.#sessionHost.discoverProviderModels(readString(params, "providerId"));
       case "provider.auth.respond": {
         const cancelled = readBoolean(params, "cancelled", { optional: true });
         if (params.value !== undefined && typeof params.value !== "string") {

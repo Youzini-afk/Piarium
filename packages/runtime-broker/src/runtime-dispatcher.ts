@@ -4,6 +4,9 @@ import {
   type HostMode,
   type ImageAttachment,
   type JsonValue,
+  parseProviderConfigInput,
+  type ProviderConfigInput,
+  ProviderConfigValidationError,
   type ProviderAuthResponse,
   type RuntimeMethod,
   type RuntimeMethodResult,
@@ -125,6 +128,17 @@ function requireProviderAuthResponse(record: Record<string, unknown>): ProviderA
 
 function optionalName(record: Record<string, unknown>): string | undefined {
   return optionalString(record, "name");
+}
+
+function requireProviderConfig(value: unknown): ProviderConfigInput {
+  try {
+    return parseProviderConfigInput(value);
+  } catch (error) {
+    if (error instanceof ProviderConfigValidationError) {
+      throw new RuntimeDispatchError("invalid_params", error.message);
+    }
+    throw error;
+  }
 }
 
 function assertNever(value: never): never {
@@ -276,6 +290,36 @@ async function dispatchRuntimeRequestUnchecked(
     case "provider.list": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "provider.list", {});
+    }
+    case "provider.config.get": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "provider.config.get", {
+        providerId: requireString(input, "providerId"),
+      });
+    }
+    case "provider.config.upsert": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "provider.config.upsert", {
+        config: requireProviderConfig(input.config),
+        scope: requireEnum(input, "scope", ["user", "project", "custom"] as const),
+      });
+    }
+    case "provider.config.delete": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "provider.config.delete", {
+        providerId: requireString(input, "providerId"),
+        scope: requireEnum(
+          input,
+          "scope",
+          ["user", "project", "custom", "auth", "all"] as const,
+        ),
+      });
+    }
+    case "provider.models.discover": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "provider.models.discover", {
+        providerId: requireString(input, "providerId"),
+      });
     }
     case "provider.auth.respond": {
       const sessionId = requireString(input, "sessionId");

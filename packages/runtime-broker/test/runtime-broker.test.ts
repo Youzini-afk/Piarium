@@ -65,6 +65,40 @@ test("broker owns catalog and per-session Pi workers", async () => {
       sessionId: created.sessionId,
     });
     assert.ok(Array.isArray(models));
+    const providerDetails = await dispatchRuntimeRequest(broker, "provider.config.upsert", {
+      config: {
+        api: "openai-completions",
+        baseUrl: "https://provider.example.test/v1",
+        id: "broker-provider",
+        models: [{ id: "broker-model", name: "Broker model" }],
+        name: "Broker provider",
+      },
+      scope: "user",
+      sessionId: created.sessionId,
+    });
+    assert.equal(providerDetails.effectiveScope, "user");
+    assert.ok(
+      (await dispatchRuntimeRequest(broker, "provider.list", {
+        sessionId: created.sessionId,
+      })).some((provider) => provider.id === "broker-provider"),
+    );
+    await assert.rejects(
+      dispatchRuntimeRequest(broker, "provider.config.upsert", {
+        config: {
+          api: "openai-completions",
+          baseUrl: "file:///tmp/provider",
+          id: "invalid-provider",
+          models: [],
+        },
+        scope: "user",
+        sessionId: created.sessionId,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeDispatchError);
+        assert.equal(error.code, "invalid_params");
+        return true;
+      },
+    );
     const commands = await broker.requestForSession(created.sessionId, "command.list", {
       sessionId: created.sessionId,
     });

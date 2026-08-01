@@ -68,7 +68,9 @@ retained before engine surgery begins.
   web/desktop/mobile, validates every public method, routes per-worker event sequences, and works
   through the existing encrypted relay allowlist. Protocol v2 now projects Pi session trees,
   messages, stream deltas, models, and provider-owned auth prompts/events into stable Piarium DTOs;
-  SDK callbacks, signatures, and credentials remain worker-private.
+  SDK callbacks, signatures, and credentials remain worker-private. Pi-native user/project/operator
+  provider configuration, scoped deletion, credential provenance, and credential-safe model discovery
+  are implemented behind the same runtime boundary.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.

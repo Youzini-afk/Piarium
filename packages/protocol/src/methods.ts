@@ -17,6 +17,13 @@ import type {
   SessionSummary,
 } from "./types.js";
 import type { ProviderAuthResponse, ProviderDescriptor } from "./auth.js";
+import type {
+  ProviderConfigDeleteScope,
+  ProviderConfigDetails,
+  ProviderConfigInput,
+  ProviderConfigScope,
+  ProviderModelDiscoveryResult,
+} from "./provider.js";
 import type { SessionEntriesResult } from "./session.js";
 
 export interface HostMethodMap {
@@ -71,6 +78,22 @@ export interface HostMethodMap {
   "provider.list": {
     params: Record<string, never>;
     result: ProviderDescriptor[];
+  };
+  "provider.config.delete": {
+    params: { providerId: string; scope: ProviderConfigDeleteScope };
+    result: ProviderConfigDetails;
+  };
+  "provider.config.get": {
+    params: { providerId: string };
+    result: ProviderConfigDetails;
+  };
+  "provider.config.upsert": {
+    params: { config: ProviderConfigInput; scope: ProviderConfigScope };
+    result: ProviderConfigDetails;
+  };
+  "provider.models.discover": {
+    params: { providerId: string };
+    result: ProviderModelDiscoveryResult;
   };
   "provider.auth.respond": {
     params: ProviderAuthResponse;

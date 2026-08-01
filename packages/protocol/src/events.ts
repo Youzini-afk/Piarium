@@ -12,6 +12,7 @@ import type {
   ProviderAuthPromptRequest,
 } from "./auth.js";
 import type { PiAgentEvent } from "./session.js";
+import type { ProviderConfigDeleteScope } from "./provider.js";
 
 export interface HostEventMap {
   "agent.event": {
@@ -44,6 +45,11 @@ export interface HostEventMap {
     sessionId: string;
   };
   "provider.auth.prompt": ProviderAuthPromptRequest;
+  "provider.config.changed": {
+    providerId: string;
+    scope: ProviderConfigDeleteScope;
+    sessionId: string;
+  };
   "recovery.changed": {
     sessionId: string;
   };
@@ -74,6 +80,7 @@ export const HOST_EVENTS = [
   "provider.auth.dismiss",
   "provider.auth.event",
   "provider.auth.prompt",
+  "provider.config.changed",
   "recovery.changed",
   "recovery.status",
   "session.closed",

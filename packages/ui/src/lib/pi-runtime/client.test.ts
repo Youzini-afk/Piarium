@@ -27,6 +27,7 @@ class HandshakeSocket implements RuntimeWebSocket {
             extensionUi: true,
             models: true,
             packages: true,
+            providerConfiguration: true,
             recovery: true,
             sessions: true,
             settings: true,

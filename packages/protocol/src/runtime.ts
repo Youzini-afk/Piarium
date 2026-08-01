@@ -43,6 +43,10 @@ type SessionScopedRuntimeMethod =
   | "package.remove"
   | "package.update"
   | "provider.list"
+  | "provider.config.delete"
+  | "provider.config.get"
+  | "provider.config.upsert"
+  | "provider.models.discover"
   | "provider.login"
   | "provider.logout"
   | "settings.get"
@@ -100,6 +104,10 @@ export const RUNTIME_METHODS = [
   "package.remove",
   "package.update",
   "provider.list",
+  "provider.config.delete",
+  "provider.config.get",
+  "provider.config.upsert",
+  "provider.models.discover",
   "provider.auth.respond",
   "provider.login",
   "provider.logout",
