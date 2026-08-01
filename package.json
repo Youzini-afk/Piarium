@@ -1,0 +1,29 @@
+{
+  "name": "piarium",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A native workspace for Pi agents.",
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run format:check && npm run typecheck && npm run test",
+    "format": "biome check --write .",
+    "format:check": "biome check .",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@types/node": "24.13.3",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3"
+  }
+}
