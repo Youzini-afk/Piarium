@@ -24,7 +24,7 @@ or oversized frames.
 Acceptance: a headless integration test creates or opens a disposable session, completes a prompt
 with a fake provider, exercises extension UI, and shuts down without a child process leak.
 
-## Phase 2 — Desktop MVP
+## Phase 2 — Desktop MVP (complete)
 
 - Secure Electron main/preload boundary.
 - React shell, onboarding, projects, session list, chat timeline, composer, and tool cards.

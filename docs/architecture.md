@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: implemented through Phase 1
+Status: implemented through Phase 2
 
 Last updated: 2026-08-02
 
@@ -42,7 +42,7 @@ React renderer
     v
 Electron main / runtime broker
     |
-    | Piarium protocol v1 over authenticated local IPC
+    | Piarium protocol v1 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -60,9 +60,10 @@ typed preload capability.
 
 ### 4.2 Electron main and broker
 
-The broker owns windows, lifecycle, native dialogs, notifications, updates, and workers. It
-enforces one writer lease per Pi session file and one recovery lease per workspace. A worker crash
-cannot crash the renderer, and a renderer reload does not terminate an active task.
+The broker owns windows, lifecycle, native dialogs, and workers. In Phase 2 it maps one live worker
+to each opened top-level session and uses a separate catalog worker for session discovery. Phase 3
+adds the session-writer and workspace-recovery leases. A worker crash cannot crash the renderer,
+and a renderer reload does not terminate an active task.
 
 ### 4.3 Session workers
 
@@ -70,10 +71,11 @@ Each hot top-level session runs in its own Node worker process and embeds the pu
 matches the single-active-session assumptions made by several Pi extensions while allowing
 multiple background sessions. Idle sessions are persisted by Pi and need no live worker.
 
-The broker maintains a bounded hot-worker pool. Eviction is graceful: stop accepting requests,
-wait for idle or require explicit abort, dispose the SDK runtime, flush settings, and then stop the
-process. Subagents remain owned by their supervising extension and are observed through structured
-events and lifecycle artifacts.
+Phase 2 keeps opened sessions live until explicitly closed or the application exits. A bounded
+hot-worker pool and idle eviction remain a later optimization; eviction must be graceful: stop
+accepting requests, wait for idle or require explicit abort, dispose the SDK runtime, flush
+settings, and then stop the process. Subagents remain owned by their supervising extension and are
+observed through structured events and lifecycle artifacts.
 
 ### 4.4 Why direct SDK workers
 
@@ -104,7 +106,7 @@ actions instead of guessing from runtime versions.
 | Pi session tree/messages | Pi SessionManager JSONL | Read/navigate via SDK; destructive edits only in recovery transactions |
 | Models/auth | Pi ModelRuntime/AuthStorage | Never mirror secrets into renderer storage |
 | Pi settings/packages | Pi SettingsManager/PackageManager | Typed operations with source/provenance shown |
-| App metadata | Piarium SQLite | Archive, pin, tags, recent projects, view preferences |
+| App metadata | Atomic Piarium JSON (Phase 2), recovery database later | Recent projects now; archive, pin, tags, and view preferences later |
 | Workspace checkpoints | Recovery store + shadow Git | Per real workspace and Pi session; separate from project `.git` |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |

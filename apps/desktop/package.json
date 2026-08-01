@@ -1,0 +1,36 @@
+{
+  "name": "@piarium/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Piarium Electron desktop application.",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "node scripts/build-main.mjs",
+    "build:renderer": "vite build",
+    "dev": "node scripts/dev.mjs",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "start": "electron .",
+    "test": "tsx --test test/**/*.test.ts",
+    "test:dist": "node --test test/runtime-broker.dist.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@piarium/pi-host": "0.1.0",
+    "@piarium/protocol": "0.1.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.5",
+    "electron": "43.2.0",
+    "esbuild": "0.28.1",
+    "vite": "8.2.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

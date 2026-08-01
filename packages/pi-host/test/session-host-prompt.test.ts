@@ -88,6 +88,30 @@ describe("SessionHost prompt streaming", () => {
             JSON.stringify(entry.data).includes("agent_settled"),
         ),
       );
+      const entries = host.entries(snapshot.sessionId, true);
+      assert.ok(Array.isArray(entries));
+      const userEntry = entries.find(
+        (entry) =>
+          typeof entry === "object" &&
+          entry !== null &&
+          !Array.isArray(entry) &&
+          entry.type === "message" &&
+          typeof entry.message === "object" &&
+          entry.message !== null &&
+          !Array.isArray(entry.message) &&
+          entry.message.role === "user",
+      );
+      const userEntryId =
+        typeof userEntry === "object" &&
+        userEntry !== null &&
+        !Array.isArray(userEntry) &&
+        typeof userEntry.id === "string"
+          ? userEntry.id
+          : undefined;
+      assert.ok(userEntryId);
+      const forked = await host.fork(snapshot.sessionId, userEntryId, "at");
+      assert.equal(forked.cancelled, false);
+      assert.notEqual(forked.snapshot.sessionId, snapshot.sessionId);
     } finally {
       await host.dispose();
       faux.unregister();

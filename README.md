@@ -11,10 +11,10 @@ message/file checkpoints into one local interface.
 
 ## Status
 
-Piarium is under active development. Phase 1 is complete: the repository contains the architecture,
-bounded protocol, runtime discovery, and an isolated Pi `0.83.0` SDK host with sessions, providers,
-settings, packages, commands, project trust, and generic extension UI. See
-[the roadmap](docs/roadmap.md) for delivery phases.
+Piarium is under active development. Phase 2 is complete: the repository contains the architecture,
+bounded protocol, isolated Pi `0.83.0` SDK workers, and a secure Electron/React desktop MVP for
+projects, sessions, chat streaming, tools, models, providers, settings, packages, and generic
+extension UI. See [the roadmap](docs/roadmap.md) for delivery phases.
 
 ## Product principles
 
@@ -40,6 +40,7 @@ packages/
   ui/             Shared product UI and domain components
 docs/
   architecture.md
+  phase-2-desktop.md
   roadmap.md
   security.md
 ```

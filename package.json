@@ -7,6 +7,7 @@
   "packageManager": "npm@11.16.0",
   "allowScripts": {
     "@google/genai": false,
+    "electron@43.2.0": true,
     "esbuild@0.28.1": true,
     "protobufjs": false
   },
@@ -21,15 +22,16 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace @piarium/protocol && npm run build --workspace @piarium/pi-host",
+    "build": "npm run build --workspace @piarium/protocol && npm run build --workspace @piarium/pi-host && npm run build --workspace @piarium/desktop",
     "check": "npm run security:check && npm run format:check && npm run typecheck && npm run test",
     "format": "biome check --write .",
     "format:check": "biome check .",
     "postinstall": "node scripts/repair-pi-shrinkwrap.mjs",
     "security:check": "node scripts/repair-pi-shrinkwrap.mjs --check",
     "smoke:extension": "npm run build && node scripts/smoke-extension.mjs",
+    "smoke:desktop": "npm run smoke --workspace @piarium/desktop",
     "test": "npm run test --workspaces --if-present",
-    "test:dist": "npm run test:dist --workspace @piarium/pi-host",
+    "test:dist": "npm run test:dist --workspace @piarium/pi-host && npm run test:dist --workspace @piarium/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "dependencies": {

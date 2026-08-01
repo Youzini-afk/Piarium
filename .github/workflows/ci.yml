@@ -25,3 +25,5 @@ jobs:
       - run: npm run check
       - run: npm run build
       - run: npm run test:dist
+      - if: runner.os == 'Windows'
+        run: npm run smoke:desktop
