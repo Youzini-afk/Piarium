@@ -22,6 +22,17 @@ module.exports = (context) => {
   fs.mkdirSync(path.dirname(packagedBetterSqliteBinary), { recursive: true });
   fs.copyFileSync(betterSqliteBinary, packagedBetterSqliteBinary);
 
+  const requiredPiRuntimeFiles = [
+    path.join('node_modules', '@piarium', 'pi-host', 'dist', 'main.js'),
+    path.join('node_modules', '@piarium', 'runtime-broker', 'dist', 'index.js'),
+  ];
+  for (const relativePath of requiredPiRuntimeFiles) {
+    const packagedPath = path.join(resourcesPath, 'app.asar.unpacked', relativePath);
+    if (!fs.existsSync(packagedPath)) {
+      throw new Error(`Missing packaged Pi runtime file at ${packagedPath}`);
+    }
+  }
+
   if (context.electronPlatformName !== 'darwin') return;
 
   const sourceAssetsPath = path.join(__dirname, '..', 'resources', 'icons', 'Assets.car');

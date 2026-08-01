@@ -100,6 +100,8 @@
       "version": "1.17.1",
       "dependencies": {
         "@openchamber/web": "workspace:*",
+        "@piarium/pi-host": "workspace:*",
+        "@piarium/runtime-broker": "workspace:*",
         "better-sqlite3": "^12.10.0",
         "electron-context-menu": "^4.1.2",
         "electron-log": "^5.4.3",
@@ -155,6 +157,14 @@
       "name": "@piarium/recovery",
       "version": "0.1.0",
       "dependencies": {
+        "@piarium/protocol": "0.1.0",
+      },
+    },
+    "packages/runtime-broker": {
+      "name": "@piarium/runtime-broker",
+      "version": "0.1.0",
+      "dependencies": {
+        "@piarium/pi-host": "0.1.0",
         "@piarium/protocol": "0.1.0",
       },
     },
@@ -1193,6 +1203,8 @@
     "@piarium/protocol": ["@piarium/protocol@workspace:packages/protocol"],
 
     "@piarium/recovery": ["@piarium/recovery@workspace:packages/recovery"],
+
+    "@piarium/runtime-broker": ["@piarium/runtime-broker@workspace:packages/runtime-broker"],
 
     "@pierre/diffs": ["@pierre/diffs@1.3.0-beta.6", "", { "dependencies": { "@pierre/theme": "1.1.0", "@pierre/theming": "0.0.2", "@shikijs/transformers": "^3.0.0 || ^4.0.0", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" } }, "sha512-SGxpOvuPeAq2sIMYqCokt8pVJ9UAZ6P5/qR4RYlcEVGRXOfGszbNMbrHs+IfRKnk6AufPNqVkIQWTwLC77x85A=="],
 

@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi host and recovery core implemented; OpenChamber product-base migration in progress
+Status: Pi host, recovery core, runtime broker, and Electron worker lifecycle implemented; product engine migration in progress
 
 Last updated: 2026-08-02
 
@@ -66,6 +66,14 @@ The retained shell owns windows, web/mobile/remote bootstrap, packaging, and nat
 Piarium broker owns Pi workers and maps one live worker to each opened top-level session, with a
 separate catalog worker for discovery. Recovery adds session/workspace leases. A worker crash
 cannot crash the renderer, and a renderer reload does not terminate an active task.
+
+`@piarium/runtime-broker` is now the single process client for this boundary. It validates protocol
+frames and event sequence numbers, correlates bounded requests, denies project trust by default,
+owns catalog/per-session workers, and performs graceful then process-tree shutdown. Electron starts
+and handshakes the catalog worker whenever the local runtime is available, verifies that packaged
+worker files are unpacked, and awaits broker disposal during ordinary quit, update, relaunch, hard
+signals, and startup failure. The OpenChamber UI does not consume the broker yet; that direct
+session/provider migration is the next slice.
 
 ### 4.3 Session workers
 

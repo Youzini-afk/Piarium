@@ -20,7 +20,8 @@
     "./discovery": {
       "types": "./dist/runtime-discovery.d.ts",
       "import": "./dist/runtime-discovery.js"
-    }
+    },
+    "./host": "./dist/main.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

@@ -14,6 +14,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTray, createTrayController } from './tray.mjs';
 import { NotificationListener } from './notification-listener.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
+import { createDesktopPiRuntimeBroker } from './pi-runtime.mjs';
 import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
@@ -241,6 +242,9 @@ const { autoUpdater } = updaterPkg;
 
 const state = {
   serverHandle: null,
+  piRuntimeBroker: null,
+  piRuntimeHandshake: null,
+  piRuntimeStartPromise: null,
   sidecarUrl: null,
   localOrigin: null,
   apiBaseUrl: null,
@@ -274,6 +278,109 @@ const state = {
   trayFocusListener: null,
   lastFocusedWindowId: null,
   keepAwakeBlockerId: null,
+};
+
+const emitPiRuntimeEvent = (event) => {
+  if (event.kind === 'diagnostic') {
+    if (event.level === 'error') {
+      log.warn('[pi-runtime]', event.message, { role: event.role, workerId: event.workerId });
+    } else {
+      log.info('[pi-runtime]', event.message, { role: event.role, workerId: event.workerId });
+    }
+    return;
+  }
+  if (event.kind === 'worker.exit') {
+    const details = {
+      workerId: event.workerId,
+      role: event.role,
+      sessionId: event.sessionId || null,
+      code: event.code,
+      signal: event.signal,
+      expected: event.expected,
+    };
+    if (event.expected) log.info('[pi-runtime] worker exited', details);
+    else log.error('[pi-runtime] worker exited unexpectedly', details);
+    if (!event.expected && event.role === 'catalog') {
+      state.piRuntimeHandshake = null;
+      const timer = setTimeout(() => {
+        if (!state.piRuntimeBroker || state.quitRequested || state.backgroundShutdownComplete) return;
+        void ensurePiRuntime().catch((error) => {
+          log.error('[pi-runtime] catalog restart failed:', error);
+        });
+      }, 250);
+      timer.unref?.();
+    }
+    return;
+  }
+  if (event.envelope.event === 'host.error') {
+    log.warn('[pi-runtime] host error', {
+      workerId: event.workerId,
+      role: event.role,
+      sessionId: event.sessionId || null,
+      code: event.envelope.data.code,
+      message: event.envelope.data.message,
+    });
+  }
+};
+
+const ensurePiRuntime = async () => {
+  if (state.piRuntimeStartPromise) return state.piRuntimeStartPromise;
+  if (state.piRuntimeBroker && state.piRuntimeHandshake) return state.piRuntimeHandshake;
+
+  const agentDir = typeof process.env.PIARIUM_AGENT_DIR === 'string'
+    ? process.env.PIARIUM_AGENT_DIR.trim()
+    : '';
+  const createdBroker = !state.piRuntimeBroker;
+  const broker = state.piRuntimeBroker || createDesktopPiRuntimeBroker({
+    ...(agentDir ? { agentDir } : {}),
+    clientVersion: APP_VERSION,
+    emit: emitPiRuntimeEvent,
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  });
+  if (createdBroker) state.piRuntimeBroker = broker;
+  state.piRuntimeStartPromise = (async () => {
+    try {
+      const handshake = await broker.warmup();
+      state.piRuntimeHandshake = handshake;
+      log.info('[pi-runtime] ready', {
+        hostVersion: handshake.hostVersion,
+        protocolVersion: handshake.protocolVersion,
+        piVersion: handshake.runtime.piVersion,
+        nodeVersion: handshake.runtime.nodeVersion,
+        source: handshake.runtime.source,
+      });
+      return handshake;
+    } catch (error) {
+      if (createdBroker && state.piRuntimeBroker === broker) state.piRuntimeBroker = null;
+      state.piRuntimeHandshake = null;
+      if (createdBroker) await broker.dispose();
+      throw error;
+    } finally {
+      state.piRuntimeStartPromise = null;
+    }
+  })();
+  return state.piRuntimeStartPromise;
+};
+
+const shutdownPiRuntime = async () => {
+  const starting = state.piRuntimeStartPromise;
+  if (starting) {
+    try {
+      await starting;
+    } catch {
+      // Startup already disposed its failed broker.
+    }
+  }
+  const broker = state.piRuntimeBroker;
+  state.piRuntimeBroker = null;
+  state.piRuntimeHandshake = null;
+  if (!broker) return;
+  try {
+    await broker.dispose();
+  } catch (error) {
+    log.warn('[pi-runtime] failed to stop Pi workers:', error);
+  }
 };
 
 const setDesktopKeepAwakeActive = (enabled) => {
@@ -360,6 +467,7 @@ const shutdownBackgroundServices = async ({ allowDuringUpdate = false } = {}) =>
       if (!allowDuringUpdate && state.installingUpdate) {
         return;
       }
+      await shutdownPiRuntime();
       await killSidecar();
       if (state.notificationListener) {
         state.notificationListener.stop();
@@ -2965,6 +3073,8 @@ const resolveInitialUrl = async () => {
       ? hmrApiUrl
       : await spawnLocalServer();
 
+  if (localUrl) await ensurePiRuntime();
+
   const localUiUrl = usePackagedUi
     ? buildPackagedUiUrl('/index.html')
     : startupProbePlan.probeHmrUi && await waitForHealth(hmrUiUrl, 8_000, 100)
@@ -5417,7 +5527,11 @@ app.whenReady().then(async () => {
   powerMonitor.on('resume', () => {
     emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
   });
-}).catch((error) => {
+}).catch(async (error) => {
   log.error('[electron] startup failed:', error);
-  app.exit(1);
+  try {
+    await shutdownBackgroundServices();
+  } finally {
+    app.exit(1);
+  }
 });

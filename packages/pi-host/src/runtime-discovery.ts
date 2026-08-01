@@ -1,15 +1,25 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { VERSION } from "@earendil-works/pi-coding-agent";
 import type { RuntimeSourceKind } from "@piarium/protocol";
 
 const execFileAsync = promisify(execFile);
 const MINIMUM_PI_VERSION = "0.82.1";
 const MINIMUM_NODE_VERSION = "22.19.0";
+const PACKAGE_MANIFEST = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as { dependencies?: Record<string, string> };
+const readBundledPiVersion = (): string => {
+  const version = PACKAGE_MANIFEST.dependencies?.["@earendil-works/pi-coding-agent"];
+  if (!version) {
+    throw new Error("Pi host package manifest does not pin @earendil-works/pi-coding-agent");
+  }
+  return version;
+};
+const BUNDLED_PI_VERSION = readBundledPiVersion();
 
 export interface RuntimeCandidate {
   available: boolean;
@@ -334,13 +344,13 @@ export async function discoverPiRuntimes(
   ];
   const bundled: RuntimeCandidate = {
     available: true,
-    compatible: isCompatible(VERSION) && isNodeCompatible(process.versions.node),
+    compatible: isCompatible(BUNDLED_PI_VERSION) && isNodeCompatible(process.versions.node),
     id: "bundled",
     nodePath: process.execPath,
     nodeVersion: process.versions.node,
     packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
     source: "bundled",
-    version: VERSION,
+    version: BUNDLED_PI_VERSION,
   };
   return [
     bundled,

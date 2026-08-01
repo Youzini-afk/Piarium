@@ -178,6 +178,9 @@ async function stopChildTree(child) {
 }
 
 async function main() {
+  console.log('[electron:dev] building Pi runtime worker and broker...');
+  await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
+
   const useBundledUi = process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1';
   let devServer = null;
   let hmrApiPort = '';
