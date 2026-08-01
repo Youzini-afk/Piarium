@@ -4,7 +4,6 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
     "paths": {
       "@piarium/protocol": ["packages/protocol/src/index.ts"],
       "@piarium/recovery": ["packages/recovery/src/index.ts"]

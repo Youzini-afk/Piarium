@@ -24,7 +24,7 @@ or oversized frames.
 Acceptance: a headless integration test creates or opens a disposable session, completes a prompt
 with a fake provider, exercises extension UI, and shuts down without a child process leak.
 
-## Phase 2 — Desktop MVP (complete)
+## Phase 2 — Desktop integration prototype (complete, superseded)
 
 - Secure Electron main/preload boundary.
 - React shell, onboarding, projects, session list, chat timeline, composer, and tool cards.
@@ -32,8 +32,9 @@ with a fake provider, exercises extension UI, and shuts down without a child pro
 - Package/extension manager and diagnostics.
 - Worker crash/restart and reconnect behavior.
 
-Acceptance: local Windows development build can configure a model, create/switch/fork a session,
-stream a response, answer an extension UI request, abort, and reopen after restart.
+Acceptance: the prototype proved the broker/preload/session path before its temporary shell was
+removed in favor of the imported OpenChamber product base. Its protocol and host work continue in
+the maintained packages rather than a parallel desktop application.
 
 ## Phase 3 — Recovery core (complete)
 
@@ -45,7 +46,7 @@ stream a response, answer an extension UI request, abort, and reopen after resta
 Acceptance: destructive and crash-injection tests prove rollback; two workers cannot write the same
 session/workspace; ignored secrets are not captured; Windows Unicode paths pass.
 
-## Phase 4 — OpenChamber fork product base
+## Phase 4 — OpenChamber fork product base (complete)
 
 - Import the clean `Youzini-afk/openchamber` fork snapshot into Piarium with provenance and MIT
   attribution; keep every source fork worktree read-only.
@@ -53,6 +54,8 @@ session/workspace; ignored secrets are not captured; Windows Unicode paths pass.
   sessions, session UX, Electron/web/mobile/VS Code surfaces, and reviewed fork customizations.
 - Adopt the mature build and product shell without copying tracked secrets, obsolete release
   identities, or OpenCode branding into Piarium artifacts.
+- Keep the connected Capacitor iOS/Android implementation and remove the unused parallel Expo/React
+  Native tree and dependencies.
 
 Acceptance: the imported product shell builds in Piarium and fork-specific regression coverage is
 retained before engine surgery begins.
@@ -91,5 +94,5 @@ an integration smoke test without exposing credentials.
 - NSIS installer, upgrade/uninstall behavior, logs, crash recovery, and update metadata.
 - Packaged-app smoke tests and artifact checks.
 
-Acceptance: install on a clean Windows user profile, run the Phase 4–6 smoke journey, restart with
+Acceptance: install on a clean Windows user profile, run the Phase 5–6 smoke journey, restart with
 active history intact, upgrade in place, and uninstall without deleting user projects or sessions.

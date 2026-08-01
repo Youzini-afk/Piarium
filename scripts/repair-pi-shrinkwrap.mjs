@@ -49,7 +49,7 @@ try {
 if (nestedVersion !== undefined && !isAtLeast(nestedVersion, minimumVersion)) {
   if (checkOnly) {
     throw new Error(
-      `Pi's npm shrinkwrap restored vulnerable brace-expansion ${nestedVersion}; run npm install to repair it`,
+      `Pi's shrinkwrap restored vulnerable brace-expansion ${nestedVersion}; run bun install to repair it`,
     );
   }
   await rm(nestedPackageRoot, { force: true, recursive: true });

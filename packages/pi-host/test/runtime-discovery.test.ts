@@ -102,18 +102,21 @@ describe("discoverPiRuntimes", () => {
   }, async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-runtime-"));
     const bin = join(root, "bin with spaces");
-    const previousPath = process.env.PATH;
     try {
       await mkdir(bin, { recursive: true });
       await writeFile(join(bin, "pi.cmd"), "@echo off\r\necho 0.82.1\r\n");
-      process.env.PATH = `${bin};${previousPath ?? ""}`;
-      const candidates = await discoverPiRuntimes({ env: {}, platform: "win32" });
+      const env = { ...process.env };
+      const pathEntry = Object.entries(env).find(([key]) => key.toLowerCase() === "path");
+      for (const key of Object.keys(env)) {
+        if (key.toLowerCase() === "path") delete env[key];
+      }
+      const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+      env[pathEntry?.[0] ?? "Path"] = `${bin};${join(systemRoot, "System32")};${systemRoot}`;
+      const candidates = await discoverPiRuntimes({ env, platform: "win32" });
       assert.equal(candidates[1]?.available, true);
-      assert.equal(candidates[1]?.version, "0.82.1");
       assert.equal(candidates[1]?.command, join(bin, "pi.cmd"));
+      assert.equal(candidates[1]?.version, "0.82.1");
     } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
       await rm(root, { force: true, recursive: true });
     }
   });

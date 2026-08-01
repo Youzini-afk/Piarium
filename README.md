@@ -13,9 +13,11 @@ message/file checkpoints into one local interface.
 
 Piarium is under active development. Its bounded protocol, isolated Pi `0.83.0` SDK host, secure
 desktop broker, and transactional conversation/workspace recovery core are implemented and tested.
+The complete OpenChamber-derived product shell is now imported and builds from this repository;
+direct replacement of its OpenCode engine paths with the Pi host is the active phase.
 
 The product base is the maintainer's OpenChamber fork at commit `f551150e5`. That fork is imported
-into this repository and directly refactored from OpenCode to Pi; the source fork remains read-only.
+into this repository and is being directly refactored from OpenCode to Pi; the source fork remains read-only.
 Custom providers, remote/cloud access, workspace tools, settings, session UX, and multi-surface
 support remain product requirements. See [the migration contract](docs/openchamber-pi-migration.md)
 and [the roadmap](docs/roadmap.md).
@@ -35,17 +37,15 @@ and [the roadmap](docs/roadmap.md).
 ## Repository layout
 
 ```text
-apps/
-  desktop/        Electron main, preload, and React renderer
 packages/
-  protocol/       Versioned desktop-to-host wire protocol
+  ui/             Shared OpenChamber-derived product UI, being refactored to Pi domain types
+  web/            Web/remote surface and trusted runtime service
+  electron/       Windows/macOS/Linux desktop shell and packaging
+  mobile/         Capacitor mobile shell
+  vscode/         VS Code extension and runtime bridge
+  protocol/       Versioned desktop-to-Pi-host wire protocol
   pi-host/        Isolated Node worker that embeds the Pi SDK
   recovery/       Message and workspace checkpoint engine
-docs/
-  architecture.md
-  phase-2-desktop.md
-  roadmap.md
-  security.md
 ```
 
 The Pi runtime and maintained extensions remain independent projects. Development checkouts live
@@ -57,15 +57,15 @@ working trees.
 Requirements:
 
 - Node.js 22.19 or newer (Node 24 is the supported development baseline)
-- npm 11
+- Bun 1.3.14
 - Git for Windows
 - Git Bash for Pi shell tools on Windows
 
 ```powershell
-npm install
-npm run check
-npm run build
-npm run test:dist
+bun install --frozen-lockfile
+bun run check:pi
+bun run build
+bun run test:pi:dist
 ```
 
 Architecture decisions are recorded in [docs/architecture.md](docs/architecture.md).

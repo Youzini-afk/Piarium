@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type * as PiAiCompat from "@earendil-works/pi-ai/compat";
+import { fauxAssistantMessage, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { HostEvent, HostEventData } from "@piarium/protocol";
 import { SessionHost } from "../src/session-host.js";
@@ -13,14 +13,6 @@ describe("SessionHost prompt streaming", () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-prompt-"));
     const agentDir = join(root, "agent");
     const events: Array<{ data: unknown; event: string }> = [];
-    const codingAgentEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
-    const compatEntry = new URL(
-      "../node_modules/@earendil-works/pi-ai/dist/compat.js",
-      codingAgentEntry,
-    ).href;
-    const { fauxAssistantMessage, registerFauxProvider } = (await import(
-      compatEntry
-    )) as typeof PiAiCompat;
     const faux = registerFauxProvider();
     faux.setResponses([fauxAssistantMessage("hello from Piarium")]);
     const model = faux.getModel();

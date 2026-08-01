@@ -1,0 +1,776 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { randomUUID } from 'crypto';
+import {
+  fetchProviderModels,
+  getProviderConfig,
+  getProviderSources,
+  removeProviderConfig,
+  upsertProviderConfig,
+} from './opencodeConfig';
+import { getProviderAuth, removeProviderAuth, saveProviderAuth } from './opencodeAuth';
+import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
+import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
+import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
+import { getSessionActivitySnapshot } from './sessionActivityWatcher';
+import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
+import type { BridgeContext, BridgeResponse } from './bridge';
+
+type BridgeMessageInput = {
+  id: string;
+  type: string;
+  payload?: unknown;
+};
+
+type SystemRuntimeDeps = {
+  resolveUserPath: (value: string, baseDirectory: string) => string;
+  fetchModelsMetadata: () => Promise<unknown>;
+  updateCheckUrl: string;
+  clientReloadDelayMs: number;
+};
+
+const NOTIFICATION_CLAIM_TTL_MS = 10_000;
+const notificationClaims = new Map<string, number>();
+
+const claimNotification = (key: string): boolean => {
+  const now = Date.now();
+  for (const [claimKey, claimedAt] of notificationClaims) {
+    if (now - claimedAt > NOTIFICATION_CLAIM_TTL_MS) {
+      notificationClaims.delete(claimKey);
+    }
+  }
+
+  const existing = notificationClaims.get(key);
+  if (existing && now - existing <= NOTIFICATION_CLAIM_TTL_MS) {
+    return false;
+  }
+
+  notificationClaims.set(key, now);
+  return true;
+};
+
+const normalizeBridgeString = (value: unknown): string => (
+  typeof value === 'string' ? value.trim() : ''
+);
+
+const readProviderAuthKey = (value: unknown): string => {
+  if (!value || typeof value !== 'object') {
+    return '';
+  }
+
+  const body = value as { key?: unknown; apiKey?: unknown; token?: unknown };
+  return normalizeBridgeString(body.key) ||
+    normalizeBridgeString(body.apiKey) ||
+    normalizeBridgeString(body.token);
+};
+
+type ProviderSourceLayer = {
+  exists: boolean;
+  path?: string | null;
+};
+
+type ProviderSources = {
+  auth: { exists: boolean };
+  user: ProviderSourceLayer;
+  project: ProviderSourceLayer;
+  custom: ProviderSourceLayer;
+};
+
+const isProviderSources = (value: unknown): value is ProviderSources => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<Record<keyof ProviderSources, unknown>>;
+  return Boolean(candidate.auth && candidate.user && candidate.project && candidate.custom);
+};
+
+const unwrapProviderSources = (value: unknown): ProviderSources => {
+  if (isProviderSources(value)) return value;
+  if (value && typeof value === 'object') {
+    const nested = (value as { sources?: unknown }).sources;
+    if (isProviderSources(nested)) return nested;
+  }
+  throw new Error('Invalid provider source response');
+};
+
+const ZEN_MODELS_URL = 'https://opencode.ai/zen/v1/models';
+const ZEN_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedZenModels: { models: Array<{ id: string; owned_by?: string }>; at: number } | null = null;
+
+const getOpenChamberConfigDir = (): string => {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA;
+    if (appData) return path.join(appData, 'openchamber');
+  }
+  return path.join(os.homedir(), '.config', 'openchamber');
+};
+
+const sanitizeInstallScope = (scope: string): 'vscode' | 'web' => {
+  if (scope === 'vscode' || scope === 'web') return scope;
+  return 'web';
+};
+
+const getOrCreateInstallId = (scope: string): string => {
+  const configDir = getOpenChamberConfigDir();
+  const normalizedScope = sanitizeInstallScope(scope);
+  const idPath = path.join(configDir, `install-id-${normalizedScope}`);
+
+  try {
+    const existing = fs.readFileSync(idPath, 'utf8').trim();
+    if (existing) return existing;
+  } catch {
+    // Generate new id.
+  }
+
+  const installId = randomUUID();
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(idPath, `${installId}\n`, { encoding: 'utf8', mode: 0o600 });
+  return installId;
+};
+
+const mapNodePlatformToApiPlatform = (value: string): 'macos' | 'windows' | 'linux' | 'android' | 'ios' | 'web' => {
+  // The webview already sends API-shaped values; Node's os.platform() is the fallback source.
+  if (value === 'macos' || value === 'windows' || value === 'linux' || value === 'android' || value === 'ios' || value === 'web') {
+    return value;
+  }
+  if (value === 'darwin') return 'macos';
+  if (value === 'win32') return 'windows';
+  return 'web';
+};
+
+const mapNodeArchToApiArch = (value: string): 'arm64' | 'x64' | 'unknown' => {
+  if (value === 'arm64' || value === 'aarch64') return 'arm64';
+  if (value === 'x64' || value === 'amd64') return 'x64';
+  return 'unknown';
+};
+
+type ParsedDiffHunk = {
+  newStart: number;
+  oldLines: string[];
+  newLines: string[];
+};
+
+const VIRTUAL_DIFF_SCHEME = 'openchamber-diff';
+const virtualDiffContents = new Map<string, string>();
+let virtualDiffCounter = 0;
+let virtualDiffProviderDisposable: vscode.Disposable | null = null;
+
+const ensureVirtualDiffProviderRegistered = (ctx?: BridgeContext): void => {
+  if (virtualDiffProviderDisposable) {
+    return;
+  }
+
+  virtualDiffProviderDisposable = vscode.workspace.registerTextDocumentContentProvider(
+    VIRTUAL_DIFF_SCHEME,
+    {
+      provideTextDocumentContent: (uri: vscode.Uri) => {
+        const key = new URLSearchParams(uri.query).get('key') || '';
+        return virtualDiffContents.get(key) ?? '';
+      },
+    },
+  );
+
+  if (ctx?.context) {
+    ctx.context.subscriptions.push(virtualDiffProviderDisposable);
+  }
+};
+
+const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vscode.Uri => {
+  const key = `${Date.now()}-${++virtualDiffCounter}`;
+  virtualDiffContents.set(key, content);
+
+  if (virtualDiffContents.size > 100) {
+    const firstKey = virtualDiffContents.keys().next().value;
+    if (firstKey) {
+      virtualDiffContents.delete(firstKey);
+    }
+  }
+
+  return vscode.Uri.from({
+    scheme: VIRTUAL_DIFF_SCHEME,
+    path: `/${path.basename(modifiedPath) || 'original'}`,
+    query: `key=${encodeURIComponent(key)}`,
+  });
+};
+
+const parseUnifiedDiffHunks = (patch: string): ParsedDiffHunk[] => {
+  const lines = patch.split(/\r?\n/);
+  const hunks: ParsedDiffHunk[] = [];
+
+  let current: ParsedDiffHunk | null = null;
+
+  for (const line of lines) {
+    const headerMatch = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (headerMatch) {
+      if (current) {
+        hunks.push(current);
+      }
+      current = {
+        newStart: Number(headerMatch[1] || 1),
+        oldLines: [],
+        newLines: [],
+      };
+      continue;
+    }
+
+    if (!current) continue;
+
+    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('\\ No newline')) {
+      continue;
+    }
+
+    if (line.startsWith('-')) {
+      current.oldLines.push(line.slice(1));
+      continue;
+    }
+
+    if (line.startsWith('+')) {
+      current.newLines.push(line.slice(1));
+      continue;
+    }
+
+    if (line.startsWith(' ')) {
+      const content = line.slice(1);
+      current.oldLines.push(content);
+      current.newLines.push(content);
+    }
+  }
+
+  if (current) {
+    hunks.push(current);
+  }
+
+  return hunks;
+};
+
+const reconstructOriginalContentFromPatch = (modifiedContent: string, patch: string): string | null => {
+  const hunks = parseUnifiedDiffHunks(patch);
+  if (hunks.length === 0) {
+    return null;
+  }
+
+  const lines = modifiedContent.split('\n');
+  for (let index = hunks.length - 1; index >= 0; index -= 1) {
+    const hunk = hunks[index];
+    if (!hunk) {
+      continue;
+    }
+    const startIndex = Math.max(0, hunk.newStart - 1);
+    const replaceCount = hunk.newLines.length;
+    lines.splice(startIndex, replaceCount, ...hunk.oldLines);
+  }
+
+  return lines.join('\n');
+};
+
+const fetchFreeZenModels = async (): Promise<Array<{ id: string; owned_by?: string }>> => {
+  const now = Date.now();
+  if (cachedZenModels && now - cachedZenModels.at < ZEN_MODELS_CACHE_TTL_MS) {
+    return cachedZenModels.models;
+  }
+
+  const response = await fetch(ZEN_MODELS_URL, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Zen models (${response.status})`);
+  }
+
+  const data = await response.json().catch(() => null) as unknown;
+  const rawModels = Array.isArray(data)
+    ? data
+    : Array.isArray((data as { models?: unknown } | null)?.models)
+      ? (data as { models: unknown[] }).models
+      : [];
+  const models = rawModels
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const candidate = entry as { id?: unknown; owned_by?: unknown; ownedBy?: unknown };
+      const id = normalizeBridgeString(candidate.id);
+      if (!id) return null;
+      const ownedBy = normalizeBridgeString(candidate.owned_by) || normalizeBridgeString(candidate.ownedBy);
+      return {
+        id,
+        ...(ownedBy ? { owned_by: ownedBy } : {}),
+      };
+    })
+    .filter((entry): entry is { id: string; owned_by?: string } => entry !== null);
+
+  cachedZenModels = { models, at: now };
+  return models;
+};
+
+export async function handleSystemBridgeMessage(
+  message: BridgeMessageInput,
+  ctx: BridgeContext | undefined,
+  deps: SystemRuntimeDeps,
+): Promise<BridgeResponse | null> {
+  const { id, type, payload } = message;
+
+  switch (type) {
+    case 'api:opencode/directory': {
+      const target = (payload as { path?: string })?.path;
+      if (!target) {
+        return { id, type, success: false, error: 'Path is required' };
+      }
+      const baseDirectory =
+        ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+      const resolvedPath = deps.resolveUserPath(target, baseDirectory);
+      const result = await ctx?.manager?.setWorkingDirectory(resolvedPath);
+      if (!result) {
+        return { id, type, success: false, error: 'OpenCode manager unavailable' };
+      }
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:models/metadata': {
+      try {
+        const data = await deps.fetchModelsMetadata();
+        return { id, type, success: true, data };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:opencode/version': {
+      try {
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
+        }
+        const base = `${apiUrl.replace(/\/+$/, '')}/`;
+        const response = await fetch(new URL('global/health', base).toString(), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
+        });
+        const health = await response.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
+        if (!response.ok) {
+          const message = typeof health?.error === 'string' ? health.error : response.statusText || 'Failed to read OpenCode version';
+          return { id, type, success: true, data: { version: null, error: message } };
+        }
+        const version = typeof health?.version === 'string' && health.version.trim().length > 0
+          ? health.version.trim().replace(/^v/, '')
+          : null;
+        return { id, type, success: true, data: { version } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: true, data: { version: null, error: errorMessage } };
+      }
+    }
+
+    case 'api:opencode/upgrade-status': {
+      return { id, type, success: true, data: await getOpenCodeUpgradeStatus(ctx?.manager) };
+    }
+
+    case 'api:opencode/upgrade': {
+      const target = (payload as { target?: unknown } | undefined)?.target;
+      return { id, type, success: true, data: await upgradeManagedOpenCode(ctx?.manager, target) };
+    }
+
+    case 'api:session-activity:get': {
+      return { id, type, success: true, data: getSessionActivitySnapshot() };
+    }
+
+    case 'api:notifications:claim': {
+      const key = typeof (payload as { key?: unknown } | undefined)?.key === 'string'
+        ? (payload as { key: string }).key.trim()
+        : '';
+      return { id, type, success: true, data: { claimed: key ? claimNotification(key) : false } };
+    }
+
+    case 'api:zen:models': {
+      const models = await fetchFreeZenModels();
+      return { id, type, success: true, data: { models } };
+    }
+
+    case 'api:openchamber:update-check': {
+      try {
+        const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+        const currentVersion = typeof body.currentVersion === 'string' && body.currentVersion.trim().length > 0
+          ? body.currentVersion.trim()
+          : String(ctx?.context?.extension?.packageJSON?.version || 'unknown');
+        const instanceMode = typeof body.instanceMode === 'string' && body.instanceMode.trim().length > 0
+          ? body.instanceMode.trim()
+          : 'local';
+        const deviceClass = typeof body.deviceClass === 'string' && body.deviceClass.trim().length > 0
+          ? body.deviceClass.trim()
+          : 'desktop';
+        const platformRaw = typeof body.platform === 'string' && body.platform.trim().length > 0
+          ? body.platform.trim()
+          : os.platform();
+        const archRaw = typeof body.arch === 'string' && body.arch.trim().length > 0
+          ? body.arch.trim()
+          : os.arch();
+        const reportUsage = body.reportUsage !== false;
+
+        const requestBody = {
+          appType: 'vscode',
+          deviceClass,
+          platform: mapNodePlatformToApiPlatform(platformRaw),
+          arch: mapNodeArchToApiArch(archRaw),
+          channel: 'stable',
+          currentVersion,
+          ...(reportUsage ? { installId: getOrCreateInstallId('vscode') } : {}),
+          instanceMode,
+          reportUsage,
+        };
+
+        const response = await fetch(deps.updateCheckUrl, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(10_000),
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => 'update check failed');
+          return { id, type, success: false, error: text || `Update check failed with ${response.status}` };
+        }
+
+        const data = await response.json();
+        return { id, type, success: true, data };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'editor:openFile': {
+      const { path: filePath, line, column } = payload as { path: string; line?: number; column?: number };
+      try {
+        const doc = await vscode.workspace.openTextDocument(filePath);
+        const options: vscode.TextDocumentShowOptions = {};
+        if (typeof line === 'number') {
+          const pos = new vscode.Position(Math.max(0, line - 1), column || 0);
+          options.selection = new vscode.Range(pos, pos);
+        }
+        await vscode.window.showTextDocument(doc, options);
+        return { id, type, success: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'editor:openDiff': {
+      const { original, modified, label, line, patch } = payload as {
+        original: string;
+        modified: string;
+        label?: string;
+        line?: number;
+        patch?: string;
+      };
+      try {
+        const modifiedUri = vscode.Uri.file(modified);
+        const modifiedDoc = await vscode.workspace.openTextDocument(modifiedUri);
+        let originalUri = original ? vscode.Uri.file(original) : modifiedUri;
+
+        if (typeof patch === 'string' && patch.trim().length > 0) {
+          const originalContent = reconstructOriginalContentFromPatch(modifiedDoc.getText(), patch);
+          if (typeof originalContent === 'string') {
+            ensureVirtualDiffProviderRegistered(ctx);
+            originalUri = createVirtualOriginalDiffUri(modified, originalContent);
+          }
+        }
+
+        const leftLabel = original ? path.basename(original) : `${path.basename(modified)} (before)`;
+        const title = label || `${leftLabel} ↔ ${path.basename(modified)}`;
+
+        await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title);
+
+        if (typeof line === 'number' && Number.isFinite(line)) {
+          const targetLine = Math.max(0, Math.trunc(line) - 1);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const targetEditor = vscode.window.visibleTextEditors.find(
+            (editor) => editor.document.uri.toString() === modifiedUri.toString(),
+          );
+          if (targetEditor) {
+            const target = new vscode.Position(targetLine, 0);
+            targetEditor.selection = new vscode.Selection(target, target);
+            targetEditor.revealRange(new vscode.Range(target, target), vscode.TextEditorRevealType.InCenter);
+          }
+        }
+
+        return { id, type, success: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/auth:delete': {
+      const { providerId, scope, directory } = (payload || {}) as { providerId?: string; scope?: string; directory?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      const normalizedScope = typeof scope === 'string' ? scope : 'auth';
+      const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
+        ? directory.trim()
+        : ctx?.manager?.getWorkingDirectory();
+      try {
+        let removed = false;
+        if (normalizedScope === 'auth') {
+          removed = removeProviderAuth(providerId);
+        } else if (normalizedScope === 'user' || normalizedScope === 'project' || normalizedScope === 'custom') {
+          removed = removeProviderConfig(providerId, workingDirectory, normalizedScope);
+        } else if (normalizedScope === 'all') {
+          const authRemoved = removeProviderAuth(providerId);
+          const userRemoved = removeProviderConfig(providerId, workingDirectory, 'user');
+          const projectRemoved = workingDirectory
+            ? removeProviderConfig(providerId, workingDirectory, 'project')
+            : false;
+          const customRemoved = removeProviderConfig(providerId, workingDirectory, 'custom');
+          removed = authRemoved || userRemoved || projectRemoved || customRemoved;
+        } else {
+          return { id, type, success: false, error: 'Invalid scope' };
+        }
+
+        if (removed) {
+          await ctx?.manager?.restart();
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            removed,
+            requiresReload: removed,
+            message: removed
+              ? `Provider ${providerId} disconnected successfully. Reloading interface…`
+              : `Provider ${providerId} was not configured.`,
+            reloadDelayMs: removed ? deps.clientReloadDelayMs : undefined,
+          },
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/auth:save': {
+      const { providerId } = (payload || {}) as { providerId?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+
+      const key = readProviderAuthKey(payload);
+      if (!key) {
+        return { id, type, success: false, error: 'API key is required' };
+      }
+
+      const authType = normalizeBridgeString((payload as { authType?: unknown; type?: unknown } | undefined)?.authType) ||
+        normalizeBridgeString((payload as { type?: unknown } | undefined)?.type) ||
+        'api';
+
+      try {
+        saveProviderAuth(providerId, { type: authType, key });
+        await ctx?.manager?.restart();
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            providerId,
+            requiresReload: true,
+            reloadDelayMs: deps.clientReloadDelayMs,
+          },
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/config:get': {
+      const { providerId, directory } = (payload || {}) as { providerId?: string; directory?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+
+      try {
+        const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
+          ? directory.trim()
+          : ctx?.manager?.getWorkingDirectory();
+        const config = getProviderConfig(providerId, workingDirectory);
+        if (!config) {
+          return { id, type, success: false, error: 'Provider configuration not found' };
+        }
+        return { id, type, success: true, data: { providerId, config } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/custom:save': {
+      const body = payload && typeof payload === 'object' && 'body' in payload
+        ? (payload as { body?: unknown }).body
+        : payload;
+      const requestedScope = normalizeBridgeString((body as { scope?: unknown } | undefined)?.scope);
+      const scope = requestedScope === 'project' || requestedScope === 'custom' ? requestedScope : 'user';
+      const directory = normalizeBridgeString((payload as { directory?: unknown } | undefined)?.directory);
+      const workingDirectory = directory || ctx?.manager?.getWorkingDirectory();
+
+      try {
+        const result = upsertProviderConfig(body, workingDirectory, scope);
+        const apiKey = readProviderAuthKey(body);
+        if (apiKey) {
+          saveProviderAuth(result.providerId, { type: 'api', key: apiKey });
+        }
+
+        await ctx?.manager?.restart();
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            providerId: result.providerId,
+            scope: result.scope,
+            path: result.path,
+            requiresReload: true,
+            reloadDelayMs: deps.clientReloadDelayMs,
+          },
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/custom/models:fetch': {
+      try {
+        const result = await fetchProviderModels(payload);
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            type: result.type,
+            baseURL: result.baseURL,
+            models: result.models,
+          },
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider/source:get': {
+      const { providerId, directory } = (payload || {}) as { providerId?: string; directory?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      try {
+        const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
+          ? directory.trim()
+          : ctx?.manager?.getWorkingDirectory();
+        const sources = unwrapProviderSources(getProviderSources(providerId, workingDirectory));
+        const auth = getProviderAuth(providerId);
+        sources.auth.exists = Boolean(auth);
+        return { id, type, success: true, data: { providerId, sources } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota:providers': {
+      try {
+        const providers = listConfiguredQuotaProviders();
+        return { id, type, success: true, data: { providers } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota:credentials': {
+      const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
+      try {
+        if (!providerId || !['opencode-go', 'ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
+        if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
+        if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
+        if (method === 'IMPORT') {
+          if (providerId !== 'cursor') return { id, type, success: false, error: 'Import unavailable' };
+          const credential = importCursorCredential();
+          await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
+        }
+        if (method === 'PUT') {
+          const credential = normalizeCredential(providerId, input);
+          if (!credential) return { id, type, success: false, error: 'Invalid credential' };
+          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
+          else await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
+        }
+        if (method === 'VALIDATE') {
+          const credential = readCredential(providerId);
+          if (!credential) return { id, type, success: false, error: 'Not configured' };
+          if (providerId === 'opencode-go') await fetchOpenCodeGoUsage(credential as { workspaceId: string; authCookie: string });
+          else await validateCredential(providerId, credential);
+          return { id, type, success: true, data: { valid: true } };
+        }
+        return { id, type, success: false, error: 'Unsupported method' };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    case 'api:quota:get': {
+      const { providerId } = (payload || {}) as { providerId?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      try {
+        const result = await fetchQuotaForProvider(providerId);
+        return { id, type, success: true, data: result };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'vscode:command': {
+      const { command, args } = (payload || {}) as { command?: string; args?: unknown[] };
+      if (!command) {
+        return { id, type, success: false, error: 'Command is required' };
+      }
+      try {
+        const result = await vscode.commands.executeCommand(command, ...(args || []));
+        return { id, type, success: true, data: { result } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'vscode:openExternalUrl': {
+      const { url } = (payload || {}) as { url?: string };
+      const target = typeof url === 'string' ? url.trim() : '';
+      if (!target) {
+        return { id, type, success: false, error: 'URL is required' };
+      }
+      try {
+        await vscode.env.openExternal(vscode.Uri.parse(target));
+        return { id, type, success: true, data: { opened: true } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    default:
+      return null;
+  }
+}

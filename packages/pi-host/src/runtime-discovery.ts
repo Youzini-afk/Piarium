@@ -86,10 +86,15 @@ function isNodeCompatible(version: string | undefined): boolean {
   return version !== undefined && compareVersions(version, MINIMUM_NODE_VERSION) >= 0;
 }
 
-async function defaultCommandRunner(command: string, args: string[]): Promise<CommandResult> {
+async function defaultCommandRunner(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<CommandResult> {
   try {
     const result = await execFileAsync(command, args, {
       encoding: "utf8",
+      env,
       timeout: 10_000,
       windowsVerbatimArguments:
         process.platform === "win32" && /(?:^|[\\/])cmd(?:\.exe)?$/i.test(command),
@@ -142,7 +147,7 @@ function buildVersionInvocation(command: string, platform: NodeJS.Platform): [st
   }
   if (extension === ".cmd" || extension === ".bat") {
     const escaped = command.replaceAll('"', '""');
-    return [process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `call "${escaped}" --version`]];
+    return [process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${escaped}" --version"`]];
   }
   return [command, ["--version"]];
 }
@@ -307,8 +312,10 @@ export async function discoverPiRuntimes(
   options: RuntimeDiscoveryOptions = {},
 ): Promise<RuntimeCandidate[]> {
   const platform = options.platform ?? process.platform;
-  const runner = options.commandRunner ?? defaultCommandRunner;
   const env = options.env ?? process.env;
+  const runner =
+    options.commandRunner ??
+    ((command: string, args: string[]) => defaultCommandRunner(command, args, env));
   const sourcePaths = [
     ...(options.sourcePaths ?? []),
     ...(env.PIARIUM_PI_SOURCE ? [env.PIARIUM_PI_SOURCE] : []),

@@ -1,0 +1,103 @@
+import { registerCustomTheme } from '@pierre/diffs';
+
+import type { Theme } from '@/types/theme';
+import type { VSCodeTextMateTheme, VSCodeTokenColorRule } from './vscodeTextMateTheme';
+import { buildTextMateThemeFromAppTheme } from './textMateThemeFromAppTheme';
+
+export type ShikiThemeRegistrationResolvedLike = VSCodeTextMateTheme & {
+  settings: VSCodeTokenColorRule[];
+  fg: string;
+  bg: string;
+};
+
+const isHex8 = (value: string): boolean => /^#[0-9a-fA-F]{8}$/.test(value);
+
+const stripAlpha = (value: string): string => {
+  if (isHex8(value)) {
+    return value.slice(0, 7);
+  }
+  return value;
+};
+
+function withStableStringId<T extends object>(value: T, id: string): T {
+  Object.defineProperty(value, 'toString', {
+    value: () => id,
+    enumerable: false,
+    configurable: true,
+  });
+
+  Object.defineProperty(value, Symbol.toPrimitive, {
+    value: () => id,
+    enumerable: false,
+    configurable: true,
+  });
+
+  return value;
+}
+
+const MAX_RESOLVED_THEME_CACHE_ENTRIES = 40;
+const resolvedThemeCache = new Map<string, ShikiThemeRegistrationResolvedLike>();
+const registeredPierreThemeSignatures = new Map<string, string>();
+
+export const getThemeContentSignature = (theme: Theme): string => JSON.stringify(theme);
+
+const toResolvedTheme = (raw: VSCodeTextMateTheme, id: string): ShikiThemeRegistrationResolvedLike => {
+  const bgRaw = raw.colors?.['editor.background'];
+  const fgRaw = raw.colors?.['editor.foreground'];
+
+  const bg = bgRaw ? stripAlpha(bgRaw) : undefined;
+  const fg = fgRaw ? stripAlpha(fgRaw) : undefined;
+
+  if (!bg || !fg) {
+    throw new Error(`Theme "${id}" is missing editor.background/editor.foreground`);
+  }
+
+  const settings = raw.tokenColors ?? [];
+
+  return withStableStringId(
+    {
+      ...raw,
+      name: id,
+      fg,
+      bg,
+      settings,
+    },
+    id,
+  );
+};
+
+const buildTextMateTheme = (theme: Theme): VSCodeTextMateTheme => {
+  return buildTextMateThemeFromAppTheme(theme);
+};
+
+export const getResolvedShikiTheme = (theme: Theme): ShikiThemeRegistrationResolvedLike => {
+  const signature = getThemeContentSignature(theme);
+  const cached = resolvedThemeCache.get(signature);
+  if (cached) {
+    resolvedThemeCache.delete(signature);
+    resolvedThemeCache.set(signature, cached);
+    return cached;
+  }
+
+  const raw = buildTextMateTheme(theme);
+  const resolved = toResolvedTheme(raw, theme.metadata.id);
+  resolvedThemeCache.set(signature, resolved);
+  while (resolvedThemeCache.size > MAX_RESOLVED_THEME_CACHE_ENTRIES) {
+    const oldest = resolvedThemeCache.keys().next().value;
+    if (oldest === undefined) break;
+    resolvedThemeCache.delete(oldest);
+  }
+  return resolved;
+};
+
+export const ensurePierreThemeRegistered = (theme: Theme): void => {
+  const id = theme.metadata.id;
+  const signature = getThemeContentSignature(theme);
+  if (registeredPierreThemeSignatures.get(id) === signature) {
+    return;
+  }
+
+  const resolved = getResolvedShikiTheme(theme);
+  registerCustomTheme(id, async () => resolved);
+  registeredPierreThemeSignatures.set(id, signature);
+};
