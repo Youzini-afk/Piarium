@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 8 as const;
+export const PIARIUM_PROTOCOL_VERSION = 9 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -28,6 +28,7 @@ export interface HostCapabilities {
   packages: boolean;
   providerConfiguration: boolean;
   recovery: boolean;
+  resources: boolean;
   sessions: boolean;
   settings: boolean;
 }
@@ -103,6 +104,62 @@ export interface PackageDescriptor {
   name: string;
   source: string;
   version?: string;
+}
+
+export type PiResourceKind = "prompt" | "skill";
+
+export type PiResourceScope = "user" | "project";
+
+export interface PiResourceSourceInfo {
+  baseDir?: string;
+  origin: "package" | "top-level";
+  path: string;
+  scope: PiResourceScope | "temporary";
+  source: string;
+}
+
+export interface PiResourceCollision {
+  loserPath: string;
+  loserSource?: string;
+  name: string;
+  resourceType: "extension" | "prompt" | "skill" | "theme";
+  winnerPath: string;
+  winnerSource?: string;
+}
+
+export interface PiResourceDiagnostic {
+  collision?: PiResourceCollision;
+  message: string;
+  path?: string;
+  type: "collision" | "error" | "warning";
+}
+
+export interface PiResourceDescriptor {
+  active: boolean;
+  argumentHint?: string;
+  baseDir?: string;
+  description: string;
+  disableModelInvocation?: boolean;
+  filePath: string;
+  id: string;
+  kind: PiResourceKind;
+  name: string;
+  sourceInfo: PiResourceSourceInfo;
+  valid: boolean;
+  writable: boolean;
+}
+
+export interface PiResourceCatalogSnapshot {
+  diagnostics: PiResourceDiagnostic[];
+  projectTrusted: boolean;
+  resources: PiResourceDescriptor[];
+}
+
+export interface PiResourceDocumentSnapshot {
+  content: string;
+  descriptor: PiResourceDescriptor;
+  projectTrusted: boolean;
+  revision: string;
 }
 
 export type RecoveryMode = "conversation" | "files" | "both";

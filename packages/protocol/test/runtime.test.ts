@@ -41,6 +41,12 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("recovery.status"), true);
     assert.equal(isRuntimeMethod("recovery.navigate"), true);
     assert.equal(isRuntimeMethod("recovery.repair"), true);
+    assert.equal(isRuntimeMethod("resource.copy"), true);
+    assert.equal(isRuntimeMethod("resource.create"), true);
+    assert.equal(isRuntimeMethod("resource.delete"), true);
+    assert.equal(isRuntimeMethod("resource.get"), true);
+    assert.equal(isRuntimeMethod("resource.list"), true);
+    assert.equal(isRuntimeMethod("resource.update"), true);
     assert.equal(isRuntimeMethod("recovery.apply"), false);
   });
 

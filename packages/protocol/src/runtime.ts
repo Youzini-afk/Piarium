@@ -59,6 +59,12 @@ type SessionScopedRuntimeMethod =
   | "provider.models.discover"
   | "provider.login"
   | "provider.logout"
+  | "resource.copy"
+  | "resource.create"
+  | "resource.delete"
+  | "resource.get"
+  | "resource.list"
+  | "resource.update"
   | "settings.get"
   | "settings.update";
 
@@ -160,6 +166,12 @@ export const RUNTIME_METHODS = [
   "provider.auth.respond",
   "provider.login",
   "provider.logout",
+  "resource.copy",
+  "resource.create",
+  "resource.delete",
+  "resource.get",
+  "resource.list",
+  "resource.update",
   "recovery.checkpoint.create",
   "recovery.navigate",
   "recovery.repair",

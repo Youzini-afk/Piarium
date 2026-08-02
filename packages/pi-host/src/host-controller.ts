@@ -18,6 +18,8 @@ import {
   ProtocolDecodeError,
   type RequestEnvelope,
   type RecoveryMode,
+  type PiResourceKind,
+  type PiResourceScope,
   type RuntimeDescriptor,
   THINKING_LEVELS,
   type ThinkingLevel,
@@ -36,6 +38,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
   packages: true,
   providerConfiguration: true,
   recovery: true,
+  resources: true,
   sessions: true,
   settings: true,
 };
@@ -72,6 +75,22 @@ function readRecoveryMode(record: Record<string, unknown>): RecoveryMode {
     throw new HostError("invalid_params", "mode must be conversation, files, or both");
   }
   return mode;
+}
+
+function readResourceKind(record: Record<string, unknown>): PiResourceKind {
+  const kind = readString(record, "kind");
+  if (kind !== "prompt" && kind !== "skill") {
+    throw new HostError("invalid_params", "kind must be prompt or skill");
+  }
+  return kind;
+}
+
+function readResourceScope(record: Record<string, unknown>): PiResourceScope {
+  const scope = readString(record, "scope");
+  if (scope !== "user" && scope !== "project") {
+    throw new HostError("invalid_params", "scope must be user or project");
+  }
+  return scope;
 }
 
 function optionalString(record: Record<string, unknown>, key: string): string | undefined {
@@ -432,6 +451,40 @@ export class HostController {
       case "provider.logout":
         await this.#sessionHost.logoutProvider(readString(params, "providerId"));
         return { authenticated: false };
+      case "resource.list":
+        return this.#sessionHost.listResources(readResourceKind(params));
+      case "resource.get":
+        return this.#sessionHost.getResource(
+          readResourceKind(params),
+          readString(params, "id"),
+        );
+      case "resource.create":
+        return this.#sessionHost.createResource(
+          readResourceKind(params),
+          readResourceScope(params),
+          readString(params, "name"),
+          readString(params, "content", { allowEmpty: true }),
+        );
+      case "resource.update":
+        return this.#sessionHost.updateResource(
+          readResourceKind(params),
+          readString(params, "id"),
+          readString(params, "content", { allowEmpty: true }),
+          readString(params, "expectedRevision"),
+        );
+      case "resource.delete":
+        return this.#sessionHost.deleteResource(
+          readResourceKind(params),
+          readString(params, "id"),
+          readString(params, "expectedRevision"),
+        );
+      case "resource.copy":
+        return this.#sessionHost.copyResource(
+          readResourceKind(params),
+          readString(params, "id"),
+          readResourceScope(params),
+          optionalString(params, "name"),
+        );
       case "recovery.status":
         return this.#sessionHost.recoveryStatus(readString(params, "sessionId"));
       case "recovery.navigate":

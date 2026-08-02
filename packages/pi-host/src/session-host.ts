@@ -1,6 +1,8 @@
-import { lstat, readdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import type { Dirent } from "node:fs";
+import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   type AgentSession,
   type AgentSessionRuntime,
@@ -30,6 +32,12 @@ import type {
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
+  PiResourceCatalogSnapshot,
+  PiResourceDescriptor,
+  PiResourceDiagnostic,
+  PiResourceDocumentSnapshot,
+  PiResourceKind,
+  PiResourceScope,
   PiSettingsSnapshot,
   ProviderConfigDeleteScope,
   ProviderConfigDetails,
@@ -62,6 +70,7 @@ import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
 import { ProviderAuthBridge } from "./provider-auth-bridge.js";
 import { ProviderConfigurationManager } from "./provider-configuration.js";
+import { RevisionedTextFileEditor } from "./revisioned-text-file-editor.js";
 import { discoverProviderModels } from "./provider-model-discovery.js";
 import {
   projectAgentEvent,
@@ -283,6 +292,86 @@ function userConfigRoot(): string {
   const configured = process.env.XDG_CONFIG_HOME?.trim();
   if (configured && isAbsolute(configured)) return resolve(configured);
   return join(homeRoot(), ".config");
+}
+
+interface ResourceRoot {
+  path: string;
+  scope: PiResourceScope;
+}
+
+interface ResourceOwnership extends ResourceRoot {
+  filePath: string;
+}
+
+function resourcePathKey(path: string): string {
+  const normalized = resolve(path);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function resourceId(kind: PiResourceKind, filePath: string): string {
+  return createHash("sha256")
+    .update(kind)
+    .update("\0")
+    .update(resourcePathKey(filePath))
+    .digest("base64url");
+}
+
+function normalizeResourceName(kind: PiResourceKind, requestedName: string): string {
+  let name = requestedName.trim();
+  if (kind === "prompt" && name.toLowerCase().endsWith(".md")) name = name.slice(0, -3);
+  if (
+    name.length === 0
+    || name === "."
+    || name === ".."
+    || name.includes("\0")
+    || name.includes("/")
+    || name.includes("\\")
+  ) {
+    throw new HostError(
+      "invalid_resource_name",
+      "Resource name must be a non-empty file name without path separators",
+    );
+  }
+  return name;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const pathFromRoot = relative(resolve(rootPath), resolve(candidatePath));
+  return (
+    pathFromRoot.length > 0
+    && pathFromRoot !== ".."
+    && !pathFromRoot.startsWith(`..${sep}`)
+    && !isAbsolute(pathFromRoot)
+  );
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (isMissingPathError(error)) return false;
+    throw error;
+  }
+}
+
+async function copyResourceDirectory(source: string, target: string): Promise<void> {
+  const sourceInfo = await lstat(source);
+  if (sourceInfo.isSymbolicLink()) {
+    throw new HostError("resource_symlink_denied", "Skill copies cannot include symbolic links");
+  }
+  if (sourceInfo.isDirectory()) {
+    await mkdir(target);
+    const entries = await readdir(source, { withFileTypes: true });
+    for (const entry of entries) {
+      await copyResourceDirectory(join(source, entry.name), join(target, entry.name));
+    }
+    return;
+  }
+  if (!sourceInfo.isFile()) {
+    throw new HostError("resource_copy_failed", `Unsupported file type in skill: ${source}`);
+  }
+  await copyFile(source, target);
 }
 
 export class SessionHost {
@@ -708,6 +797,267 @@ export class SessionHost {
           ? "repair-typo"
           : "repair-destructive";
     return this.#finishRecovery(protocolAction, execution);
+  }
+
+  async listResources(kind: PiResourceKind): Promise<PiResourceCatalogSnapshot> {
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
+    const prompts = kind === "prompt" ? this.session.resourceLoader.getPrompts() : undefined;
+    const skills = kind === "skill" ? this.session.resourceLoader.getSkills() : undefined;
+    const nativeDiagnostics = prompts?.diagnostics ?? skills?.diagnostics ?? [];
+    const diagnostics: PiResourceDiagnostic[] = nativeDiagnostics.map((diagnostic) => ({
+      ...(diagnostic.collision === undefined
+        ? {}
+        : {
+            collision: {
+              loserPath: diagnostic.collision.loserPath,
+              ...(diagnostic.collision.loserSource === undefined
+                ? {}
+                : { loserSource: diagnostic.collision.loserSource }),
+              name: diagnostic.collision.name,
+              resourceType: diagnostic.collision.resourceType,
+              winnerPath: diagnostic.collision.winnerPath,
+              ...(diagnostic.collision.winnerSource === undefined
+                ? {}
+                : { winnerSource: diagnostic.collision.winnerSource }),
+            },
+          }),
+      message: diagnostic.message,
+      ...(diagnostic.path === undefined ? {} : { path: diagnostic.path }),
+      type: diagnostic.type,
+    }));
+    const nativeResources: PiResourceDescriptor[] = prompts
+      ? prompts.prompts.map((resource) => ({
+          active: true,
+          ...(resource.argumentHint === undefined ? {} : { argumentHint: resource.argumentHint }),
+          description: resource.description,
+          filePath: resource.filePath,
+          id: resourceId(kind, resource.filePath),
+          kind,
+          name: resource.name,
+          sourceInfo: {
+            ...(resource.sourceInfo.baseDir === undefined
+              ? {}
+              : { baseDir: resource.sourceInfo.baseDir }),
+            origin: resource.sourceInfo.origin,
+            path: resource.sourceInfo.path,
+            scope: resource.sourceInfo.scope,
+            source: resource.sourceInfo.source,
+          },
+          valid: true,
+          writable: false,
+        }))
+      : (skills?.skills ?? []).map((resource) => ({
+          active: true,
+          baseDir: resource.baseDir,
+          description: resource.description,
+          disableModelInvocation: resource.disableModelInvocation,
+          filePath: resource.filePath,
+          id: resourceId(kind, resource.filePath),
+          kind,
+          name: resource.name,
+          sourceInfo: {
+            ...(resource.sourceInfo.baseDir === undefined
+              ? {}
+              : { baseDir: resource.sourceInfo.baseDir }),
+            origin: resource.sourceInfo.origin,
+            path: resource.sourceInfo.path,
+            scope: resource.sourceInfo.scope,
+            source: resource.sourceInfo.source,
+          },
+          valid: true,
+          writable: false,
+        }));
+    const resources = await Promise.all(
+      nativeResources.map(async (resource) => {
+        const ownership = await this.#resourceOwnership(
+          kind,
+          resource.filePath,
+          resource.sourceInfo.origin,
+          resource.sourceInfo.scope,
+        );
+        return {
+          ...resource,
+          writable: ownership !== undefined,
+        } satisfies PiResourceDescriptor;
+      }),
+    );
+    const knownIds = new Set(resources.map((resource) => resource.id));
+    for (const candidate of await this.#resourceCandidateFiles(kind, projectTrusted)) {
+      const id = resourceId(kind, candidate.filePath);
+      if (knownIds.has(id)) continue;
+      const matchingDiagnostics = diagnostics.filter((diagnostic) => {
+        if (diagnostic.path && resourcePathKey(diagnostic.path) === resourcePathKey(candidate.filePath)) {
+          return true;
+        }
+        return diagnostic.collision
+          ? resourcePathKey(diagnostic.collision.loserPath) === resourcePathKey(candidate.filePath)
+          : false;
+      });
+      const collisionOnly =
+        matchingDiagnostics.length > 0
+        && matchingDiagnostics.every((diagnostic) => diagnostic.type === "collision");
+      const fileName = basename(candidate.filePath);
+      resources.push({
+        active: false,
+        ...(kind === "skill" ? { baseDir: dirname(candidate.filePath) } : {}),
+        description: "",
+        filePath: candidate.filePath,
+        id,
+        kind,
+        name: kind === "prompt"
+          ? fileName.replace(/\.md$/i, "")
+          : fileName.toLowerCase() === "skill.md"
+            ? basename(dirname(candidate.filePath))
+            : fileName.replace(/\.md$/i, ""),
+        sourceInfo: {
+          baseDir: candidate.root,
+          origin: "top-level",
+          path: candidate.filePath,
+          scope: candidate.scope,
+          source: "local",
+        },
+        valid: collisionOnly,
+        writable: true,
+      });
+      knownIds.add(id);
+    }
+    resources.sort((left, right) =>
+      left.name.localeCompare(right.name) || left.filePath.localeCompare(right.filePath),
+    );
+    return { diagnostics, projectTrusted, resources };
+  }
+
+  async getResource(kind: PiResourceKind, id: string): Promise<PiResourceDocumentSnapshot> {
+    const descriptor = await this.#findResource(kind, id);
+    const snapshot = await new RevisionedTextFileEditor(descriptor.filePath, {
+      conflictCode: "resource_conflict",
+      conflictLabel: "Resource",
+    }).read();
+    if (!snapshot.exists) {
+      throw new HostError("resource_not_found", `Pi ${kind} resource no longer exists: ${id}`);
+    }
+    return {
+      content: snapshot.content,
+      descriptor,
+      projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
+      revision: snapshot.revision,
+    };
+  }
+
+  async createResource(
+    kind: PiResourceKind,
+    scope: PiResourceScope,
+    requestedName: string,
+    content: string,
+  ): Promise<PiResourceDocumentSnapshot> {
+    this.#assertResourceScopeTrusted(scope);
+    const target = await this.#resourceTarget(kind, scope, requestedName);
+    const editor = new RevisionedTextFileEditor(target.filePath, {
+      conflictCode: "resource_conflict",
+      conflictLabel: "Resource",
+    });
+    const current = await editor.read();
+    if (current.exists) {
+      throw new HostError("resource_exists", `A Pi ${kind} resource already exists at ${target.filePath}`);
+    }
+    await editor.update(content, current.revision);
+    await this.session.reload();
+    return this.getResource(kind, resourceId(kind, target.filePath));
+  }
+
+  async updateResource(
+    kind: PiResourceKind,
+    id: string,
+    content: string,
+    expectedRevision: string,
+  ): Promise<PiResourceDocumentSnapshot> {
+    const descriptor = await this.#findResource(kind, id);
+    const ownership = await this.#requireResourceOwnership(descriptor);
+    this.#assertResourceScopeTrusted(ownership.scope);
+    await new RevisionedTextFileEditor(descriptor.filePath, {
+      conflictCode: "resource_conflict",
+      conflictLabel: "Resource",
+    }).update(content, expectedRevision);
+    await this.session.reload();
+    return this.getResource(kind, id);
+  }
+
+  async deleteResource(
+    kind: PiResourceKind,
+    id: string,
+    expectedRevision: string,
+  ): Promise<{ deleted: boolean; id: string }> {
+    const descriptor = await this.#findResource(kind, id);
+    const ownership = await this.#requireResourceOwnership(descriptor);
+    this.#assertResourceScopeTrusted(ownership.scope);
+    const deleted = await new RevisionedTextFileEditor(descriptor.filePath, {
+      conflictCode: "resource_conflict",
+      conflictLabel: "Resource",
+    }).delete(expectedRevision);
+    if (
+      deleted
+      && kind === "skill"
+      && basename(descriptor.filePath).toLowerCase() === "skill.md"
+    ) {
+      const skillDirectory = resolve(descriptor.baseDir ?? dirname(descriptor.filePath));
+      if (
+        resourcePathKey(skillDirectory) === resourcePathKey(dirname(descriptor.filePath))
+        && isPathInside(ownership.path, skillDirectory)
+      ) {
+        await rm(skillDirectory, { force: true, recursive: true });
+      }
+    }
+    if (deleted) await this.session.reload();
+    return { deleted, id };
+  }
+
+  async copyResource(
+    kind: PiResourceKind,
+    id: string,
+    scope: PiResourceScope,
+    requestedName?: string,
+  ): Promise<PiResourceDocumentSnapshot> {
+    this.#assertResourceScopeTrusted(scope);
+    const source = await this.getResource(kind, id);
+    const target = await this.#resourceTarget(
+      kind,
+      scope,
+      requestedName ?? source.descriptor.name,
+    );
+    if (kind === "skill" && basename(source.descriptor.filePath).toLowerCase() === "skill.md") {
+      const sourceDirectory = resolve(source.descriptor.baseDir ?? dirname(source.descriptor.filePath));
+      const targetDirectory = dirname(target.filePath);
+      if (await pathExists(targetDirectory)) {
+        throw new HostError(
+          "resource_exists",
+          `A Pi skill resource already exists at ${targetDirectory}`,
+        );
+      }
+      try {
+        await mkdir(target.path, { recursive: true });
+        await copyResourceDirectory(sourceDirectory, targetDirectory);
+      } catch (error) {
+        if (isPathInside(target.path, targetDirectory)) {
+          await rm(targetDirectory, { force: true, recursive: true }).catch(() => undefined);
+        }
+        throw error;
+      }
+    } else {
+      const editor = new RevisionedTextFileEditor(target.filePath, {
+        conflictCode: "resource_conflict",
+        conflictLabel: "Resource",
+      });
+      const current = await editor.read();
+      if (current.exists) {
+        throw new HostError(
+          "resource_exists",
+          `A Pi ${kind} resource already exists at ${target.filePath}`,
+        );
+      }
+      await editor.update(source.content, current.revision);
+    }
+    await this.session.reload();
+    return this.getResource(kind, resourceId(kind, target.filePath));
   }
 
   listCommands(sessionId: string): Array<{ description?: string; name: string; source?: string }> {
@@ -1139,6 +1489,177 @@ export class SessionHost {
     }
     await this.session.reload();
     return this.getSettings();
+  }
+
+  #resourceRoots(kind: PiResourceKind): ResourceRoot[] {
+    const roots: ResourceRoot[] = kind === "prompt"
+      ? [
+          { path: join(this.#agentDir, "prompts"), scope: "user" },
+          { path: join(this.runtime.cwd, ".pi", "prompts"), scope: "project" },
+        ]
+      : [
+          { path: join(this.#agentDir, "skills"), scope: "user" },
+          { path: join(homeRoot(), ".agents", "skills"), scope: "user" },
+          { path: join(this.runtime.cwd, ".pi", "skills"), scope: "project" },
+          { path: join(this.runtime.cwd, ".agents", "skills"), scope: "project" },
+        ];
+    const seen = new Set<string>();
+    return roots.filter((root) => {
+      const key = resourcePathKey(root.path);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  async #resourceOwnership(
+    kind: PiResourceKind,
+    filePath: string,
+    origin: "package" | "top-level",
+    scope: PiResourceScope | "temporary",
+  ): Promise<ResourceOwnership | undefined> {
+    if (origin !== "top-level" || scope === "temporary") return undefined;
+    for (const root of this.#resourceRoots(kind)) {
+      if (root.scope !== scope || !isPathInside(root.path, filePath)) continue;
+      const relativePath = relative(resolve(root.path), resolve(filePath));
+      try {
+        const resolved = await resolveConfigDocumentPath(root.path, relativePath, {
+          extensions: [".md"],
+          reservedPaths: [],
+        });
+        if (resourcePathKey(resolved.path) !== resourcePathKey(filePath)) continue;
+        return { ...root, filePath: resolved.path };
+      } catch (error) {
+        if (error instanceof HostError) continue;
+        throw error;
+      }
+    }
+    return undefined;
+  }
+
+  async #requireResourceOwnership(
+    descriptor: PiResourceDescriptor,
+  ): Promise<ResourceOwnership> {
+    const ownership = await this.#resourceOwnership(
+      descriptor.kind,
+      descriptor.filePath,
+      descriptor.sourceInfo.origin,
+      descriptor.sourceInfo.scope,
+    );
+    if (!ownership) {
+      throw new HostError(
+        "resource_read_only",
+        "Package, temporary, linked, and externally configured Pi resources are read-only; copy the resource into the user or project scope before editing",
+      );
+    }
+    return ownership;
+  }
+
+  async #resourceTarget(
+    kind: PiResourceKind,
+    scope: PiResourceScope,
+    requestedName: string,
+  ): Promise<ResourceOwnership> {
+    const name = normalizeResourceName(kind, requestedName);
+    const root = this.#resourceRoots(kind).find((candidate) => candidate.scope === scope);
+    if (!root) throw new HostError("resource_scope_unavailable", `No ${scope} ${kind} root exists`);
+    const requestedPath = kind === "prompt" ? `${name}.md` : join(name, "SKILL.md");
+    const location = await resolveConfigDocumentPath(root.path, requestedPath, {
+      extensions: [".md"],
+      reservedPaths: [],
+    });
+    return { ...root, filePath: location.path };
+  }
+
+  async #findResource(kind: PiResourceKind, id: string): Promise<PiResourceDescriptor> {
+    const descriptor = (await this.listResources(kind)).resources.find(
+      (resource) => resource.id === id,
+    );
+    if (!descriptor) {
+      throw new HostError("resource_not_found", `Unknown Pi ${kind} resource: ${id}`);
+    }
+    return descriptor;
+  }
+
+  #assertResourceScopeTrusted(scope: PiResourceScope): void {
+    if (scope === "project" && !this.runtime.services.settingsManager.isProjectTrusted()) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to write project resources",
+      );
+    }
+  }
+
+  async #resourceCandidateFiles(
+    kind: PiResourceKind,
+    projectTrusted: boolean,
+  ): Promise<Array<{ filePath: string; root: string; scope: PiResourceScope }>> {
+    const candidates: Array<{ filePath: string; root: string; scope: PiResourceScope }> = [];
+    for (const root of this.#resourceRoots(kind)) {
+      if (root.scope === "project" && !projectTrusted) continue;
+      let rootInfo: Awaited<ReturnType<typeof lstat>>;
+      try {
+        rootInfo = await lstat(root.path);
+      } catch (error) {
+        if (isMissingPathError(error)) continue;
+        throw error;
+      }
+      if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) continue;
+      let files: string[];
+      try {
+        files = kind === "prompt"
+          ? (await readdir(root.path, { withFileTypes: true }))
+              .filter(
+                (entry) => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith(".md"),
+              )
+              .map((entry) => join(root.path, entry.name))
+          : await this.#walkSkillCandidates(root.path, true);
+      } catch {
+        continue;
+      }
+      candidates.push(
+        ...files.map((filePath) => ({ filePath, root: root.path, scope: root.scope })),
+      );
+    }
+    return candidates;
+  }
+
+  async #walkSkillCandidates(
+    directory: string,
+    includeRootFiles: boolean,
+  ): Promise<string[]> {
+    let entries: Dirent<string>[];
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const skillFile = entries.find(
+      (entry) =>
+        entry.name.toLowerCase() === "skill.md"
+        && entry.isFile()
+        && !entry.isSymbolicLink(),
+    );
+    if (skillFile) return [join(directory, skillFile.name)];
+    const files = includeRootFiles
+      ? entries
+          .filter(
+            (entry) => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith(".md"),
+          )
+          .map((entry) => join(directory, entry.name))
+      : [];
+    for (const entry of entries) {
+      if (
+        !entry.isDirectory()
+        || entry.isSymbolicLink()
+        || entry.name.startsWith(".")
+        || entry.name === "node_modules"
+      ) {
+        continue;
+      }
+      files.push(...(await this.#walkSkillCandidates(join(directory, entry.name), false)));
+    }
+    return files;
   }
 
   assertSession(sessionId: string): void {

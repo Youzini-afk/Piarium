@@ -11,6 +11,10 @@ import type {
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
+  PiResourceCatalogSnapshot,
+  PiResourceDocumentSnapshot,
+  PiResourceKind,
+  PiResourceScope,
   PiSettingsSnapshot,
   ProviderAuthType,
   RecoveryMode,
@@ -152,6 +156,35 @@ export interface HostMethodMap {
   "provider.logout": {
     params: { providerId: string };
     result: { authenticated: false };
+  };
+  "resource.copy": {
+    params: {
+      id: string;
+      kind: PiResourceKind;
+      name?: string;
+      scope: PiResourceScope;
+    };
+    result: PiResourceDocumentSnapshot;
+  };
+  "resource.create": {
+    params: { content: string; kind: PiResourceKind; name: string; scope: PiResourceScope };
+    result: PiResourceDocumentSnapshot;
+  };
+  "resource.delete": {
+    params: { expectedRevision: string; id: string; kind: PiResourceKind };
+    result: { deleted: boolean; id: string };
+  };
+  "resource.get": {
+    params: { id: string; kind: PiResourceKind };
+    result: PiResourceDocumentSnapshot;
+  };
+  "resource.list": {
+    params: { kind: PiResourceKind };
+    result: PiResourceCatalogSnapshot;
+  };
+  "resource.update": {
+    params: { content: string; expectedRevision: string; id: string; kind: PiResourceKind };
+    result: PiResourceDocumentSnapshot;
   };
   "recovery.checkpoint.create": {
     params: { name: string; sessionId: string };

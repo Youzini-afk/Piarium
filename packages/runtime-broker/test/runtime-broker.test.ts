@@ -170,6 +170,46 @@ test("broker owns catalog and per-session Pi workers", async () => {
       await readFile(join(homeDir, ".config", "mcp", "mcp.json"), "utf8"),
       homeMcpContent,
     );
+    const promptContent = "---\ndescription: Broker-managed prompt\n---\nCheck $1.\n";
+    const createdPrompt = await dispatchRuntimeRequest(broker, "resource.create", {
+      content: promptContent,
+      cwd: workspace,
+      kind: "prompt",
+      name: "broker-check",
+      scope: "project",
+    });
+    assert.equal(createdPrompt.content, promptContent);
+    assert.equal(createdPrompt.descriptor.writable, true);
+    assert.ok(
+      (await dispatchRuntimeRequest(broker, "resource.list", {
+        cwd: workspace,
+        kind: "prompt",
+      })).resources.some((resource) => resource.id === createdPrompt.descriptor.id),
+    );
+    assert.equal(
+      (await dispatchRuntimeRequest(broker, "resource.get", {
+        cwd: workspace,
+        id: createdPrompt.descriptor.id,
+        kind: "prompt",
+      })).revision,
+      createdPrompt.revision,
+    );
+    const updatedPrompt = await dispatchRuntimeRequest(broker, "resource.update", {
+      content: `${promptContent}\nFollow repository conventions.\n`,
+      cwd: workspace,
+      expectedRevision: createdPrompt.revision,
+      id: createdPrompt.descriptor.id,
+      kind: "prompt",
+    });
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "resource.delete", {
+        cwd: workspace,
+        expectedRevision: updatedPrompt.revision,
+        id: updatedPrompt.descriptor.id,
+        kind: "prompt",
+      }),
+      { deleted: true, id: createdPrompt.descriptor.id },
+    );
     assert.deepEqual(broker.activeSessionIds, []);
     let stopAuthPromptListener = () => {};
     const authPrompt = new Promise<{ requestId: string; sessionId: string }>((resolvePrompt) => {
