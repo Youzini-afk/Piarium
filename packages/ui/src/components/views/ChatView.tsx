@@ -1,7 +1,7 @@
 import React from 'react';
-import { ChatContainer } from '@/components/chat/ChatContainer';
+import { PiChatView } from '@/components/pi-session/PiChatView';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 type ChatViewProps = {
     active?: boolean;
@@ -10,11 +10,11 @@ type ChatViewProps = {
 };
 
 export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = false, autoOpenDraft = true }) => {
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
 
     return (
         <ChatErrorBoundary sessionId={currentSessionId || undefined}>
-            <ChatContainer active={active} readOnly={readOnly} autoOpenDraft={autoOpenDraft} />
+            <PiChatView active={active} readOnly={readOnly} autoOpenDraft={autoOpenDraft} />
         </ChatErrorBoundary>
     );
 };

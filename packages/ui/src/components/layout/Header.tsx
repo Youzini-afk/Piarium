@@ -19,6 +19,7 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
 import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSessionMessagesResolved } from '@/sync/sync-context';
@@ -67,7 +68,7 @@ import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitc
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
-import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
+import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { Icon } from "@/components/icon/Icon";
@@ -746,6 +747,19 @@ export const Header: React.FC<HeaderProps> = ({
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const piCurrentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const piCurrentSnapshot = usePiSessionStore((state) => (
+    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
+  ));
+  const piCurrentSummary = usePiSessionStore((state) => (
+    state.currentSessionId === null
+      ? undefined
+      : state.summaries.find((summary) => summary.id === state.currentSessionId)
+  ));
+  const piCurrentSessionTitle = piCurrentSummary?.name?.trim()
+    || piCurrentSummary?.firstMessage.split(/\r?\n/u).map((line) => line.trim()).find(Boolean)
+    || piCurrentSnapshot?.name?.trim()
+    || null;
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
   const currentSessionStatus = useGlobalSessionStatus(currentSessionId ?? '');
   const isCurrentSessionMovingToWorktree = useIsSessionWorktreeMovePending(currentSessionId ?? '');
@@ -2262,7 +2276,7 @@ export const Header: React.FC<HeaderProps> = ({
         ) : (
           <div className="app-region-no-drag mr-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-left">
             {!isSidebarOpen ? (
-              <SessionSwitcherDropdown align="start">
+              <PiSessionSwitcherDropdown align="start">
                 <button
                   type="button"
                   className={desktopHeaderIconButtonClass}
@@ -2270,7 +2284,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Icon name="history" className="h-[18px] w-[18px]" />
                 </button>
-              </SessionSwitcherDropdown>
+              </PiSessionSwitcherDropdown>
             ) : null}
             <div className="flex min-w-0 flex-col justify-center px-1">
               {isRenamingHeaderSession ? (
@@ -2315,11 +2329,16 @@ export const Header: React.FC<HeaderProps> = ({
                 </form>
               ) : (
                 <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
-                  {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
+                  {piCurrentSessionId
+                    ? (piCurrentSessionTitle ?? t('sessions.sidebar.session.untitled'))
+                    : isNewSessionDraftOpen
+                      ? t('sessions.switcher.draftTitle')
+                      : currentSessionTitle}
                 </span>
               )}
-              {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind)) ? (
+              {(piCurrentSnapshot?.cwd || activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && worktreeBadgeKind)) ? (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+                  {piCurrentSnapshot?.cwd ? <span className="truncate">{piCurrentSnapshot.cwd}</span> : null}
                   {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
@@ -2340,7 +2359,7 @@ export const Header: React.FC<HeaderProps> = ({
               ) : null}
             </div>
             <div className="flex h-[18px] shrink-0 items-center justify-center self-start">
-              {currentSessionId && !isNewSessionDraftOpen && !isRenamingHeaderSession ? (
+              {currentSessionId && !piCurrentSessionId && !isNewSessionDraftOpen && !isRenamingHeaderSession ? (
                 <DropdownMenu
                   open={isHeaderSessionMenuOpen}
                   onOpenChange={setIsHeaderSessionMenuOpen}

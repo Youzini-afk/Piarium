@@ -439,6 +439,35 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.recoveryStatus?.actions).toEqual(['navigate']);
   });
 
+  test('applies plugin recovery to its session without stealing a newer selection', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method, params) => {
+      const sessionId = (params as { sessionId?: string }).sessionId ?? '';
+      if (method === 'recovery.navigate') {
+        return {
+          action: 'navigate',
+          editorText: 'restore this prompt',
+          handledBy: 'pi-workspace-history',
+          mode: 'both',
+          outcome: 'applied',
+          snapshot: snapshot(sessionId),
+        };
+      }
+      if (method === 'session.entries') return branch(sessionId);
+      if (method === 'recovery.status') return recoveryStatus;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.getState().setCurrentSession('session-b');
+
+    const result = await store.getState().recoverTo('session-a', 'entry-a', 'both');
+
+    expect(result.editorText).toBe('restore this prompt');
+    expect(store.getState().currentSessionId).toBe('session-b');
+    expect(store.getState().records['session-a']?.snapshot?.sessionId).toBe('session-a');
+    expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([]);
+  });
+
   test('resets catalog, current session, and event ownership on runtime change', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

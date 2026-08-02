@@ -11,8 +11,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
 import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
-import { SessionSidebar } from '@/components/session/SessionSidebar';
-import { SessionDialogs } from '@/components/session/SessionDialogs';
+import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
 import { ArchiveView } from '@/components/views/ArchiveView';
 import { WorktreesView } from '@/components/views/WorktreesView';
@@ -23,7 +22,7 @@ import { DrawerProvider } from '@/contexts/DrawerContext';
 import { WorkspaceOverlays } from '@/components/workspace/WorkspaceOverlays';
 
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
@@ -63,12 +62,9 @@ export const MainLayout: React.FC = () => {
 
     React.useEffect(() => {
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
-        const unsubscribeSession = useSessionUIStore.subscribe((state, prev) => {
+        const unsubscribeSession = usePiSessionStore.subscribe((state, prev) => {
             const sessionSelected = Boolean(state.currentSessionId) && state.currentSessionId !== prev.currentSessionId;
-            // Draft identity change covers re-opening a draft while one is
-            // already open (the boolean alone never transitions then).
-            const draftOpened = Boolean(state.newSessionDraft?.open) && state.newSessionDraft !== prev.newSessionDraft;
-            if (sessionSelected || draftOpened) closeSurfacePages();
+            if (sessionSelected) closeSurfacePages();
         });
         const unsubscribeTab = useUIStore.subscribe((state, prev) => {
             if (state.activeMainTab !== prev.activeMainTab) closeSurfacePages();
@@ -182,45 +178,6 @@ export const MainLayout: React.FC = () => {
         setMobileRightSidebarOpen(false);
     }, [isMobile, setMobileSessionPanelOpen]);
 
-    useEffect(() => {
-        if (!isMobile || activeMainTab !== 'chat' || mobileLeftDrawerOpen || mobileRightSidebarOpen || isSettingsDialogOpen) {
-            return;
-        }
-
-        let disposed = false;
-        let timeoutId: number | undefined;
-
-        const scheduleDraftOpen = (delayMs: number) => {
-            timeoutId = window.setTimeout(() => {
-                if (disposed) {
-                    return;
-                }
-
-                const sessionState = useSessionUIStore.getState();
-                const uiState = useUIStore.getState();
-                if (uiState.activeMainTab !== 'chat' || uiState.isSettingsDialogOpen || sessionState.currentSessionId || sessionState.newSessionDraft?.open) {
-                    return;
-                }
-
-                if (sessionState.isLoading) {
-                    scheduleDraftOpen(250);
-                    return;
-                }
-
-                sessionState.openNewSessionDraft();
-            }, delayMs);
-        };
-
-        scheduleDraftOpen(500);
-
-        return () => {
-            disposed = true;
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
-            }
-        };
-    }, [activeMainTab, isMobile, isSettingsDialogOpen, mobileLeftDrawerOpen, mobileRightSidebarOpen]);
-
     // Ensure mobile drawers are closed when opening full-screen settings
     useEffect(() => {
         if (!isMobile || !isSettingsDialogOpen) {
@@ -289,7 +246,6 @@ export const MainLayout: React.FC = () => {
                 <CommandPalette />
                 <HelpDialog />
                 <OpenCodeStatusDialog />
-                <SessionDialogs />
                 <WorkspaceOverlays />
 
                 {isMobile ? (
@@ -379,7 +335,7 @@ export const MainLayout: React.FC = () => {
                                 aria-hidden={!mobileLeftDrawerOpen}
                             >
                                 <ErrorBoundary>
-                                    <SessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />
+                                    <PiSessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />
                                 </ErrorBoundary>
                             </motion.div>
                             {mobileRightDrawerVisible && (
@@ -419,7 +375,7 @@ export const MainLayout: React.FC = () => {
                             className="border-border"
                             topBar={<SidebarTopBar />}
                         >
-                            <SessionSidebar isVisible={isSidebarOpen} />
+                            <PiSessionSidebar isVisible={isSidebarOpen} />
                         </Sidebar>
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                             <Header />

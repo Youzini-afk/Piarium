@@ -4,6 +4,9 @@ import type {
   PiAgentEvent,
   PiAssistantMessage,
   PiSessionEntry,
+  RecoveryMode,
+  RecoveryOperationResult,
+  RecoveryRepairAction,
   RecoveryStatus,
   RuntimeEventEnvelope,
   RuntimeMethod,
@@ -85,6 +88,17 @@ export interface PiSessionStoreState {
   ): Promise<RuntimeMethodResult<'session.navigate'>>;
   openSession(params: RuntimeMethodParams<'session.open'>): Promise<SessionSnapshot>;
   prompt(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean>;
+  recoverTo(
+    sessionId: string,
+    targetId: string,
+    mode: RecoveryMode,
+    summarize?: boolean,
+  ): Promise<RecoveryOperationResult>;
+  redoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult>;
+  repairRecovery(
+    sessionId: string,
+    action: RecoveryRepairAction,
+  ): Promise<RecoveryOperationResult>;
   refreshEntries(
     sessionId: string,
     scope?: 'branch' | 'all',
@@ -96,6 +110,7 @@ export interface PiSessionStoreState {
   selectThinking(sessionId: string, level: ThinkingLevel): Promise<SessionSnapshot>;
   setCurrentSession(sessionId: string | null): void;
   steer(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean>;
+  undoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult>;
   unarchiveSession(sessionId: string): Promise<SessionSummary>;
 }
 
@@ -492,6 +507,25 @@ export const createPiSessionStore = (
       await get().loadCatalog(cwd).catch(() => undefined);
     };
 
+    const applyRecoveryResult = async (
+      sessionId: string,
+      result: RecoveryOperationResult,
+    ): Promise<RecoveryOperationResult> => {
+      set((state) => ({
+        lastError: null,
+        records: upsertRecord(state.records, sessionId, (current) => ({
+          ...current,
+          open: true,
+          snapshot: result.snapshot,
+        })),
+      }));
+      await Promise.all([
+        get().refreshEntries(sessionId),
+        get().refreshRecoveryStatus(sessionId).catch(() => undefined),
+      ]);
+      return result;
+    };
+
     return {
       ...initialFields(runtime.currentKey()),
 
@@ -742,6 +776,26 @@ export const createPiSessionStore = (
         return result.accepted;
       },
 
+      recoverTo: async (sessionId, targetId, mode, summarize) => {
+        const { result } = await request('recovery.navigate', {
+          mode,
+          sessionId,
+          targetId,
+          ...(summarize === undefined ? {} : { summarize }),
+        });
+        return applyRecoveryResult(sessionId, result);
+      },
+
+      redoRecovery: async (sessionId, mode) => {
+        const { result } = await request('recovery.redo', { mode, sessionId });
+        return applyRecoveryResult(sessionId, result);
+      },
+
+      repairRecovery: async (sessionId, action) => {
+        const { result } = await request('recovery.repair', { action, sessionId });
+        return applyRecoveryResult(sessionId, result);
+      },
+
       refreshEntries: async (sessionId, scope = 'branch') => {
         const requestKey = entriesRequestKey(sessionId, scope);
         const generation = (entriesGeneration.get(requestKey) ?? 0) + 1;
@@ -886,6 +940,11 @@ export const createPiSessionStore = (
           text,
         });
         return result.accepted;
+      },
+
+      undoRecovery: async (sessionId, mode) => {
+        const { result } = await request('recovery.undo', { mode, sessionId });
+        return applyRecoveryResult(sessionId, result);
       },
 
       unarchiveSession: async (sessionId) => {

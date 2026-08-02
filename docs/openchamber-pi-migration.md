@@ -48,7 +48,16 @@ layer. Inside the copied Piarium tree it will:
 There is one runtime boundary between trusted application services and isolated Pi workers. There
 is no OpenCode-shaped compatibility server layered on top of another Pi adapter.
 
-Recovery integrates at OpenChamber's shared `revertToMessage` action so message menus, timeline,
-slash commands, and reverted-message dock stay coherent. The default policy is conversation only,
-conversation + files, or always ask; detailed recovery management lives in the right sidebar and
-settings.
+Recovery attaches directly to Pi timeline entries. A user-message rollback targets the stable Pi
+entry ID, restores that prompt into the Piarium composer, and delegates file restoration through
+the versioned recovery bridge. The default policy is conversation only, conversation + files, or
+always ask; detailed recovery management lives in the right sidebar and settings. Piarium ships
+recommended controls for `pi-workspace-history` and `pi-wtf`, while accepting any package source
+and displaying any provider that implements the bridge contract.
+
+The primary Web/Desktop layout now reads the Pi catalog and Pi branch entries directly. Its
+session tree, search, project grouping, streaming assistant state, tool executions, image prompts,
+steering/follow-up queue, abort, rename, archive, restore, delete, and message rollback do not
+project Pi data into OpenCode `Session`, `Message`, or `Part` objects. Remaining legacy surfaces
+stay migration work, not a supported compatibility layer, and are deleted as their direct Pi
+replacements land.
