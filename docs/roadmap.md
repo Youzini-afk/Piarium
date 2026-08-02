@@ -81,6 +81,9 @@ retained before engine surgery begins.
   text/images; workspace-history owns combined restore/undo/redo/checkpoints; pi-wtf owns prompt
   repair; recovery bridge v1 accepts future structured/files-only capabilities. The parallel
   `@piarium/recovery` shadow-Git engine was deleted.
+- Implemented Pi-native desktop first-launch and local recovery readiness. Both negotiate the real
+  runtime WebSocket handshake and show Pi/host/Node/source versions; the former OpenCode installer,
+  binary-path picker, and `/health` polling are removed while remote connection selection remains.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.

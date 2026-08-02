@@ -84,6 +84,11 @@ Piarium does not impose renderer payload, pending-request, or buffered-output ce
 deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
 `PIARIUM_RUNTIME_MAX_PENDING_REQUESTS`, and `PIARIUM_RUNTIME_MAX_BUFFERED_BYTES`.
 
+Desktop first-launch and local recovery use this same authenticated connection and require a
+successful Pi host handshake. The surface shows the negotiated Pi, host, Node, and runtime-source
+versions; it does not probe OpenCode health, ask for an OpenCode binary, or run an installation
+script. Remote host selection remains a separate retained transport choice.
+
 Protocol v7 does not forward Pi SDK objects verbatim. The host projects the append-only session
 tree, messages, tool calls/results, streaming updates, compaction, retry state, model metadata, and
 provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,

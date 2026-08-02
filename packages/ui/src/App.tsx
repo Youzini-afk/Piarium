@@ -813,10 +813,7 @@ function App({ apis }: AppProps) {
               <OnboardingScreen
                 mode="first-launch"
                 localAvailable={bootView.localAvailable !== false}
-                onCliAvailable={handleDesktopBootDismiss}
-                onChooseRemote={() => {
-                  // Switch to remote tab - handled internally by OnboardingScreen
-                }}
+                onRuntimeAvailable={handleDesktopBootDismiss}
               />
             </React.Suspense>
           </div>
@@ -838,7 +835,7 @@ function App({ apis }: AppProps) {
               recoveryHostUrl={hostUrl}
               recoveryHostLabel={undefined}
               localAvailable={bootView.localAvailable !== false}
-              onCliAvailable={handleDesktopBootDismiss}
+              onRuntimeAvailable={handleDesktopBootDismiss}
             />
           </React.Suspense>
         </div>

@@ -9,8 +9,8 @@ export type OnboardingScreenMode = 'first-launch' | 'local-setup' | 'recovery';
 type OnboardingScreenProps = {
   /** Callback when user goes back from local-setup */
   onBack?: () => void;
-  /** Callback when CLI becomes available */
-  onCliAvailable?: () => void;
+  /** Callback when the selected Pi runtime becomes available */
+  onRuntimeAvailable?: () => void;
   /** Screen mode to render */
   mode?: OnboardingScreenMode;
   /** Recovery variant (only used when mode is 'recovery') */
@@ -21,14 +21,12 @@ type OnboardingScreenProps = {
   recoveryHostLabel?: string;
   /** Callback when user enters local setup from recovery */
   onEnterLocalSetup?: () => void;
-  /** Callback when user wants to switch to remote (first-launch only) */
-  onChooseRemote?: () => void;
   localAvailable?: boolean;
 };
 
 export function OnboardingScreen({
   onBack,
-  onCliAvailable,
+  onRuntimeAvailable,
   mode = 'first-launch',
   recoveryVariant = 'missing-default-host',
   recoveryHostUrl,
@@ -60,11 +58,8 @@ export function OnboardingScreen({
         onChooseRemote={() => setShowRecoveryRemoteForm(true)}
         showRemoteForm={showRecoveryRemoteForm}
         onCloseRemoteForm={() => setShowRecoveryRemoteForm(false)}
-        onSwitchToLocalFromRemote={() => {
-          setShowRecoveryRemoteForm(false);
-          setRecoveryEnteredLocalSetup(true);
-        }}
         onEnterLocalSetup={() => {
+          setShowRecoveryRemoteForm(false);
           setRecoveryEnteredLocalSetup(true);
           onEnterLocalSetup?.();
         }}
@@ -84,9 +79,12 @@ export function OnboardingScreen({
             onBack?.();
           }
         }}
-        onCliAvailable={onCliAvailable}
+        onRuntimeAvailable={onRuntimeAvailable}
         isFromRecovery={recoveryEnteredLocalSetup}
-        onSwitchToRemote={() => setShowRecoveryRemoteForm(true)}
+        onSwitchToRemote={() => {
+          setRecoveryEnteredLocalSetup(false);
+          setShowRecoveryRemoteForm(true);
+        }}
       />
     );
   }
@@ -94,7 +92,7 @@ export function OnboardingScreen({
   // First-launch mode (default)
   return (
     <ChooserScreen
-      onCliAvailable={onCliAvailable}
+      onRuntimeAvailable={onRuntimeAvailable}
       localAvailable={localAvailable}
     />
   );

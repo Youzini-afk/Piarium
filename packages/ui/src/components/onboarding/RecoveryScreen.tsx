@@ -21,8 +21,6 @@ type RecoveryScreenProps = {
   showRemoteForm?: boolean;
   /** Callback when closing remote form */
   onCloseRemoteForm?: () => void;
-  /** Callback when switching to local from remote form */
-  onSwitchToLocalFromRemote?: () => void;
   /** Callback when entering local setup */
   onEnterLocalSetup?: () => void;
   /** Whether retry action is in progress */
@@ -38,7 +36,6 @@ export function RecoveryScreen({
   onChooseRemote,
   showRemoteForm = false,
   onCloseRemoteForm,
-  onSwitchToLocalFromRemote,
   onEnterLocalSetup,
   isRetrying = false,
   localAvailable = true,
@@ -94,6 +91,15 @@ export function RecoveryScreen({
     }
   }, [variant, onChooseRemote]);
 
+  const handleRemoteFormUseLocal = React.useCallback(async () => {
+    await persistFirstChoice('local');
+    if (isDesktopShell()) {
+      await restartDesktopApp();
+      return;
+    }
+    onEnterLocalSetup?.();
+  }, [onEnterLocalSetup, persistFirstChoice]);
+
   // Recovery mode — show recovery component first; only switch to remote form on explicit user action
   if (showRemoteForm) {
     // For remote-wrong-service, do NOT auto-populate the known bad URL
@@ -106,15 +112,7 @@ export function RecoveryScreen({
         initialLabel={prefillLabel}
         isRecoveryMode={true}
         showInstancePicker={!localAvailable}
-        onSwitchToLocal={localAvailable ? (onSwitchToLocalFromRemote || (() => {
-          persistFirstChoice('local').then(() => {
-            if (isDesktopShell()) {
-              restartDesktopApp();
-            } else {
-              onEnterLocalSetup?.();
-            }
-          });
-        })) : undefined}
+        onSwitchToLocal={localAvailable ? () => void handleRemoteFormUseLocal() : undefined}
       />
     );
   }

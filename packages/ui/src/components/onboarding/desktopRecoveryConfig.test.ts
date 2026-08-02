@@ -8,14 +8,14 @@ describe('getDesktopRecoveryConfig', () => {
   test('local-unavailable exposes both actions and Retry Local', () => {
     const config = getDesktopRecoveryConfig('local-unavailable');
 
-    expect(config.title).toBe('Local OpenCode Unavailable');
+    expect(config.title).toBe('Local Pi Runtime Unavailable');
     expect(config.iconKey).toBe('local');
     expect(config.showRetry).toBe(true);
     expect(config.retryLabel).toBe('Retry Local');
     expect(config.showUseLocal).toBe(true);
     expect(config.showUseRemote).toBe(true);
-    // local-unavailable uses setup-oriented label since local needs installing
-    expect(config.useLocalLabel).toBe('Set Up Local');
+    // local-unavailable opens the Pi runtime diagnostics flow.
+    expect(config.useLocalLabel).toBe('Check Local Pi');
     expect(config.useRemoteLabel).toBe('Use Remote');
   });
 
