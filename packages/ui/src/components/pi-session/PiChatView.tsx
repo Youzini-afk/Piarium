@@ -19,10 +19,12 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { PiComposer } from './PiComposer';
+import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiTimeline } from './PiTimeline';
 import { piSessionTitle } from './sessionPresentation';
 
@@ -67,11 +69,15 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
   const recoveryPreference = useUIStore((state) => state.recoveryPreference);
+  const extensionUi = usePiInteractionStore((state) => (
+    currentSessionId === null ? undefined : state.sessions[currentSessionId]
+  ));
   const [drafts, setDrafts] = React.useState<Record<string, PiDraftState>>({});
   const [sending, setSending] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
+  const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const untitled = t('sessions.sidebar.session.untitled');
   const draft = currentSessionId === null
     ? emptyDraft()
@@ -86,6 +92,14 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       },
     }));
   }, []);
+
+  React.useEffect(() => {
+    if (!currentSessionId || !extensionUi?.editorText) return;
+    const { revision, text } = extensionUi.editorText;
+    if (appliedEditorRevisions.current.get(currentSessionId) === revision) return;
+    appliedEditorRevisions.current.set(currentSessionId, revision);
+    updateDraft(currentSessionId, { text });
+  }, [currentSessionId, extensionUi?.editorText, updateDraft]);
 
   const handleCreate = React.useCallback(async () => {
     const activeProject = projects.find((project) => project.id === activeProjectId);
@@ -201,9 +215,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 
   const { snapshot } = currentRecord;
   const entries = currentRecord.branchEntries?.entries ?? [];
-  const title = currentSummary
+  const title = extensionUi?.title?.trim() || (currentSummary
     ? piSessionTitle(currentSummary, untitled)
-    : snapshot.name?.trim() || untitled;
+    : snapshot.name?.trim() || untitled);
   const supportsCombinedRecovery = currentRecord.recoveryStatus?.modes.includes('both') === true;
 
   return (
@@ -237,6 +251,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         ) : (
           <PiTimeline
             entries={entries}
+            hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
             liveAssistant={currentRecord.liveAssistant}
             onRecover={handleRecover}
             recoveryBusyEntryId={recoveryBusyEntryId}
@@ -244,6 +259,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             toolExecutions={currentRecord.toolExecutions}
           />
         )}
+
+        <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} />
 
         {!readOnly && (
           <PiComposer
@@ -258,6 +275,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             onSend={handleSend}
           />
         )}
+        <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />
       </div>
 
       <Dialog open={recoveryEntry !== null} onOpenChange={(open) => { if (!open) setRecoveryEntry(null); }}>

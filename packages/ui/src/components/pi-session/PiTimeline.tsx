@@ -17,6 +17,7 @@ import type { PiToolExecutionState } from '@/stores/usePiSessionStore';
 
 interface PiTimelineProps {
   entries: PiSessionEntry[];
+  hiddenThinkingLabel?: string;
   liveAssistant?: PiAssistantMessage;
   onRecover(entry: PiSessionMessageEntry): void;
   recoveryBusyEntryId?: string | null;
@@ -158,10 +159,11 @@ const MetaEntry: React.FC<{
 const AssistantMessage: React.FC<{
   entryId: string;
   executionById: Record<string, PiToolExecutionState>;
+  hiddenThinkingLabel?: string;
   message: PiAssistantMessage;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
   streaming?: boolean;
-}> = ({ entryId, executionById, message, resultByCallId, streaming = false }) => (
+}> = ({ entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => (
   <div className="max-w-full">
     {message.content.map((content, index) => {
       if (content.type === 'text') {
@@ -179,7 +181,7 @@ const AssistantMessage: React.FC<{
         return (
           <details key={`${entryId}:thinking:${index}`} className="my-2 rounded-lg border border-border/60 bg-muted/15">
             <summary className="cursor-pointer select-none px-3 py-2 typography-meta text-muted-foreground">
-              Thinking{content.redacted ? ' (redacted)' : ''}
+              {hiddenThinkingLabel || 'Thinking'}{content.redacted ? ' (redacted)' : ''}
             </summary>
             {!content.redacted && (
               <div className="border-t border-border/60 px-3 py-2 text-muted-foreground">
@@ -213,6 +215,7 @@ const AssistantMessage: React.FC<{
 
 export const PiTimeline: React.FC<PiTimelineProps> = ({
   entries,
+  hiddenThinkingLabel,
   liveAssistant,
   onRecover,
   recoveryBusyEntryId,
@@ -311,6 +314,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                   <AssistantMessage
                     entryId={entry.id}
                     executionById={toolExecutions}
+                    hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
                     message={message}
                     resultByCallId={resultByCallId}
                   />
@@ -431,6 +435,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             <AssistantMessage
               entryId={`live:${sessionId}`}
               executionById={toolExecutions}
+              hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
               message={liveAssistant}
               resultByCallId={resultByCallId}
               streaming

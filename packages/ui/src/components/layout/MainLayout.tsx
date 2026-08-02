@@ -12,6 +12,7 @@ import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
 import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
+import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
 import { ArchiveView } from '@/components/views/ArchiveView';
 import { WorktreesView } from '@/components/views/WorktreesView';
@@ -244,6 +245,7 @@ export const MainLayout: React.FC = () => {
                 )}
             >
                 <CommandPalette />
+                <PiInteractionHost />
                 <HelpDialog />
                 <OpenCodeStatusDialog />
                 <WorkspaceOverlays />

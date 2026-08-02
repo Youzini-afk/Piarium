@@ -3064,5 +3064,10 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.premiumInteractions': 'Premium interactions',
   'aboutDialog.openChamberVersionLabel': 'OpenChamber version {version}',
   'aboutDialog.openCodeVersionLabel': 'OpenCode version {version}',
+  'pi.interaction.extensionFallback': 'Pi 扩展',
+  'pi.interaction.trust.description': 'Pi 在此工作区发现了项目提供的扩展和资源。信任后将允许这些代码运行。',
+  'pi.interaction.trust.remember': '记住对此工作区的选择',
+  'pi.interaction.trust.title': '信任项目扩展？',
+  'pi.interaction.trust.workspace': '工作区',
   'voice.action.finishAndTranscribe': 'Finish and transcribe voice input',
 };
