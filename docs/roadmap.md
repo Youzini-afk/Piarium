@@ -67,7 +67,7 @@ retained before engine surgery begins.
   catalog/per-session worker broker; Electron owns its handshake, packaged entry verification,
   and bounded shutdown lifecycle. The authenticated WebSocket gateway now shares that broker with
   web/desktop/mobile, validates every public method, routes per-worker event sequences, and works
-  through the existing encrypted relay allowlist. Protocol v4 now projects Pi session trees,
+  through the existing encrypted relay allowlist. Protocol v5 now projects Pi session trees,
   messages, stream deltas, models, and provider-owned auth prompts/events into stable Piarium DTOs;
   SDK callbacks, signatures, and credentials remain worker-private. Pi-native user/project/operator
   provider configuration, scoped deletion, credential provenance, and credential-safe model discovery
@@ -76,7 +76,7 @@ retained before engine surgery begins.
   real runtime/queue state, model thinking selection, native rename, atomic archive/restore metadata,
   and safe deletion. Product-level queue, transport-frame, gateway concurrency, and discovery ceilings
   are absent by default; deployment budgets are opt-in.
-- Implemented protocol v4 recovery capability discovery. Pi-native conversation rollback preserves
+- Implemented protocol v5 recovery capability discovery and unrestricted scoped plugin settings. Pi-native conversation rollback preserves
   text/images; workspace-history owns combined restore/undo/redo/checkpoints; pi-wtf owns prompt
   repair; recovery bridge v1 accepts future structured/files-only capabilities. The parallel
   `@piarium/recovery` shadow-Git engine was deleted.

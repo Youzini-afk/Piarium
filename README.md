@@ -16,10 +16,11 @@ desktop broker, and plugin-backed conversation/workspace recovery bridge are imp
 The complete OpenChamber-derived product shell is now imported and builds from this repository.
 Its Electron lifecycle owns the Pi worker broker directly, and an authenticated Pi-native
 WebSocket surface plus browser client now carries that broker across desktop/web/mobile and the
-encrypted relay. Protocol v4 now exposes Pi's complete branch graph, tree/header/entry/summary/stats,
+encrypted relay. Protocol v5 now exposes Pi's complete branch graph, tree/header/entry/summary/stats,
 real streaming/compaction/queue state, native rename/archive/restore/delete, model and thinking
 selection, provider-owned authentication, and recovery-provider capabilities as Piarium DTOs without
-leaking SDK-only callbacks or Pi credential objects. Conversation rollback uses Pi directly;
+leaking SDK-only callbacks or Pi credential objects. It also carries explicit project-trust responses,
+the complete Pi extension UI surface, and scope-aware arbitrary plugin settings. Conversation rollback uses Pi directly;
 workspace history and repair delegate to `pi-workspace-history` and `pi-wtf`, so their independent
 package updates remain usable. The duplicate Piarium shadow-Git engine has been removed. Product
 limits are absent by default; deployment resource budgets are explicit opt-ins. Replacement of the

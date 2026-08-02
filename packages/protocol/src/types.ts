@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 4 as const;
+export const PIARIUM_PROTOCOL_VERSION = 5 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -237,6 +237,14 @@ export interface ProjectTrustRequest {
   cwd: string;
   id: string;
   reason: "project-resources";
+}
+
+export type PiSettingsScope = "global" | "project";
+
+export interface PiSettingsSnapshot {
+  global: { [key: string]: JsonValue };
+  project: { [key: string]: JsonValue };
+  projectTrusted: boolean;
 }
 
 export interface ProtocolErrorData {

@@ -6,6 +6,8 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiSettingsScope,
+  PiSettingsSnapshot,
   ProviderAuthType,
   RecoveryMode,
   RecoveryOperationResult,
@@ -218,11 +220,15 @@ export interface HostMethodMap {
   };
   "settings.get": {
     params: Record<string, never>;
-    result: JsonValue;
+    result: PiSettingsSnapshot;
   };
   "settings.update": {
-    params: { patch: JsonValue };
-    result: JsonValue;
+    params: {
+      remove: string[];
+      scope: PiSettingsScope;
+      set: { [key: string]: JsonValue };
+    };
+    result: PiSettingsSnapshot;
   };
 }
 

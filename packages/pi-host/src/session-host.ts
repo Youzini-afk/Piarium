@@ -24,6 +24,8 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiSettingsScope,
+  PiSettingsSnapshot,
   ProviderConfigDeleteScope,
   ProviderConfigDetails,
   ProviderConfigInput,
@@ -53,6 +55,7 @@ import { ProjectTrustController } from "./project-trust-controller.js";
 import { ProviderAuthBridge } from "./provider-auth-bridge.js";
 import { ProviderConfigurationManager } from "./provider-configuration.js";
 import { discoverProviderModels } from "./provider-model-discovery.js";
+import { PiSettingsFileEditor } from "./settings-file-editor.js";
 import {
   projectAgentEvent,
   projectProviderAuthEvent,
@@ -66,20 +69,6 @@ import {
 } from "./recovery-plugin-adapter.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
-
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-const QUEUE_MODES = new Set(["all", "one-at-a-time"]);
-const WRITABLE_SETTINGS = new Set([
-  "compactionEnabled",
-  "defaultModel",
-  "defaultProvider",
-  "defaultThinkingLevel",
-  "followUpMode",
-  "retryEnabled",
-  "shellPath",
-  "steeringMode",
-  "theme",
-]);
 
 export interface SessionHostOptions {
   agentDir: string;
@@ -209,17 +198,6 @@ function packageNameFromSource(source: string): string {
   }
   if (/^[A-Za-z0-9_.-]+(?:@[^@]+)?$/.test(value)) return value.split("@")[0] ?? value;
   return value;
-}
-
-function requireSettingType(
-  values: Record<string, JsonValue>,
-  key: string,
-  expected: "boolean" | "string",
-): void {
-  const value = values[key];
-  if (value !== undefined && typeof value !== expected) {
-    throw new HostError("invalid_settings", `${key} must be a ${expected}`);
-  }
 }
 
 export class SessionHost {
@@ -884,82 +862,49 @@ export class SessionHost {
     return this.listPackages();
   }
 
-  getSettings(): JsonValue {
+  getSettings(): PiSettingsSnapshot {
     const settings = this.runtime.services.settingsManager;
-    return toJsonValue({
-      global: settings.getGlobalSettings(),
-      project: settings.getProjectSettings(),
+    return {
+      global: toJsonValue(settings.getGlobalSettings()) as PiSettingsSnapshot["global"],
+      project: toJsonValue(settings.getProjectSettings()) as PiSettingsSnapshot["project"],
       projectTrusted: settings.isProjectTrusted(),
-    });
+    };
   }
 
-  async updateSettings(patch: JsonValue): Promise<JsonValue> {
-    if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
-      throw new HostError("invalid_settings", "Settings patch must be an object");
-    }
+  async updateSettings(
+    scope: PiSettingsScope,
+    set: JsonValue,
+    remove: readonly string[],
+  ): Promise<PiSettingsSnapshot> {
     const settings = this.runtime.services.settingsManager;
-    const values = patch as Record<string, JsonValue>;
-    const unknown = Object.keys(values).filter((key) => !WRITABLE_SETTINGS.has(key));
-    if (unknown.length > 0) {
-      throw new HostError("invalid_settings", `Unknown settings: ${unknown.join(", ")}`);
-    }
-    for (const key of [
-      "defaultProvider",
-      "defaultModel",
-      "defaultThinkingLevel",
-      "steeringMode",
-      "followUpMode",
-      "theme",
-    ]) {
-      requireSettingType(values, key, "string");
-    }
-    for (const key of ["compactionEnabled", "retryEnabled"]) {
-      requireSettingType(values, key, "boolean");
-    }
-    if (
-      values.shellPath !== undefined &&
-      values.shellPath !== null &&
-      typeof values.shellPath !== "string"
-    ) {
-      throw new HostError("invalid_settings", "shellPath must be a string or null");
-    }
-    if (typeof values.defaultProvider === "string")
-      settings.setDefaultProvider(values.defaultProvider);
-    if (typeof values.defaultModel === "string") settings.setDefaultModel(values.defaultModel);
-    if (typeof values.defaultThinkingLevel === "string") {
-      if (!THINKING_LEVELS.has(values.defaultThinkingLevel)) {
-        throw new HostError("invalid_settings", "Unknown default thinking level");
-      }
-      settings.setDefaultThinkingLevel(
-        values.defaultThinkingLevel as Parameters<typeof settings.setDefaultThinkingLevel>[0],
+    if (scope === "project" && !settings.isProjectTrusted()) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to write project settings",
       );
-    }
-    if (typeof values.steeringMode === "string") {
-      if (!QUEUE_MODES.has(values.steeringMode))
-        throw new HostError("invalid_settings", "Unknown steering mode");
-      settings.setSteeringMode(values.steeringMode as "all" | "one-at-a-time");
-    }
-    if (typeof values.followUpMode === "string") {
-      if (!QUEUE_MODES.has(values.followUpMode))
-        throw new HostError("invalid_settings", "Unknown follow-up mode");
-      settings.setFollowUpMode(values.followUpMode as "all" | "one-at-a-time");
-    }
-    if (typeof values.theme === "string") settings.setTheme(values.theme);
-    if (typeof values.compactionEnabled === "boolean") {
-      settings.setCompactionEnabled(values.compactionEnabled);
-    }
-    if (typeof values.retryEnabled === "boolean") settings.setRetryEnabled(values.retryEnabled);
-    if (typeof values.shellPath === "string" || values.shellPath === null) {
-      settings.setShellPath(values.shellPath ?? undefined);
     }
     await settings.flush();
-    const errors = settings.drainErrors();
-    if (errors.length > 0) {
+    const pendingErrors = settings.drainErrors();
+    if (pendingErrors.length > 0) {
       throw new HostError(
         "settings_write_failed",
-        errors.map((entry) => entry.error.message).join("; "),
+        pendingErrors.map((entry) => entry.error.message).join("; "),
       );
     }
+    const editor = new PiSettingsFileEditor({
+      agentDir: this.#agentDir,
+      cwd: this.runtime.cwd,
+    });
+    await editor.update(scope, set, remove);
+    await settings.reload();
+    const reloadErrors = settings.drainErrors();
+    if (reloadErrors.length > 0) {
+      throw new HostError(
+        "settings_write_failed",
+        reloadErrors.map((entry) => entry.error.message).join("; "),
+      );
+    }
+    await this.session.reload();
     return this.getSettings();
   }
 

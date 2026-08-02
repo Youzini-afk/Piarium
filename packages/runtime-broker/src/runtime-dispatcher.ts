@@ -72,6 +72,14 @@ function requireBoolean(record: Record<string, unknown>, key: string): boolean {
   return value;
 }
 
+function requireStringList(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new RuntimeDispatchError("invalid_params", `${key} must be an array of strings`);
+  }
+  return value;
+}
+
 function requireEnum<T extends string>(
   record: Record<string, unknown>,
   key: string,
@@ -468,11 +476,13 @@ async function dispatchRuntimeRequestUnchecked(
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.get", {});
     }
     case "settings.update": {
-      if (!("patch" in input)) {
-        throw new RuntimeDispatchError("invalid_params", "patch is required");
+      if (!("set" in input)) {
+        throw new RuntimeDispatchError("invalid_params", "set is required");
       }
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.update", {
-        patch: input.patch as JsonValue,
+        remove: requireStringList(input, "remove"),
+        scope: requireEnum(input, "scope", ["global", "project"] as const),
+        set: requireRecord(input.set) as { [key: string]: JsonValue },
       });
     }
 

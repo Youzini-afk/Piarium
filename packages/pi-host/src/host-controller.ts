@@ -78,6 +78,14 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
   return readString(record, key, { optional: true });
 }
 
+function readStringList(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new HostError("invalid_params", `${key} must be an array of strings`);
+  }
+  return value as string[];
+}
+
 function readProviderConfig(value: unknown): ProviderConfigInput {
   try {
     return parseProviderConfigInput(value);
@@ -461,8 +469,17 @@ export class HostController {
       }
       case "settings.get":
         return this.#sessionHost.getSettings();
-      case "settings.update":
-        return this.#sessionHost.updateSettings(readJson(params, "patch") ?? null);
+      case "settings.update": {
+        const scope = readString(params, "scope");
+        if (scope !== "global" && scope !== "project") {
+          throw new HostError("invalid_params", "Unknown settings scope");
+        }
+        return this.#sessionHost.updateSettings(
+          scope,
+          readJson(params, "set") ?? null,
+          readStringList(params, "remove"),
+        );
+      }
       case "package.list":
         return this.#sessionHost.listPackages();
       case "package.install":

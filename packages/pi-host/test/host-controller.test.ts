@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -28,10 +28,13 @@ describe("HostController", () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-host-"));
     const cwd = join(root, "workspace");
     const agentDir = join(root, "agent");
+    const extensionLoadLog = join(root, "extension-loads.txt");
     await mkdir(join(cwd, ".pi", "extensions"), { recursive: true });
     await writeFile(
       join(cwd, ".pi", "extensions", "ui-test.ts"),
-      `export default function extension(pi: any) {
+      `import { appendFileSync } from "node:fs";
+      export default function extension(pi: any) {
+        appendFileSync(${JSON.stringify(extensionLoadLog)}, "loaded\\n", "utf8");
         pi.registerProvider("piarium-test-provider", {
           name: "Piarium Test Provider",
           baseUrl: "https://provider.invalid/v1",
@@ -248,13 +251,36 @@ describe("HostController", () => {
       assert.equal((thinking.result as SessionSnapshot).thinkingLevel, "off");
 
       transport.receive(
-        createRequest("bad-settings", "settings.update", {
-          patch: { unsupportedSetting: true },
+        createRequest("plugin-settings", "settings.update", {
+          remove: [],
+          scope: "project",
+          set: {
+            workspaceHistory: {
+              enabled: true,
+              maxWorkspaces: 50,
+            },
+          },
         }),
       );
-      const badSettings = await transport.waitFor((entry) => isResponse(entry, "bad-settings"));
-      assert.ok(badSettings.kind === "response" && !badSettings.ok);
-      assert.equal(badSettings.error.code, "invalid_settings");
+      const pluginSettings = await transport.waitFor((entry) =>
+        isResponse(entry, "plugin-settings"),
+      );
+      assert.ok(pluginSettings.kind === "response" && pluginSettings.ok);
+      assert.deepEqual(
+        (pluginSettings.result as {
+          project: { workspaceHistory?: unknown };
+        }).project.workspaceHistory,
+        { enabled: true, maxWorkspaces: 50 },
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(join(cwd, ".pi", "settings.json"), "utf8")),
+        { workspaceHistory: { enabled: true, maxWorkspaces: 50 } },
+      );
+      assert.equal(
+        (await readFile(extensionLoadLog, "utf8")).trim().split("\n").length,
+        2,
+        "saving plugin settings reloads extensions so their new configuration takes effect",
+      );
     } finally {
       await controller.dispose();
       await rm(root, { force: true, recursive: true });

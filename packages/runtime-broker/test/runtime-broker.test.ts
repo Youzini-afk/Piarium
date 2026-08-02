@@ -78,6 +78,25 @@ test("broker owns catalog and per-session Pi workers", async () => {
         (provider) => provider.id === "workspace-provider",
       ),
     );
+    const updatedSettings = await dispatchRuntimeRequest(broker, "settings.update", {
+      cwd: workspace,
+      remove: [],
+      scope: "project",
+      set: {
+        workspaceHistory: {
+          enabled: true,
+          maxSessionsPerWorkspace: 12,
+        },
+      },
+    });
+    assert.deepEqual(updatedSettings.project.workspaceHistory, {
+      enabled: true,
+      maxSessionsPerWorkspace: 12,
+    });
+    assert.deepEqual(
+      (await dispatchRuntimeRequest(broker, "settings.get", { cwd: workspace })).project,
+      updatedSettings.project,
+    );
     assert.deepEqual(broker.activeSessionIds, []);
     let stopAuthPromptListener = () => {};
     const authPrompt = new Promise<{ requestId: string; sessionId: string }>((resolvePrompt) => {
