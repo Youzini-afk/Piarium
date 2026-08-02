@@ -23,26 +23,24 @@ import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
 import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { RiCheckLine, RiClipboardLine, RiCodeAiLine, RiLoopRightAiLine } from '@remixicon/react';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
-import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
+import { toast } from '@/components/ui';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
@@ -75,11 +73,11 @@ const joinPath = (base: string, segment: string): string => {
 };
 
 const buildRepoPlanPath = (directory: string, created: number, slug: string): string => {
-  return joinPath(joinPath(joinPath(directory, '.opencode'), 'plans'), `${created}-${slug}.md`);
+  return joinPath(joinPath(joinPath(directory, '.piarium'), 'plans'), `${created}-${slug}.md`);
 };
 
 const buildHomePlanPath = (created: number, slug: string): string => {
-  return `~/.opencode/plans/${created}-${slug}.md`;
+  return `~/.piarium/plans/${created}-${slug}.md`;
 };
 
 const resolveTilde = (path: string, homeDir: string | null): string => {
@@ -150,12 +148,15 @@ type SelectedLineRange = {
 
 export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const { t } = useI18n();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const createSession = useSessionUIStore((state) => state.createSession);
-  const initializeNewOpenChamberSession = useSessionUIStore((state) => state.initializeNewOpenChamberSession);
-  const sendMessage = useSessionUIStore((state) => state.sendMessage);
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const sessions = useSessions();
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const sessionSummary = usePiSessionStore((state) => (
+    state.currentSessionId === null
+      ? undefined
+      : state.summaries.find((summary) => summary.id === state.currentSessionId)
+  ));
+  const sessionSnapshot = usePiSessionStore((state) => (
+    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
+  ));
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const projects = useProjectsStore((state) => state.projects);
@@ -168,19 +169,15 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const { isMobile } = useDeviceInfo();
   const { currentTheme } = useThemeSystem();
 
-  const session = React.useMemo(() => {
-    if (!currentSessionId) return null;
-    return sessions.find((s) => s.id === currentSessionId) ?? null;
-  }, [currentSessionId, sessions]);
-
   const sessionDirectory = React.useMemo(() => {
-    const raw = typeof session?.directory === 'string' ? session.directory : '';
-    return normalize(raw || '');
-  }, [session?.directory]);
+    return normalize(sessionSnapshot?.cwd || sessionSummary?.cwd || '');
+  }, [sessionSnapshot?.cwd, sessionSummary?.cwd]);
   const projectDirectory = React.useMemo(
     () => normalize(effectiveDirectory || sessionDirectory),
     [effectiveDirectory, sessionDirectory],
   );
+  const sessionCreatedAt = sessionSummary ? Date.parse(sessionSummary.createdAt) : Number.NaN;
+  const sessionPlanSlug = currentSessionId?.replace(/[^a-zA-Z0-9._-]+/g, '-') ?? '';
   const currentProjectRef = React.useMemo(
     () => resolveProjectRefForDirectory(projectDirectory, projects, activeProjectId),
     [activeProjectId, projectDirectory, projects],
@@ -425,7 +422,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         return;
       }
 
-      if (!session?.slug || !session?.time?.created || !sessionDirectory) {
+      if (!sessionPlanSlug || !Number.isFinite(sessionCreatedAt) || !sessionDirectory) {
         setResolvedPath(null);
         setContent('');
         return;
@@ -434,8 +431,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
       setLoading(true);
 
       try {
-        const repoPath = buildRepoPlanPath(sessionDirectory, session.time.created, session.slug);
-        const homePath = resolveTilde(buildHomePlanPath(session.time.created, session.slug), homeDirectory || null);
+        const repoPath = buildRepoPlanPath(sessionDirectory, sessionCreatedAt, sessionPlanSlug);
+        const homePath = resolveTilde(buildHomePlanPath(sessionCreatedAt, sessionPlanSlug), homeDirectory || null);
 
         let resolved: string | null = null;
         let text: string | null = null;
@@ -480,7 +477,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       cancelled = true;
     };
-  }, [homeDirectory, planModeEnabled, runtimeApis.files, sessionDirectory, session?.slug, session?.time?.created, targetPath]);
+  }, [homeDirectory, planModeEnabled, runtimeApis.files, sessionCreatedAt, sessionDirectory, sessionPlanSlug, targetPath]);
 
   React.useEffect(() => {
     if (!resolvedPath) {
@@ -548,67 +545,26 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
           plan_path: resolvedPath ?? '',
         },
       );
-      const syntheticParts = [{ synthetic: true as const, text: instructionsText }];
       setIsPlanSendSubmitting(true);
 
       try {
         routeToChat();
-
-        let sessionId: string | null = null;
-        let directoryHint: string | null = currentProjectRef.path;
-
+        let sessionId: string;
         if (pendingPlanSend.target === 'worktree') {
-          if (!canCreateWorktree) {
-            return;
+          if (!canCreateWorktree) return;
+          const projectsState = useProjectsStore.getState();
+          if (projectsState.activeProjectId !== currentProjectRef.id) {
+            projectsState.setActiveProjectIdOnly(currentProjectRef.id);
           }
-          const created = await createWorktreeSessionForNewBranch(currentProjectRef.path, generateBranchName());
-          if (!created?.id) {
-            return;
-          }
-          sessionId = created.id;
-          directoryHint = created.path;
+          sessionId = (await createPiWorktreeSession()).sessionId;
         } else {
-          const sessionResult = await createSession(undefined, currentProjectRef.path, null);
-          if (!sessionResult?.id) {
-            return;
-          }
-          sessionId = sessionResult.id;
-          directoryHint = sessionResult.directory ?? currentProjectRef.path;
-          initializeNewOpenChamberSession(sessionResult.id, useConfigStore.getState().agents ?? []);
+          sessionId = (await createPiSessionFromNavigation({
+            directory: currentProjectRef.path,
+            projectId: currentProjectRef.id,
+          })).sessionId;
         }
-
-        if (!sessionId) {
-          return;
-        }
-
-        const selectionState = useSelectionStore.getState();
-        selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
-        if (execution.agent.trim()) {
-          selectionState.saveSessionAgentSelection(sessionId, execution.agent);
-          selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
-          selectionState.saveAgentModelVariantForSession(
-            sessionId,
-            execution.agent,
-            execution.providerID,
-            execution.modelID,
-            execution.variant || undefined,
-          );
-        }
-
-        setCurrentSession(sessionId, directoryHint);
-        // "Run as goal" rides the same arm mechanism as the composer target
-        // button; set explicitly either way so a stray armed flag cannot
-        // leak into a non-goal plan send. The objective override carries the
-        // plan substance — "Implement this plan: X" alone would give the
-        // progress audit nothing to judge against. Plans that exceed the
-        // objective limit are distilled into completion criteria by the
-        // small model (the working agent always reads the full plan from
-        // its file); on distillation failure a head+tail excerpt keeps the
-        // intent (top) and acceptance criteria (bottom), sacrificing the
-        // implementation middle the agent reads from the file anyway.
-        // Oversized objectives (huge plans) are distilled into audit
-        // criteria inside setSessionGoal — the shared path for every goal
-        // source. Here we only compose header + full content.
+        // Pi receives the full plan directly. Goal mode adds explicit completion
+        // criteria without routing the request through the legacy goal runtime.
         const goalObjective = execution.runAsGoal === true
           ? [
               `Implement the plan "${sendPromptTitle}" end-to-end${resolvedPath ? ` (plan file: ${resolvedPath})` : ''}.`,
@@ -617,24 +573,29 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
               content,
             ].join('\n')
           : null;
-        useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
-        await sendMessage(
-          visiblePrompt,
-          execution.providerID,
-          execution.modelID,
-          execution.agent.trim() || undefined,
-          undefined,
-          undefined,
-          syntheticParts,
-          execution.variant || undefined,
-        );
+        const promptText = [visiblePrompt, instructionsText, goalObjective]
+          .filter((value): value is string => Boolean(value?.trim()))
+          .join('\n\n');
+        const sessionState = usePiSessionStore.getState();
+        await sessionState.selectModel(sessionId, {
+          id: execution.modelID,
+          provider: execution.providerID,
+        });
+        await sessionState.selectThinking(sessionId, execution.thinkingLevel);
+        if (!await sessionState.prompt(sessionId, promptText)) {
+          throw new Error('The Pi runtime did not accept the plan prompt');
+        }
 
         setPendingPlanSend(null);
+      } catch (error) {
+        toast.error('Failed to start Pi plan session', {
+          description: error instanceof Error ? error.message : String(error),
+        });
       } finally {
         setIsPlanSendSubmitting(false);
       }
     },
-    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
+    [canCreateWorktree, content, currentProjectRef, pendingPlanSend, resolvedPath, routeToChat, sendPromptTitle]
   );
 
   const blockWidgets = React.useMemo(() => {

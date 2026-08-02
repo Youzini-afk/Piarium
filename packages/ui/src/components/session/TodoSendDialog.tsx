@@ -1,132 +1,121 @@
 import React from 'react';
+import type { ModelDescriptor, ThinkingLevel } from '@piarium/protocol';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Checkbox } from '@/components/ui/checkbox';
-import { isVSCodeRuntime } from '@/lib/desktop';
-import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
-import { ThinkingPill } from '@/components/session/ThinkingPill';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useAgentsStore } from '@/stores/useAgentsStore';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
-import { getModelVariantKeys } from '@/lib/modelVariants';
 import { useI18n } from '@/lib/i18n';
+import { usePiProviderStore } from '@/stores/usePiProviderStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 type TodoSendTarget = 'session' | 'worktree';
 
-export type TodoSendExecution = {
-  providerID: string;
+export interface TodoSendExecution {
   modelID: string;
-  variant: string;
-  agent: string;
+  providerID: string;
   runAsGoal?: boolean;
-};
+  thinkingLevel: ThinkingLevel;
+}
 
-type TodoSendDialogProps = {
+interface TodoSendDialogProps {
+  allowRunAsGoal?: boolean;
+  onConfirm(execution: TodoSendExecution): Promise<void> | void;
+  onOpenChange(open: boolean): void;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
-  target: TodoSendTarget;
   projectDirectory: string | null;
   submitting?: boolean;
-  /** Offer a "Run as goal" checkbox (hidden in VS Code, where the loop does not run). */
-  allowRunAsGoal?: boolean;
-  onConfirm: (execution: TodoSendExecution) => Promise<void> | void;
+  target: TodoSendTarget;
+}
+
+const modelKey = (model: Pick<ModelDescriptor, 'id' | 'provider'>): string => (
+  JSON.stringify([model.provider, model.id])
+);
+
+const parseModelKey = (value: string): { id: string; provider: string } | null => {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+    const [provider, id] = parsed;
+    return typeof provider === 'string' && typeof id === 'string' ? { id, provider } : null;
+  } catch {
+    return null;
+  }
 };
 
-const getInitialExecution = (params: {
-  providerID: string;
-  modelID: string;
-  variant: string;
-  agent: string;
-}): TodoSendExecution => ({
-  providerID: params.providerID,
-  modelID: params.modelID,
-  variant: params.variant,
-  agent: params.agent,
-});
-
-export function TodoSendDialog(props: TodoSendDialogProps) {
+export function TodoSendDialog({
+  allowRunAsGoal = false,
+  onConfirm,
+  onOpenChange,
+  open,
+  projectDirectory,
+  submitting = false,
+  target,
+}: TodoSendDialogProps) {
   const { t } = useI18n();
-  const { open, onOpenChange, target, projectDirectory, submitting = false, allowRunAsGoal = false, onConfirm } = props;
-  const showRunAsGoal = allowRunAsGoal && !isVSCodeRuntime();
-
-  const loadProviders = useConfigStore((state) => state.loadProviders);
-  const loadConfigAgents = useConfigStore((state) => state.loadAgents);
-  const loadAgentsStoreAgents = useAgentsStore((state) => state.loadAgents);
-  const providers = useConfigStore((state) => state.providers);
-  const currentProviderID = useConfigStore((state) => state.currentProviderId);
-  const currentModelID = useConfigStore((state) => state.currentModelId);
-  const currentVariant = useConfigStore((state) => state.currentVariant || '');
-  const currentAgentName = useConfigStore((state) => state.currentAgentName || '');
-
-  const [execution, setExecution] = React.useState<TodoSendExecution>(() => getInitialExecution({
-    providerID: currentProviderID,
-    modelID: currentModelID,
-    variant: currentVariant,
-    agent: currentAgentName,
-  }));
+  const currentSnapshot = usePiSessionStore((state) => (
+    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
+  ));
+  const providers = usePiProviderStore((state) => state.allProviders);
+  const loading = usePiProviderStore((state) => state.isLoading);
+  const error = usePiProviderStore((state) => state.error);
+  const load = usePiProviderStore((state) => state.load);
+  const [execution, setExecution] = React.useState<TodoSendExecution>({
+    modelID: '',
+    providerID: '',
+    thinkingLevel: 'off',
+  });
 
   React.useEffect(() => {
-    if (!open) return;
-    void loadProviders({ directory: projectDirectory, source: 'todoSendDialog' });
-    void loadConfigAgents({ directory: projectDirectory });
-    void loadAgentsStoreAgents();
-  }, [open, loadProviders, loadConfigAgents, loadAgentsStoreAgents, projectDirectory]);
+    if (!open || !projectDirectory) return;
+    void load(projectDirectory).catch(() => undefined);
+  }, [load, open, projectDirectory]);
+
+  const models = React.useMemo(() => providers
+    .flatMap((provider) => provider.models)
+    .filter((model) => model.available)
+    .sort((left, right) => `${left.provider}/${left.name}`.localeCompare(`${right.provider}/${right.name}`)), [providers]);
 
   React.useEffect(() => {
-    if (!open) return;
-    setExecution(getInitialExecution({
-      providerID: currentProviderID,
-      modelID: currentModelID,
-      variant: currentVariant,
-      agent: currentAgentName,
+    if (!open || models.length === 0) return;
+    const current = models.find((model) => (
+      model.provider === currentSnapshot?.model?.provider && model.id === currentSnapshot.model.id
+    ));
+    const selected = models.find((model) => (
+      model.provider === execution.providerID && model.id === execution.modelID
+    ));
+    const model = selected ?? current ?? models[0];
+    if (!model) return;
+    const currentThinking = currentSnapshot?.thinkingLevel;
+    const thinkingLevel = model.supportedThinkingLevels.includes(execution.thinkingLevel)
+      ? execution.thinkingLevel
+      : currentThinking && model.supportedThinkingLevels.includes(currentThinking)
+        ? currentThinking
+        : model.supportedThinkingLevels[0] ?? 'off';
+    if (
+      execution.providerID === model.provider
+      && execution.modelID === model.id
+      && execution.thinkingLevel === thinkingLevel
+    ) return;
+    setExecution((value) => ({
+      ...value,
+      modelID: model.id,
+      providerID: model.provider,
+      thinkingLevel,
     }));
-  }, [open, currentProviderID, currentModelID, currentVariant, currentAgentName]);
+  }, [currentSnapshot?.model, currentSnapshot?.thinkingLevel, execution.modelID, execution.providerID, execution.thinkingLevel, models, open]);
 
-  React.useEffect(() => {
-    if (!open || providers.length === 0) return;
-
-    const provider = providers.find((item) => item.id === execution.providerID) ?? providers[0];
-    const models = Array.isArray(provider?.models) ? provider.models : [];
-    const hasModel = models.some((item) => item.id === execution.modelID);
-    const fallbackModelID = models[0]?.id ?? '';
-
-    if (provider?.id === execution.providerID && hasModel) return;
-
-    setExecution((prev) => ({
-      ...prev,
-      providerID: provider?.id ?? '',
-      modelID: hasModel ? prev.modelID : fallbackModelID,
-      variant: '',
-    }));
-  }, [open, providers, execution.providerID, execution.modelID]);
-
-  const agentFilter = React.useCallback((agent: { mode?: string }) => isPrimaryMode(agent.mode), []);
-
-  const variantOptions = React.useMemo(() => {
-    const provider = providers.find((item) => item.id === execution.providerID);
-    const model = provider?.models?.find((item) => item.id === execution.modelID);
-    return getModelVariantKeys(model);
-  }, [providers, execution.providerID, execution.modelID]);
-
-  const hasVariantOptions = variantOptions.length > 0;
-
-  React.useEffect(() => {
-    if (hasVariantOptions || !execution.variant) return;
-    setExecution((prev) => ({ ...prev, variant: '' }));
-  }, [hasVariantOptions, execution.variant]);
-
-  const canConfirm = execution.providerID.trim().length > 0 && execution.modelID.trim().length > 0;
-
+  const selectedModel = models.find((model) => (
+    model.provider === execution.providerID && model.id === execution.modelID
+  ));
+  const canConfirm = selectedModel !== undefined && !loading;
   const handleSubmit = React.useCallback(() => {
     if (!canConfirm || submitting) return;
     void onConfirm(execution);
-  }, [canConfirm, submitting, onConfirm, execution]);
+  }, [canConfirm, execution, onConfirm, submitting]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -138,7 +127,7 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [open, handleSubmit]);
+  }, [handleSubmit, open]);
 
   const title = target === 'worktree'
     ? t('rightSidebar.contextNotesTodo.sendDialog.title.newWorktree')
@@ -152,44 +141,61 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          <div className="flex min-w-0 flex-col gap-1.5">
+          <label className="flex min-w-0 flex-col gap-1.5">
             <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.model')}</span>
-            <ModelSelector
-              providerId={execution.providerID}
-              modelId={execution.modelID}
-              className="max-w-[320px] justify-between"
-              dropdownPortalToBody
-              onChange={(providerID, modelID) => {
-                setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
+            <select
+              value={selectedModel ? modelKey(selectedModel) : ''}
+              onChange={(event) => {
+                const next = parseModelKey(event.target.value);
+                const model = next ? models.find((candidate) => candidate.provider === next.provider && candidate.id === next.id) : undefined;
+                if (!model) return;
+                setExecution((current) => ({
+                  ...current,
+                  modelID: model.id,
+                  providerID: model.provider,
+                  thinkingLevel: model.supportedThinkingLevels.includes(current.thinkingLevel)
+                    ? current.thinkingLevel
+                    : model.supportedThinkingLevels[0] ?? 'off',
+                }));
               }}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
+              disabled={loading || models.length === 0}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 typography-ui-label text-foreground outline-none focus:border-primary"
+            >
+              {models.map((model) => (
+                <option key={modelKey(model)} value={modelKey(model)}>
+                  {model.name} ({model.provider}/{model.id})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1.5">
             <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.thinkingLevel.label')}</span>
-            <ThinkingPill
-              value={execution.variant}
-              options={variantOptions}
-              disabled={!hasVariantOptions}
-              onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
-            <AgentSelector
-              agentName={execution.agent}
-              filter={agentFilter}
-              dropdownPortalToBody
-              onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
-            />
-          </div>
+            <select
+              value={execution.thinkingLevel}
+              onChange={(event) => setExecution((current) => ({
+                ...current,
+                thinkingLevel: event.target.value as ThinkingLevel,
+              }))}
+              disabled={!selectedModel || selectedModel.supportedThinkingLevels.length === 0}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 typography-ui-label text-foreground outline-none focus:border-primary"
+            >
+              {(selectedModel?.supportedThinkingLevels ?? ['off']).map((level) => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
+          </label>
+
+          {loading && <p className="typography-meta text-muted-foreground">Loading Pi models...</p>}
+          {error && !loading && <p className="typography-meta text-[var(--status-error)]">{error}</p>}
         </div>
 
-        <div className={`flex items-center gap-3 ${showRunAsGoal ? 'justify-between' : 'justify-end'}`}>
-          {showRunAsGoal ? (
+        <div className={`flex items-center gap-3 ${allowRunAsGoal ? 'justify-between' : 'justify-end'}`}>
+          {allowRunAsGoal && (
             <div className="flex min-w-0 items-center gap-2">
               <Checkbox
                 checked={execution.runAsGoal === true}
-                onChange={(runAsGoal: boolean) => setExecution((prev) => ({ ...prev, runAsGoal }))}
+                onChange={(runAsGoal: boolean) => setExecution((current) => ({ ...current, runAsGoal }))}
                 disabled={submitting}
                 ariaLabel={t('sessions.scheduledTasks.editor.goal.aria')}
               />
@@ -197,21 +203,21 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
                 type="button"
                 className="truncate typography-ui-label text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={submitting}
-                onClick={() => setExecution((prev) => ({ ...prev, runAsGoal: prev.runAsGoal !== true }))}
+                onClick={() => setExecution((current) => ({ ...current, runAsGoal: current.runAsGoal !== true }))}
               >
                 {t('sessions.scheduledTasks.editor.goal.label')}
               </button>
             </div>
-          ) : null}
+          )}
           <div className="flex items-center justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
-            {t('rightSidebar.contextNotesTodo.sendDialog.actions.cancel')}
-          </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={!canConfirm || submitting}>
-            {submitting
-              ? t('rightSidebar.contextNotesTodo.sendDialog.actions.sending')
-              : t('rightSidebar.contextNotesTodo.sendDialog.actions.send')}
-          </Button>
+            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
+              {t('rightSidebar.contextNotesTodo.sendDialog.actions.cancel')}
+            </Button>
+            <Button size="sm" onClick={handleSubmit} disabled={!canConfirm || submitting}>
+              {submitting
+                ? t('rightSidebar.contextNotesTodo.sendDialog.actions.sending')
+                : t('rightSidebar.contextNotesTodo.sendDialog.actions.send')}
+            </Button>
           </div>
         </div>
       </DialogContent>

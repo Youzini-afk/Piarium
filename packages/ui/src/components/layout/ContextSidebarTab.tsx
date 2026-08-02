@@ -1,469 +1,270 @@
 import React from 'react';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type {
+  PiSessionEntry,
+  PiSessionMessageEntry,
+  PiUsage,
+} from '@piarium/protocol';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
-
-import { deriveMessageRole } from '@/components/chat/message/messageRole';
-import { Icon } from "@/components/icon/Icon";
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
-import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
+import { Icon } from '@/components/icon/Icon';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import {
-  derivePartsLabel,
-  deriveUserSnippet,
-  formatAssistantTokens,
-  formatMessagePreviewTime,
-} from './rawMessagePreview';
-import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
-type SessionMessage = { info: Message; parts: Part[] };
-
-type ProviderModelLike = {
-  id?: string;
-  name?: string;
-  limit?: { context?: number };
-};
-
-type ProviderLike = {
-  id?: string;
-  name?: string;
-  models?: ProviderModelLike[];
-};
-
-type TokenBreakdown = {
+interface TokenBreakdown {
+  cacheRead: number;
+  cacheWrite: number;
   input: number;
   output: number;
   reasoning: number;
-  cacheRead: number;
-  cacheWrite: number;
   total: number;
-};
-
-type ContextBuckets = {
-  user: number;
-  assistant: number;
-  tool: number;
-  other: number;
-};
+}
 
 const EMPTY_BREAKDOWN: TokenBreakdown = {
+  cacheRead: 0,
+  cacheWrite: 0,
   input: 0,
   output: 0,
   reasoning: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
   total: 0,
 };
 
-const EMPTY_BUCKETS: ContextBuckets = {
-  user: 0,
-  assistant: 0,
-  tool: 0,
-  other: 0,
-};
+const nonNegative = (value: unknown): number => (
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+);
 
-const toNonNegativeNumber = (value: unknown): number => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    return 0;
-  }
-  return value;
-};
-
-const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
-  const tokenCandidate = (message.info as { tokens?: unknown }).tokens;
-  const source =
-    tokenCandidate !== undefined
-      ? tokenCandidate
-      : (message.parts.find((part) => (part as { tokens?: unknown }).tokens !== undefined) as { tokens?: unknown } | undefined)?.tokens;
-
-  if (typeof source === 'number') {
-    return {
-      ...EMPTY_BREAKDOWN,
-      total: toNonNegativeNumber(source),
-    };
-  }
-
-  if (!source || typeof source !== 'object') {
-    return EMPTY_BREAKDOWN;
-  }
-
-  const breakdown = source as {
-    input?: unknown;
-    output?: unknown;
-    reasoning?: unknown;
-    cache?: { read?: unknown; write?: unknown };
-  };
-
-  const input = toNonNegativeNumber(breakdown.input);
-  const output = toNonNegativeNumber(breakdown.output);
-  const reasoning = toNonNegativeNumber(breakdown.reasoning);
-  const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
-  const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
-
+const usageBreakdown = (usage: PiUsage | undefined): TokenBreakdown => {
+  if (!usage) return EMPTY_BREAKDOWN;
   return {
-    input,
-    output,
-    reasoning,
-    cacheRead,
-    cacheWrite,
-    total: input + output + reasoning + cacheRead + cacheWrite,
+    cacheRead: nonNegative(usage.cacheRead),
+    cacheWrite: nonNegative(usage.cacheWrite),
+    input: nonNegative(usage.input),
+    output: nonNegative(usage.output),
+    reasoning: nonNegative(usage.reasoning),
+    total: nonNegative(usage.totalTokens),
   };
 };
 
-const pickString = (...values: unknown[]): string => {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return value;
-    }
+const entryUsage = (entry: PiSessionEntry): PiUsage | undefined => {
+  if (entry.type === 'message') {
+    const { message } = entry;
+    if (message.role === 'assistant' || message.role === 'toolResult') return message.usage;
+    return undefined;
   }
-  return '';
+  if (entry.type === 'compaction' || entry.type === 'branch_summary') return entry.usage;
+  return undefined;
 };
 
-const estimateTextLength = (value: unknown): number => {
-  if (typeof value === 'string') {
-    return value.length;
+const latestUsage = (entries: PiSessionEntry[]): PiUsage | undefined => {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const usage = entryUsage(entries[index]);
+    if (usage) return usage;
   }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value).length;
-  }
-  if (Array.isArray(value)) {
-    return value.reduce((sum, item) => sum + estimateTextLength(item), 0);
-  }
-  if (value && typeof value === 'object') {
-    return Object.values(value as Record<string, unknown>).reduce<number>((sum, item) => sum + estimateTextLength(item), 0);
-  }
-  return 0;
+  return undefined;
 };
 
-const estimatePartChars = (part: Part, role: 'user' | 'assistant' | 'tool' | 'other'): ContextBuckets => {
-  const partRecord = part as Record<string, unknown>;
-  const type = typeof partRecord.type === 'string' ? partRecord.type : '';
-
-  if (type === 'reasoning') {
-    return {
-      ...EMPTY_BUCKETS,
-      assistant: estimateTextLength(partRecord.text) + estimateTextLength(partRecord.content),
-    };
-  }
-
-  const directText = pickString(
-    partRecord.text,
-    partRecord.content,
-    partRecord.value,
-    (partRecord.source as { value?: unknown; text?: { value?: unknown } } | undefined)?.value,
-    (partRecord.source as { value?: unknown; text?: { value?: unknown } } | undefined)?.text?.value,
-  );
-
-  if (type === 'tool' || role === 'tool') {
-    const toolInputOutputLength =
-      estimateTextLength(partRecord.input)
-      + estimateTextLength(partRecord.output)
-      + estimateTextLength(partRecord.error)
-      + estimateTextLength((partRecord.call as { input?: unknown; output?: unknown; error?: unknown } | undefined)?.input)
-      + estimateTextLength((partRecord.call as { input?: unknown; output?: unknown; error?: unknown } | undefined)?.output)
-      + estimateTextLength((partRecord.call as { input?: unknown; output?: unknown; error?: unknown } | undefined)?.error);
-
-    const toolPayloadLength =
-      toolInputOutputLength
-      + estimateTextLength(partRecord.raw)
-      + Math.round(estimateTextLength(partRecord.metadata) * 0.25)
-      + Math.round(estimateTextLength(partRecord.state) * 0.1);
-
-    return { user: 0, assistant: 0, tool: toolPayloadLength, other: 0 };
-  }
-
-  if (role === 'user') {
-    return { user: directText.length, assistant: 0, tool: 0, other: 0 };
-  }
-
-  if (role === 'assistant') {
-    return { user: 0, assistant: directText.length, tool: 0, other: 0 };
-  }
-
-  return { user: 0, assistant: 0, tool: 0, other: directText.length };
-};
-
-const addBuckets = (target: ContextBuckets, value: ContextBuckets): ContextBuckets => ({
-  user: target.user + value.user,
-  assistant: target.assistant + value.assistant,
-  tool: target.tool + value.tool,
-  other: target.other + value.other,
-});
-
-const deriveRoleBucket = (message: SessionMessage): 'user' | 'assistant' | 'tool' | 'other' => {
-  const roleInfo = deriveMessageRole(message.info);
-  if (roleInfo.isUser) return 'user';
-  if (roleInfo.role === 'assistant') return 'assistant';
-  if (roleInfo.role === 'tool') return 'tool';
-  return 'other';
-};
-
-const computeContextBreakdown = (
-  sessionMessages: SessionMessage[],
-  systemPrompt: string,
-): ContextBuckets => {
-  if (sessionMessages.length === 0) {
-    return { ...EMPTY_BUCKETS };
-  }
-
-  const totalChars = sessionMessages.reduce<ContextBuckets>((acc, message) => {
-    const role = deriveRoleBucket(message);
-    let bucket = { ...EMPTY_BUCKETS };
-    for (const part of message.parts) {
-      bucket = addBuckets(bucket, estimatePartChars(part, role));
-    }
-    return addBuckets(acc, bucket);
-  }, { ...EMPTY_BUCKETS });
-
-  totalChars.user += systemPrompt.length;
-
-  return {
-    user: Math.ceil(totalChars.user / 4),
-    assistant: Math.ceil(totalChars.assistant / 4),
-    tool: Math.ceil(totalChars.tool / 4),
-    other: Math.ceil(totalChars.other / 4),
-  };
+const timestampOf = (entry: PiSessionEntry): number | null => {
+  const parsed = Date.parse(entry.timestamp);
+  if (Number.isFinite(parsed)) return parsed;
+  if (entry.type === 'message' && typeof entry.message.timestamp === 'number') return entry.message.timestamp;
+  return null;
 };
 
 const formatNumber = (value: number): string => value.toLocaleString(getCurrentIntlLocale());
 
-const formatMoney = (value: number): string => {
-  if (!Number.isFinite(value) || value <= 0) return new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(0);
-  return new Intl.NumberFormat(getCurrentIntlLocale(), {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value < 0.01 ? 4 : 2,
-    maximumFractionDigits: value < 0.01 ? 4 : 2,
-  }).format(value);
-};
+const formatMoney = (value: number): string => new Intl.NumberFormat(getCurrentIntlLocale(), {
+  currency: 'USD',
+  maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
+  minimumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
+  style: 'currency',
+}).format(Number.isFinite(value) && value > 0 ? value : 0);
 
-const formatDateTime = (timestamp: number | null, timeFormatPreference: TimeFormatPreference): string => {
+const formatDateTime = (
+  timestamp: number | null,
+  timeFormatPreference: TimeFormatPreference,
+): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';
   return formatDateTimeForPreference(timestamp, timeFormatPreference, {
-    month: 'short',
     day: 'numeric',
-    year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
   });
 };
 
-const resolveProviderAndModel = (
-  providers: ProviderLike[],
-  providerID: string,
-  modelID: string,
-): { providerName: string; modelName: string; contextLimit: number | null } => {
-  const provider = providers.find((entry) => entry.id === providerID);
-  const model = provider?.models?.find((entry) => entry.id === modelID);
+const contentText = (entry: PiSessionMessageEntry): string => {
+  const { message } = entry;
+  if (message.role === 'toolResult') return `${message.toolName}${message.isError ? ' (error)' : ''}`;
+  if (message.role === 'bashExecution') return message.command;
+  if (message.role === 'branchSummary' || message.role === 'compactionSummary') return message.summary;
+  if (message.role === 'unknown') return message.originalRole;
+  if ('content' in message) {
+    if (typeof message.content === 'string') return message.content;
+    return message.content
+      .map((content) => {
+        if (content.type === 'text') return content.text;
+        if (content.type === 'thinking') return content.thinking;
+        if (content.type === 'toolCall') return `${content.name}(${JSON.stringify(content.arguments)})`;
+        if (content.type === 'image') return `[image: ${content.mimeType}]`;
+        return '';
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+  return '';
+};
 
-  return {
-    providerName: provider?.name || providerID || '-',
-    modelName: model?.name || modelID || '-',
-    contextLimit: typeof model?.limit?.context === 'number' ? model.limit.context : null,
-  };
+const entryLabel = (entry: PiSessionEntry): string => {
+  if (entry.type === 'message') {
+    const snippet = contentText(entry).replace(/\s+/g, ' ').trim();
+    return snippet ? `${entry.message.role}: ${snippet}` : entry.message.role;
+  }
+  if (entry.type === 'custom_message') return `${entry.customType}: ${typeof entry.content === 'string' ? entry.content : ''}`;
+  if (entry.type === 'model_change') return `model: ${entry.provider}/${entry.modelId}`;
+  if (entry.type === 'thinking_level_change') return `thinking: ${entry.thinkingLevel}`;
+  if (entry.type === 'session_info') return `session: ${entry.name ?? 'Untitled'}`;
+  if (entry.type === 'custom') return `extension: ${entry.customType}`;
+  return entry.type;
 };
 
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
-  const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const record = usePiSessionStore((state) => (
+    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
+  ));
+  const summary = usePiSessionStore((state) => (
+    state.currentSessionId === null
+      ? undefined
+      : state.summaries.find((candidate) => candidate.id === state.currentSessionId)
+  ));
+  const refreshStats = usePiSessionStore((state) => state.refreshStats);
+  const refreshEntries = usePiSessionStore((state) => state.refreshEntries);
+  const [expandedEntries, setExpandedEntries] = React.useState<Record<string, boolean>>({});
+  const [copiedEntryId, setCopiedEntryId] = React.useState<string | null>(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
-  const sessions = useSessions(currentSessionDirectory ?? undefined);
-  const sessionMessages = useSessionMessageRecords(
-    currentSessionId ?? '',
-    currentSessionDirectory ?? undefined,
-  );
-  const providers = useConfigStore((state) => state.providers);
+
+  React.useEffect(() => {
+    if (!currentSessionId) return;
+    void refreshStats(currentSessionId).catch(() => undefined);
+    if (!record?.branchEntries) void refreshEntries(currentSessionId).catch(() => undefined);
+  }, [currentSessionId, record?.branchEntries, refreshEntries, refreshStats]);
 
   React.useEffect(() => {
     if (copyResetTimeoutRef.current !== null) {
       window.clearTimeout(copyResetTimeoutRef.current);
       copyResetTimeoutRef.current = null;
     }
-    setExpandedRawMessages((prev) => (Object.keys(prev).length > 0 ? {} : prev));
-    setCopiedRawMessageId(null);
-  }, [currentSessionDirectory, currentSessionId]);
+    setExpandedEntries({});
+    setCopiedEntryId(null);
+  }, [currentSessionId]);
 
-  React.useEffect(() => {
-    return () => {
-      if (copyResetTimeoutRef.current !== null) {
-        window.clearTimeout(copyResetTimeoutRef.current);
-        copyResetTimeoutRef.current = null;
-      }
-    };
+  React.useEffect(() => () => {
+    if (copyResetTimeoutRef.current !== null) window.clearTimeout(copyResetTimeoutRef.current);
   }, []);
 
-  const handleCopyRawMessage = React.useCallback(async (messageId: string, value: string) => {
+  const copyEntry = React.useCallback(async (entryId: string, value: string) => {
     const result = await copyTextToClipboard(value);
-    if (result.ok) {
-      setCopiedRawMessageId(messageId);
-      if (copyResetTimeoutRef.current !== null) {
-        window.clearTimeout(copyResetTimeoutRef.current);
-      }
-      copyResetTimeoutRef.current = window.setTimeout(() => {
-        setCopiedRawMessageId((prev) => (prev === messageId ? null : prev));
-        copyResetTimeoutRef.current = null;
-      }, 2000);
-    } else {
-      setCopiedRawMessageId(null);
+    if (!result.ok) {
+      setCopiedEntryId(null);
+      return;
     }
+    setCopiedEntryId(entryId);
+    if (copyResetTimeoutRef.current !== null) window.clearTimeout(copyResetTimeoutRef.current);
+    copyResetTimeoutRef.current = window.setTimeout(() => {
+      setCopiedEntryId((current) => current === entryId ? null : current);
+      copyResetTimeoutRef.current = null;
+    }, 2_000);
   }, []);
-
-  const viewModel = React.useMemo(() => {
-    const currentSession = currentSessionId ? sessions.find((session) => session.id === currentSessionId) ?? null : null;
-
-    const assistantMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).role === 'assistant');
-    const userMessages = sessionMessages.filter((entry) => deriveMessageRole(entry.info).isUser);
-
-    let contextMessage: SessionMessage | null = null;
-    for (let i = assistantMessages.length - 1; i >= 0; i -= 1) {
-      const message = assistantMessages[i];
-      if (extractTokenBreakdown(message).total > 0) {
-        contextMessage = message;
-        break;
-      }
-    }
-
-    const tokenBreakdown = contextMessage ? extractTokenBreakdown(contextMessage) : EMPTY_BREAKDOWN;
-
-    // Cache hit rate for the last assistant message. `input` is the non-cached portion
-    // (total input - cache.read - cache.write per SDK's session.ts:getUsage),
-    // so hit rate = cache.read / (input + cache.read + cache.write).
-    const cacheHitRate = computeCacheHitRate({
-      input: tokenBreakdown.input,
-      cache: { read: tokenBreakdown.cacheRead, write: tokenBreakdown.cacheWrite },
-    });
-
-    const totalAssistantCost = assistantMessages.reduce((sum, message) => {
-      const cost = toNonNegativeNumber((message.info as { cost?: unknown }).cost);
-      return sum + cost;
-    }, 0);
-
-    const latestAssistantInfo = (contextMessage?.info ?? null) as (Message & { providerID?: string; modelID?: string }) | null;
-    const providerModel = resolveProviderAndModel(
-      providers as ProviderLike[],
-      latestAssistantInfo?.providerID || '',
-      latestAssistantInfo?.modelID || '',
-    );
-
-    const contextLimit = providerModel.contextLimit;
-    const usagePercent = contextLimit && contextLimit > 0
-      ? Math.min(999, (tokenBreakdown.total / contextLimit) * 100)
-      : 0;
-
-    const systemPrompt = ([...sessionMessages].reverse().find(
-      (entry) => deriveMessageRole(entry.info).isUser && typeof (entry.info as { system?: unknown }).system === 'string',
-    )?.info as { system?: string } | undefined)?.system || '';
-
-    const computedBreakdown = computeContextBreakdown(sessionMessages, systemPrompt);
-
-    const userTokens = computedBreakdown.user;
-    const assistantTokens = computedBreakdown.assistant;
-    const toolTokens = computedBreakdown.tool;
-    const otherTokens = Math.max(0, tokenBreakdown.input - userTokens - assistantTokens - toolTokens);
-    const breakdownTotal = userTokens + assistantTokens + toolTokens + otherTokens;
-
-    const firstMessageTs = sessionMessages[0]?.info?.time?.created;
-    const lastMessageTs = sessionMessages.length > 0
-      ? sessionMessages[sessionMessages.length - 1]?.info?.time?.created
-      : null;
-
-    return {
-      sessionTitle: currentSession?.title || t('contextSidebar.session.untitled'),
-      messagesCount: sessionMessages.length,
-      userMessagesCount: userMessages.length,
-      assistantMessagesCount: assistantMessages.length,
-      createdAt: (currentSession?.time?.created ?? firstMessageTs ?? null) as number | null,
-      lastActivityAt: (lastMessageTs ?? currentSession?.time?.created ?? null) as number | null,
-      providerModel,
-      tokenBreakdown,
-      usagePercent,
-      cacheHitRate,
-      totalAssistantCost,
-      contextLimit,
-      breakdown: {
-        user: userTokens,
-        assistant: assistantTokens,
-        tool: toolTokens,
-        other: otherTokens,
-      },
-      breakdownTotal,
-    };
-  }, [currentSessionId, providers, sessionMessages, sessions, t]);
 
   if (!currentSessionId) {
     return (
-        <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
+      <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
         {t('contextSidebar.empty.openSession')}
       </div>
     );
   }
 
-  const segments: Array<{ key: string; label: string; value: number; color: string }> = [
-    { key: 'user', label: t('contextSidebar.breakdown.user'), value: viewModel.breakdown.user, color: 'var(--status-success)' },
-    { key: 'assistant', label: t('contextSidebar.breakdown.assistant'), value: viewModel.breakdown.assistant, color: 'var(--primary-base)' },
-    { key: 'tool', label: t('contextSidebar.breakdown.toolCalls'), value: viewModel.breakdown.tool, color: 'var(--status-warning)' },
-    { key: 'other', label: t('contextSidebar.breakdown.other'), value: viewModel.breakdown.other, color: 'var(--surface-muted-foreground)' },
+  const entries = record?.branchEntries?.entries ?? [];
+  const stats = record?.stats;
+  const usage = latestUsage(entries);
+  const tokens = usageBreakdown(usage);
+  const contextLimit = record?.snapshot?.model?.contextWindow ?? null;
+  const usagePercent = contextLimit && contextLimit > 0
+    ? Math.min(100, (tokens.total / contextLimit) * 100)
+    : 0;
+  const cacheInput = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  const cacheHitPercent = cacheInput > 0 ? (tokens.cacheRead / cacheInput) * 100 : null;
+  const sessionTitle = record?.snapshot?.name?.trim()
+    || summary?.name?.trim()
+    || summary?.firstMessage?.split(/\r?\n/).find((line) => line.trim())?.trim()
+    || t('contextSidebar.session.untitled');
+  const createdAt = summary ? Date.parse(summary.createdAt) : null;
+  const lastActivityAt = summary ? Date.parse(summary.updatedAt) : null;
+  const model = record?.snapshot?.model;
+  const segments = [
+    { color: 'var(--status-success)', key: 'input', label: t('contextSidebar.tokens.input'), value: tokens.input },
+    { color: 'var(--primary-base)', key: 'output', label: t('contextSidebar.tokens.output'), value: tokens.output },
+    { color: 'var(--status-warning)', key: 'cacheRead', label: t('contextSidebar.tokens.cacheRead'), value: tokens.cacheRead },
+    { color: 'var(--surface-muted-foreground)', key: 'cacheWrite', label: t('contextSidebar.tokens.cacheWrite'), value: tokens.cacheWrite },
   ];
+  const segmentTotal = segments.reduce((sum, segment) => sum + segment.value, 0);
 
   return (
     <div className="h-full overflow-y-auto bg-background">
       <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
-
-        {/* ── Session header ── */}
         <div className="mb-6">
-          <h2 className="typography-ui-header font-semibold text-foreground truncate">{viewModel.sessionTitle}</h2>
+          <h2 className="truncate typography-ui-header font-semibold text-foreground">{sessionTitle}</h2>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 typography-micro text-muted-foreground/70">
-            <span>{viewModel.providerModel.providerName} / {viewModel.providerModel.modelName}</span>
-            {viewModel.createdAt && (
+            <span>{model ? `${model.provider} / ${model.name || model.id}` : '-'}</span>
+            {Number.isFinite(createdAt) && (
               <>
                 <span>&middot;</span>
-                <span>{formatDateTime(viewModel.createdAt, timeFormatPreference)}</span>
+                <span>{formatDateTime(createdAt, timeFormatPreference)}</span>
+              </>
+            )}
+            {Number.isFinite(lastActivityAt) && lastActivityAt !== createdAt && (
+              <>
+                <span>&middot;</span>
+                <span>{formatDateTime(lastActivityAt, timeFormatPreference)}</span>
               </>
             )}
           </div>
         </div>
 
-        {/* ── Context usage ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
           <div className="flex items-baseline justify-between">
             <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
             <span className="typography-micro tabular-nums text-muted-foreground/70">
-              {formatNumber(viewModel.tokenBreakdown.total)}
-              {viewModel.contextLimit ? ` / ${formatNumber(viewModel.contextLimit)}` : ''}
+              {formatNumber(tokens.total)}{contextLimit ? ` / ${formatNumber(contextLimit)}` : ''}
             </span>
           </div>
           <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-            {viewModel.usagePercent > 0 && (
+            {usagePercent > 0 && (
               <div
                 className="rounded-full transition-all duration-300"
                 style={{
-                  width: `${Math.max(0.5, viewModel.usagePercent)}%`,
-                  backgroundColor: viewModel.usagePercent > 80 ? 'var(--status-warning)' : 'var(--primary-base)',
+                  backgroundColor: usagePercent > 80 ? 'var(--status-warning)' : 'var(--primary-base)',
+                  width: `${Math.max(0.5, usagePercent)}%`,
                 }}
               />
             )}
           </div>
           <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
-            {t('contextSidebar.context.percentUsed', { percent: viewModel.usagePercent.toFixed(1) })}
+            {t('contextSidebar.context.percentUsed', { percent: usagePercent.toFixed(1) })}
           </div>
         </div>
 
-        {/* ── Stat grid ── */}
         <div className="mb-5 grid grid-cols-2 gap-2">
-          {([
-            { label: t('contextSidebar.stats.messages'), value: formatNumber(viewModel.messagesCount) },
-            { label: t('contextSidebar.stats.user'), value: formatNumber(viewModel.userMessagesCount) },
-            { label: t('contextSidebar.stats.assistant'), value: formatNumber(viewModel.assistantMessagesCount) },
-            { label: t('contextSidebar.stats.cost'), value: formatMoney(viewModel.totalAssistantCost) },
-          ] as const).map((item) => (
+          {[
+            { label: t('contextSidebar.stats.messages'), value: formatNumber(stats?.totalMessages ?? entries.filter((entry) => entry.type === 'message').length) },
+            { label: t('contextSidebar.stats.user'), value: formatNumber(stats?.userMessages ?? 0) },
+            { label: t('contextSidebar.stats.assistant'), value: formatNumber(stats?.assistantMessages ?? 0) },
+            { label: t('contextSidebar.stats.cost'), value: formatMoney(stats?.cost ?? 0) },
+          ].map((item) => (
             <div key={item.label} className="rounded-lg bg-[var(--surface-elevated)]/70 px-3 py-2.5">
               <div className="typography-micro text-muted-foreground/70">{item.label}</div>
               <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">{item.value}</div>
@@ -471,174 +272,91 @@ export const ContextPanelContent: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Last turn tokens ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground mb-2.5">{t('contextSidebar.section.lastAssistantMessage')}</div>
+          <div className="mb-2.5 typography-micro text-muted-foreground">{t('contextSidebar.section.lastAssistantMessage')}</div>
           <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
-            {([
-              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input, format: 'count' },
-              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output, format: 'count' },
-              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite, format: 'count' },
-              {
-                label: t('contextSidebar.tokens.cacheHit'),
-                value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
-                format: 'percent',
-              },
-            ] as const).map((item) => (
+            {[
+              { label: t('contextSidebar.tokens.input'), value: tokens.input, suffix: '' },
+              { label: t('contextSidebar.tokens.output'), value: tokens.output, suffix: '' },
+              { label: t('contextSidebar.tokens.reasoning'), value: tokens.reasoning, suffix: '' },
+              { label: t('contextSidebar.tokens.cacheRead'), value: tokens.cacheRead, suffix: '' },
+              { label: t('contextSidebar.tokens.cacheWrite'), value: tokens.cacheWrite, suffix: '' },
+              { label: t('contextSidebar.tokens.cacheHit'), value: cacheHitPercent, suffix: '%' },
+            ].map((item) => (
               <div key={item.label}>
                 <div className="typography-micro text-muted-foreground/70">{item.label}</div>
                 <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
-                  {item.value !== null && item.value !== undefined
-                    ? item.format === 'percent'
-                      ? `${item.value.toFixed(1)}%`
-                      : formatNumber(item.value)
-                    : '—'}
+                  {item.value === null ? '-' : `${item.suffix ? item.value.toFixed(1) : formatNumber(item.value)}${item.suffix}`}
                 </div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* ── Context breakdown ── */}
         <div className="mb-6">
           <div className="flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-            {segments.map((segment) => {
-              if (segment.value <= 0 || viewModel.breakdownTotal <= 0) return null;
-              return (
-                <div
-                  key={segment.key}
-                  style={{
-                    width: `${(segment.value / viewModel.breakdownTotal) * 100}%`,
-                    backgroundColor: segment.color,
-                  }}
-                />
-              );
-            })}
+            {segments.map((segment) => segment.value > 0 && segmentTotal > 0 ? (
+              <div
+                key={segment.key}
+                style={{ backgroundColor: segment.color, width: `${(segment.value / segmentTotal) * 100}%` }}
+              />
+            ) : null)}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-            {segments.map((segment) => {
-              const pct = viewModel.breakdownTotal > 0 ? (segment.value / viewModel.breakdownTotal) * 100 : 0;
-              return (
-                <div key={segment.key} className="inline-flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: segment.color }} />
-                  <span className="typography-micro text-muted-foreground/70">
-                    {segment.label} <span className="tabular-nums">{pct.toFixed(0)}%</span>
-                  </span>
-                </div>
-              );
-            })}
+            {segments.map((segment) => (
+              <div key={segment.key} className="inline-flex items-center gap-1.5">
+                <span className="size-1.5 rounded-full" style={{ backgroundColor: segment.color }} />
+                <span className="typography-micro text-muted-foreground/70">
+                  {segment.label} <span className="tabular-nums">{segmentTotal > 0 ? ((segment.value / segmentTotal) * 100).toFixed(0) : '0'}%</span>
+                </span>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* ── Raw messages ── */}
         <div>
           <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">
-            {[...sessionMessages].reverse().map((message) => {
-              const roleInfo = deriveMessageRole(message.info);
-              const role = roleInfo.role;
-              const isAssistant = role === 'assistant';
-              const isUser = role === 'user';
-              const isExpanded = expandedRawMessages[message.info.id] === true;
-              const isCopied = copiedRawMessageId === message.info.id;
-              const messageCreatedAt = (message.info.time?.created ?? null) as number | null;
-              const partsLabel = derivePartsLabel(message.parts);
-              const tokens = isAssistant ? extractTokenBreakdown({ info: message.info, parts: message.parts }) : null;
-              const userSnippet = isUser ? deriveUserSnippet(message.parts) : '';
-              const previewTime = formatMessagePreviewTime(messageCreatedAt, timeFormatPreference);
-              // Keep token/time columns stable; the message label owns all
-              // remaining space and truncates before it can push metrics.
-              const assistantLeft = partsLabel || '\u2014';
-              const assistantMiddle = tokens
-                ? formatAssistantTokens(tokens.input, tokens.output, formatNumber)
-                : '';
-              const otherLeft = role || 'unknown';
-              const otherLabel = partsLabel ? `${otherLeft}: ${partsLabel}` : otherLeft;
-
-              const jsonValue = isExpanded
-                ? JSON.stringify({ info: message.info, parts: message.parts }, null, 2)
-                : '';
-
+            {[...entries].reverse().map((entry) => {
+              const expanded = expandedEntries[entry.id] === true;
+              const copied = copiedEntryId === entry.id;
+              const json = expanded ? JSON.stringify(entry, null, 2) : '';
+              const timestamp = timestampOf(entry);
               return (
-                <div
-                  key={message.info.id}
-                  className="overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70"
-                >
+                <div key={entry.id} className="overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70">
                   <button
                     type="button"
                     className="w-full cursor-pointer px-3 py-1.5 text-left hover:bg-[var(--interactive-hover)]"
-                    aria-expanded={isExpanded}
-                    onClick={() => {
-                      setExpandedRawMessages((prev) => ({
-                        ...prev,
-                        [message.info.id]: !(prev[message.info.id] === true),
-                      }));
-                    }}
+                    aria-expanded={expanded}
+                    onClick={() => setExpandedEntries((current) => ({ ...current, [entry.id]: !expanded }))}
                   >
-                    <div
-                      className="grid items-center gap-x-2 whitespace-nowrap typography-micro"
-                      style={{ gridTemplateColumns: isAssistant ? 'minmax(0, 1fr) 7.5rem max-content' : 'minmax(0, 1fr) max-content' }}
-                    >
-                      {isUser ? (
-                        <span
-                          className="min-w-0 truncate text-muted-foreground"
-                        >
-                          <span className="typography-ui-label text-foreground">user:</span>{' '}
-                          {userSnippet}
-                        </span>
-                      ) : (
-                        <>
-                          <span
-                            className={
-                              isAssistant
-                                ? 'min-w-0 truncate text-muted-foreground'
-                                : 'min-w-0 truncate text-muted-foreground'
-                            }
-                          >
-                            {isAssistant ? assistantLeft : otherLabel}
-                          </span>
-                          {isAssistant && (
-                            <span className="text-right text-muted-foreground tabular-nums">
-                              {assistantMiddle}
-                            </span>
-                          )}
-                        </>
-                      )}
-                      <span className="text-right text-muted-foreground">{previewTime}</span>
+                    <div className="grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-x-2 whitespace-nowrap typography-micro">
+                      <span className="min-w-0 truncate text-muted-foreground">{entryLabel(entry)}</span>
+                      <span className="text-right text-muted-foreground">{formatDateTime(timestamp, timeFormatPreference)}</span>
                     </div>
                   </button>
-
-                  {isExpanded && (
+                  {expanded && (
                     <div className="border-t border-[var(--surface-subtle)] p-0">
                       <div className="group relative max-h-[26rem] w-full overflow-auto bg-[var(--surface-background)]">
-                        <div className="absolute top-1 right-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="absolute right-2 top-1 z-10 opacity-0 transition-opacity group-hover:opacity-100">
                           <button
                             type="button"
                             className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
                             onClick={(event) => {
                               event.stopPropagation();
-                              void handleCopyRawMessage(message.info.id, jsonValue);
+                              void copyEntry(entry.id, json);
                             }}
-                            aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
-                            title={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copy')}
+                            aria-label={copied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
+                            title={copied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copy')}
                           >
-                            {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
+                            <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
                           </button>
                         </div>
                         <WorkerHighlightedCode
                           language="json"
-                          code={jsonValue}
-                          style={{
-                            margin: 0,
-                            background: 'transparent',
-                          }}
-                          codeStyle={{
-                            padding: '0.75rem',
-                            fontSize: 'var(--text-micro)',
-                            lineHeight: '1.35',
-                          }}
+                          code={json}
+                          style={{ background: 'transparent', margin: 0 }}
+                          codeStyle={{ fontSize: 'var(--text-micro)', lineHeight: '1.35', padding: '0.75rem' }}
                           wrap
                         />
                       </div>

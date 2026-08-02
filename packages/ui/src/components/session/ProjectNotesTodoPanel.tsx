@@ -33,14 +33,13 @@ import {
   type ProjectRef,
 } from '@/lib/openchamberConfig';
 import { requestFileAccess } from '@/lib/desktop';
-import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
-import { useInputStore } from '@/sync/input-store';
-import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { usePiDraftStore } from '@/stores/usePiDraftStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { cn } from '@/lib/utils';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -186,12 +185,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const todoPanelStartYRef = React.useRef(0);
   const todoPanelStartHeightRef = React.useRef(todoPanelHeight);
 
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const createSession = useSessionUIStore((state) => state.createSession);
-  const initializeNewOpenChamberSession = useSessionUIStore((state) => state.initializeNewOpenChamberSession);
-  const sendMessage = useSessionUIStore((state) => state.sendMessage);
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
@@ -497,11 +492,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       }
       routeToChat();
       const fenced = `\`\`\`md\n${todoText}\n\`\`\``;
-      setPendingInputText(fenced, 'append');
+      appendPiDraftText(currentSessionId, fenced);
       toast.success(t('rightSidebar.contextNotesTodo.toast.sentToCurrentSession'));
       onActionComplete?.();
     },
-    [currentSessionId, onActionComplete, routeToChat, setPendingInputText, t]
+    [appendPiDraftText, currentSessionId, onActionComplete, routeToChat, t]
   );
 
   const handleSendToNewWorktreeSession = React.useCallback(
@@ -530,7 +525,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       const instructionsText = await renderMagicPrompt('plan.todo.instructions', {
         todo_text: pendingSendTarget.todoText,
       });
-      const syntheticParts = [{ synthetic: true as const, text: instructionsText }];
+      const promptText = [visiblePrompt, instructionsText].join('\n\n');
 
       setIsSendDialogSubmitting(true);
       setSendingTodoId(pendingSendTarget.todoId);
@@ -538,60 +533,33 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       try {
         routeToChat();
 
-        let sessionId: string | null = null;
-        let directoryHint: string | null = projectRef.path;
-
+        let sessionId: string;
         if (pendingSendTarget.kind === 'worktree') {
           if (!canCreateWorktree) {
             toast.error(t('rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo'));
             return;
           }
-          const created = await createWorktreeSessionForNewBranch(projectRef.path, generateBranchName());
-          if (!created?.id) {
-            return;
+          const projectsState = useProjectsStore.getState();
+          if (projectsState.activeProjectId !== projectRef.id) {
+            projectsState.setActiveProjectIdOnly(projectRef.id);
           }
-          sessionId = created.id;
-          directoryHint = created.path;
+          sessionId = (await createPiWorktreeSession()).sessionId;
         } else {
-          const session = await createSession(undefined, projectRef.path, null);
-          if (!session?.id) {
-            toast.error(t('rightSidebar.contextNotesTodo.toast.createSessionFailed'));
-            return;
-          }
-          sessionId = session.id;
-          directoryHint = session.directory ?? projectRef.path;
-          initializeNewOpenChamberSession(session.id, useConfigStore.getState().agents ?? []);
+          sessionId = (await createPiSessionFromNavigation({
+            directory: projectRef.path,
+            projectId: projectRef.id,
+          })).sessionId;
         }
 
-        if (!sessionId) {
-          return;
+        const sessionState = usePiSessionStore.getState();
+        await sessionState.selectModel(sessionId, {
+          id: execution.modelID,
+          provider: execution.providerID,
+        });
+        await sessionState.selectThinking(sessionId, execution.thinkingLevel);
+        if (!await sessionState.prompt(sessionId, promptText)) {
+          throw new Error('The Pi runtime did not accept the todo prompt');
         }
-
-        const selectionState = useSelectionStore.getState();
-        selectionState.saveSessionModelSelection(sessionId, execution.providerID, execution.modelID);
-        if (execution.agent.trim()) {
-          selectionState.saveSessionAgentSelection(sessionId, execution.agent);
-          selectionState.saveAgentModelForSession(sessionId, execution.agent, execution.providerID, execution.modelID);
-          selectionState.saveAgentModelVariantForSession(
-            sessionId,
-            execution.agent,
-            execution.providerID,
-            execution.modelID,
-            execution.variant || undefined,
-          );
-        }
-
-        setCurrentSession(sessionId, directoryHint);
-        await sendMessage(
-          visiblePrompt,
-          execution.providerID,
-          execution.modelID,
-          execution.agent.trim() || undefined,
-          undefined,
-          undefined,
-          syntheticParts,
-          execution.variant || undefined,
-        );
 
         toast.success(
           pendingSendTarget.kind === 'worktree'
@@ -608,7 +576,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         setSendingTodoId(null);
       }
     },
-    [canCreateWorktree, createSession, initializeNewOpenChamberSession, onActionComplete, pendingSendTarget, projectRef, routeToChat, sendMessage, setCurrentSession, t]
+    [canCreateWorktree, onActionComplete, pendingSendTarget, projectRef, routeToChat, t]
   );
 
   const planFileInputRef = React.useRef<HTMLInputElement | null>(null);

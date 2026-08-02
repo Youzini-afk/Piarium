@@ -1,6 +1,5 @@
 import React from 'react';
 import type {
-  ImageAttachment,
   PiSessionMessageEntry,
   RecoveryMode,
 } from '@piarium/protocol';
@@ -21,9 +20,18 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import {
+  EMPTY_PI_DRAFT,
+  piDraftKey,
+  readPiDraft,
+  type PiDraftState,
+  usePiDraftStore,
+} from '@/stores/usePiDraftStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
+import { appendInlineComments } from '@/lib/messages/inlineComments';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { PiComposer } from './PiComposer';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiModelSelectorDialog } from './PiModelSelectorDialog';
@@ -35,13 +43,6 @@ interface PiChatViewProps {
   autoOpenDraft?: boolean;
   readOnly?: boolean;
 }
-
-interface PiDraftState {
-  images: ImageAttachment[];
-  text: string;
-}
-
-const emptyDraft = (): PiDraftState => ({ images: [], text: '' });
 
 export const PiChatView: React.FC<PiChatViewProps> = ({
   active = true,
@@ -75,26 +76,21 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
   ));
-  const [drafts, setDrafts] = React.useState<Record<string, PiDraftState>>({});
+  const currentDraftKey = currentSessionId === null ? null : piDraftKey(currentSessionId);
+  const draft = usePiDraftStore((state) => (
+    currentDraftKey === null ? EMPTY_PI_DRAFT : state.drafts[currentDraftKey] ?? EMPTY_PI_DRAFT
+  ));
+  const setPiDraft = usePiDraftStore((state) => state.setDraft);
+  const clearPiDraft = usePiDraftStore((state) => state.clear);
   const [sending, setSending] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const untitled = t('sessions.sidebar.session.untitled');
-  const draft = currentSessionId === null
-    ? emptyDraft()
-    : (drafts[currentSessionId] ?? emptyDraft());
-
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
-    setDrafts((current) => ({
-      ...current,
-      [sessionId]: {
-        ...(current[sessionId] ?? emptyDraft()),
-        ...update,
-      },
-    }));
-  }, []);
+    setPiDraft(sessionId, update);
+  }, [setPiDraft]);
 
   React.useEffect(() => {
     if (!currentSessionId || !extensionUi?.editorText) return;
@@ -122,40 +118,50 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const sendDraft = React.useCallback(async (sessionId: string, currentDraft: PiDraftState) => {
     const snapshot = usePiSessionStore.getState().records[sessionId]?.snapshot;
     if (!snapshot || sending) return;
-    if (!currentDraft.text.trim() && currentDraft.images.length === 0) return;
+    const inlineDraftTarget = { directory: snapshot.cwd, sessionKey: sessionId };
+    const inlineDraftStore = useInlineCommentDraftStore.getState();
+    const inlineDrafts = inlineDraftStore.consumeDrafts(inlineDraftTarget);
+    const promptText = appendInlineComments(currentDraft.text, inlineDrafts);
+    if (!promptText.trim() && currentDraft.images.length === 0) {
+      inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
+      return;
+    }
     setSending(true);
     try {
+      let accepted: boolean;
       if (projectPiSessionActivity(snapshot).isWorking) {
         if (followUpBehavior === 'queue') {
-          await followUp(sessionId, currentDraft.text, currentDraft.images);
+          accepted = await followUp(sessionId, promptText, currentDraft.images);
         } else {
-          await steer(sessionId, currentDraft.text, currentDraft.images);
+          accepted = await steer(sessionId, promptText, currentDraft.images);
         }
       } else {
-        await prompt(sessionId, currentDraft.text, currentDraft.images);
+        accepted = await prompt(sessionId, promptText, currentDraft.images);
       }
-      updateDraft(sessionId, { images: [], text: '' });
+      if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
+      clearPiDraft(sessionId);
     } catch (error) {
+      inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
       console.error('Failed to send Pi prompt:', error);
       toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.messageSendFailed'));
     } finally {
       setSending(false);
     }
-  }, [followUp, followUpBehavior, prompt, sending, steer, t, updateDraft]);
+  }, [clearPiDraft, followUp, followUpBehavior, prompt, sending, steer, t]);
 
   const handleSend = React.useCallback(async () => {
     if (!currentSessionId) return;
-    await sendDraft(currentSessionId, drafts[currentSessionId] ?? emptyDraft());
-  }, [currentSessionId, drafts, sendDraft]);
+    await sendDraft(currentSessionId, readPiDraft(currentSessionId));
+  }, [currentSessionId, sendDraft]);
 
   const handleDictationSend = React.useCallback(async (transcript: string) => {
     if (!currentSessionId) return;
-    const currentDraft = drafts[currentSessionId] ?? emptyDraft();
+    const currentDraft = readPiDraft(currentSessionId);
     const text = [currentDraft.text.trimEnd(), transcript.trim()]
       .filter((value) => value.length > 0)
       .join('\n');
     await sendDraft(currentSessionId, { ...currentDraft, text });
-  }, [currentSessionId, drafts, sendDraft]);
+  }, [currentSessionId, sendDraft]);
 
   const runRecovery = React.useCallback(async (
     entry: PiSessionMessageEntry,

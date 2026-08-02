@@ -9,6 +9,8 @@ import type { FollowUpBehavior } from '@/stores/messageQueueStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
+import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 interface PiComposerProps {
   draft: string;
@@ -65,7 +67,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
   const busy = projectPiSessionActivity(snapshot).isWorking;
-  const canSend = draft.trim().length > 0 || images.length > 0;
+  const inlineDraftKey = getInlineCommentDraftKey(getRuntimeKey(), snapshot.cwd, snapshot.sessionId);
+  const inlineDraftCount = useInlineCommentDraftStore((state) => (
+    inlineDraftKey ? state.drafts[inlineDraftKey]?.length ?? 0 : 0
+  ));
+  const canSend = draft.trim().length > 0 || images.length > 0 || inlineDraftCount > 0;
   const footerIconButtonClass = 'flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';
 
   React.useLayoutEffect(() => {
@@ -234,6 +240,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 radius="0.75rem"
                 sendIconSizeClass="size-4"
               />
+              {inlineDraftCount > 0 && (
+                <span className="truncate px-1 typography-micro text-muted-foreground">
+                  {inlineDraftCount} attached context
+                </span>
+              )}
               {busy && (
                 <span className="truncate px-1 typography-micro text-muted-foreground">
                   {followUpBehavior === 'queue' ? 'Queue follow-up' : 'Steer current run'}

@@ -19,11 +19,11 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
-import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useInputStore } from '@/sync/input-store';
 import { markSessionViewed } from '@/sync/notification-store';
-import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
+import { setExternallyViewedSession } from '@/sync/sync-context';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { addPiDraftImageFile, usePiDraftStore } from '@/stores/usePiDraftStore';
+import { useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -419,44 +419,23 @@ const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null
   return sessionID || null;
 };
 
-const areTitleMapsEqual = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean => {
-  if (a.size !== b.size) return false;
-  for (const [key, value] of a) {
-    if (b.get(key) !== value) return false;
-  }
-  return true;
-};
-
-const buildSessionTitleMap = (sessions: Array<{ id: string; title?: string | null }>, sessionIDs: readonly string[]): Map<string, string> => {
+const buildSessionTitleMap = (sessions: Array<{ firstMessage?: string; id: string; name?: string }>, sessionIDs: readonly string[]): Map<string, string> => {
   if (sessionIDs.length === 0) return EMPTY_SESSION_TITLE_MAP;
   const wanted = new Set(sessionIDs);
   const next = new Map<string, string>();
   for (const session of sessions) {
     if (!wanted.has(session.id)) continue;
-    const title = session.title?.trim();
+    const title = (session.name || session.firstMessage?.split(/\r?\n/).find((line) => line.trim()))?.trim();
     if (title) next.set(session.id, title);
   }
   return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
 };
 
-const useSessionTitleMap = (directory: string | undefined, sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
-  const store = useDirectoryStore(directory);
-  const snapshotRef = React.useRef<ReadonlyMap<string, string>>(EMPTY_SESSION_TITLE_MAP);
-  const sessionIDsRef = React.useRef<readonly string[]>(sessionIDs);
-
-  sessionIDsRef.current = sessionIDs;
-
-  return React.useSyncExternalStore(
-    store.subscribe,
-    React.useCallback(() => {
-      const next = buildSessionTitleMap(store.getState().session, sessionIDsRef.current);
-      if (areTitleMapsEqual(snapshotRef.current, next)) {
-        return snapshotRef.current;
-      }
-      snapshotRef.current = next;
-      return next;
-    }, [store]),
-    () => EMPTY_SESSION_TITLE_MAP,
+const useSessionTitleMap = (sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
+  const summaries = usePiSessionStore((state) => state.summaries);
+  return React.useMemo(
+    () => buildSessionTitleMap(summaries, sessionIDs),
+    [sessionIDs, summaries],
   );
 };
 
@@ -688,11 +667,9 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const [consoleEvents, setConsoleEvents] = React.useState<PreviewConsoleEvent[]>([]);
   const [inspectMode, setInspectMode] = React.useState(false);
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const effectiveDirectory = useEffectiveDirectory();
-  const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
-  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
+  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
 
   let parsedUrl: URL | null = null;
   try {
@@ -836,7 +813,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   const showError = isLoopback && proxyState.status === 'error';
 
   const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+    const sessionKey = currentSessionId;
     if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.inspect.attachNoSession'));
       return;
@@ -854,32 +831,24 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         const iframe = iframeRef.current;
         const screenshot = iframe ? await renderPreviewScreenshot(iframe, target) : null;
         if (screenshot) {
-          await addAttachedFile(screenshot);
+          await addPiDraftImageFile(sessionKey, screenshot);
           attachedScreenshot = true;
         }
       } catch {
         attachedScreenshot = false;
       }
 
-      addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
-        source: 'preview-annotation',
-        fileLabel: pageUrl || 'preview',
-        startLine: 1,
-        endLine: 1,
-        code: formatPreviewAnnotationMarkdown({
+      appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
           pageUrl,
           viewport,
           devicePixelRatio,
           target,
           screenshotAttached: attachedScreenshot,
           intro: t('contextPanel.preview.inspect.attachAnnotation'),
-        }),
-        language: 'markdown',
-        text: '',
-      });
+        }));
       toast.success(t('contextPanel.preview.inspect.attached'));
     })();
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [appendPiDraftText, currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
 
   React.useEffect(() => {
     setBridgeReady(false);
@@ -1068,7 +1037,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   }, [consoleEvents, effectiveSrc, rawUrl, t]);
 
   const attachConsoleEvents = React.useCallback(() => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+    const sessionKey = currentSessionId;
     if (!sessionKey || !effectiveDirectory) {
       toast.error(t('contextPanel.preview.console.attachNoSession'));
       return;
@@ -1085,17 +1054,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return `[${timestamp}] [${event.level}] ${event.message}${details}`;
     }).join('\n');
 
-    addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
-      source: 'preview-console',
-      fileLabel: rawUrl || effectiveSrc || 'preview',
-      startLine: 1,
-      endLine: Math.max(1, consoleEvents.length),
-      code: `${header}${text}`,
-      language: 'text',
-      text: t('contextPanel.preview.console.attachAnnotation'),
-    });
+    appendPiDraftText(
+      sessionKey,
+      `${t('contextPanel.preview.console.attachAnnotation')}\n\n\`\`\`text\n${header}${text}\n\`\`\``,
+    );
     toast.success(t('contextPanel.preview.console.attached'));
-  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
+  }, [appendPiDraftText, consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
 
   // Out-of-band upstream probe: iframes don't expose HTTP status to the parent,
   // so when the proxy returns a 502 (upstream dev server is offline) the iframe
@@ -1486,10 +1450,8 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
   const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
   const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
-  const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
-  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
 
   const persistUrl = React.useCallback((url: string) => {
     if (!url || url === 'about:blank' || !directory || !tabID) return;
@@ -1717,7 +1679,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
   }, []);
 
   const attachBrowserAnnotation = React.useCallback(async (target: PreviewElementMetadata) => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+    const sessionKey = currentSessionId;
     if (!sessionKey) {
       toast.error(t('contextPanel.preview.inspect.attachNoSession'));
       return;
@@ -1734,15 +1696,10 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     const file = iframe ? await renderPreviewScreenshot(iframe, target) : null;
     const screenshotAttached = Boolean(file);
     if (file) {
-      await addAttachedFile(file);
+      await addPiDraftImageFile(sessionKey, file);
     }
 
-    addInlineCommentDraft({ directory, sessionKey }, {
-      source: 'preview-annotation',
-      fileLabel: currentUrl || 'browser',
-      startLine: 1,
-      endLine: 1,
-      code: formatPreviewAnnotationMarkdown({
+    appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
         pageUrl: currentUrl,
         viewport,
         devicePixelRatio: window.devicePixelRatio || 1,
@@ -1751,12 +1708,9 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
         intro: t(screenshotAttached
           ? 'contextPanel.preview.inspect.attachAnnotationWithScreenshot'
           : 'contextPanel.preview.inspect.attachAnnotation'),
-      }),
-      language: 'markdown',
-      text: '',
-    });
+      }));
     toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, newSessionDraftOpen, t]);
+  }, [appendPiDraftText, currentSessionId, currentUrl, t]);
 
   const cancelInspect = React.useCallback(() => {
     const iframe = iframeRef.current;
@@ -1976,10 +1930,8 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
     if (!url || url === 'about:blank' || !directory || !tabID) return;
     setContextPanelTabTargetPath(directory, tabID, url);
   }, [directory, tabID, setContextPanelTabTargetPath]);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
-  const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
-  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const appendPiDraftText = usePiDraftStore((state) => state.appendText);
 
   // Listen to webview navigation events
   React.useEffect(() => {
@@ -2118,7 +2070,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         setIsInspecting(false);
         if (!target || !isPreviewElementMetadata(target)) return;
 
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+        const sessionKey = currentSessionId;
         if (!sessionKey) {
           toast.error(t('contextPanel.preview.inspect.attachNoSession'));
           return;
@@ -2141,29 +2093,21 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         const file = await desktopAnnotationToFile(capture.base64, capture.width, capture.height, cssWidth, cssHeight, target);
         const screenshotAttached = Boolean(file);
         if (file) {
-          await addAttachedFile(file);
+          await addPiDraftImageFile(sessionKey, file);
         }
 
-        addInlineCommentDraft({ directory, sessionKey }, {
-          source: 'preview-annotation',
-          fileLabel: currentUrl || 'browser',
-          startLine: 1,
-          endLine: 1,
-          code: formatPreviewAnnotationMarkdown({
+        appendPiDraftText(sessionKey, formatPreviewAnnotationMarkdown({
             pageUrl: currentUrl,
             viewport: { width: cssWidth, height: cssHeight },
             devicePixelRatio: window.devicePixelRatio || 1,
             target,
             screenshotAttached,
             intro: t('contextPanel.preview.inspect.attachAnnotationWithScreenshot'),
-          }),
-          language: 'markdown',
-          text: '',
-        });
+          }));
         toast.success(t('contextPanel.preview.inspect.attached'));
       })
       .catch(() => setIsInspecting(false));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, isInspecting, newSessionDraftOpen, t]);
+  }, [appendPiDraftText, currentSessionId, currentUrl, isInspecting, t]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
@@ -2228,9 +2172,13 @@ export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionDirectory = useSessionUIStore((state) => (
-    state.currentSessionId ? state.getDirectoryForSession(state.currentSessionId) : null
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSessionDirectory = usePiSessionStore((state) => (
+    state.currentSessionId
+      ? state.records[state.currentSessionId]?.snapshot?.cwd
+        ?? state.summaries.find((summary) => summary.id === state.currentSessionId)?.cwd
+        ?? null
+      : null
   ));
   const gitSessionDirectory = currentSessionDirectory || effectiveDirectory || null;
   const gitDirectoryScopeKey = React.useMemo(() => {
@@ -2238,23 +2186,10 @@ export const ContextPanel: React.FC = () => {
     const normalizedDirectory = normalizeDirectoryKey(gitSessionDirectory ?? '');
     return normalizedDirectory ? `directory:${normalizedDirectory}` : null;
   }, [currentSessionId, gitSessionDirectory]);
-  const selectedGitDirectory = useSessionUIStore((state) => (
-    gitDirectoryScopeKey ? state.rightSidebarGitDirectories.get(gitDirectoryScopeKey) ?? null : null
+  const selectedGitDirectory = useContextPanelGitDirectoryStore((state) => (
+    gitDirectoryScopeKey ? state.directories[gitDirectoryScopeKey] ?? null : null
   ));
-  const setRightSidebarGitDirectory = useSessionUIStore((state) => state.setRightSidebarGitDirectory);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined' || !currentSessionId || !gitDirectoryScopeKey) return;
-
-    const handleSessionReselected = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === currentSessionId) {
-        setRightSidebarGitDirectory(gitDirectoryScopeKey, null);
-      }
-    };
-
-    window.addEventListener('openchamber:session-reselected', handleSessionReselected);
-    return () => window.removeEventListener('openchamber:session-reselected', handleSessionReselected);
-  }, [currentSessionId, gitDirectoryScopeKey, setRightSidebarGitDirectory]);
+  const setRightSidebarGitDirectory = useContextPanelGitDirectoryStore((state) => state.setDirectory);
 
   const gitDirectory = selectedGitDirectory || gitSessionDirectory;
   const isFollowingSessionGitDirectory = Boolean(
@@ -2309,7 +2244,7 @@ export const ContextPanel: React.FC = () => {
     }
     return ids;
   }, [tabs]);
-  const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
+  const sessionTitleById = useSessionTitleMap(chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);

@@ -7,7 +7,7 @@ import {
   type InlineCommentDraft,
   type InlineCommentSource,
 } from '@/stores/useInlineCommentDraftStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -58,15 +58,15 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const { t } = useI18n();
   const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange } = options;
 
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const effectiveDirectory = useEffectiveDirectory();
-  const sessionDirectory = useSessionUIStore(
-    React.useCallback(
-      (state) => currentSessionId ? state.getDirectoryForSession(currentSessionId) : null,
-      [currentSessionId],
-    ),
-  );
+  const sessionDirectory = usePiSessionStore((state) => (
+    state.currentSessionId
+      ? state.records[state.currentSessionId]?.snapshot?.cwd
+        ?? state.summaries.find((summary) => summary.id === state.currentSessionId)?.cwd
+        ?? null
+      : null
+  ));
 
   const addDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);
@@ -76,7 +76,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const [commentText, setCommentText] = React.useState('');
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
 
-  const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+  const sessionKey = currentSessionId;
   const draftDirectory = sessionDirectory ?? effectiveDirectory;
   const target = React.useMemo(() => {
     if (!sessionKey || !draftDirectory) return null;
