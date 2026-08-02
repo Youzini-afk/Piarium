@@ -1,6 +1,6 @@
 import React from 'react';
 import { json } from '@codemirror/lang-json';
-import type { PiSettingsScope, PiSettingsSnapshot } from '@piarium/protocol';
+import type { PiSettingsSnapshot } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
@@ -13,30 +13,56 @@ import {
 } from '@/components/ui/select';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { getPiConfigDocument, updatePiConfigDocument } from '@/lib/pi-runtime/config-documents';
 import {
-  createPiSettingsChanges,
-  formatPiSettingsDocument,
-  parsePiSettingsDocument,
-  type PiSettingsDocument,
-} from '@/lib/pi-runtime/settings-document';
+  createPiJsonObjectChanges,
+  formatPiJsonObjectDocument,
+  parsePiJsonObjectDocument,
+  type PiJsonObjectDocument,
+} from '@/lib/pi-runtime/json-object-document';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
-interface PiPluginSettingsEditorProps {
+interface PiPluginConfigEditorProps {
   cwd: string;
 }
 
-type SettingsDrafts = Record<PiSettingsScope, string>;
-type SettingsDocuments = Record<PiSettingsScope, PiSettingsDocument>;
+type ConfigTarget = 'settings-global' | 'settings-project' | 'wtf-global';
+type ConfigDocuments = Record<ConfigTarget, PiJsonObjectDocument>;
+type ConfigDrafts = Record<ConfigTarget, string>;
 
-const emptyDocuments = (): SettingsDocuments => ({ global: {}, project: {} });
-const emptyDrafts = (): SettingsDrafts => ({ global: '{}\n', project: '{}\n' });
+const emptyDocuments = (): ConfigDocuments => ({
+  'settings-global': {},
+  'settings-project': {},
+  'wtf-global': {},
+});
 
-export const PiPluginSettingsEditor: React.FC<PiPluginSettingsEditorProps> = ({ cwd }) => {
+const emptyDrafts = (): ConfigDrafts => ({
+  'settings-global': '{}\n',
+  'settings-project': '{}\n',
+  'wtf-global': '{}\n',
+});
+
+const documentsFromSnapshots = (
+  settings: PiSettingsSnapshot,
+  wtf: PiJsonObjectDocument,
+): ConfigDocuments => ({
+  'settings-global': settings.global,
+  'settings-project': settings.project,
+  'wtf-global': wtf,
+});
+
+const draftsFromDocuments = (documents: ConfigDocuments): ConfigDrafts => ({
+  'settings-global': formatPiJsonObjectDocument(documents['settings-global']),
+  'settings-project': formatPiJsonObjectDocument(documents['settings-project']),
+  'wtf-global': formatPiJsonObjectDocument(documents['wtf-global']),
+});
+
+export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd }) => {
   const { t } = useI18n();
-  const [scope, setScope] = React.useState<PiSettingsScope>('global');
-  const [documents, setDocuments] = React.useState<SettingsDocuments>(emptyDocuments);
-  const [drafts, setDrafts] = React.useState<SettingsDrafts>(emptyDrafts);
+  const [target, setTarget] = React.useState<ConfigTarget>('settings-global');
+  const [documents, setDocuments] = React.useState<ConfigDocuments>(emptyDocuments);
+  const [drafts, setDrafts] = React.useState<ConfigDrafts>(emptyDrafts);
   const [projectTrusted, setProjectTrusted] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -44,28 +70,21 @@ export const PiPluginSettingsEditor: React.FC<PiPluginSettingsEditorProps> = ({ 
   const generationRef = React.useRef(0);
   const editorExtensions = React.useMemo(() => [json()], []);
 
-  const applySnapshot = React.useCallback((snapshot: PiSettingsSnapshot) => {
-    const nextDocuments = {
-      global: snapshot.global,
-      project: snapshot.project,
-    };
-    setDocuments(nextDocuments);
-    setDrafts({
-      global: formatPiSettingsDocument(nextDocuments.global),
-      project: formatPiSettingsDocument(nextDocuments.project),
-    });
-    setProjectTrusted(snapshot.projectTrusted);
-  }, []);
-
   const load = React.useCallback(async () => {
     const generation = ++generationRef.current;
     const runtimeKey = getRuntimeKey();
     setLoading(true);
     setLoadError(null);
     try {
-      const snapshot = await getPiSettings({ cwd });
+      const [settings, wtf] = await Promise.all([
+        getPiSettings({ cwd }),
+        getPiConfigDocument({ cwd }, 'global', 'wtf.json'),
+      ]);
       if (generation !== generationRef.current || runtimeKey !== getRuntimeKey()) return;
-      applySnapshot(snapshot);
+      const nextDocuments = documentsFromSnapshots(settings, wtf.document);
+      setDocuments(nextDocuments);
+      setDrafts(draftsFromDocuments(nextDocuments));
+      setProjectTrusted(settings.projectTrusted);
     } catch (error) {
       if (generation !== generationRef.current || runtimeKey !== getRuntimeKey()) return;
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -74,7 +93,7 @@ export const PiPluginSettingsEditor: React.FC<PiPluginSettingsEditorProps> = ({ 
         setLoading(false);
       }
     }
-  }, [applySnapshot, cwd]);
+  }, [cwd]);
 
   React.useEffect(() => {
     setDocuments(emptyDocuments());
@@ -84,47 +103,63 @@ export const PiPluginSettingsEditor: React.FC<PiPluginSettingsEditorProps> = ({ 
 
   const parsed = React.useMemo(() => {
     try {
-      return { document: parsePiSettingsDocument(drafts[scope]), error: null };
+      return { document: parsePiJsonObjectDocument(drafts[target]), error: null };
     } catch (error) {
       return {
         document: null,
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }, [drafts, scope]);
+  }, [drafts, target]);
   const changes = React.useMemo(() => (
     parsed.document
-      ? createPiSettingsChanges(documents[scope], parsed.document)
+      ? createPiJsonObjectChanges(documents[target], parsed.document)
       : { remove: [], set: {} }
-  ), [documents, parsed.document, scope]);
+  ), [documents, parsed.document, target]);
   const dirty = changes.remove.length > 0 || Object.keys(changes.set).length > 0;
-  const projectBlocked = scope === 'project' && !projectTrusted;
+  const projectBlocked = target === 'settings-project' && !projectTrusted;
 
   const save = React.useCallback(async () => {
     if (!parsed.document || !dirty || projectBlocked || saving) return;
     const runtimeKey = getRuntimeKey();
     setSaving(true);
     try {
-      const snapshot = await updatePiSettings({ cwd }, scope, changes);
-      if (runtimeKey !== getRuntimeKey()) return;
-      setDocuments((current) => ({
-        ...current,
-        global: snapshot.global,
-        project: snapshot.project,
-      }));
+      let savedDocument: PiJsonObjectDocument;
+      if (target === 'wtf-global') {
+        const snapshot = await updatePiConfigDocument(
+          { cwd },
+          'global',
+          'wtf.json',
+          changes,
+        );
+        if (runtimeKey !== getRuntimeKey()) return;
+        savedDocument = snapshot.document;
+        setProjectTrusted(snapshot.projectTrusted);
+      } else {
+        const scope = target === 'settings-global' ? 'global' : 'project';
+        const snapshot = await updatePiSettings({ cwd }, scope, changes);
+        if (runtimeKey !== getRuntimeKey()) return;
+        savedDocument = snapshot[scope];
+        setProjectTrusted(snapshot.projectTrusted);
+        setDocuments((current) => ({
+          ...current,
+          'settings-global': snapshot.global,
+          'settings-project': snapshot.project,
+        }));
+      }
+      setDocuments((current) => ({ ...current, [target]: savedDocument }));
       setDrafts((current) => ({
         ...current,
-        [scope]: formatPiSettingsDocument(snapshot[scope]),
+        [target]: formatPiJsonObjectDocument(savedDocument),
       }));
-      setProjectTrusted(snapshot.projectTrusted);
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
-      console.error('Failed to save Pi plugin settings:', error);
+      console.error('Failed to save Pi plugin configuration:', error);
       toast.error(error instanceof Error ? error.message : t('settings.common.status.saveFailed'));
     } finally {
       setSaving(false);
     }
-  }, [changes, cwd, dirty, parsed.document, projectBlocked, saving, scope, t]);
+  }, [changes, cwd, dirty, parsed.document, projectBlocked, saving, target, t]);
 
   return (
     <div className="space-y-3 rounded-lg border border-border/60 px-3 py-3">
@@ -141,13 +176,18 @@ export const PiPluginSettingsEditor: React.FC<PiPluginSettingsEditorProps> = ({ 
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Select value={scope} onValueChange={setScope}>
-            <SelectTrigger size="settings" className="min-w-28">
+          <Select value={target} onValueChange={setTarget}>
+            <SelectTrigger size="settings" className="min-w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent align="end">
-              <SelectItem value="global">{t('settings.common.scope.global')}</SelectItem>
-              <SelectItem value="project">{t('settings.common.scope.project')}</SelectItem>
+              <SelectItem value="settings-global">
+                Pi settings · {t('settings.common.scope.global')}
+              </SelectItem>
+              <SelectItem value="settings-project">
+                Pi settings · {t('settings.common.scope.project')}
+              </SelectItem>
+              <SelectItem value="wtf-global">pi-wtf · wtf.json</SelectItem>
             </SelectContent>
           </Select>
           <Button
@@ -166,8 +206,8 @@ export const PiPluginSettingsEditor: React.FC<PiPluginSettingsEditorProps> = ({ 
 
       <div className="h-72 overflow-hidden rounded-md border border-border/60 bg-background">
         <CodeMirrorEditor
-          value={drafts[scope]}
-          onChange={(value) => setDrafts((current) => ({ ...current, [scope]: value }))}
+          value={drafts[target]}
+          onChange={(value) => setDrafts((current) => ({ ...current, [target]: value }))}
           extensions={editorExtensions}
           className="h-full"
           enableSearch

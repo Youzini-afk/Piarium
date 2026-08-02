@@ -2601,7 +2601,7 @@ export const settingsDict = {
   'settings.piarium.recovery.title': '恢复与回退',
   'settings.piarium.recovery.description': '设置消息回退方式，并直接管理由 Pi 维护的恢复插件。',
   'settings.piarium.recovery.pluginSettings.title': '插件设置',
-  'settings.piarium.recovery.pluginSettings.description': '以 JSON 编辑全局或项目 Pi 设置。支持扩展定义的任意顶层键；在此删除键会从对应作用域中移除。',
+  'settings.piarium.recovery.pluginSettings.description': '编辑全局或项目 Pi 设置及扩展自有 JSON 配置文件。支持任意顶层键；删除键会从对应文件中移除。',
   'settings.piarium.recovery.pluginSettings.invalidJson': 'JSON 无效',
   'settings.piarium.recovery.pluginSettings.projectUntrusted': '请先信任此工作区，再写入项目设置。',
   'settings.piarium.recovery.preference.aria': '默认消息回退方式',

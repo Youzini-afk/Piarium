@@ -15,8 +15,21 @@ describe("surface runtime protocol", () => {
     const request = createRuntimeRequest("req-1", "provider.list", {
       sessionId: "session-1",
     });
+    const configRequest = createRuntimeRequest("req-2", "config.document.update", {
+      cwd: "C:/workspace",
+      path: "wtf.json",
+      remove: [],
+      scope: "global",
+      set: { words: ["oops"] },
+    });
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(request)), request);
+    assert.deepEqual(
+      decodeRuntimeEnvelope(encodeRuntimeEnvelope(configRequest)),
+      configRequest,
+    );
+    assert.equal(isRuntimeMethod("config.document.get"), true);
+    assert.equal(isRuntimeMethod("config.document.update"), true);
     assert.equal(isRuntimeMethod("session.tree"), true);
     assert.equal(isRuntimeMethod("session.archive"), true);
     assert.equal(isRuntimeMethod("session.unarchive"), true);

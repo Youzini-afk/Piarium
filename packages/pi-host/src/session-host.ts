@@ -1,5 +1,5 @@
-import { readdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { lstat, readdir, stat } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   type AgentSession,
   type AgentSessionRuntime,
@@ -24,7 +24,8 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
-  PiSettingsScope,
+  PiConfigDocumentSnapshot,
+  PiConfigScope,
   PiSettingsSnapshot,
   ProviderConfigDeleteScope,
   ProviderConfigDetails,
@@ -50,12 +51,12 @@ import type {
 } from "@piarium/protocol";
 import { HostError } from "./errors.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
+import { JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
 import { ProviderAuthBridge } from "./provider-auth-bridge.js";
 import { ProviderConfigurationManager } from "./provider-configuration.js";
 import { discoverProviderModels } from "./provider-model-discovery.js";
-import { PiSettingsFileEditor } from "./settings-file-editor.js";
 import {
   projectAgentEvent,
   projectProviderAuthEvent,
@@ -198,6 +199,64 @@ function packageNameFromSource(source: string): string {
   }
   if (/^[A-Za-z0-9_.-]+(?:@[^@]+)?$/.test(value)) return value.split("@")[0] ?? value;
   return value;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}
+
+async function resolveConfigDocumentPath(
+  base: string,
+  requestedPath: string,
+): Promise<{ path: string; relativePath: string }> {
+  if (requestedPath.length === 0 || requestedPath.includes("\0")) {
+    throw new HostError("invalid_config_path", "Configuration path must be non-empty");
+  }
+  if (extname(requestedPath).toLowerCase() !== ".json") {
+    throw new HostError("invalid_config_path", "Configuration path must name a JSON file");
+  }
+  const root = resolve(base);
+  const path = resolve(root, requestedPath);
+  const relativePath = relative(root, path);
+  if (
+    relativePath.length === 0 ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath)
+  ) {
+    throw new HostError(
+      "invalid_config_path",
+      "Configuration path must stay inside its Pi configuration directory",
+    );
+  }
+  const normalizedPath = relativePath.replaceAll("\\", "/");
+  if (normalizedPath.toLowerCase() === "settings.json") {
+    throw new HostError(
+      "invalid_config_path",
+      "Use the scoped Pi settings API for settings.json",
+    );
+  }
+  let current = root;
+  for (const segment of relativePath.split(sep)) {
+    current = join(current, segment);
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new HostError(
+          "invalid_config_path",
+          "Configuration path cannot traverse a symbolic link",
+        );
+      }
+    } catch (error) {
+      if (isMissingPathError(error)) break;
+      throw error;
+    }
+  }
+  return { path, relativePath: normalizedPath };
 }
 
 export class SessionHost {
@@ -871,8 +930,69 @@ export class SessionHost {
     };
   }
 
+  async getConfigDocument(
+    scope: PiConfigScope,
+    requestedPath: string,
+  ): Promise<PiConfigDocumentSnapshot> {
+    const settings = this.runtime.services.settingsManager;
+    if (scope === "project" && !settings.isProjectTrusted()) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to read project configuration",
+      );
+    }
+    const location = await resolveConfigDocumentPath(
+      scope === "global" ? this.#agentDir : join(this.runtime.cwd, ".pi"),
+      requestedPath,
+    );
+    const result = await new JsonObjectFileEditor(location.path).read();
+    return {
+      document: result.document,
+      exists: result.exists,
+      path: location.relativePath,
+      projectTrusted: settings.isProjectTrusted(),
+      scope,
+    };
+  }
+
+  async updateConfigDocument(
+    scope: PiConfigScope,
+    requestedPath: string,
+    set: JsonValue,
+    remove: readonly string[],
+  ): Promise<PiConfigDocumentSnapshot> {
+    const settings = this.runtime.services.settingsManager;
+    if (scope === "project" && !settings.isProjectTrusted()) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to write project configuration",
+      );
+    }
+    const location = await resolveConfigDocumentPath(
+      scope === "global" ? this.#agentDir : join(this.runtime.cwd, ".pi"),
+      requestedPath,
+    );
+    await settings.flush();
+    const pendingErrors = settings.drainErrors();
+    if (pendingErrors.length > 0) {
+      throw new HostError(
+        "settings_write_failed",
+        pendingErrors.map((entry) => entry.error.message).join("; "),
+      );
+    }
+    const document = await new JsonObjectFileEditor(location.path).update(set, remove);
+    await this.session.reload();
+    return {
+      document,
+      exists: true,
+      path: location.relativePath,
+      projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
+      scope,
+    };
+  }
+
   async updateSettings(
-    scope: PiSettingsScope,
+    scope: PiConfigScope,
     set: JsonValue,
     remove: readonly string[],
   ): Promise<PiSettingsSnapshot> {
@@ -891,11 +1011,10 @@ export class SessionHost {
         pendingErrors.map((entry) => entry.error.message).join("; "),
       );
     }
-    const editor = new PiSettingsFileEditor({
-      agentDir: this.#agentDir,
-      cwd: this.runtime.cwd,
-    });
-    await editor.update(scope, set, remove);
+    const settingsPath = scope === "global"
+      ? join(this.#agentDir, "settings.json")
+      : join(this.runtime.cwd, ".pi", "settings.json");
+    await new JsonObjectFileEditor(settingsPath).update(set, remove);
     await settings.reload();
     const reloadErrors = settings.drainErrors();
     if (reloadErrors.length > 0) {

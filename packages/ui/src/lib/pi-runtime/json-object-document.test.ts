@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createPiSettingsChanges,
-  formatPiSettingsDocument,
-  parsePiSettingsDocument,
-} from './settings-document';
+  createPiJsonObjectChanges,
+  formatPiJsonObjectDocument,
+  parsePiJsonObjectDocument,
+} from './json-object-document';
 
-describe('Pi settings JSON documents', () => {
-  test('builds a top-level patch without rewriting unchanged plugin settings', () => {
-    expect(createPiSettingsChanges({
+describe('Pi JSON configuration documents', () => {
+  test('builds top-level changes without rewriting unrelated plugin settings', () => {
+    expect(createPiJsonObjectChanges({
       packages: ['npm:pi-wtf'],
       workspaceHistory: { enabled: 'auto', maxWorkspaces: 10 },
     }, {
@@ -23,11 +23,13 @@ describe('Pi settings JSON documents', () => {
   });
 
   test('parses and formats unrestricted JSON objects', () => {
-    const settings = parsePiSettingsDocument('{"plugin":{"items":[1,true,null]}}');
-    expect(settings).toEqual({ plugin: { items: [1, true, null] } });
-    expect(formatPiSettingsDocument(settings)).toBe(
+    const config = parsePiJsonObjectDocument('{"plugin":{"items":[1,true,null]}}');
+    expect(config).toEqual({ plugin: { items: [1, true, null] } });
+    expect(formatPiJsonObjectDocument(config)).toBe(
       '{\n  "plugin": {\n    "items": [\n      1,\n      true,\n      null\n    ]\n  }\n}\n',
     );
-    expect(() => parsePiSettingsDocument('[]')).toThrow('Pi settings must contain a JSON object');
+    expect(() => parsePiJsonObjectDocument('[]')).toThrow(
+      'Pi configuration must contain a JSON object',
+    );
   });
 });

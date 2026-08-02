@@ -6,7 +6,8 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
-  PiSettingsScope,
+  PiConfigDocumentSnapshot,
+  PiConfigScope,
   PiSettingsSnapshot,
   ProviderAuthType,
   RecoveryMode,
@@ -30,6 +31,19 @@ import type {
 import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
 
 export interface HostMethodMap {
+  "config.document.get": {
+    params: { path: string; scope: PiConfigScope };
+    result: PiConfigDocumentSnapshot;
+  };
+  "config.document.update": {
+    params: {
+      path: string;
+      remove: string[];
+      scope: PiConfigScope;
+      set: { [key: string]: JsonValue };
+    };
+    result: PiConfigDocumentSnapshot;
+  };
   "catalog.context.open": {
     params: { cwd: string };
     result: SessionSnapshot;
@@ -225,7 +239,7 @@ export interface HostMethodMap {
   "settings.update": {
     params: {
       remove: string[];
-      scope: PiSettingsScope;
+      scope: PiConfigScope;
       set: { [key: string]: JsonValue };
     };
     result: PiSettingsSnapshot;

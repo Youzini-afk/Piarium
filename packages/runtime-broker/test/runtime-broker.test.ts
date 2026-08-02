@@ -97,6 +97,26 @@ test("broker owns catalog and per-session Pi workers", async () => {
       (await dispatchRuntimeRequest(broker, "settings.get", { cwd: workspace })).project,
       updatedSettings.project,
     );
+    const updatedWtfConfig = await dispatchRuntimeRequest(
+      broker,
+      "config.document.update",
+      {
+        cwd: workspace,
+        path: "wtf.json",
+        remove: [],
+        scope: "global",
+        set: { words: ["oops"] },
+      },
+    );
+    assert.deepEqual(updatedWtfConfig.document, { words: ["oops"] });
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "config.document.get", {
+        cwd: workspace,
+        path: "wtf.json",
+        scope: "global",
+      }),
+      updatedWtfConfig,
+    );
     assert.deepEqual(broker.activeSessionIds, []);
     let stopAuthPromptListener = () => {};
     const authPrompt = new Promise<{ requestId: string; sessionId: string }>((resolvePrompt) => {

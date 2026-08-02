@@ -23,7 +23,7 @@ import {
   updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { PiPluginSettingsEditor } from './PiPluginSettingsEditor';
+import { PiPluginConfigEditor } from './PiPluginConfigEditor';
 
 interface RecoveryIntegration {
   descriptionKey: I18nKey;
@@ -380,7 +380,7 @@ export const RecoverySettings: React.FC = () => {
           </div>
         </div>
 
-        <PiPluginSettingsEditor cwd={currentDirectory} />
+        <PiPluginConfigEditor cwd={currentDirectory} />
 
         {additionalProviders.length > 0 && (
           <div className="space-y-2">

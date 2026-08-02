@@ -80,6 +80,12 @@ Piarium persists only application policy such as the default recovery mode and v
 history stays in Pi JSONL; workspace snapshots and retention stay with the workspace-history
 provider; repair behavior stays with `pi-wtf`.
 
+The configuration editor writes `workspaceHistory` through Pi's global/project `settings.json`
+documents and edits `pi-wtf`'s global `wtf.json` as an extension-owned JSON document. Piarium treats
+both as unrestricted JSON objects, applies only changed top-level keys under an atomic file lock, and
+reloads the extension instance after saving. It does not duplicate either plugin's schema, defaults,
+validation, or migrations, so new fields remain owned by the updated plugin.
+
 The Sessions settings page persists that policy as `conversation`, `both`, or `ask` and manages the
 two maintained recovery packages through Pi's typed `package.list/install/update/remove` runtime
 operations. Package cards deliberately distinguish “configured for this workspace context” from

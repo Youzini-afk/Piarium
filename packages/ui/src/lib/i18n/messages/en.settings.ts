@@ -2601,7 +2601,7 @@ export const settingsDict = {
   'settings.piarium.recovery.title': 'Recovery',
   'settings.piarium.recovery.description': 'Choose how message rollback behaves and keep the maintained Pi recovery plugins up to date.',
   'settings.piarium.recovery.pluginSettings.title': 'Plugin settings',
-  'settings.piarium.recovery.pluginSettings.description': 'Edit global or project Pi settings as JSON. Every extension-defined top-level key is supported; removing a key here removes it from that scope.',
+  'settings.piarium.recovery.pluginSettings.description': 'Edit global or project Pi settings and extension-owned JSON documents. Every top-level key is supported; removing one deletes it from that file.',
   'settings.piarium.recovery.pluginSettings.invalidJson': 'Invalid JSON',
   'settings.piarium.recovery.pluginSettings.projectUntrusted': 'Trust this workspace before writing project settings.',
   'settings.piarium.recovery.preference.aria': 'Default message rollback behavior',

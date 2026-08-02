@@ -472,6 +472,34 @@ async function dispatchRuntimeRequestUnchecked(
       });
     }
 
+    case "config.document.get": {
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "config.document.get",
+        {
+          path: requireString(input, "path"),
+          scope: requireEnum(input, "scope", ["global", "project"] as const),
+        },
+      );
+    }
+    case "config.document.update": {
+      if (!("set" in input)) {
+        throw new RuntimeDispatchError("invalid_params", "set is required");
+      }
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "config.document.update",
+        {
+          path: requireString(input, "path"),
+          remove: requireStringList(input, "remove"),
+          scope: requireEnum(input, "scope", ["global", "project"] as const),
+          set: requireRecord(input.set) as { [key: string]: JsonValue },
+        },
+      );
+    }
+
     case "settings.get": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.get", {});
     }

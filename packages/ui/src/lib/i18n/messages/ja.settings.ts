@@ -2038,7 +2038,7 @@ export const settingsDict = {
   'settings.piarium.recovery.title': 'Recovery',
   'settings.piarium.recovery.description': 'Choose how message rollback behaves and keep the maintained Pi recovery plugins up to date.',
   'settings.piarium.recovery.pluginSettings.title': 'プラグイン設定',
-  'settings.piarium.recovery.pluginSettings.description': 'グローバルまたはプロジェクトの Pi 設定を JSON で編集します。拡張機能が定義する任意のトップレベルキーに対応し、ここで削除するとそのスコープから削除されます。',
+  'settings.piarium.recovery.pluginSettings.description': 'グローバルまたはプロジェクトの Pi 設定と、拡張機能が所有する JSON 設定を編集します。任意のトップレベルキーに対応し、削除するとそのファイルから除去されます。',
   'settings.piarium.recovery.pluginSettings.invalidJson': 'JSON が無効です',
   'settings.piarium.recovery.pluginSettings.projectUntrusted': 'プロジェクト設定を書き込む前に、このワークスペースを信頼してください。',
   'settings.piarium.recovery.preference.aria': 'Default message rollback behavior',

@@ -467,6 +467,25 @@ export class HostController {
         }
         return this.#sessionHost.repairRecovery(readString(params, "sessionId"), action);
       }
+      case "config.document.get": {
+        const scope = readString(params, "scope");
+        if (scope !== "global" && scope !== "project") {
+          throw new HostError("invalid_params", "Unknown configuration scope");
+        }
+        return this.#sessionHost.getConfigDocument(scope, readString(params, "path"));
+      }
+      case "config.document.update": {
+        const scope = readString(params, "scope");
+        if (scope !== "global" && scope !== "project") {
+          throw new HostError("invalid_params", "Unknown configuration scope");
+        }
+        return this.#sessionHost.updateConfigDocument(
+          scope,
+          readString(params, "path"),
+          readJson(params, "set") ?? null,
+          readStringList(params, "remove"),
+        );
+      }
       case "settings.get":
         return this.#sessionHost.getSettings();
       case "settings.update": {

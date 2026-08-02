@@ -39,11 +39,11 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v5 WebSocket/postMessage surface protocol
+    | authenticated Piarium v6 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v5 over a private child-process IPC pipe
+    | Piarium protocol v6 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -84,7 +84,7 @@ Piarium does not impose renderer payload, pending-request, or buffered-output ce
 deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
 `PIARIUM_RUNTIME_MAX_PENDING_REQUESTS`, and `PIARIUM_RUNTIME_MAX_BUFFERED_BYTES`.
 
-Protocol v5 does not forward Pi SDK objects verbatim. The host projects the append-only session
+Protocol v6 does not forward Pi SDK objects verbatim. The host projects the append-only session
 tree, messages, tool calls/results, streaming updates, compaction, retry state, model metadata, and
 provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,
 thinking/text signatures, callback functions, `AbortSignal`, and credential objects remain inside
@@ -155,11 +155,12 @@ no implicit pagination or truncation. The leaf and every entry's
 contains the complete append-only tree. Streaming `agent.event` messages contain one canonical
 message plus a compact typed delta instead of duplicating Pi's mutable `partial` object.
 
-Protocol v5 also exposes native `session.header`, `session.summary`, `session.tree`,
+Protocol v6 also exposes native `session.header`, `session.summary`, `session.tree`,
 `session.entry`, `session.stats`, `session.rename`, `session.archive`, `session.unarchive`,
 `session.delete`, and `thinking.select` operations. It adds surface-owned project trust responses,
-the full extension UI request/state bridge, and locked global/project JSON changes for arbitrary
-extension settings without a package-name whitelist. Runtime snapshots carry Pi's actual streaming,
+the full extension UI request/state bridge, locked global/project JSON changes for arbitrary
+extension settings, and path-contained extension-owned JSON documents without a package-name
+whitelist. Runtime snapshots carry Pi's actual streaming,
 compaction, retry, steering, follow-up, queue, model, and thinking state. Archive state is broker-owned
 atomic Piarium metadata; renames remain native append-only Pi session-info entries.
 
@@ -172,7 +173,7 @@ actions instead of guessing from runtime versions.
 | --- | --- | --- |
 | Pi session tree/messages | Pi SessionManager JSONL | Read and navigate through the SDK; conversation-only rollback stays Pi-native |
 | Models/auth | Pi ModelRuntime/AuthStorage + layered native `models.json` | Never mirror secrets into renderer storage; preserve source provenance |
-| Pi settings/packages | Pi SettingsManager/PackageManager | Scope-aware JSON settings and native package updates with source/provenance shown |
+| Pi settings/packages | Pi SettingsManager/PackageManager | Scope-aware JSON settings, extension-owned config documents, and native package updates with source/provenance shown |
 | App metadata | Atomic Piarium JSON | Archive state now; recovery preference, pin, tags, and view preferences are application-owned additions |
 | Workspace checkpoints | `pi-workspace-history` | Access through tree hooks, commands, and recovery bridge v1; never mirror private snapshot state |
 | Prompt repair | `pi-wtf` | Invoke the plugin's registered command capabilities and preserve its configuration |

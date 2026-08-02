@@ -2601,7 +2601,7 @@
   'settings.piarium.recovery.title': '復原與回退',
   'settings.piarium.recovery.description': '設定訊息回退方式，並直接管理由 Pi 維護的復原外掛。',
   'settings.piarium.recovery.pluginSettings.title': '外掛設定',
-  'settings.piarium.recovery.pluginSettings.description': '以 JSON 編輯全域或專案 Pi 設定。支援外掛定義的任意頂層鍵；在此刪除鍵會從對應範圍移除。',
+  'settings.piarium.recovery.pluginSettings.description': '編輯全域或專案 Pi 設定及外掛自有 JSON 設定檔。支援任意頂層鍵；刪除鍵會從對應檔案移除。',
   'settings.piarium.recovery.pluginSettings.invalidJson': 'JSON 無效',
   'settings.piarium.recovery.pluginSettings.projectUntrusted': '請先信任此工作區，再寫入專案設定。',
   'settings.piarium.recovery.preference.aria': '預設訊息回退方式',

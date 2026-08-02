@@ -44,6 +44,8 @@ type DirectRuntimeMethod =
   | "thinking.select";
 
 type SessionScopedRuntimeMethod =
+  | "config.document.get"
+  | "config.document.update"
   | "model.list"
   | "package.install"
   | "package.list"
@@ -131,6 +133,8 @@ export const RUNTIME_METHODS = [
   "agent.steer",
   "command.execute",
   "command.list",
+  "config.document.get",
+  "config.document.update",
   "extension.ui.respond",
   "host.handshake",
   "model.list",

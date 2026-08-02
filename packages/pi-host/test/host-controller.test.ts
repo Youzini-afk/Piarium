@@ -281,6 +281,74 @@ describe("HostController", () => {
         2,
         "saving plugin settings reloads extensions so their new configuration takes effect",
       );
+
+      transport.receive(
+        createRequest("wtf-config-get", "config.document.get", {
+          path: "wtf.json",
+          scope: "global",
+        }),
+      );
+      const emptyWtfConfig = await transport.waitFor((entry) =>
+        isResponse(entry, "wtf-config-get"),
+      );
+      assert.ok(emptyWtfConfig.kind === "response" && emptyWtfConfig.ok);
+      assert.deepEqual(emptyWtfConfig.result, {
+        document: {},
+        exists: false,
+        path: "wtf.json",
+        projectTrusted: true,
+        scope: "global",
+      });
+
+      transport.receive(
+        createRequest("wtf-config-update", "config.document.update", {
+          path: "wtf.json",
+          remove: [],
+          scope: "global",
+          set: { words: ["oops", "fix"] },
+        }),
+      );
+      const wtfConfig = await transport.waitFor((entry) =>
+        isResponse(entry, "wtf-config-update"),
+      );
+      assert.ok(wtfConfig.kind === "response" && wtfConfig.ok);
+      assert.deepEqual(
+        (wtfConfig.result as { document: unknown }).document,
+        { words: ["oops", "fix"] },
+      );
+      assert.deepEqual(
+        JSON.parse(await readFile(join(agentDir, "wtf.json"), "utf8")),
+        { words: ["oops", "fix"] },
+      );
+      assert.equal(
+        (await readFile(extensionLoadLog, "utf8")).trim().split("\n").length,
+        3,
+        "saving an extension-owned config document reloads extensions",
+      );
+
+      transport.receive(
+        createRequest("config-path-escape", "config.document.get", {
+          path: "../outside.json",
+          scope: "global",
+        }),
+      );
+      const escapedConfig = await transport.waitFor((entry) =>
+        isResponse(entry, "config-path-escape"),
+      );
+      assert.ok(escapedConfig.kind === "response" && !escapedConfig.ok);
+      assert.equal(escapedConfig.error.code, "invalid_config_path");
+
+      transport.receive(
+        createRequest("config-settings-reserved", "config.document.get", {
+          path: "settings.json",
+          scope: "global",
+        }),
+      );
+      const reservedSettings = await transport.waitFor((entry) =>
+        isResponse(entry, "config-settings-reserved"),
+      );
+      assert.ok(reservedSettings.kind === "response" && !reservedSettings.ok);
+      assert.equal(reservedSettings.error.code, "invalid_config_path");
     } finally {
       await controller.dispose();
       await rm(root, { force: true, recursive: true });
