@@ -128,8 +128,8 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'open_status',
     defaultCombo: 'mod+shift+o',
-    label: 'Open OpenCode status',
-    description: 'Open the OpenCode status dialog',
+    label: 'Show Pi runtime status',
+    description: 'Show the active Pi runtime connection and protocol version',
   },
   {
     id: 'open_settings',
@@ -210,8 +210,8 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'new_chat_worktree',
     defaultCombo: 'mod+shift+n',
-    label: 'New worktree draft',
-    description: 'Create a new worktree and open a draft in it',
+    label: 'New worktree session',
+    description: 'Create a new worktree and open a Pi session in it',
     customizable: true,
   },
   {
@@ -296,8 +296,8 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'cycle_thinking_variant',
     defaultCombo: 'mod+shift+t',
-    label: 'Cycle thinking variant',
-    description: 'Cycle thinking variant while in chat',
+    label: 'Cycle Pi thinking level',
+    description: 'Cycle the thinking levels supported by the active Pi model',
   },
   {
     id: 'cycle_agent',

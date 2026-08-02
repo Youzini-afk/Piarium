@@ -95,6 +95,12 @@ retained before engine surgery begins.
   roll back a newly-created worktree when session creation cannot complete. The tray keeps the
   platform IPC contract but no longer polls OpenCode or imposes an arbitrary session-count cap;
   native menu/tray actions no longer route Pi session IDs into the legacy mini-chat renderer.
+- Implemented Pi-native root effects and interaction controls: PWA shortcuts and retention now
+  consume the global Pi catalog, the window title follows the active Pi working directory, and
+  Escape abort, runtime status, model favorites, thinking levels, timeline focus, expanded input,
+  attachments, and dictation all target the active Pi session. OpenCode optimistic/queued-message
+  effects remain confined to explicitly named legacy embedded surfaces while those surfaces are
+  migrated or removed.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.

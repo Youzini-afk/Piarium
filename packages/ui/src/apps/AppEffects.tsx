@@ -1,6 +1,7 @@
 import React from 'react';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
+import { usePiSessionAutoCleanup } from '@/hooks/usePiSessionAutoCleanup';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
@@ -18,7 +19,7 @@ type MiniChatPresenceMessage = {
   viewed?: boolean;
 };
 
-const SyncOptimisticBridge: React.FC = () => {
+const OpenCodeOptimisticBridge: React.FC = () => {
   const sync = useSync();
   const addRef = React.useRef(sync.optimistic.add);
   const removeRef = React.useRef(sync.optimistic.remove);
@@ -38,7 +39,7 @@ const SyncOptimisticBridge: React.FC = () => {
   return null;
 };
 
-const MiniChatPresenceBridge: React.FC = () => {
+const OpenCodeMiniChatPresenceBridge: React.FC = () => {
   React.useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
 
@@ -62,16 +63,16 @@ const MiniChatPresenceBridge: React.FC = () => {
   return null;
 };
 
-export function SyncRuntimeEffects({ embeddedBackgroundWorkEnabled }: {
+export function OpenCodeSyncRuntimeEffects({ embeddedBackgroundWorkEnabled }: {
   embeddedBackgroundWorkEnabled: boolean;
 }) {
   useSessionAutoCleanup(embeddedBackgroundWorkEnabled);
   useQueuedMessageAutoSend(embeddedBackgroundWorkEnabled);
 
-  return <SyncOptimisticBridge />;
+  return <OpenCodeOptimisticBridge />;
 }
 
-export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
+export function OpenCodeSyncAppEffects({ embeddedBackgroundWorkEnabled }: {
   embeddedBackgroundWorkEnabled: boolean;
 }) {
   usePwaManifestSync();
@@ -80,8 +81,18 @@ export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
 
   return (
     <>
-      <SyncRuntimeEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-      <MiniChatPresenceBridge />
+      <OpenCodeSyncRuntimeEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+      <OpenCodeMiniChatPresenceBridge />
     </>
   );
+}
+
+export function PiAppEffects({ backgroundWorkEnabled }: {
+  backgroundWorkEnabled: boolean;
+}) {
+  usePiSessionAutoCleanup(backgroundWorkEnabled);
+  usePwaManifestSync();
+  useWindowControlsOverlayLayout();
+  useKeyboardShortcuts();
+  return null;
 }

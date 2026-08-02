@@ -57,7 +57,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isMobileAppRuntime, useMobileAppViewport } from '@/lib/mobileAppRuntime';
-import { SyncAppEffects } from '@/apps/AppEffects';
+import { OpenCodeSyncAppEffects, PiAppEffects } from '@/apps/AppEffects';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
@@ -161,7 +161,7 @@ const EmbeddedSessionChatContent: React.FC<{
 
   return (
     <>
-      <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+      <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
       <OpenCodeUpdateToast />
       <ChatView readOnly={embeddedSessionChat.readOnly} autoOpenDraft={false} />
       <Toaster />
@@ -840,7 +840,7 @@ function App({ apis }: AppProps) {
           <FireworksProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
-                  <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+                  <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
                   <MainLayout />
                   <Toaster />
                   {!isBootShell && (

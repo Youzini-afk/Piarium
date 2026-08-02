@@ -3,9 +3,11 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { findPiProjectForCwd } from '@/lib/pi-runtime/sessionNavigation';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
-const APP_TITLE = 'OpenChamber';
+const APP_TITLE = 'Piarium';
 
 const formatProjectLabel = (label: string): string => {
   return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -23,17 +25,23 @@ const buildWindowTitle = (projectLabel: string | null, instanceLabel: string | n
 };
 
 export const useWindowTitle = () => {
-  const activeProject = useProjectsStore((state) => {
-    if (!state.activeProjectId) {
-      return null;
-    }
-    return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
+  const projects = useProjectsStore((state) => state.projects);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const currentPiCwd = usePiSessionStore((state) => {
+    const sessionId = state.currentSessionId;
+    if (!sessionId) return null;
+    return state.records[sessionId]?.snapshot?.cwd
+      ?? state.summaries.find((summary) => summary.id === sessionId)?.cwd
+      ?? null;
   });
+  const activeProject = React.useMemo(() => {
+    if (currentPiCwd) return findPiProjectForCwd(projects, currentPiCwd);
+    if (!activeProjectId) return null;
+    return projects.find((project) => project.id === activeProjectId) ?? null;
+  }, [activeProjectId, currentPiCwd, projects]);
 
   const projectLabel = React.useMemo(() => {
-    if (!activeProject) {
-      return null;
-    }
+    if (!activeProject) return currentPiCwd ? formatProjectLabel(getProjectNameFromPath(currentPiCwd)) : null;
 
     const label = activeProject.label?.trim();
     if (label) {
@@ -46,7 +54,7 @@ export const useWindowTitle = () => {
     }
 
     return null;
-  }, [activeProject]);
+  }, [activeProject, currentPiCwd]);
 
   const [instanceLabel, setInstanceLabel] = React.useState<string | null>(null);
 
@@ -97,9 +105,13 @@ export const useWindowTitle = () => {
     };
 
     window.addEventListener('focus', handleFocus);
+    const unsubscribeRuntime = subscribeRuntimeEndpointChanged(() => {
+      void refreshInstanceLabel();
+    });
     return () => {
       cancelled = true;
       window.removeEventListener('focus', handleFocus);
+      unsubscribeRuntime();
     };
   }, []);
 

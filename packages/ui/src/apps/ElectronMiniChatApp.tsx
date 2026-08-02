@@ -16,7 +16,7 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { SyncRuntimeEffects } from './AppEffects';
+import { OpenCodeSyncRuntimeEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
 import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
@@ -346,7 +346,7 @@ const ElectronMiniChatContent: React.FC<{ config: MiniChatConfig }> = ({ config 
     <>
       <MiniChatBootstrap config={config} />
       <MiniChatPresencePublisher />
-      <SyncRuntimeEffects embeddedBackgroundWorkEnabled={true} />
+      <OpenCodeSyncRuntimeEffects embeddedBackgroundWorkEnabled={true} />
       <MiniChatLayout mode={config.mode} autoOpenDraft={config.mode === 'draft'} unavailable={sessionUnavailable} />
     </>
   );

@@ -6,6 +6,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { FollowUpBehavior } from '@/stores/messageQueueStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
+import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 
 interface PiComposerProps {
   draft: string;
@@ -15,6 +18,7 @@ interface PiComposerProps {
   onChangeDraft(value: string): void;
   onChangeImages(value: ImageAttachment[]): void;
   onSend(): Promise<void> | void;
+  onSendText(value: string): Promise<void> | void;
   sending: boolean;
   snapshot: SessionSnapshot;
 }
@@ -49,6 +53,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   onChangeDraft,
   onChangeImages,
   onSend,
+  onSendText,
   sending,
   snapshot,
 }) => {
@@ -56,8 +61,12 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const composingRef = React.useRef(false);
-  const busy = snapshot.busy;
+  const isMobile = useUIStore((state) => state.isMobile);
+  const isExpandedInput = useUIStore((state) => state.isExpandedInput);
+  const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
+  const busy = projectPiSessionActivity(snapshot).isWorking;
   const canSend = draft.trim().length > 0 || images.length > 0;
+  const footerIconButtonClass = 'flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';
 
   React.useLayoutEffect(() => {
     const input = inputRef.current;
@@ -80,9 +89,20 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
   const queue = [...snapshot.steering, ...snapshot.followUp];
 
+  const insertTranscript = React.useCallback((text: string) => {
+    const next = [draft.trimEnd(), text.trim()]
+      .filter((value) => value.length > 0)
+      .join('\n');
+    onChangeDraft(next);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [draft, onChangeDraft]);
+
   return (
-    <div className="shrink-0 border-t border-border bg-background px-3 pb-[max(0.75rem,var(--oc-safe-area-bottom,0px))] pt-3 sm:px-5">
-      <div className="mx-auto w-full max-w-4xl">
+    <div className={cn(
+      'shrink-0 border-t border-border bg-background px-3 pb-[max(0.75rem,var(--oc-safe-area-bottom,0px))] pt-3 sm:px-5',
+      isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
+    )}>
+      <div className={cn('mx-auto w-full max-w-4xl', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>
         {queue.length > 0 && (
           <details className="mb-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
             <summary className="cursor-pointer select-none typography-meta text-muted-foreground">
@@ -118,7 +138,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
         <div
           className={cn(
-            'rounded-xl border border-border bg-muted/15 transition-colors focus-within:border-primary/50',
+            'relative rounded-xl border border-border bg-muted/15 transition-colors focus-within:border-primary/50',
             sending && 'opacity-80',
           )}
           onDragOver={(event) => {
@@ -133,6 +153,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
         >
           <textarea
             ref={inputRef}
+            data-pi-chat-input="true"
             value={draft}
             onChange={(event) => onChangeDraft(event.target.value)}
             onCompositionStart={() => { composingRef.current = true; }}
@@ -154,10 +175,13 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               if (canSend && !sending) void onSend();
             }}
             placeholder={t('chat.chatInput.placeholder.chat')}
-            className="block max-h-[40vh] min-h-20 w-full resize-none overflow-y-auto bg-transparent px-3 pb-2 pt-3 typography-ui-label text-foreground outline-none placeholder:text-muted-foreground/70"
+            className={cn(
+              'block min-h-20 w-full resize-none overflow-y-auto bg-transparent px-3 pb-2 pt-3 typography-ui-label text-foreground outline-none placeholder:text-muted-foreground/70',
+              isExpandedInput ? 'max-h-[70vh] min-h-[40vh]' : 'max-h-[40vh]',
+            )}
           />
 
-          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+          <div data-chat-input-footer="true" className="flex items-center justify-between gap-2 px-2 pb-2">
             <div className="flex min-w-0 items-center gap-1">
               <input
                 ref={fileInputRef}
@@ -184,6 +208,32 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 </TooltipTrigger>
                 <TooltipContent side="top">{t('chat.chatInput.actions.attachFiles')}</TooltipContent>
               </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={toggleExpandedInput}
+                    className={footerIconButtonClass}
+                    aria-label={isExpandedInput ? 'Exit expanded editor' : 'Expand editor'}
+                  >
+                    <Icon name={isExpandedInput ? 'fullscreen-exit' : 'fullscreen'} className="size-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {isExpandedInput ? 'Exit expanded editor' : 'Expand editor'}
+                </TooltipContent>
+              </Tooltip>
+              <ComposerDictation
+                disabled={sending}
+                footerIconButtonClass={footerIconButtonClass}
+                footerPaddingClass="px-2 pb-2"
+                iconSizeClass="size-4"
+                isMobile={isMobile}
+                onInsert={insertTranscript}
+                onInsertAndSend={onSendText}
+                radius="0.75rem"
+                sendIconSizeClass="size-4"
+              />
               {busy && (
                 <span className="truncate px-1 typography-micro text-muted-foreground">
                   {followUpBehavior === 'queue' ? 'Queue follow-up' : 'Steer current run'}

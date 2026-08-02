@@ -9,7 +9,6 @@ import {
 import { useUIStore } from "@/stores/useUIStore";
 import {
   RiAddLine,
-  RiAiAgentLine,
   RiAiGenerate2,
   RiBrainAi3Line,
   RiCloseCircleLine,
@@ -83,12 +82,6 @@ export const HelpDialog: React.FC = () => {
           descriptionKey: "helpDialog.item.toggleSessionSidebar",
           icon: RiLayoutLeftLine,
           keys: '',
-        },
-        {
-          id: 'cycle_agent',
-          keys: '',
-          descriptionKey: "helpDialog.item.cycleAgent",
-          icon: RiAiAgentLine,
         },
         {
           id: 'open_model_selector',

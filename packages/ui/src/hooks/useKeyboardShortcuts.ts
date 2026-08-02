@@ -1,29 +1,46 @@
 import React from 'react';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
-import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { isVSCodeRuntime } from '@/lib/desktop';
-import { showOpenCodeStatus } from '@/lib/openCodeStatus';
-import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { hasOpenDropdown } from './keyboard-shortcut-dom';
 import { toast } from '@/components/ui';
 import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
+import { nextPiFavoriteModel, nextPiThinkingLevel } from '@/lib/pi-runtime/keyboardActions';
+import { listPiModels } from '@/lib/pi-runtime/providers';
+import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
+
+const focusPiTimeline = (): void => {
+  const timeline = document.querySelector<HTMLElement>('[data-pi-timeline="true"]');
+  timeline?.focus({ preventScroll: true });
+  timeline?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+};
+
+const showPiRuntimeStatus = async (): Promise<void> => {
+  try {
+    const { handshake, runtimeKey } = await getPiRuntimeConnection();
+    toast.success('Pi runtime connected', {
+      description: `${runtimeKey} · Pi ${handshake.runtime.piVersion} · protocol ${handshake.protocolVersion}`,
+    });
+  } catch (error) {
+    toast.error('Pi runtime unavailable', {
+      description: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
 
 export const useKeyboardShortcuts = () => {
-  const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
-  const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
-  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-  const abortCurrentOperation = sessionActions.abortCurrentOperation;
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSnapshot = usePiSessionStore((state) => (
+    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
+  ));
+  const abortCurrentOperation = usePiSessionStore((state) => state.abort);
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
@@ -50,15 +67,13 @@ export const useKeyboardShortcuts = () => {
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
-  const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
-  const togglePromptNavigatorPanel = useUIStore((s) => s.togglePromptNavigatorPanel);
   const setPromptNavigatorPanelOpen = useUIStore((s) => s.setPromptNavigatorPanelOpen);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const { themeMode, setThemeMode } = useThemeSystem();
-  const { phase: sessionPhase } = useCurrentSessionActivity();
-  const abortPrimedUntilRef = React.useRef<number | null>(null);
+  const sessionActivity = projectPiSessionActivity(currentSnapshot);
+  const abortPrimedRef = React.useRef<{ expiresAt: number; sessionId: string } | null>(null);
   const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const themeModeRef = React.useRef(themeMode);
 
@@ -71,9 +86,8 @@ export const useKeyboardShortcuts = () => {
       clearTimeout(abortPrimedTimeoutRef.current);
       abortPrimedTimeoutRef.current = null;
     }
-    abortPrimedUntilRef.current = null;
-    clearAbortPrompt();
-  }, [clearAbortPrompt]);
+    abortPrimedRef.current = null;
+  }, []);
 
   React.useEffect(() => {
     const combo = (actionId: string) => getEffectiveShortcutCombo(actionId, shortcutOverrides);
@@ -174,24 +188,29 @@ export const useKeyboardShortcuts = () => {
       }
 
       const sessionId = currentSessionId;
-      if (sessionPhase === 'idle' || !sessionId) {
+      if (!sessionActivity.isWorking || !sessionId) {
         resetAbortPriming();
         return;
       }
 
       const now = Date.now();
-      const primedUntil = abortPrimedUntilRef.current;
+      const primed = abortPrimedRef.current;
 
-      if (primedUntil && now < primedUntil) {
+      if (primed?.sessionId === sessionId && now < primed.expiresAt) {
         e.preventDefault();
         resetAbortPriming();
-        void abortCurrentOperation(sessionId);
+        void abortCurrentOperation(sessionId).catch((error) => {
+          toast.error('Failed to stop Pi run', {
+            description: error instanceof Error ? error.message : String(error),
+          });
+        });
         return;
       }
 
       e.preventDefault();
-      const expiresAt = armAbortPrompt(3000) ?? now + 3000;
-      abortPrimedUntilRef.current = expiresAt;
+      const expiresAt = now + 3000;
+      abortPrimedRef.current = { expiresAt, sessionId };
+      toast.message('Press Escape again to stop the current Pi run');
 
       if (abortPrimedTimeoutRef.current) {
         clearTimeout(abortPrimedTimeoutRef.current);
@@ -199,7 +218,8 @@ export const useKeyboardShortcuts = () => {
 
       const delay = Math.max(expiresAt - now, 0);
       abortPrimedTimeoutRef.current = setTimeout(() => {
-        if (abortPrimedUntilRef.current && Date.now() >= abortPrimedUntilRef.current) {
+        const current = abortPrimedRef.current;
+        if (current?.sessionId === sessionId && Date.now() >= current.expiresAt) {
           resetAbortPriming();
         }
       }, delay || 0);
@@ -210,10 +230,6 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      const isChatInputTarget = (target: EventTarget | null) => {
-        return target instanceof Element && Boolean(target.closest('[data-chat-input="true"]'));
-      };
-
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
         toggleCommandPalette();
@@ -222,25 +238,23 @@ export const useKeyboardShortcuts = () => {
 
       if (eventMatchesShortcut(e, combo('open_timeline_dialog'))) {
         e.preventDefault();
-        setTimelineDialogOpen(true);
+        focusPiTimeline();
         return;
       }
 
       if (eventMatchesShortcut(e, combo('toggle_prompt_navigator'))) {
         const {
           activeMainTab,
-          promptNavigatorEnabled,
           isSettingsDialogOpen,
           isCommandPaletteOpen,
           isHelpDialogOpen,
           isSessionSwitcherOpen,
           isAboutDialogOpen,
-          isTimelineDialogOpen,
           isMultiRunLauncherOpen,
           isImagePreviewOpen,
         } = useUIStore.getState();
 
-        if (!promptNavigatorEnabled || isMobile || isVSCodeRuntime() || activeMainTab !== 'chat') {
+        if (activeMainTab !== 'chat') {
           return;
         }
 
@@ -249,7 +263,6 @@ export const useKeyboardShortcuts = () => {
           || isHelpDialogOpen
           || isSessionSwitcherOpen
           || isAboutDialogOpen
-          || isTimelineDialogOpen
           || isMultiRunLauncherOpen
           || isImagePreviewOpen;
 
@@ -258,13 +271,13 @@ export const useKeyboardShortcuts = () => {
         }
 
         e.preventDefault();
-        togglePromptNavigatorPanel();
+        focusPiTimeline();
         return;
       }
 
       if (eventMatchesShortcut(e, combo('open_status'))) {
         e.preventDefault();
-        void showOpenCodeStatus();
+        void showPiRuntimeStatus();
         return;
       }
 
@@ -340,53 +353,6 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('focus_input'))) {
         e.preventDefault();
         focusChatInput();
-        return;
-      }
-
-      const cycleAgentCombo = combo('cycle_agent');
-      const cycleAgentBackwardCombo = cycleAgentCombo && !cycleAgentCombo.includes('shift')
-        ? normalizeCombo(`shift+${cycleAgentCombo}`)
-        : '';
-      const cycleAgentDirection = cycleAgentBackwardCombo && eventMatchesShortcut(e, cycleAgentBackwardCombo)
-        ? -1
-        : eventMatchesShortcut(e, cycleAgentCombo)
-          ? 1
-          : 0;
-
-      if (cycleAgentDirection !== 0) {
-        const {
-          isSettingsDialogOpen,
-          isCommandPaletteOpen,
-          isHelpDialogOpen,
-          isSessionSwitcherOpen,
-          isAboutDialogOpen,
-          activeMainTab,
-        } = useUIStore.getState();
-
-        const hasOverlay = isSettingsDialogOpen || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
-        if (hasOverlay || activeMainTab !== 'chat' || !isChatInputTarget(e.target)) {
-          return;
-        }
-
-        const configState = useConfigStore.getState();
-        const nextAgentName = getCycledPrimaryAgentName(
-          configState.getVisibleAgents(),
-          configState.currentAgentName,
-          cycleAgentDirection,
-        );
-
-        if (!nextAgentName) {
-          return;
-        }
-
-        e.preventDefault();
-        configState.setAgent(nextAgentName);
-        useUIStore.getState().addRecentAgent(nextAgentName);
-
-        const sessionId = useSessionUIStore.getState().currentSessionId;
-        if (sessionId) {
-          useSelectionStore.getState().saveSessionAgentSelection(sessionId, nextAgentName);
-        }
         return;
       }
 
@@ -490,7 +456,7 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      // Cmd/Ctrl+Shift+T: Cycle thinking variant (same gating as Shift+M)
+      // Cmd/Ctrl+Shift+T: cycle the thinking levels supported by the active Pi model.
       if (eventMatchesShortcut(e, combo('cycle_thinking_variant'))) {
         const {
           isSettingsDialogOpen,
@@ -512,25 +478,17 @@ export const useKeyboardShortcuts = () => {
           return;
         }
 
-        const configState = useConfigStore.getState();
-        const variants = configState.getCurrentModelVariants();
-        if (variants.length === 0) {
-          return;
-        }
-
+        const state = usePiSessionStore.getState();
+        const sessionId = state.currentSessionId;
+        const snapshot = sessionId ? state.records[sessionId]?.snapshot : undefined;
+        const nextLevel = nextPiThinkingLevel(snapshot);
+        if (!sessionId || !nextLevel) return;
         e.preventDefault();
-        configState.cycleCurrentVariant();
-
-        const nextVariant = useConfigStore.getState().currentVariant;
-        const sessionId = useSessionUIStore.getState().currentSessionId;
-        const agentName = useConfigStore.getState().currentAgentName;
-        const providerId = useConfigStore.getState().currentProviderId;
-        const modelId = useConfigStore.getState().currentModelId;
-
-        if (sessionId && agentName && providerId && modelId) {
-          useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, nextVariant);
-        }
-
+        void state.selectThinking(sessionId, nextLevel).catch((error) => {
+          toast.error('Failed to change Pi thinking level', {
+            description: error instanceof Error ? error.message : String(error),
+          });
+        });
         return;
       }
 
@@ -563,17 +521,29 @@ export const useKeyboardShortcuts = () => {
 
         e.preventDefault();
 
-        const { currentProviderId, currentModelId, setProvider, setModel } = useConfigStore.getState();
-        const len = favoriteModels.length;
-        const currentIdx = favoriteModels.findIndex(
-          (f) => f.providerID === currentProviderId && f.modelID === currentModelId,
-        );
-        const delta = eventMatchesShortcut(e, combo('cycle_favorite_model_forward')) ? 1 : -1;
-        const next = favoriteModels[(currentIdx + delta + len) % len];
-
-        setProvider(next.providerID);
-        setModel(next.modelID);
-        addRecentModel(next.providerID, next.modelID);
+        const state = usePiSessionStore.getState();
+        const sessionId = state.currentSessionId;
+        const snapshot = sessionId ? state.records[sessionId]?.snapshot : undefined;
+        if (!sessionId || !snapshot) return;
+        const direction = eventMatchesShortcut(e, combo('cycle_favorite_model_forward')) ? 1 : -1;
+        const capturedSessionId = sessionId;
+        void listPiModels(snapshot.cwd)
+          .then((models) => {
+            if (usePiSessionStore.getState().currentSessionId !== capturedSessionId) return;
+            const next = nextPiFavoriteModel(favoriteModels, models, snapshot.model, direction);
+            if (!next) {
+              toast.message('No available Pi models match your favorites');
+              return;
+            }
+            return usePiSessionStore.getState().selectModel(capturedSessionId, next).then(() => {
+              addRecentModel(next.provider, next.id);
+            });
+          })
+          .catch((error) => {
+            toast.error('Failed to change Pi model', {
+              description: error instanceof Error ? error.message : String(error),
+            });
+          });
         return;
       }
 
@@ -620,13 +590,10 @@ export const useKeyboardShortcuts = () => {
     setSessionSwitcherOpen,
     setSettingsDialogOpen,
     setModelSelectorOpen,
-    setTimelineDialogOpen,
-    togglePromptNavigatorPanel,
     setPromptNavigatorPanelOpen,
     toggleExpandedInput,
     setThemeMode,
-    sessionPhase,
-    armAbortPrompt,
+    sessionActivity.isWorking,
     resetAbortPriming,
     currentSessionId,
     currentDirectory,

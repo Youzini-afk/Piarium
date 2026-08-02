@@ -1,8 +1,8 @@
 import React from 'react';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessions } from '@/sync/sync-context';
+import type { SessionSummary } from '@piarium/protocol';
 import { isWebRuntime } from '@/lib/desktop';
 import { PWA_RECENT_SESSIONS_STORAGE_KEY } from '@/lib/pwa';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 type RecentSessionShortcut = {
   sessionId: string;
@@ -26,16 +26,17 @@ const normalizeRecentTitle = (value: string | undefined, fallback: string): stri
   return normalized.slice(0, 48);
 };
 
-const buildRecentShortcuts = (
-  sessions: Array<{ id: string; title?: string }>,
+export const buildPiRecentShortcuts = (
+  sessions: SessionSummary[],
   currentSessionId: string | null,
 ): RecentSessionShortcut[] => {
+  const activeSessions = sessions.filter((session) => session.archivedAt === undefined);
   const ordered = currentSessionId
     ? [
-        ...sessions.filter((session) => session.id === currentSessionId),
-        ...sessions.filter((session) => session.id !== currentSessionId),
+        ...activeSessions.filter((session) => session.id === currentSessionId),
+        ...activeSessions.filter((session) => session.id !== currentSessionId),
       ]
-    : sessions;
+    : activeSessions;
 
   const shortcuts: RecentSessionShortcut[] = [];
   const seen = new Set<string>();
@@ -49,7 +50,10 @@ const buildRecentShortcuts = (
     seen.add(sessionId);
     shortcuts.push({
       sessionId,
-      title: normalizeRecentTitle(session.title, `Session ${shortcuts.length + 1}`),
+      title: normalizeRecentTitle(
+        session.name || session.firstMessage,
+        `Session ${shortcuts.length + 1}`,
+      ),
     });
 
     if (shortcuts.length >= MAX_RECENT_SHORTCUTS) {
@@ -61,11 +65,11 @@ const buildRecentShortcuts = (
 };
 
 export const usePwaManifestSync = () => {
-  const sessions = useSessions();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessions = usePiSessionStore((state) => state.summaries);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
 
   const recentShortcuts = React.useMemo(() => {
-    return buildRecentShortcuts(sessions, currentSessionId);
+    return buildPiRecentShortcuts(sessions, currentSessionId);
   }, [currentSessionId, sessions]);
 
   const signature = React.useMemo(() => JSON.stringify(recentShortcuts), [recentShortcuts]);

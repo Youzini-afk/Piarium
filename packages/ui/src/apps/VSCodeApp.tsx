@@ -24,7 +24,7 @@ import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { SyncProvider } from '@/sync/sync-context';
-import { SyncAppEffects } from './AppEffects';
+import { OpenCodeSyncAppEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useWideChatLayoutClass } from '@/hooks/useWideChatLayoutClass';
 
@@ -232,7 +232,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
           <RuntimeAPIProvider apis={apis}>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
+                <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <AgentManagerView />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
@@ -251,7 +251,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
           <RuntimeAPIProvider apis={apis}>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
+                <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <React.Suspense fallback={null}>
                   <SettingsView
                     onClose={() => {
@@ -276,7 +276,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
           <FireworksProvider>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
+                <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <VSCodeLayout />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />

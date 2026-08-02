@@ -56,7 +56,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider, useSession, useSessionMessages } from '@/sync/sync-context';
 
-import { SyncAppEffects } from './AppEffects';
+import { OpenCodeSyncAppEffects } from './AppEffects';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
@@ -3125,7 +3125,7 @@ export function MobileApp({ apis }: MobileAppProps) {
         <RuntimeAPIProvider apis={apis}>
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className="h-full bg-background text-foreground">
-              <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
+              <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
               <OpenCodeUpdateToast />
               <MobileAppUpdateToast />
               <MobileShell onActiveConnectionDeleted={() => {

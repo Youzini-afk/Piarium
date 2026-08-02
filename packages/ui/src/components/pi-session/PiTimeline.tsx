@@ -490,6 +490,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   return (
     <div
       ref={scrollRef}
+      data-pi-timeline="true"
+      tabIndex={-1}
       onScroll={(event) => {
         const element = event.currentTarget;
         followTailRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;

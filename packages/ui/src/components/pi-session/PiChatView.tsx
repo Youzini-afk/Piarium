@@ -23,8 +23,10 @@ import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { PiComposer } from './PiComposer';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
+import { PiModelSelectorDialog } from './PiModelSelectorDialog';
 import { PiTimeline } from './PiTimeline';
 import { piSessionTitle } from './sessionPresentation';
 
@@ -69,6 +71,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
   const recoveryPreference = useUIStore((state) => state.recoveryPreference);
+  const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
   ));
@@ -116,29 +119,43 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     }
   }, [activeProjectId, createSession, currentDirectory, projects, setDirectory]);
 
-  const handleSend = React.useCallback(async () => {
-    if (!currentSessionId || !currentRecord?.snapshot || sending) return;
-    const currentDraft = drafts[currentSessionId] ?? emptyDraft();
+  const sendDraft = React.useCallback(async (sessionId: string, currentDraft: PiDraftState) => {
+    const snapshot = usePiSessionStore.getState().records[sessionId]?.snapshot;
+    if (!snapshot || sending) return;
     if (!currentDraft.text.trim() && currentDraft.images.length === 0) return;
     setSending(true);
     try {
-      if (currentRecord.snapshot.busy) {
+      if (projectPiSessionActivity(snapshot).isWorking) {
         if (followUpBehavior === 'queue') {
-          await followUp(currentSessionId, currentDraft.text, currentDraft.images);
+          await followUp(sessionId, currentDraft.text, currentDraft.images);
         } else {
-          await steer(currentSessionId, currentDraft.text, currentDraft.images);
+          await steer(sessionId, currentDraft.text, currentDraft.images);
         }
       } else {
-        await prompt(currentSessionId, currentDraft.text, currentDraft.images);
+        await prompt(sessionId, currentDraft.text, currentDraft.images);
       }
-      updateDraft(currentSessionId, { images: [], text: '' });
+      updateDraft(sessionId, { images: [], text: '' });
     } catch (error) {
       console.error('Failed to send Pi prompt:', error);
       toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.messageSendFailed'));
     } finally {
       setSending(false);
     }
-  }, [currentRecord?.snapshot, currentSessionId, drafts, followUp, followUpBehavior, prompt, sending, steer, t, updateDraft]);
+  }, [followUp, followUpBehavior, prompt, sending, steer, t, updateDraft]);
+
+  const handleSend = React.useCallback(async () => {
+    if (!currentSessionId) return;
+    await sendDraft(currentSessionId, drafts[currentSessionId] ?? emptyDraft());
+  }, [currentSessionId, drafts, sendDraft]);
+
+  const handleDictationSend = React.useCallback(async (transcript: string) => {
+    if (!currentSessionId) return;
+    const currentDraft = drafts[currentSessionId] ?? emptyDraft();
+    const text = [currentDraft.text.trimEnd(), transcript.trim()]
+      .filter((value) => value.length > 0)
+      .join('\n');
+    await sendDraft(currentSessionId, { ...currentDraft, text });
+  }, [currentSessionId, drafts, sendDraft]);
 
   const runRecovery = React.useCallback(async (
     entry: PiSessionMessageEntry,
@@ -230,11 +247,21 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           </div>
           <div className="flex shrink-0 items-center gap-2 typography-micro text-muted-foreground">
             {snapshot.model && (
-              <span className="hidden max-w-56 truncate rounded-md bg-muted/40 px-2 py-1 sm:inline">
+              <button
+                type="button"
+                onClick={() => setModelSelectorOpen(true)}
+                className="hidden max-w-56 truncate rounded-md bg-muted/40 px-2 py-1 hover:bg-interactive-hover sm:inline"
+              >
                 {snapshot.model.provider}/{snapshot.model.id}
-              </span>
+              </button>
             )}
-            <span className="rounded-md bg-muted/40 px-2 py-1">{snapshot.thinkingLevel}</span>
+            <button
+              type="button"
+              onClick={() => setModelSelectorOpen(true)}
+              className="rounded-md bg-muted/40 px-2 py-1 hover:bg-interactive-hover"
+            >
+              {snapshot.thinkingLevel}
+            </button>
             {snapshot.busy && <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />}
           </div>
         </div>
@@ -272,12 +299,14 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             onAbort={async () => { await abort(currentSessionId); }}
             onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
             onChangeImages={(images) => updateDraft(currentSessionId, { images })}
+            onSendText={handleDictationSend}
             onSend={handleSend}
           />
         )}
         <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />
       </div>
 
+      <PiModelSelectorDialog />
       <Dialog open={recoveryEntry !== null} onOpenChange={(open) => { if (!open) setRecoveryEntry(null); }}>
         <DialogContent showCloseButton={false} className="max-w-md gap-5">
           <DialogHeader>
