@@ -20,9 +20,13 @@ export const parseServeCliOptions = ({
   const envTunnelToken = env.OPENCHAMBER_TUNNEL_TOKEN || undefined;
   const envTunnelHostname = env.OPENCHAMBER_TUNNEL_HOSTNAME || undefined;
   const envApiOnly = env.OPENCHAMBER_API_ONLY === '1' || env.OPENCHAMBER_API_ONLY === 'true';
+  const parsedEnvPort = Number.parseInt(env.OPENCHAMBER_PORT ?? '', 10);
+  const effectiveDefaultPort = Number.isInteger(parsedEnvPort) && parsedEnvPort >= 0
+    ? parsedEnvPort
+    : defaultPort;
 
   const options = {
-    port: defaultPort,
+    port: effectiveDefaultPort,
     host: undefined,
     uiPassword: envPassword,
     tryCfTunnel: envCfTunnel,
@@ -59,7 +63,7 @@ export const parseServeCliOptions = ({
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
       const parsedPort = parseInt(value ?? '', 10);
-      options.port = Number.isFinite(parsedPort) ? parsedPort : defaultPort;
+      options.port = Number.isFinite(parsedPort) ? parsedPort : effectiveDefaultPort;
       continue;
     }
 

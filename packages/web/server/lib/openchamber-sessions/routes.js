@@ -2,9 +2,34 @@ import express from 'express';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createWorktree } from '../git/index.js';
 import { expandSnippets } from '../opencode/snippets.js';
-import { expandCommandGoalObjective, parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
+
+const parseCommandPrompt = (prompt) => {
+  if (typeof prompt !== 'string') return null;
+  const firstLine = prompt.trim().split(/\r?\n/, 1)[0] || '';
+  if (!firstLine.startsWith('/')) return null;
+  const [head, ...tail] = firstLine.split(/\s+/);
+  const command = (head || '').slice(1).trim();
+  return command ? { command, arguments: tail.join(' ').trim() } : null;
+};
+
+const expandCommandObjective = (template, argumentsText) => {
+  if (typeof template !== 'string' || !template.trim()) return null;
+  const rawArguments = String(argumentsText ?? '');
+  if (template.includes('$ARGUMENTS')) return template.replaceAll('$ARGUMENTS', rawArguments);
+  const positions = [...template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+  if (positions.length === 0) return rawArguments ? `${template}\n\n${rawArguments}` : template;
+  const parsedArguments = [...rawArguments.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
+    .map((match) => match[1] ?? match[2] ?? match[3] ?? '');
+  const lastPosition = Math.max(...positions);
+  return template.replace(/\$(\d+)/g, (_match, value) => {
+    const position = Number(value);
+    return position === lastPosition
+      ? parsedArguments.slice(position - 1).join(' ')
+      : (parsedArguments[position - 1] ?? '');
+  });
+};
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -369,7 +394,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
 
     const expandedPrompt = expandSnippets(prompt, directory);
-    const parsedCommand = parseScheduledCommandPrompt(prompt);
+    const parsedCommand = parseCommandPrompt(prompt);
     let resolvedCommand = null;
     if (parsedCommand) {
       try {
@@ -382,7 +407,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
     if (goalInput.enabled) {
       const commandObjective = resolvedCommand
-        ? expandCommandGoalObjective(resolvedCommand.template, resolvedCommand.arguments)
+        ? expandCommandObjective(resolvedCommand.template, resolvedCommand.arguments)
         : null;
       await (createSessionGoalOverride || createSessionGoal)({
         baseUrl,
