@@ -46,11 +46,13 @@ interface PiChatViewProps {
   active?: boolean;
   autoOpenDraft?: boolean;
   readOnly?: boolean;
+  showHeader?: boolean;
 }
 
 export const PiChatView: React.FC<PiChatViewProps> = ({
   active = true,
   readOnly = false,
+  showHeader = true,
 }) => {
   const { t } = useI18n();
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
@@ -267,7 +269,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   return (
     <TooltipProvider>
       <div className={cn('flex h-full min-h-0 flex-col bg-background', !active && 'pointer-events-none')}>
-        <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2 sm:px-6">
+        {showHeader ? <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2 sm:px-6">
           <div className="min-w-0 flex-1">
             <h2 className="truncate typography-ui-label font-medium text-foreground">{title}</h2>
             <p className="truncate typography-micro text-muted-foreground">{snapshot.cwd}</p>
@@ -291,7 +293,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             </button>
             {snapshot.busy && <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />}
           </div>
-        </div>
+        </div> : null}
 
         {entries.length === 0 && !currentRecord.liveAssistant ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">

@@ -5204,8 +5204,8 @@ const dispatchTrayAction = async (action) => {
     return;
   }
 
-  // Pi sessions are owned by the main Piarium surface. The imported mini-chat
-  // renderer still uses the legacy session stack and must not receive Pi IDs.
+  // Tray session actions intentionally focus the main surface. Session-specific
+  // mini windows are opened explicitly through the desktop mini-chat action.
   if (action.type === 'focus-session') {
     await focusMainWindowWithSession(action.sessionId, action.directory || '');
     return;

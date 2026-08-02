@@ -21,7 +21,10 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
 import { normalizePath } from '@/lib/pathNormalization';
+import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
@@ -130,6 +133,7 @@ interface SessionRowProps {
   onCommitRename(session: SessionSummary): void;
   onCopyId(session: SessionSummary): void;
   onDelete(node: PiSessionNode): void;
+  onOpenMiniChat(session: SessionSummary): void;
   onSelect(session: SessionSummary): void;
   onToggleExpanded(sessionId: string): void;
   onTogglePinned(session: SessionSummary): void;
@@ -245,6 +249,12 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
                 ? t('sessions.sidebar.session.menu.unpin')
                 : t('sessions.sidebar.session.menu.pin')}
             </DropdownMenuItem>
+            {canUseElectronDesktopIPC() ? (
+              <DropdownMenuItem onClick={() => props.onOpenMiniChat(session)}>
+                <Icon name="chat-new" className="mr-2 size-4" />
+                {t('sessions.sidebar.session.menu.openMiniChatWindow')}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             {archived ? (
               <DropdownMenuItem onClick={() => props.onUnarchive(session)}>
@@ -381,6 +391,17 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
       toast.error(error instanceof Error ? error.message : String(error));
     }
   }, [activeProjectId, createSession, currentDirectory, mobileVariant, projects, setActiveMainTab, setDirectory, setSessionSwitcherOpen]);
+
+  const handleOpenMiniChat = React.useCallback((session: SessionSummary) => {
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
+      directory: session.cwd,
+      sessionId: session.id,
+    }).catch((error) => {
+      console.warn('[pi-session-sidebar] failed to open mini chat window', error);
+    });
+  }, []);
 
   const commitRename = React.useCallback(async (session: SessionSummary) => {
     if (editingId !== session.id) return;
@@ -604,6 +625,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                         ids: collectPiSessionSubtreeIds(summaries, selected.session.id),
                         title: piSessionTitle(selected.session, untitled),
                       })}
+                      onOpenMiniChat={handleOpenMiniChat}
                       onUnarchive={(session) => {
                         void unarchiveSession(session.id).then(() => {
                           toast.success(t('sessions.sidebar.session.unarchive.success'));
