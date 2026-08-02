@@ -61,7 +61,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
 
   const registerApiOnlyFallbackRoutes = (app) => {
     app.get(/^(?!\/api|\/auth|\/health|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (req, res) => {
-      const command = 'openchamber connect-url --help';
+      const command = 'piarium connect-url --help';
       res.status(200).format({
         html: () => {
           res.send(`<!doctype html>

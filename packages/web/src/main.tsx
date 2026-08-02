@@ -1,15 +1,15 @@
 import { createConfiguredWebAPIs, getDesktopRelayRestoreReady } from './runtimeConfig';
 import { registerSW } from 'virtual:pwa-register';
 
-import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
-import { getStoredMobileLayoutPreference } from '@openchamber/ui/lib/mobileLayoutPreference';
-import type { HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
+import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
+import { getStoredMobileLayoutPreference } from '@piarium/ui/lib/mobileLayoutPreference';
+import type { HostedSurface } from '@piarium/ui/lib/runtimeSurface';
 import {
   isEmbeddedSessionChat,
   requestEmbeddedSessionRuntimeBootstrap,
-} from '@openchamber/ui/components/layout/contextPanelEmbeddedChat';
-import '@openchamber/ui/index.css';
-import '@openchamber/ui/styles/fonts';
+} from '@piarium/ui/components/layout/contextPanelEmbeddedChat';
+import '@piarium/ui/index.css';
+import '@piarium/ui/styles/fonts';
 
 import { detectHostedSurface } from './hostedSurface';
 
@@ -110,14 +110,14 @@ const start = async (): Promise<void> => {
   window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
 
   if (hostedSurface === 'mobile') {
-    const { renderMobileApp } = await import('@openchamber/ui/apps/renderMobileApp');
+    const { renderMobileApp } = await import('@piarium/ui/apps/renderMobileApp');
     renderMobileApp(window.__PIARIUM_RUNTIME_APIS__);
     return;
   }
 
   // Hold the render until a desktop relay-host restore has picked its transport.
   await getDesktopRelayRestoreReady();
-  await import('@openchamber/ui/main');
+  await import('@piarium/ui/main');
 };
 
 void start();

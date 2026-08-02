@@ -1,14 +1,14 @@
 import { createVSCodeAPIs } from './api';
 import { onCommand, onThemeChange, sendBridgeMessage } from './api/bridge';
 import { VSCodeRuntimeTransport } from './piRuntimeTransport';
-import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
+import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,
   type VSCodeThemeKind,
   type VSCodeThemePayload,
-} from '@openchamber/ui/lib/theme/vscode/adapter';
-import { configurePiRuntimeSurface } from '@openchamber/ui/lib/pi-runtime/client';
+} from '@piarium/ui/lib/theme/vscode/adapter';
+import { configurePiRuntimeSurface } from '@piarium/ui/lib/pi-runtime/client';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -316,7 +316,7 @@ onCommand('showSettingsPage', (payload) => {
 onCommand('reloadPiRuntime', () => {
   void (async () => {
     const [{ disconnectPiRuntime }, { usePiSessionStore }] = await Promise.all([
-      import('@openchamber/ui/lib/pi-runtime/client'),
+      import('@piarium/ui/lib/pi-runtime/client'),
       import('@/stores/usePiSessionStore'),
     ]);
     await disconnectPiRuntime();
@@ -346,7 +346,7 @@ onCommand('showNotification', (payload) => {
 const bootstrap = async () => {
   const folders = configuredWorkspaceFolders();
   if (folders.length > 0) await syncVSCodeWorkspaceProjects(folders);
-  const { renderVSCodeApp } = await import('@openchamber/ui/apps/renderVSCodeApp');
+  const { renderVSCodeApp } = await import('@piarium/ui/apps/renderVSCodeApp');
   renderVSCodeApp(window.__PIARIUM_RUNTIME_APIS__ ?? createVSCodeAPIs());
   await waitForUiMount();
   fadeOutLoadingScreen();

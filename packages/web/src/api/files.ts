@@ -3,8 +3,8 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
-} from '@openchamber/ui/lib/api/types';
-import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+} from '@piarium/ui/lib/api/types';
+import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 

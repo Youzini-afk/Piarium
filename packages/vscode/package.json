@@ -240,7 +240,7 @@
     "vite": "^7.1.2"
   },
   "dependencies": {
-    "@openchamber/ui": "workspace:*",
+    "@piarium/ui": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",
     "@piarium/runtime-client": "workspace:*",

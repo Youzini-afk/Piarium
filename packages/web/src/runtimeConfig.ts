@@ -1,10 +1,10 @@
-import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@openchamber/ui/lib/runtime-auth';
-import { installRuntimeFetchBridge } from '@openchamber/ui/lib/runtime-fetch';
-import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@openchamber/ui/lib/runtime-switch';
-import { restoreDesktopRelayRuntime } from '@openchamber/ui/lib/desktopRelayRestore';
-import { configureRuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
-import type { EmbeddedSessionRuntimeBootstrap } from '@openchamber/ui/components/layout/contextPanelEmbeddedChat';
-import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { getRuntimeExtraHeadersSync, refreshLocalRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@piarium/ui/lib/runtime-auth';
+import { installRuntimeFetchBridge } from '@piarium/ui/lib/runtime-fetch';
+import { initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
+import { restoreDesktopRelayRuntime } from '@piarium/ui/lib/desktopRelayRestore';
+import { configureRuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
+import type { EmbeddedSessionRuntimeBootstrap } from '@piarium/ui/components/layout/contextPanelEmbeddedChat';
+import { opencodeClient } from '@piarium/ui/lib/opencode/client';
 import { createWebAPIs } from './api';
 
 const sameOrigin = (left: string, right: string): boolean => {

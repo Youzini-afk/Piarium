@@ -20,9 +20,9 @@ import type {
   GitHubGitAuthorResult,
   GitHubUserSummary,
   GitHubTerminalAuthResult,
-} from '@openchamber/ui/lib/api/types';
-import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
-import type { RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
+} from '@piarium/ui/lib/api/types';
+import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
+import type { RuntimeUrlResolver } from '@piarium/ui/lib/runtime-url';
 
 interface WebGitHubAPIOptions {
   urls: RuntimeUrlResolver;

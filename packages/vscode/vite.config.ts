@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => ({
   ],
   resolve: {
     alias: [
-      { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },
+      { find: '@piarium/ui', replacement: path.resolve(__dirname, '../ui/src') },
       { find: '@vscode', replacement: path.resolve(__dirname, './webview') },
       { find: '@', replacement: path.resolve(__dirname, '../ui/src') },
     ],

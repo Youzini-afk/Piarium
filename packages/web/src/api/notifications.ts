@@ -1,4 +1,4 @@
-import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
+import type { NotificationPayload, NotificationsAPI } from '@piarium/ui/lib/api/types';
 
 const SW_READY_TIMEOUT_MS = 1500;
 const NOTIFICATION_DEDUPE_TTL_MS = 5000;

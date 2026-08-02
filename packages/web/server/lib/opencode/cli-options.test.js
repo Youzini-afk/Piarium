@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { expect, test } from 'bun:test';
 import { parseServeCliOptions } from './cli-options.js';
 
 const parse = (argv = [], env = {}) => parseServeCliOptions({
@@ -11,10 +10,10 @@ const parse = (argv = [], env = {}) => parseServeCliOptions({
 });
 
 test('OPENCHAMBER_PORT supplies the cross-platform development default', () => {
-  assert.equal(parse([], { OPENCHAMBER_PORT: '3902' }).port, 3902);
-  assert.equal(parse([], { OPENCHAMBER_PORT: 'invalid' }).port, 3000);
+  expect(parse([], { OPENCHAMBER_PORT: '3902' }).port).toBe(3902);
+  expect(parse([], { OPENCHAMBER_PORT: 'invalid' }).port).toBe(3000);
 });
 
 test('an explicit CLI port takes priority over OPENCHAMBER_PORT', () => {
-  assert.equal(parse(['--port', '4100'], { OPENCHAMBER_PORT: '3902' }).port, 4100);
+  expect(parse(['--port', '4100'], { OPENCHAMBER_PORT: '3902' }).port).toBe(4100);
 });

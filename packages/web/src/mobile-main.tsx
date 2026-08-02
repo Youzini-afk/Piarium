@@ -1,7 +1,7 @@
 import { createConfiguredWebAPIs } from './runtimeConfig';
-import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
-import '@openchamber/ui/index.css';
-import '@openchamber/ui/styles/fonts';
+import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
+import '@piarium/ui/index.css';
+import '@piarium/ui/styles/fonts';
 
 declare global {
   interface Window {
@@ -11,7 +11,7 @@ declare global {
 
 window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs();
 
-void import('@openchamber/ui/apps/renderMobileApp')
+void import('@piarium/ui/apps/renderMobileApp')
   .then(({ renderMobileApp }) => {
     renderMobileApp(window.__PIARIUM_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
   });

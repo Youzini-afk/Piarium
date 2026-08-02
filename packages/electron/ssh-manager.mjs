@@ -1005,14 +1005,14 @@ export class ElectronSshManager {
     const commands = [];
 
     if (preferred === 'bun') {
-      if (hasBun) commands.push(`bun add -g @openchamber/web@${version}`);
-      if (hasNpm) commands.push(`npm install -g @openchamber/web@${version}`);
+      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
     } else if (preferred === 'npm') {
-      if (hasNpm) commands.push(`npm install -g @openchamber/web@${version}`);
-      if (hasBun) commands.push(`bun add -g @openchamber/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
+      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
     } else {
-      if (hasBun) commands.push(`bun add -g @openchamber/web@${version}`);
-      if (hasNpm) commands.push(`npm install -g @openchamber/web@${version}`);
+      if (hasBun) commands.push(`bun add -g @piarium/web@${version}`);
+      if (hasNpm) commands.push(`npm install -g @piarium/web@${version}`);
     }
 
     if (commands.length === 0) {

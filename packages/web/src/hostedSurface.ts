@@ -1,5 +1,5 @@
-import type { MobileLayoutPreference } from '@openchamber/ui/lib/mobileLayoutPreference';
-import type { HostedSurface } from '@openchamber/ui/lib/runtimeSurface';
+import type { MobileLayoutPreference } from '@piarium/ui/lib/mobileLayoutPreference';
+import type { HostedSurface } from '@piarium/ui/lib/runtimeSurface';
 
 export type HostedSurfaceDetectionInput = {
   search: string;

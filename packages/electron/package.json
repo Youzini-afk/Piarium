@@ -1,13 +1,13 @@
 {
   "name": "@piarium/electron",
-  "version": "1.17.1",
+  "version": "0.1.0",
   "private": true,
   "description": "Piarium desktop runtime",
   "author": "Youzini-afk and Piarium contributors",
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
-    "@openchamber/web": "workspace:*",
+    "@piarium/web": "workspace:*",
     "@piarium/pi-host": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",

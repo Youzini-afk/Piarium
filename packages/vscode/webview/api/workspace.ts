@@ -1,4 +1,4 @@
-import type { WorkspaceAPI } from '@openchamber/ui/lib/api/types';
+import type { WorkspaceAPI } from '@piarium/ui/lib/api/types';
 
 const unsupported = async (): Promise<never> => {
   throw new Error('Workspace file management is not available in the VS Code runtime.');

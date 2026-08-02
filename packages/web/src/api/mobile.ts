@@ -3,7 +3,7 @@ import type {
   MobileDevice,
   MobilePairStartResult,
   MobileTestPushResult,
-} from '@openchamber/ui/lib/api/types';
+} from '@piarium/ui/lib/api/types';
 
 const fetchJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T | null> => {
   try {

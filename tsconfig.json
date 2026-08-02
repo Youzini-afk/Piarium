@@ -13,8 +13,8 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "paths": {
-      "@openchamber/ui/*": ["./packages/ui/src/*"],
-      "@openchamber/web/*": ["./packages/web/src/*"]
+      "@piarium/ui/*": ["./packages/ui/src/*"],
+      "@piarium/web/*": ["./packages/web/src/*"]
     }
   }
 }

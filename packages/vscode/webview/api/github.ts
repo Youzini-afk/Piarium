@@ -20,7 +20,7 @@ import type {
   GitHubRepoUpstreamResult,
   GitHubTerminalAuthResult,
   GitHubUserSummary,
-} from '@openchamber/ui/lib/api/types';
+} from '@piarium/ui/lib/api/types';
 
 import { sendBridgeMessage } from './bridge';
 

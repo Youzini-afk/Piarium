@@ -63,7 +63,7 @@ describe('external access routes', () => {
     fs.mkdirSync(path.join(deploymentRoot, 'workspace'), { recursive: true });
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(path.join(deploymentRoot, 'package.json'), '{"name":"openchamber-test"}');
-    fs.writeFileSync(path.join(deploymentRoot, 'packages', 'web', 'package.json'), '{"name":"@openchamber/web"}');
+    fs.writeFileSync(path.join(deploymentRoot, 'packages', 'web', 'package.json'), '{"name":"@piarium/web"}');
   });
 
   afterEach(() => {

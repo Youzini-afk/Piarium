@@ -4,8 +4,8 @@ import type {
   SmartSearchConfigResponse,
   SmartSearchDoctorResponse,
   SmartSearchStatusResponse,
-} from '@openchamber/ui/lib/api/types';
-import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
+} from '@piarium/ui/lib/api/types';
+import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 
 const STATUS_ENDPOINT = '/api/smart-search/status';
 const CONFIG_ENDPOINT = '/api/smart-search/config';

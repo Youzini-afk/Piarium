@@ -33,7 +33,7 @@ import {
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
-import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
+import { mintOutsideFileGrant } from '@piarium/web/server/lib/fs/routes.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -197,13 +197,13 @@ const readAppMetadata = () => {
     try {
       const raw = fs.readFileSync(candidate, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed?.name === '@openchamber/electron' && typeof parsed.version === 'string') {
+      if (parsed?.name === '@piarium/electron' && typeof parsed.version === 'string') {
         return { name: parsed.name, version: parsed.version };
       }
     } catch {
     }
   }
-  return { name: '@openchamber/electron', version: app.getVersion() };
+  return { name: '@piarium/electron', version: app.getVersion() };
 };
 
 const APP_METADATA = readAppMetadata();
@@ -1512,7 +1512,7 @@ const loadShellEnv = () => {
 };
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
-import { pathLooksUserConfigured, mergePathValues } from '@openchamber/web/server/lib/opencode/path-utils.js';
+import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/lib/opencode/path-utils.js';
 
 // import/start the server in-process. The server and its children (opencode
 // CLI, git, etc.) inherit process.env directly now — there is no sidecar
@@ -1607,7 +1607,7 @@ const spawnLocalServer = async () => {
     throw new Error('Pi runtime broker is unavailable after startup');
   }
 
-  const { startWebUiServer } = await import('@openchamber/web/server/index.js');
+  const { startWebUiServer } = await import('@piarium/web/server/index.js');
 
   const handle = await startWebUiServer({
     port: chosenPort,

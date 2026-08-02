@@ -279,7 +279,7 @@ function resetDirectory(directory) {
 }
 
 function installedWebCli(directory) {
-  const cliPath = path.join(directory, 'node_modules', '@openchamber', 'web', 'bin', 'cli.js');
+  const cliPath = path.join(directory, 'node_modules', '@piarium', 'web', 'bin', 'cli.js');
   return existsSync(cliPath) ? cliPath : '';
 }
 
@@ -296,7 +296,7 @@ function stopInstalledInstance(directory, port) {
 
 function startInstalledInstance(directory, port) {
   const cliPath = installedWebCli(directory);
-  if (!cliPath) throw new Error(`OpenChamber CLI was not installed in ${directory}`);
+  if (!cliPath) throw new Error(`Piarium CLI was not installed in ${directory}`);
   run('node', [cliPath, '--port', port], {
     cwd: directory,
     env: {
@@ -366,15 +366,14 @@ async function deployWeb(options, config) {
     return;
   }
 
-  step(`Stopping global instance on ${GLOBAL_PORT}`, () => run('openchamber', ['stop', '--port', GLOBAL_PORT], { allowFail: true, label: `stop global instance on ${GLOBAL_PORT}` }));
+  step(`Stopping global instance on ${GLOBAL_PORT}`, () => run('piarium', ['stop', '--port', GLOBAL_PORT], { allowFail: true, label: `stop global instance on ${GLOBAL_PORT}` }));
   step('Removing old global package', () => {
-    run('bun', ['remove', '-g', '@openchamber/web'], { allowFail: true, label: 'remove @openchamber/web' });
-    run('bun', ['remove', '-g', 'openchamber'], { allowFail: true, label: 'remove openchamber' });
+    run('bun', ['remove', '-g', '@piarium/web'], { allowFail: true, label: 'remove @piarium/web' });
   });
   step('Installing package globally', () => run('bun', ['add', '-g', packageFile]));
   step(`Starting global instance on ${GLOBAL_PORT}`, () => {
     const cliPath = installedGlobalWebCli();
-    if (!cliPath) throw new Error('Global OpenChamber CLI was not installed by bun add -g');
+    if (!cliPath) throw new Error('Global Piarium CLI was not installed by bun add -g');
     run('node', [cliPath, '--port', GLOBAL_PORT], { env: { OPENCHAMBER_UI_PASSWORD: process.env.OPENCHAMBER_PASSWORD || '', OPENCHAMBER_HOST: '0.0.0.0' } });
   });
 }
@@ -391,7 +390,7 @@ async function deployRemoteWeb(options, config) {
   if (!host || !dir || !port) throw new Error(`Remote deployment ${remote.id} must define host, dir, and port.`);
 
   step('Preparing remote directories', () => run('ssh', [host, `mkdir -p ~/${dir}/releases`]));
-  step(`Stopping remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; ${REMOTE_RUNTIME_ENV}; cd ~/${dir} 2>/dev/null || exit 0; PORT=${quote(port)}; TMPDIR=$(node -p "require('os').tmpdir()" 2>/dev/null || echo /tmp); PIDFILE="$TMPDIR/openchamber-${port}.pid"; INSTANCEFILE="$TMPDIR/openchamber-${port}.json"; if [ -f ./node_modules/@openchamber/web/bin/cli.js ]; then bun ./node_modules/@openchamber/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || node ./node_modules/@openchamber/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || true; fi; if command -v lsof >/dev/null 2>&1; then lsof -ti :"$PORT" | xargs -r kill >/dev/null 2>&1 || true; sleep 0.5; lsof -ti :"$PORT" | xargs -r kill -9 >/dev/null 2>&1 || true; fi; rm -f "$PIDFILE" "$INSTANCEFILE"`], { label: 'stop remote instance' }));
+  step(`Stopping remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; ${REMOTE_RUNTIME_ENV}; cd ~/${dir} 2>/dev/null || exit 0; PORT=${quote(port)}; TMPDIR=$(node -p "require('os').tmpdir()" 2>/dev/null || echo /tmp); PIDFILE="$TMPDIR/openchamber-${port}.pid"; INSTANCEFILE="$TMPDIR/openchamber-${port}.json"; if [ -f ./node_modules/@piarium/web/bin/cli.js ]; then bun ./node_modules/@piarium/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || node ./node_modules/@piarium/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || true; fi; if command -v lsof >/dev/null 2>&1; then lsof -ti :"$PORT" | xargs -r kill >/dev/null 2>&1 || true; sleep 0.5; lsof -ti :"$PORT" | xargs -r kill -9 >/dev/null 2>&1 || true; fi; rm -f "$PIDFILE" "$INSTANCEFILE"`], { label: 'stop remote instance' }));
   step('Copying package to remote', () => {
     run('ssh', [host, `mkdir -p ~/${dir}/releases && rm -f ~/${dir}/releases/*.tgz`]);
     run('scp', ['-q', packageFile, `${host}:~/${dir}/releases/${packageBase}`]);
@@ -399,7 +398,7 @@ async function deployRemoteWeb(options, config) {
   step('Resetting remote install state', () => run('ssh', [host, `cd ~/${dir} && rm -f package.json package-lock.json pnpm-lock.yaml bun.lockb && rm -rf node_modules`]));
   step('Preparing remote package manifest', () => run('ssh', [host, `cd ~/${dir} && ${REMOTE_RUNTIME_ENV}; npm init -y >/dev/null 2>&1`]));
   step('Installing remote package', () => run('ssh', [host, `cd ~/${dir} && ${REMOTE_RUNTIME_ENV}; npm install ./releases/${packageBase}`]));
-  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; OPENCHAMBER_HOST=0.0.0.0 node ./node_modules/@openchamber/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
+  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export OPENCHAMBER_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export OPENCHAMBER_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export OPENCHAMBER_API_ONLY=true; fi; OPENCHAMBER_HOST=0.0.0.0 node ./node_modules/@piarium/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
   log.success(`Remote deployment ready: ${host}:${port}`);
 }
 
@@ -544,7 +543,7 @@ function buildElectronApp() {
 
 function startVsCodeExtension() {
   const vscodeDir = path.join(repoRoot, 'packages/vscode');
-  removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix');
+  removeFilesByPrefixSuffix(vscodeDir, 'piarium-', '.vsix');
   step('Building VS Code extension', () => run('bun', ['run', 'vscode:build']));
   run('code', ['--extensionDevelopmentPath', vscodeDir]);
 }
@@ -562,14 +561,14 @@ async function installVsCodeExtensionLocal(options) {
 
   const vscodeDir = path.join(repoRoot, 'packages/vscode');
   step('Building VS Code extension', () => run('bun', ['run', '--cwd', 'packages/vscode', 'build']));
-  step('Removing found VSIX package(s) before install flow', () => removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix'));
+  step('Removing found VSIX package(s) before install flow', () => removeFilesByPrefixSuffix(vscodeDir, 'piarium-', '.vsix'));
   step('Packaging VSIX', () => run('bunx', ['vsce', 'package', '--no-dependencies'], { cwd: vscodeDir }));
   step('Installing VSIX locally', () => {
-    run('code', ['--uninstall-extension', 'fedaykindev.openchamber'], { label: 'uninstall old extension', allowFail: true });
-    run('code --install-extension packages/vscode/openchamber-*.vsix', [], { shell: true, label: 'install VSIX' });
+    run('code', ['--uninstall-extension', 'youzini-afk.piarium'], { label: 'uninstall current extension', allowFail: true });
+    run('code --install-extension packages/vscode/piarium-*.vsix', [], { shell: true, label: 'install VSIX' });
   });
   if (cleanup === 'delete') {
-    step('Removing local VSIX package(s) after install', () => removeFilesByPrefixSuffix(vscodeDir, 'openchamber-', '.vsix'));
+    step('Removing local VSIX package(s) after install', () => removeFilesByPrefixSuffix(vscodeDir, 'piarium-', '.vsix'));
   }
 }
 

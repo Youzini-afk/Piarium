@@ -1,12 +1,12 @@
 {
-  "name": "@openchamber/web",
-  "version": "1.17.1",
+  "name": "@piarium/web",
+  "version": "0.1.0",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
   "types": "./server/index.d.ts",
   "bin": {
-    "openchamber": "./bin/cli.js"
+    "piarium": "./bin/cli.js"
   },
   "publishConfig": {
     "access": "public"

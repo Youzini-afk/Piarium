@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# OpenChamber Install Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
+# Piarium Install Script
+# Usage: curl -fsSL https://raw.githubusercontent.com/Youzini-afk/Piarium/main/scripts/install.sh | bash
 
 set -euo pipefail
 
-PACKAGE_NAME="@openchamber/web"
-BIN_NAME="openchamber"
+PACKAGE_NAME="@piarium/web"
+BIN_NAME="piarium"
 MIN_NODE_VERSION=22
 
 # Colors
@@ -156,8 +156,8 @@ main() {
   echo ""
   echo "  ╭───────────────────────────────────╮"
   echo "  │                                   │"
-  echo "  │   OpenChamber Installer           │"
-  echo "  │   Web interface for OpenCode      │"
+  echo "  │   Piarium Installer              │"
+  echo "  │   Pi-native coding workspace     │"
   echo "  │                                   │"
   echo "  ╰───────────────────────────────────╯"
   echo ""
@@ -176,23 +176,23 @@ main() {
   fi
   success "Node.js v$NODE_VERSION found"
 
-  # If OpenChamber is already installed, hand off to its own updater instead
-  # of guessing a package manager. `openchamber update` detects which manager
+  # If Piarium is already installed, hand off to its own updater instead
+  # of guessing a package manager. `piarium update` detects which manager
   # actually owns the existing global install and reinstalls with that one —
   # reinstalling with a different manager here would orphan files and break PATH.
   if command_exists "$BIN_NAME"; then
-    info "OpenChamber is already installed — updating via 'openchamber update'..."
+    info "Piarium is already installed — updating via 'piarium update'..."
     echo ""
-    if openchamber update; then
+    if piarium update; then
       echo ""
-      success "OpenChamber is up to date!"
+      success "Piarium is up to date!"
       exit 0
     fi
     echo ""
     error "Update failed."
     echo ""
     echo "  Try running it manually:"
-    echo "    openchamber update"
+    echo "    piarium update"
     echo ""
     exit 1
   fi
@@ -216,25 +216,18 @@ main() {
 
   # Install
   echo ""
-  info "Installing OpenChamber..."
+  info "Installing Piarium..."
   echo "  Running: $INSTALL_CMD"
   echo ""
 
   if eval "$INSTALL_CMD"; then
     echo ""
-    # Wordmark (toilet "pagga", "Open"/"Chamber" stacked).
-    # Hardcoded so the user needs no extra tools.
     printf '%b' "$BLUE"
     cat <<'EOF'
-  ░█▀█░█▀█░█▀▀░█▀█
-  ░█░█░█▀▀░█▀▀░█░█
-  ░▀▀▀░▀░░░▀▀▀░▀░▀
-  ░█▀▀░█░█░█▀█░█▄█░█▀▄░█▀▀░█▀▄
-  ░█░░░█▀█░█▀█░█░█░█▀▄░█▀▀░█▀▄
-  ░▀▀▀░▀░▀░▀░▀░▀░▀░▀▀░░▀▀▀░▀░▀
+  π  PIARIUM
 EOF
     printf '%b\n' "$NC"
-    success "OpenChamber installed successfully!"
+    success "Piarium installed successfully!"
     echo ""
 
     # Verify the binary is actually reachable. Global installs frequently
@@ -242,8 +235,8 @@ EOF
     # letting the user hit a confusing "command not found".
     if command_exists "$BIN_NAME"; then
       echo "  Get started:"
-      echo "    openchamber              # Start server on port 3000"
-      echo "    openchamber --help       # Show all options"
+      echo "    piarium              # Start server on port 3000"
+      echo "    piarium --help       # Show all options"
     else
       warn "'$BIN_NAME' was installed but isn't on your PATH yet."
       echo ""
@@ -259,12 +252,9 @@ EOF
         echo "    export PATH=\"$bin_dir:\$PATH\""
       else
         echo "  Add your package manager's global bin directory to PATH,"
-        echo "  then restart your terminal and run: openchamber"
+        echo "  then restart your terminal and run: piarium"
       fi
     fi
-    echo ""
-    echo "  Prerequisites:"
-    echo "    Make sure OpenCode is running: opencode serve"
     echo ""
   else
     echo ""
