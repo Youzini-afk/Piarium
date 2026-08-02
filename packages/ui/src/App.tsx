@@ -35,10 +35,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { resumeAutoReviewRun } from '@/lib/reviewFlow';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { SyncProvider } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
@@ -47,7 +44,6 @@ import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -82,7 +78,7 @@ const AboutDialogWrapper: React.FC = () => {
   );
 };
 
-const StartupInitializationRecovery: React.FC<{
+const RuntimeInitializationRecovery: React.FC<{
   onRetry: () => void;
   isRetrying: boolean;
 }> = ({ onRetry, isRetrying }) => {
@@ -174,28 +170,23 @@ function App({ apis }: AppProps) {
     }
   }, []);
 
-  const initializeApp = useConfigStore((s) => s.initializeApp);
-  const isInitialized = useConfigStore((s) => s.isInitialized);
-  const isConnected = useConfigStore((s) => s.isConnected);
-  const providersCount = useConfigStore((state) => state.providers.length);
-  const agentsCount = useConfigStore((state) => state.agents.length);
-  const loadProviders = useConfigStore((state) => state.loadProviders);
-  const loadAgents = useConfigStore((state) => state.loadAgents);
+  const initializeLegacyApp = useConfigStore((s) => s.initializeApp);
+  const legacyIsInitialized = useConfigStore((s) => s.isInitialized);
+  const legacyIsConnected = useConfigStore((s) => s.isConnected);
+  const piCatalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
+  const piCatalogLoading = usePiSessionStore((state) => state.catalogLoading);
+  const piRuntimeError = usePiSessionStore((state) => state.lastError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
-  const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
-  const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
-  const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const enableMobileAppViewport = React.useMemo(() => isMobileAppRuntime(), []);
-  const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
     return getBootInjectionStatus();
   });
@@ -222,42 +213,19 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
       resetAppForRuntimeEndpointChange(detail);
+      appReadyDispatchedRef.current = false;
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
-      setInitRetryExhausted(false);
-      setInitRetryEpoch((epoch) => epoch + 1);
     });
   }, []);
 
   React.useEffect(() => {
-    if (embeddedSessionChat || !isConnected) return;
+    if (embeddedSessionChat) return;
     const state = usePiSessionStore.getState();
     if (state.catalogLoaded || state.catalogLoading) return;
     void state.loadCatalog().catch((catalogError) => {
       console.warn('[Piarium] failed to load the Pi session catalog:', catalogError);
     });
-  }, [embeddedSessionChat, isConnected, runtimeEndpointEpoch]);
-
-  const autoReviewResumeSignature = useAutoReviewStore((state) => {
-    const runtimeKey = getRuntimeKey();
-    return Object.values(state.runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
-      .map((run) => `${run.originalSessionID}:${run.phase}:${run.lastForwardedMessageID ?? ''}:${run.expectedAssistantParentID ?? ''}`)
-      .sort()
-      .join('|');
-  });
-
-  React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
-    const runtimeKey = getRuntimeKey();
-    const runs = Object.values(useAutoReviewStore.getState().runsByOriginalSessionID)
-      .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey);
-    for (const run of runs) {
-      resumeAutoReviewRun(run.originalSessionID);
-    }
-  }, [autoReviewResumeSignature, embeddedSessionChat, runtimeEndpointEpoch]);
+  }, [embeddedSessionChat, runtimeEndpointEpoch]);
 
   useWideChatLayoutClass(wideChatLayoutEnabled);
 
@@ -278,6 +246,7 @@ function App({ apis }: AppProps) {
 
   const bootOutcomeKnown = bootInjectionStatus === 'valid';
   const bootViewIsMain = bootView?.screen === 'main';
+  const runtimeReady = embeddedSessionChat ? legacyIsInitialized : piCatalogLoaded;
 
   // Splash dismissal: use the authoritative loading gate from desktopBoot.
   // Desktop shells strictly require a valid boot outcome before dismissing.
@@ -285,7 +254,7 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     if (!canDismissInitialLoading({
       isDesktopShell: isDesktopRuntime,
-      isInitialized,
+      runtimeReady,
       bootOutcomeKnown,
       bootViewIsMain,
     })) {
@@ -303,7 +272,7 @@ function App({ apis }: AppProps) {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [isDesktopRuntime, isInitialized, bootOutcomeKnown, bootViewIsMain]);
+  }, [isDesktopRuntime, runtimeReady, bootOutcomeKnown, bootViewIsMain]);
 
   // Deterministic malformed handling: update splash text so the user
   // sees a specific error instead of a generic spinner, but do NOT
@@ -327,7 +296,7 @@ function App({ apis }: AppProps) {
 
     const fallbackTimer = setTimeout(() => {
       const loadingElement = document.getElementById('initial-loading');
-      if (loadingElement && !isInitialized) {
+      if (loadingElement && !runtimeReady) {
         loadingElement.classList.add('fade-out');
         setTimeout(() => {
           loadingElement.remove();
@@ -336,129 +305,16 @@ function App({ apis }: AppProps) {
     }, 5000);
 
     return () => clearTimeout(fallbackTimer);
-  }, [isDesktopRuntime, isInitialized]);
+  }, [isDesktopRuntime, runtimeReady]);
 
   React.useEffect(() => {
-    let cancelled = false;
-
-    const run = async () => {
-      const res = await runtimeFetch('/health', { method: 'GET' }).catch(() => null);
-      if (!res || !res.ok || cancelled) return;
-      const data = (await res.json().catch(() => null)) as null | {
-        planModeExperimentalEnabled?: unknown;
-      };
-      if (!data || cancelled) return;
-      const raw = data.planModeExperimentalEnabled;
-      const enabled = raw === true || raw === 1 || raw === '1' || raw === 'true';
-      setPlanModeEnabled(enabled);
-    };
-
-    void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [setPlanModeEnabled]);
-
-  React.useEffect(() => {
-    // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
-    // Doing the default initialization here can race with startup and lead to one-shot failures.
-    if (isVSCodeRuntime) {
+    // The Pi main application never initializes the legacy OpenCode config store.
+    // Keep the old bootstrap confined to the explicitly isolated embedded route.
+    if (!embeddedSessionChat || isVSCodeRuntime) {
       return;
     }
-    void initializeApp();
-  }, [initializeApp, isVSCodeRuntime]);
-
-  React.useEffect(() => {
-    if (isVSCodeRuntime || isInitialized) return;
-
-    let active = true;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let retryCount = 0;
-    const MAX_RETRIES = 10;
-    const BASE_DELAY_MS = 1000;
-
-    const retryInitialization = async () => {
-      if (!active) return;
-      if (retryCount >= MAX_RETRIES) {
-        setInitRetryExhausted(true);
-        return;
-      }
-      const state = useConfigStore.getState();
-      if (state.isInitialized) {
-        setInitRetryExhausted(false);
-        return;
-      }
-      retryCount += 1;
-      await state.initializeApp();
-
-      const next = useConfigStore.getState();
-      if (!active) return;
-      if (next.isInitialized) {
-        setInitRetryExhausted(false);
-        return;
-      }
-      if (retryCount >= MAX_RETRIES) {
-        setInitRetryExhausted(true);
-        return;
-      }
-      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount - 1), 16000);
-      retryTimer = setTimeout(retryInitialization, delay);
-    };
-
-    retryTimer = setTimeout(retryInitialization, BASE_DELAY_MS);
-
-    return () => {
-      active = false;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [initRetryEpoch, isInitialized, isVSCodeRuntime]);
-
-  React.useEffect(() => {
-    if (isInitialized) {
-      setInitRetryExhausted(false);
-    }
-  }, [isInitialized]);
-
-  React.useEffect(() => {
-    if (!initRetryExhausted) return;
-
-    const loadingElement = document.getElementById('initial-loading');
-    if (loadingElement) {
-      loadingElement.classList.add('fade-out');
-      setTimeout(() => {
-        loadingElement.remove();
-      }, 300);
-    }
-  }, [initRetryExhausted]);
-
-  // Startup recovery: poll until providers AND agents are loaded.
-  // loadProviders/loadAgents resolve normally even on failure (errors swallowed),
-  // so a reactive effect can't detect failure — we need an interval.
-  React.useEffect(() => {
-    if (isVSCodeRuntime || !isConnected) return;
-    if (providersCount > 0 && agentsCount > 0) return;
-
-    let active = true;
-    let retries = 0;
-    const MAX_RETRIES = 15;
-    const attempt = async () => {
-      const state = useConfigStore.getState();
-      if (state.providers.length > 0 && state.agents.length > 0) return;
-      try {
-        if (state.providers.length === 0) await loadProviders({ source: 'startupRecovery' });
-        if (useConfigStore.getState().agents.length === 0) await loadAgents({ source: 'startupRecovery' });
-      } catch { /* retry next interval */ }
-    };
-
-    void attempt();
-    const id = setInterval(() => {
-      if (!active) return;
-      if (++retries >= MAX_RETRIES) { clearInterval(id); return; }
-      void attempt();
-    }, 2000);
-    return () => { active = false; clearInterval(id); };
-  }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, agentsCount]);
+    void initializeLegacyApp();
+  }, [embeddedSessionChat, initializeLegacyApp, isVSCodeRuntime]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat) {
@@ -474,13 +330,13 @@ function App({ apis }: AppProps) {
       return;
     }
 
-    if (!isConnected) {
+    if (!legacyIsConnected) {
       return;
     }
     opencodeClient.setDirectory(currentDirectory);
 
     // Session loading is handled by the sync system's bootstrap — no manual loadSessions needed.
-  }, [currentDirectory, embeddedSessionChat, isSwitchingDirectory, isConnected, isVSCodeRuntime]);
+  }, [currentDirectory, embeddedSessionChat, isSwitchingDirectory, legacyIsConnected, isVSCodeRuntime]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -602,12 +458,12 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!isInitialized || isSwitchingDirectory) return;
+    if (!runtimeReady || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
     (window as unknown as { __openchamberAppReady?: boolean }).__openchamberAppReady = true;
     window.dispatchEvent(new Event('openchamber:app-ready'));
-  }, [isInitialized, isSwitchingDirectory]);
+  }, [runtimeReady, isSwitchingDirectory]);
 
   // useEventStream replaced by SyncProvider + SyncBridge
 
@@ -619,7 +475,7 @@ function App({ apis }: AppProps) {
 
   useWindowTitle();
 
-  useRouter({ enabled: !embeddedSessionChat && isConnected });
+  useRouter({ enabled: !embeddedSessionChat && piCatalogLoaded });
 
   useMenuActions({ enabled: !embeddedSessionChat });
 
@@ -695,22 +551,6 @@ function App({ apis }: AppProps) {
     window.location.reload();
   }, []);
 
-  const handleManualInitRetry = React.useCallback(async () => {
-    if (manualInitRetrying) return;
-
-    setInitRetryExhausted(false);
-    setManualInitRetrying(true);
-    try {
-      await useConfigStore.getState().initializeApp();
-    } finally {
-      setManualInitRetrying(false);
-    }
-
-    if (!useConfigStore.getState().isInitialized) {
-      setInitRetryEpoch((value) => value + 1);
-    }
-  }, [manualInitRetrying]);
-
   // Map boot outcome kind to recovery variant
   const mapBootViewToRecoveryVariant = (view: DesktopBootView): RecoveryVariant | undefined => {
     if (view.screen === 'recovery') {
@@ -781,12 +621,12 @@ function App({ apis }: AppProps) {
     );
   }
 
-  if (initRetryExhausted && !isInitialized && !isVSCodeRuntime && !embeddedSessionChat) {
+  if (!embeddedSessionChat && !piCatalogLoaded && piRuntimeError) {
     return (
       <ErrorBoundary>
-        <StartupInitializationRecovery
-          onRetry={() => { void handleManualInitRetry(); }}
-          isRetrying={manualInitRetrying}
+        <RuntimeInitializationRecovery
+          onRetry={() => { void usePiSessionStore.getState().loadCatalog(); }}
+          isRetrying={piCatalogLoading}
         />
       </ErrorBoundary>
     );
@@ -794,7 +634,7 @@ function App({ apis }: AppProps) {
 
   // The main Pi surface is independent from the isolated OpenCode sync tree
   // retained above for embedded legacy sessions.
-  const isBootShell = !isInitialized && !isDesktopRuntime;
+  const isBootShell = !piCatalogLoaded && !isDesktopRuntime;
 
   return (
     <ErrorBoundary>

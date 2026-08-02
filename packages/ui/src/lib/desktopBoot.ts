@@ -215,12 +215,12 @@ export type BootInjectionStatus =
 
 export type InitialLoadingState = {
   isDesktopShell: boolean;
-  isInitialized: boolean;
+  runtimeReady: boolean;
   bootOutcomeKnown: boolean;
   /**
    * Whether the resolved boot view is 'main'.
    * When false (chooser/recovery), splash dismisses on bootOutcomeKnown alone.
-   * When true or absent, splash also requires isInitialized.
+   * When true or absent, splash also requires the selected runtime to be ready.
    */
   bootViewIsMain?: boolean;
 };
@@ -235,14 +235,13 @@ export type DesktopBootFlowRestartInput = {
  *
  * Desktop shells must wait until a valid boot outcome is injected by the native host.
  * For non-main views (chooser, recovery), the splash can dismiss as soon as
- * the outcome is known — `isInitialized` is not required because OpenCode
- * may not be available in those flows.
- * For main views, both `isInitialized` and `bootOutcomeKnown` are required.
+ * the outcome is known — runtime readiness is not required in those flows.
+ * For main views, both runtime readiness and `bootOutcomeKnown` are required.
  * Non-desktop shells only need the app to be initialized.
  */
 export function canDismissInitialLoading(state: InitialLoadingState): boolean {
   if (!state.isDesktopShell) {
-    return state.isInitialized;
+    return state.runtimeReady;
   }
 
   if (!state.bootOutcomeKnown) {
@@ -254,7 +253,7 @@ export function canDismissInitialLoading(state: InitialLoadingState): boolean {
     return true;
   }
 
-  return state.isInitialized;
+  return state.runtimeReady;
 }
 
 /**

@@ -10,7 +10,7 @@ import {
 test('normalizes host and release architecture aliases', () => {
   assert.equal(normalizeTargetArchitecture('amd64').node, 'x64');
   assert.equal(normalizeTargetArchitecture('x86_64').electronBuilder, 'x64');
-  assert.equal(normalizeTargetArchitecture('aarch64').opencode, 'arm64');
+  assert.equal(normalizeTargetArchitecture('aarch64').node, 'arm64');
 });
 
 test('reads a single electron-builder target architecture', () => {

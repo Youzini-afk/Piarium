@@ -42,7 +42,6 @@ import { createDictationRuntime } from './lib/dictation/runtime.js';
 import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
-  createMessageStreamWsRuntime,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
   UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
 } from './lib/event-stream/index.js';
@@ -72,14 +71,13 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
-import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
-import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
+import { createStartupPipelineRuntime } from './lib/startup-pipeline-runtime.js';
 import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
@@ -91,8 +89,7 @@ import { createMobileDeviceStore } from './lib/mobile/device-store.js';
 import { createMobilePairingRuntime } from './lib/mobile/pairing-runtime.js';
 import { createMobilePushRuntime } from './lib/mobile/push-runtime.js';
 import { registerMobileRoutes } from './lib/mobile/routes.js';
-import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
-import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { createGracefulShutdownRuntime } from './lib/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -119,7 +116,6 @@ const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const uiNotificationClients = new Set();
 const uiNotificationWsClients = new Set();
 const uiOpenChamberEventClients = new Set();
-const HEALTH_CHECK_INTERVAL = 15000;
 const SHUTDOWN_TIMEOUT = 10000;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 const MODELS_METADATA_CACHE_TTL = 5 * 60 * 1000;
@@ -288,7 +284,6 @@ const fetchFreeZenModels = (...args) => notificationTemplateRuntime.fetchFreeZen
 const extractTextFromParts = (...args) => notificationTemplateRuntime.extractTextFromParts(...args);
 const extractLastMessageText = (...args) => notificationTemplateRuntime.extractLastMessageText(...args);
 const fetchLastAssistantMessageText = (...args) => notificationTemplateRuntime.fetchLastAssistantMessageText(...args);
-const maybeCacheSessionInfoFromEvent = (...args) => notificationTemplateRuntime.maybeCacheSessionInfoFromEvent(...args);
 const buildTemplateVariables = (...args) => notificationTemplateRuntime.buildTemplateVariables(...args);
 const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZenModels(...args);
 
@@ -521,7 +516,6 @@ let isExternalOpenCode = false;
 let exitOnShutdown = true;
 let uiAuthController = null;
 let activeTunnelController = null;
-let globalWatcherStartPromise = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
   createCloudflareTunnelProvider(),
   createNgrokTunnelProvider(),
@@ -649,7 +643,6 @@ const normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefi
 const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
 const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
-const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
@@ -754,14 +747,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   getOpenCodeAuthHeaders,
 });
 
-const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
 const autoReplyPendingPermissionsForServerSetting = (...args) => notificationTriggerRuntime.autoReplyPendingPermissionsForServerSetting(...args);
-const setAutoAcceptSession = (sessionId, enabled, options = {}) => {
-  const directory = Array.isArray(options.directories)
-    ? options.directories.find((entry) => typeof entry === 'string' && entry.trim())
-    : undefined;
-  return permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory);
-};
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
 const sessionAssistRuntime = createSessionAssistRuntime({
@@ -820,107 +806,6 @@ const globalMessageStreamHub = createGlobalMessageStreamHub({
   upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
 });
 
-const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
-  globalEventHub: globalMessageStreamHub,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  readSettingsFromDiskMigrated,
-  persistSettings,
-  broadcastGlobalUiEvent,
-});
-permissionAutoAcceptRuntime.start();
-notificationTriggerRuntime.setGetIsSessionAutoAccepting(
-  (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
-);
-notificationTriggerRuntime.setHandlePermissionAutoAccept(
-  ({ sessionId, requestId, directory }) => permissionAutoAcceptRuntime.processPermission({
-    id: requestId,
-    sessionID: sessionId,
-    directory,
-  }, directory),
-);
-
-const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
-  waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  parseSseDataPayload: (...args) => parseSseDataPayload(...args),
-  globalEventHub: globalMessageStreamHub,
-  onPayload: (payload) => {
-    maybeCacheSessionInfoFromEvent(payload);
-    void maybeSendPushForTrigger(payload);
-    sessionRuntime.processOpenCodeSsePayload(payload);
-  },
-});
-
-// Session-assist subscribes to the hub directly: it needs the envelope's
-// directory to route its own OpenCode calls to the right instance.
-console.log('[session-assist] listening for session events');
-globalMessageStreamHub.subscribeEvent((event) => {
-  const raw = event?.payload;
-  const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
-  if (!payload || typeof payload !== 'object') return;
-  const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
-    ? event.directory
-    : '';
-  sessionAssistRuntime.processPayload(payload, directory);
-  sessionGoalRuntime.processPayload(payload, directory);
-  contextObligatoryRuntime.processPayload(payload, directory);
-});
-
-const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
-  if (!payload || typeof payload !== 'object' || typeof emitSyntheticEvent !== 'function') {
-    return;
-  }
-
-  maybeCacheSessionInfoFromEvent(payload);
-
-  if (payload.type !== 'session.status') {
-    return;
-  }
-
-  const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
-  const statusInfo = properties.status && typeof properties.status === 'object' ? properties.status : {};
-  const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
-  const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
-  const status = typeof statusInfo.type === 'string'
-    ? statusInfo.type.trim()
-    : (typeof info.type === 'string' ? info.type.trim() : '');
-
-  if (!sessionId || !status) {
-    return;
-  }
-
-  emitSyntheticEvent({
-    type: 'openchamber:session-status',
-    properties: {
-      sessionID: sessionId,
-      status,
-      timestamp: Date.now(),
-      metadata: {
-        attempt: typeof statusInfo.attempt === 'number'
-          ? statusInfo.attempt
-          : (typeof info.attempt === 'number' ? info.attempt : undefined),
-        message: typeof statusInfo.message === 'string'
-          ? statusInfo.message
-          : (typeof info.message === 'string' ? info.message : undefined),
-        next: typeof statusInfo.next === 'number'
-          ? statusInfo.next
-          : (typeof info.next === 'number' ? info.next : undefined),
-      },
-      needsAttention: false,
-    },
-  });
-
-  emitSyntheticEvent({
-    type: 'openchamber:session-activity',
-    properties: {
-      sessionId,
-      phase: status === 'busy' || status === 'retry' ? 'busy' : 'idle',
-    },
-  });
-};
-
 
 const serverUtilsRuntime = createServerUtilsRuntime({
   fs,
@@ -968,7 +853,6 @@ const setOpenCodePort = (...args) => serverUtilsRuntime.setOpenCodePort(...args)
 const waitForOpenCodePort = (...args) => serverUtilsRuntime.waitForOpenCodePort(...args);
 const buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
 const buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
-const parseSseDataPayload = (...args) => serverUtilsRuntime.parseSseDataPayload(...args);
 const staticRoutesRuntime = createStaticRoutesRuntime({
   fs,
   path,
@@ -1047,7 +931,6 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createDictationRuntime,
-  createMessageStreamWsRuntime,
   createServerStartupRuntime,
 });
 
@@ -1155,7 +1038,6 @@ const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(..
 const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
 const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
-const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
@@ -1228,31 +1110,6 @@ const openChamberControlService = createOpenChamberControlService({
   scheduledTaskService,
 });
 
-const ensureGlobalWatcherStarted = async () => {
-  if (globalWatcherStartPromise) {
-    return globalWatcherStartPromise;
-  }
-
-  globalWatcherStartPromise = openCodeWatcherRuntime.start().catch((error) => {
-    globalWatcherStartPromise = null;
-    throw error;
-  });
-
-  return globalWatcherStartPromise;
-};
-const bootstrapOpenCodeAtStartup = async (...args) => {
-  await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
-  scheduleOpenCodeApiDetection();
-  if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
-    startHealthMonitoring();
-  }
-  // The global watcher used to start only for desktop notifications; the
-  // session-assist runtime also rides its event hub, so it now starts
-  // unconditionally once OpenCode is up.
-  void ensureGlobalWatcherStarted().catch((error) => {
-    console.warn(`Global event watcher startup failed: ${error?.message || error}`);
-  });
-};
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
 
@@ -1269,13 +1126,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     isShuttingDown = value;
   },
   syncToHmrState,
-  openCodeWatcherRuntime,
   sessionAssistRuntime,
   sessionGoalRuntime,
   contextObligatoryRuntime,
   sessionRuntime,
-  getHealthCheckInterval: () => healthCheckInterval,
-  clearHealthCheckInterval: (value) => clearInterval(value),
   getTerminalRuntime: () => terminalRuntime,
   setTerminalRuntime: (value) => {
     terminalRuntime = value;
@@ -1284,14 +1138,6 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
   },
-  shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
-  getOpenCodePort: () => openCodePort,
-  getOpenCodeProcess: () => openCodeProcess,
-  setOpenCodeProcess: (value) => {
-    openCodeProcess = value;
-  },
-  killProcessOnPort,
-  waitForPortRelease,
   getServer: () => server,
   getUiAuthController: () => uiAuthController,
   setUiAuthController: (value) => {
@@ -1466,6 +1312,7 @@ async function main(options = {}) {
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
+  let piRuntimeHandshake = null;
   const packagedClientOrigins = new Set([
     'piarium-ui://app',
     'capacitor://localhost',
@@ -1523,36 +1370,18 @@ async function main(options = {}) {
     runtimeName: process.env.OPENCHAMBER_RUNTIME || 'web',
     serverStartedAt,
     gracefulShutdown,
-    getHealthSnapshot: () => {
-      const launchSpec = resolvedOpencodeBinary && !useWslForOpencode
-        ? resolveManagedOpenCodeLaunchSpec(resolvedOpencodeBinary)
-        : null;
-      return {
-        openCodePort,
-        openCodeRunning: Boolean(openCodePort && isOpenCodeReady && !isRestartingOpenCode),
-        openCodeSecureConnection: isOpenCodeConnectionSecure(),
-        openCodeAuthSource: openCodeAuthSource || null,
-        openCodeApiPrefix: '',
-        openCodeApiPrefixDetected: true,
-        isOpenCodeReady,
-        lastOpenCodeError,
-        lastOpenCodeLaunchDiagnostics,
-        opencodeBinaryResolved: resolvedOpencodeBinary || null,
-        opencodeBinarySource: resolvedOpencodeBinarySource || null,
-        opencodeLaunchBinary: launchSpec?.binary || null,
-        opencodeLaunchArgs: launchSpec?.args || [],
-        opencodeLaunchWrapperType: launchSpec?.wrapperType || null,
-        opencodeViaWsl: useWslForOpencode,
-        opencodeWslBinary: resolvedWslBinary || null,
-        opencodeWslPath: resolvedWslOpencodePath || null,
-        opencodeWslDistro: resolvedWslDistro || null,
-        nodeBinaryResolved: resolvedNodeBinary || null,
-        bunBinaryResolved: resolvedBunBinary || null,
-        desktopNotifyEnabled: ENV_DESKTOP_NOTIFY,
-        planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
-        apiOnly,
-      };
-    },
+    getHealthSnapshot: () => ({
+      apiOnly,
+      piRuntime: {
+        ready: Boolean(piRuntimeHandshake),
+        capabilities: piRuntimeHandshake?.capabilities ?? null,
+        hostVersion: piRuntimeHandshake?.hostVersion ?? null,
+        nodeVersion: piRuntimeHandshake?.runtime?.nodeVersion ?? null,
+        piVersion: piRuntimeHandshake?.runtime?.piVersion ?? null,
+        protocolVersion: piRuntimeHandshake?.protocolVersion ?? null,
+        source: piRuntimeHandshake?.runtime?.source ?? null,
+      },
+    }),
     verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
     tunnelAuthController,
@@ -1589,7 +1418,6 @@ async function main(options = {}) {
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
     ensurePushInitialized,
-    ensureGlobalWatcherStarted,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
     writeSettingsToDisk,
@@ -1614,7 +1442,6 @@ async function main(options = {}) {
     modelsMetadataCacheTtl: MODELS_METADATA_CACHE_TTL,
     fetchFreeZenModels,
     getCachedZenModels,
-    setAutoAcceptSession,
     mobileDeviceStore,
     mobilePairingRuntime,
     mobilePushRuntime,
@@ -1650,7 +1477,7 @@ async function main(options = {}) {
       }
     },
   });
-  await piRuntimeBroker.warmup();
+  piRuntimeHandshake = await piRuntimeBroker.warmup();
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
   const piRuntimeGateway = createPiRuntimeGateway({
     server,
@@ -1730,7 +1557,6 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     autoReplyPendingPermissionsForServerSetting,
-    getOpenCodePort: () => openCodePort,
     buildAugmentedPath,
     projectConfigRuntime,
     scheduledTasksRuntime,
@@ -1741,7 +1567,6 @@ async function main(options = {}) {
     emitSessionCreatedEvent,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
-    permissionAutoAcceptRuntime,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({
@@ -1770,19 +1595,9 @@ async function main(options = {}) {
     isExecutable,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
-    globalEventHub: globalMessageStreamHub,
-    processForwardedEventPayload,
-    messageStreamWsClients: uiNotificationWsClients,
-    upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
-    setupProxy,
-    scheduleOpenCodeApiDetection,
-    bootstrapOpenCodeAtStartup,
-    triggerHealthCheck,
     staticRoutesRuntime,
     process,
     crypto,
@@ -1810,7 +1625,6 @@ async function main(options = {}) {
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   dictationRuntime = startupPipelineResult.dictationRuntime;
-  messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
 
   try {
     await scheduledTasksRuntime.start();
@@ -1844,22 +1658,7 @@ async function main(options = {}) {
       },
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
-    isReady: () => isOpenCodeReady,
-    restartOpenCode: () => restartOpenCode(),
-    getOpenCodeProcessInfo: () => {
-      const managed = Boolean((openCodeProcess || openCodePort) && !ENV_SKIP_OPENCODE_START && !isExternalOpenCode);
-      // Only ever expose pid/port for a server WE manage. The Electron-side
-      // killer kills by port (lsof + kill -KILL), so returning a port we don't
-      // own — e.g. an external/desktop OpenCode on 4096 we attached to — would
-      // let a single miscomputed `managed` flag take down the user's separate
-      // server. Structurally withhold what isn't ours so the killer has no
-      // target, instead of relying on the flag check alone.
-      return {
-        managed,
-        pid: managed && typeof openCodeProcess?.pid === 'number' ? openCodeProcess.pid : null,
-        port: managed ? openCodePort : null,
-      };
-    },
+    isReady: () => Boolean(piRuntimeHandshake),
     stop: async (shutdownOptions = {}) => {
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) {
@@ -1897,8 +1696,6 @@ runCliEntryIfMain({
 
 export {
   gracefulShutdown,
-  setupProxy,
-  restartOpenCode,
   main as startWebUiServer,
   parseServeCliOptions as parseArgs,
 };

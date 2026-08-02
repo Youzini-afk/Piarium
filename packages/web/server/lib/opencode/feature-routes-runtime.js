@@ -8,7 +8,6 @@ import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerExternalAccessRoutes } from '../external-access/routes.js';
-import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -123,7 +122,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       writeSseEvent,
       __dirname,
       emitSessionCreatedEvent,
-      permissionAutoAcceptRuntime,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -131,8 +129,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       refreshOpenCodeAfterConfigChange,
       clientReloadDelayMs,
     });
-
-    registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
 
     registerOpenCodeRoutes(app, {
       crypto,

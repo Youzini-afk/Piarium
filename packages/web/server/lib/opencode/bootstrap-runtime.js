@@ -35,7 +35,6 @@ export const createBootstrapRuntime = (dependencies) => {
       normalizeTunnelSessionTtlMs,
       sayTTSCapability,
       ensurePushInitialized,
-      ensureGlobalWatcherStarted,
       getOrCreateVapidKeys,
       getUiSessionTokenFromRequest,
       writeSettingsToDisk,
@@ -60,7 +59,6 @@ export const createBootstrapRuntime = (dependencies) => {
       modelsMetadataCacheTtl,
       fetchFreeZenModels,
       getCachedZenModels,
-      setAutoAcceptSession,
       mobileDeviceStore,
       mobilePairingRuntime,
       mobilePushRuntime,
@@ -114,7 +112,6 @@ export const createBootstrapRuntime = (dependencies) => {
     registerNotificationRoutes(app, {
       uiAuthController,
       ensurePushInitialized,
-      ensureGlobalWatcherStarted,
       getOrCreateVapidKeys,
       getUiSessionTokenFromRequest,
       readSettingsFromDiskMigrated,
@@ -137,7 +134,6 @@ export const createBootstrapRuntime = (dependencies) => {
       markSessionUnviewed: sessionRuntime.markSessionUnviewed,
       markUserMessageSent: sessionRuntime.markUserMessageSent,
       setPushInitialized,
-      setAutoAcceptSession,
     });
 
     if (typeof registerMobileRoutes === 'function') {

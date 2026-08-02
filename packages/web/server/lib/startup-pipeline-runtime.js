@@ -1,10 +1,9 @@
-import { recordStartupPerformance } from './startup-performance.js';
+import { recordStartupPerformance } from './opencode/startup-performance.js';
 
 export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
     createDictationRuntime,
-    createMessageStreamWsRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -23,19 +22,9 @@ export const createStartupPipelineRuntime = (dependencies) => {
       isExecutable,
       isRequestOriginAllowed,
       rejectWebSocketUpgrade,
-      buildOpenCodeUrl,
-      getOpenCodeAuthHeaders,
-      globalEventHub,
-      processForwardedEventPayload,
-      messageStreamWsClients,
-      triggerHealthCheck,
-      upstreamStallTimeoutMs,
       terminalHeartbeatIntervalMs,
       terminalRebindWindowMs,
       terminalMaxRebindsPerWindow,
-      setupProxy,
-      scheduleOpenCodeApiDetection,
-      bootstrapOpenCodeAtStartup,
       staticRoutesRuntime,
       process,
       crypto,
@@ -87,22 +76,6 @@ export const createStartupPipelineRuntime = (dependencies) => {
       modelsDir: dictationModelsDir,
     });
 
-    const messageStreamRuntime = createMessageStreamWsRuntime({
-      server,
-      uiAuthController,
-      isRequestOriginAllowed,
-      rejectWebSocketUpgrade,
-      buildOpenCodeUrl,
-      getOpenCodeAuthHeaders,
-      globalEventHub,
-      processForwardedEventPayload,
-      wsClients: messageStreamWsClients,
-      triggerHealthCheck,
-      upstreamStallTimeoutMs,
-    });
-
-    setupProxy(app);
-
     if (apiOnly) {
       staticRoutesRuntime.registerApiOnlyFallbackRoutes(app);
     } else {
@@ -137,15 +110,12 @@ export const createStartupPipelineRuntime = (dependencies) => {
       durationMs: performance.now() - pipelineStartedAt,
     });
     tunnelRuntimeContext.setActivePort(startupResult.activePort);
-    scheduleOpenCodeApiDetection();
-    void bootstrapOpenCodeAtStartup();
 
     serverStartupRuntime.attachProcessHandlers({ attachSignals });
 
     return {
       terminalRuntime,
       dictationRuntime,
-      messageStreamRuntime,
     };
   };
 

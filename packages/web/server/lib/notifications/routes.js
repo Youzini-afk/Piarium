@@ -28,7 +28,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
   const {
     uiAuthController,
     ensurePushInitialized,
-    ensureGlobalWatcherStarted,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
     readSettingsFromDiskMigrated,
@@ -51,19 +50,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     markSessionUnviewed,
     markUserMessageSent,
     setPushInitialized,
-    setAutoAcceptSession,
   } = dependencies;
-
-  const ensureSessionWatcher = async () => {
-    if (typeof ensureGlobalWatcherStarted !== 'function') {
-      return;
-    }
-    try {
-      await ensureGlobalWatcherStarted();
-    } catch (error) {
-      console.warn('[OpenCodeWatcher] lazy start failed:', error?.message ?? error);
-    }
-  };
 
   app.get('/api/push/vapid-public-key', async (_req, res) => {
     try {
@@ -78,7 +65,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
   app.post('/api/push/subscribe', async (req, res) => {
     await ensurePushInitialized();
-    await ensureSessionWatcher();
 
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
@@ -147,7 +133,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
   // is a hex APNs device token from @capacitor/push-notifications, scoped to the UI
   // session like web-push subscriptions.
   app.post('/api/push/apns-token', async (req, res) => {
-    await ensureSessionWatcher();
 
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
@@ -217,7 +202,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/notifications/stream', async (req, res) => {
-    await ensureSessionWatcher();
 
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
@@ -282,12 +266,10 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/session-activity', (_req, res) => {
-    void ensureSessionWatcher();
     res.json(getSessionActivitySnapshot());
   });
 
   app.get('/api/sessions/snapshot', async (_req, res) => {
-    await ensureSessionWatcher();
     res.json({
       statusSessions: getSessionStateSnapshot(),
       attentionSessions: getSessionAttentionSnapshot(),
@@ -296,7 +278,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/sessions/status', async (_req, res) => {
-    await ensureSessionWatcher();
     const snapshot = getSessionStateSnapshot();
     res.json({
       sessions: snapshot,
@@ -305,7 +286,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/sessions/:id/status', async (req, res) => {
-    await ensureSessionWatcher();
     const sessionId = req.params.id;
     const state = getSessionState(sessionId);
 
@@ -323,7 +303,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/sessions/attention', async (_req, res) => {
-    await ensureSessionWatcher();
     const snapshot = getSessionAttentionSnapshot();
     res.json({
       sessions: snapshot,
@@ -332,7 +311,6 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/sessions/:id/attention', async (req, res) => {
-    await ensureSessionWatcher();
     const sessionId = req.params.id;
     const state = getSessionAttentionState(sessionId);
 
@@ -394,28 +372,4 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  // Mirror client-side Permission Auto-Accept state to the server so it can
-  // keep auto-accept working after the browser/PWA window closes.
-  app.post('/api/notifications/auto-accept', (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
-    const enabled = body.enabled === true;
-    const directories = Array.isArray(body.directories)
-      ? body.directories
-      : [body.directory];
-    const normalizedDirectories = directories
-      .filter((directory) => typeof directory === 'string' && directory.trim().length > 0)
-      .map((directory) => directory.trim());
-    if (!sessionId) {
-      return res.status(400).json({ error: 'sessionId required' });
-    }
-    void ensureSessionWatcher();
-    if (typeof setAutoAcceptSession === 'function') {
-      void Promise.resolve(setAutoAcceptSession(sessionId, enabled, { directories: normalizedDirectories }))
-        .catch((error) => {
-          console.warn('[OpenCodeWatcher] auto-accept state update failed:', error?.message ?? error);
-        });
-    }
-    return res.json({ success: true, sessionId, enabled });
-  });
 };

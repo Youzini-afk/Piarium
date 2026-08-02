@@ -15,12 +15,11 @@ const writeElf = (filePath, architecture) => {
 };
 
 const createPayload = () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-payload-test-'));
-  fs.writeFileSync(path.join(root, 'openchamber.desktop'), [
-    '[Desktop Entry]', 'Name=Piarium', 'Exec=AppRun --no-sandbox %U', 'Icon=openchamber', 'StartupWMClass=openchamber', '',
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-payload-test-'));
+  fs.writeFileSync(path.join(root, 'piarium.desktop'), [
+    '[Desktop Entry]', 'Name=Piarium', 'Exec=AppRun --no-sandbox %U', 'Icon=piarium', 'StartupWMClass=piarium', '',
   ].join('\n'));
-  writeElf(path.join(root, 'openchamber'), 'x64');
-  writeElf(path.join(root, 'resources/opencode-cli/opencode'), 'x64');
+  writeElf(path.join(root, 'piarium'), 'x64');
   for (const name of ['better_sqlite3.node', 'pty.node', 'sherpa-onnx.node']) {
     writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules', name), 'x64');
   }
@@ -28,7 +27,7 @@ const createPayload = () => {
 };
 
 test('reads supported ELF architectures', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-elf-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-elf-test-'));
   try {
     writeElf(path.join(root, 'x64'), 'x64');
     writeElf(path.join(root, 'arm64'), 'arm64');
@@ -44,14 +43,12 @@ test('AppImage artifact names use electron-builder arch suffixes', () => {
   assert.equal(linuxAppImageArchSuffix('arm64'), 'arm64');
 });
 
-test('verifies identity, version, and native payload architecture', () => {
+test('verifies identity and native payload architecture', () => {
   const root = createPayload();
   try {
     const result = verifyExtractedPayload({
       root,
       targetArchitecture: 'x64',
-      expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.18',
     });
     assert.equal(result.nativeModuleCount, 3);
   } finally {
@@ -66,29 +63,19 @@ test('fails on a missing native module', () => {
     assert.throws(() => verifyExtractedPayload({
       root,
       targetArchitecture: 'x64',
-      expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.18',
     }), /Missing packaged native module: pty\.node/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('fails on wrong CLI version or native architecture', () => {
+test('fails on wrong native architecture', () => {
   const root = createPayload();
   try {
-    assert.throws(() => verifyExtractedPayload({
-      root,
-      targetArchitecture: 'x64',
-      expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.17',
-    }), /OpenCode CLI version mismatch/);
     writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules/pty.node'), 'arm64');
     assert.throws(() => verifyExtractedPayload({
       root,
       targetArchitecture: 'x64',
-      expectedOpenCodeVersion: '1.17.18',
-      runCliVersion: () => '1.17.18',
     }), /Native module architecture mismatch/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

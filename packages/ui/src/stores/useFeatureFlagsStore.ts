@@ -6,6 +6,6 @@ type FeatureFlagsStore = {
 };
 
 export const useFeatureFlagsStore = create<FeatureFlagsStore>((set) => ({
-  planModeEnabled: false,
+  planModeEnabled: true,
   setPlanModeEnabled: (enabled) => set({ planModeEnabled: enabled }),
 }));

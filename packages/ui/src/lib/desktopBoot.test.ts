@@ -149,7 +149,7 @@ describe('canDismissInitialLoading', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: true,
-        isInitialized: true,
+        runtimeReady: true,
         bootOutcomeKnown: false,
       }),
     ).toBe(false);
@@ -159,7 +159,7 @@ describe('canDismissInitialLoading', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: true,
-        isInitialized: true,
+        runtimeReady: true,
         bootOutcomeKnown: true,
         bootViewIsMain: true,
       }),
@@ -170,7 +170,7 @@ describe('canDismissInitialLoading', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: true,
-        isInitialized: false,
+        runtimeReady: false,
         bootOutcomeKnown: true,
         bootViewIsMain: true,
       }),
@@ -181,7 +181,7 @@ describe('canDismissInitialLoading', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: true,
-        isInitialized: false,
+        runtimeReady: false,
         bootOutcomeKnown: true,
         bootViewIsMain: false,
       }),
@@ -192,7 +192,7 @@ describe('canDismissInitialLoading', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: true,
-        isInitialized: true,
+        runtimeReady: true,
         bootOutcomeKnown: false,
         bootViewIsMain: false,
       }),
@@ -203,7 +203,7 @@ describe('canDismissInitialLoading', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: false,
-        isInitialized: true,
+        runtimeReady: true,
         bootOutcomeKnown: false,
       }),
     ).toBe(true);
@@ -213,7 +213,7 @@ describe('canDismissInitialLoading', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: false,
-        isInitialized: false,
+        runtimeReady: false,
         bootOutcomeKnown: false,
       }),
     ).toBe(false);
@@ -397,7 +397,7 @@ describe('canDismissInitialLoading with malformed injection', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: true,
-        isInitialized: true,
+        runtimeReady: true,
         bootOutcomeKnown: false,
       }),
     ).toBe(false);
@@ -407,7 +407,7 @@ describe('canDismissInitialLoading with malformed injection', () => {
     expect(
       canDismissInitialLoading({
         isDesktopShell: true,
-        isInitialized: true,
+        runtimeReady: true,
         bootOutcomeKnown: true,
         bootViewIsMain: true,
       }),
