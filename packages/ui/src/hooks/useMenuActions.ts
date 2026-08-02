@@ -1,16 +1,18 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getSyncSessions } from '@/sync/sync-refs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { canChooseDesktopWorkspace, switchDesktopWorkspaceFromPicker } from '@/lib/desktopWorkspace';
+import {
+  createPiSessionFromNavigation,
+  navigateRelativePiSession,
+} from '@/lib/pi-runtime/sessionNavigation';
+import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -93,15 +95,14 @@ type MenuAction =
   | 'download-logs';
 
 export const useMenuActions = (
-  onToggleMemoryDebug?: () => void
+  onToggleMemoryDebug?: () => void,
+  options: { enabled?: boolean } = {},
 ) => {
-  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+  const enabled = options.enabled ?? true;
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
@@ -149,22 +150,12 @@ export const useMenuActions = (
   }, []);
 
   const navigateSession = React.useCallback((direction: -1 | 1) => {
-    const sessions = getSyncSessions();
-    if (sessions.length === 0) return;
-
-    const currentSessionId = useSessionUIStore.getState().currentSessionId;
-    const currentIndex = sessions.findIndex((session) => session.id === currentSessionId);
-    let nextIndex = direction > 0 ? 0 : sessions.length - 1;
-    if (currentIndex >= 0) {
-      nextIndex = (currentIndex + direction + sessions.length) % sessions.length;
-    }
-    const nextSession = sessions[nextIndex];
-    if (!nextSession) return;
-
-    setActiveMainTab('chat');
-    setSessionSwitcherOpen(false);
-    useSessionUIStore.getState().setCurrentSession(nextSession.id);
-  }, [setActiveMainTab, setSessionSwitcherOpen]);
+    void navigateRelativePiSession(direction).catch((error) => {
+      toast.error('Failed to open Pi session', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, []);
 
   const navigateProject = React.useCallback((direction: -1 | 1) => {
     const { activeProjectId, projects, setActiveProject } = useProjectsStore.getState();
@@ -201,15 +192,19 @@ export const useMenuActions = (
           break;
 
         case 'new-session':
-          setActiveMainTab('chat');
-          setSessionSwitcherOpen(false);
-          openNewSessionDraft();
+          void createPiSessionFromNavigation().catch((error) => {
+            toast.error('Failed to create Pi session', {
+              description: error instanceof Error ? error.message : String(error),
+            });
+          });
           break;
 
         case 'new-worktree-session':
-          setActiveMainTab('chat');
-          setSessionSwitcherOpen(false);
-          createWorktreeSession();
+          void createPiWorktreeSession().catch((error) => {
+            toast.error('Failed to create Pi worktree session', {
+              description: error instanceof Error ? error.message : String(error),
+            });
+          });
           break;
 
         case 'change-workspace':
@@ -339,10 +334,7 @@ export const useMenuActions = (
       navigateProject,
       navigateSession,
       onToggleMemoryDebug,
-      openNewSessionDraft,
       setAboutDialogOpen,
-      setActiveMainTab,
-      setSessionSwitcherOpen,
       setCommandPaletteOpen,
       setSettingsDialogOpen,
       setThemeMode,
@@ -353,6 +345,14 @@ export const useMenuActions = (
   );
 
   React.useEffect(() => {
+    if (!enabled || typeof window === 'undefined') return;
+    const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+    if (typeof desktop?.listen === 'function') {
+      // Electron emits both IPC and an injected DOM event for the same native
+      // action. The IPC effect below owns desktop actions so they run once.
+      return;
+    }
+
     const handleMenuAction = (event: Event) => {
       const action = (event as CustomEvent<MenuAction>).detail;
       if (!action) return;
@@ -369,10 +369,10 @@ export const useMenuActions = (
       window.removeEventListener(MENU_ACTION_EVENT, handleMenuAction);
       window.removeEventListener(CHECK_FOR_UPDATES_EVENT, handleCheckForUpdatesEvent);
     };
-  }, [handleAction, handleCheckForUpdates]);
+  }, [enabled, handleAction, handleCheckForUpdates]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!enabled || typeof window === 'undefined') return;
     const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = desktop?.listen;
     if (typeof listen !== 'function') return;
@@ -393,7 +393,7 @@ export const useMenuActions = (
       });
 
     listen('openchamber:check-for-updates', () => {
-      window.dispatchEvent(new Event(CHECK_FOR_UPDATES_EVENT));
+      handleCheckForUpdates();
     })
       .then((fn) => {
         unlistenUpdate = fn;
@@ -419,5 +419,5 @@ export const useMenuActions = (
       };
       void cleanup();
     };
-  }, [handleAction]);
+  }, [enabled, handleAction, handleCheckForUpdates]);
 };

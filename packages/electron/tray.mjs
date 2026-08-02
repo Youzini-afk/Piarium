@@ -349,7 +349,6 @@ export const createTrayController = ({ idleIconPath, unseenIconPath, breathIconP
     template.push(
       { type: 'separator' },
       { label: 'New Session', click: () => onAction({ type: 'new-session' }) },
-      { label: 'New Mini Chat', click: () => onAction({ type: 'new-mini-chat' }) },
     );
 
     if (isLinux || process.platform === 'win32') {

@@ -16,14 +16,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import {
-  EMPTY_SESSION_ORDER_RANKS,
-  orderSessionsByLifecycleScopes,
-  useSessionOrderingStore,
-} from '@/sync/session-ordering';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -34,13 +28,10 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import type { Session } from '@opencode-ai/sdk/v2';
-import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import type { SessionSummary } from '@piarium/protocol';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, type SettingsRuntimeContext } from '@/lib/settings/metadata';
-
-const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 import { getSettingsNavIcon } from '@/components/views/SettingsView';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -50,6 +41,14 @@ import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
+import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
+import {
+  createPiSessionFromNavigation,
+  openPiSessionFromNavigation,
+} from '@/lib/pi-runtime/sessionNavigation';
+import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+
+const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 
 type CommandEntry = {
   id: string;
@@ -61,7 +60,7 @@ type CommandEntry = {
 };
 
 type FileHit = { path: string; name: string; relativePath: string };
-const EMPTY_SESSIONS: Session[] = [];
+const EMPTY_SESSIONS: SessionSummary[] = [];
 
 const normalizePath = (value: string): string => {
   if (!value) return '';
@@ -80,7 +79,6 @@ export const CommandPalette: React.FC = () => {
 
   const isCommandPaletteOpen = useUIStore((s) => s.isCommandPaletteOpen);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
@@ -90,23 +88,18 @@ export const CommandPalette: React.FC = () => {
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
 
-  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
-  const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
-
-  const activeSessions = useGlobalSessionsStore(React.useCallback(
-    (state) => isCommandPaletteOpen ? state.activeSessions : EMPTY_SESSIONS,
+  const sessionSummaries = usePiSessionStore(React.useCallback(
+    (state) => isCommandPaletteOpen ? state.summaries : EMPTY_SESSIONS,
     [isCommandPaletteOpen],
   ));
+  const catalogCwd = usePiSessionStore((state) => state.catalogCwd);
+  const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
+  const catalogLoading = usePiSessionStore((state) => state.catalogLoading);
   const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
     (state) => isCommandPaletteOpen ? state.ids : EMPTY_PINNED_SESSION_IDS,
     [isCommandPaletteOpen],
   ));
-  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
-    (state) => isCommandPaletteOpen ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
-    [isCommandPaletteOpen],
-  ));
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-  const activeProject = useProjectsStore((s) => s.getActiveProject());
   const projects = useProjectsStore((s) => s.projects);
   const effectiveDirectory = useEffectiveDirectory();
   const searchFiles = useFileSearchStore((s) => s.searchFiles);
@@ -130,6 +123,20 @@ export const CommandPalette: React.FC = () => {
     if (isCommandPaletteOpen) setQuery('');
   }, [isCommandPaletteOpen]);
 
+  React.useEffect(() => {
+    if (!isCommandPaletteOpen || catalogLoading || (catalogLoaded && catalogCwd === null)) return;
+    void usePiSessionStore.getState().loadCatalog().catch((error) => {
+      toast.error('Failed to load Pi sessions', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, [catalogCwd, catalogLoaded, catalogLoading, isCommandPaletteOpen]);
+
+  const activeSessions = React.useMemo(
+    () => sessionSummaries.filter((session) => session.archivedAt === undefined),
+    [sessionSummaries],
+  );
+
   // Lazy-load git status for every session directory we plan to display so that
   // branch labels become available across all projects, not only the active one.
   // Deferred to idle to keep the first render (and the file-search effect) free
@@ -139,7 +146,7 @@ export const CommandPalette: React.FC = () => {
     const handle = setTimeout(() => {
       const seen = new Set<string>();
       for (const session of activeSessions) {
-        const dir = resolveGlobalSessionDirectory(session);
+        const dir = normalizePath(session.cwd);
         if (!dir || seen.has(dir)) continue;
         seen.add(dir);
         void ensureGitStatus(dir, gitApi);
@@ -168,10 +175,14 @@ export const CommandPalette: React.FC = () => {
         icon: <Icon name="add" className="mr-2 h-4 w-4" />,
         shortcutId: 'new_chat',
         searchText: t('commandPalette.item.newSession'),
-        onSelect: run(() => {
-          setActiveMainTab('chat');
-          setSessionSwitcherOpen(false);
-          openNewSessionDraft();
+        onSelect: run(async () => {
+          try {
+            await createPiSessionFromNavigation();
+          } catch (error) {
+            toast.error('Failed to create Pi session', {
+              description: error instanceof Error ? error.message : String(error),
+            });
+          }
         }),
       },
       {
@@ -180,8 +191,14 @@ export const CommandPalette: React.FC = () => {
         icon: <Icon name="git-branch" className="mr-2 h-4 w-4" />,
         shortcutId: 'new_chat_worktree',
         searchText: t('commandPalette.item.newWorktreeDraft'),
-        onSelect: run(() => {
-          void createWorktreeSession();
+        onSelect: run(async () => {
+          try {
+            await createPiWorktreeSession();
+          } catch (error) {
+            toast.error('Failed to create Pi worktree session', {
+              description: error instanceof Error ? error.message : String(error),
+            });
+          }
         }),
       },
       {
@@ -240,38 +257,17 @@ export const CommandPalette: React.FC = () => {
         onSelect: run(() => setSettingsDialogOpen(true)),
       },
     ];
-    if (canUseElectronDesktopIPC()) {
-      list.splice(1, 0, {
-        id: 'new-mini-chat',
-        title: t('commandPalette.item.newMiniChat'),
-        icon: <Icon name="window" className="mr-2 h-4 w-4" />,
-        shortcutId: 'new_mini_chat',
-        searchText: t('commandPalette.item.newMiniChat'),
-        onSelect: run(() => {
-          void invokeDesktop('desktop_open_draft_mini_chat_window', {
-            directory: normalizePath(currentDirectory || activeProject?.path || ''),
-            projectId: activeProject?.id ?? null,
-          }).catch((error) => {
-            console.warn('[command-palette] failed to open draft mini chat window', error);
-          });
-        }),
-      });
-    }
     return list;
   }, [
     t,
     run,
     isMobile,
-    setActiveMainTab,
     setSessionSwitcherOpen,
-    openNewSessionDraft,
     toggleSidebar,
     openContextSurface,
     currentDirectory,
     openContextOverview,
     setSettingsDialogOpen,
-    activeProject?.id,
-    activeProject?.path,
   ]);
 
   // ---------------------------------------------------------------------------
@@ -308,20 +304,21 @@ export const CommandPalette: React.FC = () => {
   // Sessions
   // ---------------------------------------------------------------------------
   const orderedActiveSessions = React.useMemo(() => {
-    return orderSessionsByLifecycleScopes(activeSessions, pinnedSessionIds, sessionOrderRanks);
-  }, [activeSessions, pinnedSessionIds, sessionOrderRanks]);
+    return activeSessions.slice().sort((left, right) => comparePiSessions(
+      left,
+      right,
+      (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
+    ));
+  }, [activeSessions, pinnedSessionIds]);
 
   const allBranches = useGitAllBranches();
-  const worktreeMetadata = useSessionUIStore((s) => s.worktreeMetadata);
 
   const branchForSession = React.useCallback(
-    (sessionId: string, dir: string | null): string | null => {
-      const meta = worktreeMetadata.get(sessionId);
-      if (meta?.branch) return meta.branch.trim() || null;
+    (dir: string | null): string | null => {
       if (dir) return allBranches.get(dir)?.trim() || null;
       return null;
     },
-    [worktreeMetadata, allBranches],
+    [allBranches],
   );
 
   // ---------------------------------------------------------------------------
@@ -394,12 +391,16 @@ export const CommandPalette: React.FC = () => {
   }, [settingsEntries, liveTrimmed, hasQuery]);
 
   const scoredSessions = React.useMemo(() => {
-    if (!hasQuery) return orderedActiveSessions.slice(0, 5).map((item) => ({ item, score: 0 }));
-    return scoreByFuzzyQuery(orderedActiveSessions, liveTrimmed, (s) => s.title || '', {
-      limit: 7,
+    if (!hasQuery) return orderedActiveSessions.map((item) => ({ item, score: 0 }));
+    return scoreByFuzzyQuery(orderedActiveSessions, liveTrimmed, (session) => [
+      piSessionTitle(session, t('commandPalette.session.untitled')),
+      session.cwd,
+      session.firstMessage,
+      session.allMessagesText,
+    ].join('\n'), {
       threshold: 0.2,
     });
-  }, [orderedActiveSessions, liveTrimmed, hasQuery]);
+  }, [orderedActiveSessions, liveTrimmed, hasQuery, t]);
 
   const scoredFiles = React.useMemo(() => {
     if (!isCommandPaletteOpen) return [];
@@ -445,11 +446,18 @@ export const CommandPalette: React.FC = () => {
   }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles, scoredProjects]);
 
   const handleOpenSession = React.useCallback(
-    (session: Session) => {
+    (session: SessionSummary) => {
       close();
-      setCurrentSession(session.id, resolveGlobalSessionDirectory(session));
+      void openPiSessionFromNavigation({
+        directory: session.cwd,
+        sessionId: session.id,
+      }).catch((error) => {
+        toast.error('Failed to open Pi session', {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      });
     },
-    [close, setCurrentSession],
+    [close],
   );
 
   const handleOpenFile = React.useCallback(
@@ -469,9 +477,16 @@ export const CommandPalette: React.FC = () => {
   const handleOpenProject = React.useCallback(
     (projectId: string, projectPath: string) => {
       close();
-      openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: projectPath });
+      void createPiSessionFromNavigation({
+        directory: projectPath,
+        projectId,
+      }).catch((error) => {
+        toast.error('Failed to create Pi session', {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      });
     },
-    [close, openNewSessionDraft],
+    [close],
   );
 
   const shortcut = React.useCallback(
@@ -531,9 +546,9 @@ export const CommandPalette: React.FC = () => {
                 return (
                   <CommandGroup key="sessions">
                     {visibleSessions.map((session) => {
-                      const title = session.title || t('commandPalette.session.untitled');
-                      const dir = resolveGlobalSessionDirectory(session);
-                      const branch = branchForSession(session.id, dir);
+                      const title = piSessionTitle(session, t('commandPalette.session.untitled'));
+                      const dir = normalizePath(session.cwd);
+                      const branch = branchForSession(dir);
                       return (
                         <CommandItem
                           key={session.id}

@@ -88,6 +88,13 @@ retained before engine surgery begins.
   context statistics, rename, full-history Markdown export, subtree archive, and subtree deletion
   now use Pi protocol/store data. The old sync cache, OpenCode message exporter, session worktree
   attachment, share actions, and legacy mini-chat launch path are no longer loaded by the header.
+- Implemented Pi-native root launch and desktop navigation: URL/deep-link parsing, native
+  open/new-session events, previous/next navigation, keyboard/menu/command-palette actions,
+  global catalog bootstrap, and native tray projection now use Pi summaries, snapshots, and session operations.
+  Worktree actions create the Git worktree first and then a Pi session in its directory; failures
+  roll back a newly-created worktree when session creation cannot complete. The tray keeps the
+  platform IPC contract but no longer polls OpenCode or imposes an arbitrary session-count cap;
+  native menu/tray actions no longer route Pi session IDs into the legacy mini-chat renderer.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.

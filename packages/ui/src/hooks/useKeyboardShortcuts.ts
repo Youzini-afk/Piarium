@@ -6,20 +6,20 @@ import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
-import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { readEmbeddedThemeSearchParams } from '@/contexts/theme-embedded-bootstrap';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { hasOpenDropdown } from './keyboard-shortcut-dom';
+import { toast } from '@/components/ui';
+import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 
 export const useKeyboardShortcuts = () => {
-  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
   const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -48,7 +48,6 @@ export const useKeyboardShortcuts = () => {
   }, [currentShortcutDirectory]);
   const isMobile = useUIStore((s) => s.isMobile);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
   const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
@@ -57,7 +56,6 @@ export const useKeyboardShortcuts = () => {
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-  const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
   const { phase: sessionPhase } = useCurrentSessionActivity();
   const abortPrimedUntilRef = React.useRef<number | null>(null);
@@ -276,32 +274,23 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (canUseElectronDesktopIPC() && eventMatchesShortcut(e, combo('new_mini_chat'))) {
-        e.preventDefault();
-        void invokeDesktop('desktop_open_draft_mini_chat_window', {
-          directory: currentDirectory || activeProject?.path || '',
-          projectId: activeProject?.id ?? null,
-        }).catch((error) => {
-          console.warn('[keyboard-shortcuts] failed to open draft mini chat window', error);
-        });
-        return;
-      }
-
       const matchedNewSessionShortcut = eventMatchesShortcut(e, combo('new_chat'));
       const matchedWorktreeShortcut = eventMatchesShortcut(e, combo('new_chat_worktree'));
 
       if (matchedNewSessionShortcut || matchedWorktreeShortcut) {
+        if (e.repeat) return;
         e.preventDefault();
-
-        setActiveMainTab('chat');
-        setSessionSwitcherOpen(false);
-
-        if (!isVSCodeRuntime() && matchedWorktreeShortcut) {
-          createWorktreeSession();
-          return;
-        }
-
-        openNewSessionDraft();
+        const creation = matchedWorktreeShortcut
+          ? createPiWorktreeSession()
+          : createPiSessionFromNavigation();
+        void creation.catch((error) => {
+          toast.error(
+            matchedWorktreeShortcut
+              ? 'Failed to create Pi worktree session'
+              : 'Failed to create Pi session',
+            { description: error instanceof Error ? error.message : String(error) },
+          );
+        });
         return;
       }
 
@@ -621,7 +610,6 @@ export const useKeyboardShortcuts = () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
-    openNewSessionDraft,
     abortCurrentOperation,
     toggleCommandPalette,
     toggleHelpDialog,
@@ -630,7 +618,6 @@ export const useKeyboardShortcuts = () => {
     toggleTerminalSurfaceExpanded,
     isMobile,
     setSessionSwitcherOpen,
-    setActiveMainTab,
     setSettingsDialogOpen,
     setModelSelectorOpen,
     setTimelineDialogOpen,
@@ -643,8 +630,6 @@ export const useKeyboardShortcuts = () => {
     resetAbortPriming,
     currentSessionId,
     currentDirectory,
-    activeProject?.id,
-    activeProject?.path,
     shortcutOverrides,
   ]);
 

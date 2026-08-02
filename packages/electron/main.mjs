@@ -2412,14 +2412,6 @@ const dispatchMenuAction = (action) => {
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
 
-// Mini-chat draft windows are not deduplicated, so this must reach the renderer
-// exactly once — emitToWindow alone (no DOM-event double dispatch). The renderer
-// resolves the active directory/project and opens the window.
-const dispatchOpenMiniChat = (browserWindow) => {
-  const target = browserWindow && !browserWindow.isDestroyed() ? browserWindow : getMenuTargetWindow();
-  if (target) emitToWindow(target, 'openchamber:open-mini-chat');
-};
-
 const dispatchCheckForUpdates = () => {
   emitToAllWindows('openchamber:check-for-updates');
   for (const browserWindow of BrowserWindow.getAllWindows()) {
@@ -4790,9 +4782,6 @@ const buildMacMenu = () => {
         { type: 'separator' },
         { label: 'New Session', accelerator: 'Cmd+N', click: () => dispatchAction('new-session') },
         { label: 'New Worktree', accelerator: 'Cmd+Shift+N', click: () => dispatchAction('new-worktree-session') },
-        // registerAccelerator:false → show the shortcut hint but let the
-        // renderer own the (customizable) key binding, avoiding a double open.
-        { label: 'New Mini Chat', accelerator: 'Cmd+Alt+N', registerAccelerator: false, click: () => dispatchOpenMiniChat() },
         { type: 'separator' },
         { label: 'Add Workspace', click: () => dispatchAction('change-workspace') },
         { type: 'separator' },
@@ -5318,34 +5307,9 @@ const dispatchTrayAction = async (action) => {
     return;
   }
 
-  // Mini chat opens its own small window; we only need a renderer with context,
-  // not to surface the main window.
-  if (action.type === 'new-mini-chat') {
-    let target = getMenuTargetWindow();
-    if (!target) target = await revealMainWindow();
-    if (target?.id === state.mainWindow?.id && target.webContents.isLoading()) {
-      pendingTrayActions.push(action);
-      return;
-    }
-    dispatchOpenMiniChat(target);
-    return;
-  }
-
-  // Open a session on the surface the user was last on: if that's a mini-chat,
-  // switch THAT window to the session in place (no new window); otherwise use
-  // the main window.
+  // Pi sessions are owned by the main Piarium surface. The imported mini-chat
+  // renderer still uses the legacy session stack and must not receive Pi IDs.
   if (action.type === 'focus-session') {
-    const surface = resolveTraySurface();
-    if (surface && surface.__ocMiniChat === true && action.sessionId) {
-      if (surface.isMinimized()) surface.restore();
-      surface.show();
-      surface.focus();
-      emitToWindow(surface, 'openchamber:open-session', {
-        sessionId: action.sessionId,
-        directory: action.directory || '',
-      });
-      return;
-    }
     await focusMainWindowWithSession(action.sessionId, action.directory || '');
     return;
   }

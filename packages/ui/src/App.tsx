@@ -5,7 +5,6 @@ import {
   isEmbeddedSessionChatReady,
   normalizeEmbeddedSessionDirectory,
   readEmbeddedSessionChatConfig,
-  shouldConsumeSessionUrlParams,
   type EmbeddedSessionChatConfig,
 } from '@/lib/embeddedSessionChat';
 import { FireworksProvider } from '@/contexts/FireworksContext';
@@ -16,7 +15,6 @@ import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
-import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
@@ -25,7 +23,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -37,9 +35,8 @@ import {
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -66,6 +63,11 @@ import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import { useWideChatLayoutClass } from '@/hooks/useWideChatLayoutClass';
+import {
+  createPiSessionFromNavigation,
+  openPiSessionFromNavigation,
+} from '@/lib/pi-runtime/sessionNavigation';
+import { toast } from '@/components/ui';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -182,8 +184,6 @@ function App({ apis }: AppProps) {
   const agentsCount = useConfigStore((state) => state.agents.length);
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
-  const error = useSessionUIStore((s) => s.error);
-  const clearError = useSessionUIStore((s) => s.clearError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
@@ -238,6 +238,15 @@ function App({ apis }: AppProps) {
       setInitRetryEpoch((epoch) => epoch + 1);
     });
   }, []);
+
+  React.useEffect(() => {
+    if (embeddedSessionChat || !isConnected) return;
+    const state = usePiSessionStore.getState();
+    if (state.catalogLoaded || state.catalogLoading) return;
+    void state.loadCatalog().catch((catalogError) => {
+      console.warn('[Piarium] failed to load the Pi session catalog:', catalogError);
+    });
+  }, [embeddedSessionChat, isConnected, runtimeEndpointEpoch]);
 
   const autoReviewResumeSignature = useAutoReviewStore((state) => {
     const runtimeKey = getRuntimeKey();
@@ -463,6 +472,10 @@ function App({ apis }: AppProps) {
   }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, agentsCount]);
 
   React.useEffect(() => {
+    if (!embeddedSessionChat) {
+      return;
+    }
+
     if (isSwitchingDirectory) {
       return;
     }
@@ -478,7 +491,7 @@ function App({ apis }: AppProps) {
     opencodeClient.setDirectory(currentDirectory);
 
     // Session loading is handled by the sync system's bootstrap — no manual loadSessions needed.
-  }, [currentDirectory, isSwitchingDirectory, isConnected, isVSCodeRuntime]);
+  }, [currentDirectory, embeddedSessionChat, isSwitchingDirectory, isConnected, isVSCodeRuntime]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -554,7 +567,7 @@ function App({ apis }: AppProps) {
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (embeddedSessionChat || typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId?: string; directory?: string }>).detail;
@@ -563,64 +576,21 @@ function App({ apis }: AppProps) {
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      useUIStore.getState().setActiveMainTab('chat');
-      void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
+      void openPiSessionFromNavigation({ directory, sessionId }).catch((openError) => {
+        toast.error('Failed to open Pi session', {
+          description: openError instanceof Error ? openError.message : String(openError),
+        });
+      });
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
-  }, []);
+  }, [embeddedSessionChat]);
 
-  // Open a draft Mini Chat window from the native File menu / tray. Uses a
-  // dedicated single-fire event (not the menu-action channel) because draft
-  // mini-chat windows are NOT deduplicated — a double dispatch would open two.
+  // Native tray/menu "new session" requests carry optional project and cwd
+  // hints; Pi creates the session immediately instead of opening a legacy draft.
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const onOpenMiniChat = () => {
-      const currentDir = useDirectoryStore.getState().currentDirectory;
-      const { activeProjectId, projects } = useProjectsStore.getState();
-      const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
-      void invokeDesktop('desktop_open_draft_mini_chat_window', {
-        directory: currentDir || activeProject?.path || '',
-        projectId: activeProject?.id ?? null,
-      });
-    };
-    window.addEventListener('openchamber:open-mini-chat', onOpenMiniChat);
-    return () => window.removeEventListener('openchamber:open-mini-chat', onOpenMiniChat);
-  }, []);
-
-  // When the window regains focus, mark the currently-selected session as seen.
-  // Turn-completes that arrive while the app is backgrounded are intentionally
-  // left unseen (see isViewedInCurrentSession); coming back to the window is the
-  // signal that the user has now looked at it, so the marker clears.
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const onFocus = () => {
-      const sessionId = useSessionUIStore.getState().currentSessionId;
-      if (sessionId) markSessionViewed(sessionId);
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined' || !isInitialized) return;
-    const params = new URLSearchParams(window.location.search);
-    if (!shouldConsumeSessionUrlParams(params)) return;
-    const sessionId = (params.get('session') ?? params.get('sessionId') ?? '').trim();
-    if (!sessionId) return;
-    const directory = (params.get('directory') ?? '').trim() || undefined;
-    void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
-    params.delete('session');
-    params.delete('sessionId');
-    params.delete('directory');
-    const nextSearch = params.toString();
-    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
-    window.history.replaceState(window.history.state, '', nextUrl);
-  }, [isInitialized]);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (embeddedSessionChat || typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ directory?: string; projectId?: string }>).detail;
@@ -630,18 +600,16 @@ function App({ apis }: AppProps) {
       const projectId = typeof detail?.projectId === 'string' && detail.projectId.trim().length > 0
         ? detail.projectId.trim()
         : null;
-      useUIStore.getState().setActiveMainTab('chat');
-      useUIStore.getState().setSessionSwitcherOpen(false);
-      useSessionUIStore.getState().openNewSessionDraft({
-        selectedProjectId: projectId,
-        directoryOverride: directory,
-        preserveDirectoryOverride: Boolean(directory),
+      void createPiSessionFromNavigation({ directory, projectId }).catch((createError) => {
+        toast.error('Failed to create Pi session', {
+          description: createError instanceof Error ? createError.message : String(createError),
+        });
       });
     };
 
     window.addEventListener('openchamber:open-draft-session', handler as EventListener);
     return () => window.removeEventListener('openchamber:open-draft-session', handler as EventListener);
-  }, []);
+  }, [embeddedSessionChat]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -662,17 +630,15 @@ function App({ apis }: AppProps) {
 
   useWindowTitle();
 
-  useRouter({ enabled: !embeddedSessionChat });
+  useRouter({ enabled: !embeddedSessionChat && isConnected });
 
   const handleToggleMemoryDebug = React.useCallback(() => {
     setShowMemoryDebug(prev => !prev);
   }, []);
 
-  useMenuActions(handleToggleMemoryDebug);
+  useMenuActions(handleToggleMemoryDebug, { enabled: !embeddedSessionChat });
 
-  useTraySync();
-
-  useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
+  useTraySync({ enabled: !embeddedSessionChat });
 
   React.useEffect(() => {
     if (embeddedSessionChat) {
@@ -694,17 +660,6 @@ function App({ apis }: AppProps) {
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [embeddedSessionChat]);
-
-  React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
-    if (error) {
-
-      setTimeout(() => clearError(), 5000);
-    }
-  }, [clearError, embeddedSessionChat, error]);
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
   // The Rust backend sets window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ once the

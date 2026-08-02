@@ -1,11 +1,12 @@
 import React from 'react';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import type { MainTab } from '@/stores/useUIStore';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 /**
  * Check if running in VS Code webview context.
@@ -19,7 +20,7 @@ function isVSCodeContext(): boolean {
 }
 
 /**
- * Hook that provides bidirectional URL routing for OpenChamber.
+ * Hook that provides bidirectional URL routing for Piarium.
  *
  * On mount:
  * - Parses URL parameters and applies them to app state
@@ -47,9 +48,10 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
   // Track initialization to avoid duplicate applies
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
+  const activeRouteAppliesRef = React.useRef(0);
+  const latestRouteApplyRef = React.useRef(0);
 
   // Get store actions (stable references)
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -60,25 +62,33 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
    */
   const applyRoute = React.useCallback(
     async (route: RouteState) => {
-      if (isApplyingRouteRef.current) {
-        return;
-      }
-
       if (!enabled) {
         return;
       }
 
+      const applyId = ++latestRouteApplyRef.current;
+      activeRouteAppliesRef.current += 1;
       isApplyingRouteRef.current = true;
 
       try {
         // 1. Apply session first (may trigger async operations)
         if (route.sessionId) {
-          const currentSessionId = useSessionUIStore.getState().currentSessionId;
-          if (route.sessionId !== currentSessionId) {
-            const directoryHint = useSessionUIStore.getState().getDirectoryForSession(route.sessionId);
-            setCurrentSession(route.sessionId, directoryHint);
+          const sessionState = usePiSessionStore.getState();
+          const current = sessionState.records[route.sessionId];
+          if (route.sessionId !== sessionState.currentSessionId || !current?.open || !current.snapshot) {
+            try {
+              await openPiSessionFromNavigation({
+                directory: route.directory,
+                sessionId: route.sessionId,
+              });
+            } catch (error) {
+              console.error('[router] failed to open Pi session:', error);
+            }
           }
         }
+
+        // A newer back/forward action owns the remaining UI route state.
+        if (applyId !== latestRouteApplyRef.current) return;
 
         // 2. Handle settings (takes precedence over tabs - it's a full-screen overlay)
         if (route.settingsPath) {
@@ -103,17 +113,18 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
           navigateToDiff(route.diffFile);
         }
       } finally {
-        isApplyingRouteRef.current = false;
+        activeRouteAppliesRef.current = Math.max(0, activeRouteAppliesRef.current - 1);
+        isApplyingRouteRef.current = activeRouteAppliesRef.current > 0;
       }
     },
-    [enabled, setCurrentSession, setActiveMainTab, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
+    [enabled, setActiveMainTab, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
   );
 
   /**
    * Get current app state for URL serialization.
    */
   const getCurrentAppState = React.useCallback((): AppRouteState => {
-    const sessionState = useSessionUIStore.getState();
+    const sessionState = usePiSessionStore.getState();
     const uiState = useUIStore.getState();
 
     return {
@@ -171,7 +182,7 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
       if (!isVSCode && !isEmbeddedChat) {
         updateBrowserURL({
           ...getCurrentAppState(),
-          sessionId: route.sessionId ?? useSessionUIStore.getState().currentSessionId,
+          sessionId: route.sessionId ?? usePiSessionStore.getState().currentSessionId,
           tab: route.tab ?? useUIStore.getState().activeMainTab,
           settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
           diffFile: route.diffFile ?? useUIStore.getState().pendingDiffFile,
@@ -188,9 +199,9 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
       return;
     }
 
-    let prevSessionId: string | null = useSessionUIStore.getState().currentSessionId;
+    let prevSessionId: string | null = usePiSessionStore.getState().currentSessionId;
 
-    const unsubscribe = useSessionUIStore.subscribe((state) => {
+    const unsubscribe = usePiSessionStore.subscribe((state) => {
       const sessionId = state.currentSessionId;
 
       // Skip if no change or if we're currently applying a route

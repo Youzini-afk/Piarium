@@ -8,6 +8,8 @@ import type { MainTab } from '@/stores/useUIStore';
 export interface RouteState {
   /** Session ID to navigate to */
   sessionId: string | null;
+  /** One-time working-directory hint for opening a session */
+  directory: string | null;
   /** Main tab to display (chat, git, diff, terminal, files) */
   tab: MainTab | null;
   /** Settings section - when non-null, settings dialog should be open */
@@ -39,6 +41,8 @@ export const VALID_SETTINGS_SECTIONS: readonly SidebarSection[] = [
  */
 export const ROUTE_PARAMS = {
   SESSION: 'session',
+  LEGACY_SESSION: 'sessionId',
+  DIRECTORY: 'directory',
   TAB: 'tab',
   SETTINGS: 'settings',
   FILE: 'file',
