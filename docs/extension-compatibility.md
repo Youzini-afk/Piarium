@@ -19,7 +19,7 @@ state. It does not invoke network, model, recovery, or destructive commands.
 Run the reusable smoke harness after building Piarium:
 
 ```powershell
-npm run smoke:extension -- D:\path\to\extension\index.ts
+node scripts/smoke-extension.mjs D:\path\to\extension\index.ts
 ```
 
 The local plugin repositories must have their own locked dependencies installed. Magic Context
@@ -27,9 +27,16 @@ must build `packages/pi-plugin/dist/index.js` first. Its current `bun run build`
 on Windows when `dist/*-*.js` has no match; invoking the documented `bun build` portion directly
 produces the same split ESM output without changing that upstream repository.
 
-This table proves generic loading and command registration only. Phase 4 owns feature-level
-adapters, credentials, MCP OAuth/keyring behavior, web-provider workflows, subagent projection,
-Magic Context native assets, degraded states, and packaged-runtime compatibility. Recovery now
-preserves plugin ownership: Piarium discovers the current workspace-history and pi-wtf command/tree
-capabilities, delegates operations to them, and accepts richer capabilities through recovery bridge
-v1 without reading either plugin's private state.
+The table proves generic loading and command registration. Current feature integration also keeps
+plugin ownership intact:
+
+- recovery discovers the current workspace-history and pi-wtf command/tree capabilities, delegates
+  operations to them, and accepts richer capabilities through recovery bridge v1 without reading
+  either plugin's private state;
+- MCP consumes `pi-mcp-adapter/status/v1`, invokes the adapter's commands, and edits its native config
+  sources without taking over merging, transports, OAuth, or the credential store;
+- Web Access uses its native `web-search.json` while search/fetch tools, widgets, and custom entries
+  travel through the generic Pi extension bridge.
+
+Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
+verification.

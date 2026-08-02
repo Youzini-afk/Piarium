@@ -53,6 +53,18 @@ describe("surface runtime protocol", () => {
     );
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(event)), event);
+
+    const extensionState = createRuntimeEvent(
+      { role: "session", sessionId: "session-1", workerId: "worker-1" },
+      13,
+      "extension.state",
+      {
+        channel: "pi-mcp-adapter/status/v1",
+        sessionId: "session-1",
+        value: { connectedCount: 1, version: 1 },
+      },
+    );
+    assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(extensionState)), extensionState);
   });
 
   it("rejects worker-only methods and unrouted events", () => {

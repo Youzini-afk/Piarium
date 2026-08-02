@@ -1,6 +1,10 @@
 import React from 'react';
 import { json } from '@codemirror/lang-json';
-import type { PiConfigTextDocumentSnapshot, PiSettingsSnapshot } from '@piarium/protocol';
+import type {
+  PiConfigTextDocumentSnapshot,
+  PiSettingsSnapshot,
+  RuntimeContextTarget,
+} from '@piarium/protocol';
 import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -31,10 +35,11 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 
 interface PiPluginConfigEditorProps {
   cwd: string;
+  sessionId?: string | null;
 }
 
 type JsonConfigTarget = 'settings-global' | 'settings-project' | 'wtf-global';
-type TextConfigTarget = 'magic-user' | 'magic-project';
+type TextConfigTarget = 'magic-user' | 'magic-project' | 'web-access-agent';
 type ConfigTarget = JsonConfigTarget | TextConfigTarget;
 type ConfigDocuments = Record<JsonConfigTarget, PiJsonObjectDocument>;
 type TextConfigDocuments = Record<TextConfigTarget, PiConfigTextDocumentSnapshot>;
@@ -42,17 +47,24 @@ type ConfigDrafts = Record<ConfigTarget, string>;
 
 const TEXT_TARGETS = {
   'magic-project': {
-    pathBase: '.cortexkit/magic-context',
+    format: 'jsonc',
+    paths: ['.cortexkit/magic-context.jsonc', '.cortexkit/magic-context.json'],
     root: 'project',
   },
   'magic-user': {
-    pathBase: 'cortexkit/magic-context',
+    format: 'jsonc',
+    paths: ['cortexkit/magic-context.jsonc', 'cortexkit/magic-context.json'],
     root: 'user-config',
+  },
+  'web-access-agent': {
+    format: 'json',
+    paths: ['web-search.json'],
+    root: 'agent',
   },
 } as const;
 
 const isTextConfigTarget = (target: ConfigTarget): target is TextConfigTarget => (
-  target === 'magic-user' || target === 'magic-project'
+  target === 'magic-user' || target === 'magic-project' || target === 'web-access-agent'
 );
 
 const emptyDocuments = (): ConfigDocuments => ({
@@ -61,25 +73,23 @@ const emptyDocuments = (): ConfigDocuments => ({
   'wtf-global': {},
 });
 
+const emptyTextDocument = (target: TextConfigTarget): PiConfigTextDocumentSnapshot => {
+  const definition = TEXT_TARGETS[target];
+  return {
+    content: '{}\n',
+    exists: false,
+    format: definition.format,
+    path: definition.paths[0],
+    projectTrusted: false,
+    revision: '',
+    root: definition.root,
+  };
+};
+
 const emptyTextDocuments = (): TextConfigDocuments => ({
-  'magic-project': {
-    content: '{}\n',
-    exists: false,
-    format: 'jsonc',
-    path: `${TEXT_TARGETS['magic-project'].pathBase}.jsonc`,
-    projectTrusted: false,
-    revision: '',
-    root: TEXT_TARGETS['magic-project'].root,
-  },
-  'magic-user': {
-    content: '{}\n',
-    exists: false,
-    format: 'jsonc',
-    path: `${TEXT_TARGETS['magic-user'].pathBase}.jsonc`,
-    projectTrusted: false,
-    revision: '',
-    root: TEXT_TARGETS['magic-user'].root,
-  },
+  'magic-project': emptyTextDocument('magic-project'),
+  'magic-user': emptyTextDocument('magic-user'),
+  'web-access-agent': emptyTextDocument('web-access-agent'),
 });
 
 const emptyDrafts = (): ConfigDrafts => ({
@@ -87,6 +97,7 @@ const emptyDrafts = (): ConfigDrafts => ({
   'magic-user': '{}\n',
   'settings-global': '{}\n',
   'settings-project': '{}\n',
+  'web-access-agent': '{}\n',
   'wtf-global': '{}\n',
 });
 
@@ -107,32 +118,34 @@ const draftsFromDocuments = (
   'magic-user': textDocuments['magic-user'].content,
   'settings-global': formatPiJsonObjectDocument(documents['settings-global']),
   'settings-project': formatPiJsonObjectDocument(documents['settings-project']),
+  'web-access-agent': textDocuments['web-access-agent'].content,
   'wtf-global': formatPiJsonObjectDocument(documents['wtf-global']),
 });
 
 const loadTextConfigDocument = async (
-  cwd: string,
+  runtimeTarget: RuntimeContextTarget,
   target: TextConfigTarget,
 ): Promise<PiConfigTextDocumentSnapshot> => {
   const definition = TEXT_TARGETS[target];
-  const primary = await getPiConfigTextDocument(
-    { cwd },
-    definition.root,
-    `${definition.pathBase}.jsonc`,
-    'jsonc',
-  );
-  if (primary.exists) return primary;
-  const legacyJson = await getPiConfigTextDocument(
-    { cwd },
-    definition.root,
-    `${definition.pathBase}.json`,
-    'jsonc',
-  );
-  return legacyJson.exists ? legacyJson : primary;
+  let fallback: PiConfigTextDocumentSnapshot | undefined;
+  for (const path of definition.paths) {
+    const snapshot = await getPiConfigTextDocument(
+      runtimeTarget,
+      definition.root,
+      path,
+      definition.format,
+    );
+    fallback ??= snapshot;
+    if (snapshot.exists) return snapshot;
+  }
+  return fallback ?? emptyTextDocument(target);
 };
 
-export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd }) => {
+export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd, sessionId }) => {
   const { t } = useI18n();
+  const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
+    sessionId ? { sessionId } : { cwd }
+  ), [cwd, sessionId]);
   const [target, setTarget] = React.useState<ConfigTarget>('settings-global');
   const [documents, setDocuments] = React.useState<ConfigDocuments>(emptyDocuments);
   const [textDocuments, setTextDocuments] = React.useState<TextConfigDocuments>(emptyTextDocuments);
@@ -150,19 +163,21 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
     setLoading(true);
     setLoadError(null);
     try {
-      const settings = await getPiSettings({ cwd });
-      const [wtf, magicUser, magicProject] = await Promise.all([
-        getPiConfigDocument({ cwd }, 'global', 'wtf.json'),
-        loadTextConfigDocument(cwd, 'magic-user'),
+      const settings = await getPiSettings(runtimeTarget);
+      const [wtf, magicUser, magicProject, webAccess] = await Promise.all([
+        getPiConfigDocument(runtimeTarget, 'global', 'wtf.json'),
+        loadTextConfigDocument(runtimeTarget, 'magic-user'),
         settings.projectTrusted
-          ? loadTextConfigDocument(cwd, 'magic-project')
+          ? loadTextConfigDocument(runtimeTarget, 'magic-project')
           : Promise.resolve(emptyTextDocuments()['magic-project']),
+        loadTextConfigDocument(runtimeTarget, 'web-access-agent'),
       ]);
       if (generation !== generationRef.current || runtimeKey !== getRuntimeKey()) return;
       const nextDocuments = documentsFromSnapshots(settings, wtf.document);
       const nextTextDocuments: TextConfigDocuments = {
         'magic-project': magicProject,
         'magic-user': magicUser,
+        'web-access-agent': webAccess,
       };
       setDocuments(nextDocuments);
       setTextDocuments(nextTextDocuments);
@@ -176,7 +191,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
         setLoading(false);
       }
     }
-  }, [cwd]);
+  }, [runtimeTarget]);
 
   React.useEffect(() => {
     setDocuments(emptyDocuments());
@@ -187,10 +202,11 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
 
   const parsed = React.useMemo(() => {
     if (isTextConfigTarget(target)) {
+      const format = TEXT_TARGETS[target].format;
       const errors: ParseError[] = [];
       const document = parse(drafts[target].replace(/^\uFEFF/, ''), errors, {
-        allowTrailingComma: true,
-        disallowComments: false,
+        allowTrailingComma: format === 'jsonc',
+        disallowComments: format === 'json',
       });
       if (errors.length > 0) {
         const first = errors[0];
@@ -229,7 +245,10 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
   const dirty = isTextConfigTarget(target)
     ? drafts[target] !== textDocuments[target].content
     : changes.remove.length > 0 || Object.keys(changes.set).length > 0;
-  const projectBlocked = (target === 'settings-project' || target === 'magic-project') && !projectTrusted;
+  const projectBlocked = (
+    target === 'settings-project'
+    || (isTextConfigTarget(target) && TEXT_TARGETS[target].root === 'project')
+  ) && !projectTrusted;
 
   const save = React.useCallback(async () => {
     if (!parsed.valid || !dirty || projectBlocked || saving) return;
@@ -239,10 +258,10 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
       if (isTextConfigTarget(target)) {
         const currentDocument = textDocuments[target];
         const snapshot = await updatePiConfigTextDocument(
-          { cwd },
+          runtimeTarget,
           currentDocument.root,
           currentDocument.path,
-          'jsonc',
+          currentDocument.format,
           drafts[target],
           currentDocument.revision,
         );
@@ -252,7 +271,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
         setProjectTrusted(snapshot.projectTrusted);
       } else if (target === 'wtf-global') {
         const snapshot = await updatePiConfigDocument(
-          { cwd },
+          runtimeTarget,
           'global',
           'wtf.json',
           changes,
@@ -266,7 +285,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
         setProjectTrusted(snapshot.projectTrusted);
       } else {
         const scope = target === 'settings-global' ? 'global' : 'project';
-        const snapshot = await updatePiSettings({ cwd }, scope, changes);
+        const snapshot = await updatePiSettings(runtimeTarget, scope, changes);
         if (runtimeKey !== getRuntimeKey()) return;
         const savedDocument = snapshot[scope];
         setDocuments((current) => ({ ...current, [target]: savedDocument }));
@@ -283,7 +302,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
     } finally {
       setSaving(false);
     }
-  }, [changes, cwd, dirty, drafts, parsed.valid, projectBlocked, saving, target, t, textDocuments]);
+  }, [changes, dirty, drafts, parsed.valid, projectBlocked, runtimeTarget, saving, target, t, textDocuments]);
 
   return (
     <div className="space-y-3 rounded-lg border border-border/60 px-3 py-3">
@@ -314,6 +333,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
               <SelectItem value="wtf-global">pi-wtf · wtf.json</SelectItem>
               <SelectItem value="magic-user">Magic Context · user JSONC</SelectItem>
               <SelectItem value="magic-project">Magic Context · project JSONC</SelectItem>
+              <SelectItem value="web-access-agent">Web Access · web-search.json</SelectItem>
             </SelectContent>
           </Select>
           <Button
@@ -349,7 +369,9 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd 
 
       {parsed.error && (
         <p className="typography-meta text-[var(--status-error)]">
-          {isTextConfigTarget(target) ? 'Invalid JSONC' : t('settings.piarium.recovery.pluginSettings.invalidJson')}: {parsed.error}
+          {isTextConfigTarget(target)
+            ? `Invalid ${TEXT_TARGETS[target].format.toUpperCase()}`
+            : t('settings.piarium.recovery.pluginSettings.invalidJson')}: {parsed.error}
         </p>
       )}
       {projectBlocked && !loading && (

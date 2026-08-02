@@ -39,11 +39,11 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v7 WebSocket/postMessage surface protocol
+    | authenticated Piarium v8 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v7 over a private child-process IPC pipe
+    | Piarium protocol v8 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -180,8 +180,8 @@ actions instead of guessing from runtime versions.
 | Prompt repair | `pi-wtf` | Invoke the plugin's registered command capabilities and preserve its configuration |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |
-| MCP | Adapter config/status events | Preserve source precedence and credential store |
-| Web Access | Extension config/custom entries | Provider settings and safe workflow defaults |
+| MCP | `pi-mcp-adapter` config/status events | Project its public `status/v1` snapshot, invoke its commands, and edit each native source without reproducing merge or credential logic |
+| Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 
 ## 7. Extension architecture
 
@@ -202,9 +202,13 @@ unknown package remains usable before a first-class adapter exists.
 - **Magic Context:** plugin-owned user/project JSONC configuration and status rendered through its
   native Pi component/custom entries; future memory, compartment, historian/dreamer/sidekick, and
   diagnostic views continue to read its public plugin/database contracts rather than copied state.
-- **pi-mcp-adapter:** server status, tools/resources/prompts, OAuth, and config provenance.
-- **pi-web-access:** provider routing, safe fetch settings, custom result entries, activity, and
-  optional Curator flow.
+- **pi-mcp-adapter:** protocol v8 carries the adapter's public `pi-mcp-adapter/status/v1`
+  snapshot. The settings surface invokes `/mcp` and `/mcp-auth`, manages the normal Pi package,
+  and edits all six adapter-owned JSON/JSONC sources in their documented precedence order. The
+  adapter still owns merging, host imports, transports, OAuth/keyring data, and connection state.
+- **pi-web-access:** Piarium edits the extension's agent-level `web-search.json`; provider routing,
+  credentials, SSRF policy, search/fetch tools, activity widgets, and optional Curator server remain
+  extension-owned.
 
 PiDeck-installed local extensions are not product dependencies. A conforming generic UI bridge may
 still allow them to work when a user installs them independently.

@@ -1,5 +1,9 @@
 import React from 'react';
-import type { PackageDescriptor, RecoveryPreference } from '@piarium/protocol';
+import type {
+  PackageDescriptor,
+  RecoveryPreference,
+  RuntimeContextTarget,
+} from '@piarium/protocol';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
@@ -103,13 +107,19 @@ export const RecoverySettings: React.FC = () => {
   } | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [customSource, setCustomSource] = React.useState('');
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
+    currentSessionId ? { sessionId: currentSessionId } : { cwd: currentDirectory }
+  ), [currentDirectory, currentSessionId]);
   const discoveredProviders = usePiSessionStore((state) => {
     if (state.currentSessionId === null) return [];
     return state.records[state.currentSessionId]?.recoveryStatus?.providers ?? [];
   });
   const currentDirectoryRef = React.useRef(currentDirectory);
+  const currentSessionIdRef = React.useRef(currentSessionId);
   const refreshGenerationRef = React.useRef(0);
   currentDirectoryRef.current = currentDirectory;
+  currentSessionIdRef.current = currentSessionId;
 
   const refresh = React.useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
@@ -119,7 +129,7 @@ export const RecoverySettings: React.FC = () => {
     setPackages([]);
     setLoadError(null);
     try {
-      const next = await listPiPackages({ cwd: currentDirectory });
+      const next = await listPiPackages(runtimeTarget);
       if (generation !== refreshGenerationRef.current || runtimeKey !== getRuntimeKey()) return;
       setPackages(next);
       setLoaded(true);
@@ -132,7 +142,7 @@ export const RecoverySettings: React.FC = () => {
         setLoading(false);
       }
     }
-  }, [currentDirectory]);
+  }, [runtimeTarget]);
 
   React.useEffect(() => {
     void refresh();
@@ -148,18 +158,23 @@ export const RecoverySettings: React.FC = () => {
     source: string,
   ) => {
     const actionDirectory = currentDirectory;
+    const actionSessionId = currentSessionId;
     const runtimeKey = getRuntimeKey();
     setBusyPackageAction({ action, source });
     try {
       if (action === 'install') {
-        await installPiPackage({ cwd: currentDirectory }, source);
+        await installPiPackage(runtimeTarget, source);
       } else if (action === 'remove') {
-        const result = await removePiPackage({ cwd: currentDirectory }, source);
+        const result = await removePiPackage(runtimeTarget, source);
         if (!result.removed) throw new Error(`Pi package is not configured: ${source}`);
       } else {
-        await updatePiPackages({ cwd: currentDirectory }, source);
+        await updatePiPackages(runtimeTarget, source);
       }
-      if (currentDirectoryRef.current === actionDirectory && getRuntimeKey() === runtimeKey) {
+      if (
+        currentDirectoryRef.current === actionDirectory
+        && currentSessionIdRef.current === actionSessionId
+        && getRuntimeKey() === runtimeKey
+      ) {
         await refresh();
       }
       toast.success(t(PACKAGE_ACTION_TOAST_KEYS[action].success));
@@ -169,7 +184,7 @@ export const RecoverySettings: React.FC = () => {
     } finally {
       setBusyPackageAction(null);
     }
-  }, [currentDirectory, refresh, t]);
+  }, [currentDirectory, currentSessionId, refresh, runtimeTarget, t]);
 
   const normalizedCustomSource = customSource.trim();
   const customConfigured = normalizedCustomSource.length === 0
@@ -380,7 +395,10 @@ export const RecoverySettings: React.FC = () => {
           </div>
         </div>
 
-        <PiPluginConfigEditor cwd={currentDirectory} />
+        <PiPluginConfigEditor
+          cwd={currentDirectory}
+          sessionId={currentSessionId}
+        />
 
         {additionalProviders.length > 0 && (
           <div className="space-y-2">

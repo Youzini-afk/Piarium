@@ -4,7 +4,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
-import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
@@ -16,7 +15,6 @@ import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
-import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
 import { usePluginsStore } from '@/stores/usePluginsStore';
@@ -318,10 +316,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void useCommandsStore.getState().loadCommands();
       return;
     }
-    if (settingsSlug === 'mcp') {
-      void useMcpConfigStore.getState().loadMcpConfigs();
-      return;
-    }
     if (settingsSlug === 'plugins') {
       void usePluginsStore.getState().loadPlugins();
       return;
@@ -445,29 +439,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       store.setCommandDraft({ name, scope: 'user' });
       store.setSelectedCommand(name);
       return result.id === 'commands.create' ? 'commands.name' : result.id;
-    }
-
-    if (result.id.startsWith('mcp.')) {
-      const store = useMcpConfigStore.getState();
-      const name = nextUniqueName('new-mcp-server', store.mcpServers.map((server) => server.name));
-      store.setMcpDraft({
-        name,
-        scope: 'user',
-        type: 'local',
-        command: [],
-        url: '',
-        environment: [],
-        headers: [],
-        oauthEnabled: true,
-        oauthClientId: '',
-        oauthClientSecret: '',
-        oauthScope: '',
-        oauthRedirectUri: '',
-        timeout: '',
-        enabled: true,
-      });
-      store.setSelectedMcp(name);
-      return result.id === 'mcp.create' ? 'mcp.server' : result.id;
     }
 
     if (result.id.startsWith('snippets.')) {
@@ -637,8 +608,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
       case 'commands':
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'mcp':
-        return <McpSidebar onItemSelect={opts.onItemSelect} />;
       case 'plugins':
         return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':

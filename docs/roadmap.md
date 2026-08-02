@@ -76,7 +76,7 @@ retained before engine surgery begins.
   real runtime/queue state, model thinking selection, native rename, atomic archive/restore metadata,
   and safe deletion. Product-level queue, transport-frame, gateway concurrency, and discovery ceilings
   are absent by default; deployment budgets are opt-in.
-- Implemented protocol v7 recovery capability discovery, unrestricted scoped plugin settings,
+- Implemented protocol v8 recovery capability discovery, unrestricted scoped plugin settings,
   extension-owned JSON/JSONC configuration documents, and Pi custom-component snapshots. Pi-native conversation rollback preserves
   text/images; workspace-history owns combined restore/undo/redo/checkpoints; pi-wtf owns prompt
   repair; recovery bridge v1 accepts future structured/files-only capabilities. The parallel
@@ -105,8 +105,13 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
 
 - Subagent tree, controls, artifacts, and parent-session result projection.
 - Magic Context configuration, memory/session views, and diagnostics.
-- MCP server/config/OAuth/status/tools/resources/prompts UI.
-- Web Access provider/config/activity/results and optional Curator flow.
+- Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
+  reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
+  config sources. Tools/resources/results already use the generic Pi tool projection; richer MCP Apps
+  rendering remains dependent on an explicit public webview contract from the adapter.
+- Implemented: direct editing of `pi-web-access`'s native `web-search.json`; its search/fetch tools,
+  activity widgets, and custom entries use the generic extension projection. Optional Curator
+  embedding remains dependent on a public embedding contract from the extension.
 
 Acceptance: each adapter has an unavailable/degraded state, version compatibility diagnostics, and
 an integration smoke test without exposing credentials.

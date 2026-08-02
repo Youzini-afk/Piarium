@@ -1,4 +1,5 @@
 import type {
+  ExtensionStateSnapshot,
   ExtensionUiRequest,
   JsonValue,
   ProjectTrustRequest,
@@ -24,6 +25,7 @@ export interface HostEventMap {
     sessionId: string;
   };
   "extension.ui.request": ExtensionUiRequest;
+  "extension.state": ExtensionStateSnapshot;
   "host.error": ProtocolErrorData;
   "host.log": {
     fields?: JsonValue;
@@ -72,6 +74,7 @@ export const HOST_EVENTS = [
   "agent.event",
   "extension.ui.dismiss",
   "extension.ui.request",
+  "extension.state",
   "host.error",
   "host.log",
   "host.ready",

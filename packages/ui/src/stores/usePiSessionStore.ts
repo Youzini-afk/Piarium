@@ -36,6 +36,7 @@ export interface PiToolExecutionState {
 export interface PiSessionViewState {
   allEntries?: SessionEntriesResult;
   branchEntries?: SessionEntriesResult;
+  extensionStates: Record<string, JsonValue>;
   lastAgentEvent?: PiAgentEvent;
   liveAssistant?: PiAssistantMessage;
   open: boolean;
@@ -74,6 +75,7 @@ export interface PiSessionStoreState {
   closeSession(sessionId: string): Promise<boolean>;
   createSession(cwd: string, name?: string): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
+  executeCommand(sessionId: string, command: string): Promise<JsonValue>;
   followUp(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean>;
   forkSession(
     sessionId: string,
@@ -145,6 +147,7 @@ export const selectCurrentPiSession = (
 );
 
 const emptySession = (sessionId: string): PiSessionViewState => ({
+  extensionStates: {},
   open: false,
   sessionId,
   toolExecutions: {},
@@ -457,6 +460,18 @@ export const createPiSessionStore = (
           void get().refreshRecoveryStatus(sessionId).catch(() => undefined);
           return;
         }
+        case 'extension.state': {
+          const { channel, sessionId, value } = envelope.data;
+          set((state) => ({
+            records: upsertRecord(state.records, sessionId, (current) => {
+              const extensionStates = { ...current.extensionStates };
+              if (value === null) delete extensionStates[channel];
+              else extensionStates[channel] = value;
+              return { ...current, extensionStates };
+            }),
+          }));
+          return;
+        }
         case 'host.error':
           set({ lastError: envelope.data.message });
           return;
@@ -633,6 +648,11 @@ export const createPiSessionStore = (
           commitError(runtime.currentKey(), error);
           throw error;
         }
+      },
+
+      executeCommand: async (sessionId, command) => {
+        const { result } = await request('command.execute', { command, sessionId });
+        return result;
       },
 
       followUp: async (sessionId, text, images) => {

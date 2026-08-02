@@ -1,2041 +1,626 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { toast } from '@/components/ui';
-import { copyTextToClipboard } from '@/lib/clipboard';
-import { openExternalUrl } from '@/lib/url';
-import { isVSCodeRuntime } from '@/lib/desktop';
-import {
-  useMcpConfigStore,
-  envRecordToArray,
-  type McpDraft,
-  type McpScope,
-} from '@/stores/useMcpConfigStore';
-import { useShallow } from 'zustand/react/shallow';
-import {
-  parseImportedMcpSnippet,
-  applyImportedMcpToDraft,
-} from './mcpImport';
-import { useMcpStore } from '@/stores/useMcpStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import {
-  RiAddLine,
-  RiArrowDownSLine,
-  RiArrowRightSLine,
-  RiClipboardLine,
-  RiDeleteBinLine,
-  RiEyeLine,
-  RiEyeOffLine,
-  RiErrorWarningLine,
-  RiExternalLinkLine,
-  RiFileCodeLine,
-  RiFolderLine,
-  RiPlugLine,
-  RiUser3Line,
-} from '@remixicon/react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { cn } from '@/lib/utils';
+import { json } from '@codemirror/lang-json';
+import type {
+  PackageDescriptor,
+  PiConfigTextDocumentSnapshot,
+  PiConfigTextRoot,
+  RuntimeContextTarget,
+} from '@piarium/protocol';
+import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import {
-  SettingsSection,
-  SettingsFieldRow,
-  SettingsCheckboxRow,
-  SettingsStackedField,
-  SettingsChipGroup,
-  SettingsGroupTitle,
-  SETTINGS_SELECT_SIZE,
-  SETTINGS_FIELD_LABEL_CLASS,
-} from '@/components/sections/shared/SettingsSection';
-import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
-import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { Button } from '@/components/ui/button';
+import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select';
-import { useI18n } from '@/lib/i18n';
-import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import {
+  getPiConfigTextDocument,
+  updatePiConfigTextDocument,
+} from '@/lib/pi-runtime/config-documents';
+import {
+  findPiPackage,
+  installPiPackage,
+  listPiPackages,
+  removePiPackage,
+  updatePiPackages,
+} from '@/lib/pi-runtime/packages';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { cn } from '@/lib/utils';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import {
+  MCP_ADAPTER_STATUS_CHANNEL,
+  parseMcpAdapterStatus,
+  type McpAdapterServerSnapshot,
+  type McpAdapterServerStatus,
+} from './mcpAdapterStatus';
 
-// ─────────────────────────────────────────────────────────────
-// CommandTextarea  — one arg per line, paste-friendly
-// ─────────────────────────────────────────────────────────────
-interface CommandTextareaProps {
-  value: string[];
-  onChange: (v: string[]) => void;
-  pasteCommandTitle: string;
-  pasteCommandLabel: string;
-  pasteSuccess: (count: number) => string;
-  clipboardReadFailed: string;
-  preview: (count: number) => string;
+const MCP_PACKAGE_SOURCE = 'npm:pi-mcp-adapter';
+
+interface McpConfigTarget {
+  id: string;
+  label: string;
+  path: string;
+  root: PiConfigTextRoot;
 }
 
-/**
- * Splits a shell-like command string into argv array.
- * Handles simple quoted args (single/double) and plain tokens.
- */
-function parseShellCommand(raw: string): string[] {
-  const args: string[] = [];
-  let current = '';
-  let inSingle = false;
-  let inDouble = false;
+const MCP_CONFIG_TARGETS: McpConfigTarget[] = [
+  {
+    id: 'shared-global',
+    label: '1 · ~/.config/mcp/mcp.json',
+    path: '.config/mcp/mcp.json',
+    root: 'home',
+  },
+  {
+    id: 'agents-global',
+    label: '2 · ~/.agents/mcp.json',
+    path: '.agents/mcp.json',
+    root: 'home',
+  },
+  {
+    id: 'agents-nested-global',
+    label: '3 · ~/.agents/mcp/mcp.json',
+    path: '.agents/mcp/mcp.json',
+    root: 'home',
+  },
+  {
+    id: 'pi-global',
+    label: '4 · Pi agent dir/mcp.json',
+    path: 'mcp.json',
+    root: 'agent',
+  },
+  {
+    id: 'shared-project',
+    label: '5 · .mcp.json',
+    path: '.mcp.json',
+    root: 'project',
+  },
+  {
+    id: 'pi-project',
+    label: '6 · .pi/mcp.json',
+    path: '.pi/mcp.json',
+    root: 'project',
+  },
+];
 
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i];
-    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
-    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
-    if ((ch === ' ' || ch === '\t') && !inSingle && !inDouble) {
-      if (current) { args.push(current); current = ''; }
-      continue;
+type PackageAction = 'install' | 'remove' | 'update';
+
+const PACKAGE_SUCCESS_KEYS = {
+  install: 'settings.piarium.mcp.toast.package.install',
+  remove: 'settings.piarium.mcp.toast.package.remove',
+  update: 'settings.piarium.mcp.toast.package.update',
+} satisfies Record<PackageAction, I18nKey>;
+
+const statusTone = (status: McpAdapterServerStatus): string => {
+  if (status === 'connected') return 'text-[var(--status-success)] bg-[var(--status-success)]/10';
+  if (status === 'failed') return 'text-[var(--status-error)] bg-[var(--status-error)]/10';
+  if (status === 'needs-auth') return 'text-[var(--status-warning)] bg-[var(--status-warning)]/10';
+  return 'text-muted-foreground bg-muted';
+};
+
+const safeCommandArgument = (value: string): string => value.replace(/[\r\n]+/g, ' ').trim();
+
+const McpConfigEditor: React.FC<{ runtimeTarget: RuntimeContextTarget }> = ({ runtimeTarget }) => {
+  const { t } = useI18n();
+  const [targetId, setTargetId] = React.useState('pi-project');
+  const [snapshot, setSnapshot] = React.useState<PiConfigTextDocumentSnapshot | null>(null);
+  const [draft, setDraft] = React.useState('{}\n');
+  const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const generationRef = React.useRef(0);
+  const editorExtensions = React.useMemo(() => [json()], []);
+  const target = MCP_CONFIG_TARGETS.find((candidate) => candidate.id === targetId)
+    ?? MCP_CONFIG_TARGETS[0]!;
+
+  const load = React.useCallback(async () => {
+    const generation = ++generationRef.current;
+    const runtimeKey = getRuntimeKey();
+    setLoading(true);
+    setLoadError(null);
+    setSnapshot(null);
+    try {
+      const next = await getPiConfigTextDocument(
+        runtimeTarget,
+        target.root,
+        target.path,
+        'jsonc',
+      );
+      if (generation !== generationRef.current || runtimeKey !== getRuntimeKey()) return;
+      setSnapshot(next);
+      setDraft(next.content);
+    } catch (error) {
+      if (generation !== generationRef.current || runtimeKey !== getRuntimeKey()) return;
+      setLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (generation === generationRef.current && runtimeKey === getRuntimeKey()) setLoading(false);
     }
-    current += ch;
-  }
-  if (current) args.push(current);
-  return args;
-}
+  }, [runtimeTarget, target.path, target.root]);
 
-function extractAuthorizationResponse(raw: string): {
-  code: string | null;
-  context: { name: string; directory: string | null } | null;
-  stateKey: string | null;
-} {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return { code: null, context: null, stateKey: null };
-  }
+  React.useEffect(() => {
+    setDraft('{}\n');
+    void load();
+  }, [load]);
 
-  try {
-    const parsed = new URL(trimmed);
-    const code = parsed.searchParams.get('code');
-    if (typeof code === 'string' && code.trim()) {
+  const parsed = React.useMemo(() => {
+    const errors: ParseError[] = [];
+    const document = parse(draft.replace(/^\uFEFF/, ''), errors, {
+      allowTrailingComma: true,
+      disallowComments: false,
+    });
+    if (errors.length > 0) {
+      const first = errors[0];
       return {
-        code: code.trim(),
-        context: parseMcpOAuthCallbackContext(parsed.searchParams),
-        stateKey: parseMcpOAuthCallbackStateKey(parsed.searchParams),
+        error: first
+          ? `${printParseErrorCode(first.error)} at offset ${first.offset}`
+          : 'Invalid JSONC',
+        valid: false,
       };
     }
-  } catch {
-    // Fall through to treating the pasted value as a raw authorization code.
-  }
-
-  return {
-    code: trimmed,
-    context: null,
-    stateKey: null,
-  };
-}
-
-const CommandTextarea: React.FC<CommandTextareaProps> = ({
-  value,
-  onChange,
-  pasteCommandTitle,
-  pasteCommandLabel,
-  pasteSuccess,
-  clipboardReadFailed,
-  preview,
-}) => {
-  // Internal: one arg per line
-  const [text, setText] = React.useState(() => value.join('\n'));
-
-  // Sync when external value changes (e.g. switching servers)
-  const prevValueRef = React.useRef(value);
-  React.useEffect(() => {
-    if (JSON.stringify(prevValueRef.current) !== JSON.stringify(value)) {
-      prevValueRef.current = value;
-      setText(value.join('\n'));
+    if (typeof document !== 'object' || document === null || Array.isArray(document)) {
+      return { error: 'Configuration root must be an object', valid: false };
     }
-  }, [value]);
+    return { error: null, valid: true };
+  }, [draft]);
+  const dirty = snapshot !== null && draft !== snapshot.content;
+  const projectBlocked = target.root === 'project' && snapshot?.projectTrusted === false;
 
-  const commit = (raw: string) => {
-    const lines = raw.split('\n').filter((l) => l.trim().length > 0);
-    onChange(lines);
-  };
-
-  const handlePasteFromClipboard = async () => {
+  const save = React.useCallback(async () => {
+    if (!snapshot || !parsed.valid || !dirty || projectBlocked || saving) return;
+    const runtimeKey = getRuntimeKey();
+    setSaving(true);
     try {
-      const raw = await navigator.clipboard.readText();
-      const trimmed = raw.trim();
-      // If it looks like a multi-line list, keep as-is; otherwise parse as shell command
-      const lines = trimmed.includes('\n')
-        ? trimmed.split('\n').filter((l) => l.trim())
-        : parseShellCommand(trimmed);
-      setText(lines.join('\n'));
-      onChange(lines);
-      toast.success(pasteSuccess(lines.length));
-    } catch {
-      toast.error(clipboardReadFailed);
+      const next = await updatePiConfigTextDocument(
+        runtimeTarget,
+        target.root,
+        snapshot.path,
+        'jsonc',
+        draft,
+        snapshot.revision,
+      );
+      if (runtimeKey !== getRuntimeKey()) return;
+      setSnapshot(next);
+      setDraft(next.content);
+      toast.success(t('settings.piarium.mcp.toast.saved'));
+    } catch (error) {
+      console.error('Failed to save MCP adapter configuration:', error);
+      toast.error(error instanceof Error ? error.message : t('settings.common.status.saveFailed'));
+    } finally {
+      setSaving(false);
     }
-  };
+  }, [dirty, draft, parsed.valid, projectBlocked, runtimeTarget, saving, snapshot, t, target.root]);
 
   return (
-    <div className="space-y-2" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          variant="ghost"
-          size="xs"
-          className="!font-normal gap-1 text-muted-foreground"
-          onClick={handlePasteFromClipboard}
-          type="button"
-          title={pasteCommandTitle}
-        >
-          <RiClipboardLine className="h-3 w-3" />
-          {pasteCommandLabel}
-        </Button>
-      </div>
-
-      <Textarea
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          commit(e.target.value);
-        }}
-        onBlur={() => {
-          // Normalise on blur: strip trailing spaces from each line
-          const cleaned = text
-            .split('\n')
-            .map((l) => l.trimEnd())
-            .join('\n');
-          setText(cleaned);
-          commit(cleaned);
-        }}
-        placeholder={
-          'npx\n-y\n@modelcontextprotocol/server-postgres\npostgresql://user:pass@host/db'
-        }
-        rows={Math.max(4, value.length + 1)}
-        className="font-mono typography-meta resize-y min-h-[80px]"
-        spellCheck={false}
-      />
-
-      {/* Formatted preview of what will be saved */}
-      {value.length > 0 && (
-        <details className="group">
-          <summary className="typography-micro text-muted-foreground/60 cursor-pointer select-none hover:text-muted-foreground">
-            {preview(value.length)}
-          </summary>
-          <div className="mt-1 rounded-md bg-[var(--surface-elevated)] px-3 py-2 overflow-x-auto">
-            <code className="typography-micro text-foreground/80 whitespace-pre">
-              {value.map((a, i) => (
-                <span key={i} className="block">
-                  <span className="text-muted-foreground select-none mr-2">[{i}]</span>
-                  {a}
-                </span>
+    <SettingsSection
+      title={t('settings.piarium.mcp.config.title')}
+      description={t('settings.piarium.mcp.config.description')}
+      settingsItem="mcp.configuration"
+    >
+      <div className="space-y-3">
+        <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:justify-between">
+          <Select value={targetId} onValueChange={setTargetId}>
+            <SelectTrigger size="settings" className="min-w-64 max-w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MCP_CONFIG_TARGETS.map((candidate) => (
+                <SelectItem key={candidate.id} value={candidate.id}>{candidate.label}</SelectItem>
               ))}
-            </code>
-          </div>
-        </details>
-      )}
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────
-// EnvEditor  — compact rows, wide value, paste .env support
-// ─────────────────────────────────────────────────────────────
-interface EnvEntry { key: string; value: string; }
-
-interface EnvEditorProps {
-  value: EnvEntry[];
-  onChange: (v: EnvEntry[]) => void;
-  keyTransform?: (value: string) => string;
-  keyPlaceholder?: string;
-  keyInputClassName?: string;
-  pasteLabel?: string;
-  pasteTitle?: string;
-  noPairsFoundError: string;
-  importSuccess: (count: number) => string;
-  clipboardReadFailed: string;
-  keyLabel: string;
-  valueLabel: string;
-  valuePlaceholder: string;
-  hideValueTitle: string;
-  showValueTitle: string;
-  addVariable: string;
-  plainTextWarning: string;
-  removeVariableAria: string;
-}
-
-const normalizeEnvKey = (value: string): string => value.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
-
-const EnvEditor: React.FC<EnvEditorProps> = ({
-  value,
-  onChange,
-  keyTransform = normalizeEnvKey,
-  keyPlaceholder = 'API_KEY',
-  keyInputClassName = 'w-36 shrink-0 font-mono typography-meta uppercase',
-  pasteLabel = 'Paste .env',
-  pasteTitle = 'Paste KEY=VALUE lines from clipboard',
-  noPairsFoundError,
-  importSuccess,
-  clipboardReadFailed,
-  keyLabel,
-  valueLabel,
-  valuePlaceholder,
-  hideValueTitle,
-  showValueTitle,
-  addVariable,
-  plainTextWarning,
-  removeVariableAria,
-}) => {
-  const [revealedKeys, setRevealedKeys] = React.useState<Set<number>>(new Set());
-
-  const addRow = () => onChange([...value, { key: '', value: '' }]);
-
-  const removeRow = (idx: number) => {
-    onChange(value.filter((_, i) => i !== idx));
-    setRevealedKeys((prev) => {
-      const next = new Set(prev);
-      next.delete(idx);
-      return next;
-    });
-  };
-
-  const updateRow = (idx: number, field: 'key' | 'value', val: string) => {
-    const next = [...value];
-    next[idx] = { ...next[idx], [field]: val };
-    onChange(next);
-  };
-
-  const toggleReveal = (idx: number) => {
-    setRevealedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx); else next.add(idx);
-      return next;
-    });
-  };
-
-  const handlePasteDotEnv = async () => {
-    try {
-      const raw = await navigator.clipboard.readText();
-      const parsed: EnvEntry[] = [];
-      for (const line of raw.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIdx = trimmed.indexOf('=');
-        if (eqIdx === -1) continue;
-        const key = trimmed.slice(0, eqIdx).trim();
-        let val = trimmed.slice(eqIdx + 1).trim();
-        // Strip surrounding quotes
-        if ((val.startsWith('"') && val.endsWith('"')) ||
-            (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
-        }
-        if (key) parsed.push({ key, value: val });
-      }
-      if (parsed.length === 0) {
-        toast.error(noPairsFoundError);
-        return;
-      }
-      // Merge: update existing keys, append new ones
-      const merged = [...value];
-      for (const p of parsed) {
-        const existing = merged.findIndex((e) => e.key === p.key);
-        if (existing !== -1) merged[existing] = p;
-        else merged.push(p);
-      }
-      onChange(merged);
-      toast.success(importSuccess(parsed.length));
-    } catch {
-      toast.error(clipboardReadFailed);
-    }
-  };
-
-  const hasSensitiveValues = value.some((e) => e.value.length > 0);
-
-  return (
-    <div className="space-y-2">
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <span className="typography-micro text-muted-foreground w-32 shrink-0">{keyLabel}</span>
-          <span className="typography-micro text-muted-foreground">{valueLabel}</span>
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={loading || saving}
+            onClick={() => void load()}
+            className="!font-normal gap-1.5"
+          >
+            <Icon name="refresh" className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
+            {t('settings.piarium.recovery.actions.refresh')}
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="xs"
-          className="!font-normal gap-1 text-muted-foreground"
-          onClick={handlePasteDotEnv}
-          type="button"
-          title={pasteTitle}
-        >
-          <RiClipboardLine className="h-3 w-3" />
-          {pasteLabel}
-        </Button>
-      </div>
 
-      {/* Rows */}
-      <div className="space-y-1.5">
-        {value.map((entry, idx) => (
-          <div key={idx} className="flex items-center gap-2">
-            {/* KEY — fixed narrow width */}
-            <Input
-              value={entry.key}
-              onChange={(e) => updateRow(idx, 'key', keyTransform(e.target.value))}
-              placeholder={keyPlaceholder}
-              className={keyInputClassName}
-              data-bwignore="true"
-              data-1p-ignore="true"
-              data-lpignore="true"
-              spellCheck={false}
-            />
-            {/* VALUE — takes remaining space */}
-            <div className="relative flex-1 flex items-center">
-              <Input
-                type={revealedKeys.has(idx) ? 'text' : 'password'}
-                value={entry.value}
-                onChange={(e) => updateRow(idx, 'value', e.target.value)}
-                placeholder={valuePlaceholder}
-                className="font-mono typography-meta pr-8 w-full"
-                autoComplete="new-password"
-                data-bwignore="true"
-                data-1p-ignore="true"
-                data-lpignore="true"
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                onClick={() => toggleReveal(idx)}
-                className="absolute right-2 text-muted-foreground/60 hover:text-muted-foreground"
-                title={revealedKeys.has(idx) ? hideValueTitle : showValueTitle}
-              >
-                {revealedKeys.has(idx)
-                  ? <RiEyeOffLine className="h-3.5 w-3.5" />
-                  : <RiEyeLine className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-            {/* Remove */}
-            <Button size="sm"
-              variant="ghost"
-              className="h-7 w-7 px-0 shrink-0 text-muted-foreground hover:text-[var(--status-error)]"
-              onClick={() => removeRow(idx)}
-              aria-label={removeVariableAria}
-            >
-              <RiDeleteBinLine className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        ))}
-      </div>
-
-      <Button
-        variant="outline"
-        size="xs"
-        className="!font-normal gap-1.5"
-        onClick={addRow}
-        type="button"
-      >
-        <RiAddLine className="h-3.5 w-3.5" />
-        {addVariable}
-      </Button>
-
-      {hasSensitiveValues && (
-        <p className="typography-micro text-muted-foreground/60">
-          {plainTextWarning}
+        <p className="typography-micro text-muted-foreground">
+          {t('settings.piarium.mcp.config.precedence')}
         </p>
-      )}
+        <p className="break-all font-mono typography-micro text-muted-foreground">
+          {target.root} · {snapshot?.path ?? target.path}
+        </p>
+
+        <div className="h-80 overflow-hidden rounded-md border border-border/60 bg-background">
+          <CodeMirrorEditor
+            value={draft}
+            onChange={setDraft}
+            extensions={editorExtensions}
+            className="h-full"
+            enableSearch
+            readOnly={loading || projectBlocked}
+          />
+        </div>
+
+        {parsed.error && (
+          <p className="typography-meta text-[var(--status-error)]">
+            {t('settings.piarium.mcp.config.invalid')}: {parsed.error}
+          </p>
+        )}
+        {projectBlocked && !loading && (
+          <p className="typography-meta text-[var(--status-warning)]">
+            {t('settings.piarium.mcp.config.untrusted')}
+          </p>
+        )}
+        {loadError && (
+          <p className="break-words typography-meta text-[var(--status-error)]">{loadError}</p>
+        )}
+
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            disabled={loading || saving || !dirty || !parsed.valid || projectBlocked}
+            onClick={() => void save()}
+          >
+            {saving
+              ? t('settings.common.actions.saving')
+              : t('settings.common.actions.saveChanges')}
+          </Button>
+        </div>
+      </div>
+    </SettingsSection>
+  );
+};
+
+const ServerCard: React.FC<{
+  busy: string | null;
+  onCommand: (action: string, serverName: string, command: string, reload?: boolean) => void;
+  server: McpAdapterServerSnapshot;
+}> = ({ busy, onCommand, server }) => {
+  const { t } = useI18n();
+  const actionBusy = busy?.endsWith(`:${server.name}`) === true;
+  const argument = safeCommandArgument(server.name);
+  return (
+    <div className="rounded-lg border border-border/60 px-3 py-3">
+      <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate typography-ui-label text-foreground">{server.name}</span>
+            <span className={cn(
+              'rounded-full px-2 py-0.5 typography-micro font-medium',
+              statusTone(server.status),
+            )}>
+              {server.status}
+            </span>
+          </div>
+          <p className="typography-micro text-muted-foreground">
+            {t('settings.piarium.mcp.runtime.serverCounts', {
+              tools: server.toolCount,
+              resources: server.resourceCount ?? 0,
+            })}
+            {server.failedAgoSeconds === undefined
+              ? ''
+              : ` · ${t('settings.piarium.mcp.runtime.failedAgo', { seconds: server.failedAgoSeconds })}`}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {!server.disabled && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={actionBusy}
+              onClick={() => onCommand('reconnect', server.name, `/mcp reconnect ${argument}`)}
+              className="!font-normal"
+            >
+              {t('settings.piarium.mcp.actions.reconnect')}
+            </Button>
+          )}
+          {server.status === 'needs-auth' && (
+            <Button
+              type="button"
+              size="xs"
+              disabled={actionBusy}
+              onClick={() => onCommand('authorize', server.name, `/mcp-auth ${argument}`)}
+              className="!font-normal"
+            >
+              {t('settings.piarium.mcp.actions.authorize')}
+            </Button>
+          )}
+          {!server.disabled && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={actionBusy}
+              onClick={() => onCommand('logout', server.name, `/mcp logout ${argument}`)}
+              className="!font-normal text-muted-foreground"
+            >
+              {t('settings.piarium.mcp.actions.logout')}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={actionBusy}
+            onClick={() => onCommand(
+              server.disabled ? 'enable' : 'disable',
+              server.name,
+              `/mcp ${server.disabled ? 'enable' : 'disable'} ${argument}`,
+              true,
+            )}
+            className="!font-normal text-muted-foreground"
+          >
+            {server.disabled
+              ? t('settings.piarium.mcp.actions.enable')
+              : t('settings.piarium.mcp.actions.disable')}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// Status badge
-// ─────────────────────────────────────────────────────────────
-const StatusBadge: React.FC<{
-  status: string | undefined;
-  enabled: boolean;
-  getStatusLabel: (status: string) => string;
-  variant?: 'compact' | 'pill'
-}> = ({ status, enabled, getStatusLabel, variant = 'compact' }) => {
-  if (!enabled) return null;
-  if (!status) return null;
-
-  const colorClassMap: Record<string, { text: string; bg: string }> = {
-    connected: { text: 'text-[var(--status-success)]', bg: 'bg-[var(--status-success)]/10' },
-    failed: { text: 'text-[var(--status-error)]', bg: 'bg-[var(--status-error)]/10' },
-    needs_auth: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
-    needs_client_registration: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
-  };
-
-  const colors = colorClassMap[status] ?? { text: 'text-muted-foreground', bg: '' };
-
-  if (variant === 'pill') {
-    return (
-      <span className={cn('typography-micro font-medium rounded-full px-2 py-0.5', colors.text, colors.bg)}>
-        ● {getStatusLabel(status)}
-      </span>
-    );
-  }
-
-  return (
-    <span className={cn('typography-micro font-medium', colors.text)}>
-      ● {getStatusLabel(status)}
-    </span>
-  );
-};
-
-const getStatusDescription = (
-  status: string | undefined,
-  t: (key: string, params?: Record<string, unknown>) => string,
-  error?: string
-): string => {
-  switch (status) {
-    case 'connected':
-      return t('settings.mcp.page.status.description.connected');
-    case 'failed':
-      return error?.trim() || t('settings.mcp.page.status.description.failedDefault');
-    case 'needs_auth':
-      return t('settings.mcp.page.status.description.needsAuth');
-    case 'needs_client_registration':
-      return error?.trim() || t('settings.mcp.page.status.description.needsClientRegistrationDefault');
-    case 'disabled':
-      return t('settings.mcp.page.status.description.disabled');
-    default:
-      return t('settings.mcp.page.status.description.default');
-  }
-};
-
-const statusCardClass = (status: string | undefined): string => {
-  switch (status) {
-    case 'failed':
-      return 'border-[var(--status-error-border)] bg-[var(--status-error-background)]';
-    case 'needs_auth':
-    case 'needs_client_registration':
-      return 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)]';
-    default:
-      return 'border-[var(--interactive-border)] bg-[var(--surface-elevated)]';
-  }
-};
-
-const shouldShowFullStatusCard = (status: string | undefined, authUrl: string | null, needsAuthorization: boolean, isAuthPolling: boolean): boolean => {
-  // Only show full card for error/warning states or when auth is in progress
-  if (status === 'failed' || status === 'needs_auth' || status === 'needs_client_registration') return true;
-  if (authUrl) return true;
-  if (needsAuthorization || isAuthPolling) return true;
-  return false;
-};
-
-const buildMcpOAuthRedirectUri = (name?: string | null, directory?: string | null): string | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const url = new URL(MCP_OAUTH_CALLBACK_PATH, getRuntimeApiBaseUrl() || window.location.origin);
-  if (typeof name === 'string' && name.trim()) {
-    url.searchParams.set('server', name.trim());
-  }
-  if (typeof directory === 'string' && directory.trim()) {
-    url.searchParams.set('directory', directory.trim());
-  }
-  return url.toString();
-};
-
-const queuePendingMcpAuthContext = async (input: {
-  state: string;
-  name: string;
-  directory?: string | null;
-}): Promise<void> => {
-  const response = await runtimeFetch('/api/mcp/auth/pending', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      state: input.state,
-      name: input.name,
-      directory: typeof input.directory === 'string' && input.directory.trim() ? input.directory.trim() : null,
-    }),
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || 'Failed to prepare MCP authorization callback');
-  }
-};
-
-const getPendingMcpAuthContext = async (stateKey: string): Promise<{ name: string; directory: string | null } | null> => {
-  const response = await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey)}`);
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = await response.json().catch(() => null) as { name?: string; directory?: string | null } | null;
-  if (!payload?.name?.trim()) {
-    return null;
-  }
-
-  return {
-    name: payload.name.trim(),
-    directory: typeof payload.directory === 'string' && payload.directory.trim() ? payload.directory.trim() : null,
-  };
-};
-
-const clearPendingMcpAuthContext = async (stateKey: string | null | undefined): Promise<void> => {
-  if (typeof stateKey !== 'string' || !stateKey.trim()) {
-    return;
-  }
-
-  await runtimeFetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey.trim())}`, { method: 'DELETE' }).catch(() => undefined);
-};
-
-const normalizeMcpAuthErrorMessage = (
-  error: unknown,
-  fallback: string,
-  t: (key: string, params?: Record<string, unknown>) => string
-): string => {
-  const message = error instanceof Error ? error.message : fallback;
-  if (/oauth state required/i.test(message)) {
-    return t('settings.mcp.page.toast.authSessionExpired');
-  }
-  return message;
-};
-
-const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
-  const normalizedDirectory = typeof directory === 'string' && directory.trim()
-    ? directory.trim()
-    : '__global__';
-  return `${name ?? '__none__'}::${normalizedDirectory}`;
-};
-
-const MINIMUM_MCP_SCHEMA_COMPATIBLE_OPENCODE_VERSION = '1.15.4';
-
-const parseSemverCore = (value: string): [number, number, number] | null => {
-  const match = value.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
-  if (!match) {
-    return null;
-  }
-
-  return [
-    Number.parseInt(match[1] ?? '0', 10),
-    Number.parseInt(match[2] ?? '0', 10),
-    Number.parseInt(match[3] ?? '0', 10),
-  ];
-};
-
-const compareSemverCore = (left: string, right: string): number | null => {
-  const parsedLeft = parseSemverCore(left);
-  const parsedRight = parseSemverCore(right);
-  if (!parsedLeft || !parsedRight) {
-    return null;
-  }
-
-  for (let index = 0; index < parsedLeft.length; index += 1) {
-    if (parsedLeft[index] !== parsedRight[index]) {
-      return parsedLeft[index] - parsedRight[index];
-    }
-  }
-
-  return 0;
-};
-
-const isOpenCodeVersionTooOldForMcpSchemas = (version: string | null | undefined): boolean => {
-  if (!version) {
-    return false;
-  }
-
-  const comparison = compareSemverCore(version, MINIMUM_MCP_SCHEMA_COMPATIBLE_OPENCODE_VERSION);
-  return comparison !== null && comparison < 0;
-};
-
-const isMcpToolSchemaFailure = (message: string | null | undefined): boolean =>
-  typeof message === 'string' && /failed to get tools/i.test(message);
-
-const isMcpAuthStartSerializationFailure = (message: string | null | undefined): boolean =>
-  typeof message === 'string' && (
-    /JSON\.stringify cannot serialize cyclic structures/i.test(message) ||
-    /Response status code does not indicate success:\s*500/i.test(message)
-  );
-
-const fetchOpenCodeRuntimeVersion = async (signal?: AbortSignal): Promise<string | null> => {
-  const response = await fetch('/api/global/health', {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-    signal,
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = await response.json().catch(() => null) as { version?: unknown } | null;
-  return typeof payload?.version === 'string' && payload.version.trim()
-    ? payload.version.trim()
-    : null;
-};
-
-// ─────────────────────────────────────────────────────────────
-// McpPage
-// ─────────────────────────────────────────────────────────────
 export const McpPage: React.FC = () => {
   const { t } = useI18n();
-  const tUnsafe = React.useCallback(
-    (key: string, params?: Record<string, unknown>) => t(key as never, params as never),
-    [t]
-  );
-  const {
-    selectedMcpName,
-    mcpServers,
-    mcpDraft,
-    setMcpDraft,
-    setSelectedMcp,
-    getMcpByName,
-    createMcp,
-    updateMcp,
-    deleteMcp,
-  } = useMcpConfigStore(useShallow((s) => ({
-    selectedMcpName: s.selectedMcpName,
-    mcpServers: s.mcpServers,
-    mcpDraft: s.mcpDraft,
-    setMcpDraft: s.setMcpDraft,
-    setSelectedMcp: s.setSelectedMcp,
-    getMcpByName: s.getMcpByName,
-    createMcp: s.createMcp,
-    updateMcp: s.updateMcp,
-    deleteMcp: s.deleteMcp,
-  })));
-
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);
-  const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
-  const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory ?? null));
-  const refreshStatus = useMcpStore((state) => state.refresh);
-  const connectMcp = useMcpStore((state) => state.connect);
-  const disconnectMcp = useMcpStore((state) => state.disconnect);
-  const startAuthMcp = useMcpStore((state) => state.startAuth);
-  const completeAuthMcp = useMcpStore((state) => state.completeAuth);
-  const clearAuthMcp = useMcpStore((state) => state.clearAuth);
-  const testConnectionMcp = useMcpStore((state) => state.testConnection);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const sessionCwd = usePiSessionStore((state) => (
+    state.currentSessionId === null
+      ? undefined
+      : state.records[state.currentSessionId]?.snapshot?.cwd
+  ));
+  const extensionState = usePiSessionStore((state) => (
+    state.currentSessionId === null
+      ? undefined
+      : state.records[state.currentSessionId]?.extensionStates[MCP_ADAPTER_STATUS_CHANNEL]
+  ));
+  const executeCommand = usePiSessionStore((state) => state.executeCommand);
+  const cwd = currentDirectory || sessionCwd || '';
+  const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
+    currentSessionId ? { sessionId: currentSessionId } : { cwd }
+  ), [currentSessionId, cwd]);
+  const status = React.useMemo(() => parseMcpAdapterStatus(extensionState), [extensionState]);
+  const [packages, setPackages] = React.useState<PackageDescriptor[]>([]);
+  const [packagesLoading, setPackagesLoading] = React.useState(false);
+  const [packageAction, setPackageAction] = React.useState<PackageAction | null>(null);
+  const [commandAction, setCommandAction] = React.useState<string | null>(null);
+  const packageGenerationRef = React.useRef(0);
+  const configuredPackage = findPiPackage(packages, 'pi-mcp-adapter');
 
-  const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName) : null;
-  const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
-
-  // ── form state ──
-  const [draftName, setDraftName] = React.useState('');
-  const [draftScope, setDraftScope] = React.useState<McpScope>('user');
-  const [mcpType, setMcpType] = React.useState<'local' | 'remote'>('local');
-  const [command, setCommand] = React.useState<string[]>([]);
-  const [url, setUrl] = React.useState('');
-  const [envEntries, setEnvEntries] = React.useState<Array<{ key: string; value: string }>>([]);
-  const [headerEntries, setHeaderEntries] = React.useState<Array<{ key: string; value: string }>>([]);
-  const [oauthEnabled, setOauthEnabled] = React.useState(true);
-  const [oauthClientId, setOauthClientId] = React.useState('');
-  const [oauthClientSecret, setOauthClientSecret] = React.useState('');
-  const [oauthScope, setOauthScope] = React.useState('');
-  const [oauthRedirectUri, setOauthRedirectUri] = React.useState('');
-  const [timeout, setTimeoutValue] = React.useState('');
-  const [enabled, setEnabled] = React.useState(true);
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
-  const [isDeleting, setIsDeleting] = React.useState(false);
-  const [isConnecting, setIsConnecting] = React.useState(false);
-
-  const [isAuthorizing, setIsAuthorizing] = React.useState(false);
-  const [isClearingAuth, setIsClearingAuth] = React.useState(false);
-  const [isTestingConnection, setIsTestingConnection] = React.useState(false);
-  const [isCompletingAuth, setIsCompletingAuth] = React.useState(false);
-  const [authUrl, setAuthUrl] = React.useState<string | null>(null);
-  const [authStateKey, setAuthStateKey] = React.useState<string | null>(null);
-  const [authCallbackInput, setAuthCallbackInput] = React.useState('');
-  const [isAuthPolling, setIsAuthPolling] = React.useState(false);
-  const [openCodeRuntimeVersion, setOpenCodeRuntimeVersion] = React.useState<string | null>(null);
-  const authPollAttemptsRef = React.useRef(0);
-  const authPollStartsFromNeedsAuthRef = React.useRef(false);
-  const [isAdvancedRemoteOptionsOpen, setIsAdvancedRemoteOptionsOpen] = React.useState(false);
-  const [showImportDialog, setShowImportDialog] = React.useState(false);
-  const [importJsonText, setImportJsonText] = React.useState('');
-  const [importError, setImportError] = React.useState<string | null>(null);
-  const runtimeActionKey = React.useMemo(
-    () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
-    [currentDirectory, selectedMcpName],
-  );
-  const runtimeActionKeyRef = React.useRef(runtimeActionKey);
-
-  const initialRef = React.useRef<{
-    mcpType: 'local' | 'remote'; command: string[]; url: string;
-    envEntries: Array<{ key: string; value: string }>;
-    headerEntries: Array<{ key: string; value: string }>;
-    oauthEnabled: boolean;
-    oauthClientId: string;
-    oauthClientSecret: string;
-    oauthScope: string;
-    oauthRedirectUri: string;
-    timeout: string;
-    enabled: boolean;
-  } | null>(null);
-
-  const resetTransientAuthState = React.useCallback(() => {
-    setAuthUrl(null);
-    setAuthStateKey(null);
-    setAuthCallbackInput('');
-    setIsAuthPolling(false);
-    authPollAttemptsRef.current = 0;
-    setIsCompletingAuth(false);
-    setIsAuthorizing(false);
-    setIsClearingAuth(false);
-    authPollStartsFromNeedsAuthRef.current = false;
-  }, []);
-
-  const handleOpenImportDialog = React.useCallback(() => {
-    setImportJsonText('');
-    setImportError(null);
-    setShowImportDialog(true);
-  }, []);
-
-  const handlePasteImportClipboard = React.useCallback(async () => {
+  const refreshPackages = React.useCallback(async () => {
+    const generation = ++packageGenerationRef.current;
+    const runtimeKey = getRuntimeKey();
+    setPackagesLoading(true);
     try {
-      const text = await navigator.clipboard.readText();
-      setImportJsonText(text);
-      setImportError(null);
-    } catch {
-      toast.error(t('settings.mcp.page.toast.clipboardReadFailed'));
-    }
-  }, [t]);
-
-  const handleImportJson = React.useCallback(() => {
-    const outcome = parseImportedMcpSnippet(importJsonText, { fallbackName: draftName });
-    if (!outcome.ok) {
-      setImportError(outcome.error);
-      return;
-    }
-
-    const partial = {
-      name: draftName,
-      scope: draftScope,
-      type: mcpType,
-      command,
-      url,
-      environment: envEntries,
-      headers: headerEntries,
-      oauthEnabled,
-      oauthClientId,
-      oauthClientSecret,
-      oauthScope,
-      oauthRedirectUri,
-      timeout,
-      enabled,
-    };
-
-    const next = applyImportedMcpToDraft(outcome, partial, { isNewServer });
-
-    setDraftName(next.name);
-    setMcpType(next.type as 'local' | 'remote');
-    setCommand(next.command ?? []);
-    setUrl(next.url ?? '');
-    setEnvEntries(next.environment ?? []);
-    setHeaderEntries(next.headers ?? []);
-    setOauthEnabled(next.oauthEnabled ?? false);
-    setOauthClientId(next.oauthClientId ?? '');
-    setOauthClientSecret(next.oauthClientSecret ?? '');
-    setOauthScope(next.oauthScope ?? '');
-    setOauthRedirectUri(next.oauthRedirectUri ?? '');
-    setTimeoutValue(next.timeout ?? '');
-    setEnabled(next.enabled ?? true);
-
-    setShowImportDialog(false);
-    setImportJsonText('');
-    setImportError(null);
-
-    toast.success(t('settings.mcp.page.toast.configImported'));
-  }, [
-    importJsonText,
-    draftName,
-    draftScope,
-    mcpType,
-    command,
-    url,
-    envEntries,
-    headerEntries,
-    oauthEnabled,
-    oauthClientId,
-    oauthClientSecret,
-    oauthScope,
-    oauthRedirectUri,
-    timeout,
-    enabled,
-    isNewServer,
-    t,
-  ]);
-
-  // Populate form when selection changes
-  React.useEffect(() => {
-    if (isNewServer && mcpDraft) {
-      setDraftName(mcpDraft.name);
-      setDraftScope(mcpDraft.scope || 'user');
-      setMcpType(mcpDraft.type);
-      setCommand(mcpDraft.command);
-      setUrl(mcpDraft.url);
-      setEnvEntries(mcpDraft.environment);
-      setHeaderEntries(mcpDraft.headers);
-      setOauthEnabled(mcpDraft.oauthEnabled);
-      setOauthClientId(mcpDraft.oauthClientId);
-      setOauthClientSecret(mcpDraft.oauthClientSecret);
-      setOauthScope(mcpDraft.oauthScope);
-      setOauthRedirectUri(mcpDraft.oauthRedirectUri);
-      setTimeoutValue(mcpDraft.timeout);
-      setEnabled(mcpDraft.enabled);
-      setIsAdvancedRemoteOptionsOpen(false);
-      initialRef.current = {
-        mcpType: mcpDraft.type, command: mcpDraft.command,
-        url: mcpDraft.url,
-        envEntries: mcpDraft.environment,
-        headerEntries: mcpDraft.headers,
-        oauthEnabled: mcpDraft.oauthEnabled,
-        oauthClientId: mcpDraft.oauthClientId,
-        oauthClientSecret: mcpDraft.oauthClientSecret,
-        oauthScope: mcpDraft.oauthScope,
-        oauthRedirectUri: mcpDraft.oauthRedirectUri,
-        timeout: mcpDraft.timeout,
-        enabled: mcpDraft.enabled,
-      };
-      return;
-    }
-    if (selectedServer) {
-      setDraftScope(selectedServer.scope === 'project' ? 'project' : 'user');
-      const envArr = envRecordToArray(selectedServer.environment);
-      const remoteServer = selectedServer.type === 'remote'
-        ? selectedServer as typeof selectedServer & {
-            headers?: Record<string, string>;
-            oauth?: {
-              clientId?: string;
-              clientSecret?: string;
-              scope?: string;
-              redirectUri?: string;
-            } | false;
-            timeout?: number;
-          }
-        : null;
-      const headersArr = envRecordToArray(remoteServer?.headers);
-      const oauth = remoteServer?.oauth;
-      const oauthConfig = oauth && typeof oauth === 'object' ? oauth : null;
-      const nextOauthEnabled = oauth !== false;
-      const serverType = selectedServer.type;
-      const cmd = serverType === 'local' ? ((selectedServer as { command?: string[] }).command ?? []) : [];
-      const u = serverType === 'remote' ? ((selectedServer as { url?: string }).url ?? '') : '';
-      const nextTimeout = typeof remoteServer?.timeout === 'number' && Number.isFinite(remoteServer.timeout)
-        ? String(remoteServer.timeout)
-        : '';
-      setMcpType(serverType);
-      setCommand(cmd);
-      setUrl(u);
-      setEnvEntries(envArr);
-      setHeaderEntries(headersArr);
-      setOauthEnabled(nextOauthEnabled);
-      setOauthClientId(nextOauthEnabled ? (oauthConfig?.clientId ?? '') : '');
-      setOauthClientSecret(nextOauthEnabled ? (oauthConfig?.clientSecret ?? '') : '');
-      setOauthScope(nextOauthEnabled ? (oauthConfig?.scope ?? '') : '');
-      setOauthRedirectUri(nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '');
-      setTimeoutValue(nextTimeout);
-      setEnabled(selectedServer.enabled);
-      setIsAdvancedRemoteOptionsOpen(false);
-      initialRef.current = {
-        mcpType: serverType,
-        command: cmd,
-        url: u,
-        envEntries: envArr,
-        headerEntries: headersArr,
-        oauthEnabled: nextOauthEnabled,
-        oauthClientId: nextOauthEnabled ? (oauthConfig?.clientId ?? '') : '',
-        oauthClientSecret: nextOauthEnabled ? (oauthConfig?.clientSecret ?? '') : '',
-        oauthScope: nextOauthEnabled ? (oauthConfig?.scope ?? '') : '',
-        oauthRedirectUri: nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '',
-        timeout: nextTimeout,
-        enabled: selectedServer.enabled,
-      };
-    }
-  }, [selectedServer, isNewServer, mcpDraft]);
-
-  const isDirty = React.useMemo(() => {
-    const init = initialRef.current;
-    if (!init) return false;
-    return (
-      mcpType !== init.mcpType ||
-      enabled !== init.enabled ||
-      JSON.stringify(command) !== JSON.stringify(init.command) ||
-      url !== init.url ||
-      JSON.stringify(envEntries) !== JSON.stringify(init.envEntries) ||
-      JSON.stringify(headerEntries) !== JSON.stringify(init.headerEntries) ||
-      oauthEnabled !== init.oauthEnabled ||
-      oauthClientId !== init.oauthClientId ||
-      oauthClientSecret !== init.oauthClientSecret ||
-      oauthScope !== init.oauthScope ||
-      oauthRedirectUri !== init.oauthRedirectUri ||
-      timeout !== init.timeout
-    );
-  }, [mcpType, command, url, envEntries, headerEntries, oauthEnabled, oauthClientId, oauthClientSecret, oauthScope, oauthRedirectUri, timeout, enabled]);
-
-  const handleSave = async () => {
-    const name = isNewServer ? draftName.trim() : selectedMcpName ?? '';
-    if (!name) { toast.error(t('settings.mcp.page.toast.nameRequired')); return; }
-    if (isNewServer && mcpServers.some((s) => s.name === name)) {
-      toast.error(t('settings.mcp.page.toast.serverNameExists')); return;
-    }
-    if (mcpType === 'local' && command.filter(Boolean).length === 0) {
-      toast.error(t('settings.mcp.page.toast.localCommandRequired')); return;
-    }
-    if (mcpType === 'remote' && !url.trim()) {
-      toast.error(t('settings.mcp.page.toast.remoteUrlRequired')); return;
-    }
-
-    const draft: McpDraft = {
-      name,
-      scope: draftScope,
-      type: mcpType,
-      command,
-      url,
-      environment: envEntries,
-      headers: headerEntries,
-      oauthEnabled,
-      oauthClientId,
-      oauthClientSecret,
-      oauthScope,
-      oauthRedirectUri,
-      timeout,
-      enabled,
-    };
-    setIsSaving(true);
-    try {
-      const result = isNewServer ? await createMcp(draft) : await updateMcp(name, draft);
-      if (result.ok) {
-        await clearPendingMcpAuthContext(authStateKey);
-        resetTransientAuthState();
-        if (isNewServer) { setMcpDraft(null); setSelectedMcp(name); }
-        await refreshStatus({ directory: currentDirectory, silent: true });
-        if (result.reloadFailed) {
-          toast.warning(result.message || (isNewServer
-            ? t('settings.mcp.page.toast.serverCreatedReloadFailed')
-            : t('settings.mcp.page.toast.savedReloadFailed')), {
-            description: result.warning || t('settings.mcp.page.toast.retryRefreshHint'),
-          });
-        } else {
-          toast.success(result.message || (isNewServer
-            ? t('settings.mcp.page.toast.serverCreatedReloading')
-            : t('settings.mcp.page.toast.savedReloading')));
-        }
-      } else {
-        toast.error(t('settings.mcp.page.toast.saveFailed'));
+      const next = await listPiPackages(runtimeTarget);
+      if (generation !== packageGenerationRef.current || runtimeKey !== getRuntimeKey()) return;
+      setPackages(next);
+    } catch (error) {
+      if (generation === packageGenerationRef.current && runtimeKey === getRuntimeKey()) {
+        toast.error(error instanceof Error ? error.message : String(error));
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.mcp.page.toast.unexpectedError'));
     } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!selectedMcpName) return;
-    setIsDeleting(true);
-    const result = await deleteMcp(selectedMcpName);
-    if (result.ok) {
-      await clearPendingMcpAuthContext(authStateKey);
-      resetTransientAuthState();
-      if (result.reloadFailed) {
-        toast.warning(result.message || t('settings.mcp.page.toast.serverDeletedReloadFailed', { name: selectedMcpName }), {
-          description: result.warning || t('settings.mcp.page.toast.refreshListIfStale'),
-        });
-      } else {
-        toast.success(result.message || t('settings.mcp.page.toast.serverDeleted', { name: selectedMcpName }));
-      }
-      setShowDeleteConfirm(false);
-    } else toast.error(t('settings.mcp.page.toast.deleteFailed'));
-    setIsDeleting(false);
-  };
-
-  const handleToggleConnect = async () => {
-    if (!selectedMcpName) return;
-    setIsConnecting(true);
-    try {
-      const isConnected = mcpStatus[selectedMcpName]?.status === 'connected';
-      if (isConnected) {
-        await disconnectMcp(selectedMcpName, currentDirectory);
-        toast.success(t('settings.mcp.page.toast.disconnected'));
-      } else {
-        await connectMcp(selectedMcpName, currentDirectory);
-        await refreshStatus({ directory: currentDirectory, silent: true });
-        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName];
-        if (nextStatus?.status === 'connected') {
-          toast.success(t('settings.mcp.page.toast.connected'));
-        } else if (nextStatus?.status === 'needs_auth') {
-          toast.message(t('settings.mcp.page.toast.connectionNeedsAuthorization'));
-        } else if (nextStatus?.status === 'needs_client_registration') {
-          toast.message(t('settings.mcp.page.toast.connectionNeedsClientRegistration'));
-        } else if (nextStatus?.status === 'failed') {
-          toast.error(nextStatus.error || t('settings.mcp.page.toast.connectionFailed'));
-        } else {
-          toast.message(t('settings.mcp.page.toast.connectionAttemptFinished'));
-        }
-        return;
-      }
-      await refreshStatus({ directory: currentDirectory, silent: true });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.mcp.page.toast.connectionFailed'));
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const requireSavedConfig = React.useCallback((): boolean => {
-    if (isNewServer) {
-      toast.error(t('settings.mcp.page.toast.createServerBeforeLiveActions'));
-      return false;
-    }
-    if (isDirty) {
-      toast.error(t('settings.mcp.page.toast.saveBeforeLiveActions'));
-      return false;
-    }
-    return true;
-  }, [isDirty, isNewServer, t]);
-
-  const handleRefreshRuntimeStatus = React.useCallback(async (silent = false) => {
-    try {
-      await refreshStatus({ directory: currentDirectory, silent });
-    } catch (err) {
-      if (!silent) {
-        toast.error(err instanceof Error ? err.message : t('settings.mcp.page.toast.refreshStatusFailed'));
+      if (generation === packageGenerationRef.current && runtimeKey === getRuntimeKey()) {
+        setPackagesLoading(false);
       }
     }
-  }, [currentDirectory, refreshStatus, t]);
+  }, [runtimeTarget]);
 
   React.useEffect(() => {
-    void handleRefreshRuntimeStatus(true);
-  }, [handleRefreshRuntimeStatus]);
+    void refreshPackages();
+  }, [refreshPackages]);
 
-  React.useEffect(() => {
-    runtimeActionKeyRef.current = runtimeActionKey;
-    setIsConnecting(false);
-    setIsTestingConnection(false);
-    resetTransientAuthState();
-  }, [resetTransientAuthState, runtimeActionKey]);
-
-  React.useEffect(() => {
-    if (!isVSCodeAuthRuntime) {
-      setOpenCodeRuntimeVersion(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    let cancelled = false;
-
-    void fetchOpenCodeRuntimeVersion(controller.signal)
-      .then((version) => {
-        if (!cancelled) {
-          setOpenCodeRuntimeVersion(version);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setOpenCodeRuntimeVersion(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [isVSCodeAuthRuntime, runtimeActionKey]);
-
-  const openCodeMcpCompatibilityWarning = React.useMemo(() => {
-    if (!isVSCodeAuthRuntime || !isOpenCodeVersionTooOldForMcpSchemas(openCodeRuntimeVersion)) {
-      return null;
-    }
-
-    return t('settings.mcp.page.status.opencodeVersionTooOldForMcp', {
-      version: openCodeRuntimeVersion ?? t('settings.mcp.page.status.unknownOpenCodeVersion'),
-      minimum: MINIMUM_MCP_SCHEMA_COMPATIBLE_OPENCODE_VERSION,
-    });
-  }, [isVSCodeAuthRuntime, openCodeRuntimeVersion, t]);
-
-  const handleStartAuthorization = React.useCallback(async () => {
-    if (!selectedMcpName || mcpType !== 'remote' || !requireSavedConfig()) return;
-
-    setIsAuthorizing(true);
-    const actionKey = runtimeActionKey;
-    let queuedStateKey: string | null = null;
+  const runPackageAction = React.useCallback(async (action: PackageAction) => {
+    const source = configuredPackage?.source ?? MCP_PACKAGE_SOURCE;
+    setPackageAction(action);
     try {
-      const currentStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName]?.status;
-      authPollStartsFromNeedsAuthRef.current = currentStatus === 'needs_auth' || currentStatus === 'needs_client_registration';
-
-      const redirectUri = buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
-      if (!redirectUri) {
-        throw new Error(t('settings.mcp.page.toast.oauthRedirectUrlBuildFailed'));
-      }
-
-      if (!oauthRedirectUri.trim() && !isVSCodeAuthRuntime) {
-        const saved = await updateMcp(selectedMcpName, {
-          oauthEnabled,
-          oauthClientId,
-          oauthClientSecret,
-          oauthScope,
-          oauthRedirectUri: redirectUri,
-        });
-
-        if (!saved.ok) {
-          throw new Error(t('settings.mcp.page.toast.oauthBrowserCallbackSaveFailed'));
-        }
-
-        if (saved.reloadFailed) {
-          throw new Error(saved.warning || saved.message || t('settings.mcp.page.toast.openCodeReloadFailedAfterCallbackSave'));
-        }
-
-        if (runtimeActionKeyRef.current !== actionKey) {
-          return;
-        }
-
-        setOauthRedirectUri(redirectUri);
-        initialRef.current = initialRef.current
-          ? { ...initialRef.current, oauthRedirectUri: redirectUri }
-          : initialRef.current;
-      }
-
-      const nextAuthUrl = await startAuthMcp(selectedMcpName, currentDirectory);
-      const stateKey = parseMcpOAuthCallbackStateKey(new URL(nextAuthUrl).searchParams);
-      if (stateKey) {
-        queuedStateKey = stateKey;
-        await queuePendingMcpAuthContext({
-          state: stateKey,
-          name: selectedMcpName,
-          directory: currentDirectory,
-        });
-      }
-
-      if (runtimeActionKeyRef.current !== actionKey) {
-        return;
-      }
-
-      setAuthUrl(nextAuthUrl);
-      setAuthStateKey(stateKey ?? null);
-      setIsAuthPolling(true);
-      authPollAttemptsRef.current = 0;
-
-      const opened = await openExternalUrl(nextAuthUrl);
-      if (runtimeActionKeyRef.current !== actionKey) {
-        return;
-      }
-
-      if (opened) {
-        toast.message(
-          isVSCodeAuthRuntime
-            ? t('settings.mcp.page.toast.completeAuthorizationInBrowserWithPaste')
-            : t('settings.mcp.page.toast.completeAuthorizationInBrowser'),
-        );
-      } else {
-        toast.error(t('settings.mcp.page.toast.openAuthorizationUrlFailed'));
-      }
-    } catch (err) {
-      await clearPendingMcpAuthContext(queuedStateKey);
-      if (runtimeActionKeyRef.current === actionKey) {
-        const rawMessage = err instanceof Error ? err.message : String(err);
-        toast.error(
-          openCodeMcpCompatibilityWarning && isMcpAuthStartSerializationFailure(rawMessage)
-            ? openCodeMcpCompatibilityWarning
-            : normalizeMcpAuthErrorMessage(err, t('settings.mcp.page.toast.authorizationStartFailed'), tUnsafe)
-        );
-      }
+      if (action === 'install') await installPiPackage(runtimeTarget, source);
+      else if (action === 'update') await updatePiPackages(runtimeTarget, source);
+      else await removePiPackage(runtimeTarget, source);
+      await refreshPackages();
+      toast.success(t(PACKAGE_SUCCESS_KEYS[action]));
+    } catch (error) {
+      console.error(`Failed to ${action} pi-mcp-adapter:`, error);
+      toast.error(error instanceof Error ? error.message : t('settings.piarium.mcp.toast.packageFailed'));
     } finally {
-      if (runtimeActionKeyRef.current === actionKey) {
-        setIsAuthorizing(false);
-      }
+      setPackageAction(null);
     }
-  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, openCodeMcpCompatibilityWarning, requireSavedConfig, runtimeActionKey, selectedMcpName, startAuthMcp, t, tUnsafe, updateMcp]);
+  }, [configuredPackage?.source, refreshPackages, runtimeTarget, t]);
 
-  const handleClearAuthorization = React.useCallback(async () => {
-    if (!selectedMcpName || !requireSavedConfig()) return;
-
-    setIsClearingAuth(true);
-    const actionKey = runtimeActionKey;
+  const runCommand = React.useCallback(async (
+    action: string,
+    command: string,
+    reload = false,
+  ) => {
+    if (!currentSessionId) return;
+    setCommandAction(action);
     try {
-      await clearAuthMcp(selectedMcpName, currentDirectory);
-
-      if (runtimeActionKeyRef.current !== actionKey) {
-        return;
-      }
-
-      setAuthUrl(null);
-      setAuthStateKey(null);
-      setAuthCallbackInput('');
-      setIsAuthPolling(false);
-      authPollAttemptsRef.current = 0;
-      await clearPendingMcpAuthContext(authStateKey);
-      toast.success(t('settings.mcp.page.toast.savedAuthorizationRemoved'));
-    } catch (err) {
-      if (runtimeActionKeyRef.current === actionKey) {
-        toast.error(normalizeMcpAuthErrorMessage(err, t('settings.mcp.page.toast.clearAuthorizationFailed'), tUnsafe));
-      }
+      await executeCommand(currentSessionId, command);
+      if (reload) await executeCommand(currentSessionId, '/reload');
+    } catch (error) {
+      console.error(`Failed to execute Pi MCP command ${command}:`, error);
+      toast.error(error instanceof Error ? error.message : t('settings.piarium.mcp.toast.commandFailed'));
     } finally {
-      if (runtimeActionKeyRef.current === actionKey) {
-        setIsClearingAuth(false);
+      setCommandAction(null);
+    }
+  }, [currentSessionId, executeCommand, t]);
+
+  const runServerCommand = React.useCallback((
+    action: string,
+    serverName: string,
+    command: string,
+    reload = false,
+  ) => {
+    setCommandAction(`${action}:${serverName}`);
+    void (async () => {
+      try {
+        if (!currentSessionId) return;
+        await executeCommand(currentSessionId, command);
+        if (reload) await executeCommand(currentSessionId, '/reload');
+      } catch (error) {
+        console.error(`Failed to execute Pi MCP command ${command}:`, error);
+        toast.error(error instanceof Error ? error.message : t('settings.piarium.mcp.toast.commandFailed'));
+      } finally {
+        setCommandAction(null);
       }
-    }
-  }, [authStateKey, clearAuthMcp, currentDirectory, requireSavedConfig, runtimeActionKey, selectedMcpName, t, tUnsafe]);
-
-  const handleCopyAuthUrl = React.useCallback(async () => {
-    if (!authUrl) return;
-    const result = await copyTextToClipboard(authUrl);
-    if (result.ok) {
-      toast.success(t('settings.mcp.page.toast.authorizationUrlCopied'));
-      return;
-    }
-    toast.error(t('settings.mcp.page.toast.authorizationUrlCopyFailed'));
-  }, [authUrl, t]);
-
-  const handleCompleteAuthorization = React.useCallback(async () => {
-    const response = extractAuthorizationResponse(authCallbackInput);
-    if (!response.code) {
-      toast.error(t('settings.mcp.page.toast.pasteCallbackOrCodeFirst'));
-      return;
-    }
-
-    const pendingContext = response.stateKey ? await getPendingMcpAuthContext(response.stateKey) : null;
-    const resolvedContext = response.context ?? pendingContext;
-    const targetName = resolvedContext?.name ?? selectedMcpName;
-    const targetDirectory = resolvedContext?.directory ?? currentDirectory;
-
-    if (!targetName) {
-      toast.error(t('settings.mcp.page.toast.missingServerDetails'));
-      return;
-    }
-
-    if (!resolvedContext && !requireSavedConfig()) return;
-
-    setIsCompletingAuth(true);
-    const actionKey = runtimeActionKey;
-    try {
-      await completeAuthMcp(targetName, response.code, targetDirectory);
-      await clearPendingMcpAuthContext(response.stateKey ?? authStateKey);
-
-      if (runtimeActionKeyRef.current !== actionKey) {
-        return;
-      }
-
-      setAuthCallbackInput('');
-      setAuthUrl(null);
-      setAuthStateKey(null);
-      setIsAuthPolling(false);
-      authPollAttemptsRef.current = 0;
-      toast.success(targetName === selectedMcpName
-        ? t('settings.mcp.page.toast.authorizationCompleted')
-        : t('settings.mcp.page.toast.authorizationCompletedFor', { name: targetName }));
-    } catch (err) {
-      if (runtimeActionKeyRef.current === actionKey) {
-        toast.error(normalizeMcpAuthErrorMessage(err, t('settings.mcp.page.toast.authorizationCompleteFailed'), tUnsafe));
-      }
-    } finally {
-      if (runtimeActionKeyRef.current === actionKey) {
-        setIsCompletingAuth(false);
-      }
-    }
-  }, [authCallbackInput, authStateKey, completeAuthMcp, currentDirectory, requireSavedConfig, runtimeActionKey, selectedMcpName, t, tUnsafe]);
-
-  const handleTestConnection = React.useCallback(async () => {
-    if (!selectedMcpName || !requireSavedConfig()) return;
-    if (!enabled) {
-      toast.error(t('settings.mcp.page.toast.enableServerBeforeTest'));
-      return;
-    }
-
-    setIsTestingConnection(true);
-    try {
-      const result = await testConnectionMcp(selectedMcpName, currentDirectory);
-      const nextStatus = result.status?.status;
-
-      if (result.warning) {
-        toast.warning(result.warning);
-      } else if (nextStatus === 'connected') {
-        toast.success(t('settings.mcp.page.toast.connectionTestSucceeded'));
-      } else if (nextStatus === 'needs_auth') {
-        toast.message(t('settings.mcp.page.toast.connectionNeedsAuthorization'));
-      } else if (nextStatus === 'needs_client_registration') {
-        toast.message(t('settings.mcp.page.toast.connectionNeedsClientRegistration'));
-      } else if (nextStatus === 'failed') {
-        const errorMessage = result.status?.error || result.error || null;
-        toast.error(
-          openCodeMcpCompatibilityWarning && isMcpToolSchemaFailure(errorMessage)
-            ? openCodeMcpCompatibilityWarning
-            : errorMessage || t('settings.mcp.page.toast.connectionTestFailed')
-        );
-      } else if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast.message(t('settings.mcp.page.toast.connectionTestFinished'));
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.mcp.page.toast.connectionTestFailed'));
-    } finally {
-      setIsTestingConnection(false);
-    }
-  }, [currentDirectory, enabled, openCodeMcpCompatibilityWarning, requireSavedConfig, selectedMcpName, t, testConnectionMcp]);
-
-  React.useEffect(() => {
-    if (!isAuthPolling || !selectedMcpName) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void (async () => {
-        authPollAttemptsRef.current += 1;
-        await refreshStatus({ directory: currentDirectory, silent: true });
-        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName];
-
-        if (!nextStatus) {
-          return;
-        }
-
-        if (
-          authPollStartsFromNeedsAuthRef.current
-          && nextStatus.status !== 'needs_auth'
-          && nextStatus.status !== 'needs_client_registration'
-        ) {
-          setIsAuthPolling(false);
-          authPollAttemptsRef.current = 0;
-          authPollStartsFromNeedsAuthRef.current = false;
-          setAuthUrl(null);
-          setAuthCallbackInput('');
-          if (nextStatus.status === 'connected') {
-            toast.success(t('settings.mcp.page.toast.authorizationCompleted'));
-          }
-          return;
-        }
-
-        if (!authPollStartsFromNeedsAuthRef.current && nextStatus.status === 'failed') {
-          setIsAuthPolling(false);
-          authPollAttemptsRef.current = 0;
-          authPollStartsFromNeedsAuthRef.current = false;
-          toast.error(nextStatus.error || t('settings.mcp.page.toast.authorizationFailed'));
-          return;
-        }
-
-        if (authPollAttemptsRef.current >= 30) {
-          setIsAuthPolling(false);
-          authPollAttemptsRef.current = 0;
-          authPollStartsFromNeedsAuthRef.current = false;
-          toast.message(t('settings.mcp.page.toast.authorizationStillInProgress'));
-        }
-      })();
-    }, 2000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [currentDirectory, isAuthPolling, refreshStatus, selectedMcpName, t]);
-
-  // ── Empty state ──
-  if (!selectedMcpName) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <RiPlugLine className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">{t('settings.mcp.page.empty.selectServer')}</p>
-          <p className="typography-meta mt-1 opacity-75">{t('settings.mcp.page.empty.addNewOne')}</p>
-        </div>
-      </div>
-    );
-  }
-
-  const runtimeStatus = mcpStatus[selectedMcpName];
-  const runtimeDiagnostic = selectedMcpName ? mcpDiagnostics[selectedMcpName] : undefined;
-  const effectiveRuntimeStatus = runtimeStatus ?? runtimeDiagnostic;
-  const isConnected = runtimeStatus?.status === 'connected';
-  const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
-  const suggestedRedirectUri = isVSCodeAuthRuntime ? null : buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
-  const runtimeDescription = getStatusDescription(
-    effectiveRuntimeStatus?.status,
-    tUnsafe,
-    effectiveRuntimeStatus && 'error' in effectiveRuntimeStatus ? effectiveRuntimeStatus.error : undefined,
-  );
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'connected':
-        return t('settings.mcp.page.status.label.connected');
-      case 'failed':
-        return t('settings.mcp.page.status.label.failed');
-      case 'needs_auth':
-        return t('settings.mcp.page.status.label.needsAuth');
-      case 'needs_client_registration':
-        return t('settings.mcp.page.status.label.needsRegistration');
-      default:
-        return status;
-    }
-  };
+    })();
+  }, [currentSessionId, executeCommand, t]);
 
   return (
-    <>
-      <SettingsPageLayout
-        title={isNewServer ? t('settings.mcp.page.header.newServer') : selectedMcpName}
-        titleAccessory={!isNewServer ? (
-          <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
-        ) : undefined}
-        description={isNewServer
-          ? t('settings.mcp.page.header.configureNewServer')
-          : t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}
-        headerEnd={!isNewServer ? (
-          <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant={isConnected ? 'outline' : 'default'}
-            size="xs"
-            className="!font-normal"
-            onClick={handleToggleConnect}
-            disabled={isConnecting || !enabled}
-          >
-            {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
-          </Button>
-          {mcpType === 'remote' && (
-            <>
-              <Button
-                variant={needsAuthorization ? 'default' : 'outline'}
-                size="xs"
-                className="!font-normal"
-                onClick={() => void handleStartAuthorization()}
-                disabled={isAuthorizing || !enabled}
-              >
-                {isAuthorizing
-                  ? t('settings.mcp.page.actions.starting')
-                  : needsAuthorization
-                    ? t('settings.mcp.page.actions.authorize')
-                    : t('settings.mcp.page.actions.reauthorize')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="xs"
-                className="!font-normal gap-1 text-muted-foreground"
-                onClick={() => void handleClearAuthorization()}
-                disabled={isClearingAuth || !enabled}
-              >
-                {isClearingAuth ? t('settings.mcp.page.actions.clearing') : t('settings.mcp.page.actions.clearAuth')}
-              </Button>
-            </>
-          )}
-          {isConnected && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="!font-normal gap-1 text-muted-foreground"
-              onClick={() => void handleTestConnection()}
-              disabled={isTestingConnection || !enabled}
-            >
-              {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.test')}
-            </Button>
-          )}
-        </div>
-      ) : undefined}
+    <SettingsPageLayout
+      title={t('settings.page.mcp.title')}
+      description={t('settings.piarium.mcp.description')}
       showSaveStatus={false}
+      headerEnd={currentSessionId ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          disabled={commandAction !== null}
+          onClick={() => void runCommand('panel', '/mcp')}
+          className="!font-normal"
+        >
+          {t('settings.piarium.mcp.actions.openPanel')}
+        </Button>
+      ) : undefined}
     >
-
-
-
-        {/* Runtime Status - Simplified for connected, expanded for errors */}
-        {!isNewServer && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
-          <SettingsSection divider={false}>
-            <div className={cn('rounded-lg border p-3', statusCardClass(effectiveRuntimeStatus?.status))}>
-              <div className="space-y-4">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.status.runtimeStatus')}</span>
-                    <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} />
-                  </div>
-                  <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
-                  {openCodeMcpCompatibilityWarning && isMcpToolSchemaFailure(effectiveRuntimeStatus && 'error' in effectiveRuntimeStatus ? effectiveRuntimeStatus.error : undefined) && (
-                    <div className="mt-2 flex gap-2 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-900 dark:text-amber-100">
-                      <RiErrorWarningLine className="mt-0.5 h-4 w-4 shrink-0" />
-                      <p className="typography-micro leading-relaxed">{openCodeMcpCompatibilityWarning}</p>
-                    </div>
-                  )}
-                  <p className="typography-micro text-muted-foreground/80">
-                    {draftScope === 'project'
-                      ? t('settings.mcp.page.status.projectScopedTo', { directory: currentDirectory ?? t('settings.mcp.page.status.activeProject') })
-                      : t('settings.mcp.page.status.userScoped')}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {!isConnected && (
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      className="!font-normal"
-                      onClick={() => void handleTestConnection()}
-                      disabled={isTestingConnection || !enabled}
-                    >
-                      {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.testConnection')}
-                    </Button>
-                  )}
-                </div>
-
-                {authUrl && (
-                  <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-2">
-                    <div className="space-y-2">
-                      <div className="typography-micro text-muted-foreground">{t('settings.mcp.page.auth.authorizationUrl')}</div>
-                      <div className="break-all typography-micro text-foreground font-mono">{authUrl}</div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button variant="outline" size="xs" className="!font-normal" onClick={() => void openExternalUrl(authUrl)}>
-                          <RiExternalLinkLine className="h-3.5 w-3.5" />
-                          {t('settings.mcp.page.actions.openInBrowser')}
-                        </Button>
-                        <Button variant="outline" size="xs" className="!font-normal" onClick={() => void handleCopyAuthUrl()}>
-                          <RiClipboardLine className="h-3.5 w-3.5" />
-                          {t('settings.mcp.page.actions.copyLink')}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {mcpType === 'remote' && (needsAuthorization || isAuthPolling || authUrl) && (
-                  <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-3">
-                    <div className="space-y-2">
-                      <div>
-                        <SettingsGroupTitle as="div">{t('settings.mcp.page.auth.manualFallbackTitle')}</SettingsGroupTitle>
-                        <p className="mt-1 typography-micro text-muted-foreground">
-                          {t('settings.mcp.page.auth.manualFallbackDescription')}
-                        </p>
-                      </div>
-                      <Textarea
-                        value={authCallbackInput}
-                        onChange={(event) => setAuthCallbackInput(event.target.value)}
-                        placeholder={t('settings.mcp.page.auth.callbackInputPlaceholder')}
-                        rows={3}
-                        className="font-mono typography-meta resize-y"
-                        data-bwignore="true"
-                        data-1p-ignore="true"
-                        spellCheck={false}
-                      />
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          className="!font-normal"
-                          onClick={() => void handleCompleteAuthorization()}
-                          disabled={isCompletingAuth}
-                        >
-                          {isCompletingAuth ? t('settings.mcp.page.actions.completing') : t('settings.mcp.page.actions.completeAuthorization')}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
+      <SettingsSection
+        title="pi-mcp-adapter"
+        description={t('settings.piarium.mcp.package.description')}
+        settingsItem="mcp.package"
+        divider={false}
+      >
+        <div className="rounded-lg border border-border/60 px-3 py-3">
+          <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Icon
+                  name="plug-2"
+                  className={configuredPackage
+                    ? 'size-4 text-[var(--status-success)]'
+                    : 'size-4 text-muted-foreground'}
+                />
+                <span className="typography-ui-label text-foreground">pi-mcp-adapter</span>
+                {!packagesLoading && (
+                  <span className={configuredPackage
+                    ? 'typography-micro text-[var(--status-success)]'
+                    : 'typography-micro text-muted-foreground'}>
+                    {configuredPackage
+                      ? t('settings.piarium.recovery.status.configured')
+                      : t('settings.piarium.recovery.status.notConfigured')}
+                  </span>
                 )}
               </div>
-
-              {isAuthPolling && (
-                <p className="mt-4 typography-micro text-muted-foreground">
-                  {t('settings.mcp.page.auth.waitingForOpenCode')}
-                </p>
-              )}
+              <p className="break-all font-mono typography-micro text-muted-foreground">
+                {configuredPackage?.source ?? MCP_PACKAGE_SOURCE}
+              </p>
             </div>
-          </SettingsSection>
-        )}
-
-        <SettingsSection
-          title={t('settings.mcp.page.server.title')}
-          divider={false}
-          settingsItem="mcp.server"
-          contentClassName="space-y-0"
-        >
-
-            {isNewServer && (
-              <SettingsFieldRow label={t('settings.mcp.page.server.name')}>
-                  <Input
-                    value={draftName}
-                    onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
-                    placeholder={t('settings.mcp.page.server.namePlaceholder')}
-                    className="h-7 w-48 font-mono px-2"
-                    autoFocus
-                  />
-                  <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 !w-7 !min-w-0 !px-0 !py-0 justify-center [&>svg:last-child]:hidden" title={draftScope === 'user' ? t('settings.common.scope.global') : t('settings.common.scope.project')}>
-                      {draftScope === 'user' ? <Icon name="user-3" className="h-3.5 w-3.5" /> : <Icon name="folder" className="h-3.5 w-3.5" />}
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                      <SelectItem value="user">
-                        <div className="flex items-center gap-2">
-                          <RiUser3Line className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.global')}</span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="project">
-                        <div className="flex items-center gap-2">
-                          <RiFolderLine className="h-3.5 w-3.5" />
-                          <span>{t('settings.common.scope.project')}</span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-              </SettingsFieldRow>
-            )}
-
-            {/* Import JSON - prominent placement for new servers */}
-            {isNewServer && (
-              <div className="py-1.5">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {configuredPackage ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={packageAction !== null || packagesLoading}
+                    onClick={() => void runPackageAction('update')}
+                    className="!font-normal"
+                  >
+                    {t('settings.piarium.recovery.actions.update')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    disabled={packageAction !== null || packagesLoading}
+                    onClick={() => void runPackageAction('remove')}
+                    className="!font-normal text-muted-foreground"
+                  >
+                    {t('settings.piarium.recovery.actions.remove')}
+                  </Button>
+                </>
+              ) : (
                 <Button
+                  type="button"
                   variant="outline"
                   size="xs"
-                  className="!font-normal gap-1.5"
-                  onClick={handleOpenImportDialog}
-                  type="button"
-                  title={t('settings.mcp.page.server.importJsonTitle')}
+                  disabled={packageAction !== null || packagesLoading}
+                  onClick={() => void runPackageAction('install')}
+                  className="!font-normal"
                 >
-                  <RiFileCodeLine className="h-3.5 w-3.5" />
-                  {t('settings.mcp.page.server.importJson')}
+                  {t('settings.piarium.recovery.actions.install')}
                 </Button>
-              </div>
-            )}
-
-            <SettingsCheckboxRow
-              checked={enabled}
-              onChange={setEnabled}
-              label={t('settings.mcp.page.server.enable')}
-              ariaLabel={t('settings.mcp.page.server.enableAria')}
-            />
-
-            <SettingsStackedField label={t('settings.mcp.page.server.transportMode')}>
-              <SettingsChipGroup
-                aria-label={t('settings.mcp.page.server.transportMode')}
-                value={mcpType}
-                onChange={setMcpType}
-                options={[
-                  { value: 'local', label: t('settings.mcp.page.transport.local') },
-                  { value: 'remote', label: t('settings.mcp.page.transport.remote') },
-                ]}
-              />
-            </SettingsStackedField>
-
-        </SettingsSection>
-
-        <SettingsSection
-          title={mcpType === 'local' ? t('settings.mcp.page.connection.command') : t('settings.mcp.page.connection.serverUrl')}
-          settingsItem="mcp.command"
-        >
-            {mcpType === 'local' ? (
-              <CommandTextarea
-                value={command}
-                onChange={setCommand}
-                pasteCommandTitle={t('settings.mcp.page.connection.pasteCommandTitle')}
-                pasteCommandLabel={t('settings.mcp.page.connection.pasteCommand')}
-                pasteSuccess={(count) => t('settings.mcp.page.toast.pastedArgumentsCount', { count })}
-                clipboardReadFailed={t('settings.mcp.page.toast.clipboardReadFailed')}
-                preview={(count) => t('settings.mcp.page.connection.previewArgs', { count })}
-              />
-            ) : (
-              <Input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder={t('settings.mcp.page.connection.serverUrlPlaceholder')}
-                className="font-mono typography-meta"
-              />
-            )}
-        </SettingsSection>
-
-        {mcpType === 'remote' && (
-          <SettingsSection
-            title={t('settings.mcp.page.advanced.title')}
-            settingsItem="mcp.advanced"
-          >
-              <Collapsible
-                open={isAdvancedRemoteOptionsOpen}
-                onOpenChange={setIsAdvancedRemoteOptionsOpen}
-              >
-                <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
-                  <div className="flex items-center gap-1.5 text-left">
-                    <span className="typography-ui-label font-normal text-foreground">{t('settings.mcp.page.advanced.configure')}</span>
-                    <span className="typography-micro text-muted-foreground">
-                      ({oauthEnabled ? t('settings.mcp.page.advanced.autoDetect') : t('settings.mcp.page.advanced.custom')} · {headerEntries.length} {t('settings.mcp.page.advanced.headers')}{timeout ? ` · ${timeout}ms` : ''})
-                    </span>
-                  </div>
-                  {isAdvancedRemoteOptionsOpen ? (
-                    <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                  ) : (
-                    <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                  )}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-2">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:gap-8">
-                        <div className="flex min-w-0 flex-row items-center gap-1 @xl:w-56 shrink-0">
-                          <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.mcp.page.advanced.timeoutMs')}</span>
-                          <SettingsInfoHint>{t('settings.mcp.page.advanced.timeoutHint')}</SettingsInfoHint>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={timeout}
-                            onChange={(e) => setTimeoutValue(e.target.value)}
-                            placeholder="5000"
-                            className="h-7 w-32 font-mono px-2"
-                            data-bwignore="true"
-                            data-1p-ignore="true"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <SettingsGroupTitle as="div" className="mb-2">
-                        {t('settings.mcp.page.advanced.requestHeaders')}
-                        {headerEntries.length > 0 && (
-                          <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
-                        )}
-                      </SettingsGroupTitle>
-                      <EnvEditor
-                        value={headerEntries}
-                        onChange={setHeaderEntries}
-                        keyTransform={(value) => value.trimStart()}
-                        keyPlaceholder={t('settings.mcp.page.advanced.headerNamePlaceholder')}
-                        keyInputClassName="w-36 shrink-0 font-mono typography-meta"
-                        pasteLabel={t('settings.mcp.page.advanced.pasteHeaders')}
-                        pasteTitle={t('settings.mcp.page.advanced.pasteHeadersTitle')}
-                        noPairsFoundError={t('settings.mcp.page.toast.noKeyValuePairsFound')}
-                        importSuccess={(count) => t('settings.mcp.page.toast.importedVariablesCount', { count })}
-                        clipboardReadFailed={t('settings.mcp.page.toast.clipboardReadFailed')}
-                        keyLabel={t('settings.mcp.page.env.key')}
-                        valueLabel={t('settings.mcp.page.env.value')}
-                        valuePlaceholder={t('settings.mcp.page.env.valuePlaceholder')}
-                        hideValueTitle={t('settings.mcp.page.env.hide')}
-                        showValueTitle={t('settings.mcp.page.env.show')}
-                        addVariable={t('settings.mcp.page.env.addVariable')}
-                        plainTextWarning={t('settings.mcp.page.env.plainTextWarning')}
-                        removeVariableAria={t('settings.mcp.page.env.removeVariableAria')}
-                      />
-                    </div>
-
-                    <div className="space-y-3">
-                      <SettingsCheckboxRow
-                        checked={oauthEnabled}
-                        onChange={setOauthEnabled}
-                        label={t('settings.mcp.page.advanced.oauthAutoDetection')}
-                        ariaLabel={t('settings.mcp.page.advanced.oauthAutoDetectionAria')}
-                        info={t('settings.mcp.page.advanced.oauthHint')}
-                      />
-
-                      <div className="grid gap-3 @xl:grid-cols-2">
-                        <Input
-                          value={oauthClientId}
-                          onChange={(e) => setOauthClientId(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthClientIdPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                        <Input
-                          value={oauthClientSecret}
-                          onChange={(e) => setOauthClientSecret(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthClientSecretPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                        <Input
-                          value={oauthScope}
-                          onChange={(e) => setOauthScope(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthScopesPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                        <Input
-                          value={oauthRedirectUri}
-                          onChange={(e) => setOauthRedirectUri(e.target.value)}
-                          placeholder={t('settings.mcp.page.advanced.oauthRedirectUriPlaceholder')}
-                          className="font-mono typography-meta"
-                          disabled={!oauthEnabled}
-                          data-bwignore="true"
-                          data-1p-ignore="true"
-                        />
-                      </div>
-
-                      {suggestedRedirectUri && (
-                        <p className="typography-micro text-muted-foreground">
-                          {t('settings.mcp.page.advanced.oauthCallbackHint')}
-                          <span className="mt-1 block break-all font-mono text-foreground/80">{suggestedRedirectUri}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-          </SettingsSection>
-        )}
-
-        <SettingsSection
-          title={t('settings.mcp.page.env.title')}
-          titleAccessory={
-            envEntries.length > 0 ? (
-              <span className="typography-micro text-muted-foreground font-normal">
-                ({envEntries.length})
-              </span>
-            ) : null
-          }
-          settingsItem="mcp.environment"
-        >
-            {envEntries.length === 0 ? (
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal gap-1.5"
-                onClick={() => setEnvEntries([{ key: '', value: '' }])}
-              >
-                <RiAddLine className="h-3.5 w-3.5" />
-                {t('settings.mcp.page.env.addEnvironmentVariable')}
-              </Button>
-            ) : (
-              <EnvEditor
-                value={envEntries}
-                onChange={setEnvEntries}
-                keyPlaceholder={t('settings.mcp.page.env.keyPlaceholder')}
-                pasteLabel={t('settings.mcp.page.env.pasteEnv')}
-                pasteTitle={t('settings.mcp.page.env.pasteEnvTitle')}
-                noPairsFoundError={t('settings.mcp.page.toast.noKeyValuePairsFound')}
-                importSuccess={(count) => t('settings.mcp.page.toast.importedVariablesCount', { count })}
-                clipboardReadFailed={t('settings.mcp.page.toast.clipboardReadFailed')}
-                keyLabel={t('settings.mcp.page.env.key')}
-                valueLabel={t('settings.mcp.page.env.value')}
-                valuePlaceholder={t('settings.mcp.page.env.valuePlaceholder')}
-                hideValueTitle={t('settings.mcp.page.env.hide')}
-                showValueTitle={t('settings.mcp.page.env.show')}
-                addVariable={t('settings.mcp.page.env.addVariable')}
-                plainTextWarning={t('settings.mcp.page.env.plainTextWarning')}
-                removeVariableAria={t('settings.mcp.page.env.removeVariableAria')}
-              />
-            )}
-        </SettingsSection>
-
-        <div className="flex items-center gap-2 pb-8">
-          <Button
-            onClick={handleSave}
-            disabled={isSaving || (!isDirty && !isNewServer)}
-            size="xs"
-            className="!font-normal"
-          >
-            {isSaving ? t('settings.common.actions.saving') : isNewServer ? t('settings.common.actions.create') : t('settings.common.actions.saveChanges')}
-          </Button>
-          {!isNewServer && (
-            <Button
-              variant="destructive"
-              size="xs"
-              className="!font-normal"
-              onClick={() => setShowDeleteConfirm(true)}
-            >
-              {t('settings.common.actions.delete')}
-            </Button>
-          )}
-        </div>      </SettingsPageLayout>
-
-
-      {/* Import JSON dialog */}
-      <Dialog
-        open={showImportDialog}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowImportDialog(false);
-            setImportJsonText('');
-            setImportError(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t('settings.mcp.page.importDialog.title')}</DialogTitle>
-            <DialogDescription>
-              {t('settings.mcp.page.importDialog.description')}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <Textarea
-              value={importJsonText}
-              onChange={(e) => {
-                setImportJsonText(e.target.value);
-                setImportError(null);
-              }}
-              placeholder={'{\n  "mcpServers": {\n    "postgres": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-postgres"]\n    }\n  }\n}'}
-              rows={8}
-              className="font-mono typography-meta resize-y"
-              spellCheck={false}
-              data-bwignore="true"
-              data-1p-ignore="true"
-            />
-
-            {importError && (
-              <p className="typography-micro text-[var(--status-error)]">{importError}</p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal gap-1"
-                onClick={handlePasteImportClipboard}
-                type="button"
-              >
-                <RiClipboardLine className="h-3.5 w-3.5" />
-                {t('settings.mcp.page.importDialog.pasteFromClipboard')}
-              </Button>
+              )}
             </div>
-
           </div>
+        </div>
+      </SettingsSection>
 
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowImportDialog(false);
-                setImportJsonText('');
-                setImportError(null);
-              }}
-              className="text-foreground"
-            >
-              {t('settings.common.actions.cancel')}
-            </Button>
-            <Button
-              onClick={handleImportJson}
-              disabled={!importJsonText.trim()}
-              size="sm"
-            >
-              {t('settings.common.actions.import')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete confirm */}
-      <Dialog
-        open={showDeleteConfirm}
-        onOpenChange={(open) => { if (!open && !isDeleting) setShowDeleteConfirm(false); }}
+      <SettingsSection
+        title={t('settings.piarium.mcp.runtime.title')}
+        description={t('settings.piarium.mcp.runtime.description')}
+        settingsItem="mcp.runtime"
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t('settings.mcp.page.deleteDialog.title', { name: selectedMcpName ?? '' })}</DialogTitle>
-            <DialogDescription>
-              {t('settings.mcp.page.deleteDialog.descriptionPrefix')}{' '}
-              <code className="text-foreground">opencode.json</code>.
-              {' '}
-              {t('settings.mcp.page.deleteDialog.descriptionSuffix')}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowDeleteConfirm(false)}
-              disabled={isDeleting}
-              className="text-foreground"
-            >
-              {t('settings.common.actions.cancel')}
-            </Button>
-            <Button variant="destructive" size="sm" onClick={handleDelete} disabled={isDeleting}>
-              {isDeleting ? t('settings.mcp.page.actions.deleting') : t('settings.common.actions.delete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        {!currentSessionId ? (
+          <div className="rounded-lg border border-border/60 px-4 py-6 text-center typography-meta text-muted-foreground">
+            {t('settings.piarium.mcp.runtime.noSession')}
+          </div>
+        ) : extensionState === undefined ? (
+          <div className="rounded-lg border border-border/60 px-4 py-6 text-center typography-meta text-muted-foreground">
+            {t('settings.piarium.mcp.runtime.noStatus')}
+          </div>
+        ) : status === null ? (
+          <div className="rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning)]/10 px-3 py-3">
+            <p className="typography-meta text-[var(--status-warning)]">
+              {t('settings.piarium.mcp.runtime.unsupported')}
+            </p>
+            <details className="mt-2">
+              <summary className="cursor-pointer typography-micro text-muted-foreground">Raw snapshot</summary>
+              <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-all typography-micro">
+                {JSON.stringify(extensionState, null, 2)}
+              </pre>
+            </details>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid gap-2 grid-cols-2 @xl:grid-cols-4">
+              {[
+                [t('settings.piarium.mcp.runtime.servers'), status.servers.length],
+                [t('settings.piarium.mcp.runtime.connected'), status.connectedCount],
+                [t('settings.piarium.mcp.runtime.tools'), status.totalTools],
+                [t('settings.piarium.mcp.runtime.resources'), status.totalResources],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-lg border border-border/60 px-3 py-2">
+                  <p className="typography-micro text-muted-foreground">{label}</p>
+                  <p className="typography-settings-group-title text-foreground">{value}</p>
+                </div>
+              ))}
+            </div>
+            {status.servers.length === 0 ? (
+              <div className="rounded-lg border border-border/60 px-4 py-6 text-center typography-meta text-muted-foreground">
+                {t('settings.piarium.mcp.runtime.empty')}
+              </div>
+            ) : status.servers.map((server) => (
+              <ServerCard
+                key={server.name}
+                server={server}
+                busy={commandAction}
+                onCommand={runServerCommand}
+              />
+            ))}
+          </div>
+        )}
+      </SettingsSection>
 
-    </>
+      <McpConfigEditor runtimeTarget={runtimeTarget} />
+    </SettingsPageLayout>
   );
 };

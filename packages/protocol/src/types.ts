@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 7 as const;
+export const PIARIUM_PROTOCOL_VERSION = 8 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -243,7 +243,13 @@ export interface ProjectTrustRequest {
 export type PiConfigScope = "global" | "project";
 
 export type PiConfigTextFormat = "json" | "jsonc";
-export type PiConfigTextRoot = "agent" | "project" | "user-config";
+export type PiConfigTextRoot = "agent" | "home" | "project" | "user-config";
+
+export interface ExtensionStateSnapshot {
+  channel: string;
+  sessionId: string;
+  value: JsonValue | null;
+}
 
 export interface PiConfigTextDocumentSnapshot {
   content: string;

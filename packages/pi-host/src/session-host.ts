@@ -55,6 +55,7 @@ import type {
 } from "@piarium/protocol";
 import { HostError } from "./errors.js";
 import { ConfigTextFileEditor } from "./config-text-file-editor.js";
+import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
@@ -273,12 +274,15 @@ async function resolveConfigDocumentPath(
   return { path, relativePath: normalizedPath };
 }
 
+function homeRoot(): string {
+  const configuredHome = process.env.HOME?.trim();
+  return configuredHome && isAbsolute(configuredHome) ? resolve(configuredHome) : homedir();
+}
+
 function userConfigRoot(): string {
   const configured = process.env.XDG_CONFIG_HOME?.trim();
   if (configured && isAbsolute(configured)) return resolve(configured);
-  const configuredHome = process.env.HOME?.trim();
-  const home = configuredHome && isAbsolute(configuredHome) ? configuredHome : homedir();
-  return join(home, ".config");
+  return join(homeRoot(), ".config");
 }
 
 export class SessionHost {
@@ -1027,6 +1031,8 @@ export class SessionHost {
     }
     const base = root === "agent"
       ? this.#agentDir
+      : root === "home"
+        ? homeRoot()
       : root === "project"
         ? this.runtime.cwd
         : userConfigRoot();
@@ -1064,6 +1070,8 @@ export class SessionHost {
     }
     const base = root === "agent"
       ? this.#agentDir
+      : root === "home"
+        ? homeRoot()
       : root === "project"
         ? this.runtime.cwd
         : userConfigRoot();
@@ -1191,6 +1199,11 @@ export class SessionHost {
         cwd,
         resourceLoaderOptions: {
           extensionFactories: [
+            {
+              factory: createExtensionStateBridgeExtension(this.#emit),
+              hidden: true,
+              name: "piarium-extension-state-bridge",
+            },
             {
               factory: createRecoveryBridgeExtension(recovery),
               hidden: true,

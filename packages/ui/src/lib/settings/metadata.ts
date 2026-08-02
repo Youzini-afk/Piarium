@@ -136,8 +136,8 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'mcp',
     title: 'MCP',
     group: 'opencode',
-    kind: 'split',
-    keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
+    kind: 'single',
+    keywords: ['mcp', 'model context protocol', 'pi-mcp-adapter', 'servers', 'tools', 'resources', 'oauth', 'remote', 'stdio'],
   },
   {
     slug: 'plugins',

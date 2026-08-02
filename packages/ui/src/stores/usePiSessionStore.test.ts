@@ -168,6 +168,7 @@ describe('Pi session event state', () => {
     const sessionId = 'session-a';
     const initial = {
       branchEntries: branch(sessionId),
+      extensionStates: {},
       open: true,
       sessionId,
       snapshot: snapshot(sessionId),
@@ -209,6 +210,7 @@ describe('Pi session event state', () => {
 
   test('projects queue and lifecycle events into the native snapshot', () => {
     const initial = {
+      extensionStates: {},
       open: true,
       sessionId: 'session-a',
       snapshot: snapshot('session-a'),
@@ -274,11 +276,41 @@ describe('Pi session store', () => {
       event: { type: 'agent_start' } satisfies PiAgentEvent,
       sessionId: 'session-a',
     }, 'session-a');
+    runtime.event('extension.state', {
+      channel: 'pi-mcp-adapter/status/v1',
+      sessionId: 'session-a',
+      value: { connectedCount: 1, version: 1 },
+    }, 'session-a');
 
     expect(store.getState().currentSessionId).toBe('session-a');
     expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([]);
     expect(store.getState().records['session-a']?.recoveryStatus?.available).toBe(true);
     expect(store.getState().records['session-a']?.snapshot?.busy).toBe(true);
+    expect(store.getState().records['session-a']?.extensionStates['pi-mcp-adapter/status/v1'])
+      .toEqual({ connectedCount: 1, version: 1 });
+
+    runtime.event('extension.state', {
+      channel: 'pi-mcp-adapter/status/v1',
+      sessionId: 'session-a',
+      value: null,
+    }, 'session-a');
+    expect(store.getState().records['session-a']?.extensionStates).toEqual({});
+  });
+
+  test('executes extension commands through the active Pi session', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'command.execute') return { executed: true };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const result = await store.getState().executeCommand('session-a', '/mcp reconnect docs');
+    expect(result).toEqual({ executed: true });
+    expect(runtime.calls).toEqual([{
+      method: 'command.execute',
+      params: { command: '/mcp reconnect docs', sessionId: 'session-a' },
+    }]);
   });
 
   test('ignores ephemeral catalog-worker session events', async () => {
