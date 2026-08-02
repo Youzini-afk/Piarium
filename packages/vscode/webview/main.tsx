@@ -1,5 +1,6 @@
 import { createVSCodeAPIs } from './api';
 import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { VSCodeRuntimeTransport } from './piRuntimeTransport';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -15,6 +16,7 @@ import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
+import { configurePiRuntimeSurface } from '@openchamber/ui/lib/pi-runtime/client';
 import type { PermissionRequest } from '@opencode-ai/sdk/v2/client';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -102,6 +104,13 @@ try {
 }
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+configurePiRuntimeSurface({
+  clientName: 'piarium-vscode-webview',
+  clientVersion: window.__VSCODE_CONFIG__?.extensionVersion || '0.1.0',
+  createTransport: () => new VSCodeRuntimeTransport(),
+  mode: 'vscode',
+  runtimeKey: 'vscode:local',
+});
 
 const bootstrapLocale = readStoredLocaleForBootstrap();
 const bootstrapMessages = getBootstrapMessages(bootstrapLocale);

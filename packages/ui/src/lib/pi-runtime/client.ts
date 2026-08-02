@@ -1,6 +1,7 @@
 import {
   PiRuntimeClient,
   WebSocketRuntimeTransport,
+  type RuntimeTransport,
   type RuntimeWebSocket,
 } from '@piarium/runtime-client';
 import {
@@ -33,7 +34,18 @@ export interface CreatePiRuntimeConnectionOptions {
   refreshAuth?: (apiBaseUrl?: string | null) => Promise<string>;
   resolveWebSocketUrl?: () => string;
   runtimeKey?: string;
+  transport?: RuntimeTransport;
 }
+
+export interface PiRuntimeSurfaceConfiguration {
+  clientName?: string;
+  clientVersion?: string;
+  createTransport(): RuntimeTransport;
+  mode: HostMode;
+  runtimeKey: string;
+}
+
+let surfaceConfiguration: PiRuntimeSurfaceConfiguration | null = null;
 
 const defaultMode = (): HostMode => {
   if (typeof window === 'undefined') return 'web';
@@ -46,15 +58,19 @@ const defaultMode = (): HostMode => {
 export const createPiRuntimeConnection = async (
   options: CreatePiRuntimeConnectionOptions = {},
 ): Promise<PiRuntimeConnection> => {
-  const refreshAuth = options.refreshAuth ?? refreshRuntimeUrlAuthToken;
-  await refreshAuth(getRuntimeApiBaseUrl() || undefined);
-  const url = options.resolveWebSocketUrl?.()
-    ?? getRuntimeUrlResolver().websocket('/api/piarium/runtime/ws');
-  const transport = new WebSocketRuntimeTransport({
-    url,
-    webSocketFactory: options.openSocket ?? ((socketUrl, protocols) =>
-      openRuntimeWebSocket(socketUrl, protocols) as unknown as RuntimeWebSocket),
-  });
+  const configured = surfaceConfiguration;
+  let transport = options.transport ?? configured?.createTransport();
+  if (!transport) {
+    const refreshAuth = options.refreshAuth ?? refreshRuntimeUrlAuthToken;
+    await refreshAuth(getRuntimeApiBaseUrl() || undefined);
+    const url = options.resolveWebSocketUrl?.()
+      ?? getRuntimeUrlResolver().websocket('/api/piarium/runtime/ws');
+    transport = new WebSocketRuntimeTransport({
+      url,
+      webSocketFactory: options.openSocket ?? ((socketUrl, protocols) =>
+        openRuntimeWebSocket(socketUrl, protocols) as unknown as RuntimeWebSocket),
+    });
+  }
   const client = new PiRuntimeClient({
     ...(options.onProtocolError ? { onProtocolError: options.onProtocolError } : {}),
     ...(options.onSequenceGap ? { onSequenceGap: options.onSequenceGap } : {}),
@@ -63,15 +79,15 @@ export const createPiRuntimeConnection = async (
   try {
     await client.connect();
     const handshake = await client.handshake({
-      clientName: options.clientName ?? 'piarium-ui',
-      clientVersion: options.clientVersion ?? '0.1.0',
-      mode: options.mode ?? defaultMode(),
+      clientName: options.clientName ?? configured?.clientName ?? 'piarium-ui',
+      clientVersion: options.clientVersion ?? configured?.clientVersion ?? '0.1.0',
+      mode: options.mode ?? configured?.mode ?? defaultMode(),
       protocolVersions: [PIARIUM_PROTOCOL_VERSION],
     });
     return {
       client,
       handshake,
-      runtimeKey: options.runtimeKey ?? getRuntimeKey(),
+      runtimeKey: options.runtimeKey ?? configured?.runtimeKey ?? getRuntimeKey(),
     };
   } catch (error) {
     await client.close();
@@ -83,15 +99,24 @@ let activeConnection: PiRuntimeConnection | null = null;
 let activeConnectionPromise: Promise<PiRuntimeConnection> | null = null;
 let connectionGeneration = 0;
 
+const currentRuntimeKey = (): string => surfaceConfiguration?.runtimeKey ?? getRuntimeKey();
+
+export const configurePiRuntimeSurface = (
+  configuration: PiRuntimeSurfaceConfiguration | null,
+): void => {
+  surfaceConfiguration = configuration;
+  void disconnectPiRuntime();
+};
+
 export const getPiRuntimeConnection = (): Promise<PiRuntimeConnection> => {
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentRuntimeKey();
   if (activeConnection?.runtimeKey === runtimeKey && activeConnection.client.connected) {
     return Promise.resolve(activeConnection);
   }
   if (activeConnectionPromise) return activeConnectionPromise;
   const generation = connectionGeneration;
   const promise = createPiRuntimeConnection({ runtimeKey }).then(async (connection) => {
-    if (generation !== connectionGeneration || connection.runtimeKey !== getRuntimeKey()) {
+    if (generation !== connectionGeneration || connection.runtimeKey !== currentRuntimeKey()) {
       await connection.client.close();
       throw new Error('Pi runtime changed while connecting');
     }

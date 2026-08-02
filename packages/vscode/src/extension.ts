@@ -6,12 +6,14 @@ import { SettingsPanelProvider } from './SettingsPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { VSCodePiRuntime } from './piRuntime';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
 let sessionEditorProvider: SessionEditorPanelProvider | undefined;
 let settingsPanelProvider: SettingsPanelProvider | undefined;
 let openCodeManager: OpenCodeManager | undefined;
+let piRuntime: VSCodePiRuntime | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 
 let activeSessionId: string | null = null;
@@ -125,10 +127,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Create OpenCode manager first
   openCodeManager = createOpenCodeManager(context);
+  piRuntime = new VSCodePiRuntime(context, outputChannel);
+  context.subscriptions.push(piRuntime);
 
   // Create chat view provider with manager reference
   // The webview will show a loading state until OpenCode is ready
-  chatViewProvider = new ChatViewProvider(context, context.extensionUri, openCodeManager);
+  chatViewProvider = new ChatViewProvider(context, context.extensionUri, openCodeManager, piRuntime);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
@@ -191,10 +195,10 @@ export async function activate(context: vscode.ExtensionContext) {
   void maybeMoveChatToRightSidebarOnStartup();
 
   // Create Agent Manager panel provider
-  agentManagerProvider = new AgentManagerPanelProvider(context, context.extensionUri, openCodeManager);
-  sessionEditorProvider = new SessionEditorPanelProvider(context, context.extensionUri, openCodeManager);
-  settingsPanelProvider = new SettingsPanelProvider(context, context.extensionUri, openCodeManager);
-  context.subscriptions.push(settingsPanelProvider);
+  agentManagerProvider = new AgentManagerPanelProvider(context, context.extensionUri, openCodeManager, piRuntime);
+  sessionEditorProvider = new SessionEditorPanelProvider(context, context.extensionUri, openCodeManager, piRuntime);
+  settingsPanelProvider = new SettingsPanelProvider(context, context.extensionUri, openCodeManager, piRuntime);
+  context.subscriptions.push(agentManagerProvider, sessionEditorProvider, settingsPanelProvider);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.internal.settingsSynced', (settings: unknown) => {
@@ -285,6 +289,7 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         await openCodeManager?.restart();
+        await piRuntime?.restart();
         vscode.window.showInformationMessage(t('OpenChamber: API connection restarted'));
       } catch (e) {
         vscode.window.showErrorMessage(t('OpenChamber: Failed to restart API - {0}', String(e)));
@@ -751,7 +756,6 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     openCodeManager.onStatusChange((status, error) => {
       chatViewProvider?.updateConnectionStatus(status, error);
-      agentManagerProvider?.updateConnectionStatus(status, error);
       sessionEditorProvider?.updateConnectionStatus(status, error);
       settingsPanelProvider?.updateConnectionStatus(status, error);
 
@@ -766,15 +770,26 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  context.subscriptions.push(
+    piRuntime.onStatusChange(({ status, error }) => {
+      agentManagerProvider?.updateConnectionStatus(status, error);
+    })
+  );
+
   // Start OpenCode API without blocking activation.
   // Blocking here delays webview resolution and causes a blank panel until startup completes.
   void openCodeManager.start();
+  void piRuntime.start().catch(() => {
+    // Status and diagnostics are published by VSCodePiRuntime.
+  });
 }
 
 export async function deactivate() {
   stopGlobalEventWatcher();
   await openCodeManager?.stop();
+  await piRuntime?.stop();
   openCodeManager = undefined;
+  piRuntime = undefined;
   chatViewProvider = undefined;
   agentManagerProvider = undefined;
   sessionEditorProvider = undefined;

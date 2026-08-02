@@ -23,7 +23,7 @@ const noopVSCodeApi: VSCodeAPI = {
   },
 };
 
-function getVSCodeAPI(): VSCodeAPI {
+export function getVSCodeAPI(): VSCodeAPI {
   if (!vscodeApi) {
     const acquired = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
     vscodeApi = acquired ?? noopVSCodeApi;

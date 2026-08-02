@@ -1,10 +1,5 @@
 import { lstat, realpath, rm } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import {
-  discoverPiRuntimes,
-  type RuntimeCandidate,
-  type RuntimeDiscoveryOptions,
-} from "@piarium/pi-host/discovery";
 import type {
   EventEnvelope,
   ExtensionUiResponse,
@@ -60,7 +55,6 @@ export interface PiRuntimeBrokerOptions {
   agentDir?: string;
   client: Omit<HostHandshakeParams, "protocolVersions">;
   cwd?: string;
-  discovery?: RuntimeDiscoveryOptions;
   emit?(event: PiRuntimeBrokerEvent): void;
   environment?: NodeJS.ProcessEnv;
   execArgv?: string[];
@@ -130,10 +124,6 @@ export class PiRuntimeBroker {
 
   get workerCount(): number {
     return this.#clients.size;
-  }
-
-  discoverRuntimes(): Promise<RuntimeCandidate[]> {
-    return discoverPiRuntimes(this.#options.discovery);
   }
 
   subscribe(listener: (event: PiRuntimeBrokerEvent) => void): () => void {

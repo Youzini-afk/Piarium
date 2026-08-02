@@ -8,11 +8,14 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import type { VSCodePiRuntime } from './piRuntime';
+import { PiRuntimeWebviewBridge } from './piRuntimeWebviewBridge';
 
 const t = vscode.l10n.t;
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
+  piRuntimeBridge?: PiRuntimeWebviewBridge;
   sseStreams: Map<string, AbortController>;
 };
 
@@ -36,7 +39,7 @@ const isSameActiveEditorFilePayload = (a: ActiveEditorFilePayload | null, b: Act
     && a.selection?.text === b.selection?.text;
 };
 
-export class SessionEditorPanelProvider {
+export class SessionEditorPanelProvider implements vscode.Disposable {
   public static readonly viewType = 'openchamber.sessionEditor';
 
   private _cachedStatus: ConnectionStatus = 'connecting';
@@ -52,7 +55,8 @@ export class SessionEditorPanelProvider {
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
-    private readonly _openCodeManager?: OpenCodeManager
+    private readonly _openCodeManager?: OpenCodeManager,
+    private readonly _piRuntime?: VSCodePiRuntime,
   ) {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
 
@@ -106,6 +110,9 @@ export class SessionEditorPanelProvider {
 
     const state: SessionPanelState = {
       panel,
+      ...(this._piRuntime
+        ? { piRuntimeBridge: new PiRuntimeWebviewBridge(panel.webview, this._piRuntime) }
+        : {}),
       sseStreams: new Map(),
     };
 
@@ -129,7 +136,9 @@ export class SessionEditorPanelProvider {
     }, null, this._context.subscriptions);
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (state.piRuntimeBridge?.handleMessage(message)) return;
       if (message.type === 'restartApi') {
+        await this._piRuntime?.restart();
         await this._openCodeManager?.restart();
         return;
       }
@@ -216,6 +225,17 @@ export class SessionEditorPanelProvider {
         command: 'windowFocusChanged',
         payload: { focused },
       });
+    }
+  }
+
+  public dispose(): void {
+    if (this._broadcastSelectionDebounce !== undefined) clearTimeout(this._broadcastSelectionDebounce);
+    if (this._clearActiveEditorFileTimer !== undefined) clearTimeout(this._clearActiveEditorFileTimer);
+    this._broadcastSelectionDebounce = undefined;
+    this._clearActiveEditorFileTimer = undefined;
+    for (const [panelId, entry] of [...this._panels]) {
+      entry.panel.dispose();
+      this._disposePanel(panelId);
     }
   }
 
@@ -396,6 +416,7 @@ export class SessionEditorPanelProvider {
       controller.abort();
     }
     entry.sseStreams.clear();
+    entry.piRuntimeBridge?.dispose();
 
     this._panels.delete(sessionId);
     if (this._lastActivePanelId === sessionId) {
@@ -500,7 +521,7 @@ export class SessionEditorPanelProvider {
     );
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const initialStatus = this._cachedStatus;
-    const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
+    const cliAvailable = this._piRuntime !== undefined || (this._openCodeManager?.isCliAvailable() ?? false);
 
     return getWebviewHtml({
       webview,

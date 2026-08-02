@@ -1,17 +1,4 @@
-import {
-  createRuntimeErrorResponse,
-  createRuntimeEvent,
-  createRuntimeSuccessResponse,
-  decodeRuntimeEnvelope,
-  encodeRuntimeEnvelope,
-  ProtocolDecodeError,
-} from '@piarium/protocol';
-import {
-  dispatchRuntimeRequest,
-  PiRuntimeBrokerError,
-  PiHostRequestError,
-  RuntimeDispatchError,
-} from '@piarium/runtime-broker';
+import { PiRuntimeSurfaceConnection } from '@piarium/runtime-broker';
 import { WebSocketServer } from 'ws';
 
 export const PI_RUNTIME_WS_PATH = '/api/piarium/runtime/ws';
@@ -40,52 +27,14 @@ const parsePathname = (url) => {
   }
 };
 
-const errorResponse = (id, error) => {
-  if (
-    error instanceof RuntimeDispatchError ||
-    error instanceof PiRuntimeBrokerError ||
-    error instanceof PiHostRequestError
-  ) {
-    return createRuntimeErrorResponse(id, {
-      code: error.code,
-      ...(error.details === undefined ? {} : { details: error.details }),
-      message: error.message,
-      ...(error.retryable === undefined ? {} : { retryable: error.retryable === true }),
-    });
-  }
-  if (error instanceof ProtocolDecodeError) {
-    return createRuntimeErrorResponse(id, {
-      code: error.code,
-      message: error.message,
-      retryable: false,
-    });
-  }
-  return createRuntimeErrorResponse(id, {
-    code: 'runtime_request_failed',
-    message: 'Pi runtime request failed',
-    retryable: false,
-  });
-};
-
-const readFrameId = (frame) => {
-  try {
-    const value = JSON.parse(frame);
-    return value && typeof value === 'object' && typeof value.id === 'string' && value.id
-      ? value.id
-      : null;
-  } catch {
-    return null;
-  }
-};
-
-const sendEnvelope = (socket, envelope) => {
+const sendFrame = (socket, frame) => {
   if (socket.readyState !== WS_OPEN) return false;
   if (MAX_BUFFERED_BYTES > 0 && socket.bufferedAmount > MAX_BUFFERED_BYTES) {
     socket.terminate();
     return false;
   }
   try {
-    socket.send(encodeRuntimeEnvelope(envelope));
+    socket.send(frame);
     return true;
   } catch {
     try {
@@ -117,29 +66,21 @@ export function createPiRuntimeGateway({
   });
   let stopped = false;
 
-  const unsubscribe = broker.subscribe((event) => {
-    if (stopped || event.kind !== 'host') return;
-    const source = {
-      role: event.role,
-      workerId: event.workerId,
-      ...(event.sessionId ? { sessionId: event.sessionId } : {}),
-    };
-    const envelope = createRuntimeEvent(
-      source,
-      event.envelope.seq,
-      event.envelope.event,
-      event.envelope.data,
-    );
-    for (const socket of wsServer.clients) {
-      if (socket.piariumHandshakeState === 'complete') sendEnvelope(socket, envelope);
-    }
-  });
-
   wsServer.on('connection', (socket, req) => {
-    const pending = new Set();
     socket.isAlive = true;
     socket.authContext = req.piariumAuthContext || null;
-    socket.piariumHandshakeState = 'required';
+    const connection = new PiRuntimeSurfaceConnection({
+      broker,
+      maxPendingRequests: MAX_PENDING_REQUESTS,
+      onClose: (reason) => {
+        try {
+          socket.close(1008, reason);
+        } catch {
+        }
+      },
+      send: (frame) => sendFrame(socket, frame),
+    });
+    socket.piariumRuntimeConnection = connection;
     socket.on('pong', () => {
       socket.isAlive = true;
     });
@@ -149,72 +90,9 @@ export function createPiRuntimeGateway({
         return;
       }
       const frame = raw.toString('utf8');
-      let envelope;
-      try {
-        envelope = decodeRuntimeEnvelope(frame);
-      } catch (error) {
-        const id = readFrameId(frame);
-        if (id) sendEnvelope(socket, errorResponse(id, error));
-        else socket.close(1008, 'invalid runtime frame');
-        return;
-      }
-      if (envelope.kind !== 'request') {
-        socket.close(1008, 'client requests only');
-        return;
-      }
-      if (envelope.method === 'host.handshake') {
-        if (socket.piariumHandshakeState !== 'required') {
-          sendEnvelope(socket, createRuntimeErrorResponse(envelope.id, {
-            code: 'handshake_already_started',
-            message: 'Runtime handshake has already started',
-            retryable: false,
-          }));
-          return;
-        }
-        socket.piariumHandshakeState = 'pending';
-      } else if (socket.piariumHandshakeState !== 'complete') {
-        sendEnvelope(socket, createRuntimeErrorResponse(envelope.id, {
-          code: 'handshake_required',
-          message: 'Runtime handshake is required before other requests',
-          retryable: true,
-        }));
-        return;
-      }
-      if (pending.has(envelope.id)) {
-        sendEnvelope(socket, createRuntimeErrorResponse(envelope.id, {
-          code: 'duplicate_request_id',
-          message: 'Runtime request ID is already active',
-          retryable: false,
-        }));
-        return;
-      }
-      if (MAX_PENDING_REQUESTS > 0 && pending.size >= MAX_PENDING_REQUESTS) {
-        sendEnvelope(socket, createRuntimeErrorResponse(envelope.id, {
-          code: 'too_many_requests',
-          message: 'Too many runtime requests are active',
-          retryable: true,
-        }));
-        return;
-      }
-      pending.add(envelope.id);
-      void dispatchRuntimeRequest(broker, envelope.method, envelope.params).then(
-        (result) => {
-          if (envelope.method === 'host.handshake') {
-            socket.piariumHandshakeState = 'complete';
-          }
-          return sendEnvelope(socket, createRuntimeSuccessResponse(envelope.id, result));
-        },
-        (error) => {
-          if (envelope.method === 'host.handshake') {
-            socket.piariumHandshakeState = 'required';
-          }
-          return sendEnvelope(socket, errorResponse(envelope.id, error));
-        },
-      ).finally(() => {
-        pending.delete(envelope.id);
-      });
+      connection.receive(frame);
     });
-    socket.on('close', () => pending.clear());
+    socket.on('close', () => connection.close());
     socket.on('error', () => {
       // close follows and clears connection-local state.
     });
@@ -268,8 +146,8 @@ export function createPiRuntimeGateway({
       stopped = true;
       server.off('upgrade', upgradeHandler);
       clearInterval(heartbeat);
-      unsubscribe();
       for (const socket of wsServer.clients) {
+        socket.piariumRuntimeConnection?.close();
         try {
           socket.close(1001, 'server shutting down');
         } catch {

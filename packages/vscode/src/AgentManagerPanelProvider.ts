@@ -8,10 +8,12 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import type { VSCodePiRuntime } from './piRuntime';
+import { PiRuntimeWebviewBridge } from './piRuntimeWebviewBridge';
 
 const t = vscode.l10n.t;
 
-export class AgentManagerPanelProvider {
+export class AgentManagerPanelProvider implements vscode.Disposable {
   public static readonly viewType = 'openchamber.agentManager';
 
   private _panel?: vscode.WebviewPanel;
@@ -21,12 +23,14 @@ export class AgentManagerPanelProvider {
   private _cachedError?: string;
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
+  private _piRuntimeBridge?: PiRuntimeWebviewBridge;
   private readonly _webviewDevServerUrl: string | null;
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
-    private readonly _openCodeManager?: OpenCodeManager
+    private readonly _openCodeManager?: OpenCodeManager,
+    private readonly _piRuntime?: VSCodePiRuntime,
   ) {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
   }
@@ -58,6 +62,9 @@ export class AgentManagerPanelProvider {
     };
 
     this._panel.webview.html = this._getHtmlForWebview(this._panel.webview);
+    this._piRuntimeBridge = this._piRuntime
+      ? new PiRuntimeWebviewBridge(this._panel.webview, this._piRuntime)
+      : undefined;
 
     // Send theme payload (including optional Shiki theme JSON) after the webview is set up.
     void this.updateTheme(vscode.window.activeColorTheme.kind);
@@ -72,13 +79,17 @@ export class AgentManagerPanelProvider {
         controller.abort();
       }
       this._sseStreams.clear();
+      this._piRuntimeBridge?.dispose();
+      this._piRuntimeBridge = undefined;
 
       this._panel = undefined;
     }, null, this._context.subscriptions);
 
     // Handle messages
     this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (this._piRuntimeBridge?.handleMessage(message)) return;
       if (message.type === 'restartApi') {
+        await this._piRuntime?.restart();
         await this._openCodeManager?.restart();
         return;
       }
@@ -154,6 +165,15 @@ export class AgentManagerPanelProvider {
       command: 'windowFocusChanged',
       payload: { focused },
     });
+  }
+
+  public dispose(): void {
+    this._panel?.dispose();
+    this._piRuntimeBridge?.dispose();
+    this._piRuntimeBridge = undefined;
+    for (const controller of this._sseStreams.values()) controller.abort();
+    this._sseStreams.clear();
+    this._panel = undefined;
   }
 
   private _sendCachedState() {
@@ -264,7 +284,7 @@ export class AgentManagerPanelProvider {
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
-    const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
+    const cliAvailable = this._piRuntime !== undefined || (this._openCodeManager?.isCliAvailable() ?? false);
 
     return getWebviewHtml({
       webview,

@@ -7,6 +7,8 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import type { VSCodePiRuntime } from './piRuntime';
+import { PiRuntimeWebviewBridge } from './piRuntimeWebviewBridge';
 
 export class SettingsPanelProvider implements vscode.Disposable {
   public static readonly viewType = 'openchamber.settings';
@@ -16,12 +18,14 @@ export class SettingsPanelProvider implements vscode.Disposable {
   private _cachedError?: string;
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
+  private _piRuntimeBridge?: PiRuntimeWebviewBridge;
   private readonly _webviewDevServerUrl: string | null;
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
-    private readonly _openCodeManager?: OpenCodeManager
+    private readonly _openCodeManager?: OpenCodeManager,
+    private readonly _piRuntime?: VSCodePiRuntime,
   ) {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
   }
@@ -60,6 +64,9 @@ export class SettingsPanelProvider implements vscode.Disposable {
     };
 
     this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, normalizedSettingsPage);
+    this._piRuntimeBridge = this._piRuntime
+      ? new PiRuntimeWebviewBridge(this._panel.webview, this._piRuntime)
+      : undefined;
 
     void this.updateTheme(vscode.window.activeColorTheme.kind);
     this._sendCachedState();
@@ -70,7 +77,9 @@ export class SettingsPanelProvider implements vscode.Disposable {
     }, null, this._context.subscriptions);
 
     this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (this._piRuntimeBridge?.handleMessage(message)) return;
       if (message.type === 'restartApi') {
+        await this._piRuntime?.restart();
         await this._openCodeManager?.restart();
         return;
       }
@@ -154,6 +163,8 @@ export class SettingsPanelProvider implements vscode.Disposable {
   }
 
   private _disposePanelResources() {
+    this._piRuntimeBridge?.dispose();
+    this._piRuntimeBridge = undefined;
     for (const controller of this._sseStreams.values()) {
       controller.abort();
     }
@@ -252,7 +263,7 @@ export class SettingsPanelProvider implements vscode.Disposable {
     const workspaceFolder = normalizeWindowsDriveLetter(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
     );
-    const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
+    const cliAvailable = this._piRuntime !== undefined || (this._openCodeManager?.isCliAvailable() ?? false);
 
     return getWebviewHtml({
       webview,

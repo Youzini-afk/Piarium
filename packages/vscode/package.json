@@ -215,13 +215,22 @@
           "type": "string",
           "default": "",
           "description": "%configuration.opencodeBinary.description%"
+        },
+        "piarium.nodePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Absolute path to Node.js 22.19 or newer for the Piarium host. Leave empty to use VS Code's Node runtime or discover Node.js from PATH."
         }
       }
     }
   },
   "scripts": {
     "vscode:prepublish": "bun run build",
-    "build": "bun run build:extension && bun run build:webview",
+    "build": "bun run prepare:pi-runtime && bun run build:extension && bun run build:webview",
+    "prepare:pi-runtime": "bun run --cwd ../runtime-broker build && node scripts/prepare-pi-runtime.mjs",
+    "test:pi-runtime": "node scripts/test-pi-runtime.mjs",
+    "verify:pi-runtime": "bun run prepare:pi-runtime && bun run test:pi-runtime",
     "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --main-fields=module,main",
     "build:webview": "VITE_OPENCODE_URL=/api vite build",
     "dev": "concurrently -n \"ext,web\" -c \"cyan,magenta\" \"bun run watch:extension\" \"bun run dev:webview\"",
@@ -245,6 +254,9 @@
   "dependencies": {
     "@openchamber/ui": "workspace:*",
     "@opencode-ai/sdk": "1.18.9",
+    "@piarium/protocol": "workspace:*",
+    "@piarium/runtime-broker": "workspace:*",
+    "@piarium/runtime-client": "workspace:*",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

@@ -8,6 +8,8 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
+import type { VSCodePiRuntime } from './piRuntime';
+import { PiRuntimeWebviewBridge } from './piRuntimeWebviewBridge';
 
 type ActiveEditorFilePayload = {
   filePath: string;
@@ -47,6 +49,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _cachedError?: string;
   private _sseCounter = 0;
   private _sseStreams = new Map<string, { controller: AbortController; view: vscode.WebviewView | undefined }>();
+  private _piRuntimeBridge?: PiRuntimeWebviewBridge;
   private readonly _webviewDevServerUrl: string | null;
   private _broadcastSelectionDebounce: ReturnType<typeof setTimeout> | undefined;
   private _clearActiveEditorFileTimer: ReturnType<typeof setTimeout> | undefined;
@@ -73,7 +76,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
-    private readonly _openCodeManager?: OpenCodeManager
+    private readonly _openCodeManager?: OpenCodeManager,
+    private readonly _piRuntime?: VSCodePiRuntime,
   ) {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
 
@@ -97,6 +101,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+    this._piRuntimeBridge = this._piRuntime
+      ? new PiRuntimeWebviewBridge(webviewView.webview, this._piRuntime)
+      : undefined;
     // Send theme payload (including optional Shiki theme JSON) after the webview is set up.
     void this.updateTheme(vscode.window.activeColorTheme.kind);
 
@@ -124,10 +131,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       this._lastActiveEditorFilePayload = null;
       this._clearPendingMessages();
+      this._piRuntimeBridge?.dispose();
+      this._piRuntimeBridge = undefined;
       this._view = undefined;
     });
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+      if (this._piRuntimeBridge?.handleMessage(message)) return;
       if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
         this._confirmMessage(message._msgId);
         return;
@@ -138,6 +148,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
 
       if (message.type === 'restartApi') {
+        await this._piRuntime?.restart();
         await this._openCodeManager?.restart();
         return;
       }
@@ -613,7 +624,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     // Use cached values which are updated by onStatusChange callback
     const initialStatus = this._cachedStatus;
-    const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
+    const cliAvailable = this._piRuntime !== undefined || (this._openCodeManager?.isCliAvailable() ?? false);
 
     return getWebviewHtml({
       webview,
