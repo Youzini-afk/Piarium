@@ -6,9 +6,9 @@ import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentGroupsStore, type AgentGroup, type AgentGroupSession } from '@/stores/useAgentGroupsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useGlobalSessionStatus, useAllSessionStatuses } from '@/sync/sync-context';
-import { ChatContainer } from '@/components/chat/ChatContainer';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { PiChatView } from '@/components/pi-session/PiChatView';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import {
   Dialog,
@@ -32,11 +32,18 @@ interface AgentGroupDetailProps {
   className?: string;
 }
 
+const comparablePath = (value: string): string => {
+  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+  return /^[a-z]:\//i.test(normalized) || normalized.startsWith('//')
+    ? normalized.toLocaleLowerCase()
+    : normalized;
+};
+
 const SessionStatusDot: React.FC<{ sessionId: string }> = ({ sessionId }) => {
-  const status = useGlobalSessionStatus(sessionId);
-  if (!status || status.type === 'idle') return null;
+  const busy = usePiSessionStore((state) => state.records[sessionId]?.snapshot?.busy === true);
+  if (!busy) return null;
   return (
-    <span className="relative flex h-2 w-2 flex-shrink-0" title={status.type}>
+    <span className="relative flex h-2 w-2 flex-shrink-0" title="busy">
       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
       <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
     </span>
@@ -51,8 +58,12 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
   const selectedSessionId = useAgentGroupsStore((s) => s.selectedSessionId);
   const selectSession = useAgentGroupsStore((s) => s.selectSession);
   const deleteGroupSessions = useAgentGroupsStore((s) => s.deleteGroupSessions);
-  const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
-  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentRecord = usePiSessionStore((state) => (
+    state.currentSessionId ? state.records[state.currentSessionId] : undefined
+  ));
+  const openSession = usePiSessionStore((state) => state.openSession);
+  const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const [worktreeDialog, setWorktreeDialog] = React.useState<null | { kind: 'remove' | 'keepOnly'; path: string; label: string }>(null);
   const [isProcessing, setIsProcessing] = React.useState(false);
 
@@ -63,28 +74,36 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
 
   const handleSessionSelect = React.useCallback((session: AgentGroupSession) => {
     selectSession(session.id);
-    setCurrentSession(session.id, session.path);
-  }, [selectSession, setCurrentSession]);
+    setDirectory(session.path, { showOverlay: false });
+    void openSession({ sessionId: session.id, cwd: session.path }).catch((error) => {
+      toast.error(error instanceof Error ? error.message : String(error));
+    });
+  }, [openSession, selectSession, setDirectory]);
 
-  // Auto-select first session when group changes and sync OpenCode session
   React.useEffect(() => {
-    if (group.sessions.length > 0) {
-      const session = selectedSessionId
-        ? group.sessions.find((s) => s.id === selectedSessionId) ?? group.sessions[0]
-        : group.sessions[0];
+    const session = selectedSessionId
+      ? group.sessions.find((candidate) => candidate.id === selectedSessionId) ?? group.sessions[0]
+      : group.sessions[0];
+    if (!session) return;
+    if (!selectedSessionId) selectSession(session.id);
+    if (session.id === currentSessionId && currentRecord?.open && currentRecord.snapshot) return;
+    setDirectory(session.path, { showOverlay: false });
+    let cancelled = false;
+    void openSession({ sessionId: session.id, cwd: session.path }).catch((error) => {
+      if (!cancelled) toast.error(error instanceof Error ? error.message : String(error));
+    });
+    return () => { cancelled = true; };
+  }, [currentRecord?.open, currentRecord?.snapshot, currentSessionId, group.sessions, openSession, selectSession, selectedSessionId, setDirectory]);
 
-        if (session) {
-          if (session.id !== currentSessionId) {
-            setCurrentSession(session.id, session.path);
-          }
-          if (!selectedSessionId) {
-            selectSession(session.id);
-        }
-      }
-    }
-  }, [group.name, group.sessions, selectedSessionId, currentSessionId, selectSession, setCurrentSession]);
-
-  const isSessionSynced = selectedSession?.id === currentSessionId;
+  const isSessionReady = selectedSession?.id === currentSessionId
+    && currentRecord?.open === true
+    && currentRecord.snapshot !== undefined;
+  const canRemoveSelectedWorktree = Boolean(
+    selectedSession?.worktreeMetadata
+    && selectedSession.worktreeMetadata.projectDirectory
+    && comparablePath(selectedSession.path)
+      !== comparablePath(selectedSession.worktreeMetadata.projectDirectory),
+  );
 
   const handleCopyWorktreePath = React.useCallback(() => {
     if (!selectedSession?.path) {
@@ -142,12 +161,9 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
     }
   }, [deleteGroupSessions, group.sessions, isProcessing, t, worktreeDialog]);
 
-  // Group-level status: show if any session is busy
-  const allStatuses = useAllSessionStatuses();
-  const groupBusy = React.useMemo(
-    () => group.sessions.some((s) => allStatuses[s.id]?.type === 'busy'),
-    [group.sessions, allStatuses],
-  );
+  const groupBusy = usePiSessionStore((state) => group.sessions.some((session) => (
+    state.records[session.id]?.snapshot?.busy === true
+  )));
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
@@ -252,29 +268,33 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[220px]">
+                {canRemoveSelectedWorktree ? (
+                  <>
+                    <DropdownMenuItem
+                      onSelect={handleRemoveSelectedWorktree}
+                      closeOnClick={false}
+                      variant="destructive"
+                    >
+                      {t('agentManager.detail.actions.removeThisWorktree')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={handleKeepOnlySelectedWorktree}
+                      closeOnClick={false}
+                    >
+                      {t('agentManager.detail.actions.keepThisRemoveOthers')}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 <DropdownMenuItem
-                  onSelect={handleRemoveSelectedWorktree}
-                  closeOnClick={false}
-                  variant="destructive"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleCopyWorktreePath();
+                  }}
+                  disabled={!selectedSession?.path}
                 >
-                  {t('agentManager.detail.actions.removeThisWorktree')}
+                  <Icon name="file-copy" className="h-4 w-4 mr-px" />
+                  {t('agentManager.detail.actions.copyWorktreePath')}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={handleKeepOnlySelectedWorktree}
-                  closeOnClick={false}
-                >
-                  {t('agentManager.detail.actions.keepThisRemoveOthers')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCopyWorktreePath();
-                }}
-                disabled={!selectedSession?.path}
-              >
-                <Icon name="file-copy" className="h-4 w-4 mr-px" />
-                {t('agentManager.detail.actions.copyWorktreePath')}
-              </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -320,9 +340,9 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
       {/* Chat Content */}
       <div className="flex-1 min-h-0">
         {selectedSession ? (
-          isSessionSynced ? (
+          isSessionReady ? (
             <ChatErrorBoundary sessionId={selectedSession.id}>
-              <ChatContainer />
+              <PiChatView active showHeader={false} />
             </ChatErrorBoundary>
           ) : (
             <div className="h-full flex flex-col">

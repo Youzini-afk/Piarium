@@ -1,8 +1,17 @@
+import type { PiAgentInvocationDescriptor } from '@piarium/protocol';
+
 interface MultiRunModelSelection {
   providerID: string;
   modelID: string;
   displayName?: string;
   variant?: string;
+}
+
+export interface MultiRunAgentSelection {
+  id: string;
+  invocation: PiAgentInvocationDescriptor;
+  name: string;
+  providerId: string;
 }
 
 export interface MultiRunFileAttachment {
@@ -19,7 +28,7 @@ export interface MultiRunGroup {
 export interface CreateMultiRunParams {
   name: string;
   groups: MultiRunGroup[];
-  agent?: string;
+  agent?: MultiRunAgentSelection;
   worktreeBaseBranch?: string;
   isolateRuns?: boolean;
   files?: MultiRunFileAttachment[];
@@ -27,6 +36,12 @@ export interface CreateMultiRunParams {
 }
 
 export interface CreateMultiRunResult {
+  failures: Array<{
+    message: string;
+    modelID: string;
+    providerID: string;
+    stage: 'create' | 'start';
+  }>;
   groupSlug: string;
   sessionIds: string[];
   firstSessionId: string | null;

@@ -1,17 +1,33 @@
 import React from 'react';
+import type { ModelDescriptor } from '@piarium/protocol';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useModelLists } from '@/hooks/useModelLists';
 import { useI18n } from '@/lib/i18n';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 
 /** Chip height class - shared between chips and add button */
 const CHIP_HEIGHT_CLASS = 'h-7';
+
+const toPickerModel = (model: ModelDescriptor): ModelPickerEntry['model'] => ({
+  capabilities: {
+    attachment: model.input.includes('image'),
+    reasoning: model.supportedThinkingLevels.some((level) => level !== 'off'),
+    toolcall: true,
+  },
+  cost: model.cost,
+  id: model.id,
+  input: model.input,
+  limit: { context: model.contextWindow, output: model.maxTokens },
+  name: model.name,
+  provider: model.provider,
+  variants: Object.fromEntries(model.supportedThinkingLevels.map((level) => [level, {}])),
+});
 
 /** UI-only type with instanceId for React keys and duplicate tracking */
 export interface ModelSelectionWithId {
@@ -58,6 +74,8 @@ const ModelChip: React.FC<{
 };
 
 export interface ModelMultiSelectProps {
+  /** Pi workspace whose provider/model catalog should be shown. */
+  cwd?: string | null;
   selectedModels: ModelSelectionWithId[];
   onAdd: (model: ModelSelectionWithId) => void;
   onRemove: (index: number) => void;
@@ -86,6 +104,7 @@ export interface ModelMultiSelectProps {
  * Model selector for multi-run (allows selecting same model multiple times).
  */
 export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
+  cwd,
   selectedModels,
   onAdd,
   onRemove,
@@ -101,11 +120,21 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   triggerIcon,
 }) => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
-  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const targetDirectory = cwd?.trim() || currentDirectory?.trim() || '';
+  const piProviders = usePiProviderStore((state) => state.providers);
+  const loadProviders = usePiProviderStore((state) => state.load);
+  const providers = React.useMemo<ModelPickerProvider[]>(() => piProviders.map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    models: provider.models.filter((model) => model.available).map(toPickerModel),
+  })), [piProviders]);
+  const modelsMetadata = React.useMemo(() => new Map(), []);
   const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
   const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
-  const { favoriteModelsList, recentModelsList } = useModelLists();
+  const addRecentModel = useUIStore((state) => state.addRecentModel);
+  const favoriteModels = useUIStore((state) => state.favoriteModels);
+  const recentModels = useUIStore((state) => state.recentModels);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const providerOrder = useUIStore((state) => state.providerOrder);
   const [isOpen, setIsOpen] = React.useState(false);
@@ -115,6 +144,32 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const isSingleSelect = maxModels === 1;
   const canAddModel = maxModels === undefined || selectedModels.length < maxModels || isSingleSelect;
+
+  React.useEffect(() => {
+    if (!targetDirectory) return;
+    void loadProviders(targetDirectory).catch((error) => {
+      console.warn('[pi-model-multi-select] failed to load models', error);
+    });
+  }, [loadProviders, targetDirectory]);
+
+  const providerById = React.useMemo(() => new Map(
+    providers.map((provider) => [provider.id, provider]),
+  ), [providers]);
+  const resolveModelEntry = React.useCallback((providerID: string, modelID: string) => {
+    const provider = providerById.get(providerID);
+    const model = provider?.models?.find((candidate) => candidate.id === modelID);
+    return provider && model ? { model, providerID, modelID } : null;
+  }, [providerById]);
+  const favoriteModelsList = React.useMemo(() => favoriteModels
+    .map(({ providerID, modelID }) => resolveModelEntry(providerID, modelID))
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null), [favoriteModels, resolveModelEntry]);
+  const favoriteKeys = React.useMemo(() => new Set(
+    favoriteModels.map((entry) => `${entry.providerID}\n${entry.modelID}`),
+  ), [favoriteModels]);
+  const recentModelsList = React.useMemo(() => recentModels
+    .filter(({ providerID, modelID }) => !favoriteKeys.has(`${providerID}\n${modelID}`))
+    .map(({ providerID, modelID }) => resolveModelEntry(providerID, modelID))
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null), [favoriteKeys, recentModels, resolveModelEntry]);
 
   // Count occurrences of each model for display purposes
   const modelCounts = React.useMemo(() => {
@@ -202,11 +257,12 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     } else {
       onAdd(nextModel);
     }
+    addRecentModel(entry.providerID, entry.modelID);
     if (isSingleSelect) {
       setIsOpen(false);
       setSearchQuery('');
     }
-  }, [isSingleSelect, onAdd, onUpdate, selectedModels.length]);
+  }, [addRecentModel, isSingleSelect, onAdd, onUpdate, selectedModels.length]);
 
   const labels = React.useMemo(() => ({
     searchPlaceholder: t('multirun.modelMultiSelect.search.placeholder'),

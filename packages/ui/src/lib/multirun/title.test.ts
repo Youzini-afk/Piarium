@@ -20,6 +20,16 @@ describe('multi-run titles', () => {
     });
   });
 
+  test('keeps legacy model ids containing slashes readable', () => {
+    expect(parseMultiRunSessionTitle('group/openrouter/anthropic/claude-sonnet/2')).toEqual({
+      fusion: false,
+      groupSlug: 'group',
+      index: 2,
+      modelID: 'anthropic/claude-sonnet',
+      providerID: 'openrouter',
+    });
+  });
+
   test('parses grouped session titles', () => {
     expect(parseMultiRunSessionTitle('bench/g2/anthropic/claude')).toEqual({
       groupSlug: 'bench',
@@ -60,6 +70,23 @@ describe('multi-run titles', () => {
       modelID: 'claude',
       index: 1,
       fusion: false,
+    });
+  });
+
+  test('round-trips Unicode group names and model ids containing slashes', () => {
+    const title = getMultiRunSessionTitle({
+      groupSlug: '修复登录',
+      providerID: 'openrouter',
+      modelID: 'anthropic/claude-sonnet',
+      index: 2,
+    });
+    expect(title).toBe('%E4%BF%AE%E5%A4%8D%E7%99%BB%E5%BD%95/openrouter/anthropic%2Fclaude-sonnet/2');
+    expect(parseMultiRunSessionTitle(title)).toEqual({
+      fusion: false,
+      groupSlug: '修复登录',
+      index: 2,
+      modelID: 'anthropic/claude-sonnet',
+      providerID: 'openrouter',
     });
   });
 });

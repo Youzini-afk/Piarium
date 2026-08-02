@@ -198,6 +198,12 @@ export interface PiAgentConfigurationTarget {
   section?: string;
 }
 
+export interface PiAgentInvocationDescriptor {
+  command: string;
+  kind: "slash-command";
+  taskSeparator: "space" | "double-dash";
+}
+
 export interface PiAgentDescriptor {
   actions: PiAgentActionDescriptor[];
   aliases?: string[];
@@ -205,6 +211,7 @@ export interface PiAgentDescriptor {
   description: string;
   fallbackModels?: string[];
   id: string;
+  invocation?: PiAgentInvocationDescriptor;
   kind: PiAgentKind;
   model?: string;
   name: string;

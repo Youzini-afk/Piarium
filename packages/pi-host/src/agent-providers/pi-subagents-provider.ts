@@ -217,6 +217,11 @@ function descriptorFor(entry: ParsedListEntry, disabled: boolean): PiAgentDescri
     configuration: CONFIGURATION,
     description: entry.description,
     id: agentProviderEntityId(PROVIDER_ID, entry.kind, entry.name),
+    invocation: {
+      command: entry.kind === "workflow" ? "run-chain" : "run",
+      kind: "slash-command",
+      taskSeparator: entry.kind === "workflow" ? "double-dash" : "space",
+    },
     kind: entry.kind,
     name: entry.name,
     providerId: PROVIDER_ID,

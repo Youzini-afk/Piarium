@@ -1,110 +1,159 @@
+import { THINKING_LEVELS, type ImageAttachment, type ThinkingLevel } from '@piarium/protocol';
 import { create } from 'zustand';
-import type { Session } from '@opencode-ai/sdk/v2';
-import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
-import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
-import { opencodeClient } from '@/lib/opencode/client';
+import type {
+  CreateMultiRunParams,
+  CreateMultiRunResult,
+  MultiRunAgentSelection,
+  MultiRunFileAttachment,
+} from '@/types/multirun';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { checkIsGitRepository } from '@/lib/gitApi';
+import { renderPiComposerSubmission } from '@/components/pi-session/piComposerSubmission';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
-import { useGlobalSessionsStore } from './useGlobalSessionsStore';
+import { usePiSessionStore } from './usePiSessionStore';
 import { getMultiRunSessionTitle } from '@/lib/multirun/title';
-import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 
-const toGitSafeSlug = (value: string): string => {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .substring(0, 50);
+const toGitSafeSlug = (value: string): string => value
+  .normalize('NFKC')
+  .toLocaleLowerCase()
+  .replace(/[^\p{L}\p{N}]+/gu, '-')
+  .replace(/^-+|-+$/g, '');
+
+const stableFallbackSlug = (value: string): string => {
+  let hash = 2166136261;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `group-${(hash >>> 0).toString(36)}`;
 };
 
 const toModelSlug = (providerID: string, modelID: string): string => {
-  const provider = toGitSafeSlug(providerID);
-  const model = toGitSafeSlug(modelID);
-  return `${provider}-${model}`.substring(0, 60);
+  const provider = toGitSafeSlug(providerID) || 'provider';
+  const model = toGitSafeSlug(modelID) || 'model';
+  return `${provider}-${model}`;
 };
 
-const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string => {
-  return `${groupSlug}/${modelSlug}`;
+const generateWorktreeNameSeed = (groupSlug: string, modelSlug: string): string => (
+  `${groupSlug}/${modelSlug}`
+);
+
+const errorMessage = (error: unknown): string => (
+  error instanceof Error ? error.message : String(error)
+);
+
+const isThinkingLevel = (value: string | undefined): value is ThinkingLevel => (
+  value !== undefined && THINKING_LEVELS.includes(value as ThinkingLevel)
+);
+
+const dataUrlParts = (url: string): { base64: boolean; data: string; mime: string } | null => {
+  const match = /^data:([^;,]*)(;base64)?,([\s\S]*)$/i.exec(url);
+  if (!match) return null;
+  return {
+    base64: match[2] !== undefined,
+    data: match[3] ?? '',
+    mime: match[1] || 'application/octet-stream',
+  };
 };
 
-const normalizePath = (value: string): string => {
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
+const decodeBase64Text = (value: string): string => {
+  const decoded = atob(value);
+  const bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 };
 
-const registerCreatedSession = (session: Session, directory: string): Session => {
-  const normalizedDirectory = normalizePath(directory);
-  const sessionDirectory = (session as Session & { directory?: string | null }).directory;
-  const sessionWithDirectory = typeof sessionDirectory === 'string' && sessionDirectory.trim().length > 0
-    ? session
-    : ({ ...session, directory: normalizedDirectory } as Session);
+const isTextAttachment = (mime: string): boolean => (
+  mime.startsWith('text/')
+  || /\/(?:json|jsonc|javascript|typescript|xml|yaml|x-yaml|toml)(?:$|;)/i.test(mime)
+);
 
-  registerSessionDirectory(session.id, normalizedDirectory);
-  useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id);
-  useGlobalSessionsStore.getState().upsertSession(sessionWithDirectory);
+const escapeAttribute = (value: string): string => value
+  .replace(/&/g, '&amp;')
+  .replace(/"/g, '&quot;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
 
-  try {
-    const store = getSyncChildStores().ensureChild(normalizedDirectory, { bootstrap: false });
-    store.setState((state) => {
-      const existingIndex = state.session.findIndex((candidate) => candidate.id === session.id);
-      if (existingIndex >= 0 && state.session[existingIndex] === sessionWithDirectory) {
-        return state;
+const prepareAttachments = (
+  files: MultiRunFileAttachment[] | undefined,
+): { images: ImageAttachment[]; instructions?: string } => {
+  const images: ImageAttachment[] = [];
+  const blocks: string[] = [];
+  for (const file of files ?? []) {
+    const parsed = dataUrlParts(file.url);
+    const mime = file.mime || parsed?.mime || 'application/octet-stream';
+    if (mime.startsWith('image/') && parsed?.base64) {
+      images.push({ data: parsed.data, mimeType: mime });
+      continue;
+    }
+    let body = file.url;
+    let encoding = 'data-url';
+    if (parsed && isTextAttachment(mime)) {
+      try {
+        body = parsed.base64 ? decodeBase64Text(parsed.data) : decodeURIComponent(parsed.data);
+        encoding = 'text';
+      } catch {
+        body = file.url;
       }
-
-      const nextSessions = existingIndex >= 0
-        ? state.session.map((candidate, index) => index === existingIndex ? sessionWithDirectory : candidate)
-        : [...state.session, sessionWithDirectory].sort((a, b) => a.id.localeCompare(b.id));
-
-      return {
-        session: nextSessions,
-        sessionTotal: Math.max(state.sessionTotal, nextSessions.length),
-        limit: Math.max(state.limit, nextSessions.length),
-      };
-    });
-  } catch {
-    // SyncProvider can be unavailable in tests or detached surfaces; the global
-    // session upsert above is enough for the sidebar to show the session.
+    }
+    blocks.push(
+      `<attachment name="${escapeAttribute(file.filename)}" mime="${escapeAttribute(mime)}" encoding="${encoding}">\n${body}\n</attachment>`,
+    );
   }
+  return {
+    images,
+    ...(blocks.length === 0
+      ? {}
+      : { instructions: `The user attached the following files to this run:\n${blocks.join('\n')}` }),
+  };
+};
 
-  return sessionWithDirectory;
+const invokeAgent = (agent: MultiRunAgentSelection, task: string): string => {
+  const { command, taskSeparator } = agent.invocation;
+  if (!/^[\w:-]+$/u.test(command) || !/^[\p{L}\p{N}_.:-]+$/u.test(agent.name)) {
+    throw new Error(`Agent ${agent.name} exposes an invalid invocation contract`);
+  }
+  const separator = taskSeparator === 'double-dash' ? ' -- ' : ' ';
+  return `/${command} ${agent.name}${separator}${task}`;
 };
 
 const resolveActiveProject = (): ProjectRef | null => {
   const projectsState = useProjectsStore.getState();
   const activeProjectId = projectsState.activeProjectId;
-  if (!activeProjectId) return null;
-
-  const project = projectsState.projects.find((entry) => entry.id === activeProjectId);
+  const project = activeProjectId
+    ? projectsState.projects.find((entry) => entry.id === activeProjectId)
+    : undefined;
   if (project?.path) return { id: project.id, path: project.path };
 
   const currentDirectory = useDirectoryStore.getState().currentDirectory ?? null;
-  if (currentDirectory && currentDirectory.trim().length > 0) {
-    const normalized = currentDirectory.replace(/\\/g, '/').replace(/\/+$/, '') || currentDirectory;
-    return { id: `path:${normalized}`, path: normalized };
-  }
-
-  return null;
+  if (!currentDirectory?.trim()) return null;
+  const normalized = currentDirectory.replace(/\\/g, '/').replace(/\/+$/, '') || currentDirectory;
+  return { id: `path:${normalized}`, path: normalized };
 };
 
+interface CreatedRun {
+  modelID: string;
+  prompt: string;
+  providerID: string;
+  sessionId: string;
+  variant?: string;
+  worktreePath: string;
+}
+
 interface MultiRunState {
-  isLoading: boolean;
   error: string | null;
+  isLoading: boolean;
 }
 
 interface MultiRunActions {
-  createMultiRun: (params: CreateMultiRunParams) => Promise<CreateMultiRunResult | null>;
-  clearError: () => void;
+  clearError(): void;
+  createMultiRun(params: CreateMultiRunParams): Promise<CreateMultiRunResult | null>;
 }
 
 type MultiRunStore = MultiRunState & MultiRunActions;
@@ -112,228 +161,191 @@ type MultiRunStore = MultiRunState & MultiRunActions;
 export const useMultiRunStore = create<MultiRunStore>()(
   devtools(
     (set) => ({
-      isLoading: false,
       error: null,
+      isLoading: false,
 
-      createMultiRun: async (params: CreateMultiRunParams) => {
+      createMultiRun: async (params) => {
         const groupName = params.name.trim();
-        const { groups, agent, files, setupCommands } = params;
-
         if (!groupName) {
           set({ error: 'Group name is required' });
           return null;
         }
-
-        if (!groups || groups.length === 0) {
+        if (params.groups.length === 0) {
           set({ error: 'At least one run group is required' });
           return null;
         }
-
-        for (let gi = 0; gi < groups.length; gi++) {
-          if (!groups[gi].prompt.trim()) {
-            set({ error: `Group ${gi + 1}: prompt is required` });
+        for (let index = 0; index < params.groups.length; index += 1) {
+          const group = params.groups[index];
+          if (!group.prompt.trim()) {
+            set({ error: `Group ${index + 1}: prompt is required` });
             return null;
           }
-          if (groups[gi].models.length < 1) {
-            set({ error: `Group ${gi + 1}: select at least 1 model` });
-            return null;
-          }
-          if (groups[gi].models.length > 5) {
-            set({ error: `Group ${gi + 1}: maximum 5 models allowed` });
+          if (group.models.length === 0) {
+            set({ error: `Group ${index + 1}: select at least 1 model` });
             return null;
           }
         }
 
-        set({ isLoading: true, error: null });
-
+        set({ error: null, isLoading: true });
         try {
           const project = resolveActiveProject();
-          if (!project) {
-            set({ error: 'Select a project', isLoading: false });
-            return null;
-          }
-
+          if (!project) throw new Error('Select a project');
           const directory = project.path;
+          const shouldIsolateRuns = await checkIsGitRepository(directory) && params.isolateRuns !== false;
+          const normalizedGroupSlug = toGitSafeSlug(groupName);
+          const groupSlug = normalizedGroupSlug || stableFallbackSlug(groupName);
+          const rootTrackingRemote = shouldIsolateRuns
+            ? await resolveRootTrackingRemote(directory)
+            : null;
+          const setupCommands = params.setupCommands?.filter((command) => command.trim().length > 0) ?? [];
+          const createdRuns: CreatedRun[] = [];
+          const failures: CreateMultiRunResult['failures'] = [];
+          const piSessions = usePiSessionStore.getState();
 
-          const isGit = await checkIsGitRepository(directory);
-          const shouldIsolateRuns = isGit && params.isolateRuns !== false;
-
-          const groupSlug = toGitSafeSlug(groupName);
-          const rootBranch = shouldIsolateRuns ? await getRootBranch(directory) : undefined;
-          const rootTrackingRemote = shouldIsolateRuns ? await resolveRootTrackingRemote(directory) : null;
-
-          const createdRuns: Array<{
-            sessionId: string;
-            worktreePath: string;
-            providerID: string;
-            modelID: string;
-            variant?: string;
-            prompt: string;
-          }> = [];
-
-          const commandsToRun = setupCommands?.filter((cmd) => cmd.trim().length > 0) ?? [];
-
-          for (let gi = 0; gi < groups.length; gi++) {
-            const group = groups[gi];
-            const prompt = group.prompt;
-
+          for (let groupIndex = 0; groupIndex < params.groups.length; groupIndex += 1) {
+            const group = params.groups[groupIndex];
             const modelCounts = new Map<string, number>();
             for (const model of group.models) {
               const key = `${model.providerID}:${model.modelID}`;
-              modelCounts.set(key, (modelCounts.get(key) || 0) + 1);
+              modelCounts.set(key, (modelCounts.get(key) ?? 0) + 1);
             }
-
             const modelIndexes = new Map<string, number>();
 
             for (const model of group.models) {
               const key = `${model.providerID}:${model.modelID}`;
-              const count = modelCounts.get(key) || 1;
-              const index = (modelIndexes.get(key) || 0) + 1;
-              modelIndexes.set(key, index);
-
+              const count = modelCounts.get(key) ?? 1;
+              const instance = (modelIndexes.get(key) ?? 0) + 1;
+              modelIndexes.set(key, instance);
+              const runGroup = params.groups.length > 1 ? `g${groupIndex + 1}` : undefined;
               const modelSlug = toModelSlug(model.providerID, model.modelID);
-              const runGroup = groups.length > 1 ? `g${gi + 1}` : undefined;
-              const modelPart = count > 1
-                ? generateWorktreeNameSeed(groupSlug, `${modelSlug}/${index}`)
-                : generateWorktreeNameSeed(groupSlug, modelSlug);
+              const modelPart = count > 1 ? `${modelSlug}/${instance}` : modelSlug;
               const preferredName = runGroup
-                ? `${runGroup}/${modelPart}`
-                : modelPart;
-
+                ? `${runGroup}/${generateWorktreeNameSeed(groupSlug, modelPart)}`
+                : generateWorktreeNameSeed(groupSlug, modelPart);
               const sessionTitle = getMultiRunSessionTitle({
                 groupSlug,
-                runGroup,
+                ...(runGroup === undefined ? {} : { runGroup }),
                 providerID: model.providerID,
                 modelID: model.modelID,
-                index: count > 1 ? index : undefined,
+                ...(count > 1 ? { index: instance } : {}),
               });
 
+              let sessionId: string | undefined;
+              let worktreeMetadata: Awaited<ReturnType<typeof createWorktreeWithDefaults>> | undefined;
               try {
-                if (!shouldIsolateRuns) {
-                  const session = await opencodeClient.withDirectory(
-                    directory,
-                    () => opencodeClient.createSession({ title: sessionTitle }),
-                  );
-                  registerCreatedSession(session, directory);
-
-                  createdRuns.push({
-                    sessionId: session.id,
-                    worktreePath: directory,
-                    providerID: model.providerID,
-                    modelID: model.modelID,
-                    variant: model.variant,
-                    prompt,
-                  });
-                  continue;
+                let worktreePath = directory;
+                if (shouldIsolateRuns) {
+                  worktreeMetadata = await createWorktreeWithDefaults(project, {
+                    branchName: preferredName,
+                    mode: 'new',
+                    preferredName,
+                    returnAfterDirectoryCreated: true,
+                    setupCommands,
+                    startRef: params.worktreeBaseBranch || 'HEAD',
+                    worktreeName: preferredName,
+                  }, { resolvedRootTrackingRemote: rootTrackingRemote });
+                  worktreePath = worktreeMetadata.path;
+                  if (await getWorktreeSetupWaitEnabled(project)) {
+                    await waitForWorktreeBootstrap(worktreePath);
+                  }
                 }
 
-                const worktreeMetadata = await createWorktreeWithDefaults(project, {
-                  preferredName,
-                  mode: 'new',
-                  branchName: preferredName,
-                  worktreeName: preferredName,
-                  startRef: params.worktreeBaseBranch || 'HEAD',
-                  setupCommands: commandsToRun,
-                  returnAfterDirectoryCreated: true,
-                }, {
-                  resolvedRootTrackingRemote: rootTrackingRemote,
+                const snapshot = await piSessions.createSession(worktreePath, sessionTitle);
+                sessionId = snapshot.sessionId;
+                await piSessions.selectModel(sessionId, {
+                  id: model.modelID,
+                  provider: model.providerID,
                 });
-
-                const enrichedMetadata = {
-                  ...worktreeMetadata,
-                  createdFromBranch: rootBranch,
-                  kind: 'standard' as const,
-                };
-
-                if (await getWorktreeSetupWaitEnabled(project)) {
-                  await waitForWorktreeBootstrap(worktreeMetadata.path);
+                if (model.variant !== undefined) {
+                  if (!isThinkingLevel(model.variant)) {
+                    throw new Error(`Unsupported Pi thinking level: ${model.variant}`);
+                  }
+                  await piSessions.selectThinking(sessionId, model.variant);
                 }
-
-                const session = await opencodeClient.withDirectory(
-                  worktreeMetadata.path,
-                  () => opencodeClient.createSession({ title: sessionTitle }),
-                );
-                registerCreatedSession(session, worktreeMetadata.path);
-
-                useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
-
                 createdRuns.push({
-                  sessionId: session.id,
-                  worktreePath: worktreeMetadata.path,
-                  providerID: model.providerID,
                   modelID: model.modelID,
-                  variant: model.variant,
-                  prompt,
+                  prompt: group.prompt,
+                  providerID: model.providerID,
+                  sessionId,
+                  ...(model.variant === undefined ? {} : { variant: model.variant }),
+                  worktreePath,
                 });
-              } catch (err) {
-                console.warn('[MultiRun] Failed to create session:', err);
+              } catch (error) {
+                if (sessionId) await piSessions.deleteSession(sessionId).catch(() => undefined);
+                if (worktreeMetadata) {
+                  await removeProjectWorktree(project, worktreeMetadata, { deleteLocalBranch: true })
+                    .catch(() => undefined);
+                }
+                failures.push({
+                  message: errorMessage(error),
+                  modelID: model.modelID,
+                  providerID: model.providerID,
+                  stage: 'create',
+                });
               }
             }
           }
 
-          const commandsToSave = setupCommands?.filter((cmd) => cmd.trim().length > 0) ?? [];
-          if (commandsToSave.length > 0) {
-            saveWorktreeSetupCommands(project, commandsToSave).catch(() => {
-              console.warn('[MultiRun] Failed to save worktree setup commands');
+          if (setupCommands.length > 0) {
+            void saveWorktreeSetupCommands(project, setupCommands).catch((error) => {
+              console.warn('[MultiRun] Failed to save worktree setup commands', error);
             });
           }
-
-          const sessionIds = createdRuns.map((r) => r.sessionId);
-          const firstSessionId = createdRuns[0]?.sessionId ?? null;
-
-          if (sessionIds.length === 0) {
-            set({ error: 'Failed to create any sessions', isLoading: false });
-            return null;
+          if (createdRuns.length === 0) {
+            const detail = failures.map((failure) => failure.message).filter(Boolean).join('; ');
+            throw new Error(detail ? `Failed to create any sessions: ${detail}` : 'Failed to create any sessions');
           }
 
-          const filesForMessage = files?.map((f) => ({
-            type: 'file' as const,
-            mime: f.mime,
-            filename: f.filename,
-            url: f.url,
+          const attachments = prepareAttachments(params.files);
+          await Promise.all(createdRuns.map(async (run) => {
+            try {
+              const rendered = await renderPiComposerSubmission(run.prompt);
+              const expanded = await useSnippetsStore.getState().expandText(rendered.text)
+                .catch(() => rendered.text);
+              const instructionParts = [rendered.instructions, attachments.instructions]
+                .filter((value): value is string => Boolean(value?.trim()));
+              const directInstructions = instructionParts.length > 0
+                ? instructionParts.join('\n\n')
+                : undefined;
+              const task = params.agent && directInstructions
+                ? `${expanded}\n\n<piarium-run-instructions>\n${directInstructions}\n</piarium-run-instructions>`
+                : expanded;
+              const text = params.agent ? invokeAgent(params.agent, task) : task;
+              const accepted = await piSessions.prompt(
+                run.sessionId,
+                text,
+                attachments.images.length > 0 ? attachments.images : undefined,
+                params.agent ? undefined : directInstructions,
+              );
+              if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
+            } catch (error) {
+              failures.push({
+                message: errorMessage(error),
+                modelID: run.modelID,
+                providerID: run.providerID,
+                stage: 'start',
+              });
+            }
           }));
 
-          void (async () => {
-            try {
-              const expandText = useSnippetsStore.getState().expandText;
-              await Promise.allSettled(
-                createdRuns.map(async (run) => {
-                  try {
-                    const text = await expandText(run.prompt).catch(() => run.prompt);
-                    await routeMessage({
-                      sessionId: run.sessionId,
-                      directory: run.worktreePath,
-                      content: text,
-                      providerID: run.providerID,
-                      modelID: run.modelID,
-                      variant: run.variant,
-                      agent,
-                      files: filesForMessage,
-                    });
-                  } catch (err) {
-                    console.warn('[MultiRun] Failed to start run:', err);
-                  }
-                }),
-              );
-            } catch (err) {
-              console.warn('[MultiRun] Failed to start runs:', err);
-            }
-          })();
-
-          set({ isLoading: false });
-          return { groupSlug, sessionIds, firstSessionId };
-        } catch (error) {
+          const sessionIds = createdRuns.map((run) => run.sessionId);
+          const firstSessionId = sessionIds[0] ?? null;
+          if (firstSessionId) piSessions.setCurrentSession(firstSessionId);
           set({
-            error: error instanceof Error ? error.message : 'Failed to create Multi-Run',
-            isLoading: false,
+            error: failures.length > 0
+              ? `${failures.length} run${failures.length === 1 ? '' : 's'} failed to create or start`
+              : null,
           });
+          return { failures, firstSessionId, groupSlug, sessionIds };
+        } catch (error) {
+          set({ error: errorMessage(error) || 'Failed to create Multi-Run' });
           return null;
+        } finally {
+          set({ isLoading: false });
         }
       },
 
-      clearError: () => {
-        set({ error: null });
-      },
+      clearError: () => set({ error: null }),
     }),
     { name: 'multirun-store' },
   ),

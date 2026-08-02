@@ -19,7 +19,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from '@/components/multirun/ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from '@/components/multirun/BranchSelector';
-import { AgentSelector } from '@/components/multirun/AgentSelector';
+import { PiAgentSelector } from '@/components/multirun/PiAgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -27,13 +27,12 @@ import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectRef } from '@/lib/openchamberConfig';
-import type { CreateMultiRunParams, MultiRunFileAttachment } from '@/types/multirun';
+import type {
+  CreateMultiRunParams,
+  MultiRunAgentSelection,
+  MultiRunFileAttachment,
+} from '@/types/multirun';
 import { useI18n } from '@/lib/i18n';
-
-/** Max file size in bytes (10MB) */
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-/** Max number of concurrent runs */
-const MAX_MODELS = 5;
 
 /** Attached file for agent manager */
 interface AttachedFile {
@@ -61,7 +60,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   const [groupName, setGroupName] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [selectedModels, setSelectedModels] = React.useState<ModelSelectionWithId[]>([]);
-  const [selectedAgent, setSelectedAgent] = React.useState<string>('');
+  const [selectedAgent, setSelectedAgent] = React.useState<MultiRunAgentSelection | null>(null);
   const [baseBranch, setBaseBranch] = React.useState('');
   const [attachedFiles, setAttachedFiles] = React.useState<AttachedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -142,11 +141,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   }, [projectRef]);
 
   const handleAddModel = React.useCallback((model: ModelSelectionWithId) => {
-    if (selectedModels.length >= MAX_MODELS) {
-      return;
-    }
     setSelectedModels((prev) => [...prev, model]);
-  }, [selectedModels.length]);
+  }, []);
 
   const handleRemoveModel = React.useCallback((index: number) => {
     setSelectedModels((prev) => prev.filter((_, i) => i !== index));
@@ -163,11 +159,6 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     let attachedCount = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.size > MAX_FILE_SIZE) {
-        toast.error(t('agentManager.empty.toast.fileTooLarge', { fileName: file.name }));
-        continue;
-      }
-
       try {
         const dataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -320,9 +311,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     groupName.trim() &&
     prompt.trim() &&
     selectedModels.length >= 1 &&
-    baseBranch &&
-    isGitRepository &&
-    !isLoadingBranches
+    !isLoadingBranches &&
+    (!isGitRepository || baseBranch)
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -354,8 +344,9 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
       await onCreateGroup?.({
         name: groupName.trim(),
         groups: [{ prompt: prompt.trim(), models }],
-        agent: selectedAgent || undefined,
-        worktreeBaseBranch: baseBranch,
+        agent: selectedAgent ?? undefined,
+        worktreeBaseBranch: isGitRepository ? baseBranch : undefined,
+        isolateRuns: isGitRepository === true,
         files,
         setupCommands: commandsToRun.length > 0 ? commandsToRun : undefined,
       });
@@ -364,7 +355,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
       setGroupName('');
       setPrompt('');
       setSelectedModels([]);
-      setSelectedAgent('');
+      setSelectedAgent(null);
       setAttachedFiles([]);
       setBaseBranch('HEAD');
       setShowCommandAutocomplete(false);
@@ -373,7 +364,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
       setMentionQuery('');
     } catch (error) {
       console.error('Failed to create agent group:', error);
-      toast.error(t('agentManager.empty.toast.failedToCreateGroup'));
+      toast.error(error instanceof Error ? error.message : t('agentManager.empty.toast.failedToCreateGroup'));
     } finally {
       setIsSubmitting(false);
     }
@@ -430,21 +421,22 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
           </p>
         </div>
 
-        {/* Branch Selection */}
-        <div className="space-y-1.5">
-          <label className="typography-ui-label font-medium text-foreground flex items-center gap-1.5">
-            <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
-            {t('agentManager.empty.baseBranch.label')}
-          </label>
-          <BranchSelector
-            directory={currentDirectory}
-            value={baseBranch}
-            onChange={setBaseBranch}
-          />
-          <p className="typography-micro text-muted-foreground">
-            {t('agentManager.empty.baseBranch.description', { branch: baseBranch })}
-          </p>
-        </div>
+        {isGitRepository ? (
+          <div className="space-y-1.5">
+            <label className="typography-ui-label font-medium text-foreground flex items-center gap-1.5">
+              <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
+              {t('agentManager.empty.baseBranch.label')}
+            </label>
+            <BranchSelector
+              directory={currentDirectory}
+              value={baseBranch}
+              onChange={setBaseBranch}
+            />
+            <p className="typography-micro text-muted-foreground">
+              {t('agentManager.empty.baseBranch.description', { branch: baseBranch })}
+            </p>
+          </div>
+        ) : null}
 
         {/* Setup commands collapsible */}
         <Collapsible open={isSetupCommandsOpen} onOpenChange={setIsSetupCommandsOpen}>
@@ -518,7 +510,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
           <label className="typography-ui-label font-medium text-foreground">
             {t('agentManager.empty.agent.label')}
           </label>
-          <AgentSelector
+          <PiAgentSelector
+            cwd={projectRef?.path}
             value={selectedAgent}
             onChange={setSelectedAgent}
           />
@@ -533,13 +526,13 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
             {t('agentManager.empty.models.label')}
           </label>
           <ModelMultiSelect
+            cwd={projectRef?.path}
             selectedModels={selectedModels}
             onAdd={handleAddModel}
             onRemove={handleRemoveModel}
             onUpdate={handleUpdateModel}
             minModels={1}
             addButtonLabel={t('agentManager.empty.models.addModel')}
-            maxModels={5}
           />
         </div>
 

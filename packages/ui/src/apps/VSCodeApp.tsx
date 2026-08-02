@@ -228,18 +228,14 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   if (panelType === 'agentManager') {
     return (
       <ErrorBoundary>
-        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={syncDirectory}>
-          <RuntimeAPIProvider apis={apis}>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full text-foreground bg-background">
-                <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={true} />
-                <AgentManagerView />
-                <OpenCodeUpdateToast />
-                <Toaster position="top-center" />
-              </div>
-            </TooltipProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
+        <RuntimeAPIProvider apis={apis}>
+          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+            <div className="h-full text-foreground bg-background">
+              <AgentManagerView />
+              <Toaster position="top-center" />
+            </div>
+          </TooltipProvider>
+        </RuntimeAPIProvider>
       </ErrorBoundary>
     );
   }

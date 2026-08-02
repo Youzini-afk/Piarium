@@ -11,14 +11,17 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/openchamberConfig';
-import type { CreateMultiRunParams, MultiRunGroup } from '@/types/multirun';
+import type {
+  CreateMultiRunParams,
+  MultiRunAgentSelection,
+  MultiRunGroup,
+} from '@/types/multirun';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from './BranchSelector';
-import { AgentSelector } from './AgentSelector';
+import { PiAgentSelector } from './PiAgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
@@ -30,9 +33,6 @@ import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, ProjectIconImage } from '@/lib/pro
 import type { ProjectEntry } from '@/lib/api/types';
 import { startDesktopWindowDrag } from '@/lib/desktopNative';
 import { useI18n } from '@/lib/i18n';
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_MODELS_PER_GROUP = 5;
 
 interface MultiRunAttachedFile {
   id: string;
@@ -94,7 +94,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const [runGroups, setRunGroups] = React.useState<RunGroupState[]>(() => [
     { id: generateInstanceId(), prompt: '', models: [] },
   ]);
-  const [selectedAgent, setSelectedAgent] = React.useState<string>('');
+  const [selectedAgent, setSelectedAgent] = React.useState<MultiRunAgentSelection | null>(null);
   const [attachedFiles, setAttachedFiles] = React.useState<MultiRunAttachedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
@@ -310,10 +310,6 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     let attachedCount = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.size > MAX_FILE_SIZE) {
-        toast.error(t('multirun.launcher.toast.fileTooLarge', { fileName: file.name }));
-        continue;
-      }
       try {
         const dataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -384,7 +380,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       const params: CreateMultiRunParams = {
         name: name.trim(),
         groups,
-        agent: selectedAgent || undefined,
+        agent: selectedAgent ?? undefined,
         worktreeBaseBranch: effectiveIsolateRuns ? worktreeBaseBranch : undefined,
         isolateRuns: effectiveIsolateRuns,
         files: filesForStore.length > 0 ? filesForStore : undefined,
@@ -393,8 +389,8 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
       const result = await createMultiRun(params);
       if (result) {
-        if (result.firstSessionId) {
-          useSessionUIStore.getState().setCurrentSession(result.firstSessionId);
+        if (result.failures.length > 0) {
+          toast.warning(`${result.failures.length} run(s) failed to create or start`);
         }
         onCreated?.();
       }
@@ -516,7 +512,12 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 <FieldLabel htmlFor="multirun-agent" info={<InfoTip>{t('multirun.launcher.agent.info')}</InfoTip>}>
                   {t('multirun.launcher.agent.label')}
                 </FieldLabel>
-                <AgentSelector value={selectedAgent} onChange={setSelectedAgent} id="multirun-agent" />
+                <PiAgentSelector
+                  cwd={selectedProjectDirectory}
+                  value={selectedAgent}
+                  onChange={setSelectedAgent}
+                  id="multirun-agent"
+                />
               </div>
             </div>
 
@@ -730,7 +731,6 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
   const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
 
   const handleAddModel = React.useCallback((model: ModelSelectionWithId) => {
-    if (group.models.length >= MAX_MODELS_PER_GROUP) return;
     onUpdate(group.id, { models: [...group.models, model] });
   }, [group.id, group.models, onUpdate]);
 
@@ -991,17 +991,17 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
       <div className="flex flex-col gap-1.5">
         <FieldLabel
           required
-          info={<InfoTip>{t('multirun.launcher.models.info', { max: MAX_MODELS_PER_GROUP })}</InfoTip>}
+          info={<InfoTip>{t('multirun.modelMultiSelect.validation.minOnly', { min: 1 })}</InfoTip>}
         >
           {t('multirun.launcher.models.label')}
         </FieldLabel>
         <ModelMultiSelect
+          cwd={projectDirectory}
           selectedModels={group.models}
           onAdd={handleAddModel}
           onRemove={handleRemoveModel}
           onUpdate={handleUpdateModel}
           minModels={1}
-          maxModels={MAX_MODELS_PER_GROUP}
         />
       </div>
     </div>

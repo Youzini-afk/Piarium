@@ -90,11 +90,21 @@ export default function (pi: any) {
       ]);
       const byName = new Map(catalog.agents.map((agent) => [`${agent.providerId}:${agent.name}`, agent]));
       assert.equal(byName.get("pi-subagents:worker")?.kind, "delegatable");
+      assert.deepEqual(byName.get("pi-subagents:worker")?.invocation, {
+        command: "run",
+        kind: "slash-command",
+        taskSeparator: "space",
+      });
       assert.equal(byName.get("pi-subagents:custom")?.source.scope, "user");
       assert.equal(byName.get("pi-subagents:custom")?.source.path, "/user/custom.md");
       assert.equal(byName.get("pi-subagents:custom")?.model, "test/custom");
       assert.deepEqual(byName.get("pi-subagents:custom")?.fallbackModels, ["test/fallback"]);
       assert.equal(byName.get("pi-subagents:verify")?.kind, "workflow");
+      assert.deepEqual(byName.get("pi-subagents:verify")?.invocation, {
+        command: "run-chain",
+        kind: "slash-command",
+        taskSeparator: "double-dash",
+      });
       assert.deepEqual(
         byName.get("pi-subagents:verify")?.actions.map((action) => action.id),
         ["inspect", "update", "delete"],
