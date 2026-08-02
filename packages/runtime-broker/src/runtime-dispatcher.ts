@@ -2,6 +2,8 @@ import {
   PIARIUM_PROTOCOL_VERSION,
   type ExtensionUiResponse,
   type HostMode,
+  type HostMethodParams,
+  type HostMethodResult,
   type ImageAttachment,
   type JsonValue,
   parseProviderConfigInput,
@@ -11,7 +13,7 @@ import {
   type RuntimeMethod,
   type RuntimeMethodResult,
 } from "@piarium/protocol";
-import { PiRuntimeBroker } from "./runtime-broker.js";
+import { PiRuntimeBroker, type PiCatalogMethod } from "./runtime-broker.js";
 
 export class RuntimeDispatchError extends Error {
   readonly code: string;
@@ -128,6 +130,32 @@ function requireProviderAuthResponse(record: Record<string, unknown>): ProviderA
 
 function optionalName(record: Record<string, unknown>): string | undefined {
   return optionalString(record, "name");
+}
+
+type RuntimeContextTarget = { cwd: string } | { sessionId: string };
+type WorkspaceMethod = Exclude<PiCatalogMethod, "session.list">;
+
+function requireRuntimeContext(record: Record<string, unknown>): RuntimeContextTarget {
+  const cwd = optionalString(record, "cwd");
+  const sessionId = optionalString(record, "sessionId");
+  if ((cwd === undefined) === (sessionId === undefined)) {
+    throw new RuntimeDispatchError(
+      "invalid_params",
+      "Exactly one of cwd or sessionId is required",
+    );
+  }
+  return sessionId === undefined ? { cwd: cwd as string } : { sessionId };
+}
+
+function requestForRuntimeContext<M extends WorkspaceMethod>(
+  broker: PiRuntimeBroker,
+  target: RuntimeContextTarget,
+  method: M,
+  params: HostMethodParams<M>,
+): Promise<HostMethodResult<M>> {
+  return "sessionId" in target
+    ? broker.requestForSession(target.sessionId, method, params)
+    : broker.requestForWorkspace(target.cwd, method, params);
 }
 
 function requireProviderConfig(value: unknown): ProviderConfigInput {
@@ -275,8 +303,7 @@ async function dispatchRuntimeRequestUnchecked(
     }
 
     case "model.list": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "model.list", {});
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "model.list", {});
     }
     case "model.select": {
       const sessionId = requireString(input, "sessionId");
@@ -288,25 +315,26 @@ async function dispatchRuntimeRequestUnchecked(
     }
 
     case "provider.list": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "provider.list", {});
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.list", {});
     }
     case "provider.config.get": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "provider.config.get", {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.config.get", {
         providerId: requireString(input, "providerId"),
       });
     }
     case "provider.config.upsert": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "provider.config.upsert", {
-        config: requireProviderConfig(input.config),
-        scope: requireEnum(input, "scope", ["user", "project", "custom"] as const),
-      });
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "provider.config.upsert",
+        {
+          config: requireProviderConfig(input.config),
+          scope: requireEnum(input, "scope", ["user", "project", "custom"] as const),
+        },
+      );
     }
     case "provider.config.delete": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "provider.config.delete", {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.config.delete", {
         providerId: requireString(input, "providerId"),
         scope: requireEnum(
           input,
@@ -316,9 +344,12 @@ async function dispatchRuntimeRequestUnchecked(
       });
     }
     case "provider.models.discover": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "provider.models.discover", {
+      const config = input.config === undefined ? undefined : requireProviderConfig(input.config);
+      const requestCredential = optionalBoolean(input, "requestCredential");
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.models.discover", {
+        ...(config === undefined ? {} : { config }),
         providerId: requireString(input, "providerId"),
+        ...(requestCredential === undefined ? {} : { requestCredential }),
       });
     }
     case "provider.auth.respond": {
@@ -330,48 +361,41 @@ async function dispatchRuntimeRequestUnchecked(
       return { accepted };
     }
     case "provider.login": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "provider.login", {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.login", {
         providerId: requireString(input, "providerId"),
         type: requireEnum(input, "type", ["api_key", "oauth"] as const),
       });
     }
     case "provider.logout": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "provider.logout", {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "provider.logout", {
         providerId: requireString(input, "providerId"),
       });
     }
 
     case "package.list": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "package.list", {});
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "package.list", {});
     }
     case "package.install":
     case "package.remove": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, method, {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), method, {
         source: requireString(input, "source"),
       });
     }
     case "package.update": {
-      const sessionId = requireString(input, "sessionId");
       const source = optionalString(input, "source");
-      return broker.requestForSession(sessionId, "package.update", {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "package.update", {
         ...(source === undefined ? {} : { source }),
       });
     }
 
     case "settings.get": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "settings.get", {});
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.get", {});
     }
     case "settings.update": {
-      const sessionId = requireString(input, "sessionId");
       if (!("patch" in input)) {
         throw new RuntimeDispatchError("invalid_params", "patch is required");
       }
-      return broker.requestForSession(sessionId, "settings.update", {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.update", {
         patch: input.patch as JsonValue,
       });
     }

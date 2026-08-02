@@ -81,4 +81,63 @@ describe("provider model discovery", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("discovers models from anonymous HTTP endpoints", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-provider-anonymous-discovery-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    const authorizations: Array<string | undefined> = [];
+    const server = createServer((request, response) => {
+      authorizations.push(request.headers.authorization);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "anonymous-model" }] }));
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const runtime = await ModelRuntime.create({
+      allowModelNetwork: false,
+      authPath: join(agentDir, "auth.json"),
+      modelsPath: join(agentDir, "models.json"),
+    });
+    const manager = new ProviderConfigurationManager({ agentDir });
+    try {
+      const result = await discoverProviderModels({
+        config: {
+          api: "openai-completions",
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          id: "anonymous-discovery",
+          models: [],
+        },
+        configuration: manager,
+        cwd,
+        providerId: "anonymous-discovery",
+        runtime,
+      });
+      assert.equal(authorizations[0], undefined);
+      assert.equal(result.models[0]?.id, "anonymous-model");
+      await discoverProviderModels({
+        apiKey: "one-shot-draft-key",
+        config: {
+          api: "openai-completions",
+          baseUrl: `http://127.0.0.1:${address.port}/v1`,
+          id: "anonymous-discovery",
+          models: [],
+        },
+        configuration: manager,
+        cwd,
+        providerId: "anonymous-discovery",
+        runtime,
+      });
+      assert.equal(authorizations[1], "Bearer one-shot-draft-key");
+      assert.equal(runtime.getProviderAuthStatus("anonymous-discovery").configured, false);
+    } finally {
+      await new Promise<void>((resolveClose, reject) =>
+        server.close((error) => (error ? reject(error) : resolveClose())),
+      );
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

@@ -52,6 +52,10 @@ type SessionScopedRuntimeMethod =
   | "settings.get"
   | "settings.update";
 
+export type RuntimeContextTarget =
+  | { cwd: string; sessionId?: never }
+  | { cwd?: never; sessionId: string };
+
 type SessionScopedMethodMap = {
   [M in SessionScopedRuntimeMethod]: {
     params: M extends
@@ -59,8 +63,8 @@ type SessionScopedMethodMap = {
       | "package.list"
       | "provider.list"
       | "settings.get"
-      ? { sessionId: string }
-      : HostMethodMap[M]["params"] & { sessionId: string };
+      ? RuntimeContextTarget
+      : HostMethodMap[M]["params"] & RuntimeContextTarget;
     result: HostMethodMap[M]["result"];
   };
 };
@@ -68,8 +72,8 @@ type SessionScopedMethodMap = {
 /**
  * Public Piarium runtime contract used by renderer, web, mobile, and editor
  * surfaces. Worker-only lifecycle and trust-response methods are deliberately
- * absent. Catalog operations are session scoped because Pi resources and
- * provider registrations can vary by workspace.
+ * absent. Catalog operations target either a live session or a broker-owned in-memory workspace
+ * context because Pi resources and provider registrations can vary by workspace.
  */
 export type RuntimeMethodMap = Pick<HostMethodMap, DirectRuntimeMethod> &
   SessionScopedMethodMap & {

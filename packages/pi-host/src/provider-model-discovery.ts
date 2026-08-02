@@ -2,16 +2,35 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   DISCOVERABLE_PROVIDER_APIS,
   type DiscoverableProviderApi,
+  type ProviderConfigInput,
   type ProviderModelConfigInput,
   type ProviderModelDiscoveryResult,
 } from "@piarium/protocol";
 import { HostError } from "./errors.js";
 import type { ProviderConfigurationManager } from "./provider-configuration.js";
 
-// These are resource-safety ceilings, not product catalog limits.
-const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
-const REQUEST_TIMEOUT_MS = 60_000;
-const MAX_REDIRECTS = 5;
+function configurableResourceLimit(name: string, fallback: number): number | undefined {
+  const configured = process.env[name];
+  if (configured === undefined || configured.trim() === "") return fallback;
+  const parsed = Number(configured);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed === 0 ? undefined : Math.floor(parsed);
+}
+
+// Defaults prevent a broken endpoint from owning the worker indefinitely. They are deliberately
+// generous, are not catalog/model limits, and can be raised or disabled (value 0) by the owner.
+const MAX_RESPONSE_BYTES = configurableResourceLimit(
+  "PIARIUM_PROVIDER_DISCOVERY_MAX_BYTES",
+  256 * 1024 * 1024,
+);
+const REQUEST_TIMEOUT_MS = configurableResourceLimit(
+  "PIARIUM_PROVIDER_DISCOVERY_TIMEOUT_MS",
+  5 * 60_000,
+);
+const MAX_REDIRECTS = configurableResourceLimit(
+  "PIARIUM_PROVIDER_DISCOVERY_MAX_REDIRECTS",
+  20,
+);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,10 +115,14 @@ function takeUrlCredentials(
 
 async function readBoundedBody(response: Response): Promise<Uint8Array> {
   const contentLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+  if (
+    MAX_RESPONSE_BYTES !== undefined
+    && Number.isFinite(contentLength)
+    && contentLength > MAX_RESPONSE_BYTES
+  ) {
     throw new HostError(
       "provider_discovery_response_too_large",
-      "Provider model response exceeded the 64 MiB safety ceiling",
+      `Provider model response exceeded the configured ${MAX_RESPONSE_BYTES} byte ceiling`,
     );
   }
   if (!response.body) return new Uint8Array();
@@ -110,11 +133,11 @@ async function readBoundedBody(response: Response): Promise<Uint8Array> {
     const chunk = await reader.read();
     if (chunk.done) break;
     size += chunk.value.byteLength;
-    if (size > MAX_RESPONSE_BYTES) {
+    if (MAX_RESPONSE_BYTES !== undefined && size > MAX_RESPONSE_BYTES) {
       await reader.cancel();
       throw new HostError(
         "provider_discovery_response_too_large",
-        "Provider model response exceeded the 64 MiB safety ceiling",
+        `Provider model response exceeded the configured ${MAX_RESPONSE_BYTES} byte ceiling`,
       );
     }
     chunks.push(chunk.value);
@@ -144,7 +167,7 @@ function redactedProviderMessage(
     : undefined;
   let message = rawMessage || `Provider model discovery failed (${status})`;
   for (const [name, value] of Object.entries(headers)) {
-    if (!isSensitiveHeader(name) || value.length < 4) continue;
+    if (!isSensitiveHeader(name) || !value) continue;
     message = message.replaceAll(value, "[redacted]");
     if (/^bearer /iu.test(value)) message = message.replaceAll(value.slice(7), "[redacted]");
   }
@@ -153,12 +176,22 @@ function redactedProviderMessage(
 
 async function requestJson(url: URL, initialHeaders: Record<string, string>): Promise<unknown> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = REQUEST_TIMEOUT_MS === undefined
+    ? undefined
+    : setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let currentUrl = url;
   let headers = initialHeaders;
+  const visited = new Set<string>();
   try {
     for (let redirects = 0; ; redirects += 1) {
       const request = takeUrlCredentials(currentUrl, headers);
+      if (visited.has(request.url.href)) {
+        throw new HostError(
+          "provider_discovery_redirect_loop",
+          "Provider model discovery encountered a redirect loop",
+        );
+      }
+      visited.add(request.url.href);
       let response: Response;
       try {
         response = await fetch(request.url, {
@@ -184,10 +217,10 @@ async function requestJson(url: URL, initialHeaders: Record<string, string>): Pr
             "Provider returned a redirect without a location",
           );
         }
-        if (redirects >= MAX_REDIRECTS) {
+        if (MAX_REDIRECTS !== undefined && redirects >= MAX_REDIRECTS) {
           throw new HostError(
             "provider_discovery_redirect_limit",
-            "Provider model discovery exceeded five redirects",
+            `Provider model discovery exceeded the configured ${MAX_REDIRECTS} redirects`,
           );
         }
         const nextUrl = new URL(location, request.url);
@@ -219,7 +252,7 @@ async function requestJson(url: URL, initialHeaders: Record<string, string>): Pr
       return payload;
     }
   } finally {
-    clearTimeout(timeout);
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
@@ -313,12 +346,15 @@ function normalizedModels(
 }
 
 export async function discoverProviderModels(options: {
+  apiKey?: string;
+  config?: ProviderConfigInput;
   configuration: ProviderConfigurationManager;
   cwd: string;
   providerId: string;
   runtime: ModelRuntime;
 }): Promise<ProviderModelDiscoveryResult> {
-  const config = await options.configuration.effectiveConfig(options.cwd, options.providerId);
+  const config = options.config
+    ?? await options.configuration.effectiveConfig(options.cwd, options.providerId);
   const runtimeProvider = options.runtime.getProvider(options.providerId);
   const runtimeModel = options.runtime.getModels(options.providerId)[0];
   const configuredApi = config.api ?? runtimeModel?.api;
@@ -341,15 +377,9 @@ export async function discoverProviderModels(options: {
   const api = configuredApi as DiscoverableProviderApi;
   const discoveryUrl = appendModelsPath(configuredBaseUrl);
   const auth = await options.runtime.getAuth(options.providerId);
-  if (!auth && !discoveryUrl.username && !discoveryUrl.password) {
-    throw new HostError(
-      "provider_auth_required",
-      `Authenticate ${options.providerId} before discovering models`,
-    );
-  }
   const payload = await requestJson(
     discoveryUrl,
-    requestHeaders(api, auth?.auth.apiKey, auth?.auth.headers),
+    requestHeaders(api, options.apiKey ?? auth?.auth.apiKey, auth?.auth.headers),
   );
   return {
     api,

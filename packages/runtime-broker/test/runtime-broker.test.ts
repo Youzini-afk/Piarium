@@ -58,6 +58,53 @@ test("broker owns catalog and per-session Pi workers", async () => {
     assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
     assert.equal(broker.catalogStarted, true);
     assert.deepEqual(await broker.listSessions(workspace), []);
+    const workspaceProvider = await dispatchRuntimeRequest(
+      broker,
+      "provider.config.upsert",
+      {
+        config: {
+          api: "openai-completions",
+          baseUrl: "https://workspace-provider.example.test/v1",
+          id: "workspace-provider",
+          models: [{ id: "workspace-model", name: "Workspace model" }],
+        },
+        cwd: workspace,
+        scope: "project",
+      },
+    );
+    assert.equal(workspaceProvider.effectiveScope, "project");
+    assert.ok(
+      (await dispatchRuntimeRequest(broker, "provider.list", { cwd: workspace })).some(
+        (provider) => provider.id === "workspace-provider",
+      ),
+    );
+    assert.deepEqual(broker.activeSessionIds, []);
+    let stopAuthPromptListener = () => {};
+    const authPrompt = new Promise<{ requestId: string; sessionId: string }>((resolvePrompt) => {
+      stopAuthPromptListener = broker.subscribe((event) => {
+        if (event.kind !== "host" || event.envelope.event !== "provider.auth.prompt") return;
+        if (event.envelope.data.providerId !== "workspace-provider") return;
+        resolvePrompt({
+          requestId: event.envelope.data.prompt.requestId,
+          sessionId: event.envelope.data.sessionId,
+        });
+      });
+    });
+    const login = dispatchRuntimeRequest(broker, "provider.login", {
+      cwd: workspace,
+      providerId: "workspace-provider",
+      type: "api_key",
+    });
+    const prompt = await authPrompt;
+    stopAuthPromptListener();
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "provider.auth.respond", {
+        response: { requestId: prompt.requestId, value: "workspace-test-key" },
+        sessionId: prompt.sessionId,
+      }),
+      { accepted: true },
+    );
+    assert.deepEqual(await login, { authenticated: true });
 
     const created = await broker.createSession(workspace, "Broker smoke");
     assert.deepEqual(broker.activeSessionIds, [created.sessionId]);

@@ -6,10 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { opencodeClient } from '@/lib/opencode/client';
-import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
-import { useConfigStore } from '@/stores/useConfigStore';
+import {
+  discoverPiProviderModels,
+  loginPiProvider,
+  upsertPiProviderConfig,
+} from '@/lib/pi-runtime/providers';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import {
   Select,
   SelectContent,
@@ -26,12 +29,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  COMMON_PROVIDER_APIS,
+  createEmptyCustomProviderModel,
+  createEmptyCustomProviderState,
+  createPiProviderConfigFromForm,
   mergeCustomProviderModelRows,
-  normalizeCustomProviderModelRows,
   resolveCustomProviderApiKey,
 } from './customProviderForm';
 import type {
-  CustomProviderApiTypeValue,
   CustomProviderEditableFormState,
   CustomProviderModelRowInput,
 } from './customProviderForm';
@@ -43,16 +48,7 @@ interface CustomProviderEditorProps {
   onCancel?: () => void;
 }
 
-const API_TYPES: CustomProviderApiTypeValue[] = [
-  'openai-compatible',
-  'openai-responses',
-  'anthropic',
-  'google',
-];
-
 const SCOPES: Array<'user' | 'project' | 'custom'> = ['user', 'project', 'custom'];
-
-const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 const MODEL_IMPORT_SORT_OPTIONS = [
   { value: 'id-asc', labelKey: 'settings.providers.page.modelImport.sort.idAsc' },
@@ -65,35 +61,6 @@ const shouldIgnoreToggleRowClick = (target: EventTarget | null): boolean => (
   target instanceof HTMLElement && Boolean(target.closest('[data-checkbox-control="true"]'))
 );
 
-const getCurrentDirectory = (): string | null => {
-  const dir = opencodeClient.getDirectory();
-  if (typeof dir === 'string' && dir.trim().length > 0) {
-    return dir.trim();
-  }
-  return null;
-};
-
-const createEmptyState = (): CustomProviderEditableFormState => ({
-  type: 'openai-compatible',
-  id: '',
-  name: '',
-  baseURL: '',
-  models: [
-    {
-      id: '',
-      name: '',
-      context: '',
-      output: '',
-      attachment: false,
-      tool_call: false,
-      reasoning: false,
-      reasoningEffort: '',
-    },
-  ],
-  apiKey: '',
-  scope: 'user',
-});
-
 export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
   mode,
   initialState,
@@ -101,12 +68,13 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
   onCancel,
 }) => {
   const { t } = useI18n();
+  const currentDirectory = useDirectoryStore((store) => store.currentDirectory);
   const tUnsafe = React.useCallback(
     (key: string) => t(key as Parameters<typeof t>[0]),
     [t]
   );
   const [state, setState] = React.useState<CustomProviderEditableFormState>(() =>
-    initialState ? { ...initialState, models: initialState.models.map((m) => ({ ...m })) } : createEmptyState()
+    initialState ? { ...initialState, models: initialState.models.map((m) => ({ ...m })) } : createEmptyCustomProviderState()
   );
   const [saving, setSaving] = React.useState(false);
   const [fetchingModels, setFetchingModels] = React.useState(false);
@@ -153,7 +121,7 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
   ) => {
     setState((prev) => {
       const nextModels = prev.models.map((row, i) => (i === index ? { ...row, [field]: value } : row));
-      return { ...prev, models: nextModels };
+      return { ...prev, models: nextModels, modelsDefined: true };
     });
   };
 
@@ -162,56 +130,41 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
       ...prev,
       models: [
         ...prev.models,
-        {
-          id: '',
-          name: '',
-          context: '',
-          output: '',
-          attachment: false,
-          tool_call: false,
-          reasoning: false,
-          reasoningEffort: '',
-        },
+        createEmptyCustomProviderModel(),
       ],
+      modelsDefined: true,
     }));
   };
 
   const removeModel = (index: number) => {
     setState((prev) => {
       const nextModels = prev.models.filter((_, i) => i !== index);
-      return { ...prev, models: nextModels.length > 0 ? nextModels : [createEmptyState().models[0]] };
+      return {
+        ...prev,
+        models: nextModels.length > 0 ? nextModels : [createEmptyCustomProviderModel()],
+        modelsDefined: true,
+      };
     });
   };
 
   const handleFetchModels = async () => {
     const baseURL = state.baseURL.trim();
+    const providerId = state.id.trim();
+    const api = state.api.trim();
     const apiKey = readApiKey();
 
-    if (!baseURL || !apiKey) {
+    if (!providerId || !baseURL || !api) {
       toast.error(t('settings.providers.page.toast.customProviderFetchRequired'));
       return;
     }
 
     setFetchingModels(true);
     try {
-      const response = await runtimeFetch('/api/provider/custom/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: state.type,
-          baseURL,
-          apiKey,
-        }),
+      const discovery = await discoverPiProviderModels(currentDirectory, providerId, {
+        ...(apiKey ? { apiKey } : {}),
+        config: createPiProviderConfigFromForm(state),
       });
-
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = payload?.error || t('settings.providers.page.toast.customProviderFetchFailed');
-        toast.error(message);
-        return;
-      }
-
-      const fetched = Array.isArray(payload?.models) ? payload.models : [];
+      const fetched = discovery.models;
       if (fetched.length === 0) {
         toast.error(t('settings.providers.page.toast.customProviderFetchNoModels'));
         return;
@@ -365,6 +318,7 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
     setState((prev) => ({
       ...prev,
       models: mergeCustomProviderModelRows(prev.models, selectedModels),
+      modelsDefined: true,
     }));
 
     toast.success(
@@ -382,11 +336,17 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
 
   const validate = (): boolean => {
     const id = state.id.trim();
-    const baseURL = state.baseURL.trim();
-    const hasModelWithId = state.models.some((row) => row.id.trim().length > 0);
-
-    if (!id || !baseURL || !hasModelWithId) {
+    if (!id) {
       toast.error(t('settings.providers.page.toast.customProviderRequired'));
+      return false;
+    }
+
+    const invalidNumber = state.models.some((row) => [row.context, row.output].some((value) => {
+      const normalized = value.trim().replace(/,/g, '');
+      return normalized.length > 0 && (!Number.isFinite(Number(normalized)) || Number(normalized) <= 0);
+    }));
+    if (invalidNumber) {
+      toast.error(t('settings.providers.page.toast.customProviderModelLimitsInvalid'));
       return false;
     }
 
@@ -401,41 +361,21 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
     setSaving(true);
     try {
       const resolvedScope = mode === 'edit' ? (originalEditScopeRef.current ?? state.scope) : state.scope;
-      const directory = resolvedScope === 'project' ? getCurrentDirectory() : null;
       const apiKey = readApiKey();
-      const payload = {
-        id: state.id.trim(),
-        name: state.name.trim() || state.id.trim(),
-        baseURL: state.baseURL.trim(),
-        type: state.type,
-        scope: resolvedScope,
-        ...(apiKey ? { apiKey } : {}),
-        models: normalizeCustomProviderModelRows(state.models),
-      };
-
-      const response = await runtimeFetch('/api/provider/custom', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        ...(directory ? { query: { directory } } : {}),
-        body: JSON.stringify(payload),
-      });
-
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = result?.error || t('settings.providers.page.toast.customProviderSaveFailed');
-        toast.error(message);
-        return;
+      const config = createPiProviderConfigFromForm(state);
+      await upsertPiProviderConfig(currentDirectory, resolvedScope, config);
+      if (apiKey) {
+        await loginPiProvider({
+          cwd: currentDirectory,
+          onPrompt: async () => apiKey,
+          providerId: config.id,
+          type: 'api_key',
+        });
       }
 
       toast.success(t('settings.providers.page.toast.customProviderSaved'));
-
-      await reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' });
-
-      const currentDirectory = getCurrentDirectory();
-      await useConfigStore.getState().loadProviders({ directory: currentDirectory, force: true });
-
-      const savedProviderId = typeof result?.providerId === 'string' ? result.providerId : state.id.trim();
-      onSaved?.(savedProviderId);
+      await usePiProviderStore.getState().load(currentDirectory, { force: true });
+      onSaved?.(config.id);
     } catch (error) {
       console.error('Failed to save custom provider:', error);
       const message = error instanceof Error ? error.message : t('settings.providers.page.toast.customProviderSaveFailed');
@@ -445,24 +385,19 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
     }
   };
 
-  const renderTypeDescription = (type: CustomProviderApiTypeValue) => {
-    switch (type) {
-      case 'openai-compatible':
+  const renderTypeDescription = (api: string) => {
+    switch (api) {
+      case 'openai-completions':
         return t('settings.providers.page.custom.type.openaiCompatible.description');
       case 'openai-responses':
         return t('settings.providers.page.custom.type.openaiResponses.description');
-      case 'anthropic':
+      case 'anthropic-messages':
         return t('settings.providers.page.custom.type.anthropic.description');
-      case 'google':
+      case 'google-generative-ai':
         return t('settings.providers.page.custom.type.google.description');
       default:
         return '';
     }
-  };
-
-  const getTypeLabelKey = (type: CustomProviderApiTypeValue) => {
-    const suffix = type === 'openai-compatible' ? 'openaiCompatible' : type === 'openai-responses' ? 'openaiResponses' : type;
-    return `settings.providers.page.custom.type.${suffix}.label`;
   };
 
   return (
@@ -473,31 +408,21 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
             <label className="typography-ui-label text-foreground">
               {t('settings.providers.page.custom.field.type')}
             </label>
-            <Select value={state.type} onValueChange={(value) => updateField('type', value as CustomProviderApiTypeValue)}>
-              <SelectTrigger className="w-full sm:w-[280px]">
-                <SelectValue>
-                  {(value) =>
-                    value && typeof value === 'string'
-                      ? tUnsafe(getTypeLabelKey(value as CustomProviderApiTypeValue))
-                      : ''
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {API_TYPES.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    <div className="flex flex-col items-start">
-                      <span className="typography-ui-label">
-                        {tUnsafe(getTypeLabelKey(type))}
-                      </span>
-                      <span className="typography-micro text-muted-foreground">
-                        {renderTypeDescription(type)}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              value={state.api}
+              onChange={(event) => updateField('api', event.target.value)}
+              list="piarium-provider-apis"
+              placeholder="openai-completions"
+              className="h-7 w-full font-mono sm:w-[280px]"
+            />
+            <datalist id="piarium-provider-apis">
+              {COMMON_PROVIDER_APIS.map((api) => <option key={api} value={api} />)}
+            </datalist>
+            {renderTypeDescription(state.api) && (
+              <span className="typography-micro text-muted-foreground">
+                {renderTypeDescription(state.api)}
+              </span>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -579,6 +504,14 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
               placeholder={t('settings.providers.page.custom.placeholder.apiKey')}
               className="h-7 font-mono text-xs"
             />
+            <label className="flex cursor-pointer items-center gap-2">
+              <Checkbox
+                checked={state.authHeader === true}
+                onChange={(checked) => updateField('authHeader', checked)}
+                ariaLabel="Authorization header"
+              />
+              <span className="typography-meta text-muted-foreground">Authorization: Bearer</span>
+            </label>
           </div>
         </div>
 
@@ -692,33 +625,6 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
                     tabIndex={0}
                     onClick={(event) => {
                       if (shouldIgnoreToggleRowClick(event.target)) return;
-                      updateModel(index, 'tool_call', !row.tool_call);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        updateModel(index, 'tool_call', !row.tool_call);
-                      }
-                    }}
-                  >
-                    <span data-checkbox-control="true">
-                      <Checkbox
-                        checked={row.tool_call}
-                        onChange={(checked) => updateModel(index, 'tool_call', checked)}
-                        ariaLabel={t('settings.providers.page.models.capability.toolCalling')}
-                      />
-                    </span>
-                    <span className="typography-ui-label font-normal text-foreground">
-                      {t('settings.providers.page.models.capability.toolCalling')}
-                    </span>
-                  </label>
-
-                  <label
-                    className="flex cursor-pointer items-center gap-2"
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => {
-                      if (shouldIgnoreToggleRowClick(event.target)) return;
                       updateModel(index, 'reasoning', !row.reasoning);
                     }}
                     onKeyDown={(event) => {
@@ -739,28 +645,6 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
                       {t('settings.providers.page.models.capability.reasoning')}
                     </span>
                   </label>
-
-                  {row.reasoning && (
-                    <Select
-                      value={row.reasoningEffort || 'none'}
-                      onValueChange={(value) => updateModel(index, 'reasoningEffort', value)}
-                    >
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue>
-                        {(value) =>
-                          value ? tUnsafe(`settings.providers.page.custom.reasoningEffort.${value}`) : ''
-                        }
-                      </SelectValue>
-                    </SelectTrigger>
-                      <SelectContent>
-                        {REASONING_EFFORTS.map((effort) => (
-                          <SelectItem key={effort} value={effort}>
-                            {tUnsafe(`settings.providers.page.custom.reasoningEffort.${effort}`)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
                 </div>
 
                 <div className="mt-3 flex justify-end">

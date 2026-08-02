@@ -15,7 +15,7 @@ import type { RuntimeTransport } from "./transport.js";
 interface PendingRequest {
   reject(error: unknown): void;
   resolve(value: unknown): void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | undefined;
 }
 
 export interface RuntimeSequenceGap {
@@ -96,20 +96,22 @@ export class PiRuntimeClient {
   async request<M extends RuntimeMethod>(
     method: M,
     params: RuntimeMethodParams<M>,
-    timeoutMs: number = this.#options.requestTimeoutMs ?? 120_000,
+    timeoutMs: number | null = this.#options.requestTimeoutMs ?? 120_000,
   ): Promise<RuntimeMethodResult<M>> {
     if (!this.connected) throw new Error("Pi runtime client is not connected");
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    if (timeoutMs !== null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       throw new RangeError("timeoutMs must be positive");
     }
     const id = this.#createId();
     if (!id || this.#pending.has(id)) throw new Error("Runtime request IDs must be unique");
     const envelope = createRuntimeRequest(id, method, params);
     const result = new Promise<RuntimeMethodResult<M>>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new Error(`Pi runtime request timed out: ${method}`));
-      }, timeoutMs);
+      const timer = timeoutMs === null
+        ? undefined
+        : setTimeout(() => {
+            this.#pending.delete(id);
+            reject(new Error(`Pi runtime request timed out: ${method}`));
+          }, timeoutMs);
       this.#pending.set(id, {
         reject,
         resolve: (value) => resolve(value as RuntimeMethodResult<M>),
@@ -156,7 +158,7 @@ export class PiRuntimeClient {
         this.#reportProtocolError(new Error(`Unexpected runtime response: ${envelope.id}`));
         return;
       }
-      clearTimeout(pending.timer);
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
       this.#pending.delete(envelope.id);
       if (envelope.ok) pending.resolve(envelope.result);
       else pending.reject(new PiRuntimeRequestError(envelope));
@@ -199,14 +201,14 @@ export class PiRuntimeClient {
   #rejectPending(id: string, error: unknown): void {
     const pending = this.#pending.get(id);
     if (!pending) return;
-    clearTimeout(pending.timer);
+    if (pending.timer !== undefined) clearTimeout(pending.timer);
     this.#pending.delete(id);
     pending.reject(error);
   }
 
   #failPending(error: Error): void {
     for (const pending of this.#pending.values()) {
-      clearTimeout(pending.timer);
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
       pending.reject(error);
     }
     this.#pending.clear();

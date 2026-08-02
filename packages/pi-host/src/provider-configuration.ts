@@ -48,9 +48,18 @@ interface RuntimeConfigurationState {
 }
 
 const EMPTY_CONFIG = "{\n  \"providers\": {}\n}\n";
-const LOCK_STALE_MS = 60_000;
 const LOCK_RETRY_MS = 50;
-const LOCK_TIMEOUT_MS = 10_000;
+
+function configurableDuration(name: string, fallback: number): number | undefined {
+  const configured = process.env[name];
+  if (configured === undefined || configured.trim() === "") return fallback;
+  const parsed = Number(configured);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed === 0 ? undefined : Math.floor(parsed);
+}
+
+const LOCK_STALE_MS = configurableDuration("PIARIUM_PROVIDER_CONFIG_LOCK_STALE_MS", 60_000);
+const LOCK_TIMEOUT_MS = configurableDuration("PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS", 60_000);
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -83,7 +92,7 @@ function stringRecord(value: unknown): Record<string, string> | undefined {
   if (!isObject(value)) return undefined;
   const entries = Object.entries(value).filter(
     (entry): entry is [string, string] =>
-      entry[0].length > 0 && entry[0].length <= 256 && typeof entry[1] === "string",
+      entry[0].length > 0 && typeof entry[1] === "string",
   );
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
@@ -242,6 +251,7 @@ function runtimeProviderConfig(
 
 function providerRecord(document: ConfigDocument, providerId: string): JsonObject | undefined {
   const providers = isObject(document.data.providers) ? document.data.providers : undefined;
+  if (!providers || !Object.prototype.hasOwnProperty.call(providers, providerId)) return undefined;
   const value = providers?.[providerId];
   return isObject(value) ? value : undefined;
 }
@@ -350,7 +360,7 @@ async function acquireLock(path: string): Promise<() => Promise<void>> {
       if (errorCode(error) !== "EEXIST") throw error;
       try {
         const info = await stat(lockPath);
-        if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
+        if (LOCK_STALE_MS !== undefined && Date.now() - info.mtimeMs > LOCK_STALE_MS) {
           await rm(lockPath, { force: true, recursive: true });
           continue;
         }
@@ -358,7 +368,7 @@ async function acquireLock(path: string): Promise<() => Promise<void>> {
         if (errorCode(statError) === "ENOENT") continue;
         throw statError;
       }
-      if (Date.now() - started >= LOCK_TIMEOUT_MS) {
+      if (LOCK_TIMEOUT_MS !== undefined && Date.now() - started >= LOCK_TIMEOUT_MS) {
         throw new HostError("provider_config_locked", `Timed out waiting for models configuration: ${path}`, {
           retryable: true,
         });
@@ -559,6 +569,10 @@ export class ProviderConfigurationManager {
       ...(config.models === undefined ? {} : { models: config.models }),
       ...(config.name === undefined ? {} : { name: config.name }),
     };
+    // Validate against the currently composed native Pi catalog before touching disk. This keeps
+    // partial overrides available while preventing a malformed new model from being silently saved
+    // and then skipped during the next catalog refresh.
+    runtimeProviderConfig(runtime, config.id, next);
     await updateProviderEntry(path, config.id, next);
     await this.apply(runtime, cwd);
     return this.getDetails(runtime, cwd, config.id);
@@ -601,7 +615,7 @@ export class ProviderConfigurationManager {
 
   #providerId(value: string): string {
     const normalized = value.trim();
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(normalized)) {
+    if (!normalized) {
       throw new HostError("invalid_params", "providerId is invalid");
     }
     return normalized;

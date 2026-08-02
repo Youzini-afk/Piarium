@@ -197,6 +197,11 @@ export class SessionHost {
     return this.snapshot();
   }
 
+  async openCatalogContext(cwd: string): Promise<SessionSnapshot> {
+    await this.#replaceWith(SessionManager.inMemory(cwd));
+    return this.snapshot();
+  }
+
   async open(input: {
     cwd?: string;
     sessionFile?: string;
@@ -599,12 +604,30 @@ export class SessionHost {
     return details;
   }
 
-  async discoverProviderModels(providerId: string): Promise<ProviderModelDiscoveryResult> {
+  async discoverProviderModels(
+    providerId: string,
+    config?: ProviderConfigInput,
+    requestCredential: boolean = false,
+  ): Promise<ProviderModelDiscoveryResult> {
     const runtime = this.runtime.services.modelRuntime;
     await this.#providerConfiguration.apply(runtime, this.runtime.cwd);
+    if (config && config.id !== providerId) {
+      throw new HostError(
+        "invalid_params",
+        "Provider discovery config id must match providerId",
+      );
+    }
+    const apiKey = requestCredential
+      ? await this.auth.prompt(providerId, this.session.sessionId, {
+          message: "Enter API key for model discovery",
+          type: "secret",
+        })
+      : undefined;
     return discoverProviderModels({
       configuration: this.#providerConfiguration,
+      ...(config === undefined ? {} : { config }),
       cwd: this.runtime.cwd,
+      ...(apiKey === undefined ? {} : { apiKey }),
       providerId,
       runtime,
     });

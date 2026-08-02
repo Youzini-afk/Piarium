@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import {
   discoverPiRuntimes,
   type RuntimeCandidate,
@@ -68,6 +69,10 @@ export type PiCatalogMethod =
   | "package.remove"
   | "package.update"
   | "provider.list"
+  | "provider.config.delete"
+  | "provider.config.get"
+  | "provider.config.upsert"
+  | "provider.models.discover"
   | "provider.login"
   | "provider.logout"
   | "session.list"
@@ -80,6 +85,9 @@ export class PiRuntimeBroker {
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
   #catalog: PiHostClient | undefined;
+  #catalogContextCwd: string | undefined;
+  #catalogContextQueue: Promise<void> = Promise.resolve();
+  #catalogContextSessionId: string | undefined;
   #catalogPromise: Promise<PiHostClient> | undefined;
   #disposed = false;
 
@@ -123,6 +131,28 @@ export class PiRuntimeBroker {
   ): Promise<HostMethodResult<M>> {
     const worker = await this.#getCatalog();
     return worker.request(method, params);
+  }
+
+  requestForWorkspace<M extends Exclude<PiCatalogMethod, "session.list">>(
+    cwd: string,
+    method: M,
+    params: HostMethodParams<M>,
+  ): Promise<HostMethodResult<M>> {
+    const normalizedCwd = resolve(cwd);
+    const request = this.#catalogContextQueue.then(async () => {
+      const worker = await this.#getCatalog();
+      if (this.#catalogContextCwd !== normalizedCwd) {
+        const snapshot = await worker.request("catalog.context.open", { cwd: normalizedCwd });
+        this.#catalogContextCwd = snapshot.cwd;
+        this.#catalogContextSessionId = snapshot.sessionId;
+      }
+      return worker.request(method, params);
+    });
+    this.#catalogContextQueue = request.then(
+      () => undefined,
+      () => undefined,
+    );
+    return request;
   }
 
   async listSessions(cwd?: string) {
@@ -195,7 +225,7 @@ export class PiRuntimeBroker {
     sessionId: string,
     response: ExtensionUiResponse,
   ): Promise<boolean> {
-    const result = await this.#workerForSession(sessionId).request(
+    const result = await this.#workerForInteractiveContext(sessionId).request(
       "extension.ui.respond",
       response,
     );
@@ -206,7 +236,7 @@ export class PiRuntimeBroker {
     sessionId: string,
     response: ProviderAuthResponse,
   ): Promise<boolean> {
-    const result = await this.#workerForSession(sessionId).request(
+    const result = await this.#workerForInteractiveContext(sessionId).request(
       "provider.auth.respond",
       response,
     );
@@ -220,6 +250,8 @@ export class PiRuntimeBroker {
     this.#clients.clear();
     this.#sessions.clear();
     this.#catalog = undefined;
+    this.#catalogContextCwd = undefined;
+    this.#catalogContextSessionId = undefined;
     await Promise.allSettled(clients.map((client) => client.dispose()));
     this.#listeners.clear();
   }
@@ -279,7 +311,7 @@ export class PiRuntimeBroker {
         this.#emit({ kind: "diagnostic", level, message, role, workerId: client.id });
       },
       onEvent: (envelope) => {
-        if (envelope.event === "session.snapshot") {
+        if (role === "session" && envelope.event === "session.snapshot") {
           this.#bindSession(client, envelope.data.sessionId);
         }
         this.#emit({
@@ -351,9 +383,20 @@ export class PiRuntimeBroker {
     return worker;
   }
 
+  #workerForInteractiveContext(sessionId: string): PiHostClient {
+    const worker = this.#sessions.get(sessionId);
+    if (worker) return worker;
+    if (this.#catalog && this.#catalogContextSessionId === sessionId) return this.#catalog;
+    throw new Error(`Session or workspace context is not active: ${sessionId}`);
+  }
+
   async #removeWorker(worker: PiHostClient): Promise<void> {
     this.#clients.delete(worker);
-    if (this.#catalog === worker) this.#catalog = undefined;
+    if (this.#catalog === worker) {
+      this.#catalog = undefined;
+      this.#catalogContextCwd = undefined;
+      this.#catalogContextSessionId = undefined;
+    }
     for (const [sessionId, candidate] of this.#sessions) {
       if (candidate === worker) this.#sessions.delete(sessionId);
     }
@@ -367,7 +410,11 @@ export class PiRuntimeBroker {
   ): void {
     const sessionId = client.sessionId;
     const expected = this.#disposed || client.disposing;
-    if (client === this.#catalog) this.#catalog = undefined;
+    if (client === this.#catalog) {
+      this.#catalog = undefined;
+      this.#catalogContextCwd = undefined;
+      this.#catalogContextSessionId = undefined;
+    }
     this.#clients.delete(client);
     for (const [mappedSessionId, worker] of this.#sessions) {
       if (worker === client) this.#sessions.delete(mappedSessionId);

@@ -1,55 +1,54 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldLoadAvailableProviders } from './providerAvailability';
+import type { ProviderConfigDetails } from '@piarium/protocol';
 import {
-  buildProviderSourcesFromConfig,
+  buildProviderSourcesFromDetails,
   canEditProviderFromDetails,
-  isEditableCustomProviderConfig,
-  readProviderConfigPayload,
+  editableProviderFromDetails,
 } from './providerDetailConfig';
 
-describe('ProvidersPage available provider loading', () => {
-  test('loads available providers only in add-provider mode', () => {
-    expect(shouldLoadAvailableProviders(false)).toBe(false);
-    expect(shouldLoadAvailableProviders(true)).toBe(true);
-  });
+const details = (overrides: Partial<ProviderConfigDetails> = {}): ProviderConfigDetails => ({
+  auth: { configured: true, label: 'Stored API key', source: 'stored' },
+  config: {
+    api: 'openai-completions',
+    baseUrl: 'http://localhost:11434/v1',
+    id: 'local',
+    models: [],
+  },
+  effectiveScope: 'project',
+  locations: {
+    custom: { available: false, exists: false, scope: 'custom', writable: false },
+    project: { available: true, exists: true, path: 'C:/repo/.pi/models.json', scope: 'project', writable: true },
+    user: { available: true, exists: false, path: 'C:/agent/models.json', scope: 'user', writable: true },
+  },
+  providerId: 'local',
+  ...overrides,
 });
 
-describe('provider detail config helpers', () => {
-  test('reads custom provider config from web and VS Code bridge payloads', () => {
-    const config = {
-      providerId: 'custom',
-      baseURL: 'https://api.example.com/v1',
-      models: [{ id: 'model-a' }],
-    };
-
-    expect(readProviderConfigPayload({ config })).toEqual(config);
-    expect(readProviderConfigPayload({ data: { config } })).toEqual(config);
-    expect(readProviderConfigPayload({ data: {} })).toBe(undefined);
-  });
-
-  test('treats readable custom provider config as editable details', () => {
-    const config = {
-      providerId: 'custom',
-      baseURL: 'https://api.example.com/v1',
-      scope: 'project',
-      path: 'E:\\repo\\opencode.json',
-      models: [{ id: 'model-a' }],
-    };
-
-    expect(isEditableCustomProviderConfig(config)).toBe(true);
-
-    const sources = buildProviderSourcesFromConfig(config);
-    expect(sources.project).toEqual({ exists: true, path: 'E:\\repo\\opencode.json' });
-    expect(canEditProviderFromDetails(null, sources)).toBe(true);
-  });
-
-  test('keeps edit hidden when neither source nor config is editable', () => {
-    expect(isEditableCustomProviderConfig({ baseURL: '', models: [{ id: 'model-a' }] })).toBe(false);
-    expect(canEditProviderFromDetails(null, {
+describe('Pi provider settings details', () => {
+  test('maps canonical host provenance directly into UI sources', () => {
+    expect(buildProviderSourcesFromDetails(details())).toEqual({
       auth: { exists: true },
-      user: { exists: false },
-      project: { exists: false },
-      custom: { exists: false },
-    })).toBe(false);
+      custom: { exists: false, path: null },
+      project: { exists: true, path: 'C:/repo/.pi/models.json' },
+      user: { exists: false, path: 'C:/agent/models.json' },
+    });
+  });
+
+  test('builds an editable Pi form only when host-owned config exists', () => {
+    const editable = editableProviderFromDetails(details());
+    expect(canEditProviderFromDetails(details())).toBe(true);
+    expect(editable?.api).toBe('openai-completions');
+    expect(editable?.baseURL).toBe('http://localhost:11434/v1');
+    expect(editable?.id).toBe('local');
+    expect(editable?.scope).toBe('project');
+
+    const full = details();
+    const authOnly: ProviderConfigDetails = {
+      auth: full.auth,
+      locations: full.locations,
+      providerId: full.providerId,
+    };
+    expect(canEditProviderFromDetails(authOnly)).toBe(false);
+    expect(editableProviderFromDetails(authOnly)).toBeNull();
   });
 });

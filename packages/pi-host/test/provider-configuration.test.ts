@@ -124,6 +124,36 @@ describe("ProviderConfigurationManager", () => {
       assert.equal(partial.config?.api, undefined);
       assert.equal(partial.config?.models, undefined);
       assert.equal(runtime.getModel("partial", "base-model")?.baseUrl, "http://127.0.0.1:11434/v1");
+
+      const longProviderId = `provider-${"x".repeat(512)}`;
+      const longIdDetails = await manager.upsert(
+        runtime,
+        cwd,
+        "project",
+        config(longProviderId, "long-id-model"),
+      );
+      assert.equal(longIdDetails.providerId, longProviderId);
+
+      const unrestrictedProviderId = "本地 provider/@experimental";
+      const unrestrictedIdDetails = await manager.upsert(
+        runtime,
+        cwd,
+        "project",
+        config(unrestrictedProviderId, "unrestricted-id-model"),
+      );
+      assert.equal(unrestrictedIdDetails.providerId, unrestrictedProviderId);
+
+      await assert.rejects(
+        manager.upsert(runtime, cwd, "project", {
+          id: "invalid-model-definition",
+          models: [{ id: "missing-api-and-base-url" }],
+        }),
+        /does not define an API/,
+      );
+      assert.equal(
+        (await manager.getDetails(runtime, cwd, "invalid-model-definition")).locations.project.exists,
+        false,
+      );
     } finally {
       await rm(root, { force: true, recursive: true });
     }

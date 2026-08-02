@@ -249,6 +249,8 @@ export class HostController {
       case "host.shutdown":
         readBoolean(params, "force", { optional: true });
         return { accepted: true };
+      case "catalog.context.open":
+        return this.#sessionHost.openCatalogContext(readString(params, "cwd"));
       case "session.create":
         return this.#sessionHost.create(readString(params, "cwd"), optionalString(params, "name"));
       case "session.open": {
@@ -344,7 +346,11 @@ export class HostController {
           readProviderDeleteScope(readString(params, "scope")),
         );
       case "provider.models.discover":
-        return this.#sessionHost.discoverProviderModels(readString(params, "providerId"));
+        return this.#sessionHost.discoverProviderModels(
+          readString(params, "providerId"),
+          params.config === undefined ? undefined : readProviderConfig(params.config),
+          readBoolean(params, "requestCredential", { optional: true }) ?? false,
+        );
       case "provider.auth.respond": {
         const cancelled = readBoolean(params, "cancelled", { optional: true });
         if (params.value !== undefined && typeof params.value !== "string") {

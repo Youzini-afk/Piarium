@@ -96,11 +96,22 @@ provider metadata. Existing literal/env/command keys in native configuration lay
 and usable but are redacted from the surface protocol.
 
 Remote model discovery is a separate privileged operation. It uses the provider's host-owned auth
-and never accepts a key in ordinary request parameters. HTTP, HTTPS, localhost, LAN, and URL basic
-authentication remain available for explicitly configured providers. Redirects are followed up to
-five hops; authentication headers are removed on cross-origin redirects. A 60-second timeout and
-64 MiB response ceiling protect the worker from a permanently stalled or unbounded endpoint without
-imposing a model-count limit. Google keys are sent in `x-goog-api-key`, not in the URL.
+when present and also supports anonymous endpoints. HTTP, HTTPS, localhost, LAN, and URL basic
+authentication remain available for explicitly configured providers. Authentication headers are
+removed on cross-origin redirects. Resource defaults are intentionally generous (20 redirects,
+five minutes, and 256 MiB), impose no model-count limit, and owners can raise or disable them with
+`PIARIUM_PROVIDER_DISCOVERY_MAX_REDIRECTS`, `PIARIUM_PROVIDER_DISCOVERY_TIMEOUT_MS`, and
+`PIARIUM_PROVIDER_DISCOVERY_MAX_BYTES` (`0` disables the corresponding ceiling). Exact redirect
+loops are still rejected. Google keys are sent in `x-goog-api-key`, not in the URL.
+
+The settings editor may send a credential-free draft provider definition for discovery without
+writing it to `models.json`. If the draft includes a one-shot API key, the key travels only through
+the typed auth-prompt response and is neither embedded in the discovery request nor persisted.
+
+Concurrent provider-config writes use an atomic lock. The default stale-lock and wait windows are
+60 seconds; `PIARIUM_PROVIDER_CONFIG_LOCK_STALE_MS` and
+`PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS` can raise them, while `0` disables the corresponding
+automatic cutoff.
 
 ### 4.3 Session workers
 

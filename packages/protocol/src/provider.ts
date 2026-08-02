@@ -219,12 +219,6 @@ function parseModel(value: unknown, index: number): ProviderModelConfigInput {
 export function parseProviderConfigInput(value: unknown): ProviderConfigInput {
   const input = recordAt(value, "config");
   const id = requiredString(input.id, "config.id");
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(id)) {
-    throw new ProviderConfigValidationError(
-      "config.id",
-      "must start with a letter or number and contain only letters, numbers, dots, underscores, or hyphens",
-    );
-  }
   const name = optionalString(input.name, "config.name");
   const rawBaseUrl = optionalString(input.baseUrl, "config.baseUrl");
   let baseUrl: string | undefined;

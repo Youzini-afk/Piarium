@@ -27,6 +27,10 @@ import type {
 import type { SessionEntriesResult } from "./session.js";
 
 export interface HostMethodMap {
+  "catalog.context.open": {
+    params: { cwd: string };
+    result: SessionSnapshot;
+  };
   "agent.abort": {
     params: { sessionId: string };
     result: { aborted: boolean };
@@ -92,7 +96,11 @@ export interface HostMethodMap {
     result: ProviderConfigDetails;
   };
   "provider.models.discover": {
-    params: { providerId: string };
+    params: {
+      config?: ProviderConfigInput;
+      providerId: string;
+      requestCredential?: boolean;
+    };
     result: ProviderModelDiscoveryResult;
   };
   "provider.auth.respond": {

@@ -119,4 +119,23 @@ describe("PiRuntimeClient", () => {
 
     await assert.rejects(request, /offline/);
   });
+
+  it("supports interactive requests without a client-side timeout", async () => {
+    const transport = new MemoryTransport();
+    const client = new PiRuntimeClient({ createId: () => "interactive", transport });
+    await client.connect();
+    const request = client.request("provider.login", {
+      cwd: "C:/workspace",
+      providerId: "example",
+      type: "oauth",
+    }, null);
+    transport.receive(
+      encodeRuntimeEnvelope(
+        createRuntimeSuccessResponse<"provider.login">("interactive", { authenticated: true }),
+      ),
+    );
+
+    assert.deepEqual(await request, { authenticated: true });
+    await client.close();
+  });
 });

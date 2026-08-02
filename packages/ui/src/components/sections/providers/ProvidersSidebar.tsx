@@ -3,36 +3,15 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Button } from '@/components/ui/button';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiProviderStore, type PiProviderView } from '@/stores/usePiProviderStore';
 import { RiAddLine, RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
-import { opencodeClient } from '@/lib/opencode/client';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 const ADD_PROVIDER_ID = '__add_provider__';
-
-interface ProviderSourceInfo {
-  exists: boolean;
-  path?: string | null;
-}
-
-interface ProviderSources {
-  auth: ProviderSourceInfo;
-  user: ProviderSourceInfo;
-  project: ProviderSourceInfo;
-  custom?: ProviderSourceInfo;
-}
-
-const getCurrentDirectory = (): string | null => {
-  const dir = opencodeClient.getDirectory();
-  if (typeof dir === 'string' && dir.trim().length > 0) {
-    return dir.trim();
-  }
-  return null;
-};
 
 interface ProvidersSidebarProps {
   onItemSelect?: () => void;
@@ -40,74 +19,27 @@ interface ProvidersSidebarProps {
 
 export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  const providers = usePiProviderStore((state) => state.providers);
+  const loadProviders = usePiProviderStore((state) => state.load);
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
-  const activeProjectId = useProjectsStore((s) => s.activeProjectId);
-  const [sourcesByProvider, setSourcesByProvider] = React.useState<Record<string, ProviderSources>>({});
-  const directory = React.useMemo(() => {
-    // tie refresh to active project changes (directory is stored in the client)
-    void activeProjectId;
-    return getCurrentDirectory();
-  }, [activeProjectId]);
 
   React.useEffect(() => {
-    if (providers.length === 0) {
-      setSourcesByProvider({});
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadAllSources = async () => {
-      const tasks = providers.map(async (provider) => {
-        try {
-          const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          // OpenChamber-only metadata endpoint: the SDK exposes provider data but
-          // not local auth/source-file provenance used by this settings sidebar.
-          const response = await runtimeFetch(`/api/provider/${encodeURIComponent(provider.id)}/source${query}`, {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-          });
-          if (!response.ok) {
-            return;
-          }
-          const payload = await response.json().catch(() => null);
-          const sources = (payload?.sources ?? payload?.data?.sources) as ProviderSources | undefined;
-          if (!sources) {
-            return;
-          }
-          if (cancelled) {
-            return;
-          }
-          setSourcesByProvider((prev) => ({
-            ...prev,
-            [provider.id]: sources,
-          }));
-        } catch {
-          // ignore
-        }
-      });
-
-      await Promise.all(tasks);
-    };
-
-    void loadAllSources();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [directory, providers]);
+    void loadProviders(currentDirectory).catch((error: unknown) => {
+      console.error('Failed to load Pi providers:', error);
+    });
+  }, [currentDirectory, loadProviders]);
 
   const bgClass = 'bg-background';
 
   const projectProviders = React.useMemo(() => {
-    return providers.filter((p) => Boolean(sourcesByProvider[p.id]?.project?.exists));
-  }, [providers, sourcesByProvider]);
+    return providers.filter((provider) => provider.details?.locations.project.exists === true);
+  }, [providers]);
 
   const userProviders = React.useMemo(() => {
-    return providers.filter((p) => !sourcesByProvider[p.id]?.project?.exists);
-  }, [providers, sourcesByProvider]);
+    return providers.filter((provider) => provider.details?.locations.project.exists !== true);
+  }, [providers]);
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
@@ -185,11 +117,11 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
 };
 
 const ProviderListItem: React.FC<{
-  provider: { id: string; name?: string; models?: unknown[] };
+  provider: PiProviderView;
   selectedProviderId: string;
   onSelect: () => void;
 }> = ({ provider, selectedProviderId, onSelect }) => {
-  const modelCount = Array.isArray(provider.models) ? provider.models.length : 0;
+  const modelCount = provider.models.length;
   const isSelected = provider.id === selectedProviderId;
 
   return (
