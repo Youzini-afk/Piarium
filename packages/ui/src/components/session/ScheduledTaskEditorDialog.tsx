@@ -1573,6 +1573,7 @@ export function ScheduledTaskEditorDialog(props: {
               {showCommandAutocomplete ? (
                 <CommandAutocomplete
                   ref={commandRef}
+                  cwd={projectDirectory}
                   searchQuery={commandQuery}
                   onCommandSelect={handleCommandSelect}
                   onClose={() => setShowCommandAutocomplete(false)}

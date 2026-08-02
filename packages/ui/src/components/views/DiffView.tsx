@@ -40,7 +40,6 @@ import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessages } from '@/sync/sync-context';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
 
@@ -76,17 +75,7 @@ type DiffData = {
     fileDiff?: FileDiffMetadata;
     contextMode?: DiffContextMode;
 };
-type DiffScope = 'all' | 'staged' | 'working' | 'turn';
-
-type TurnSnapshotDiff = {
-    file?: string;
-    status?: string;
-    before?: string;
-    after?: string;
-    patch?: string;
-    additions?: number;
-    deletions?: number;
-};
+type DiffScope = 'all' | 'staged' | 'working';
 
 const BinaryDiffPlaceholder = React.memo(() => {
     const { t } = useI18n();
@@ -176,20 +165,6 @@ const getFirstChangedModifiedLine = (original: string, modified: string): number
 const isBinaryPatch = (patch: string): boolean =>
     /^Binary files .+ differ$/m.test(patch) || /^GIT binary patch$/m.test(patch);
 
-const listTurnDiffs = (value: unknown): TurnSnapshotDiff[] => {
-    if (!Array.isArray(value)) return [];
-    return value.filter((diff): diff is TurnSnapshotDiff => {
-        if (!diff || typeof diff !== 'object') return false;
-        return typeof (diff as TurnSnapshotDiff).file === 'string';
-    });
-};
-
-const statusToGitCode = (status?: string): string => {
-    if (status === 'added') return 'A';
-    if (status === 'deleted') return 'D';
-    return 'M';
-};
-
 const createTextDiffDataFromPatch = (filePath: string, patch: string, contextMode: DiffContextMode): DiffData => {
     if (isBinaryPatch(patch)) {
         return { original: '', modified: '', isBinary: true, patch, contextMode };
@@ -227,28 +202,24 @@ const formatDiffTotals = (
 };
 
 interface ChangeScopeSelectorProps {
-    scope: Extract<DiffScope, 'working' | 'staged' | 'turn'>;
+    scope: Extract<DiffScope, 'working' | 'staged'>;
     workingCount: number;
     stagedCount: number;
-    turnCount: number;
-    onScopeChange?: (scope: Extract<DiffScope, 'working' | 'staged' | 'turn'>) => void;
+    onScopeChange?: (scope: Extract<DiffScope, 'working' | 'staged'>) => void;
 }
 
 const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
     scope,
     workingCount,
     stagedCount,
-    turnCount,
     onScopeChange,
 }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
-    const currentCount = scope === 'staged' ? stagedCount : scope === 'turn' ? turnCount : workingCount;
+    const currentCount = scope === 'staged' ? stagedCount : workingCount;
     const currentLabel = scope === 'staged'
         ? t('diffView.scope.staged')
-        : scope === 'turn'
-            ? t('diffView.scope.lastTurn')
-            : t('diffView.scope.changed');
+        : t('diffView.scope.changed');
 
     return (
         <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -268,7 +239,7 @@ const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                 <DropdownMenuRadioGroup
                     value={scope}
                     onValueChange={(value) => {
-                        if (value === 'working' || value === 'staged' || value === 'turn') {
+                        if (value === 'working' || value === 'staged') {
                             onScopeChange?.(value);
                             setOpen(false);
                         }
@@ -284,12 +255,6 @@ const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                             <span>{t('diffView.scope.staged')}</span>
                             <span className="typography-meta text-muted-foreground">{stagedCount}</span>
-                        </span>
-                    </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="turn">
-                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                            <span>{t('diffView.scope.lastTurn')}</span>
-                            <span className="typography-meta text-muted-foreground">{turnCount}</span>
                         </span>
                     </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
@@ -942,7 +907,7 @@ interface DiffViewProps {
     pinSelectedFileHeaderToTopOnNavigate?: boolean;
     showOpenInEditorAction?: boolean;
     diffScope?: DiffScope;
-    onDiffScopeChange?: (scope: Extract<DiffScope, 'working' | 'staged' | 'turn'>) => void;
+    onDiffScopeChange?: (scope: Extract<DiffScope, 'working' | 'staged'>) => void;
     targetFilePath?: string | null;
     /** Render diff content flush with the container edges (no outer padding). */
     flushContent?: boolean;
@@ -996,13 +961,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const setDiffWrapLines = useUIStore((state) => state.setDiffWrapLines);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const sessionMessages = useSessionMessages(currentSessionId ?? '', effectiveDirectory ?? undefined);
     const diffWrapLines = diffWrapLinesStore;
     const forcedStaged = activeDiffScope === 'staged' ? true : activeDiffScope === 'working' ? false : null;
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
 
     const isMobileLayout = isMobile || screenWidth <= 768;
-    const showReviewAction = Boolean(currentSessionId) && activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
+    const showReviewAction = Boolean(currentSessionId) && !isMobileLayout && !isVSCodeRuntime();
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
@@ -1033,47 +997,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         });
     }, []);
 
-    const lastTurnDiffs = React.useMemo(() => {
-        for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
-            const message = sessionMessages[index] as { role?: string; summary?: { diffs?: unknown } };
-            if (message.role !== 'user') continue;
-            return listTurnDiffs(message.summary?.diffs);
-        }
-        return [];
-    }, [sessionMessages]);
-
-    const lastTurnDiffData = React.useMemo(() => {
-        const map = new Map<string, DiffData>();
-        for (const diff of lastTurnDiffs) {
-            if (!diff.file) continue;
-            if (typeof diff.patch === 'string') {
-                map.set(diff.file, createTextDiffDataFromPatch(diff.file, diff.patch, 'patch'));
-                continue;
-            }
-            map.set(diff.file, {
-                original: diff.before ?? '',
-                modified: diff.after ?? '',
-                contextMode: 'full',
-            });
-        }
-        return map;
-    }, [lastTurnDiffs]);
-
     const changedFiles: FileEntry[] = React.useMemo(() => {
-        if (activeDiffScope === 'turn') {
-            return lastTurnDiffs
-                .map((diff) => ({
-                    path: diff.file ?? '',
-                    index: '',
-                    working_dir: statusToGitCode(diff.status),
-                    insertions: diff.additions ?? 0,
-                    deletions: diff.deletions ?? 0,
-                    isNew: diff.status === 'added',
-                }))
-                .filter((file) => file.path)
-                .sort((a, b) => a.path.localeCompare(b.path));
-        }
-
         if (!status?.files) return [];
         const diffStats = status.diffStats ?? {};
         const includeFile = activeDiffScope === 'staged'
@@ -1091,7 +1015,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 isNew: isNewStatusFile(file),
             }))
             .sort((a, b) => a.path.localeCompare(b.path));
-    }, [activeDiffScope, lastTurnDiffs, status]);
+    }, [activeDiffScope, status]);
 
     const workingFileCount = React.useMemo(() => {
         if (!status?.files) return 0;
@@ -1102,8 +1026,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (!status?.files) return 0;
         return status.files.filter(isStagedStatusFile).length;
     }, [status]);
-
-    const turnFileCount = lastTurnDiffs.length;
 
     const changedFilePathsKey = React.useMemo(
         () => changedFiles.map((file) => file.path).join('\0'),
@@ -1603,14 +1525,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                     onSelect={handleSelectFile}
                                     onExpandedChange={handleStackedEntryExpandedChange}
                                     registerSectionRef={registerSectionRef}
-                                    showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn'}
+                                    showOpenInEditorAction={showOpenInEditorAction}
                                     isOpeningInEditor={openingEditorFilePath === file.path}
                                     onOpenInEditor={(filePath, diffData) => {
                                         void openFileInEditorAtChange(filePath, diffData);
                                     }}
                                     staged={getFileStaged(file.path)}
                                     loadFullFiles={loadFullFiles}
-                                    initialDiffData={activeDiffScope === 'turn' ? lastTurnDiffData.get(file.path) ?? null : null}
                                 />
                             ))}
                         </div>
@@ -1630,7 +1551,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             );
         }
 
-        if (activeDiffScope !== 'turn' && isLoadingStatus && !status) {
+        if (isLoadingStatus && !status) {
             return (
                 <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Icon name="loader-4" className="size-4 animate-spin" />
@@ -1639,7 +1560,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             );
         }
 
-        if (activeDiffScope !== 'turn' && isGitRepo === false) {
+        if (isGitRepo === false) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                     {t('diffView.state.notGitRepository')}
@@ -1650,7 +1571,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (changedFiles.length === 0) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    {activeDiffScope === 'turn' ? t('diffView.state.noLastTurnChanges') : t('diffView.state.cleanWorkingTree')}
+                    {t('diffView.state.cleanWorkingTree')}
                 </div>
             );
         }
@@ -1662,12 +1583,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
         <div className="flex h-full flex-col overflow-hidden bg-background">
             <div className="@container/diff-toolbar flex min-w-0 items-center gap-2 px-3 py-2 bg-background">
                 {!isMobile && (
-                    activeDiffScope === 'working' || activeDiffScope === 'staged' || activeDiffScope === 'turn' ? (
+                    activeDiffScope === 'working' || activeDiffScope === 'staged' ? (
                         <ChangeScopeSelector
                             scope={activeDiffScope}
                             workingCount={workingFileCount}
                             stagedCount={stagedFileCount}
-                            turnCount={turnFileCount}
                             onScopeChange={(scope) => {
                                 setActiveDiffScope(scope);
                                 onDiffScopeChange?.(scope);

@@ -77,6 +77,10 @@ test("broker owns catalog and per-session Pi workers", async () => {
     );
     assert.equal(workspaceProvider.effectiveScope, "project");
     assert.ok(
+      (await dispatchRuntimeRequest(broker, "command.list", { cwd: workspace }))
+        .some((command) => command.name === "broker-seed"),
+    );
+    assert.ok(
       (await dispatchRuntimeRequest(broker, "provider.list", { cwd: workspace })).some(
         (provider) => provider.id === "workspace-provider",
       ),

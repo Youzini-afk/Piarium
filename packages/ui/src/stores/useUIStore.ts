@@ -14,7 +14,7 @@ import { isWindowsArm64 } from '@/lib/platform';
 import type { RecoveryPreference } from '@piarium/protocol';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
-export type PendingDiffScope = 'working' | 'staged' | 'turn';
+export type PendingDiffScope = 'working' | 'staged';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
@@ -211,7 +211,7 @@ const normalizeContextTabLabel = (value: string | null | undefined): string | nu
 };
 
 const normalizePendingDiffScope = (value: unknown): PendingDiffScope | null => {
-  return value === 'working' || value === 'staged' || value === 'turn' ? value : null;
+  return value === 'working' || value === 'staged' ? value : null;
 };
 
 const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath: string | null): string => {

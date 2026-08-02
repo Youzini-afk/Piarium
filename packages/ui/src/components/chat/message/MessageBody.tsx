@@ -131,11 +131,11 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
 
     const openLastTurnDiff = React.useCallback((file: string) => {
         if (!isMobile && effectiveDirectory) {
-            openContextDiff(effectiveDirectory, file, false, 'turn');
+            openContextDiff(effectiveDirectory, file, false, 'working');
             return;
         }
 
-        navigateToDiff(file, false, 'turn');
+        navigateToDiff(file, false, 'working');
     }, [effectiveDirectory, isMobile, navigateToDiff, openContextDiff]);
 
     return (

@@ -1,7 +1,6 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSession } from '@/sync/sync-context';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 
 export interface ProjectActionsContext {
@@ -18,7 +17,7 @@ const normalize = (value: string): string => {
 /**
  * Resolves the active project ref + working directory used by
  * {@link ProjectActionsButton}. Directory priority mirrors the header:
- * worktree → session → draft → project path. A sticky ref keeps the last
+ * current Pi session → project path. A sticky ref keeps the last
  * good context so the actions button doesn't flicker during session switches.
  */
 export function useProjectActionsContext(): ProjectActionsContext | null {
@@ -29,30 +28,18 @@ export function useProjectActionsContext(): ProjectActionsContext | null {
     return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
   });
 
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSession = useSession(currentSessionId ?? null);
-
-  const worktreePath = useSessionUIStore((state) => {
-    if (!currentSessionId) return '';
-    return state.worktreeMetadata.get(currentSessionId)?.path ?? '';
+  const sessionDirectory = usePiSessionStore((state) => {
+    const sessionId = state.currentSessionId;
+    if (!sessionId) return '';
+    return normalize(
+      state.records[sessionId]?.snapshot?.cwd
+      ?? state.summaries.find((summary) => summary.id === sessionId)?.cwd
+      ?? '',
+    );
   });
-  const draftDirectory = useSessionUIStore((state) => {
-    if (!state.newSessionDraft?.open) {
-      return '';
-    }
-    return normalize(state.newSessionDraft.bootstrapPendingDirectory ?? state.newSessionDraft.directoryOverride ?? '');
-  });
-
-  const worktreeDirectory = React.useMemo(() => normalize(worktreePath || ''), [worktreePath]);
-  const sessionDirectory = React.useMemo(() => {
-    const raw = typeof currentSession?.directory === 'string' ? currentSession.directory : '';
-    return normalize(raw || '');
-  }, [currentSession?.directory]);
-
-  const openDirectory = worktreeDirectory || sessionDirectory || draftDirectory;
   const actionDirectory = React.useMemo(
-    () => normalize(openDirectory || activeProject?.path || ''),
-    [activeProject?.path, openDirectory],
+    () => normalize(sessionDirectory || activeProject?.path || ''),
+    [activeProject?.path, sessionDirectory],
   );
   const activeProjectRef = React.useMemo<ProjectRef | null>(() => {
     if (!activeProject) {

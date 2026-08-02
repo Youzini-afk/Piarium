@@ -171,6 +171,26 @@ export class PiRuntimeBroker {
     return request;
   }
 
+  listCommandsForWorkspace(cwd: string): Promise<HostMethodResult<"command.list">> {
+    const normalizedCwd = resolve(cwd);
+    const request = this.#catalogContextQueue.then(async () => {
+      const worker = await this.#getCatalog();
+      if (this.#catalogContextCwd !== normalizedCwd) {
+        const snapshot = await worker.request("catalog.context.open", { cwd: normalizedCwd });
+        this.#catalogContextCwd = snapshot.cwd;
+        this.#catalogContextSessionId = snapshot.sessionId;
+      }
+      const sessionId = this.#catalogContextSessionId;
+      if (!sessionId) throw new PiRuntimeBrokerError("catalog_context_missing", "Pi catalog context is unavailable");
+      return worker.request("command.list", { sessionId });
+    });
+    this.#catalogContextQueue = request.then(
+      () => undefined,
+      () => undefined,
+    );
+    return request;
+  }
+
   async listSessions(cwd?: string): Promise<SessionSummary[]> {
     const worker = await this.#getCatalog();
     const catalogSummaries = await worker.request(

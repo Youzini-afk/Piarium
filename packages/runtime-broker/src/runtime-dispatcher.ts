@@ -348,8 +348,10 @@ async function dispatchRuntimeRequestUnchecked(
     }
 
     case "command.list": {
-      const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "command.list", { sessionId });
+      const target = requireRuntimeContext(input);
+      return "sessionId" in target
+        ? broker.requestForSession(target.sessionId, "command.list", { sessionId: target.sessionId })
+        : broker.listCommandsForWorkspace(target.cwd);
     }
     case "command.execute": {
       const sessionId = requireString(input, "sessionId");

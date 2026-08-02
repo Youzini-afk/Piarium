@@ -1,16 +1,22 @@
 import React from 'react';
+import type { SessionSummary } from '@piarium/protocol';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Icon } from "@/components/icon/Icon";
-import type { Session } from '@opencode-ai/sdk/v2';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessions } from '@/sync/sync-context';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import {
@@ -19,8 +25,8 @@ import {
   saveWorktreeSetupCommands,
   saveWorktreeSetupWaitEnabled,
 } from '@/lib/openchamberConfig';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { listProjectWorktrees, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
+import { collectPiWorktreeSessions } from '@/lib/pi-runtime/worktreeSessions';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { formatPathForDisplay, cn } from '@/lib/utils';
 import {
@@ -49,8 +55,8 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   const projectPath = projectRefProp?.path ?? activeProject?.path ?? null;
 
-  const getWorktreeMetadata = useSessionUIStore((s) => s.getWorktreeMetadata);
-  const sessions = useSessions();
+  const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
+  const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
@@ -60,6 +66,13 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
   const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
   const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
+  const [deleteTarget, setDeleteTarget] = React.useState<{
+    sessions: SessionSummary[];
+    worktree: WorktreeMetadata;
+  } | null>(null);
+  const [deleteLocalBranch, setDeleteLocalBranch] = React.useState(false);
+  const [deleteRemoteBranch, setDeleteRemoteBranch] = React.useState(false);
+  const [deletePending, setDeletePending] = React.useState(false);
   const isSavingCommandsRef = React.useRef(false);
 
   const projectRef = React.useMemo(() => {
@@ -266,70 +279,49 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     }
   }, [projectRef]);
 
-  const handleDeleteWorktree = React.useCallback((worktree: WorktreeMetadata) => {
-    const normalize = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '');
-    const normalizedWorktreePath = normalize(worktree.path);
-
-    const directSessions = sessions.filter((session) => {
-      const metadata = getWorktreeMetadata(session.id);
-      if (metadata?.path && normalize(metadata.path) === normalizedWorktreePath) {
-        return true;
-      }
-
-      const sessionDir = (session as { directory?: string }).directory;
-      if (sessionDir) {
-        const normalizedSessionDir = normalize(sessionDir);
-        if (normalizedSessionDir === normalizedWorktreePath) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-
-    const directSessionIds = new Set(directSessions.map((s) => s.id));
-
-    const allKnownSessions = [
-      ...useGlobalSessionsStore.getState().activeSessions,
-      ...useGlobalSessionsStore.getState().archivedSessions,
-    ];
-
-    const findSubsessions = (parentIds: Set<string>): Session[] => {
-      const subsessions = allKnownSessions.filter((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
-        return parentID && parentIds.has(parentID);
+  const handleDeleteWorktree = React.useCallback(async (worktree: WorktreeMetadata) => {
+    try {
+      const summaries = await loadCatalog();
+      setDeleteTarget({
+        sessions: collectPiWorktreeSessions(summaries, worktree.path),
+        worktree,
       });
-      if (subsessions.length === 0) {
-        return [];
-      }
-      const subsessionIds = new Set(subsessions.map((s) => s.id));
-      return [...subsessions, ...findSubsessions(subsessionIds)];
-    };
-
-    const allSubsessions = findSubsessions(directSessionIds);
-
-    const seenIds = new Set<string>();
-    const allSessions = [...directSessions, ...allSubsessions].filter((session) => {
-      if (seenIds.has(session.id)) {
-        return false;
-      }
-      seenIds.add(session.id);
-      return true;
-    });
-
-    sessionEvents.requestDelete({
-      sessions: allSessions,
-      mode: 'worktree',
-      worktree,
-    });
-  }, [sessions, getWorktreeMetadata]);
-
-  const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);
-  React.useEffect(() => {
-    if (isGitRepoLocal && projectPath) {
-      refreshWorktrees();
+      setDeleteLocalBranch(false);
+      setDeleteRemoteBranch(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [sessionsKey, isGitRepoLocal, projectPath, refreshWorktrees]);
+  }, [loadCatalog]);
+
+  const confirmDeleteWorktree = React.useCallback(async () => {
+    if (!deleteTarget || !projectRef) return;
+    setDeletePending(true);
+    try {
+      const sessionsToArchive = deleteTarget.sessions.filter((session) => session.archivedAt === undefined);
+      const archived = await Promise.allSettled(
+        sessionsToArchive.map((session) => archiveSession(session.id)),
+      );
+      if (archived.some((result) => result.status === 'rejected')) {
+        toast.error(t('sessions.sidebar.session.archive.error'));
+        return;
+      }
+      await removeProjectWorktree(projectRef, deleteTarget.worktree, {
+        deleteLocalBranch,
+        deleteRemoteBranch,
+      });
+      await refreshWorktrees();
+      toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle'), {
+        description: deleteRemoteBranch
+          ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
+          : t('sessions.sidebar.sessionDialogs.worktree.removed'),
+      });
+      setDeleteTarget(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletePending(false);
+    }
+  }, [archiveSession, deleteLocalBranch, deleteRemoteBranch, deleteTarget, projectRef, refreshWorktrees, t]);
 
   const setupTooltip = (
     <SettingsInfoHint>
@@ -468,7 +460,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleDeleteWorktree(worktree)}
+                  onClick={() => void handleDeleteWorktree(worktree)}
                   className={cn(
                     'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
                     alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -482,6 +474,65 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
           </div>
         )}
       </ProjectSettingsSubsection>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open && !deletePending) setDeleteTarget(null); }}
+      >
+        <DialogContent showCloseButton={false} className="max-w-md gap-5">
+          <DialogHeader>
+            <DialogTitle>{t('mobile.projectEdit.deleteWorktreeTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('mobile.projectEdit.deleteWorktreeConfirm', {
+                name: deleteTarget?.worktree.label || deleteTarget?.worktree.branch || deleteTarget?.worktree.path || '',
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteTarget ? (
+            <div className="space-y-3">
+              <p className="break-all typography-micro text-muted-foreground">
+                {formatPathForDisplay(deleteTarget.worktree.path, homeDirectory)}
+              </p>
+              {deleteTarget.worktree.status?.isDirty ? (
+                <p className="typography-meta text-status-warning">
+                  {t('mobile.projectEdit.deleteWorktreeDirty')}
+                </p>
+              ) : null}
+              {deleteTarget.sessions.length > 0 ? (
+                <p className="typography-meta text-muted-foreground">
+                  {t('mobile.projectEdit.deleteWorktreeArchiveNote', { count: deleteTarget.sessions.length })}
+                </p>
+              ) : null}
+              <label className="flex cursor-pointer items-center gap-2 typography-meta text-foreground">
+                <Checkbox
+                  checked={deleteLocalBranch}
+                  onChange={setDeleteLocalBranch}
+                  ariaLabel={t('sessions.sidebar.sessionDialogs.actions.deleteLocalBranch')}
+                />
+                {t('sessions.sidebar.sessionDialogs.actions.deleteLocalBranch')}
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 typography-meta text-foreground">
+                <Checkbox
+                  checked={deleteRemoteBranch}
+                  onChange={setDeleteRemoteBranch}
+                  ariaLabel={t('sessions.sidebar.sessionDialogs.actions.deleteRemoteBranch')}
+                />
+                {t('sessions.sidebar.sessionDialogs.actions.deleteRemoteBranch')}
+              </label>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deletePending}>
+              {t('sessions.sidebar.dialogs.cancel')}
+            </Button>
+            <Button variant="destructive" onClick={() => void confirmDeleteWorktree()} disabled={deletePending}>
+              {deletePending
+                ? t('sessions.sidebar.sessionDialogs.actions.deleting')
+                : t('mobile.projectEdit.deleteWorktreeConfirmButton')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

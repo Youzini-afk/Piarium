@@ -20,7 +20,6 @@ type DirectRuntimeMethod =
   | "agent.prompt"
   | "agent.steer"
   | "command.execute"
-  | "command.list"
   | "recovery.checkpoint.create"
   | "recovery.navigate"
   | "recovery.repair"
@@ -88,6 +87,10 @@ type SessionScopedMethodMap = {
  */
 export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "session.rename"> &
   SessionScopedMethodMap & {
+    "command.list": {
+      params: RuntimeContextTarget;
+      result: HostMethodMap["command.list"]["result"];
+    };
     "extension.ui.respond": {
       params: { response: ExtensionUiResponse; sessionId: string };
       result: HostMethodMap["extension.ui.respond"]["result"];

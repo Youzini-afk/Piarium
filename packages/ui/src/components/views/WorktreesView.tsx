@@ -1,10 +1,12 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
+import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 
 // Full-page worktree management surface for a single project, opened from the
 // project menu in the sidebar. Renders only the worktree list (setup commands
@@ -12,9 +14,24 @@ import { WorktreeSectionContent } from '@/components/sections/openchamber/Worktr
 export function WorktreesView(): React.ReactNode {
   const { t } = useI18n();
   const projectId = useUIStore((state) => state.worktreesPageProjectId);
-  const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const project = useProjectsStore((state) => state.projects.find((entry) => entry.id === projectId) ?? null);
+  const [creating, setCreating] = React.useState(false);
+  const [refreshKey, setRefreshKey] = React.useState(0);
+
+  const createWorktree = React.useCallback(async () => {
+    if (!project) return;
+    setActiveProjectIdOnly(project.id);
+    setCreating(true);
+    try {
+      await createPiWorktreeSession();
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCreating(false);
+    }
+  }, [project, setActiveProjectIdOnly]);
 
   if (!projectId || !project) return null;
 
@@ -25,16 +42,14 @@ export function WorktreesView(): React.ReactNode {
           <div className="flex items-center">
             <Button
               size="sm"
-              onClick={() => {
-                setActiveProjectIdOnly(project.id);
-                setNewWorktreeDialogOpen(true);
-              }}
+              disabled={creating}
+              onClick={() => void createWorktree()}
             >
-              <Icon name="node-tree" className="mr-1 h-3.5 w-3.5" />
+              <Icon name={creating ? 'loader-4' : 'node-tree'} className={`mr-1 h-3.5 w-3.5 ${creating ? 'animate-spin' : ''}`} />
               {t('sessions.sidebar.project.actions.newWorktree')}
             </Button>
           </div>
-          <WorktreeSectionContent projectRef={{ id: project.id, path: project.path }} sections="list-only" />
+          <WorktreeSectionContent key={refreshKey} projectRef={{ id: project.id, path: project.path }} sections="list-only" />
         </div>
       </div>
     </div>

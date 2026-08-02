@@ -56,12 +56,12 @@ export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> =
         const store = useUIStore.getState();
         const relativePath = toRelativePath(file.path, currentDirectory);
         if (!store.isMobile) {
-            store.openContextDiff(currentDirectory, relativePath, false, 'turn');
+            store.openContextDiff(currentDirectory, relativePath, false, 'working');
             setIsExpanded(false);
             return;
         }
 
-        store.navigateToDiff(relativePath, false, 'turn');
+        store.navigateToDiff(relativePath, false, 'working');
         setIsExpanded(false);
     };
 

@@ -632,6 +632,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
             {runGroups.map((group, groupIndex) => (
               <RunGroupCard
                 key={group.id}
+                projectDirectory={selectedProjectDirectory}
                 group={group}
                 groupIndex={groupIndex}
                 canRemove={runGroups.length > 1}
@@ -700,6 +701,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 };
 
 interface RunGroupCardProps {
+  projectDirectory: string;
   group: RunGroupState;
   groupIndex: number;
   canRemove: boolean;
@@ -708,6 +710,7 @@ interface RunGroupCardProps {
 }
 
 const RunGroupCard: React.FC<RunGroupCardProps> = ({
+  projectDirectory,
   group,
   groupIndex,
   canRemove,
@@ -954,6 +957,7 @@ const RunGroupCard: React.FC<RunGroupCardProps> = ({
           {showCommandAutocomplete ? (
             <CommandAutocomplete
               ref={commandRef}
+              cwd={projectDirectory}
               searchQuery={commandQuery}
               onCommandSelect={handleCommandSelect}
               onClose={() => setShowCommandAutocomplete(false)}

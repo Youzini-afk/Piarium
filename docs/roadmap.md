@@ -101,6 +101,16 @@ retained before engine surgery begins.
   attachments, and dictation all target the active Pi session. OpenCode optimistic/queued-message
   effects remain confined to explicitly named legacy embedded surfaces while those surfaces are
   migrated or removed.
+- Implemented the Pi-native main application root: context panels, plans, project notes/todos,
+  inline comments, drafts, archive management, project actions, worktree management, and command
+  discovery no longer require the OpenCode SyncProvider. The provider remains isolated to explicit
+  embedded legacy routes only. Pi commands are discovered from live sessions or an in-memory
+  workspace catalog, so extension, prompt-template, skill, and recovery-plugin updates appear
+  without Piarium-owned copies.
+- Implemented Pi-native scheduled execution end to end: the scheduler creates a Pi session,
+  selects its Pi provider/model/thinking level, and dispatches either a Pi extension command or
+  agent prompt. The editor and run-now navigation use the same Pi catalog/session contract; legacy
+  OpenCode agent variants, permission policy, goal token ceiling, and session IDs were removed.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.
@@ -121,8 +131,10 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
   package manager. It lists configured sources, updates one or all packages, removes packages, and
   passes arbitrary npm, Git, local-path, or future Pi sources directly to `PackageManager`. The
   recommended integration cards are convenience entries, not an allowlist.
-- Connect the Pi-native message rollback action to that policy after the session/message UI no
-  longer uses OpenCode message IDs.
+- Implemented: connect timeline recovery to the selected policy with Pi entry IDs. Conversation
+  navigation remains Pi-native; combined/files recovery, checkpoint, undo/redo, and repair are
+  delegated to the installed `pi-workspace-history` / `pi-wtf` providers through their public
+  bridge and commands, so package updates remain authoritative.
 - Put provider status/checkpoint/history management in the right sidebar/settings while retaining
   the existing timeline, reverted-message dock, undo/redo, and fork UX. Enable files-only/preview
   controls only when a plugin advertises them through recovery bridge v1.

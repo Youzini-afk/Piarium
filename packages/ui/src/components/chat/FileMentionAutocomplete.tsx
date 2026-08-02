@@ -259,6 +259,10 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   }, [currentDirectory, debouncedQuery, searchFiles, showHidden, showGitignored]);
 
   React.useEffect(() => {
+    if (!onAgentSelect) {
+      setAgents([]);
+      return;
+    }
     const visibleAgents = getVisibleAgents();
     const normalizedQuery = (searchQuery ?? '').trim().toLowerCase();
     const filtered = visibleAgents
@@ -275,7 +279,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
     setAgents(filtered);
-  }, [getVisibleAgents, searchQuery]);
+  }, [getVisibleAgents, onAgentSelect, searchQuery]);
 
   React.useEffect(() => {
     setSelectedIndex(0);

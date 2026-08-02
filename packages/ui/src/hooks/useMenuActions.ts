@@ -84,7 +84,6 @@ type MenuAction =
   | 'theme-dark'
   | 'theme-system'
   | 'toggle-sidebar'
-  | 'toggle-memory-debug'
   | 'go-back'
   | 'go-forward'
   | 'previous-session'
@@ -94,10 +93,7 @@ type MenuAction =
   | 'help-dialog'
   | 'download-logs';
 
-export const useMenuActions = (
-  onToggleMemoryDebug?: () => void,
-  options: { enabled?: boolean } = {},
-) => {
+export const useMenuActions = (options: { enabled?: boolean } = {}) => {
   const enabled = options.enabled ?? true;
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
@@ -289,10 +285,6 @@ export const useMenuActions = (
           toggleSidebar();
           break;
 
-        case 'toggle-memory-debug':
-          onToggleMemoryDebug?.();
-          break;
-
         case 'go-back':
           useDirectoryStore.getState().goBack();
           break;
@@ -333,7 +325,6 @@ export const useMenuActions = (
       handleChangeWorkspace,
       navigateProject,
       navigateSession,
-      onToggleMemoryDebug,
       setAboutDialogOpen,
       setCommandPaletteOpen,
       setSettingsDialogOpen,

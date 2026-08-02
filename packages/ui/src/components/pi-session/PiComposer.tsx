@@ -9,6 +9,11 @@ import type { FollowUpBehavior } from '@/stores/messageQueueStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
+import {
+  CommandAutocomplete,
+  type CommandAutocompleteHandle,
+  type CommandInfo,
+} from '@/components/chat/CommandAutocomplete';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
@@ -61,8 +66,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 }) => {
   const { t } = useI18n();
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
+  const commandRef = React.useRef<CommandAutocompleteHandle>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const composingRef = React.useRef(false);
+  const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
+  const [commandQuery, setCommandQuery] = React.useState('');
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
@@ -79,6 +87,13 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     if (!input) return;
     input.style.height = '0px';
     input.style.height = `${input.scrollHeight}px`;
+  }, [draft]);
+
+  React.useEffect(() => {
+    if (!draft.startsWith('/')) {
+      setShowCommandAutocomplete(false);
+      setCommandQuery('');
+    }
   }, [draft]);
 
   const addFiles = React.useCallback(async (files: Iterable<File>) => {
@@ -102,6 +117,36 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     onChangeDraft(next);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [draft, onChangeDraft]);
+
+  const updateCommandAutocomplete = React.useCallback((value: string, cursorPosition: number) => {
+    if (!value.startsWith('/')) {
+      setShowCommandAutocomplete(false);
+      return;
+    }
+    const firstSpace = value.indexOf(' ');
+    const firstNewline = value.indexOf('\n');
+    const commandEnd = Math.min(
+      firstSpace === -1 ? value.length : firstSpace,
+      firstNewline === -1 ? value.length : firstNewline,
+    );
+    const shouldOpen = cursorPosition <= commandEnd && firstSpace === -1;
+    setShowCommandAutocomplete(shouldOpen);
+    if (shouldOpen) setCommandQuery(value.slice(1, commandEnd));
+  }, []);
+
+  const handleCommandSelect = React.useCallback((command: CommandInfo) => {
+    const value = `/${command.name} `;
+    onChangeDraft(value);
+    setShowCommandAutocomplete(false);
+    setCommandQuery('');
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.selectionStart = value.length;
+      input.selectionEnd = value.length;
+    });
+  }, [onChangeDraft]);
 
   return (
     <div className={cn(
@@ -161,7 +206,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             ref={inputRef}
             data-pi-chat-input="true"
             value={draft}
-            onChange={(event) => onChangeDraft(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              onChangeDraft(value);
+              updateCommandAutocomplete(value, event.target.selectionStart ?? value.length);
+            }}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
             onPaste={(event) => {
@@ -171,6 +220,18 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               void addFiles(files);
             }}
             onKeyDown={(event) => {
+              if (
+                showCommandAutocomplete
+                && (event.key === 'Enter'
+                  || event.key === 'ArrowUp'
+                  || event.key === 'ArrowDown'
+                  || event.key === 'Escape'
+                  || event.key === 'Tab')
+              ) {
+                event.preventDefault();
+                commandRef.current?.handleKeyDown(event.key);
+                return;
+              }
               if (
                 event.key !== 'Enter'
                 || event.shiftKey
@@ -186,6 +247,17 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               isExpandedInput ? 'max-h-[70vh] min-h-[40vh]' : 'max-h-[40vh]',
             )}
           />
+
+          {showCommandAutocomplete ? (
+            <CommandAutocomplete
+              ref={commandRef}
+              cwd={snapshot.cwd}
+              sessionId={snapshot.sessionId}
+              searchQuery={commandQuery}
+              onCommandSelect={handleCommandSelect}
+              onClose={() => setShowCommandAutocomplete(false)}
+            />
+          ) : null}
 
           <div data-chat-input-footer="true" className="flex items-center justify-between gap-2 px-2 pb-2">
             <div className="flex min-w-0 items-center gap-1">

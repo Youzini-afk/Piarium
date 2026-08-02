@@ -10,8 +10,6 @@ import {
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
-import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
-import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 // useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
@@ -22,7 +20,6 @@ import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { hasModifier } from '@/lib/utils';
 import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
@@ -187,7 +184,6 @@ function App({ apis }: AppProps) {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
-  const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
@@ -212,13 +208,6 @@ function App({ apis }: AppProps) {
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
-
-  React.useEffect(() => {
-    setStreamPerfEnabled(showMemoryDebug);
-    return () => {
-      setStreamPerfEnabled(false);
-    };
-  }, [showMemoryDebug]);
 
   React.useEffect(() => {
     applyMobileKeyboardMode(mobileKeyboardMode);
@@ -632,34 +621,9 @@ function App({ apis }: AppProps) {
 
   useRouter({ enabled: !embeddedSessionChat && isConnected });
 
-  const handleToggleMemoryDebug = React.useCallback(() => {
-    setShowMemoryDebug(prev => !prev);
-  }, []);
-
-  useMenuActions(handleToggleMemoryDebug, { enabled: !embeddedSessionChat });
+  useMenuActions({ enabled: !embeddedSessionChat });
 
   useTraySync({ enabled: !embeddedSessionChat });
-
-  React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isDebugShortcut = hasModifier(e)
-        && e.shiftKey
-        && !e.altKey
-        && (e.code === 'KeyD' || e.key.toLowerCase() === 'd');
-
-      if (isDebugShortcut) {
-        e.preventDefault();
-        setShowMemoryDebug(prev => !prev);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [embeddedSessionChat]);
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
   // The Rust backend sets window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ once the
@@ -828,35 +792,29 @@ function App({ apis }: AppProps) {
     );
   }
 
-  // Always mount the full provider tree to avoid remounts when isInitialized
-  // flips from false → true. FireworksProvider is a lightweight shell; its
-  // heavy children are only activated when actually needed.
+  // The main Pi surface is independent from the isolated OpenCode sync tree
+  // retained above for embedded legacy sessions.
   const isBootShell = !isInitialized && !isDesktopRuntime;
 
   return (
     <ErrorBoundary>
-      <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-        <RuntimeAPIProvider apis={apis}>
-          <FireworksProvider>
-              <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-                <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
-                  <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-                  <MainLayout />
-                  <Toaster />
-                  {!isBootShell && (
-                    <>
-                      <ConfigUpdateOverlay />
-                      <AboutDialogWrapper />
-                      {showMemoryDebug && (
-                        <MemoryDebugPanel onClose={() => setShowMemoryDebug(false)} />
-                      )}
-                    </>
-                  )}
-                </div>
-              </TooltipProvider>
-          </FireworksProvider>
-        </RuntimeAPIProvider>
-      </SyncProvider>
+      <RuntimeAPIProvider apis={apis}>
+        <FireworksProvider>
+          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+            <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
+              <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+              <MainLayout />
+              <Toaster />
+              {!isBootShell && (
+                <>
+                  <ConfigUpdateOverlay />
+                  <AboutDialogWrapper />
+                </>
+              )}
+            </div>
+          </TooltipProvider>
+        </FireworksProvider>
+      </RuntimeAPIProvider>
     </ErrorBoundary>
   );
 }

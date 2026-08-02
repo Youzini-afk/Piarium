@@ -10,7 +10,6 @@ import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
-import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
@@ -247,7 +246,6 @@ export const MainLayout: React.FC = () => {
                 <CommandPalette />
                 <PiInteractionHost />
                 <HelpDialog />
-                <OpenCodeStatusDialog />
                 <WorkspaceOverlays />
 
                 {isMobile ? (
