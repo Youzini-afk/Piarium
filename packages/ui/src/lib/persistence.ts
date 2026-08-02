@@ -25,12 +25,12 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
   if (typeof window === 'undefined') {
     return;
   }
-  if (typeof window.__OPENCHAMBER_HOME__ === 'string' && window.__OPENCHAMBER_HOME__.length > 0) {
+  if (typeof window.__PIARIUM_HOME__ === 'string' && window.__PIARIUM_HOME__.length > 0) {
     return;
   }
 
   try {
-    window.__OPENCHAMBER_HOME__ = homeDirectory;
+    window.__PIARIUM_HOME__ = homeDirectory;
   } catch {
     /* read-only contextBridge property — leave preload-seeded value */
   }

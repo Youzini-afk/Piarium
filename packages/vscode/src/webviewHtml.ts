@@ -1,5 +1,5 @@
+import * as os from 'node:os';
 import * as vscode from 'vscode';
-import * as os from 'os';
 import { getThemeKindName } from './theme';
 import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
@@ -7,32 +7,26 @@ import type { WorkspaceFolderCandidate } from './workspaceResolver';
 export type PanelType = 'chat' | 'agentManager' | 'settings';
 
 export interface WebviewHtmlOptions {
-  webview: vscode.Webview;
+  devServerUrl?: string | null;
   extensionUri: vscode.Uri;
-  workspaceFolder: string;
-  workspaceFolders?: WorkspaceFolderCandidate[];
-  initialStatus: PiRuntimeConnectionStatus;
-  cliAvailable: boolean;
-  panelType?: PanelType;
+  extensionVersion?: string;
   initialSessionId?: string;
   initialSettingsPage?: string;
+  initialStatus: PiRuntimeConnectionStatus;
+  panelType?: PanelType;
   viewMode?: 'sidebar' | 'editor';
-  devServerUrl?: string | null;
-  extensionVersion?: string;
+  webview: vscode.Webview;
+  workspaceFolder: string;
+  workspaceFolders?: WorkspaceFolderCandidate[];
 }
 
 const asCspToken = (value: string | null | undefined): string | null => {
-  if (!value) {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 };
 
 const toOrigin = (value: string | null | undefined): string | null => {
-  if (!value) {
-    return null;
-  }
+  if (!value) return null;
   try {
     return new URL(value).origin;
   } catch {
@@ -40,9 +34,11 @@ const toOrigin = (value: string | null | undefined): string | null => {
   }
 };
 
-const uniqueTokens = (values: Array<string | null | undefined>): string => {
-  return Array.from(new Set(values.map(asCspToken).filter((value): value is string => Boolean(value)))).join(' ');
-};
+const uniqueTokens = (values: Array<string | null | undefined>): string => (
+  Array.from(new Set(values.map(asCspToken).filter((value): value is string => Boolean(value)))).join(' ')
+);
+
+const htmlSafeJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
 export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const {
@@ -51,7 +47,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     workspaceFolder,
     workspaceFolders = [],
     initialStatus,
-    cliAvailable,
     panelType = 'chat',
     initialSessionId,
     initialSettingsPage,
@@ -59,8 +54,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     devServerUrl,
     extensionVersion = '',
   } = options;
-  const workspaceFoldersJson = JSON.stringify(workspaceFolders).replace(/</g, '\\u003c');
-
   const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
   const scriptUri = webview.asWebviewUri(scriptPath);
   const normalizedDevServerUrl = asCspToken(devServerUrl)?.replace(/\/$/, '') ?? null;
@@ -70,22 +63,26 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const connectSrc = uniqueTokens(['*', 'ws:', 'wss:', 'http:', 'https:', devServerOrigin]);
   const imgSrc = uniqueTokens([webview.cspSource, 'data:', 'https:', devServerOrigin]);
   const fontSrc = uniqueTokens([webview.cspSource, 'data:', devServerOrigin]);
-  // fflate's async browser inflater creates blob-backed workers. Keep blob:
-  // scoped to worker-src so document decompression works without allowing blob scripts.
   const workerSrc = uniqueTokens([webview.cspSource, 'blob:', devServerOrigin]);
+  const documentLanguage = vscode.env.language.replace(/[^A-Za-z0-9-]/g, '') || 'en';
+  const runtimeConnectionFailed = htmlSafeJson(vscode.l10n.t('Piarium: Pi runtime connection failed'));
+  const waitingForDevelopmentServer = htmlSafeJson(vscode.l10n.t('Piarium: Waiting for the webview development server'));
+  const bootstrapConfig = htmlSafeJson({
+    workspaceFolder,
+    workspaceFolders,
+    theme: getThemeKindName(vscode.window.activeColorTheme.kind),
+    connectionStatus: initialStatus,
+    extensionVersion,
+    platform: os.platform(),
+    arch: os.arch(),
+    panelType,
+    viewMode,
+    initialSessionId: initialSessionId ?? null,
+    initialSettingsPage: initialSettingsPage ?? null,
+  });
 
-  const themeKind = getThemeKindName(vscode.window.activeColorTheme.kind);
-
-  // Use VS Code CSS variables for proper theme integration
-  // These variables are automatically provided by VS Code to webviews
-  //
-  // Logo geometry matches OpenChamberLogo.tsx:
-  // edge=48, cos30=0.866, sin30=0.5, centerY=50
-  // top=(50, 2), left=(8.432, 26), right=(91.568, 26), center=(50, 50)
-  // bottomLeft=(8.432, 74), bottomRight=(91.568, 74), bottom=(50, 98)
-  // topFaceCenterY = (2 + 26 + 50 + 26) / 4 = 26
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${documentLanguage}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -95,292 +92,128 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     body {
       overflow: hidden;
       background: var(--vscode-editor-background, var(--vscode-sideBar-background));
-      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
       color: var(--vscode-foreground);
+      font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
     }
-
-    /* Initial loading screen styles - uses VS Code theme variables */
     #initial-loading {
       position: fixed;
       inset: 0;
+      z-index: 9999;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 16px;
-      z-index: 9999;
+      gap: 14px;
       background: var(--vscode-editor-background, var(--vscode-sideBar-background));
-      transition: opacity 0.3s ease-out;
+      transition: opacity 180ms ease-out;
     }
-    #initial-loading.fade-out {
-      opacity: 0;
-      pointer-events: none;
+    #initial-loading.fade-out { opacity: 0; pointer-events: none; }
+    .piarium-mark {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
+      border-radius: 13px;
+      color: var(--vscode-foreground);
+      background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+      font: 600 20px/1 var(--vscode-font-family, sans-serif);
+      animation: piarium-breathe 1.6s ease-in-out infinite;
     }
-    /* Glow pulse on the OpenCode mark on the cube's top face — signals loading without text. */
-    @keyframes oc-logo-glow {
-      0%, 100% { filter: drop-shadow(0 0 0 transparent); }
-      50% { filter: drop-shadow(0 0 4px var(--vscode-foreground)); }
-    }
-    #initial-loading .logo-inner {
-      animation: oc-logo-glow 1.8s ease-in-out infinite;
-    }
-    @media (prefers-reduced-motion: reduce) {
-      #initial-loading .logo-inner { animation: none; }
-    }
-    /* Logo colors use VS Code foreground color */
-    #initial-loading .logo-stroke {
-      stroke: var(--vscode-foreground);
-    }
-    #initial-loading .logo-fill {
-      fill: var(--vscode-foreground);
-      opacity: 0.15;
-    }
-    #initial-loading .logo-fill-solid {
-      fill: var(--vscode-foreground);
-    }
-    #initial-loading .logo-fill-dim {
-      fill: var(--vscode-foreground);
-      opacity: 0.4;
-    }
-    #initial-loading .status-text {
-      font-size: 13px;
-      color: var(--vscode-descriptionForeground, var(--vscode-foreground));
-      text-align: center;
-    }
-    #initial-loading .error-text {
-      font-size: 12px;
+    .piarium-name { font-size: 12px; letter-spacing: 0.08em; opacity: 0.72; }
+    #loading-status {
+      max-width: 320px;
+      padding: 0 20px;
       color: var(--vscode-errorForeground, #f48771);
+      font-size: 12px;
       text-align: center;
-      max-width: 280px;
+      white-space: pre-wrap;
     }
+    @keyframes piarium-breathe {
+      0%, 100% { opacity: 0.62; transform: scale(0.97); }
+      50% { opacity: 1; transform: scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) { .piarium-mark { animation: none; } }
   </style>
-  <title>OpenChamber</title>
+  <title>Piarium</title>
 </head>
 <body>
-  <!-- Initial loading screen with simplified OpenChamber logo -->
   <div id="initial-loading">
-    <svg class="logo" width="70" height="70" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <!-- Left face -->
-      <path class="logo-fill logo-stroke" d="M50 50 L8.432 26 L8.432 74 L50 98 Z" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Right face -->
-      <path class="logo-fill logo-stroke" d="M50 50 L91.568 26 L91.568 74 L50 98 Z" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Top face (no fill, stroke only) -->
-      <path class="logo-stroke" d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke-width="2" stroke-linejoin="round"/>
-
-      <!-- OpenCode logo on top face -->
-      <g class="logo-inner" transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
-        <path class="logo-fill-solid" fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z"/>
-        <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>
-      </g>
-    </svg>
-    <!-- Status text stays empty while things are fine; populated only on error. -->
-    <div class="status-text" id="loading-status"></div>
-    ${!cliAvailable ? `<div class="error-text" id="cli-missing-text">OpenCode CLI not found. Please install it first.</div>` : ''}
+    <div class="piarium-mark" aria-hidden="true">π</div>
+    <div class="piarium-name">PIARIUM</div>
+    <div id="loading-status" role="status" aria-live="polite"></div>
   </div>
-
   <div id="root"></div>
   <script>
-    // Polyfill process for Node.js modules running in browser
     window.process = window.process || { env: { NODE_ENV: 'production' }, platform: '', version: '', browser: true };
-
-    window.__VSCODE_CONFIG__ = {
-      workspaceFolder: "${workspaceFolder.replace(/\\/g, '\\\\')}",
-      workspaceFolders: ${workspaceFoldersJson},
-      theme: "${themeKind}",
-      connectionStatus: "${initialStatus}",
-      cliAvailable: ${cliAvailable},
-      extensionVersion: "${extensionVersion.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
-      platform: "${os.platform()}",
-      arch: "${os.arch()}",
-      panelType: "${panelType}",
-      viewMode: "${viewMode}",
-      initialSessionId: ${initialSessionId ? `"${initialSessionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'},
-      initialSettingsPage: ${initialSettingsPage ? JSON.stringify(initialSettingsPage) : 'null'},
-    };
-    window.__OPENCHAMBER_HOME__ = "${workspaceFolder.replace(/\\/g, '\\\\')}";
-    window.__PIARIUM_HOME__ = ${JSON.stringify(os.homedir())};
-
-    function getBootstrapMessages() {
-      var locale = 'en';
-      try {
-        var rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
-        if (rawLocale) {
-          var parsedLocale = JSON.parse(rawLocale);
-          if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-            locale = 'fr';
-          }
-        }
-      } catch {}
-
-      return locale === 'fr'
-        ? {
-            startingApi: 'Démarrage de l’API OpenCode…',
-            initializing: 'Initialisation…',
-            connecting: 'Connexion…',
-            connected: 'Connecté !',
-            connectionError: 'Erreur de connexion',
-            reconnecting: 'Reconnexion…',
-            cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
-          }
-        : {
-            startingApi: 'Starting OpenCode API…',
-            initializing: 'Initializing…',
-            connecting: 'Connecting…',
-            connected: 'Connected!',
-            connectionError: 'Connection error',
-            reconnecting: 'Reconnecting…',
-            cliNotFound: 'OpenCode CLI not found. Please install it first.',
-          };
-    }
-
-    (function applyBootstrapLocale() {
-      var statusEl = document.getElementById('loading-status');
-      var cliMissingEl = document.getElementById('cli-missing-text');
-      var messages = getBootstrapMessages();
-      if (cliMissingEl) {
-        cliMissingEl.textContent = messages.cliNotFound;
-      }
-      if (statusEl) {
-        statusEl.textContent = '';
-      }
-    })();
-
-    // Handle connection status updates to update loading screen
+    window.__VSCODE_CONFIG__ = ${bootstrapConfig};
+    window.__PIARIUM_HOME__ = ${htmlSafeJson(os.homedir())};
     window.addEventListener('message', function(event) {
-      var msg = event.data;
-      if (msg && msg.type === 'connectionStatus') {
-        var messages = getBootstrapMessages();
-        var statusEl = document.getElementById('loading-status');
-        if (statusEl) {
-          // Only show text when something is wrong — progress states stay silent
-          // (the animated logo already signals "working").
-          if (msg.status === 'error') {
-            statusEl.textContent = msg.error || messages.connectionError;
-            statusEl.classList.add('error-text');
-          } else {
-            statusEl.textContent = '';
-            statusEl.classList.remove('error-text');
-          }
-        }
-      }
+      var message = event.data;
+      if (!message || message.type !== 'connectionStatus') return;
+      var status = document.getElementById('loading-status');
+      if (status) status.textContent = message.status === 'error' ? (message.error || ${runtimeConnectionFailed}) : '';
     });
   </script>
   <script type="module">
-    const prodEntryUrl = ${JSON.stringify(scriptUri.toString())};
-    const devServerUrl = ${normalizedDevServerUrl ? JSON.stringify(normalizedDevServerUrl) : 'null'};
+    const productionEntryUrl = ${htmlSafeJson(scriptUri.toString())};
+    const devServerUrl = ${normalizedDevServerUrl ? htmlSafeJson(normalizedDevServerUrl) : 'null'};
 
     const loadProductionBundle = () => {
       const script = document.createElement('script');
       script.type = 'module';
-      script.src = prodEntryUrl;
+      script.src = productionEntryUrl;
       document.body.appendChild(script);
     };
 
     if (!devServerUrl) {
       loadProductionBundle();
     } else {
-      const baseUrl = devServerUrl;
-
-      const statusEl = document.getElementById('loading-status');
-      const getDevMessages = () => {
-        try {
-          const rawLocale = window.localStorage.getItem('openchamber.i18n.v1');
-          if (rawLocale) {
-            const parsedLocale = JSON.parse(rawLocale);
-            if (parsedLocale && typeof parsedLocale.locale === 'string' && parsedLocale.locale.toLowerCase().indexOf('fr') === 0) {
-              return {
-                startingDevServer: (host) => 'Démarrage du serveur de développement de la webview (' + host + ')...',
-                waitingDevServer: (host, attempt) => 'En attente du serveur de développement de la webview (' + host + ')... tentative ' + attempt,
-              };
-            }
-          }
-        } catch {}
-        return {
-          startingDevServer: (host) => 'Starting webview dev server (' + host + ')...',
-          waitingDevServer: (host, attempt) => 'Waiting for webview dev server (' + host + ')... attempt ' + attempt,
-        };
-      };
-      const setStatus = (text) => {
-        if (statusEl) {
-          statusEl.textContent = text;
-        }
-      };
-
-      const retryDelayMs = 500;
+      const status = document.getElementById('loading-status');
       let attempt = 0;
-
-      const waitForRootMount = (timeoutMs) => {
+      const waitForRootMount = (timeoutMs) => new Promise((resolve) => {
         const root = document.getElementById('root');
-        if (!root) {
-          return Promise.resolve(false);
-        }
-
-        if (root.childNodes.length > 0) {
-          return Promise.resolve(true);
-        }
-
-        return new Promise((resolve) => {
-          const observer = new MutationObserver(() => {
-            if (root.childNodes.length > 0) {
-              observer.disconnect();
-              clearTimeout(timer);
-              resolve(true);
-            }
-          });
-
-          observer.observe(root, { childList: true, subtree: true });
-          const timer = window.setTimeout(() => {
+        if (!root || root.childNodes.length > 0) return resolve(Boolean(root?.childNodes.length));
+        const observer = new MutationObserver(() => {
+          if (root.childNodes.length > 0) {
             observer.disconnect();
-            resolve(root.childNodes.length > 0);
-          }, timeoutMs);
-        });
-      };
-
-      const tryLoadDevBundle = () => {
-        const viteClientUrl = baseUrl + '/@vite/client';
-        const reactRefreshUrl = baseUrl + '/@react-refresh';
-        const devEntryUrl = baseUrl + '/main.tsx';
-        const hostLabel = (() => {
-          try {
-            return new URL(baseUrl).host;
-          } catch {
-            return baseUrl;
+            clearTimeout(timer);
+            resolve(true);
           }
-        })();
-
-        const devMessages = getDevMessages();
-        setStatus(devMessages.startingDevServer(hostLabel));
-
+        });
+        observer.observe(root, { childList: true, subtree: true });
+        const timer = window.setTimeout(() => {
+          observer.disconnect();
+          resolve(root.childNodes.length > 0);
+        }, timeoutMs);
+      });
+      const loadDevelopmentBundle = () => {
+        if (status) status.textContent = '';
         Promise.resolve()
-          .then(() => import(viteClientUrl))
-          .then(() => import(reactRefreshUrl))
-          .then((mod) => {
-            const runtime = mod && mod.default ? mod.default : null;
-            if (runtime && typeof runtime.injectIntoGlobalHook === 'function') {
-              runtime.injectIntoGlobalHook(window);
+          .then(() => import(devServerUrl + '/@vite/client'))
+          .then(() => import(devServerUrl + '/@react-refresh'))
+          .then((module) => {
+            const refresh = module?.default;
+            if (typeof refresh?.injectIntoGlobalHook === 'function') {
+              refresh.injectIntoGlobalHook(window);
               window.$RefreshReg$ = () => {};
               window.$RefreshSig$ = () => (type) => type;
               window.__vite_plugin_react_preamble_installed__ = true;
             }
           })
-          .then(() => import(devEntryUrl))
+          .then(() => import(devServerUrl + '/main.tsx'))
           .then(() => waitForRootMount(4000))
           .then((mounted) => {
-            if (!mounted) {
-              throw new Error('Dev bundle loaded but app did not mount');
-            }
+            if (!mounted) throw new Error('Development bundle loaded but did not mount');
           })
           .catch((error) => {
             attempt += 1;
-            console.warn('[OpenChamber] VS Code webview dev bundle unavailable, retrying...', error);
-            setStatus(devMessages.waitingDevServer(hostLabel, attempt));
-            window.setTimeout(() => {
-              tryLoadDevBundle();
-            }, retryDelayMs);
+            console.warn('[Piarium] VS Code webview development bundle unavailable; retrying', { attempt }, error);
+            if (status) status.textContent = ${waitingForDevelopmentServer};
+            window.setTimeout(loadDevelopmentBundle, 500);
           });
       };
-
-      tryLoadDevBundle();
+      loadDevelopmentBundle();
     }
   </script>
 </body>

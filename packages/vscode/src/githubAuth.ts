@@ -181,7 +181,7 @@ const postForm = async <T extends JsonRecord>(url: string, params: Record<string
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json',
-      'User-Agent': 'OpenChamber',
+      'User-Agent': 'Piarium',
     },
     body: new URLSearchParams(params).toString(),
   });
@@ -222,7 +222,7 @@ export const fetchMe = async (accessToken: string) => {
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${accessToken}`,
-      'User-Agent': 'OpenChamber',
+      'User-Agent': 'Piarium',
     },
   });
   if (response.status === 401) {
@@ -244,7 +244,7 @@ export const fetchMe = async (accessToken: string) => {
         headers: {
           Accept: 'application/vnd.github+json',
           Authorization: `Bearer ${accessToken}`,
-          'User-Agent': 'OpenChamber',
+          'User-Agent': 'Piarium',
         },
       });
       if (emailsResponse.status === 401) {

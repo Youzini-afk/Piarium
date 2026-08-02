@@ -15,7 +15,7 @@ import { detectHostedSurface } from './hostedSurface';
 
 declare global {
   interface Window {
-    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
+    __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs;
     __OPENCHAMBER_SURFACE__?: HostedSurface;
   }
 }
@@ -107,11 +107,11 @@ const start = async (): Promise<void> => {
   const embeddedBootstrap = isEmbeddedSessionChat()
     ? await requestEmbeddedSessionRuntimeBootstrap()
     : null;
-  window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
+  window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
 
   if (hostedSurface === 'mobile') {
     const { renderMobileApp } = await import('@openchamber/ui/apps/renderMobileApp');
-    renderMobileApp(window.__OPENCHAMBER_RUNTIME_APIS__);
+    renderMobileApp(window.__PIARIUM_RUNTIME_APIS__);
     return;
   }
 

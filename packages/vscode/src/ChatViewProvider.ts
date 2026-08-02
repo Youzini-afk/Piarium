@@ -30,7 +30,7 @@ const isSameActiveEditorFilePayload = (a: ActiveEditorFilePayload | null, b: Act
 };
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'openchamber.chatView';
+  public static readonly viewType = 'piarium.chatView';
 
   private _view?: vscode.WebviewView;
 
@@ -139,7 +139,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       void this._sendMessageWithRetry(response);
 
       if (message.type === 'api:settings:save' && response.success) {
-        void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
+        void vscode.commands.executeCommand('piarium.internal.settingsSynced', response.data);
       }
     });
   }
@@ -304,11 +304,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  /**
-   * Ask the webview to run the full OpenCode reload flow (overlay + managed
-   * restart via the bridge + config/data refresh) — the same flow used after an
-   * OpenCode update. Returns false if no webview is resolved to drive it.
-   */
+  /** Ask the webview to reconnect after the extension host restarts Pi. */
   public reloadPiRuntime(): boolean {
     if (!this._view) {
       return false;
@@ -508,7 +504,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       workspaceFolder,
       workspaceFolders,
       initialStatus,
-      cliAvailable: true,
       extensionVersion: String(this._context.extension?.packageJSON?.version || ''),
       devServerUrl: this._webviewDevServerUrl,
     });

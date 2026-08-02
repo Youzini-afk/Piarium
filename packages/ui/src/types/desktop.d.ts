@@ -2,7 +2,7 @@ import type { DesktopBootOutcome } from '@/lib/desktopBoot';
 
 declare global {
   interface Window {
-    __OPENCHAMBER_HOME__?: string;
+    __PIARIUM_HOME__?: string;
     __OPENCHAMBER_MACOS_MAJOR__?: number;
     __OPENCHAMBER_LOCAL_ORIGIN__?: string;
     __OPENCHAMBER_ELECTRON__?: { runtime?: string; arch?: string; macVibrancy?: boolean; macVibrancySupported?: boolean; trayEnabled?: boolean };

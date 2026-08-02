@@ -1,78 +1,55 @@
-# VS Code Backend Modules
+# VS Code runtime architecture
 
-This document describes backend runtime modules used by the VS Code extension bridge (`packages/vscode/src/bridge.ts`).
+## Boundary
 
-## Purpose
+The extension host is the trusted boundary. It owns the bundled Pi runtime, workspace filesystem access, Git processes, GitHub credentials, editor commands, and persisted extension settings. The React webview owns presentation and sends typed requests through the VS Code bridge. Pi extensions never execute in the webview.
 
-Keep `bridge.ts` as a thin orchestration layer that delegates message handling to cohesive domain runtimes while preserving API behavior.
+## Startup and Pi runtime
 
-## Runtime modules
+- `extension.ts` registers Piarium views and commands, creates the panel providers, and owns activation and disposal.
+- `piRuntime.ts` resolves the Node executable and staged Pi host, starts one runtime broker, serializes restart/dispose, and exposes connection state.
+- `piRuntimeWebviewBridge.ts` connects an individual webview to the broker protocol and forwards only protocol messages.
+- `webviewHtml.ts` produces the CSP-constrained bootstrap document and injects non-secret workspace/runtime presentation state.
+- `webview/main.tsx` registers VS Code `RuntimeAPIs`, configures the Pi runtime client, synchronizes workspace candidates, and mounts the shared Piarium UI.
 
-- `bridge.ts`
-  - Entry orchestration layer for bridge messages.
-  - Delegates to specialized runtimes in order and handles only unmatched fallthrough cases.
+The packaged runtime is prepared by `scripts/prepare-pi-runtime.mjs`. `scripts/test-pi-runtime.mjs` verifies the staged host can start and answer through the broker.
 
-- `bridge-git-runtime.ts`
-  - Standard Git message handlers.
+## Native bridge
 
-- `bridge-git-special-runtime.ts`
-  - Specialized Git flows (`pr-description`, `conflict-details`) and generation helpers.
+`bridge.ts` is the thin dispatcher for platform capabilities that do not belong in the Pi protocol:
 
-- `bridge-git-process-runtime.ts`
-  - Git process execution and environment setup (`execGit`), including SSH agent socket resolution.
+- `bridge-fs-runtime.ts` and `bridge-fs-helpers-runtime.ts`: bounded workspace file listing, search, reads, and attachment ingestion.
+- `bridge-git-runtime.ts`, `bridge-git-conflict-runtime.ts`, `bridge-git-process-runtime.ts`, and `gitService.ts`: Git status, mutations, conflicts, worktrees, and process environment.
+- `bridge-settings-runtime.ts`: atomic Piarium settings persistence plus editor-derived fields.
+- `bridge-vscode-runtime.ts`: open-file, diff, external-URL, and explicitly requested VS Code commands.
+- `githubAuth.ts`, `githubPr.ts`, `githubPulls.ts`, and `githubIssues.ts`: GitHub device authentication and repository workflows.
 
-- `gitService.ts`
-  - Owns VS Code Git and worktree operations.
-  - Fast worktree creation reports bootstrap phases explicitly: `directory-created`, then `git-ready` after Git population/upstream work, and `setup-ready` after setup commands. Existing worktrees without tracked bootstrap state fall back to `ready`/`setup-ready`; shared webview consumers also accept legacy responses without `phase`.
-  - Worktree removal waits for an active create/bootstrap task for the same directory so background Git and setup work cannot race deletion or restore stale bootstrap state.
+Unknown requests fail explicitly. Filesystem and shell-like operations remain in the extension host; the webview receives only operation results.
 
-- `bridge-fs-runtime.ts`
-  - Bridge handlers for filesystem-related message routes.
-  - Uses shared FS helpers via injected dependencies.
+## Worktrees
 
-- `bridge-fs-helpers-runtime.ts`
-  - Filesystem/path/search helper functions:
-    - path normalization and resolution
-    - directory listing
-    - file search
-    - file read path safety checks
-    - dropped-file parsing and attachment reading
-    - models metadata fetch helper
+Worktree creation has three observable phases: `directory-created`, `git-ready`, and `setup-ready`. Fast creation may return after the directory exists while the tracked bootstrap task populates Git, applies upstream configuration, and runs the explicit Piarium setup command. Removal waits for an active bootstrap task so the directory cannot be recreated after deletion.
 
-The webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
+Generated worktrees use the Piarium data directory and default `piarium/<name>` branches. The project key is derived from the canonical repository path. The service does not write `.git/opencode`, consume OpenCode project storage, or mirror sandbox metadata into another engine's schema.
 
-- `bridge-localfs-proxy-runtime.ts`
-  - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
+## Webview surfaces
 
-- `bridge-proxy-runtime.ts`
-  - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
-  - SSE routes are intentionally excluded from the generic proxy and use `sseProxy.ts`, whose upstream-only stall watchdog closes a quiet OpenCode stream so the webview can reconnect instead of trusting an open but silent response.
-  - The webview allocates each SSE stream ID and installs its listener before requesting the upstream stream, so immediate OpenCode replay events cannot race the bridge start response.
+- `ChatViewProvider.ts`: sidebar chat and workspace/editor context synchronization.
+- `SessionEditorPanelProvider.ts`: session tabs in the editor area.
+- `AgentManagerPanelProvider.ts`: agent-group panel.
+- `SettingsPanelProvider.ts`: Piarium Settings panel.
 
-- `bridge-config-runtime.ts`
-  - Config and skills message handlers (`api:config/*`).
-  - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
+Each surface owns a separate Pi runtime bridge connection and shares the same host lifecycle. Settings updates are broadcast to the other active Piarium webviews after the authoritative write succeeds.
 
-- `bridge-settings-runtime.ts`
-  - Settings read/write and OpenCode skills discovery via API for bridge consumers.
+## Validation
 
-- `bridge-system-runtime.ts`
-  - System/editor/provider/quota/notification/update-check message handlers.
-  - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`).
-  - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
-  - Owns managed OpenCode upgrade status and mutation handlers, including capability reporting, upgrade serialization, and process restart after a successful upgrade.
+Use the package scripts as the source of truth:
 
-- `opencode-upgrade-runtime.ts`
-  - Owns managed-versus-external capability decisions, latest-version checks, serialized OpenCode self-upgrades, and restart-after-upgrade behavior.
+```bash
+bun run --cwd packages/vscode type-check
+bun test packages/vscode/src packages/vscode/webview
+bun run --cwd packages/vscode build
+bun run --cwd packages/vscode verify:pi-runtime
+```
 
-- `bridge-permission-auto-accept-runtime.ts`
-  - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
-  - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
-
-## Extension guideline
-
-When adding new bridge route families:
-
-1. Prefer creating or extending a domain runtime module under `packages/vscode/src/bridge-*-runtime.ts`.
-2. Keep `bridge.ts` focused on delegation order and minimal fallthrough behavior.
-3. Inject dependencies into runtimes instead of reaching into unrelated modules directly.
+For release packaging, run `bun run --cwd packages/vscode package` after the build.

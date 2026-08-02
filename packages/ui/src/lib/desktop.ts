@@ -569,7 +569,7 @@ export const isWebRuntime = (): boolean => {
 
 export const getDesktopHomeDirectory = async (): Promise<string | null> => {
   if (typeof window !== 'undefined') {
-    const embedded = window.__OPENCHAMBER_HOME__;
+    const embedded = window.__PIARIUM_HOME__;
     if (embedded && embedded.length > 0) {
       return embedded;
     }

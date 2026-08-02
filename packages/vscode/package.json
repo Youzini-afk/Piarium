@@ -1,15 +1,14 @@
 {
-  "name": "openchamber",
-  "displayName": "OpenChamber",
+  "name": "piarium",
+  "displayName": "Piarium",
   "description": "%extension.description%",
-  "version": "1.17.1",
-  "publisher": "fedaykindev",
+  "version": "0.1.0",
+  "publisher": "youzini-afk",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/openchamber/openchamber.git"
+    "url": "https://github.com/Youzini-afk/Piarium.git"
   },
-  "qna": "https://discord.gg/ZYRSdnwwKA",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -28,40 +27,40 @@
     "chatgpt",
     "groq",
     "assistant",
-    "opencode",
-    "openchamber"
+    "pi",
+    "piarium"
   ],
   "icon": "assets/app-icon.png",
   "main": "./dist/extension.js",
   "l10n": "./l10n",
   "activationEvents": [
-    "onCommand:openchamber.openSidebar",
-    "onCommand:openchamber.attachExplorerToChat",
-    "onView:openchamber.chatView"
+    "onCommand:piarium.openSidebar",
+    "onCommand:piarium.attachExplorerToChat",
+    "onView:piarium.chatView"
   ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "openchamber",
-          "title": "OpenChamber",
+          "id": "piarium",
+          "title": "Piarium",
           "icon": "assets/icon.svg"
         }
       ]
     },
     "views": {
-      "openchamber": [
+      "piarium": [
         {
           "type": "webview",
-          "id": "openchamber.chatView",
+          "id": "piarium.chatView",
           "name": "%views.chat.name%"
         }
       ]
     },
     "commands": [
       {
-        "command": "openchamber.openSidebar",
-        "category": "OpenChamber",
+        "command": "piarium.openSidebar",
+        "category": "Piarium",
         "title": "%command.openSidebar.title%",
         "icon": {
           "light": "assets/icon.svg",
@@ -69,35 +68,35 @@
         }
       },
       {
-        "command": "openchamber.focusChat",
-        "category": "OpenChamber",
+        "command": "piarium.focusChat",
+        "category": "Piarium",
         "title": "%command.focusChat.title%"
       },
       {
-        "command": "openchamber.restartApi",
-        "category": "OpenChamber",
-        "title": "%command.restartApi.title%"
+        "command": "piarium.restartRuntime",
+        "category": "Piarium",
+        "title": "%command.restartRuntime.title%"
       },
       {
-        "command": "openchamber.showOpenCodeStatus",
-        "category": "OpenChamber",
-        "title": "%command.showOpenCodeStatus.title%"
+        "command": "piarium.showRuntimeStatus",
+        "category": "Piarium",
+        "title": "%command.showRuntimeStatus.title%"
       },
       {
-        "command": "openchamber.openAgentManager",
-        "category": "OpenChamber",
+        "command": "piarium.openAgentManager",
+        "category": "Piarium",
         "title": "%command.openAgentManager.title%",
         "icon": "$(circuit-board)"
       },
       {
-        "command": "openchamber.openActiveSessionInEditor",
-        "category": "OpenChamber",
+        "command": "piarium.openActiveSessionInEditor",
+        "category": "Piarium",
         "title": "%command.openActiveSessionInEditor.title%",
         "icon": "$(link-external)"
       },
       {
-        "command": "openchamber.openNewSessionInEditor",
-        "category": "OpenChamber",
+        "command": "piarium.openNewSessionInEditor",
+        "category": "Piarium",
         "title": "%command.openNewSessionInEditor.title%",
         "icon": {
           "light": "assets/icon.svg",
@@ -105,122 +104,112 @@
         }
       },
       {
-        "command": "openchamber.openCurrentOrNewSessionInEditor",
-        "category": "OpenChamber",
+        "command": "piarium.openCurrentOrNewSessionInEditor",
+        "category": "Piarium",
         "title": "%command.openCurrentOrNewSessionInEditor.title%",
         "icon": "$(link-external)"
       },
       {
-        "command": "openchamber.addToContext",
-        "category": "OpenChamber",
+        "command": "piarium.addToContext",
+        "category": "Piarium",
         "title": "%command.addToContext.title%"
       },
       {
-        "command": "openchamber.explain",
-        "category": "OpenChamber",
+        "command": "piarium.explain",
+        "category": "Piarium",
         "title": "%command.explain.title%"
       },
       {
-        "command": "openchamber.improveCode",
-        "category": "OpenChamber",
+        "command": "piarium.improveCode",
+        "category": "Piarium",
         "title": "%command.improveCode.title%"
       },
       {
-        "command": "openchamber.newSession",
-        "category": "OpenChamber",
+        "command": "piarium.newSession",
+        "category": "Piarium",
         "title": "%command.newSession.title%",
         "icon": "$(add)"
       },
       {
-        "command": "openchamber.showSettings",
-        "category": "OpenChamber",
+        "command": "piarium.showSettings",
+        "category": "Piarium",
         "title": "%command.showSettings.title%",
         "icon": "$(settings-gear)"
       },
       {
-        "command": "openchamber.attachExplorerToChat",
-        "category": "OpenChamber",
+        "command": "piarium.attachExplorerToChat",
+        "category": "Piarium",
         "title": "%command.attachExplorerToChat.title%"
       }
     ],
     "submenus": [
       {
-        "id": "openchamber.submenu",
-        "label": "OpenChamber"
+        "id": "piarium.submenu",
+        "label": "Piarium"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "submenu": "openchamber.submenu",
+          "submenu": "piarium.submenu",
           "group": "navigation"
         }
       ],
       "explorer/context": [
         {
-          "command": "openchamber.attachExplorerToChat",
+          "command": "piarium.attachExplorerToChat",
           "when": "resourceScheme == file && explorerResourceIsFolder == false",
           "group": "navigation@50"
         }
       ],
       "editor/title": [
         {
-          "command": "openchamber.openNewSessionInEditor",
+          "command": "piarium.openNewSessionInEditor",
           "group": "navigation@1"
         }
       ],
       "view/title": [
         {
-          "command": "openchamber.newSession",
-          "when": "view == openchamber.chatView",
+          "command": "piarium.newSession",
+          "when": "view == piarium.chatView",
           "group": "navigation@1"
         },
         {
-          "command": "openchamber.openCurrentOrNewSessionInEditor",
-          "when": "view == openchamber.chatView",
+          "command": "piarium.openCurrentOrNewSessionInEditor",
+          "when": "view == piarium.chatView",
           "group": "navigation@2"
         },
         {
-          "command": "openchamber.openAgentManager",
-          "when": "view == openchamber.chatView",
+          "command": "piarium.openAgentManager",
+          "when": "view == piarium.chatView",
           "group": "navigation@3"
         },
         {
-          "command": "openchamber.showSettings",
-          "when": "view == openchamber.chatView",
+          "command": "piarium.showSettings",
+          "when": "view == piarium.chatView",
           "group": "navigation@4"
         }
       ],
-      "openchamber.submenu": [
+      "piarium.submenu": [
         {
-          "command": "openchamber.explain"
+          "command": "piarium.explain"
         },
         {
-          "command": "openchamber.improveCode"
+          "command": "piarium.improveCode"
         },
         {
-          "command": "openchamber.addToContext"
+          "command": "piarium.addToContext"
         }
       ]
     },
     "configuration": {
-      "title": "OpenChamber",
+      "title": "Piarium",
       "properties": {
-        "openchamber.apiUrl": {
-          "type": "string",
-          "default": "",
-          "description": "%configuration.apiUrl.description%"
-        },
-        "openchamber.opencodeBinary": {
-          "type": "string",
-          "default": "",
-          "description": "%configuration.opencodeBinary.description%"
-        },
         "piarium.nodePath": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Absolute path to Node.js 22.19 or newer for the Piarium host. Leave empty to use VS Code's Node runtime or discover Node.js from PATH."
+          "description": "%configuration.nodePath.description%"
         }
       }
     }
@@ -232,7 +221,7 @@
     "test:pi-runtime": "node scripts/test-pi-runtime.mjs",
     "verify:pi-runtime": "bun run prepare:pi-runtime && bun run test:pi-runtime",
     "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --main-fields=module,main",
-    "build:webview": "VITE_OPENCODE_URL=/api vite build",
+    "build:webview": "vite build",
     "dev": "concurrently -n \"ext,web\" -c \"cyan,magenta\" \"bun run watch:extension\" \"bun run dev:webview\"",
     "dev:webview": "vite --host localhost --port 5173 --strictPort",
     "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
@@ -242,7 +231,6 @@
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.7",
     "@types/vscode": "^1.85.0",
     "@vitejs/plugin-react": "^5.0.0",
     "@vscode/vsce": "^3.9.2",
@@ -253,14 +241,10 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "1.18.9",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",
     "@piarium/runtime-client": "workspace:*",
-    "adm-zip": "^0.6.0",
-    "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "yaml": "^2.8.1"
+    "react-dom": "^19.1.1"
   }
 }

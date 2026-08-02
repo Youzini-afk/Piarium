@@ -1,10 +1,10 @@
 {
-  "extension.description": "AI coding assistant powered by OpenCode",
+  "extension.description": "Pi-native coding workspace for sessions, agents, providers, packages, and project tools",
   "views.chat.name": "Chat",
   "command.openSidebar.title": "Open Sidebar",
   "command.focusChat.title": "Focus Chat",
-  "command.restartApi.title": "Restart API Connection",
-  "command.showOpenCodeStatus.title": "Show OpenCode Status",
+  "command.restartRuntime.title": "Restart Pi Runtime",
+  "command.showRuntimeStatus.title": "Show Pi Runtime Status",
   "command.openAgentManager.title": "Open Agent Manager",
   "command.openActiveSessionInEditor.title": "Open Active Session in Editor",
   "command.openNewSessionInEditor.title": "Open New Session in Editor",
@@ -14,7 +14,6 @@
   "command.improveCode.title": "Improve Code",
   "command.newSession.title": "New Session",
   "command.showSettings.title": "Settings",
-  "command.attachExplorerToChat.title": "Attach to OpenChamber Chat",
-  "configuration.apiUrl.description": "URL of an external OpenCode API server. Leave empty to auto-start a local instance.",
-  "configuration.opencodeBinary.description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply."
+  "command.attachExplorerToChat.title": "Attach to Piarium Chat",
+  "configuration.nodePath.description": "Absolute path to Node.js 22.19 or newer for the Piarium host. Leave empty to use VS Code's Node runtime or discover Node.js from PATH."
 }

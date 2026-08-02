@@ -22,7 +22,7 @@ const withWindowRuntime = async (
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
-        __OPENCHAMBER_RUNTIME_APIS__: apis,
+        __PIARIUM_RUNTIME_APIS__: apis,
       },
     });
   } else if (previousWindowDescriptor) {

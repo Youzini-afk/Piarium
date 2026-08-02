@@ -14,19 +14,18 @@ import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager' | 'settings';
 
-declare const __OPENCHAMBER_WEBVIEW_BUILD_TIME__: string;
+declare const __PIARIUM_WEBVIEW_BUILD_TIME__: string;
 
 declare global {
   interface Window {
-    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
-    __OPENCHAMBER_VSCODE_THEME__?: VSCodeThemePayload['theme'];
-    __OPENCHAMBER_VSCODE_SHIKI_THEMES__?: {
+    __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs;
+    __PIARIUM_VSCODE_THEME__?: VSCodeThemePayload['theme'];
+    __PIARIUM_VSCODE_SHIKI_THEMES__?: {
       dark?: Record<string, unknown>;
       light?: Record<string, unknown>;
     } | null;
-    __OPENCHAMBER_CONNECTION__?: { error?: string; status: ConnectionStatus };
-    __OPENCHAMBER_HOME__?: string;
-    __OPENCHAMBER_PANEL_TYPE__?: PanelType;
+    __PIARIUM_CONNECTION__?: { error?: string; status: ConnectionStatus };
+    __PIARIUM_PANEL_TYPE__?: PanelType;
     __VSCODE_CONFIG__?: {
       arch?: string;
       connectionStatus?: string;
@@ -44,11 +43,11 @@ declare global {
 }
 
 console.log('[Piarium] VS Code webview starting...');
-console.log('[Piarium] VS Code webview build:', __OPENCHAMBER_WEBVIEW_BUILD_TIME__);
+console.log('[Piarium] VS Code webview build:', __PIARIUM_WEBVIEW_BUILD_TIME__);
 
-window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
-window.__OPENCHAMBER_PANEL_TYPE__ = window.__VSCODE_CONFIG__?.panelType || 'chat';
-window.__OPENCHAMBER_CONNECTION__ = {
+window.__PIARIUM_RUNTIME_APIS__ = createVSCodeAPIs();
+window.__PIARIUM_PANEL_TYPE__ = window.__VSCODE_CONFIG__?.panelType || 'chat';
+window.__PIARIUM_CONNECTION__ = {
   status: (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting',
 };
 
@@ -92,7 +91,7 @@ window.addEventListener('message', (event) => {
   const status = message.status;
   if (status !== 'connecting' && status !== 'connected' && status !== 'error' && status !== 'disconnected') return;
   const error = typeof message.error === 'string' ? message.error : undefined;
-  window.__OPENCHAMBER_CONNECTION__ = { status, ...(error ? { error } : {}) };
+  window.__PIARIUM_CONNECTION__ = { status, ...(error ? { error } : {}) };
   window.dispatchEvent(new CustomEvent('piarium:runtime-status', { detail: { error, status } }));
 });
 
@@ -117,9 +116,9 @@ const emitVSCodeTheme = (preferredKind?: VSCodeThemeKind) => {
   const palette = readVSCodeThemePalette(preferredKind);
   if (!palette) return;
   const theme = buildVSCodeThemeFromPalette(palette);
-  window.__OPENCHAMBER_VSCODE_THEME__ = theme;
+  window.__PIARIUM_VSCODE_THEME__ = theme;
   applyInitialTheme(theme);
-  window.dispatchEvent(new CustomEvent<VSCodeThemePayload>('openchamber:vscode-theme', {
+  window.dispatchEvent(new CustomEvent<VSCodeThemePayload>('piarium:vscode-theme', {
     detail: { palette, theme },
   }));
 };
@@ -128,8 +127,8 @@ emitVSCodeTheme(window.__VSCODE_CONFIG__?.theme as VSCodeThemeKind | undefined);
 onThemeChange((payload) => {
   const kind = (typeof payload === 'string' ? payload : payload?.kind) as VSCodeThemeKind | undefined;
   if (typeof payload === 'object' && payload?.shikiThemes !== undefined) {
-    window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__ = payload.shikiThemes;
-    window.dispatchEvent(new CustomEvent('openchamber:vscode-shiki-themes', {
+    window.__PIARIUM_VSCODE_SHIKI_THEMES__ = payload.shikiThemes;
+    window.dispatchEvent(new CustomEvent('piarium:vscode-shiki-themes', {
       detail: { shikiThemes: payload.shikiThemes },
     }));
   }
@@ -170,7 +169,7 @@ const configuredWorkspaceFolders = (): Array<{ name: string; path: string }> => 
 
 const persistWorkspace = (path: string) => {
   if (!path) return;
-  window.__OPENCHAMBER_HOME__ = path;
+  window.__PIARIUM_HOME__ = path;
   try {
     window.localStorage.setItem('lastDirectory', path);
     window.localStorage.setItem('homeDirectory', path);
@@ -348,7 +347,7 @@ const bootstrap = async () => {
   const folders = configuredWorkspaceFolders();
   if (folders.length > 0) await syncVSCodeWorkspaceProjects(folders);
   const { renderVSCodeApp } = await import('@openchamber/ui/apps/renderVSCodeApp');
-  renderVSCodeApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createVSCodeAPIs());
+  renderVSCodeApp(window.__PIARIUM_RUNTIME_APIS__ ?? createVSCodeAPIs());
   await waitForUiMount();
   fadeOutLoadingScreen();
 };

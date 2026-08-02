@@ -8,15 +8,15 @@ export const createVSCodeActionsAPI = (): VSCodeAPI => ({
   },
 
   async openAgentManager(): Promise<void> {
-    await executeVSCodeCommand('openchamber.openAgentManager');
+    await executeVSCodeCommand('piarium.openAgentManager');
   },
 
   async openSettings(settingsPage?: string): Promise<void> {
     if (settingsPage && settingsPage.trim().length > 0) {
-      await executeVSCodeCommand('openchamber.showSettings', [settingsPage.trim()]);
+      await executeVSCodeCommand('piarium.showSettings', [settingsPage.trim()]);
       return;
     }
-    await executeVSCodeCommand('openchamber.showSettings');
+    await executeVSCodeCommand('piarium.showSettings');
   },
 
   async openExternalUrl(url: string): Promise<void> {

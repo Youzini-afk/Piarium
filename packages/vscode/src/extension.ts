@@ -65,7 +65,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const command = await findMoveToRightSidebarCommandId();
     if (!command) return;
     try {
-      await vscode.commands.executeCommand('openchamber.chatView.focus');
+      await vscode.commands.executeCommand('piarium.chatView.focus');
       await vscode.commands.executeCommand(command);
     } catch (error) {
       outputChannel?.appendLine(`[Piarium] Failed to move chat to the right sidebar: ${String(error)}`);
@@ -77,14 +77,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setTimeout(() => void attemptMoveChatToRightSidebar(), 800);
   }
 
-  context.subscriptions.push(vscode.commands.registerCommand('openchamber.openSidebar', async () => {
+  context.subscriptions.push(vscode.commands.registerCommand('piarium.openSidebar', async () => {
     try {
-      await vscode.commands.executeCommand('workbench.view.extension.openchamber');
+      await vscode.commands.executeCommand('workbench.view.extension.piarium');
     } catch (error) {
       outputChannel?.appendLine(`[Piarium] Failed to open the view container: ${String(error)}`);
     }
     try {
-      await vscode.commands.executeCommand('openchamber.chatView.focus');
+      await vscode.commands.executeCommand('piarium.chatView.focus');
     } catch (error) {
       vscode.window.showErrorMessage(t('Piarium: Failed to open sidebar - {0}', String(error)));
       return false;
@@ -97,7 +97,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
 
   const revealChatViewForPayload = async (): Promise<boolean> => {
-    if (!await vscode.commands.executeCommand<boolean>('openchamber.openSidebar')) return false;
+    if (!await vscode.commands.executeCommand<boolean>('piarium.openSidebar')) return false;
     await waitForChatViewBootstrap();
     if (chatViewProvider?.hasResolvedView()) return true;
     vscode.window.showWarningMessage(t('Piarium: Chat sidebar is not ready'));
@@ -105,34 +105,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.focusChat', () => vscode.commands.executeCommand('openchamber.chatView.focus')),
-    vscode.commands.registerCommand('openchamber.openAgentManager', () => agentManagerProvider?.createOrShow()),
-    vscode.commands.registerCommand('openchamber.internal.settingsSynced', (settings: unknown) => {
+    vscode.commands.registerCommand('piarium.focusChat', () => vscode.commands.executeCommand('piarium.chatView.focus')),
+    vscode.commands.registerCommand('piarium.openAgentManager', () => agentManagerProvider?.createOrShow()),
+    vscode.commands.registerCommand('piarium.internal.settingsSynced', (settings: unknown) => {
       chatViewProvider?.notifySettingsSynced(settings);
       sessionEditorProvider?.notifySettingsSynced(settings);
       settingsPanelProvider?.notifySettingsSynced(settings);
     }),
-    vscode.commands.registerCommand('openchamber.setActiveSession', (sessionId: unknown, title?: unknown) => {
+    vscode.commands.registerCommand('piarium.setActiveSession', (sessionId: unknown, title?: unknown) => {
       activeSessionId = typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : null;
       activeSessionTitle = activeSessionId && typeof title === 'string' && title.trim() ? title.trim() : null;
     }),
-    vscode.commands.registerCommand('openchamber.openActiveSessionInEditor', () => {
+    vscode.commands.registerCommand('piarium.openActiveSessionInEditor', () => {
       if (!activeSessionId) {
         vscode.window.showInformationMessage(t('Piarium: No active session'));
         return;
       }
       sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
     }),
-    vscode.commands.registerCommand('openchamber.openSessionInEditor', (sessionId: unknown, title?: unknown) => {
+    vscode.commands.registerCommand('piarium.openSessionInEditor', (sessionId: unknown, title?: unknown) => {
       if (typeof sessionId !== 'string' || !sessionId.trim()) return;
       sessionEditorProvider?.createOrShow(sessionId.trim(), typeof title === 'string' ? title : undefined);
     }),
-    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', () => sessionEditorProvider?.createOrShowNewSession()),
-    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', () => {
+    vscode.commands.registerCommand('piarium.openNewSessionInEditor', () => sessionEditorProvider?.createOrShowNewSession()),
+    vscode.commands.registerCommand('piarium.openCurrentOrNewSessionInEditor', () => {
       if (activeSessionId) sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
       else sessionEditorProvider?.createOrShowNewSession();
     }),
-    vscode.commands.registerCommand('openchamber.restartApi', async () => {
+    vscode.commands.registerCommand('piarium.restartRuntime', async () => {
       try {
         await piRuntime?.restart();
         chatViewProvider?.reloadPiRuntime();
@@ -143,7 +143,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
   );
 
-  context.subscriptions.push(vscode.commands.registerCommand('openchamber.addToContext', async () => {
+  context.subscriptions.push(vscode.commands.registerCommand('piarium.addToContext', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       vscode.window.showWarningMessage(t('Piarium [Add to Context]: No active editor'));
@@ -166,7 +166,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
 
   context.subscriptions.push(vscode.commands.registerCommand(
-    'openchamber.attachExplorerToChat',
+    'piarium.attachExplorerToChat',
     async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
       const candidates = [
         ...(Array.isArray(resources) ? resources.filter((entry): entry is vscode.Uri => entry instanceof vscode.Uri) : []),
@@ -233,11 +233,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (await revealChatViewForPayload()) chatViewProvider?.createNewSessionWithPrompt(prompt);
   };
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.explain', () => createSessionWithEditorPrompt('explain')),
-    vscode.commands.registerCommand('openchamber.improveCode', () => createSessionWithEditorPrompt('improve')),
+    vscode.commands.registerCommand('piarium.explain', () => createSessionWithEditorPrompt('explain')),
+    vscode.commands.registerCommand('piarium.improveCode', () => createSessionWithEditorPrompt('improve')),
   );
 
-  context.subscriptions.push(vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
+  context.subscriptions.push(vscode.commands.registerCommand('piarium.newSession', async (directory?: unknown) => {
     const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     let folderPath = typeof directory === 'string' && directory.trim() ? directory.trim() : undefined;
     if (!folderPath && candidates.length === 0) {
@@ -263,7 +263,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       chatViewProvider?.syncWorkspaceFolders(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []));
     }),
-    vscode.commands.registerCommand('openchamber.showSettings', (settingsPage?: unknown) => {
+    vscode.commands.registerCommand('piarium.showSettings', (settingsPage?: unknown) => {
       const page = typeof settingsPage === 'string'
         ? settingsPage
         : settingsPage && typeof settingsPage === 'object' && typeof (settingsPage as { page?: unknown }).page === 'string'
@@ -271,8 +271,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           : undefined;
       settingsPanelProvider?.createOrShow(page);
     }),
-    vscode.commands.registerCommand('openchamber.closeSettingsPanel', () => settingsPanelProvider?.dispose()),
-    vscode.commands.registerCommand('openchamber.showOpenCodeStatus', () => {
+    vscode.commands.registerCommand('piarium.closeSettingsPanel', () => settingsPanelProvider?.dispose()),
+    vscode.commands.registerCommand('piarium.showRuntimeStatus', () => {
       const status = piRuntime?.getStatus();
       let nodePath = '(unavailable)';
       let hostPath = '(unavailable)';

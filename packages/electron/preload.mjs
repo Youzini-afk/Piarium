@@ -85,7 +85,7 @@ if (runtimeHeadersRaw && isLocalPage) {
 // operate on the REMOTE server's filesystem, local home is irrelevant
 // (and would be misleading if consumed as a workspace hint).
 if (isLocalPage && homeDirectory) {
-  contextBridge.exposeInMainWorld('__OPENCHAMBER_HOME__', homeDirectory);
+  contextBridge.exposeInMainWorld('__PIARIUM_HOME__', homeDirectory);
 }
 
 // macOS major version drives window chrome offsets (traffic lights) — UI

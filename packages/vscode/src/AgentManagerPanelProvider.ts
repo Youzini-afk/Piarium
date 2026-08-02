@@ -12,7 +12,7 @@ import { resolveWorkspaceFolders } from './workspaceResolver';
 const t = vscode.l10n.t;
 
 export class AgentManagerPanelProvider implements vscode.Disposable {
-  public static readonly viewType = 'openchamber.agentManager';
+  public static readonly viewType = 'piarium.agentManager';
 
   private _panel?: vscode.WebviewPanel;
   private _cachedStatus: PiRuntimeConnectionStatus = 'connecting';
@@ -113,7 +113,6 @@ export class AgentManagerPanelProvider implements vscode.Disposable {
       workspaceFolder: normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''),
       workspaceFolders: resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []),
       initialStatus: this._cachedStatus,
-      cliAvailable: true,
       panelType: 'agentManager',
       viewMode: 'editor',
       extensionVersion: String(this._context.extension?.packageJSON?.version || ''),

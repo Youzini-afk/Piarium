@@ -49,9 +49,9 @@ bun run vscode:build    # Build extension + webview
 bun run vscode:package  # Create a local .vsix package
 ```
 
-`bun run vscode:dev` opens an Extension Development Host automatically. You can override the editor or workspace with `OPENCHAMBER_VSCODE_BIN` and `OPENCHAMBER_VSCODE_DEV_WORKSPACE`.
+`bun run vscode:dev` opens an Extension Development Host automatically. You can override the editor or workspace with `PIARIUM_VSCODE_BIN` and `PIARIUM_VSCODE_DEV_WORKSPACE`.
 
-Example: `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`.
+Example: `PIARIUM_VSCODE_BIN=cursor bun run vscode:dev`.
 
 ### Shared UI (`packages/ui`)
 

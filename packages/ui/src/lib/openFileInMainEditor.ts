@@ -47,8 +47,8 @@ const getVSCodeRuntimeEditor = (): RuntimeAPIs['editor'] | undefined => {
     return undefined;
   }
 
-  const apis = (window as typeof window & { __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs })
-    .__OPENCHAMBER_RUNTIME_APIS__;
+  const apis = (window as typeof window & { __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs })
+    .__PIARIUM_RUNTIME_APIS__;
   if (!apis?.runtime?.isVSCode || !apis.editor?.openFile) {
     return undefined;
   }

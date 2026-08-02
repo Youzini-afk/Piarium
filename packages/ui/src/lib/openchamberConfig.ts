@@ -207,7 +207,7 @@ const writeTextFile = async (path: string, content: string): Promise<boolean> =>
 
 const resolveHomeDirectory = async (): Promise<string | null> => {
   // Use server-reported home as the source of truth for user config paths.
-  // In some runtimes, window.__OPENCHAMBER_HOME__ can be workspace/project-root
+  // In some runtimes, window.__PIARIUM_HOME__ can be workspace/project-root
   // scoped, which would incorrectly route writes into the project directory.
   try {
     const response = await runtimeFetch(`${getBaseUrl()}/fs/home`, {

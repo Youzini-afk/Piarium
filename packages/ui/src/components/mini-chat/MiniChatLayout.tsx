@@ -34,7 +34,7 @@ const normalizePath = (value: string | null | undefined): string => {
 const compactPath = (value: string | null | undefined): string => {
   const path = normalizePath(value);
   if (!path) return '';
-  const home = typeof window !== 'undefined' ? normalizePath(window.__OPENCHAMBER_HOME__) : '';
+  const home = typeof window !== 'undefined' ? normalizePath(window.__PIARIUM_HOME__) : '';
   if (home && path === home) return '~';
   if (home && path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
   const segments = path.split('/').filter(Boolean);

@@ -142,14 +142,14 @@ const getVSCodeSettingsRuntime = (): VSCodeSettingsRuntime | null => {
 
   const win = window as typeof window & {
     __VSCODE_CONFIG__?: unknown;
-    __OPENCHAMBER_RUNTIME_APIS__?: { vscode?: VSCodeSettingsRuntime };
+    __PIARIUM_RUNTIME_APIS__?: { vscode?: VSCodeSettingsRuntime };
   };
 
   if (!win.__VSCODE_CONFIG__) {
     return null;
   }
 
-  return win.__OPENCHAMBER_RUNTIME_APIS__?.vscode ?? null;
+  return win.__PIARIUM_RUNTIME_APIS__?.vscode ?? null;
 };
 
 // Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
@@ -1671,7 +1671,7 @@ export const useUIStore = create<UIStore>()(
               if (typeof vscodeApi.openSettings === 'function') {
                 void vscodeApi.openSettings(page);
               } else if (typeof vscodeApi.executeCommand === 'function') {
-                void vscodeApi.executeCommand('openchamber.showSettings', page);
+                void vscodeApi.executeCommand('piarium.showSettings', page);
               }
               return;
             }

@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { createHash } from 'crypto';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
@@ -1005,28 +1006,35 @@ export interface RemoveGitWorktreePayload {
   deleteLocalBranch?: boolean;
 }
 
-const OPENCODE_ADJECTIVES = [
+const PIARIUM_ADJECTIVES = [
   'brave', 'calm', 'clever', 'cosmic', 'crisp', 'curious', 'eager', 'gentle', 'glowing', 'happy',
   'hidden', 'jolly', 'kind', 'lucky', 'mighty', 'misty', 'neon', 'nimble', 'playful', 'proud',
   'quick', 'quiet', 'shiny', 'silent', 'stellar', 'sunny', 'swift', 'tidy', 'witty',
 ];
 
-const OPENCODE_NOUNS = [
+const PIARIUM_NOUNS = [
   'cabin', 'cactus', 'canyon', 'circuit', 'comet', 'eagle', 'engine', 'falcon', 'forest', 'garden',
   'harbor', 'island', 'knight', 'lagoon', 'meadow', 'moon', 'mountain', 'nebula', 'orchid', 'otter',
   'panda', 'pixel', 'planet', 'river', 'rocket', 'sailor', 'squid', 'star', 'tiger', 'wizard', 'wolf',
 ];
 
-const OPENCODE_WORKTREE_ATTEMPTS = 26;
+const PIARIUM_WORKTREE_ATTEMPTS = 26;
 
-const getOpenCodeDataPath = () => {
-  const xdgDataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
-  return path.join(xdgDataHome, 'opencode');
+const getPiariumDataPath = (): string => {
+  const configured = process.env.PIARIUM_DATA_DIR?.trim();
+  if (configured) return path.resolve(configured);
+  if (process.platform === 'win32') {
+    return path.join(process.env.LOCALAPPDATA || process.env.APPDATA || os.homedir(), 'Piarium');
+  }
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'Piarium');
+  }
+  return path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'piarium');
 };
 
 const pickRandom = (values: string[]) => values[Math.floor(Math.random() * values.length)];
 
-const generateOpenCodeRandomName = () => `${pickRandom(OPENCODE_ADJECTIVES)}-${pickRandom(OPENCODE_NOUNS)}`;
+const generatePiariumRandomName = () => `${pickRandom(PIARIUM_ADJECTIVES)}-${pickRandom(PIARIUM_NOUNS)}`;
 
 const slugWorktreeName = (value: string) => {
   return String(value || '')
@@ -1093,6 +1101,13 @@ const canonicalPath = async (input: string): Promise<string> => {
   const realPath = await fs.promises.realpath(absolutePath).catch(() => absolutePath);
   const normalized = path.normalize(realPath);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+};
+
+const createWorktreeProjectKey = async (primaryWorktree: string): Promise<string> => {
+  const canonical = await canonicalPath(primaryWorktree);
+  const name = slugWorktreeName(path.basename(primaryWorktree)) || 'repository';
+  const digest = createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+  return `${name}-${digest}`;
 };
 
 const checkPathExists = async (targetPath: string): Promise<boolean> => {
@@ -1273,36 +1288,6 @@ const populateWorktreeWithLockRecovery = async (directory: string): Promise<void
   await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
 };
 
-const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string> => {
-  const gitDir = path.join(primaryWorktree, '.git');
-  const idFile = path.join(gitDir, 'opencode');
-  const existing = await fs.promises.readFile(idFile, 'utf8').then((value) => value.trim()).catch(() => '');
-  if (existing) {
-    return existing;
-  }
-
-  const rootsResult = await runGitCommandOrThrow(
-    primaryWorktree,
-    ['rev-list', '--max-parents=0', '--all'],
-    'Failed to resolve repository roots'
-  );
-
-  const roots = rootsResult.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
-
-  const projectId = roots[0] || '';
-  if (!projectId) {
-    throw new Error('Failed to derive OpenCode project ID');
-  }
-
-  await fs.promises.mkdir(gitDir, { recursive: true }).catch(() => undefined);
-  await fs.promises.writeFile(idFile, projectId, 'utf8').catch(() => undefined);
-  return projectId;
-};
-
 const resolveWorktreeProjectContext = async (directory: string) => {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath) {
@@ -1323,10 +1308,10 @@ const resolveWorktreeProjectContext = async (directory: string) => {
   );
   const commonDir = path.resolve(sandbox, commonResult.stdout.trim());
   const primaryWorktree = path.dirname(commonDir);
-  const projectID = await ensureOpenCodeProjectId(primaryWorktree);
-  const worktreeRoot = path.join(getOpenCodeDataPath(), 'worktree', projectID);
+  const projectKey = await createWorktreeProjectKey(primaryWorktree);
+  const worktreeRoot = path.join(getPiariumDataPath(), 'worktrees', projectKey);
 
-  return { projectID, sandbox, primaryWorktree, worktreeRoot };
+  return { sandbox, primaryWorktree, worktreeRoot };
 };
 
 const listWorktreeEntries = async (directory: string): Promise<WorktreeListEntry[]> => {
@@ -1337,13 +1322,13 @@ const listWorktreeEntries = async (directory: string): Promise<WorktreeListEntry
 const resolveWorktreeNameCandidates = (baseName: string): string[] => {
   const normalizedBase = slugWorktreeName(baseName || '');
   if (!normalizedBase) {
-    return Array.from({ length: OPENCODE_WORKTREE_ATTEMPTS }, () => generateOpenCodeRandomName());
+    return Array.from({ length: PIARIUM_WORKTREE_ATTEMPTS }, () => generatePiariumRandomName());
   }
-  return Array.from({ length: OPENCODE_WORKTREE_ATTEMPTS }, (_, index) => {
+  return Array.from({ length: PIARIUM_WORKTREE_ATTEMPTS }, (_, index) => {
     if (index === 0) {
       return normalizedBase;
     }
-    return `${normalizedBase}-${generateOpenCodeRandomName()}`;
+    return `${normalizedBase}-${generatePiariumRandomName()}`;
   });
 };
 
@@ -1365,7 +1350,7 @@ const resolveCandidateDirectory = async (
       return { name, directory, branch: explicitBranchName };
     }
 
-    const branch = `openchamber/${name}`;
+    const branch = `piarium/${name}`;
     const branchRef = `refs/heads/${branch}`;
     const branchExists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', branchRef]);
     if (branchExists.success) {
@@ -1492,87 +1477,6 @@ const runWorktreeStartCommand = async (directory: string, command: string): Prom
   }
 };
 
-const loadProjectStartCommand = async (projectID: string): Promise<string> => {
-  const storagePath = path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
-  try {
-    const raw = await fs.promises.readFile(storagePath, 'utf8');
-    const parsed = JSON.parse(raw) as { commands?: { start?: string } };
-    const start = typeof parsed?.commands?.start === 'string' ? parsed.commands.start.trim() : '';
-    return start || '';
-  } catch {
-    return '';
-  }
-};
-
-const getProjectStoragePath = (projectID: string) => {
-  return path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
-};
-
-const updateProjectSandboxes = async (
-  projectID: string,
-  primaryWorktree: string,
-  updater: (project: {
-    id: string;
-    worktree: string;
-    vcs: string;
-    sandboxes: string[];
-    time: { created: number; updated: number };
-  }) => void
-) => {
-  const storagePath = getProjectStoragePath(projectID);
-  await fs.promises.mkdir(path.dirname(storagePath), { recursive: true });
-
-  const now = Date.now();
-  const base = {
-    id: projectID,
-    worktree: primaryWorktree,
-    vcs: 'git',
-    sandboxes: [] as string[],
-    time: { created: now, updated: now },
-  };
-
-  const parsed = await fs.promises.readFile(storagePath, 'utf8').then((raw) => JSON.parse(raw) as typeof base).catch(() => null);
-  const current = parsed && typeof parsed === 'object' ? { ...base, ...parsed } : base;
-  current.id = String(current.id || projectID);
-  current.worktree = String(current.worktree || primaryWorktree);
-  current.vcs = current.vcs || 'git';
-  current.sandboxes = Array.isArray(current.sandboxes)
-    ? current.sandboxes.map((entry) => String(entry || '').trim()).filter(Boolean)
-    : [];
-  const createdAt = Number(current?.time?.created);
-  current.time = {
-    created: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : now,
-    updated: now,
-  };
-
-  updater(current);
-
-  current.sandboxes = [...new Set(current.sandboxes.map((entry) => String(entry || '').trim()).filter(Boolean))];
-  await fs.promises.writeFile(storagePath, `${JSON.stringify(current, null, 2)}\n`, 'utf8');
-};
-
-const syncProjectSandboxAdd = async (projectID: string, primaryWorktree: string, sandboxPath: string) => {
-  const sandbox = String(sandboxPath || '').trim();
-  if (!sandbox) {
-    return;
-  }
-  await updateProjectSandboxes(projectID, primaryWorktree, (project) => {
-    if (!project.sandboxes.includes(sandbox)) {
-      project.sandboxes.push(sandbox);
-    }
-  });
-};
-
-const syncProjectSandboxRemove = async (projectID: string, primaryWorktree: string, sandboxPath: string) => {
-  const sandbox = String(sandboxPath || '').trim();
-  if (!sandbox) {
-    return;
-  }
-  await updateProjectSandboxes(projectID, primaryWorktree, (project) => {
-    project.sandboxes = project.sandboxes.filter((entry) => entry !== sandbox);
-  });
-};
-
 const isInsideOrSameDirectory = (root: string, target: string): boolean => {
   const relative = path.relative(root, target);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -1596,14 +1500,6 @@ const cleanupFailedFastWorktreeCreate = async (
   const isInsideWorktreeRoot = isInsideOrSameDirectory(worktreeRoot, candidateDirectory) && candidateDirectory !== worktreeRoot;
   const isAttached = await isAttachedGitWorktreeDirectory(candidateDirectory);
 
-  if (!isAttached) {
-    try {
-      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, candidateDirectory);
-    } catch (error) {
-      console.warn('[GitService] Failed to clean up OpenCode sandbox metadata after worktree failure:', error instanceof Error ? error.message : String(error));
-    }
-  }
-
   if (!isInsideWorktreeRoot || isAttached) {
     return;
   }
@@ -1621,29 +1517,19 @@ const cleanupFailedFastWorktreeCreate = async (
   }
 };
 
-const runWorktreeStartScripts = async (directory: string, projectID: string, startCommand: string | undefined) => {
-  const projectStart = await loadProjectStartCommand(projectID);
-  if (projectStart) {
-    const projectResult = await runWorktreeStartCommand(directory, projectStart);
-    if (!projectResult.success) {
-      console.warn('[GitService] Worktree project start command failed:', projectResult.message || projectResult.stderr || projectResult.stdout);
-      return;
-    }
-  }
-
-  const extraCommand = String(startCommand || '').trim();
-  if (!extraCommand) {
+const runWorktreeStartScript = async (directory: string, startCommand: string | undefined) => {
+  const command = String(startCommand || '').trim();
+  if (!command) {
     return;
   }
-  const extraResult = await runWorktreeStartCommand(directory, extraCommand);
-  if (!extraResult.success) {
-    console.warn('[GitService] Worktree start command failed:', extraResult.message || extraResult.stderr || extraResult.stdout);
+  const result = await runWorktreeStartCommand(directory, command);
+  if (!result.success) {
+    console.warn('[GitService] Worktree start command failed:', result.message || result.stderr || result.stdout);
   }
 };
 
 const queueWorktreeBootstrap = (args: {
   directory: string;
-  projectID: string;
   primaryWorktree: string;
   localBranch: string;
   setUpstream: boolean;
@@ -1655,7 +1541,6 @@ const queueWorktreeBootstrap = (args: {
 }) => {
   const {
     directory,
-    projectID,
     primaryWorktree,
     localBranch,
     setUpstream,
@@ -1683,7 +1568,7 @@ const queueWorktreeBootstrap = (args: {
         });
       }
       setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_PENDING, WORKTREE_PHASE_GIT_READY);
-      await runWorktreeStartScripts(directory, projectID, startCommand).catch((error) => {
+      await runWorktreeStartScript(directory, startCommand).catch((error) => {
         console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
       });
       setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_READY, WORKTREE_PHASE_SETUP_READY);
@@ -2082,12 +1967,6 @@ async function attachGitWorktreeToCandidate(
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
 
-  try {
-    await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
-  } catch (error) {
-    console.warn('[GitService] Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
-  }
-
   const shouldSetUpstream = Boolean(input?.setUpstream);
   const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
   const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
@@ -2105,7 +1984,6 @@ async function attachGitWorktreeToCandidate(
 
   queueWorktreeBootstrap({
     directory: candidate.directory,
-    projectID: context.projectID,
     primaryWorktree: context.primaryWorktree,
     localBranch,
     setUpstream: shouldSetUpstream,
@@ -2151,12 +2029,6 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
 
   if (input?.returnAfterDirectoryCreated === true) {
     await fs.promises.mkdir(candidate.directory, { recursive: false });
-
-    try {
-      await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
-    } catch (error) {
-      console.warn('[GitService] Failed to sync OpenCode sandbox metadata (add):', error instanceof Error ? error.message : String(error));
-    }
 
     const bootstrapStatus = setWorktreeBootstrapState(
       candidate.directory,
@@ -2248,12 +2120,6 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
       await fs.promises.rm(targetDirectory, { recursive: true, force: true });
     }
 
-    try {
-      await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, targetDirectory);
-    } catch (error) {
-      console.warn('[GitService] Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
-    }
-
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
@@ -2274,12 +2140,6 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
         `Failed to delete local branch ${branchName}`
       );
     }
-  }
-
-  try {
-    await syncProjectSandboxRemove(context.projectID, context.primaryWorktree, matchedEntry.worktree);
-  } catch (error) {
-    console.warn('[GitService] Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
   }
 
   clearWorktreeBootstrapState(matchedEntry.worktree);
@@ -2638,7 +2498,7 @@ export async function applyGitHunk(
 
   const flags = HUNK_ACTION_ARGS[action];
   const tmpDir = os.tmpdir();
-  const tmpPath = path.join(tmpDir, `openchamber-hunk-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
+  const tmpPath = path.join(tmpDir, `piarium-hunk-${Date.now()}-${Math.random().toString(36).slice(2)}.patch`);
 
   try {
     await fs.promises.writeFile(tmpPath, patch, 'utf8');
@@ -3055,7 +2915,7 @@ export async function countGitStashFiles(directory: string, refs: string[]): Pro
 }
 
 export async function stashGitChanges(directory: string, options: { message?: string } = {}): Promise<{ success: boolean; created: boolean; message: string; output: string }> {
-  const message = options.message?.trim() || `OpenChamber stash ${new Date().toISOString()}`;
+  const message = options.message?.trim() || `Piarium stash ${new Date().toISOString()}`;
   const result = await execGit(['stash', 'push', '--include-untracked', '-m', message], directory);
   if (result.exitCode !== 0) throw new Error(result.stderr.trim() || 'Failed to stash changes');
   const output = result.stdout.trim() || result.stderr.trim();

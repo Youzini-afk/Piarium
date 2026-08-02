@@ -25,7 +25,7 @@ type VSCodePanelType = 'chat' | 'agentManager' | 'settings';
 
 declare global {
   interface Window {
-    __OPENCHAMBER_PANEL_TYPE__?: VSCodePanelType;
+    __PIARIUM_PANEL_TYPE__?: VSCodePanelType;
   }
 }
 
@@ -34,7 +34,7 @@ interface VSCodeAppProps {
 }
 
 export function VSCodeApp({ apis }: VSCodeAppProps) {
-  const panelType = typeof window === 'undefined' ? 'chat' : window.__OPENCHAMBER_PANEL_TYPE__ || 'chat';
+  const panelType = typeof window === 'undefined' ? 'chat' : window.__PIARIUM_PANEL_TYPE__ || 'chat';
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const initialSettingsPage = React.useMemo(() => {
@@ -88,7 +88,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 <PiSettingsView
                   isWindowed
                   onClose={() => {
-                    void apis.vscode?.executeCommand('openchamber.closeSettingsPanel');
+                    void apis.vscode?.executeCommand('piarium.closeSettingsPanel');
                   }}
                 />
               </React.Suspense>

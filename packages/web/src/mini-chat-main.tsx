@@ -5,13 +5,13 @@ import '@openchamber/ui/styles/fonts';
 
 declare global {
   interface Window {
-    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
+    __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs;
   }
 }
 
-window.__OPENCHAMBER_RUNTIME_APIS__ = createConfiguredWebAPIs();
+window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs();
 
 void import('@openchamber/ui/apps/renderElectronMiniChatApp')
   .then(({ renderElectronMiniChatApp }) => {
-    renderElectronMiniChatApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
+    renderElectronMiniChatApp(window.__PIARIUM_RUNTIME_APIS__ ?? createConfiguredWebAPIs());
   });

@@ -213,9 +213,9 @@ export const VSCodeLayout: React.FC = () => {
 
   React.useEffect(() => {
     if (!runtimeApis.vscode) return;
-    void runtimeApis.vscode.executeCommand('openchamber.setActiveSession', currentSessionId, sessionTitle);
+    void runtimeApis.vscode.executeCommand('piarium.setActiveSession', currentSessionId, sessionTitle);
     if (viewMode === 'editor' && currentSessionId && sessionTitle) {
-      void runtimeApis.vscode.executeCommand('openchamber.updateSessionEditorTitle', currentSessionId, sessionTitle);
+      void runtimeApis.vscode.executeCommand('piarium.updateSessionEditorTitle', currentSessionId, sessionTitle);
     }
   }, [currentSessionId, runtimeApis.vscode, sessionTitle, viewMode]);
 

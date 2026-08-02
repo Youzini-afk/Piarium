@@ -9,7 +9,7 @@ import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { getWebviewHtml } from './webviewHtml';
 
 export class SettingsPanelProvider implements vscode.Disposable {
-  public static readonly viewType = 'openchamber.settings';
+  public static readonly viewType = 'piarium.settings';
 
   private _panel?: vscode.WebviewPanel;
   private _cachedStatus: PiRuntimeConnectionStatus = 'connecting';
@@ -71,7 +71,7 @@ export class SettingsPanelProvider implements vscode.Disposable {
       const response = await handleBridgeMessage(message, { context: this._context });
       void panel.webview.postMessage(response);
       if (message.type === 'api:settings:save' && response.success) {
-        void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
+        void vscode.commands.executeCommand('piarium.internal.settingsSynced', response.data);
       }
     }, null, this._context.subscriptions);
   }
@@ -117,7 +117,6 @@ export class SettingsPanelProvider implements vscode.Disposable {
       extensionUri: this._extensionUri,
       workspaceFolder: normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''),
       initialStatus: this._cachedStatus,
-      cliAvailable: true,
       panelType: 'settings',
       initialSettingsPage,
       viewMode: 'editor',

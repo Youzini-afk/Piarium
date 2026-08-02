@@ -205,8 +205,7 @@ export class VSCodePiRuntime implements vscode.Disposable {
     const hostEntry = this.#dependencies.resolveHostEntry(this.#context.extensionPath);
     this.#output.appendLine(`[Pi runtime] Node: ${nodePath}`);
     this.#output.appendLine(`[Pi runtime] Host: ${hostEntry}`);
-    let broker!: PiRuntimeBroker;
-    broker = this.#dependencies.createBroker({
+    const broker = this.#dependencies.createBroker({
       client: {
         clientName: 'piarium-vscode',
         clientVersion: String(this.#context.extension?.packageJSON?.version || '0.1.0'),

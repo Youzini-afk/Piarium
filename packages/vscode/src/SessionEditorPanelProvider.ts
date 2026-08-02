@@ -37,7 +37,7 @@ const isSameActiveEditorFilePayload = (a: ActiveEditorFilePayload | null, b: Act
 };
 
 export class SessionEditorPanelProvider implements vscode.Disposable {
-  public static readonly viewType = 'openchamber.sessionEditor';
+  public static readonly viewType = 'piarium.sessionEditor';
 
   private _cachedStatus: PiRuntimeConnectionStatus = 'connecting';
   private _cachedError?: string;
@@ -161,7 +161,7 @@ export class SessionEditorPanelProvider implements vscode.Disposable {
       if (state.piRuntimeBridge.handleMessage(message)) return;
       if (message.type === 'vscode:command') {
         const { command, args } = (message.payload || {}) as { command?: unknown; args?: unknown[] };
-        if (command === 'openchamber.updateSessionEditorTitle') {
+        if (command === 'piarium.updateSessionEditorTitle') {
           state.panel.title = typeof args?.[1] === 'string' && args[1].trim() ? args[1].trim() : t('Session');
           void state.panel.webview.postMessage({
             id: message.id,
@@ -175,7 +175,7 @@ export class SessionEditorPanelProvider implements vscode.Disposable {
       const response = await handleBridgeMessage(message, { context: this._context });
       void state.panel.webview.postMessage(response);
       if (message.type === 'api:settings:save' && response.success) {
-        void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
+        void vscode.commands.executeCommand('piarium.internal.settingsSynced', response.data);
       }
     }, null, this._context.subscriptions);
   }
@@ -281,7 +281,6 @@ export class SessionEditorPanelProvider implements vscode.Disposable {
       workspaceFolder: normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''),
       workspaceFolders: resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []),
       initialStatus: this._cachedStatus,
-      cliAvailable: true,
       panelType: 'chat',
       initialSessionId: sessionId ?? undefined,
       viewMode: 'editor',
