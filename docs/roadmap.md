@@ -97,14 +97,19 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across
   application settings; manage `pi-workspace-history` and `pi-wtf` through Pi's native package
   operations with truthful configured-versus-active status.
+- Implemented: replace the imported OpenCode plugin registry/file editor with a single Pi-native
+  package manager. It lists configured sources, updates one or all packages, removes packages, and
+  passes arbitrary npm, Git, local-path, or future Pi sources directly to `PackageManager`. The
+  recommended integration cards are convenience entries, not an allowlist.
 - Connect the Pi-native message rollback action to that policy after the session/message UI no
   longer uses OpenCode message IDs.
 - Put provider status/checkpoint/history management in the right sidebar/settings while retaining
   the existing timeline, reverted-message dock, undo/redo, and fork UX. Enable files-only/preview
   controls only when a plugin advertises them through recovery bridge v1.
 
-- Subagent tree, controls, artifacts, and parent-session result projection.
-- Magic Context configuration, memory/session views, and diagnostics.
+- Implemented: native package installation/update and unrestricted configuration documents for
+  `pi-subagents` and Magic Context. Subagent tree controls and Magic Context memory/session
+  diagnostics remain dependent on their public event/data contracts.
 - Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
   reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
   config sources. Tools/resources/results already use the generic Pi tool projection; richer MCP Apps

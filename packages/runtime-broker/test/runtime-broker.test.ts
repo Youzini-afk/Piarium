@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -17,7 +17,9 @@ test("broker owns catalog and per-session Pi workers", async () => {
   const root = await mkdtemp(join(tmpdir(), "piarium-runtime-broker-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
+  const homeDir = join(root, "home");
   await mkdir(join(workspace, ".pi", "extensions"), { recursive: true });
+  await mkdir(homeDir, { recursive: true });
   await writeFile(
     join(workspace, ".pi", "extensions", "broker-smoke.ts"),
     `export default function extension(pi: any) {
@@ -42,6 +44,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
         throw new Error("observer failure must not block trust resolution");
       }
     },
+    environment: { HOME: homeDir },
     execArgv: ["--import", "tsx"],
     hostEntry: HOST_ENTRY,
     promptForProjectTrust: async () => ({ remember: false, trusted: true }),
@@ -141,6 +144,27 @@ test("broker owns catalog and per-session Pi workers", async () => {
         root: "project",
       })).revision,
       updatedMagicConfig.revision,
+    );
+    const emptyHomeMcpConfig = await dispatchRuntimeRequest(broker, "config.text.get", {
+      cwd: workspace,
+      format: "json",
+      path: ".config/mcp/mcp.json",
+      root: "home",
+    });
+    const homeMcpContent = "{\n  \"mcpServers\": {}\n}\n";
+    const updatedHomeMcpConfig = await dispatchRuntimeRequest(broker, "config.text.update", {
+      content: homeMcpContent,
+      cwd: workspace,
+      expectedRevision: emptyHomeMcpConfig.revision,
+      format: "json",
+      path: ".config/mcp/mcp.json",
+      root: "home",
+    });
+    assert.equal(updatedHomeMcpConfig.root, "home");
+    assert.equal(updatedHomeMcpConfig.content, homeMcpContent);
+    assert.equal(
+      await readFile(join(homeDir, ".config", "mcp", "mcp.json"), "utf8"),
+      homeMcpContent,
     );
     assert.deepEqual(broker.activeSessionIds, []);
     let stopAuthPromptListener = () => {};

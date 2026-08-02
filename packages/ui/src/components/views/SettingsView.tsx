@@ -16,8 +16,7 @@ import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpPage } from '@/components/sections/mcp/McpPage';
-import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
-import { usePluginsStore } from '@/stores/usePluginsStore';
+import { PluginsPage } from '@/components/sections/plugins';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -316,10 +315,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void useCommandsStore.getState().loadCommands();
       return;
     }
-    if (settingsSlug === 'plugins') {
-      void usePluginsStore.getState().loadPlugins();
-      return;
-    }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
@@ -461,10 +456,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
     }
 
-    if (result.id === 'plugins.create') {
-      return 'plugins.spec';
-    }
-
     return result.id;
   }, []);
 
@@ -510,11 +501,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     openPage(result.page);
     if (isMobile) {
       setMobileStage('page-content');
-    }
-    if (result.id === 'plugins.create' && typeof window !== 'undefined') {
-      window.setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('openchamber:settings-open-plugin-add'));
-      }, 50);
     }
   }, [isMobile, openPage, prepareSettingsSearchTarget]);
 
@@ -608,8 +594,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
       case 'commands':
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'plugins':
-        return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':
         return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':

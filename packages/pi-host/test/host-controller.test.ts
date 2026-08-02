@@ -391,6 +391,19 @@ describe("HostController", () => {
       );
 
       transport.receive(
+        createRequest("home-config-get", "config.text.get", {
+          format: "json",
+          path: `.piarium-host-test-${snapshot.sessionId}.json`,
+          root: "home",
+        }),
+      );
+      const homeConfig = await transport.waitFor((entry) =>
+        isResponse(entry, "home-config-get"),
+      );
+      assert.ok(homeConfig.kind === "response" && homeConfig.ok);
+      assert.equal((homeConfig.result as { root: string }).root, "home");
+
+      transport.receive(
         createRequest("config-path-escape", "config.document.get", {
           path: "../outside.json",
           scope: "global",

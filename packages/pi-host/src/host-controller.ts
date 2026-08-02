@@ -489,7 +489,7 @@ export class HostController {
       case "config.text.get": {
         const root = readString(params, "root");
         const format = readString(params, "format");
-        if (root !== "agent" && root !== "project" && root !== "user-config") {
+        if (root !== "agent" && root !== "home" && root !== "project" && root !== "user-config") {
           throw new HostError("invalid_params", "Unknown configuration root");
         }
         if (format !== "json" && format !== "jsonc") {
@@ -504,7 +504,7 @@ export class HostController {
       case "config.text.update": {
         const root = readString(params, "root");
         const format = readString(params, "format");
-        if (root !== "agent" && root !== "project" && root !== "user-config") {
+        if (root !== "agent" && root !== "home" && root !== "project" && root !== "user-config") {
           throw new HostError("invalid_params", "Unknown configuration root");
         }
         if (format !== "json" && format !== "jsonc") {

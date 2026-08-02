@@ -141,10 +141,10 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   },
   {
     slug: 'plugins',
-    title: 'Plugins',
+    title: 'Pi Packages',
     group: 'opencode',
-    kind: 'split',
-    keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
+    kind: 'single',
+    keywords: ['pi', 'package', 'packages', 'plugin', 'plugins', 'extensions', 'npm', 'git', 'local path'],
   },
   {
     slug: 'skills.installed',

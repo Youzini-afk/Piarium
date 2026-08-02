@@ -195,6 +195,12 @@ into a surface-owned read-only panel, so Piarium does not copy the component's p
 Commands, custom session entries, tool details, and extension errors have generic renderers so an
 unknown package remains usable before a first-class adapter exists.
 
+The Plugins settings page is a direct client of Pi's typed `package.list/install/update/remove`
+operations. It does not maintain an OpenCode registry, copy extension files, or restrict package
+sources: recommended cards are only shortcuts, while any source accepted by Pi's `PackageManager`
+can be passed through unchanged. Package mutations target the current live session when one exists,
+so Pi reloads the real extension instance; otherwise they use the current workspace catalog context.
+
 ### 7.2 First-class adapters
 
 - **pi-subagents:** task tree and controls from its event bus; lifecycle artifacts for restart and
@@ -210,8 +216,9 @@ unknown package remains usable before a first-class adapter exists.
   credentials, SSRF policy, search/fetch tools, activity widgets, and optional Curator server remain
   extension-owned.
 
-PiDeck-installed local extensions are not product dependencies. A conforming generic UI bridge may
-still allow them to work when a user installs them independently.
+PiDeck-installed local extensions are not product dependencies. Local working trees and other Pi
+package sources remain installable directly, and the generic UI bridge allows unknown packages to
+work without a Piarium-specific adapter.
 
 ## 8. Recovery model
 

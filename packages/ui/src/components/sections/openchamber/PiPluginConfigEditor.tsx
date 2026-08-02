@@ -146,6 +146,9 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
   const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
     sessionId ? { sessionId } : { cwd }
   ), [cwd, sessionId]);
+  const runtimeTargetKey = sessionId ? `session:${sessionId}` : `cwd:${cwd}`;
+  const runtimeTargetKeyRef = React.useRef(runtimeTargetKey);
+  runtimeTargetKeyRef.current = runtimeTargetKey;
   const [target, setTarget] = React.useState<ConfigTarget>('settings-global');
   const [documents, setDocuments] = React.useState<ConfigDocuments>(emptyDocuments);
   const [textDocuments, setTextDocuments] = React.useState<TextConfigDocuments>(emptyTextDocuments);
@@ -160,6 +163,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
   const load = React.useCallback(async () => {
     const generation = ++generationRef.current;
     const runtimeKey = getRuntimeKey();
+    const actionTargetKey = runtimeTargetKey;
     setLoading(true);
     setLoadError(null);
     try {
@@ -172,7 +176,11 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
           : Promise.resolve(emptyTextDocuments()['magic-project']),
         loadTextConfigDocument(runtimeTarget, 'web-access-agent'),
       ]);
-      if (generation !== generationRef.current || runtimeKey !== getRuntimeKey()) return;
+      if (
+        generation !== generationRef.current
+        || actionTargetKey !== runtimeTargetKeyRef.current
+        || runtimeKey !== getRuntimeKey()
+      ) return;
       const nextDocuments = documentsFromSnapshots(settings, wtf.document);
       const nextTextDocuments: TextConfigDocuments = {
         'magic-project': magicProject,
@@ -184,14 +192,22 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
       setDrafts(draftsFromDocuments(nextDocuments, nextTextDocuments));
       setProjectTrusted(settings.projectTrusted);
     } catch (error) {
-      if (generation !== generationRef.current || runtimeKey !== getRuntimeKey()) return;
+      if (
+        generation !== generationRef.current
+        || actionTargetKey !== runtimeTargetKeyRef.current
+        || runtimeKey !== getRuntimeKey()
+      ) return;
       setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
-      if (generation === generationRef.current && runtimeKey === getRuntimeKey()) {
+      if (
+        generation === generationRef.current
+        && actionTargetKey === runtimeTargetKeyRef.current
+        && runtimeKey === getRuntimeKey()
+      ) {
         setLoading(false);
       }
     }
-  }, [runtimeTarget]);
+  }, [runtimeTarget, runtimeTargetKey]);
 
   React.useEffect(() => {
     setDocuments(emptyDocuments());
@@ -253,6 +269,13 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
   const save = React.useCallback(async () => {
     if (!parsed.valid || !dirty || projectBlocked || saving) return;
     const runtimeKey = getRuntimeKey();
+    const generation = generationRef.current;
+    const actionTargetKey = runtimeTargetKey;
+    const isCurrentSave = () => (
+      generation === generationRef.current
+      && actionTargetKey === runtimeTargetKeyRef.current
+      && runtimeKey === getRuntimeKey()
+    );
     setSaving(true);
     try {
       if (isTextConfigTarget(target)) {
@@ -265,7 +288,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
           drafts[target],
           currentDocument.revision,
         );
-        if (runtimeKey !== getRuntimeKey()) return;
+        if (!isCurrentSave()) return;
         setTextDocuments((current) => ({ ...current, [target]: snapshot }));
         setDrafts((current) => ({ ...current, [target]: snapshot.content }));
         setProjectTrusted(snapshot.projectTrusted);
@@ -276,7 +299,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
           'wtf.json',
           changes,
         );
-        if (runtimeKey !== getRuntimeKey()) return;
+        if (!isCurrentSave()) return;
         setDocuments((current) => ({ ...current, [target]: snapshot.document }));
         setDrafts((current) => ({
           ...current,
@@ -286,7 +309,7 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
       } else {
         const scope = target === 'settings-global' ? 'global' : 'project';
         const snapshot = await updatePiSettings(runtimeTarget, scope, changes);
-        if (runtimeKey !== getRuntimeKey()) return;
+        if (!isCurrentSave()) return;
         const savedDocument = snapshot[scope];
         setDocuments((current) => ({ ...current, [target]: savedDocument }));
         setDrafts((current) => ({
@@ -297,12 +320,13 @@ export const PiPluginConfigEditor: React.FC<PiPluginConfigEditorProps> = ({ cwd,
       }
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
+      if (!isCurrentSave()) return;
       console.error('Failed to save Pi plugin configuration:', error);
       toast.error(error instanceof Error ? error.message : t('settings.common.status.saveFailed'));
     } finally {
       setSaving(false);
     }
-  }, [changes, dirty, drafts, parsed.valid, projectBlocked, runtimeTarget, saving, target, t, textDocuments]);
+  }, [changes, dirty, drafts, parsed.valid, projectBlocked, runtimeTarget, runtimeTargetKey, saving, target, t, textDocuments]);
 
   return (
     <div className="space-y-3 rounded-lg border border-border/60 px-3 py-3">

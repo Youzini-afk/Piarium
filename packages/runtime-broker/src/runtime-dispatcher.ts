@@ -507,7 +507,7 @@ async function dispatchRuntimeRequestUnchecked(
         {
           format: requireEnum(input, "format", ["json", "jsonc"] as const),
           path: requireString(input, "path"),
-          root: requireEnum(input, "root", ["agent", "project", "user-config"] as const),
+          root: requireEnum(input, "root", ["agent", "home", "project", "user-config"] as const),
         },
       );
     }
@@ -521,7 +521,7 @@ async function dispatchRuntimeRequestUnchecked(
           expectedRevision: requireString(input, "expectedRevision"),
           format: requireEnum(input, "format", ["json", "jsonc"] as const),
           path: requireString(input, "path"),
-          root: requireEnum(input, "root", ["agent", "project", "user-config"] as const),
+          root: requireEnum(input, "root", ["agent", "home", "project", "user-config"] as const),
         },
       );
     }

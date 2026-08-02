@@ -5,7 +5,6 @@ import type {
   RuntimeContextTarget,
 } from '@piarium/protocol';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import {
@@ -22,12 +21,10 @@ import {
   installPiPackage,
   findPiPackage,
   listPiPackages,
-  piPackageNameFromSource,
   removePiPackage,
   updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { PiPluginConfigEditor } from './PiPluginConfigEditor';
 
 interface RecoveryIntegration {
   descriptionKey: I18nKey;
@@ -106,8 +103,10 @@ export const RecoverySettings: React.FC = () => {
     source: string;
   } | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [customSource, setCustomSource] = React.useState('');
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSessionId = usePiSessionStore((state) => {
+    const sessionId = state.currentSessionId;
+    return sessionId && state.records[sessionId]?.open ? sessionId : null;
+  });
   const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
     currentSessionId ? { sessionId: currentSessionId } : { cwd: currentDirectory }
   ), [currentDirectory, currentSessionId]);
@@ -186,14 +185,6 @@ export const RecoverySettings: React.FC = () => {
     }
   }, [currentDirectory, currentSessionId, refresh, runtimeTarget, t]);
 
-  const normalizedCustomSource = customSource.trim();
-  const customConfigured = normalizedCustomSource.length === 0
-    ? undefined
-    : packages.find((candidate) => candidate.source === normalizedCustomSource)
-      ?? findPiPackage(packages, piPackageNameFromSource(normalizedCustomSource));
-  const customBusyAction = busyPackageAction?.source === normalizedCustomSource
-    ? busyPackageAction.action
-    : null;
   const additionalProviders = discoveredProviders.filter((provider) => (
     provider.id !== 'pi-native'
     && provider.id !== 'pi-workspace-history'
@@ -332,74 +323,6 @@ export const RecoverySettings: React.FC = () => {
           );
         })}
 
-        <div className="rounded-lg border border-border/60 px-3 py-3">
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Icon name="plug-2" className="size-4 text-muted-foreground" />
-                <span className="typography-ui-label text-foreground">
-                  {t('settings.piarium.recovery.providers.custom.title')}
-                </span>
-              </div>
-              <p className="typography-meta text-muted-foreground">
-                {t('settings.piarium.recovery.providers.custom.description')}
-              </p>
-            </div>
-            <form
-              className="flex flex-col gap-2 @xl:flex-row"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (normalizedCustomSource.length === 0) return;
-                void runPackageAction(customConfigured ? 'update' : 'install', normalizedCustomSource);
-              }}
-            >
-              <Input
-                value={customSource}
-                onChange={(event) => setCustomSource(event.target.value)}
-                placeholder={t('settings.piarium.recovery.providers.custom.placeholder')}
-                disabled={busyPackageAction !== null}
-                className="min-w-0 flex-1 font-mono"
-              />
-              <div className="flex shrink-0 items-center gap-2">
-                <Button
-                  type="submit"
-                  variant="outline"
-                  size="xs"
-                  disabled={normalizedCustomSource.length === 0 || busyPackageAction !== null}
-                  className="!font-normal"
-                >
-                  {customConfigured
-                    ? (customBusyAction === 'update'
-                        ? t('settings.piarium.recovery.actions.updating')
-                        : t('settings.piarium.recovery.actions.update'))
-                    : (customBusyAction === 'install'
-                        ? t('settings.piarium.recovery.actions.installing')
-                        : t('settings.piarium.recovery.actions.install'))}
-                </Button>
-                {customConfigured && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    disabled={busyPackageAction !== null}
-                    onClick={() => void runPackageAction('remove', customConfigured.source)}
-                    className="!font-normal text-muted-foreground"
-                  >
-                    {customBusyAction === 'remove'
-                      ? t('settings.piarium.recovery.actions.removing')
-                      : t('settings.piarium.recovery.actions.remove')}
-                  </Button>
-                )}
-              </div>
-            </form>
-          </div>
-        </div>
-
-        <PiPluginConfigEditor
-          cwd={currentDirectory}
-          sessionId={currentSessionId}
-        />
-
         {additionalProviders.length > 0 && (
           <div className="space-y-2">
             <div className="space-y-0.5">
@@ -437,13 +360,9 @@ export const RecoverySettings: React.FC = () => {
                   {provider.id} · {provider.modes.join(', ')} · {provider.actions.join(', ')}
                 </p>
                 {provider.source && (
-                  <button
-                    type="button"
-                    onClick={() => setCustomSource(provider.source ?? '')}
-                    className="mt-1 block max-w-full break-all text-left font-mono typography-micro text-muted-foreground hover:text-foreground"
-                  >
+                  <p className="mt-1 max-w-full break-all font-mono typography-micro text-muted-foreground">
                     {provider.source}
-                  </button>
+                  </p>
                 )}
               </div>
             ))}

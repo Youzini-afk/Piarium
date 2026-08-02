@@ -28,13 +28,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { OpenAgentPage } from '@/components/sections/openagent/OpenAgentPage';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentOrchestrationStore } from '@/stores/useAgentOrchestrationStore';
 import type { AgentOrchestrationConfigResponse } from '@/stores/useAgentOrchestrationStore';
 import { useSlimConfigStore } from '@/stores/useSlimConfigStore';
-import { usePluginsStore } from '@/stores/usePluginsStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -793,19 +792,6 @@ export const AgentOrchestrationPage: React.FC = () => {
   const activeProvider = isProviderConflict ? null : (providers.find((provider) => provider.active) ?? null);
   const activeSelectionId = isProviderConflict ? 'conflict' : (activeProvider ? getProviderSelectionId(activeProvider) : effectiveMode);
   const currentLabel = isProviderConflict ? t('settings.agentOrchestration.badge.conflict') : (activeProvider ? getProviderTitle(activeProvider, t) : effectiveMode);
-  const handleConfigureProvider = async () => {
-    const surfaceId = activeProvider?.managementSurfaceId;
-    if (!surfaceId) return;
-    useUIStore.getState().setSettingsPage('plugins');
-    const loaded = await usePluginsStore.getState().loadPlugins({ force: true });
-    const surfaceExists = usePluginsStore.getState().managementSurfaces.some((surface) => surface.id === surfaceId);
-    if (loaded && surfaceExists) {
-      usePluginsStore.getState().selectSurface(surfaceId);
-      return;
-    }
-    toast.error(t('settings.plugins.page.empty.select'));
-  };
-
   return (
     <SettingsPageLayout className="max-w-6xl space-y-4">
       <div className="space-y-1">
@@ -871,16 +857,15 @@ export const AgentOrchestrationPage: React.FC = () => {
         </div>
       ) : null}
 
-      {activeProvider ? (
+      {activeProvider?.id === 'oh-my-opencode-slim' ? (
+        <SlimPanel />
+      ) : activeProvider?.id === 'oh-my-openagent' ? (
+        <OpenAgentPage embedded />
+      ) : activeProvider ? (
         <div className="rounded-lg border border-border/70 bg-background px-4 py-8 text-center">
           <RiSparklingLine className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
           <div className="typography-ui-label font-semibold text-foreground">{t('settings.agentOrchestration.providerSettings.title', { provider: getProviderTitle(activeProvider, t) })}</div>
           <p className="mx-auto mt-1 max-w-xl typography-ui text-muted-foreground">{t('settings.agentOrchestration.providerSettings.description')}</p>
-          <div className="mt-4 flex justify-center">
-            <Button type="button" size="sm" variant="outline" onClick={() => void handleConfigureProvider()} disabled={!activeProvider?.managementSurfaceId}>
-              {activeProvider.configurable === false ? t('settings.agentOrchestration.providerSettings.viewPluginAction') : t('settings.agentOrchestration.providerSettings.action')}
-            </Button>
-          </div>
         </div>
       ) : null}
       {isProviderConflict ? (
