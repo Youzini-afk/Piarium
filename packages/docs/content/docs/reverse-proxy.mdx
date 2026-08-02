@@ -23,7 +23,7 @@ Use this page if you run OpenChamber behind Nginx, Nginx Proxy Manager, Caddy, C
   - `/api/event`
   - `/api/global/event`
   - `/api/notifications/stream`
-  - `/api/openchamber/events`
+  - `/api/piarium/events`
   - `/api/terminal/:sessionId/stream`
 - Large request bodies for attachments and file operations
 - Long-lived read timeouts for live streams and terminal sessions
@@ -230,7 +230,7 @@ location = /api/notifications/stream {
     proxy_connect_timeout 30s;
 }
 
-location = /api/openchamber/events {
+location = /api/piarium/events {
     proxy_pass http://127.0.0.1:3000;
     proxy_set_header Accept "text/event-stream";
     proxy_set_header Cache-Control "no-cache";

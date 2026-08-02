@@ -92,7 +92,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
-import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { subscribePiariumEvents } from '@/lib/piariumEvents';
 import { buildSessionBootstrapDemands } from './sidebar/sessionBootstrapDemands';
 import { recordWorktreesSeen } from './sidebar/worktreeFirstSeen';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -646,7 +646,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
     let needsGlobalRefresh = false;
     const sessionDirectories = new Set<string>();
-    const unsubscribe = subscribeOpenchamberEvents((event) => {
+    const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type === 'scheduled-task-ran') {
         needsGlobalRefresh = true;
       } else {

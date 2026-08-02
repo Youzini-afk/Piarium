@@ -123,7 +123,7 @@ const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
 
 async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   try {
-    const response = await runtimeFetch('/api/openchamber/update-install', {
+    const response = await runtimeFetch('/api/piarium/update-install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -163,7 +163,7 @@ async function waitForUpdateApplied(
   for (let i = 0; i < maxAttempts; i++) {
     try {
       // Status-only poll while waiting for the update to apply; not a usage report.
-      const response = await runtimeFetch('/api/openchamber/update-check?reportUsage=false', {
+      const response = await runtimeFetch('/api/piarium/update-check?reportUsage=false', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });

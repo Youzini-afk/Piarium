@@ -93,7 +93,7 @@ describe('ui auth client credential seam', () => {
     const loginRes = createResponse();
     await auth.handleSessionCreate(loginReq, loginRes);
     const sessionCookie = String(loginRes.getHeader('set-cookie') || '').split(';', 1)[0];
-    expect(sessionCookie.startsWith('oc_ui_session=')).toBe(true);
+    expect(sessionCookie.startsWith('piarium_ui_session=')).toBe(true);
 
     const sessionReq = { method: 'GET', path: '/api/client-auth/clients', headers: { cookie: sessionCookie } };
     const sessionRes = createResponse();
@@ -130,7 +130,7 @@ describe('ui auth client credential seam', () => {
     expect(await auth.resolveWebSocketAuthContext(deniedReq)).toBe(null);
     expect(await auth.resolveWebSocketAuthContext({
       method: 'GET',
-      headers: { cookie: 'oc_ui_session=attacker-controlled' },
+      headers: { cookie: 'piarium_ui_session=attacker-controlled' },
     })).toBe(null);
     expect(await auth.resolveWebSocketAuthContext(allowedReq)).toMatchObject({
       type: 'client',
@@ -173,7 +173,7 @@ describe('ui auth client credential seam', () => {
       },
     });
 
-    const oldQueryReq = { method: 'GET', path: '/api/config/settings', url: '/api/config/settings?oc_client_token=client-token', headers: { accept: 'application/json' } };
+    const oldQueryReq = { method: 'GET', path: '/api/config/settings', url: '/api/config/settings?untrusted_token=client-token', headers: { accept: 'application/json' } };
     const oldQueryRes = createResponse();
     let oldQueryCalled = false;
     await auth.requireAuth(oldQueryReq, oldQueryRes, () => {
@@ -186,12 +186,12 @@ describe('ui auth client credential seam', () => {
     const mintRes = createResponse();
     await auth.handleUrlAuthToken(mintReq, mintRes);
     expect(typeof mintRes.body.token).toBe('string');
-    expect(mintRes.body.token.startsWith('oc_url_')).toBe(true);
+    expect(mintRes.body.token.startsWith('piarium_url_')).toBe(true);
     expect(mintRes.body.expiresAt).toBeGreaterThan(Date.now());
     expect(mintRes.getHeader('cache-control')).toBe('no-store');
 
     const urlToken = mintRes.body.token;
-    const urlReq = { method: 'GET', path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const urlReq = { method: 'GET', path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&piarium_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const urlRes = createResponse();
     let urlCalled = false;
     await auth.requireAuth(urlReq, urlRes, () => {
@@ -201,7 +201,7 @@ describe('ui auth client credential seam', () => {
     expect(await auth.ensureSessionToken(urlReq, urlRes)).toBe('client:device-1');
     expect(await auth.resolveAuthContext(urlReq, urlRes, { allowUrlToken: false })).toBe(null);
 
-    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const serveRes = createResponse();
     let serveCalled = false;
     await auth.requireAuth(serveReq, serveRes, () => {
@@ -209,7 +209,7 @@ describe('ui auth client credential seam', () => {
     });
     expect(serveCalled).toBe(true);
 
-    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
+    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const absoluteServeRes = createResponse();
     let absoluteServeCalled = false;
     await auth.requireAuth(absoluteServeReq, absoluteServeRes, () => {
@@ -221,8 +221,8 @@ describe('ui auth client credential seam', () => {
       method: 'GET',
       baseUrl: '/api',
       path: '/fs/serve/Users/test/project/preview-test.html',
-      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
-      url: `/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
+      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?piarium_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/fs/serve/Users/test/project/preview-test.html?piarium_url_token=${encodeURIComponent(urlToken)}`,
       headers: {},
     };
     const mountedServeRes = createResponse();
@@ -235,7 +235,7 @@ describe('ui auth client credential seam', () => {
     const dictationWsReq = {
       method: 'GET',
       path: '/api/dictation/ws',
-      url: `/api/dictation/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/api/dictation/ws?piarium_url_token=${encodeURIComponent(urlToken)}`,
       headers: { upgrade: 'websocket' },
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
@@ -243,7 +243,7 @@ describe('ui auth client credential seam', () => {
     const piRuntimeWsReq = {
       method: 'GET',
       path: '/api/piarium/runtime/ws',
-      url: `/api/piarium/runtime/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/api/piarium/runtime/ws?piarium_url_token=${encodeURIComponent(urlToken)}`,
       headers: { upgrade: 'websocket' },
     };
     expect(await auth.resolveWebSocketAuthContext(piRuntimeWsReq)).toMatchObject({
@@ -254,7 +254,7 @@ describe('ui auth client credential seam', () => {
     const dictationHttpReq = {
       method: 'GET',
       path: '/api/dictation/ws',
-      url: `/api/dictation/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/api/dictation/ws?piarium_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'application/json' },
     };
     const dictationHttpRes = createResponse();
@@ -265,7 +265,7 @@ describe('ui auth client credential seam', () => {
     expect(dictationHttpCalled).toBe(false);
     expect(dictationHttpRes.statusCode).toBe(401);
 
-    const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
+    const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
     const arbitraryGetRes = createResponse();
     let arbitraryGetCalled = false;
     await auth.requireAuth(arbitraryGetReq, arbitraryGetRes, () => {
@@ -275,7 +275,7 @@ describe('ui auth client credential seam', () => {
     expect(arbitraryGetRes.statusCode).toBe(401);
 
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-      const writeReq = { method, path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
+      const writeReq = { method, path: '/api/fs/raw', url: `/api/fs/raw?path=%2Ftmp%2Fimage.png&piarium_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
       const writeRes = createResponse();
       let writeCalled = false;
       await auth.requireAuth(writeReq, writeRes, () => {

@@ -12,7 +12,7 @@ import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { subscribePiariumEvents } from '@/lib/piariumEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
@@ -275,7 +275,7 @@ export function ScheduledTasksDialog() {
       return;
     }
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeOpenchamberEvents((event) => {
+    const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type !== 'scheduled-task-ran') {
         return;
       }

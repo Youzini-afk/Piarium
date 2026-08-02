@@ -14,7 +14,7 @@ import {
   asNonEmptyString,
   toTimestamp
 } from '../../utils/index.js';
-import { readAuthFile } from '../../../opencode/auth.js';
+import { readPiAuthFile as readAuthFile } from '../../../pi-config/storage.js';
 import { parseGoogleRefreshToken } from './transforms.js';
 
 export const GOOGLE_OAUTH_CLIENT_ENV = {

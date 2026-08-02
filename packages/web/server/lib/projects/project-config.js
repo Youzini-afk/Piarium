@@ -217,6 +217,14 @@ const normalizeExecution = (value) => {
     ? requestedThinkingLevel
     : undefined;
   const runAsGoal = value.runAsGoal === true;
+  const agent = asNonEmptyString(value.agent);
+  const goalTokenBudget = value.goalTokenBudget;
+  if (goalTokenBudget !== undefined && !runAsGoal) {
+    throw new Error('execution.goalTokenBudget requires execution.runAsGoal');
+  }
+  if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget < 1000 || goalTokenBudget > 100_000_000)) {
+    throw new Error('execution.goalTokenBudget must be from 1000 to 100000000');
+  }
 
   if (!prompt) {
     throw new Error('execution.prompt is required');
@@ -233,7 +241,9 @@ const normalizeExecution = (value) => {
     providerID,
     modelID,
     ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(agent ? { agent } : {}),
     ...(runAsGoal ? { runAsGoal: true } : {}),
+    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
   };
 };
 

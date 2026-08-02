@@ -1,19 +1,15 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// readConfig reads merged opencode config layers from disk; mock it so each
-// test controls the provider config without touching the filesystem. call.js
-// imports only readConfig from shared.js, so the rest of that module is left
-// untouched for this file.
-vi.mock('../opencode/shared.js', () => ({
-  readConfig: vi.fn(),
-  readConfigLayers: vi.fn(),
+// Keep provider configuration deterministic without touching the user's Pi
+// settings or models files.
+vi.mock('../pi-config/storage.js', () => ({
+  readPiConfiguration: vi.fn(),
+  readPiAuthFile: vi.fn(() => ({})),
+  writePiAuthFile: vi.fn(),
 }));
 
 const { callSmallModel } = await import('./call.js');
-const { readConfig, readConfigLayers } = await import('../opencode/shared.js');
+const { readPiConfiguration: readConfig } = await import('../pi-config/storage.js');
 
 // Minimal catalog fragment used by the catalog-based base URL resolution case.
 const CATALOG = {
@@ -54,51 +50,22 @@ describe('callSmallModel — custom provider config', () => {
     originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock;
     readConfig.mockReset();
-    readConfigLayers.mockReset();
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
-    delete process.env.OPENCHAMBER_TEST_PROVIDER_KEY;
+    delete process.env.PIARIUM_TEST_PROVIDER_KEY;
   });
 
   describe('config-supplied credentials (no auth.json entry)', () => {
-    it('resolves an OpenCode file variable before sending the API key', async () => {
-      const secretPath = path.join(os.homedir(), '.secret');
-      const originalReadFileSync = fs.readFileSync;
-      vi.spyOn(fs, 'readFileSync').mockImplementation((filePath, ...args) => {
-        if (filePath === secretPath) return 'sk-file-key\n';
-        return originalReadFileSync(filePath, ...args);
-      });
+    it('resolves a Pi environment variable before sending the API key', async () => {
+      process.env.PIARIUM_TEST_PROVIDER_KEY = 'sk-env-key';
       readConfig.mockReturnValue({
-        provider: {
+        providers: {
           custom: {
-            options: { apiKey: '{file:~/.secret}', baseURL: 'https://proxy.example.test/v1' },
-          },
-        },
-      });
-      fetchMock.mockResolvedValue(ok('hello'));
-
-      await callSmallModel({
-        auth: {},
-        catalog: {},
-        workingDirectory: '/proj',
-        providerID: 'custom',
-        modelID: 'model',
-        prompt: 'hi',
-      });
-
-      expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer sk-file-key');
-      expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain('{file:');
-    });
-
-    it('resolves an OpenCode environment variable before sending the API key', async () => {
-      process.env.OPENCHAMBER_TEST_PROVIDER_KEY = 'sk-env-key';
-      readConfig.mockReturnValue({
-        provider: {
-          custom: {
-            options: { apiKey: '{env:OPENCHAMBER_TEST_PROVIDER_KEY}', baseURL: 'https://proxy.example.test/v1' },
+            apiKey: '$PIARIUM_TEST_PROVIDER_KEY',
+            baseUrl: 'https://proxy.example.test/v1',
           },
         },
       });
@@ -118,9 +85,10 @@ describe('callSmallModel — custom provider config', () => {
 
     it('uses apiKey and baseURL from provider config when no auth.json entry exists', async () => {
       readConfig.mockReturnValue({
-        provider: {
+        providers: {
           custom: {
-            options: { apiKey: 'test-key', baseURL: 'https://proxy.example.test/v1' },
+            apiKey: 'test-key',
+            baseUrl: 'https://proxy.example.test/v1',
           },
         },
       });
@@ -148,8 +116,8 @@ describe('callSmallModel — custom provider config', () => {
 
     it('trims a trailing slash from the configured baseURL', async () => {
       readConfig.mockReturnValue({
-        provider: {
-          custom: { options: { apiKey: 'k', baseURL: 'https://proxy.example.test/v1/' } },
+        providers: {
+          custom: { apiKey: 'k', baseUrl: 'https://proxy.example.test/v1/' },
         },
       });
       fetchMock.mockResolvedValue(ok('ok'));
@@ -166,9 +134,9 @@ describe('callSmallModel — custom provider config', () => {
       expect(lastCall(fetchMock).url).toBe('https://proxy.example.test/v1/chat/completions');
     });
 
-    it('throws "No OpenCode login found for provider" when neither auth.json nor config apiKey exists', async () => {
+    it('requires a Pi credential when neither auth.json nor models.json provides one', async () => {
       readConfig.mockReturnValue({
-        provider: { custom: { options: { baseURL: 'https://proxy.example.test/v1' } } },
+        providers: { custom: { baseUrl: 'https://proxy.example.test/v1' } },
       });
 
       await expect(callSmallModel({
@@ -178,7 +146,7 @@ describe('callSmallModel — custom provider config', () => {
         providerID: 'custom',
         modelID: 'gpt-4o-mini',
         prompt: 'hi',
-      })).rejects.toThrow('No OpenCode login found for provider "custom"');
+      })).rejects.toThrow('No Pi credential found for provider "custom"');
 
       // The credential gate fires before any network call.
       expect(fetchMock).not.toHaveBeenCalled();
@@ -186,8 +154,8 @@ describe('callSmallModel — custom provider config', () => {
 
     it('treats a blank/whitespace apiKey in config as absent', async () => {
       readConfig.mockReturnValue({
-        provider: {
-          custom: { options: { apiKey: '   ', baseURL: 'https://proxy.example.test/v1' } },
+        providers: {
+          custom: { apiKey: '   ', baseUrl: 'https://proxy.example.test/v1' },
         },
       });
 
@@ -198,19 +166,19 @@ describe('callSmallModel — custom provider config', () => {
         providerID: 'custom',
         modelID: 'gpt-4o-mini',
         prompt: 'hi',
-      })).rejects.toThrow('No OpenCode login found for provider "custom"');
+      })).rejects.toThrow('No Pi credential found for provider "custom"');
     });
   });
 
   describe('resolution order when auth.json is also present', () => {
     it('uses the auth.json credential with the config baseURL', async () => {
       readConfig.mockReturnValue({
-        provider: { custom: { options: { baseURL: 'https://proxy.example.test/v1' } } },
+        providers: { custom: { baseUrl: 'https://proxy.example.test/v1' } },
       });
       fetchMock.mockResolvedValue(ok('done'));
 
       const text = await callSmallModel({
-        auth: { custom: { type: 'api', key: 'authjson-key' } },
+        auth: { custom: { type: 'api_key', key: 'authjson-key' } },
         catalog: {},
         workingDirectory: '/proj',
         providerID: 'custom',
@@ -224,16 +192,16 @@ describe('callSmallModel — custom provider config', () => {
       expect(init.headers.Authorization).toBe('Bearer authjson-key');
     });
 
-    it('prefers the config apiKey over an auth.json credential when both are present (matches OpenCode)', async () => {
+    it('prefers the models.json apiKey over an auth.json credential', async () => {
       readConfig.mockReturnValue({
-        provider: {
-          custom: { options: { apiKey: 'config-key', baseURL: 'https://proxy.example.test/v1' } },
+        providers: {
+          custom: { apiKey: 'config-key', baseUrl: 'https://proxy.example.test/v1' },
         },
       });
       fetchMock.mockResolvedValue(ok('done'));
 
       await callSmallModel({
-        auth: { custom: { type: 'api', key: 'authjson-key' } },
+        auth: { custom: { type: 'api_key', key: 'authjson-key' } },
         catalog: {},
         workingDirectory: '/proj',
         providerID: 'custom',
@@ -249,15 +217,15 @@ describe('callSmallModel — custom provider config', () => {
     });
   });
 
-  describe('openai provider custom baseURL override', () => {
-    it('respects provider.openai.options.baseURL over the hardcoded OpenAI endpoint', async () => {
+  describe('openai provider custom baseUrl override', () => {
+    it('respects providers.openai.baseUrl over the default OpenAI endpoint', async () => {
       readConfig.mockReturnValue({
-        provider: { openai: { options: { baseURL: 'https://gateway.example.test/v1' } } },
+        providers: { openai: { baseUrl: 'https://gateway.example.test/v1' } },
       });
       fetchMock.mockResolvedValue(ok('ok'));
 
       await callSmallModel({
-        auth: { openai: { type: 'api', key: 'sk-openai' } },
+        auth: { openai: { type: 'api_key', key: 'sk-openai' } },
         catalog: {},
         workingDirectory: '/proj',
         providerID: 'openai',
@@ -271,12 +239,12 @@ describe('callSmallModel — custom provider config', () => {
       expect(init.headers.Authorization).toBe('Bearer sk-openai');
     });
 
-    it('falls back to https://api.openai.com/v1 when no openai baseURL override is configured', async () => {
+    it('falls back to https://api.openai.com/v1 when no override is configured', async () => {
       readConfig.mockReturnValue({});
       fetchMock.mockResolvedValue(ok('ok'));
 
       await callSmallModel({
-        auth: { openai: { type: 'api', key: 'sk-openai' } },
+        auth: { openai: { type: 'api_key', key: 'sk-openai' } },
         catalog: {},
         workingDirectory: '/proj',
         providerID: 'openai',
@@ -289,7 +257,7 @@ describe('callSmallModel — custom provider config', () => {
 
     it('still requires a credential: a baseURL alone does not authenticate openai', async () => {
       readConfig.mockReturnValue({
-        provider: { openai: { options: { baseURL: 'https://gateway.example.test/v1' } } },
+        providers: { openai: { baseUrl: 'https://gateway.example.test/v1' } },
       });
 
       await expect(callSmallModel({
@@ -299,7 +267,7 @@ describe('callSmallModel — custom provider config', () => {
         providerID: 'openai',
         modelID: 'gpt-4o-mini',
         prompt: 'hi',
-      })).rejects.toThrow('No OpenCode login found for provider "openai"');
+      })).rejects.toThrow('No Pi credential found for provider "openai"');
     });
   });
 
@@ -309,7 +277,7 @@ describe('callSmallModel — custom provider config', () => {
       fetchMock.mockResolvedValue(ok('ok'));
 
       await callSmallModel({
-        auth: { mistral: { type: 'api', key: 'mistral-key' } },
+        auth: { mistral: { type: 'api_key', key: 'mistral-key' } },
         catalog: CATALOG,
         workingDirectory: '/proj',
         providerID: 'mistral',
@@ -326,7 +294,7 @@ describe('callSmallModel — custom provider config', () => {
       readConfig.mockReturnValue({});
 
       await expect(callSmallModel({
-        auth: { custom: { type: 'api', key: 'k' } },
+        auth: { custom: { type: 'api_key', key: 'k' } },
         catalog: {},
         workingDirectory: '/proj',
         providerID: 'custom',
@@ -343,8 +311,8 @@ describe('callSmallModel — custom provider config', () => {
       const catalog = { custom: { id: 'custom', models: {} } };
       const catalogBefore = JSON.parse(JSON.stringify(catalog));
       readConfig.mockReturnValue({
-        provider: {
-          custom: { options: { apiKey: 'test-key', baseURL: 'https://proxy.example.test/v1' } },
+        providers: {
+          custom: { apiKey: 'test-key', baseUrl: 'https://proxy.example.test/v1' },
         },
       });
       fetchMock.mockResolvedValue(ok('the answer'));
@@ -374,8 +342,8 @@ describe('callSmallModel — custom provider config', () => {
   describe('merged config layers', () => {
     it('reads the provider config for the supplied working directory', async () => {
       readConfig.mockReturnValue({
-        provider: {
-          custom: { options: { apiKey: 'test-key', baseURL: 'https://proxy.example.test/v1' } },
+        providers: {
+          custom: { apiKey: 'test-key', baseUrl: 'https://proxy.example.test/v1' },
         },
       });
       fetchMock.mockResolvedValue(ok('ok'));
@@ -422,7 +390,7 @@ describe('callSmallModel — Google thinking configuration', () => {
     fetchMock.mockResolvedValue(googleResponse('generated commit'));
 
     const text = await callSmallModel({
-      auth: { google: { type: 'api', key: 'google-key' } },
+      auth: { google: { type: 'api_key', key: 'google-key' } },
       catalog: {},
       workingDirectory: '/proj',
       providerID: 'google',
@@ -439,7 +407,7 @@ describe('callSmallModel — Google thinking configuration', () => {
     fetchMock.mockResolvedValue(googleResponse('generated commit'));
 
     await callSmallModel({
-      auth: { google: { type: 'api', key: 'google-key' } },
+      auth: { google: { type: 'api_key', key: 'google-key' } },
       catalog: {},
       workingDirectory: '/proj',
       providerID: 'google',
@@ -491,7 +459,6 @@ describe('callSmallModel — GitHub Copilot endpoint routing', () => {
     globalThis.fetch = fetchMock;
     readConfig.mockReset();
     readConfig.mockReturnValue({});
-    readConfigLayers.mockReset();
   });
 
   afterEach(() => {

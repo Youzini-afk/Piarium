@@ -65,7 +65,7 @@ other runtime API.
     `[session-goal:diagnostic]` structural verdict metadata.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
-  `/api/openchamber/models-metadata`).
+  `/api/piarium/models-metadata`).
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).

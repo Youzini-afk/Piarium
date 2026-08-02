@@ -2,20 +2,20 @@ import crypto from 'crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
+import { resolvePiariumDataDir } from '../platform/data-paths.js';
 
-const SESSION_COOKIE_NAME = 'oc_ui_session';
+const SESSION_COOKIE_NAME = 'piarium_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const TRUSTED_DEVICE_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
-const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
+const URL_AUTH_TOKEN_PREFIX = 'piarium_url_';
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
-const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS) || 10;
+const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.PIARIUM_RATE_LIMIT_MAX_ATTEMPTS) || 10;
 const RATE_LIMIT_LOCKOUT_MS = 15 * 60 * 1000;
 const RATE_LIMIT_CLEANUP_MS = 60 * 60 * 1000;
-const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
+const RATE_LIMIT_NO_IP_MAX_ATTEMPTS = Number(process.env.PIARIUM_RATE_LIMIT_NO_IP_MAX_ATTEMPTS) || 3;
 
 const loginRateLimiter = new Map();
 let rateLimitCleanupTimer = null;
@@ -257,11 +257,11 @@ const getBearerTokenFromRequest = (req) => {
 };
 
 const getUrlAuthTokenFromRequest = (req) => {
-  const queryToken = req?.query?.oc_url_token;
+  const queryToken = req?.query?.piarium_url_token;
   let token = Array.isArray(queryToken) ? queryToken[0] : queryToken;
   if (typeof token !== 'string' && typeof req?.url === 'string') {
     try {
-      token = new URL(req.url, 'http://localhost').searchParams.get('oc_url_token') || undefined;
+      token = new URL(req.url, 'http://localhost').searchParams.get('piarium_url_token') || undefined;
     } catch {
       token = undefined;
     }
@@ -294,8 +294,8 @@ const isWebSocketUpgrade = (req) => {
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
-    || pathname === '/api/openchamber/events'
-    || pathname === '/api/openchamber/realtime-proxy/sse'
+    || pathname === '/api/piarium/events'
+    || pathname === '/api/piarium/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
     || pathname === '/api/fs/serve'
@@ -308,7 +308,7 @@ const isUrlAuthWebSocketPath = (pathname) => {
   return pathname === '/api/event/ws'
     || pathname === '/api/global/event/ws'
     || pathname === '/api/piarium/runtime/ws'
-    || pathname === '/api/openchamber/realtime-proxy/ws'
+    || pathname === '/api/piarium/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
     || pathname.startsWith('/api/preview/proxy/');
@@ -362,13 +362,11 @@ const normalizePassword = (candidate) => {
 
 const isTrustedDeviceRequest = (value) => value === true;
 
-const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
-  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-  : path.join(os.homedir(), '.config', 'openchamber');
-const JWT_SECRET_FILE = path.join(OPENCHAMBER_DATA_DIR, 'jwt-secret');
+const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
+const JWT_SECRET_FILE = path.join(PIARIUM_DATA_DIR, 'jwt-secret');
 
 function getOrCreateJwtSecret() {
-  const envSecret = process.env.OPENCODE_JWT_SECRET;
+  const envSecret = process.env.PIARIUM_JWT_SECRET;
   if (envSecret) {
     return new TextEncoder().encode(envSecret);
   }
@@ -383,7 +381,7 @@ function getOrCreateJwtSecret() {
 
   const secret = crypto.randomBytes(32).toString('hex');
   try {
-    fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
+    fs.mkdirSync(PIARIUM_DATA_DIR, { recursive: true });
     fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
     console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
   } catch (e) {
@@ -394,13 +392,13 @@ function getOrCreateJwtSecret() {
 }
 
 function persistJwtSecret(secret) {
-  if (process.env.OPENCODE_JWT_SECRET) {
-    const error = new Error('Global sign-out is unavailable while OPENCODE_JWT_SECRET is set');
+  if (process.env.PIARIUM_JWT_SECRET) {
+    const error = new Error('Global sign-out is unavailable while PIARIUM_JWT_SECRET is set');
     error.statusCode = 400;
     throw error;
   }
 
-  fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
+  fs.mkdirSync(PIARIUM_DATA_DIR, { recursive: true });
   fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
   return new TextEncoder().encode(secret);
 }

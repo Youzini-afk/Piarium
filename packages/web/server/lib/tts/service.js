@@ -6,7 +6,7 @@
  */
 
 import OpenAI from 'openai';
-import { readAuthFile } from '../opencode/auth.js';
+import { readPiAuthFile as readAuthFile } from '../pi-config/storage.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 // Voice options from OpenAI

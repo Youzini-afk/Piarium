@@ -137,7 +137,7 @@ const uniqueRoots = (roots, pathModule) => {
   return result;
 };
 
-const getClient = (req) => req.openchamberAuth?.client || null;
+const getClient = (req) => req.piariumAuth?.client || null;
 
 const getClientCapabilities = (client) => new Set(
   Array.isArray(client?.capabilities)
@@ -146,7 +146,7 @@ const getClientCapabilities = (client) => new Set(
 );
 
 const hasCapability = (req, capability) => {
-  const context = req.openchamberAuth;
+  const context = req.piariumAuth;
   if (context?.type === 'session') return true;
   if (context?.type !== 'client') return false;
   const client = getClient(req);
@@ -160,7 +160,7 @@ const hasCapability = (req, capability) => {
 };
 
 const requireCapability = (req, res, capability) => {
-  if (!req.openchamberAuth) {
+  if (!req.piariumAuth) {
     res.status(401).json({ error: 'Authentication required' });
     return false;
   }
@@ -192,13 +192,13 @@ export const createExternalAccessRootRuntime = ({
   os,
   process,
   __dirname,
-  openchamberDataDir,
+  piariumDataDir,
   resolveProjectDirectory,
   deploymentRoot,
 }) => {
   const resolveRoots = async (req) => {
-    const envDeploymentRoot = typeof process.env.OPENCHAMBER_DEPLOYMENT_ROOT === 'string'
-      ? process.env.OPENCHAMBER_DEPLOYMENT_ROOT.trim()
+    const envDeploymentRoot = typeof process.env.PIARIUM_DEPLOYMENT_ROOT === 'string'
+      ? process.env.PIARIUM_DEPLOYMENT_ROOT.trim()
       : '';
     const serverPackageRoot = path.resolve(__dirname, '..');
     const discoveredDeploymentRoot = deploymentRoot
@@ -209,17 +209,19 @@ export const createExternalAccessRootRuntime = ({
         startPaths: [process.cwd(), __dirname, serverPackageRoot],
       })
       || process.cwd();
-    const opencodeConfigDir = typeof process.env.OPENCODE_CONFIG_DIR === 'string' && process.env.OPENCODE_CONFIG_DIR.trim()
-      ? process.env.OPENCODE_CONFIG_DIR.trim()
-      : path.join(os.homedir(), '.config', 'opencode');
+    const piAgentDir = typeof process.env.PIARIUM_AGENT_DIR === 'string' && process.env.PIARIUM_AGENT_DIR.trim()
+      ? process.env.PIARIUM_AGENT_DIR.trim()
+      : typeof process.env.PI_CODING_AGENT_DIR === 'string' && process.env.PI_CODING_AGENT_DIR.trim()
+        ? process.env.PI_CODING_AGENT_DIR.trim()
+        : path.join(os.homedir(), '.pi', 'agent');
 
     const roots = [
       { id: 'deployment', label: 'Piarium deployment', path: discoveredDeploymentRoot, source: 'deployment' },
       { id: 'server-package', label: 'Piarium web package', path: serverPackageRoot, source: 'server-package' },
       { id: 'process-cwd', label: 'Server working directory', path: process.cwd(), source: 'process' },
-      { id: 'data', label: 'Piarium data', path: openchamberDataDir, source: 'data' },
-      { id: 'logs', label: 'Piarium logs', path: path.join(openchamberDataDir, 'logs'), source: 'logs' },
-      { id: 'opencode-config', label: 'OpenCode config', path: opencodeConfigDir, source: 'opencode-config' },
+      { id: 'data', label: 'Piarium data', path: piariumDataDir, source: 'data' },
+      { id: 'logs', label: 'Piarium logs', path: path.join(piariumDataDir, 'logs'), source: 'logs' },
+      { id: 'pi-agent', label: 'Pi agent configuration', path: piAgentDir, source: 'pi-agent' },
     ];
 
     if (typeof resolveProjectDirectory === 'function') {
@@ -459,8 +461,8 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
     process,
     spawn,
     buildAugmentedPath,
-    openchamberDataDir,
-    openchamberVersion,
+    piariumDataDir,
+    piariumVersion,
     runtimeName,
     serverStartedAt,
     remoteClientAuthRuntime,
@@ -475,13 +477,13 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
     os,
     process,
     __dirname,
-    openchamberDataDir,
+    piariumDataDir,
     resolveProjectDirectory,
     deploymentRoot,
   });
 
   app.get('/api/external/me', (req, res) => {
-    const context = req.openchamberAuth || null;
+    const context = req.piariumAuth || null;
     if (!context) return res.status(401).json({ error: 'Authentication required' });
     return res.json({
       type: context.type,
@@ -491,7 +493,7 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
   });
 
   app.get('/api/external/capabilities', (req, res) => {
-    const context = req.openchamberAuth || null;
+    const context = req.piariumAuth || null;
     if (!context) return res.status(401).json({ error: 'Authentication required' });
     const client = context.client || null;
     res.json({
@@ -522,14 +524,14 @@ export const registerExternalAccessRoutes = (app, dependencies = {}) => {
     if (!requireCapability(req, res, 'instance:read')) return;
     try {
       res.json({
-        openchamberVersion,
+        piariumVersion,
         runtime: runtimeName || 'web',
         startedAt: serverStartedAt || null,
         pid: process.pid,
         platform: process.platform,
         arch: process.arch,
         cwd: process.cwd(),
-        dataDir: openchamberDataDir,
+        dataDir: piariumDataDir,
         node: process.version,
         uptimeSeconds: Math.round(process.uptime()),
       });

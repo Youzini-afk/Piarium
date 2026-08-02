@@ -5,16 +5,10 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getExitOnShutdown,
     getIsShuttingDown,
     setIsShuttingDown,
-    syncToHmrState,
     sessionRuntime,
-    sessionAssistRuntime,
-    sessionGoalRuntime,
-    contextObligatoryRuntime,
     scheduledTasksRuntime,
     getTerminalRuntime,
     setTerminalRuntime,
-    getMessageStreamRuntime,
-    setMessageStreamRuntime,
     getServer,
     getUiAuthController,
     setUiAuthController,
@@ -22,65 +16,40 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setActiveTunnelController,
     tunnelAuthController,
   } = dependencies;
-
   let shutdownPromise = null;
 
   const runShutdown = async (options = {}) => {
     if (getIsShuttingDown()) return;
-
     setIsShuttingDown(true);
-    syncToHmrState();
     console.log('Starting graceful shutdown...');
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
 
-    sessionRuntime.dispose();
-    sessionAssistRuntime?.stop?.();
-    sessionGoalRuntime?.stop?.();
-    contextObligatoryRuntime?.stop?.();
-    scheduledTasksRuntime?.stop?.();
+    sessionRuntime?.dispose?.();
+    await scheduledTasksRuntime?.stop?.();
 
     const terminalRuntime = getTerminalRuntime();
     if (terminalRuntime) {
       try {
         await terminalRuntime.shutdown();
       } catch {
+        // Continue closing the remaining server resources.
       } finally {
         setTerminalRuntime(null);
       }
     }
 
-    const messageStreamRuntime = getMessageStreamRuntime();
-    if (messageStreamRuntime) {
-      try {
-        await messageStreamRuntime.close();
-      } catch {
-      } finally {
-        setMessageStreamRuntime(null);
-      }
-    }
-
     const server = getServer();
-    if (server) {
+    if (server && typeof server.close === 'function') {
       let closeTimeout = null;
       try {
         await Promise.race([
+          new Promise((resolve) => server.close(resolve)),
           new Promise((resolve) => {
-            server.close(() => {
-              console.log('HTTP server closed');
-              resolve();
-            });
-          }),
-          new Promise((resolve) => {
-            closeTimeout = setTimeout(() => {
-              console.warn('Server close timeout reached, forcing shutdown');
-              resolve();
-            }, shutdownTimeoutMs);
+            closeTimeout = setTimeout(resolve, shutdownTimeoutMs);
           }),
         ]);
       } finally {
-        if (closeTimeout) {
-          clearTimeout(closeTimeout);
-        }
+        if (closeTimeout) clearTimeout(closeTimeout);
       }
     }
 
@@ -90,27 +59,24 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       setUiAuthController(null);
     }
 
-    const activeTunnelController = getActiveTunnelController();
-    if (activeTunnelController) {
-      console.log('Stopping active tunnel...');
-      activeTunnelController.stop();
-      setActiveTunnelController(null);
-      tunnelAuthController.clearActiveTunnel();
+    const tunnelController = getActiveTunnelController();
+    if (tunnelController) {
+      try {
+        tunnelController.stop();
+      } finally {
+        setActiveTunnelController(null);
+        tunnelAuthController.clearActiveTunnel();
+      }
     }
 
     console.log('Graceful shutdown complete');
-    if (exitProcess) {
-      process.exit(0);
-    }
+    if (exitProcess) process.exit(0);
   };
 
   const gracefulShutdown = (options = {}) => {
-    if (shutdownPromise) return shutdownPromise;
-    shutdownPromise = runShutdown(options);
+    shutdownPromise ??= runShutdown(options);
     return shutdownPromise;
   };
 
-  return {
-    gracefulShutdown,
-  };
+  return { gracefulShutdown };
 };

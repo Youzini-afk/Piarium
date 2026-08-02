@@ -25,8 +25,7 @@
  * @property {number} [nextResetTime]
  * @property {Array<{modelCode: string, usage: number}>} [usageDetails]
  */
-import { readAuthFile } from '../../opencode/auth.js';
-import { readConfigLayers } from '../../opencode/shared.js';
+import { readPiAuthFile as readAuthFile, readPiConfigLayers as readConfigLayers } from '../../pi-config/storage.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -53,9 +52,9 @@ function getApiKey() {
     const { mergedConfig } = readConfigLayers();
 
     for (const alias of aliases) {
-      const providerConfig = mergedConfig?.provider?.[alias];
-      if (providerConfig?.options?.apiKey) {
-        return providerConfig.options.apiKey;
+      const providerConfig = mergedConfig?.providers?.[alias];
+      if (typeof providerConfig?.apiKey === 'string' && providerConfig.apiKey.trim()) {
+        return providerConfig.apiKey.trim();
       }
     }
   } catch {

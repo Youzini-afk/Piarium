@@ -1,16 +1,13 @@
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import { resolvePiariumDataDir } from '../../server/lib/platform/data-paths.js';
 
 const TUNNEL_PROFILES_FILE_NAME = 'tunnel-profiles.json';
 const LEGACY_CLOUDFLARE_MANAGED_REMOTE_FILE_NAME = 'cloudflare-managed-remote-tunnels.json';
 const TUNNEL_CLI_STATE_FILE_NAME = 'tunnel-cli-state.json';
 
 function getDataDir() {
-  if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim().length > 0) {
-    return path.resolve(process.env.OPENCHAMBER_DATA_DIR.trim());
-  }
-  return path.join(os.homedir(), '.config', 'openchamber');
+  return resolvePiariumDataDir(process);
 }
 
 function getLogsDir() {
@@ -51,7 +48,7 @@ function ensureLogsDir() {
 }
 
 function getLogFilePath(port) {
-  return path.join(getLogsDir(), `openchamber-${port}.log`);
+  return path.join(getLogsDir(), `piarium-${port}.log`);
 }
 
 function getTunnelProfilesFilePath() {

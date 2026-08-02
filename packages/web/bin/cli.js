@@ -22,7 +22,6 @@ import {
 import {
   parseArgs,
   showHelp,
-  showControlHelp,
   showStartupHelp,
   showConnectUrlHelp,
   showTunnelHelp,
@@ -30,7 +29,6 @@ import {
   findClosestMatch,
 } from './lib/cli-args.js';
 import { readDesktopLocalPortFromSettings } from './lib/cli-paths.js';
-import { resolveExplicitBinary, searchPathFor } from './lib/cli-executables.js';
 import { startupCommand } from './lib/commands-startup.js';
 import { logsCommand } from './lib/commands-logs.js';
 import { statusCommand } from './lib/commands-status.js';
@@ -46,7 +44,7 @@ import { createTunnelCommand, isValidTunnelDoctorResponse, shouldDisplayTunnelQr
 import {
   resolveDoctorPortStatuses,
   discoverRunningInstances,
-  discoverOpenChamberInstanceOnPort,
+  discoverPiariumInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   resolveTunnelProviders,
@@ -59,9 +57,9 @@ import {
   getPidFilePath,
   getInstanceFilePath,
   isProcessRunning,
-  isOpenchamberCmdline,
-  isOpenchamberProcessRunning,
-  getOpenchamberProcessState,
+  isPiariumCmdline,
+  isPiariumProcessRunning,
+  getPiariumProcessState,
 } from './lib/cli-process.js';
 import {
   intro as clackIntro, outro as clackOutro, cancel as clackCancel,
@@ -143,33 +141,6 @@ function getPreferredServerRuntime() {
   return isBunInstalled() ? 'bun' : 'node';
 }
 
-async function checkOpenCodeCLI(onNotice) {
-  if (process.env.OPENCODE_BINARY) {
-    const override = resolveExplicitBinary(process.env.OPENCODE_BINARY);
-    if (override) {
-      process.env.OPENCODE_BINARY = override;
-      return override;
-    }
-    const message = `OPENCODE_BINARY="${process.env.OPENCODE_BINARY}" is not an executable file. Falling back to PATH lookup.`;
-    if (typeof onNotice === 'function') {
-      onNotice({ level: 'warning', code: 'OPENCODE_BINARY_INVALID', message });
-    } else {
-      console.warn(`Warning: ${message}`);
-    }
-  }
-
-  const resolvedFromPath = searchPathFor('opencode');
-  if (resolvedFromPath) {
-    process.env.OPENCODE_BINARY = resolvedFromPath;
-    return resolvedFromPath;
-  }
-
-  throw new Error(
-    `Unable to locate the opencode CLI on PATH (${process.env.PATH || '<empty>'}). ` +
-    'Ensure the CLI is installed and reachable, or set OPENCODE_BINARY to its full path.'
-  );
-}
-
 const commands = {
   serve: null,
 
@@ -199,7 +170,6 @@ const commands = {
 commands.serve = createServeCommand({
   serverPath: path.join(__dirname, '..', 'server', 'index.js'),
   bunBin: BUN_BIN,
-  checkOpenCodeCLI,
   getPreferredServerRuntime,
   setForegroundServerActive(value) { foregroundServerActive = value; },
   setForegroundShutdown(handler) { foregroundShutdown = handler; },
@@ -231,7 +201,7 @@ commands.update = createUpdateCommand({
 
 async function main() {
   const parsed = parseArgs();
-  const { command, subcommand, tunnelAction, startupAction, scheduleAction, sessionAction, controlAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
+  const { command, subcommand, tunnelAction, startupAction, scheduleAction, sessionAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
   activeCommandOptions = options;
 
   if (versionRequested) {
@@ -275,8 +245,6 @@ async function main() {
       await commands.models(options, 'help');
     } else if (command === 'projects') {
       await commands.projects(options, 'help');
-    } else if (command === 'control') {
-      showControlHelp();
     } else {
       showHelp();
     }
@@ -313,16 +281,8 @@ async function main() {
     return;
   }
 
-  if (command === 'control') {
-    if (controlAction !== 'help') {
-      throw new TunnelCliError(`Unknown control command '${controlAction}'.`, EXIT_CODE.USAGE_ERROR);
-    }
-    showControlHelp();
-    return;
-  }
-
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'tunnel', 'startup', 'logs', 'connect-url', 'update'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {
@@ -343,7 +303,7 @@ async function main() {
   await commands[command](options);
 }
 
-const isCliExecution = isModuleCliExecution(process.argv[1], import.meta.url, fs.realpathSync, 'openchamber');
+const isCliExecution = isModuleCliExecution(process.argv[1], import.meta.url, fs.realpathSync, 'piarium');
 
 if (isCliExecution) {
   let isHandlingSigint = false;
@@ -434,14 +394,14 @@ export {
   getPidFilePath,
   getInstanceFilePath,
   isProcessRunning,
-  isOpenchamberProcessRunning,
-  isOpenchamberCmdline,
-  getOpenchamberProcessState,
+  isPiariumProcessRunning,
+  isPiariumCmdline,
+  getPiariumProcessState,
   resolveTunnelProviders,
   fetchTunnelProvidersFromPort,
   fetchSystemInfoFromPort,
   discoverRunningInstances,
-  discoverOpenChamberInstanceOnPort,
+  discoverPiariumInstanceOnPort,
   discoverLifecycleInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,

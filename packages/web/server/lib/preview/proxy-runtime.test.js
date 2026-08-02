@@ -115,7 +115,7 @@ describe('preview target failure signaling', () => {
     const validResponse = createResponse();
     let continued = false;
     guard({
-      originalUrl: `/api/preview/proxy/${id}/?oc_preview_token=${previewToken}`,
+      originalUrl: `/api/preview/proxy/${id}/?piarium_preview_token=${previewToken}`,
       headers: {},
     }, validResponse, () => {
       continued = true;
@@ -131,7 +131,7 @@ describe('preview target failure signaling', () => {
     await registerTarget({ body: { url: 'http://127.0.0.1:4323/' }, secure: false }, registrationResponse);
     const { id, previewToken } = registrationResponse.body;
     const request = {
-      originalUrl: `/api/preview/proxy/${id}/missing?oc_preview_token=${previewToken}`,
+      originalUrl: `/api/preview/proxy/${id}/missing?piarium_preview_token=${previewToken}`,
       headers: {},
     };
     const response = createResponse();
@@ -317,7 +317,7 @@ describe('preview body URL rewriting', () => {
 
   it('adds preview and URL auth tokens to rewritten proxy resources when provided', () => {
     const output = rewritePreviewBody({
-      bodyText: '<script src="/entry.js"></script><script type="module">import RefreshRuntime from "/@react-refresh";</script><a href="http://localhost:3000/docs?x=1&oc_client_token=legacy">Docs</a>',
+      bodyText: '<script src="/entry.js"></script><script type="module">import RefreshRuntime from "/@react-refresh";</script><a href="http://localhost:3000/docs?x=1&piarium_client_token=legacy">Docs</a>',
       kind: 'html',
       proxyBasePath: '/api/preview/proxy/abc123',
       targetOrigin: 'http://127.0.0.1:3000',
@@ -325,10 +325,10 @@ describe('preview body URL rewriting', () => {
       urlAuthToken: 'url-secret',
     });
 
-    expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
-    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh?oc_preview_token=preview-secret&oc_url_token=url-secret"');
-    expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&oc_preview_token=preview-secret&oc_url_token=url-secret"');
-    expect(output).not.toContain('oc_client_token');
+    expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
+    expect(output).toContain('from "/api/preview/proxy/abc123/@react-refresh?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
+    expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
+    expect(output).not.toContain('piarium_client_token');
   });
 
   it('rewrites only CSS imports and url references in CSS responses', () => {
@@ -368,10 +368,10 @@ describe('preview body URL rewriting', () => {
       urlAuthToken: 'url-secret',
     });
 
-    expect(cssOutput).toContain('@import "/api/preview/proxy/abc123/theme.css?oc_preview_token=preview-secret&oc_url_token=url-secret"');
-    expect(cssOutput).toContain('url(/api/preview/proxy/abc123/hero.png?oc_preview_token=preview-secret&oc_url_token=url-secret)');
-    expect(jsOutput).toContain('import("/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret")');
-    expect(jsOutput).toContain('from "/api/preview/proxy/abc123/module.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(cssOutput).toContain('@import "/api/preview/proxy/abc123/theme.css?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
+    expect(cssOutput).toContain('url(/api/preview/proxy/abc123/hero.png?piarium_preview_token=preview-secret&piarium_url_token=url-secret)');
+    expect(jsOutput).toContain('import("/api/preview/proxy/abc123/entry.js?piarium_preview_token=preview-secret&piarium_url_token=url-secret")');
+    expect(jsOutput).toContain('from "/api/preview/proxy/abc123/module.js?piarium_preview_token=preview-secret&piarium_url_token=url-secret"');
   });
 });
 
@@ -399,7 +399,7 @@ describe('preview redirect URL rewriting', () => {
       targetOrigin: 'http://127.0.0.1:3000',
       previewToken: 'preview-secret',
       urlAuthToken: 'url-secret',
-    })).toBe('/api/preview/proxy/abc123/login?next=%2F&oc_preview_token=preview-secret&oc_url_token=url-secret#top');
+    })).toBe('/api/preview/proxy/abc123/login?next=%2F&piarium_preview_token=preview-secret&piarium_url_token=url-secret#top');
   });
 
   it('leaves redirects unchanged when no target origin is provided', () => {

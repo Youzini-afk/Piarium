@@ -629,9 +629,9 @@ const stripPreviewTokenFromUrl = (value: string): string => {
   if (!value) return value;
   try {
     const parsed = new URL(value);
-    parsed.searchParams.delete('oc_preview_token');
-    parsed.searchParams.delete('oc_client_token');
-    parsed.searchParams.delete('oc_url_token');
+    parsed.searchParams.delete('piarium_preview_token');
+    parsed.searchParams.delete('piarium_client_token');
+    parsed.searchParams.delete('piarium_url_token');
     return parsed.toString();
   } catch {
     return value;
@@ -643,9 +643,9 @@ const stripPreviewQueryParams = (value: string): string => {
   try {
     const parsed = new URL(value);
     parsed.searchParams.delete('ocPreview');
-    parsed.searchParams.delete('oc_preview_token');
-    parsed.searchParams.delete('oc_client_token');
-    parsed.searchParams.delete('oc_url_token');
+    parsed.searchParams.delete('piarium_preview_token');
+    parsed.searchParams.delete('piarium_client_token');
+    parsed.searchParams.delete('piarium_url_token');
     return parsed.toString();
   } catch {
     return value;
@@ -797,10 +797,10 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     ? (() => {
       const path = normalizedUrl.pathname || '/';
       const searchParams = new URLSearchParams(normalizedUrl.search);
-      searchParams.delete('oc_url_token');
-      searchParams.delete('oc_client_token');
+      searchParams.delete('piarium_url_token');
+      searchParams.delete('piarium_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('oc_preview_token', proxyState.previewToken || '');
+      searchParams.set('piarium_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
       const hash = normalizedUrl.hash || '';
       return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${hash}`);
@@ -1613,10 +1613,10 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
       const parsed = new URL(loadedUrl);
       const path = parsed.pathname || '/';
       const searchParams = new URLSearchParams(parsed.search);
-      searchParams.delete('oc_url_token');
-      searchParams.delete('oc_client_token');
+      searchParams.delete('piarium_url_token');
+      searchParams.delete('piarium_client_token');
       searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('oc_preview_token', proxyState.previewToken || '');
+      searchParams.set('piarium_preview_token', proxyState.previewToken || '');
       const search = searchParams.toString();
       return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${parsed.hash}`);
     } catch {

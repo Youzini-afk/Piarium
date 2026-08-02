@@ -1,6 +1,6 @@
-import { getModelsMetadata } from '../opencode/models-metadata.js';
+import { getModelsMetadata } from '../platform/models-metadata.js';
 
-// The models.dev catalog is shared with the /api/openchamber/models-metadata
+// The models.dev catalog is shared with the /api/piarium/models-metadata
 // route through one in-process cache — no extra fetches, no cache files.
 export async function getModelCatalog() {
   const { metadata } = await getModelsMetadata();

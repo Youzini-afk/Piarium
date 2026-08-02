@@ -21,7 +21,7 @@ describe('remote client auth runtime', () => {
     const { dir, runtime } = await createRuntime();
     try {
       const created = await runtime.createClient({ label: 'Laptop' });
-      expect(created.token.startsWith('oc_client_')).toBe(true);
+      expect(created.token.startsWith('piarium_client_')).toBe(true);
       expect(created.client.label).toBe('Laptop');
 
       const listed = await runtime.listClients();

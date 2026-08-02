@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import {
   generateAuthenticationOptions,
@@ -8,16 +7,14 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
+import { resolvePiariumDataDir } from '../platform/data-paths.js';
 
 const DEFAULT_STORE_VERSION = 1;
 const DEFAULT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_RP_NAME = 'Piarium';
 
-const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
-  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-  : path.join(os.homedir(), '.config', 'openchamber');
-
-const PASSKEY_STORE_FILE = path.join(OPENCHAMBER_DATA_DIR, 'ui-passkeys.json');
+const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
+const PASSKEY_STORE_FILE = path.join(PIARIUM_DATA_DIR, 'ui-passkeys.json');
 
 const createUserId = () => crypto.randomBytes(32).toString('base64url');
 
@@ -330,7 +327,7 @@ export const createUiPasskeys = ({
       rpName,
       rpID,
       userID,
-      userName: 'openchamber-ui',
+      userName: 'piarium-ui',
       userDisplayName: 'Piarium UI',
       attestationType: 'none',
       excludeCredentials: getPasskeysForRpId(store, rpID).map((passkey) => ({

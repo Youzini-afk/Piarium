@@ -1,24 +1,26 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { readAuthFile } from '../opencode/auth.js';
-import { readConfigLayers } from '../opencode/shared.js';
+import { readPiAuthFile as readAuthFile, readPiConfigLayers as readConfigLayers } from '../pi-config/storage.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
 import { callSmallModel } from './call.js';
 
-const OPENCHAMBER_SETTINGS_FILE = path.join(
-  process.env.OPENCHAMBER_DATA_DIR
-    ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-    : path.join(os.homedir(), '.config', 'openchamber'),
+const PIARIUM_SETTINGS_FILE = path.join(
+  process.env.PIARIUM_DATA_DIR
+    ? path.resolve(process.env.PIARIUM_DATA_DIR)
+    : process.platform === 'win32'
+      ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Piarium')
+      : process.platform === 'darwin'
+        ? path.join(os.homedir(), 'Library', 'Application Support', 'Piarium')
+        : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'piarium'),
   'settings.json',
 );
 
-// OpenChamber's own settings: when the user unchecks "use default small model"
-// their explicit override outranks every other resolution step.
+// Piarium settings can explicitly override Pi's default small-model choice.
 const readSmallModelSettingsOverride = () => {
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SETTINGS_FILE, 'utf8');
+    const raw = fs.readFileSync(PIARIUM_SETTINGS_FILE, 'utf8');
     const settings = JSON.parse(raw);
     if (!settings || typeof settings !== 'object') return null;
     if (settings.smallModelUseDefault !== false) return null;
@@ -50,7 +52,7 @@ const clampPromptToModelLimit = ({ prompt, catalog, providerID, modelID }) => {
 const readConfiguredSmallModel = (workingDirectory) => {
   try {
     const { mergedConfig } = readConfigLayers(workingDirectory);
-    const value = mergedConfig?.small_model;
+    const value = mergedConfig?.smallModel;
     return typeof value === 'string' ? value : null;
   } catch {
     return null;
@@ -59,7 +61,7 @@ const readConfiguredSmallModel = (workingDirectory) => {
 
 /**
  * Generates text with the user's small model, resolved and authenticated
- * entirely server-side from the OpenCode config and auth store.
+ * entirely server-side from Pi's configuration and auth store.
  */
 export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider = false }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
@@ -89,7 +91,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   }
 
   // Callers with a session context can forbid silently switching providers:
-  // an explicit user choice (settings override, opencode config, request
+  // an explicit user choice (settings override, Pi config, request
   // model) is always allowed, anything else must stay on the session's
   // provider.
   if (restrictToPreferredProvider
@@ -129,9 +131,9 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 }
 
 /**
- * Provider ids with a usable OpenCode login — the set the small model can
+ * Provider ids with a usable Pi credential: the set the small model can
  * actually call. Used by the settings override picker to hide providers that
- * would only ever fail (e.g. opencode free models without a token).
+ * would only ever fail.
  */
 export function listAuthenticatedProviders() {
   try {

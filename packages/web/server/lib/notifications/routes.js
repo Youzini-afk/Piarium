@@ -256,7 +256,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
     try {
       writeSseEvent(res, {
-        type: 'openchamber:notification-stream-ready',
+        type: 'piarium:notification-stream-ready',
         properties: { uiToken },
       });
       flushSse();

@@ -1,8 +1,8 @@
 const DEFAULT_TARGET_TTL_MS = 30 * 60 * 1000;
-const TOKEN_COOKIE_NAME = 'oc_preview_token';
-const TOKEN_QUERY_PARAM = 'oc_preview_token';
-const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
-const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
+const TOKEN_COOKIE_NAME = 'piarium_preview_token';
+const TOKEN_QUERY_PARAM = 'piarium_preview_token';
+const CLIENT_TOKEN_QUERY_PARAM = 'piarium_client_token';
+const URL_AUTH_TOKEN_QUERY_PARAM = 'piarium_url_token';
 const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
 const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
 export const PREVIEW_TARGET_ERROR_HEADER = 'x-openchamber-preview-target-error';
@@ -482,8 +482,8 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1] + '/';
     const currentSearchParams = new URL(window.location.href).searchParams;
-    const previewToken = currentSearchParams.get('oc_preview_token') || '';
-    const urlAuthToken = currentSearchParams.get('oc_url_token') || '';
+    const previewToken = currentSearchParams.get('piarium_preview_token') || '';
+    const urlAuthToken = currentSearchParams.get('piarium_url_token') || '';
     let reloadTimer = 0;
 
     const schedulePreviewReload = () => {
@@ -506,8 +506,8 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
         if (parsed.pathname.indexOf(proxyBase) !== 0) {
           parsed.pathname = proxyBase;
         }
-        if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
-        if (urlAuthToken) parsed.searchParams.set('oc_url_token', urlAuthToken);
+        if (previewToken) parsed.searchParams.set('piarium_preview_token', previewToken);
+        if (urlAuthToken) parsed.searchParams.set('piarium_url_token', urlAuthToken);
         return parsed.toString();
       } catch {
         return url;
@@ -549,17 +549,17 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     if (!proxyMatch) return;
     const proxyBase = proxyMatch[1];
     const currentSearchParams = new URL(window.location.href).searchParams;
-    const previewToken = currentSearchParams.get('oc_preview_token') || '';
-    const urlAuthToken = currentSearchParams.get('oc_url_token') || '';
+    const previewToken = currentSearchParams.get('piarium_preview_token') || '';
+    const urlAuthToken = currentSearchParams.get('piarium_url_token') || '';
 
     const withProxyAuth = (value) => {
       if (typeof value !== 'string' || value.indexOf(proxyBase) !== 0) return value;
       if (!previewToken && !urlAuthToken) return value;
       try {
         const parsed = new URL(value, window.location.origin);
-        parsed.searchParams.delete('oc_client_token');
-        if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
-        if (urlAuthToken) parsed.searchParams.set('oc_url_token', urlAuthToken);
+        parsed.searchParams.delete('piarium_client_token');
+        if (previewToken) parsed.searchParams.set('piarium_preview_token', previewToken);
+        if (urlAuthToken) parsed.searchParams.set('piarium_url_token', urlAuthToken);
         return parsed.pathname + parsed.search + parsed.hash;
       } catch {
         return value;
@@ -599,9 +599,9 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
         const isWebSocketProtocol = parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
         if (sameHost && isWebSocketProtocol && shouldProxyPath(parsed.pathname)) {
           parsed.pathname = proxyBase + parsed.pathname;
-          parsed.searchParams.delete('oc_client_token');
-          if (previewToken) parsed.searchParams.set('oc_preview_token', previewToken);
-          if (urlAuthToken) parsed.searchParams.set('oc_url_token', urlAuthToken);
+          parsed.searchParams.delete('piarium_client_token');
+          if (previewToken) parsed.searchParams.set('piarium_preview_token', previewToken);
+          if (urlAuthToken) parsed.searchParams.set('piarium_url_token', urlAuthToken);
           return parsed.toString();
         }
       } catch {}

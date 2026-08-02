@@ -224,7 +224,7 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
 
 // In relay mode the global-event WebSocket rides the E2EE tunnel instead of a
 // native network socket. The resolver still builds the authenticated URL (it
-// carries the oc_url_token the host replays to the loopback origin); we hand
+// carries the Piarium URL token the host replays to the loopback origin); we hand
 // its path+query to the tunnel, which returns a socket-like with the exact
 // on* handler surface this pipeline uses. Direct-URL runtimes keep the native
 // WebSocket path, wrapped to the same shape so the caller holds one type.
@@ -596,7 +596,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   const runWsAttempt = async (signal: AbortSignal) => {
     // A WebSocket upgrade can't carry an Authorization header, so it
-    // authenticates purely via the oc_url_token query param. The sync token
+    // authenticates purely via the Piarium URL token query param. The sync token
     // getter returns "" while the token is unminted or inside its expiry skew
     // window, which would open the socket WITHOUT credentials — the server then
     // rejects it ("HTTP Authentication failed; no valid credentials available")
@@ -766,7 +766,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           : "ws_closed_before_ready"
 
         // Closed before the socket ever opened → the server rejected the
-        // upgrade, typically an auth failure on the oc_url_token. Drop the
+        // upgrade, typically an auth failure on the Piarium URL token. Drop the
         // cached token so the next attempt mints a fresh one instead of
         // replaying a token the server won't accept (which would loop).
         if (!opened) {

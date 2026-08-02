@@ -633,8 +633,8 @@ const refreshQuitRiskFlags = async () => {
   const base = typeof state.sidecarUrl === 'string' ? state.sidecarUrl.trim().replace(/\/$/, '') : '';
   if (!base) return;
 
-  const scheduledUrl = `${base}/api/openchamber/scheduled-tasks/status`;
-  const tunnelUrl = `${base}/api/openchamber/tunnel/status`;
+  const scheduledUrl = `${base}/api/piarium/scheduled-tasks/status`;
+  const tunnelUrl = `${base}/api/piarium/tunnel/status`;
 
   const fetchJson = async (url) => {
     try {
@@ -1481,7 +1481,6 @@ const loadWindowsEnv = () => {
   const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local');
   const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
   const commonPaths = [
-    path.join(homeDir, '.opencode', 'bin'),
     path.join(homeDir, '.bun', 'bin'),
     path.join(homeDir, '.local', 'bin'),
     path.join(localAppData, 'Programs', 'Microsoft VS Code', 'bin'),
@@ -1512,7 +1511,7 @@ const loadShellEnv = () => {
 };
 
 // Merge the user's login-shell env (PATH, etc.) into this process before we
-import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/lib/opencode/path-utils.js';
+import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/lib/platform/path-utils.js';
 
 // import/start the server in-process. The server and its children (opencode
 // CLI, git, etc.) inherit process.env directly now — there is no sidecar

@@ -1,16 +1,24 @@
-const GOAL_REMINDER = [
+const buildScheduledInstructions = (execution) => [
+  ...(typeof execution?.agent === 'string' && execution.agent.trim()
+    ? [`Use the Pi agent role or profile named "${execution.agent.trim()}" for this turn when it is available.`]
+    : []),
+  ...(execution?.runAsGoal === true ? [
   '<system-reminder>',
   'Treat this scheduled task as an end-to-end goal. Continue using tools until the requested outcome is complete,',
   'verify the result before finishing, and report clearly what was completed and what remains.',
+  ...(Number.isSafeInteger(execution.goalTokenBudget)
+    ? [`The requested goal token budget is ${execution.goalTokenBudget}.`]
+    : []),
   '</system-reminder>',
+  ] : []),
 ].join('\n');
 
 export const buildScheduledPiPrompt = (task) => {
   const prompt = typeof task?.execution?.prompt === 'string'
     ? task.execution.prompt.trim()
     : '';
-  if (!prompt || task?.execution?.runAsGoal !== true) return prompt;
-  return `${prompt}\n\n${GOAL_REMINDER}`;
+  const instructions = buildScheduledInstructions(task?.execution);
+  return prompt && instructions ? `${prompt}\n\n${instructions}` : prompt;
 };
 
 export const createPiScheduledTaskExecutor = ({ broker }) => {
@@ -65,3 +73,5 @@ export const createPiScheduledTaskExecutor = ({ broker }) => {
     }
   };
 };
+
+export { buildScheduledInstructions };

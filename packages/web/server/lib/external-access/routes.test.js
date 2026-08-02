@@ -15,7 +15,7 @@ const createApp = ({ auth } = {}) => {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
   app.use((req, _res, next) => {
-    req.openchamberAuth = auth || {
+    req.piariumAuth = auth || {
       type: 'client',
       clientId: 'client-1',
       client: {
@@ -40,8 +40,8 @@ const createApp = ({ auth } = {}) => {
     process,
     spawn,
     buildAugmentedPath: () => process.env.PATH || '',
-    openchamberDataDir: dataDir,
-    openchamberVersion: '1.0.0-test',
+    piariumDataDir: dataDir,
+    piariumVersion: '1.0.0-test',
     runtimeName: 'test',
     serverStartedAt: '2026-01-01T00:00:00.000Z',
     remoteClientAuthRuntime: {

@@ -1,14 +1,11 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
-import { readConfig, readConfigLayers } from '../opencode/shared.js';
+import { readPiAuthFile as readAuthFile, writePiAuthFile as writeAuthFile } from '../pi-config/storage.js';
+import { readPiConfiguration as readConfig } from '../pi-config/storage.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
 
-// Direct, non-streaming text generation against the provider APIs, replicating
-// how OpenCode authenticates each of them (see the plugin auth loaders in the
-// opencode repo). auth.json credentials never leave this process.
+// Direct, non-streaming text generation against provider APIs using Pi's
+// settings, model configuration, and auth store. Credentials never leave this
+// process except in the request to their configured provider.
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const COPILOT_MODELS_TIMEOUT_MS = 5_000;
@@ -16,7 +13,7 @@ const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 // Qwen, …) spend part of this budget on reasoning before the actual answer.
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
-const USER_AGENT = 'opencode/1.0 openchamber';
+const USER_AGENT = 'piarium/0.1';
 
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -29,8 +26,8 @@ const httpError = async (response, provider) => {
 };
 
 // ---------------------------------------------------------------------------
-// OpenAI OAuth (ChatGPT plan / codex) token refresh — single-flight, with the
-// refreshed token written back to auth.json exactly like OpenCode does.
+// OpenAI OAuth (ChatGPT plan / Codex) token refresh is single-flight, with the
+// refreshed token persisted back into Pi's auth.json.
 // ---------------------------------------------------------------------------
 
 let openaiRefreshPromise = null;
@@ -354,7 +351,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
       Accept: 'text/event-stream',
       Authorization: `Bearer ${accessToken}`,
       ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {}),
-      originator: 'opencode',
+      originator: 'piarium',
       'User-Agent': USER_AGENT,
     },
     body: JSON.stringify({
@@ -367,8 +364,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
           content: [{ type: 'input_text', text: prompt }],
         },
       ],
-      // The codex backend rejects max_output_tokens (OpenCode forces it to
-      // undefined for this provider too).
+      // The Codex backend rejects max_output_tokens for subscription traffic.
       stream: true,
       store: false,
     }),
@@ -413,54 +409,28 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const resolveConfigApiKey = (value, workingDirectory, providerID) => {
-  const envMatch = value.match(/^\{env:([^}]+)\}$/i);
-  if (envMatch) {
-    return process.env[envMatch[1].trim()]?.trim() || null;
-  }
-
-  const fileMatch = value.match(/^\{file:(.+)\}$/i);
-  if (!fileMatch) return value;
-
-  const configuredPath = fileMatch[1].trim();
-  let resolvedPath;
-  if (configuredPath === '~' || configuredPath.startsWith('~/') || configuredPath.startsWith('~\\')) {
-    resolvedPath = path.join(os.homedir(), configuredPath.slice(2));
-  } else if (path.isAbsolute(configuredPath)) {
-    resolvedPath = configuredPath;
-  } else {
-    const layers = readConfigLayers(workingDirectory);
-    const source = [
-      { config: layers.customConfig, filePath: layers.paths.customPath },
-      { config: layers.projectConfig, filePath: layers.paths.projectPath },
-      { config: layers.userConfig, filePath: layers.paths.userPath },
-    ].find(({ config }) => config?.provider?.[providerID]?.options?.apiKey === value);
-    resolvedPath = path.resolve(source?.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd(), configuredPath);
-  }
-
-  try {
-    const key = fs.readFileSync(resolvedPath, 'utf8').trim();
-    if (!key) throw new Error('empty file');
-    return key;
-  } catch {
-    throw new Error(`Failed to resolve configured apiKey file for provider "${providerID}"`);
-  }
+const resolveConfigApiKey = (value) => {
+  if (value.startsWith('$$')) return value.slice(1);
+  if (value.startsWith('$!')) return value.slice(1);
+  if (value.startsWith('!')) return null;
+  const expanded = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, braced, plain) => (
+    process.env[braced || plain] || ''
+  ));
+  return expanded.trim() || null;
 };
 
 const readProviderConfig = (workingDirectory, providerID) => {
   try {
     const config = readConfig(workingDirectory);
-    const providerCfg = config?.provider?.[providerID];
+    const providerCfg = config?.providers?.[providerID];
     if (!providerCfg || typeof providerCfg !== 'object') return null;
-    const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
-    const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
-    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
+    const baseURL = typeof providerCfg.baseUrl === 'string' ? providerCfg.baseUrl.trim() : null;
+    const rawApiKey = typeof providerCfg.apiKey === 'string' ? providerCfg.apiKey.trim() : null;
+    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey) : null;
     return {
       baseURL,
-      // Shape the config-supplied key as a regular api-key auth entry so it
-      // can win the precedence check below and flow through the dispatch's
-      // `entry.type === 'api' ? entry.key : ...` branch unchanged.
-      auth: apiKey ? { type: 'api', key: apiKey } : null,
+      // Treat a provider-configured key like a regular Pi API-key credential.
+      auth: apiKey ? { type: 'api_key', key: apiKey } : null,
     };
   } catch {
     // Provider config is non-essential — continue with catalog-only resolution.
@@ -475,23 +445,22 @@ const readProviderConfig = (workingDirectory, providerID) => {
 export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
-  // Match OpenCode's resolveSDK precedence:
-  // config provider.<id>.options.apiKey (providerConfig.auth) wins; the
-  // auth.json entry is only a fallback.
+  // Pi's provider-specific models.json key takes precedence over auth.json.
   const entry = providerConfig?.auth || getAuthEntryForProvider(auth, providerID);
   if (!entry) {
-    throw new Error(`No OpenCode login found for provider "${providerID}"`);
+    throw new Error(`No Pi credential found for provider "${providerID}"`);
   }
 
   if (providerID === 'github-copilot') {
-    // OpenCode uses the stored device-OAuth token directly as the bearer —
-    // access === refresh, no exchange, no expiry.
+    // Copilot stores the device OAuth token as the bearer; no token exchange
+    // is required for model calls.
     const token = entry.refresh || entry.access || entry.key;
     if (!token) {
       throw new Error('GitHub Copilot login has no token');
     }
-    const baseURL = entry.enterpriseUrl
-      ? `https://copilot-api.${String(entry.enterpriseUrl).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
+    const enterpriseDomain = entry.enterpriseDomain || entry.enterpriseUrl;
+    const baseURL = enterpriseDomain
+      ? `https://copilot-api.${String(enterpriseDomain).replace(/^https?:\/\//, '').replace(/\/+$/, '')}`
       : 'https://api.githubcopilot.com';
     const authHeaders = {
       Authorization: `Bearer ${token}`,
@@ -544,11 +513,9 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     });
   }
 
-  const apiKey = entry.type === 'api' ? entry.key
-    : entry.type === 'wellknown' ? entry.token
-      : entry.access;
+  const apiKey = entry.type === 'api_key' ? entry.key : entry.access;
   if (!apiKey) {
-    throw new Error(`OpenCode login for "${providerID}" has no usable credential`);
+    throw new Error(`Pi credential for "${providerID}" has no usable key`);
   }
 
   if (providerID === 'anthropic') {
@@ -558,12 +525,9 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens });
   }
 
-  // Everything else: OpenAI-compatible chat completions against the catalog's
-  // base URL for that provider (openai itself included). When a custom provider
-  // is not in the catalog (e.g. a user-configured OpenAI-compatible proxy),
-  // fall back to its baseURL from the OpenCode provider config. The openai
-  // provider also respects provider.openai.options.baseURL — OpenCode itself
-  // uses the same config for all providers including openai.
+  // Everything else uses OpenAI-compatible chat completions. A custom Pi
+  // provider may supply its own baseUrl even when it is absent from the public
+  // model catalog.
   const provider = getCatalogProvider(catalog, providerID);
   const providerConfigUrl = providerConfig?.baseURL;
   const defaultOpenaiUrl = 'https://api.openai.com/v1';
@@ -578,12 +542,9 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     throw new Error(`Provider "${providerID}" has no known API base URL`);
   }
 
-  // Thinking models burn the output budget on reasoning and leave content
-  // empty — disable thinking where a wire-format switch exists (mirrors
-  // OpenCode's smallOptions/variants special cases). There is NO universal
-  // parameter: unknown body fields 400 on some providers, so this stays an
-  // explicit allowlist. Models without a switch (DeepSeek, Qwen, Kimi, …)
-  // just get the generous output budget.
+  // Thinking models can exhaust the output budget before returning content.
+  // Disable thinking only where a known wire-format switch exists because
+  // several providers reject unknown body fields.
   const lowerModel = modelID.toLowerCase();
   const supportsThinkingToggle = providerID.includes('zai')
     || providerID.includes('zhipu')

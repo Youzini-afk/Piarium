@@ -118,7 +118,7 @@ export const useSlimConfigStore = create<SlimConfigStore>()(
           try {
             const response = await runtimeFetch('/api/agent-orchestration/slim/config', {
               query: configDirectory ? { directory: configDirectory } : undefined,
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              headers: configDirectory ? { 'x-piarium-directory': configDirectory } : undefined,
             });
             if (!response.ok) {
               throw new Error(await readApiError(response, 'Failed to load Slim configuration'));
@@ -214,7 +214,7 @@ export const useSlimConfigStore = create<SlimConfigStore>()(
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
-              ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+              ...(configDirectory ? { 'x-piarium-directory': configDirectory } : {}),
             },
             body: JSON.stringify(payload),
           });

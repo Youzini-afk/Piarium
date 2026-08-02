@@ -1,6 +1,6 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
-import { requestControlAction } from './cli-control.js';
+import { requestPiariumApi, requestRuntimeMethod } from './cli-runtime.js';
 import { isJsonMode, printJson } from '../cli-output.js';
 
 const asNonEmptyString = (value) => {
@@ -10,7 +10,7 @@ const asNonEmptyString = (value) => {
 };
 
 const formatModelRef = (entry) => {
-  const providerID = asNonEmptyString(entry?.providerID) || asNonEmptyString(entry?.providerId);
+  const providerID = asNonEmptyString(entry?.provider) || asNonEmptyString(entry?.providerID) || asNonEmptyString(entry?.providerId);
   const modelID = asNonEmptyString(entry?.modelID) || asNonEmptyString(entry?.modelId) || asNonEmptyString(entry?.id);
   return providerID && modelID ? `${providerID}/${modelID}` : null;
 };
@@ -29,6 +29,9 @@ const formatModelsOutput = (settings = {}) => {
   const recent = Array.isArray(settings.recentModels)
     ? settings.recentModels.map(formatModelRef).filter(Boolean)
     : [];
+  const available = Array.isArray(settings.availableModels)
+    ? settings.availableModels.map(formatModelRef).filter(Boolean)
+    : [];
   const lines = [
     formatDefaultLine(settings),
     '',
@@ -37,13 +40,14 @@ const formatModelsOutput = (settings = {}) => {
     '',
     'Recent:',
     ...(recent.length > 0 ? recent.map((model) => `- \`${model}\``) : ['- none']),
+    ...(available.length > 0 ? ['', 'Available:', ...available.map((model) => `- \`${model}\``)] : []),
   ];
   return `${lines.join('\n')}\n`;
 };
 
 async function modelsCommand(options = {}, action = 'show') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Models Commands\n\nUSAGE:\n  openchamber models [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n`);
+    process.stdout.write(`Piarium Models Commands\n\nUSAGE:\n  piarium models [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Piarium server port\n  --json                  Output machine-readable JSON\n`);
     return;
   }
   if (action !== 'show') {
@@ -51,7 +55,11 @@ async function modelsCommand(options = {}, action = 'show') {
   }
 
   const port = await resolveTargetPort(options);
-  const result = await requestControlAction(port, 'models.list', {}, options);
+  const [settings, availableModels] = await Promise.all([
+    requestPiariumApi(port, '/api/config/settings', options),
+    requestRuntimeMethod(port, 'model.list', { cwd: process.cwd() }, options),
+  ]);
+  const result = { ...settings, availableModels: Array.isArray(availableModels) ? availableModels : [] };
 
   if (isJsonMode(options)) {
     printJson(result);

@@ -87,7 +87,7 @@ describe('realtime proxy URL builders', () => {
     const url = new URL(buildRealtimeProxySseUrl('http://127.0.0.1:57123', 'https://remote.example/api/global/event?x=1'));
 
     expect(url.origin).toBe('http://127.0.0.1:57123');
-    expect(url.pathname).toBe('/api/openchamber/realtime-proxy/sse');
+    expect(url.pathname).toBe('/api/piarium/realtime-proxy/sse');
     expect(url.searchParams.get('url')).toBe('https://remote.example/api/global/event?x=1');
   });
 
@@ -96,7 +96,7 @@ describe('realtime proxy URL builders', () => {
 
     expect(url.protocol).toBe('wss:');
     expect(url.host).toBe('127.0.0.1:57123');
-    expect(url.pathname).toBe('/api/openchamber/realtime-proxy/ws');
+    expect(url.pathname).toBe('/api/piarium/realtime-proxy/ws');
     expect(url.searchParams.get('url')).toBe('wss://remote.example/api/global/event/ws');
   });
 });

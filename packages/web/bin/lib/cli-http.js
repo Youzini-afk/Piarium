@@ -2,7 +2,7 @@ import { buildLocalUrl } from './cli-network.js';
 import { readDesktopLocalClientTokenFromSettings, readDesktopLocalPortFromSettings } from './cli-paths.js';
 import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
 
-const UI_SESSION_COOKIE_NAME = 'oc_ui_session';
+const UI_SESSION_COOKIE_NAME = 'piarium_ui_session';
 
 function extractUiSessionCookie(response) {
   const values = [];
@@ -204,7 +204,7 @@ async function fetchTunnelProvidersFromPort(port, fetchImpl = globalThis.fetch) 
     return null;
   }
   try {
-    const response = await fetchImpl(buildLocalUrl(port, '/api/openchamber/tunnel/providers'));
+    const response = await fetchImpl(buildLocalUrl(port, '/api/piarium/tunnel/providers'));
     if (!response.ok) return null;
     const body = await response.json().catch(() => null);
     if (!body || !Array.isArray(body.providers)) return null;

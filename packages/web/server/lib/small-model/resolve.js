@@ -1,7 +1,7 @@
 import { getCatalogProvider } from './catalog.js';
 
-// Mirrors OpenCode's getSmallModel fallback chain:
-// 1. `small_model` from the merged config layers ("provider/model").
+// Piarium's small-model fallback chain:
+// 1. `smallModel` from the merged Pi settings layers ("provider/model").
 // 2. GitHub Copilot's hidden utility models when Copilot is logged in.
 // 3. Family-priority scan of the authenticated providers' catalog models.
 const FAMILY_PRIORITY = ['gemini-flash', 'gpt-nano', 'claude-haiku'];
@@ -27,12 +27,11 @@ export function getAuthEntryForProvider(auth, providerID) {
 
 export function isUsableAuthEntry(entry) {
   if (!entry || typeof entry !== 'object') return false;
-  if (entry.type === 'api') return typeof entry.key === 'string' && entry.key.length > 0;
+  if (entry.type === 'api_key') return typeof entry.key === 'string' && entry.key.length > 0;
   if (entry.type === 'oauth') {
     return (typeof entry.access === 'string' && entry.access.length > 0)
       || (typeof entry.refresh === 'string' && entry.refresh.length > 0);
   }
-  if (entry.type === 'wellknown') return typeof entry.token === 'string' && entry.token.length > 0;
   return false;
 }
 
@@ -76,8 +75,7 @@ const pickWithinProvider = (providerID, auth, catalog, family) => {
 };
 
 export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID }) {
-  // OpenChamber's own setting (Settings → Sessions → Small Model override)
-  // outranks everything, including the OpenCode config.
+  // Piarium's explicit Settings override outranks the native Pi config.
   const fromSettings = parseModelRef(settingsSmallModel);
   if (fromSettings) {
     return { ...fromSettings, source: 'settings' };
@@ -88,10 +86,9 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
     return { ...explicit, source: 'config' };
   }
 
-  // Like OpenCode: when the caller has a session context, the utility call
-  // stays on the session's provider. Scan its families for a small model,
-  // otherwise run on the session's own model — never silently switch to a
-  // different provider's subscription.
+  // With a session context, keep the utility call on the session provider.
+  // Scan its model families first, then use the session model rather than
+  // silently switching to a different subscription.
   const preferred = typeof preferredProviderID === 'string' && preferredProviderID
     ? preferredProviderID
     : null;

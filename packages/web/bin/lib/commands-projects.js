@@ -1,13 +1,13 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
 import { resolveTargetPort } from './cli-api-target.js';
-import { requestControlAction } from './cli-control.js';
+import { requestPiariumApi } from './cli-runtime.js';
 import { isJsonMode, printJson } from '../cli-output.js';
 
 const formatProjectLine = (project) => `- \`${project.label}\` — \`${project.id}\` — \`${project.path}\``;
 
 async function projectsCommand(options = {}, action = 'list') {
   if (action === 'help') {
-    process.stdout.write(`OpenChamber Projects Commands\n\nUSAGE:\n  openchamber projects [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       OpenChamber server port\n  --json                  Output machine-readable JSON\n`);
+    process.stdout.write(`Piarium Projects Commands\n\nUSAGE:\n  piarium projects [OPTIONS]\n\nOUTPUT OPTIONS:\n  -p, --port <port>       Piarium server port\n  --json                  Output machine-readable JSON\n`);
     return;
   }
   if (action !== 'list') {
@@ -15,7 +15,7 @@ async function projectsCommand(options = {}, action = 'list') {
   }
 
   const port = await resolveTargetPort(options);
-  const { projects = [] } = await requestControlAction(port, 'projects.list', {}, options);
+  const { projects = [] } = await requestPiariumApi(port, '/api/config/settings', options);
   if (isJsonMode(options)) {
     printJson({ projects });
     return;

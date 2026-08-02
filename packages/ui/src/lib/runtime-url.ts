@@ -102,7 +102,7 @@ const withUrlAuth = (urlValue: string): string => {
   const url = ABSOLUTE_URL_PATTERN.test(urlValue)
     ? new URL(urlValue)
     : new URL(urlValue, 'http://openchamber.local');
-  url.searchParams.set('oc_url_token', token);
+  url.searchParams.set('piarium_url_token', token);
   if (ABSOLUTE_URL_PATTERN.test(urlValue)) return url.toString();
   return `${url.pathname}${url.search}${url.hash}`;
 };
@@ -123,10 +123,10 @@ const toRealtimeProxyUrl = (kind: 'sse' | 'ws', targetUrl: string, config: Runti
   const localOrigin = readInjectedLocalOrigin();
   if (!localOrigin) return null;
   try {
-    const proxy = new URL(`/api/openchamber/realtime-proxy/${kind === 'sse' ? 'sse' : 'ws'}`, `${localOrigin}/`);
+    const proxy = new URL(`/api/piarium/realtime-proxy/${kind === 'sse' ? 'sse' : 'ws'}`, `${localOrigin}/`);
     proxy.searchParams.set('url', targetUrl);
     const localToken = getLocalRuntimeUrlAuthTokenSync(localOrigin);
-    if (localToken) proxy.searchParams.set('oc_url_token', localToken);
+    if (localToken) proxy.searchParams.set('piarium_url_token', localToken);
     if (kind === 'ws') {
       proxy.protocol = proxy.protocol === 'https:' ? 'wss:' : 'ws:';
       return toWebSocketUrl(proxy.toString(), config);

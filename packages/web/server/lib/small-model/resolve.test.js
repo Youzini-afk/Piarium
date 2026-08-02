@@ -43,23 +43,23 @@ describe('parseModelRef', () => {
 });
 
 describe('isUsableAuthEntry', () => {
-  it('accepts api keys, oauth tokens, and wellknown tokens', () => {
-    expect(isUsableAuthEntry({ type: 'api', key: 'sk-x' })).toBe(true);
+  it('accepts Pi API keys and OAuth tokens', () => {
+    expect(isUsableAuthEntry({ type: 'api_key', key: 'sk-x' })).toBe(true);
     expect(isUsableAuthEntry({ type: 'oauth', access: 'a', refresh: 'r', expires: 0 })).toBe(true);
-    expect(isUsableAuthEntry({ type: 'wellknown', key: 'k', token: 't' })).toBe(true);
   });
 
   it('rejects empty or malformed entries', () => {
-    expect(isUsableAuthEntry({ type: 'api', key: '' })).toBe(false);
+    expect(isUsableAuthEntry({ type: 'api_key', key: '' })).toBe(false);
+    expect(isUsableAuthEntry({ type: 'api', key: 'legacy' })).toBe(false);
     expect(isUsableAuthEntry({ type: 'oauth' })).toBe(false);
     expect(isUsableAuthEntry(null)).toBe(false);
   });
 });
 
 describe('resolveSmallModel', () => {
-  it('gives the OpenChamber settings override top priority', () => {
+  it('gives the Piarium settings override top priority', () => {
     const result = resolveSmallModel({
-      auth: { anthropic: { type: 'api', key: 'sk-x' } },
+      auth: { anthropic: { type: 'api_key', key: 'sk-x' } },
       catalog,
       settingsSmallModel: 'anthropic/claude-haiku-4-5',
       configSmallModel: 'openai/gpt-4o-mini',
@@ -68,9 +68,9 @@ describe('resolveSmallModel', () => {
     expect(result).toEqual({ providerID: 'anthropic', modelID: 'claude-haiku-4-5', source: 'settings' });
   });
 
-  it('prefers the configured small_model', () => {
+  it('prefers the configured smallModel', () => {
     const result = resolveSmallModel({
-      auth: { anthropic: { type: 'api', key: 'sk-x' } },
+      auth: { anthropic: { type: 'api_key', key: 'sk-x' } },
       catalog,
       configSmallModel: 'openai/gpt-4o-mini',
     });
@@ -80,8 +80,8 @@ describe('resolveSmallModel', () => {
   it('scans authenticated providers by family priority, newest first', () => {
     const result = resolveSmallModel({
       auth: {
-        google: { type: 'api', key: 'g-key' },
-        anthropic: { type: 'api', key: 'sk-x' },
+        google: { type: 'api_key', key: 'g-key' },
+        anthropic: { type: 'api_key', key: 'sk-x' },
       },
       catalog,
       configSmallModel: null,
@@ -92,8 +92,8 @@ describe('resolveSmallModel', () => {
   it('skips providers without a usable credential', () => {
     const result = resolveSmallModel({
       auth: {
-        google: { type: 'api', key: '' },
-        anthropic: { type: 'api', key: 'sk-x' },
+        google: { type: 'api_key', key: '' },
+        anthropic: { type: 'api_key', key: 'sk-x' },
       },
       catalog,
       configSmallModel: null,
@@ -118,8 +118,8 @@ describe('resolveSmallModel', () => {
   it('prefers the session provider over other authenticated providers', () => {
     const result = resolveSmallModel({
       auth: {
-        google: { type: 'api', key: 'g-key' },
-        anthropic: { type: 'api', key: 'sk-x' },
+        google: { type: 'api_key', key: 'g-key' },
+        anthropic: { type: 'api_key', key: 'sk-x' },
       },
       catalog,
       configSmallModel: null,
@@ -130,7 +130,7 @@ describe('resolveSmallModel', () => {
 
   it('ignores a preferred provider without a usable login', () => {
     const result = resolveSmallModel({
-      auth: { google: { type: 'api', key: 'g-key' } },
+      auth: { google: { type: 'api_key', key: 'g-key' } },
       catalog,
       configSmallModel: null,
       preferredProviderID: 'anthropic',
@@ -138,16 +138,13 @@ describe('resolveSmallModel', () => {
     expect(result).toEqual({ providerID: 'google', modelID: 'gemini-2.5-flash', source: 'family-scan' });
   });
 
-  it('never uses a session provider without a login (opencode free models)', () => {
-    // Vanilla setups default the picker to opencode/big-pickle with no
-    // opencode token — those free models only work through OpenCode itself
-    // and must never be called directly, so the session context is ignored.
+  it('never uses a session provider without a credential', () => {
     const result = resolveSmallModel({
       auth: { openai: { type: 'oauth', access: 'a', refresh: 'r', expires: Date.now() + 60_000 } },
       catalog,
       configSmallModel: null,
-      preferredProviderID: 'opencode',
-      preferredModelID: 'big-pickle',
+      preferredProviderID: 'custom-free',
+      preferredModelID: 'free-model',
     });
     expect(result).toEqual({ providerID: 'openai', modelID: 'gpt-5.4-mini', source: 'codex-small' });
   });
@@ -157,8 +154,8 @@ describe('resolveSmallModel', () => {
       auth: {},
       catalog,
       configSmallModel: null,
-      preferredProviderID: 'opencode',
-      preferredModelID: 'big-pickle',
+      preferredProviderID: 'custom-free',
+      preferredModelID: 'free-model',
     });
     expect(result).toBeNull();
   });
@@ -166,27 +163,27 @@ describe('resolveSmallModel', () => {
   it('falls back to the session model instead of scanning other providers', () => {
     const result = resolveSmallModel({
       auth: {
-        'opencode-go': { type: 'api', key: 'oc-key' },
+        'custom-proxy': { type: 'api_key', key: 'custom-key' },
         openai: { type: 'oauth', access: 'a', refresh: 'r', expires: Date.now() + 60_000 },
       },
       catalog: {
-        'opencode-go': {
-          id: 'opencode-go',
+        'custom-proxy': {
+          id: 'custom-proxy',
           models: {
             'deepseek-v4-flash': { id: 'deepseek-v4-flash', family: 'deepseek-flash', release_date: '2026-01-01' },
           },
         },
       },
       configSmallModel: null,
-      preferredProviderID: 'opencode-go',
+      preferredProviderID: 'custom-proxy',
       preferredModelID: 'deepseek-v4-flash',
     });
-    expect(result).toEqual({ providerID: 'opencode-go', modelID: 'deepseek-v4-flash', source: 'session-model' });
+    expect(result).toEqual({ providerID: 'custom-proxy', modelID: 'deepseek-v4-flash', source: 'session-model' });
   });
 
   it('falls back to the session model itself when nothing resolves', () => {
     const result = resolveSmallModel({
-      auth: { mistral: { type: 'api', key: 'm-key' } },
+      auth: { mistral: { type: 'api_key', key: 'm-key' } },
       catalog,
       configSmallModel: null,
       preferredProviderID: 'mistral',

@@ -95,7 +95,7 @@ describe('mobile connection storage', () => {
       await upsertMobileConnection({
         label: 'My Desktop',
         candidates: [{ kind: 'relay', relay: testRelay }],
-        clientToken: 'oc_client_secret',
+        clientToken: 'piarium_client_secret',
       });
 
       const connections = await loadMobileConnections();
@@ -103,7 +103,7 @@ describe('mobile connection storage', () => {
       const saved = connections[0]!;
       expect(saved.candidates).toEqual([{ kind: 'relay', relay: testRelay }]);
       // Web surface: token stays inline like direct connections.
-      expect(saved.clientToken).toBe('oc_client_secret');
+      expect(saved.clientToken).toBe('piarium_client_secret');
 
       // Persisted metadata carries only the three transport fields — no grant/token.
       const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as Array<Record<string, unknown>>;

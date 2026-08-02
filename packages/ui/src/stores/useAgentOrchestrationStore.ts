@@ -127,7 +127,7 @@ export const useAgentOrchestrationStore = create<AgentOrchestrationStore>()(
           try {
             const response = await runtimeFetch('/api/agent-orchestration/config', {
               query: configDirectory ? { directory: configDirectory } : undefined,
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              headers: configDirectory ? { 'x-piarium-directory': configDirectory } : undefined,
             });
             if (!response.ok) {
               throw new Error(await readApiError(response, 'Failed to load agent orchestration configuration'));
@@ -162,7 +162,7 @@ export const useAgentOrchestrationStore = create<AgentOrchestrationStore>()(
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
-              ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+              ...(configDirectory ? { 'x-piarium-directory': configDirectory } : {}),
             },
             body: JSON.stringify({
               mode,
@@ -222,7 +222,7 @@ export const useAgentOrchestrationStore = create<AgentOrchestrationStore>()(
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
-              ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+              ...(configDirectory ? { 'x-piarium-directory': configDirectory } : {}),
             },
             body: JSON.stringify({
               providerId,

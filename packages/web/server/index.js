@@ -1,27 +1,22 @@
 import 'reflect-metadata';
-import express from 'express';
 import compression from 'compression';
-import path from 'path';
-import { spawn, spawnSync } from 'child_process';
+import crypto from 'crypto';
+import express from 'express';
 import fs from 'fs';
 import http from 'http';
-import net from 'net';
-import { fileURLToPath } from 'url';
-import os from 'os';
-import crypto from 'crypto';
 import http2 from 'node:http2';
+import os from 'os';
+import path from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
+import webPush from 'web-push';
+
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
-import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
-import { createRequestSecurityRuntime } from './lib/security/request-security.js';
-import {
-  getUnauthenticatedLanErrorMessage,
-  isNetworkExposedBindHost,
-  isUnsafeUnauthenticatedLanAllowed,
-} from './lib/security/bind-host.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -30,61 +25,27 @@ import {
   TunnelServiceError,
   isSupportedTunnelMode,
   normalizeOptionalPath,
-  normalizeTunnelStartRequest,
   normalizeTunnelMode,
   normalizeTunnelProvider,
+  normalizeTunnelStartRequest,
 } from './lib/tunnels/types.js';
-import { prepareNotificationLastMessage } from './lib/notifications/index.js';
+import { createRequestSecurityRuntime } from './lib/security/request-security.js';
+import {
+  getUnauthenticatedLanErrorMessage,
+  isNetworkExposedBindHost,
+  isUnsafeUnauthenticatedLanAllowed,
+} from './lib/security/bind-host.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
 import { createDictationRuntime } from './lib/dictation/runtime.js';
-import {
-  createGlobalUiEventBroadcaster,
-  createGlobalMessageStreamHub,
-  DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
-  UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
-} from './lib/event-stream/index.js';
+import { createGlobalUiEventBroadcaster } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
-import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
-import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
-import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
-import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
-import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
-import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
-import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
-import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
-import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
-import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
-import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
-import { parseServeCliOptions } from './lib/opencode/cli-options.js';
-import {
-  registerAuthAndAccessRoutes,
-  registerCommonRequestMiddleware,
-  registerServerStatusRoutes,
-} from './lib/opencode/core-routes.js';
-import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
-import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
-import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
-import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
-import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
-import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
-import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
-import { createSessionRuntime } from './lib/opencode/session-runtime.js';
-import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
-import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
-import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
-import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
-import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
-import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
-import { createStartupPipelineRuntime } from './lib/startup-pipeline-runtime.js';
-import { runCliEntryIfMain } from './lib/opencode/cli-entry-runtime.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
-import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
-import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
+import { createPiSessionRuntime } from './lib/notifications/pi-session-runtime.js';
 import { createMobileDeviceStore } from './lib/mobile/device-store.js';
 import { createMobilePairingRuntime } from './lib/mobile/pairing-runtime.js';
 import { createMobilePushRuntime } from './lib/mobile/push-runtime.js';
@@ -99,130 +60,111 @@ import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createWebPiRuntimeBroker } from './lib/pi-runtime/broker.js';
 import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
-import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
-import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
-import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
+import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createPiScheduledTaskExecutor } from './lib/scheduled-tasks/pi-executor.js';
-import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
-import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
-import webPush from 'web-push';
+import { createServerBootstrapRuntime } from './lib/platform/bootstrap-runtime.js';
+import { parseServeCliOptions } from './lib/platform/cli-options.js';
+import {
+  registerAuthAndAccessRoutes,
+  registerCommonRequestMiddleware,
+  registerServerStatusRoutes,
+} from './lib/platform/core-routes.js';
+import { createPlatformEnvironmentRuntime } from './lib/platform/environment-runtime.js';
+import { resolvePiariumDataDir } from './lib/platform/data-paths.js';
+import { createProjectDirectoryRuntime } from './lib/platform/project-directory-runtime.js';
+import { registerPiariumRoutes } from './lib/platform/piarium-routes.js';
+import { createPlatformRoutesRuntime } from './lib/platform/routes-runtime.js';
+import { runCliEntryIfMain } from './lib/platform/cli-entry-runtime.js';
+import { createServerStartupRuntime } from './lib/platform/server-startup-runtime.js';
+import { createSettingsHelpers } from './lib/platform/settings-helpers.js';
+import { createSettingsNormalizationRuntime } from './lib/platform/settings-normalization-runtime.js';
+import { createSettingsRuntime } from './lib/platform/settings-runtime.js';
+import { recordStartupPerformance } from './lib/platform/startup-performance.js';
+import { createStaticRoutesRuntime } from './lib/platform/static-routes-runtime.js';
+import { createStartupPipelineRuntime } from './lib/platform/startup-pipeline-runtime.js';
+import { createThemeRuntime } from './lib/platform/theme-runtime.js';
+import { createTunnelAuth } from './lib/platform/tunnel-auth.js';
+import { createTunnelWiringRuntime } from './lib/platform/tunnel-wiring-runtime.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const DEFAULT_PORT = 3000;
-const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
-const uiNotificationClients = new Set();
-const uiNotificationWsClients = new Set();
-const uiOpenChamberEventClients = new Set();
-const SHUTDOWN_TIMEOUT = 10000;
-const MODELS_DEV_API_URL = 'https://models.dev/api.json';
-const MODELS_METADATA_CACHE_TTL = 5 * 60 * 1000;
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 const CLIENT_RELOAD_DELAY_MS = 800;
-const OPEN_CODE_READY_GRACE_MS = 12000;
-const LONG_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
+const MODELS_DEV_API_URL = 'https://models.dev/api.json';
+const MODELS_METADATA_CACHE_TTL_MS = 5 * 60 * 1000;
+const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
+const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
+const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
-
-function headerIncludesEventStream(value) {
-  if (typeof value === 'string') {
-    return value.toLowerCase().includes('text/event-stream');
-  }
-
-  if (Array.isArray(value)) {
-    return value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'));
-  }
-
-  return false;
-}
-
-/**
- * SSE endpoint paths that must never be compressed by the compression middleware.
- *
- * The compression middleware filter runs before route handlers, so
- * `res.getHeader('Content-Type')` is still undefined at that point.
- * This means the Accept-header check alone is not sufficient for
- * non-standard clients (e.g. curl, fetch) that omit Accept.
- * Path-based exclusion acts as a deterministic fallback.
- */
-const SSE_PATH_PREFIXES = [
-  '/api/event',
-  '/api/global/event',
-  '/api/notifications/stream',
-  '/api/openchamber/events',
-  '/api/openchamber/realtime-proxy/sse',
-];
-
-function shouldSkipCompression(req, res) {
-  if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
-    return true;
-  }
-
-  if (headerIncludesEventStream(req.headers.accept)) {
-    return true;
-  }
-
-  const pathname = req.path || req.url || '';
-  if ((pathname === '/api' || pathname.startsWith('/api/')) && shouldSkipApiCompression()) {
-    return true;
-  }
-
-  for (const prefix of SSE_PATH_PREFIXES) {
-    if (pathname === prefix) {
-      return true;
-    }
-  }
-
-  return headerIncludesEventStream(res.getHeader('Content-Type'));
-}
-
-const OPENCHAMBER_VERSION = (() => {
-  try {
-    const packagePath = path.resolve(__dirname, '..', 'package.json');
-    const raw = fs.readFileSync(packagePath, 'utf8');
-    const pkg = JSON.parse(raw);
-    if (pkg && typeof pkg.version === 'string' && pkg.version.trim().length > 0) {
-      return pkg.version.trim();
-    }
-  } catch {
-  }
-  return 'unknown';
-})();
+const DESKTOP_NOTIFY_PREFIX = '[PiariumDesktopNotify] ';
+const MAX_THEME_JSON_BYTES = 512 * 1024;
 
 const isEnvFlagEnabled = (value) => {
   if (value === true || value === 1) return true;
   if (typeof value !== 'string') return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true';
+  return value.trim() === '1' || value.trim().toLowerCase() === 'true';
 };
 
 const isEnvFlagDisabled = (value) => {
   if (value === false || value === 0) return true;
   if (typeof value !== 'string') return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized === '0' || normalized === 'false';
+  return value.trim() === '0' || value.trim().toLowerCase() === 'false';
 };
+
+const PIARIUM_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+    return typeof pkg?.version === 'string' && pkg.version.trim() ? pkg.version.trim() : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
+
+const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
+const PIARIUM_USER_CONFIG_ROOT = PIARIUM_DATA_DIR;
+const PIARIUM_USER_THEMES_DIR = path.join(PIARIUM_USER_CONFIG_ROOT, 'themes');
+const PIARIUM_PROJECTS_CONFIG_DIR = path.join(PIARIUM_USER_CONFIG_ROOT, 'projects');
+const SETTINGS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'settings.json');
+const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'push-subscriptions.json');
+const MOBILE_DEVICES_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'mobile-devices.json');
+const APNS_TOKENS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'apns-tokens.json');
+const REMOTE_CLIENTS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'remote-clients.json');
+const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'client-pairing-sessions.json');
+const MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
+const LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(PIARIUM_DATA_DIR, 'cloudflare-named-tunnels.json');
 
 const shouldSkipApiCompression = () => {
-  if (isEnvFlagEnabled(process.env.OPENCHAMBER_SKIP_API_COMPRESSION)) return true;
-  if (isEnvFlagEnabled(process.env.OPENCHAMBER_COMPRESS_API)) return false;
-  if (isEnvFlagDisabled(process.env.OPENCHAMBER_COMPRESS_API)) return true;
-  return process.env.OPENCHAMBER_RUNTIME === 'desktop';
+  if (isEnvFlagEnabled(process.env.PIARIUM_SKIP_API_COMPRESSION)) return true;
+  if (isEnvFlagEnabled(process.env.PIARIUM_COMPRESS_API)) return false;
+  if (isEnvFlagDisabled(process.env.PIARIUM_COMPRESS_API)) return true;
+  return process.env.PIARIUM_RUNTIME === 'desktop';
 };
 
-const OPENCHAMBER_VERBOSE_REQUEST_LOGS = isEnvFlagEnabled(process.env.OPENCHAMBER_VERBOSE_REQUEST_LOGS);
+const SSE_PATHS = new Set([
+  '/api/notifications/stream',
+  '/api/piarium/events',
+  '/api/piarium/realtime-proxy/sse',
+]);
 
-const PLAN_MODE_EXPERIMENT_ENABLED =
-  isEnvFlagEnabled(process.env.OPENCODE_EXPERIMENTAL_PLAN_MODE)
-  || isEnvFlagEnabled(process.env.OPENCODE_EXPERIMENTAL);
+const shouldSkipCompression = (req, res) => {
+  if (process.env.PIARIUM_RUNTIME === 'desktop') return true;
+  const acceptsSse = (value) => Array.isArray(value)
+    ? value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'))
+    : typeof value === 'string' && value.toLowerCase().includes('text/event-stream');
+  if (acceptsSse(req.headers.accept)) return true;
+  const pathname = req.path || req.url || '';
+  if ((pathname === '/api' || pathname.startsWith('/api/')) && shouldSkipApiCompression()) return true;
+  return SSE_PATHS.has(pathname) || acceptsSse(res.getHeader('Content-Type'));
+};
 
 const fsPromises = fs.promises;
-
 const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   os,
   path,
@@ -235,70 +177,19 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   tunnelSessionTtlMinMs: TUNNEL_SESSION_TTL_MIN_MS,
   tunnelSessionTtlMaxMs: TUNNEL_SESSION_TTL_MAX_MS,
 });
-
 const normalizeDirectoryPath = (...args) => settingsNormalizationRuntime.normalizeDirectoryPath(...args);
 const normalizePathForPersistence = (...args) => settingsNormalizationRuntime.normalizePathForPersistence(...args);
 const normalizeSettingsPaths = (...args) => settingsNormalizationRuntime.normalizeSettingsPaths(...args);
 const normalizeTunnelBootstrapTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelBootstrapTtlMs(...args);
 const normalizeTunnelSessionTtlMs = (...args) => settingsNormalizationRuntime.normalizeTunnelSessionTtlMs(...args);
-const normalizeManagedRemoteTunnelHostname = (...args) =>
-  settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
-const normalizeManagedRemoteTunnelPresets = (...args) =>
-  settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresets(...args);
-const normalizeManagedRemoteTunnelPresetTokens = (...args) =>
-  settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresetTokens(...args);
-const isUnsafeSkillRelativePath = (...args) => settingsNormalizationRuntime.isUnsafeSkillRelativePath(...args);
-const sanitizeTypographySizesPartial = (...args) =>
-  settingsNormalizationRuntime.sanitizeTypographySizesPartial(...args);
+const normalizeManagedRemoteTunnelHostname = (...args) => settingsNormalizationRuntime.normalizeManagedRemoteTunnelHostname(...args);
+const normalizeManagedRemoteTunnelPresets = (...args) => settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresets(...args);
+const normalizeManagedRemoteTunnelPresetTokens = (...args) => settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresetTokens(...args);
+const sanitizeTypographySizesPartial = (...args) => settingsNormalizationRuntime.sanitizeTypographySizesPartial(...args);
 const normalizeStringArray = (...args) => settingsNormalizationRuntime.normalizeStringArray(...args);
 const sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeModelRefs(...args);
 const sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
 const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
-
-const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
-const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
-const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
-
-const MAX_THEME_JSON_BYTES = 512 * 1024;
-
-
-const themeRuntime = createThemeRuntime({
-  fsPromises,
-  path,
-  themesDir: OPENCHAMBER_USER_THEMES_DIR,
-  maxThemeJsonBytes: MAX_THEME_JSON_BYTES,
-  logger: console,
-});
-
-const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
-
-let notificationTemplateRuntime = null;
-let agentToolRuntime = null;
-let systemPromptRuntime = null;
-
-const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
-const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
-const resolveNotificationTemplate = (...args) => notificationTemplateRuntime.resolveNotificationTemplate(...args);
-const shouldApplyResolvedTemplateMessage = (...args) => notificationTemplateRuntime.shouldApplyResolvedTemplateMessage(...args);
-const fetchFreeZenModels = (...args) => notificationTemplateRuntime.fetchFreeZenModels(...args);
-const extractTextFromParts = (...args) => notificationTemplateRuntime.extractTextFromParts(...args);
-const extractLastMessageText = (...args) => notificationTemplateRuntime.extractLastMessageText(...args);
-const fetchLastAssistantMessageText = (...args) => notificationTemplateRuntime.fetchLastAssistantMessageText(...args);
-const buildTemplateVariables = (...args) => notificationTemplateRuntime.buildTemplateVariables(...args);
-const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZenModels(...args);
-
-const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
-  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-  : path.join(os.homedir(), '.config', 'openchamber');
-const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
-const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
-const MOBILE_DEVICES_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'mobile-devices.json');
-const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
-const REMOTE_CLIENTS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'remote-clients.json');
-const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'client-pairing-sessions.json');
-const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
-const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
-const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
 
 const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   fsPromises,
@@ -306,12 +197,11 @@ const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   normalizeManagedRemoteTunnelHostname,
   normalizeManagedRemoteTunnelPresets,
   constants: {
-    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH,
-    CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH,
-    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
+    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH: MANAGED_REMOTE_TUNNELS_FILE_PATH,
+    CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH: LEGACY_NAMED_TUNNELS_FILE_PATH,
+    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION: 1,
   },
 });
-
 const readManagedRemoteTunnelConfigFromDisk = (...args) => managedTunnelConfigRuntime.readManagedRemoteTunnelConfigFromDisk(...args);
 const syncManagedRemoteTunnelConfigWithPresets = (...args) => managedTunnelConfigRuntime.syncManagedRemoteTunnelConfigWithPresets(...args);
 const upsertManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken(...args);
@@ -334,13 +224,13 @@ const settingsHelpers = createSettingsHelpers({
   sanitizeSkillCatalogs,
   sanitizeProjects,
 });
-
 const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
 const normalizePwaOrientation = (...args) => settingsHelpers.normalizePwaOrientation(...args);
 const sanitizeSettingsUpdate = (...args) => settingsHelpers.sanitizeSettingsUpdate(...args);
 const mergePersistedSettings = (...args) => settingsHelpers.mergePersistedSettings(...args);
 const formatSettingsResponse = (...args) => settingsHelpers.formatSettingsResponse(...args);
 
+let readSettingsFromDiskMigrated = async () => ({});
 const projectDirectoryRuntime = createProjectDirectoryRuntime({
   fsPromises,
   path,
@@ -348,11 +238,8 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
   getReadSettingsFromDiskMigrated: () => readSettingsFromDiskMigrated,
   sanitizeProjects,
 });
-
 const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
-const validateDirectoryPath = (...args) => projectDirectoryRuntime.validateDirectoryPath(...args);
 const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
-const resolveOptionalProjectDirectory = (...args) => projectDirectoryRuntime.resolveOptionalProjectDirectory(...args);
 
 const settingsRuntime = createSettingsRuntime({
   fsPromises,
@@ -372,18 +259,24 @@ const settingsRuntime = createSettingsRuntime({
   syncManagedRemoteTunnelConfigWithPresets,
   upsertManagedRemoteTunnelToken,
 });
-
-const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
-const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
-const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
+readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 
-const requestSecurityRuntime = createRequestSecurityRuntime({
-  readSettingsFromDiskMigrated,
+const themeRuntime = createThemeRuntime({
+  fsPromises,
+  path,
+  themesDir: PIARIUM_USER_THEMES_DIR,
+  maxThemeJsonBytes: MAX_THEME_JSON_BYTES,
+  logger: console,
 });
+const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
 
+const requestSecurityRuntime = createRequestSecurityRuntime({ readSettingsFromDiskMigrated });
 const getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
+const rejectWebSocketUpgrade = (...args) => requestSecurityRuntime.rejectWebSocketUpgrade(...args);
+const isRequestOriginAllowed = (...args) => requestSecurityRuntime.isRequestOriginAllowed(...args);
 
 const pushRuntime = createPushRuntime({
   fsPromises,
@@ -393,24 +286,15 @@ const pushRuntime = createPushRuntime({
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
 });
-
 const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
 const addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
 const removePushSubscription = (...args) => pushRuntime.removePushSubscription(...args);
 const sendPushToAllUiSessions = (...args) => pushRuntime.sendPushToAllUiSessions(...args);
-// Set once the notification trigger runtime exists (declared later). When a UI
-// client reports it became visible, reset the native push badge set — the same
-// moment the device zeroes its icon badge on becomeActive, keeping them in sync.
-let clearPendingPushBadge = () => {};
-const updateUiVisibility = (token, visible, platform) => {
-  if (visible === true) clearPendingPushBadge();
-  return pushRuntime.updateUiVisibility(token, visible, platform);
-};
-const isAnyUiVisible = (...args) => pushRuntime.isAnyUiVisible(...args);
 const isAnyInteractiveClientVisible = (...args) => pushRuntime.isAnyInteractiveClientVisible(...args);
 const isUiVisible = (...args) => pushRuntime.isUiVisible(...args);
 const ensurePushInitialized = (...args) => pushRuntime.ensurePushInitialized(...args);
 const setPushInitialized = (...args) => pushRuntime.setPushInitialized(...args);
+const updateUiVisibility = (...args) => pushRuntime.updateUiVisibility(...args);
 
 const mobileDeviceStore = createMobileDeviceStore({
   fsPromises,
@@ -418,15 +302,9 @@ const mobileDeviceStore = createMobileDeviceStore({
   crypto,
   mobileDevicesFilePath: MOBILE_DEVICES_FILE_PATH,
 });
-const mobilePushRuntime = createMobilePushRuntime({
-  deviceStore: mobileDeviceStore,
-});
+const mobilePushRuntime = createMobilePushRuntime({ deviceStore: mobileDeviceStore });
 const sendMobilePushToAllDevices = (...args) => mobilePushRuntime.sendMobilePushToAllDevices(...args);
-const mobilePairingRuntime = createMobilePairingRuntime({
-  crypto,
-  deviceStore: mobileDeviceStore,
-});
-
+const mobilePairingRuntime = createMobilePairingRuntime({ crypto, deviceStore: mobileDeviceStore });
 const apnsRuntime = createApnsRuntime({
   fsPromises,
   path,
@@ -437,435 +315,76 @@ const apnsRuntime = createApnsRuntime({
   writeSettingsToDisk,
   readSettingsStrict: readSettingsFromDiskStrict,
 });
-
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
 const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
 const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
 
-const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
-const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
-const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
-
-const rejectWebSocketUpgrade = (...args) => requestSecurityRuntime.rejectWebSocketUpgrade(...args);
-
-
-const isRequestOriginAllowed = (...args) => requestSecurityRuntime.isRequestOriginAllowed(...args);
-
+const uiNotificationClients = new Set();
+const uiNotificationWsClients = new Set();
+const uiPiariumEventClients = new Set();
+const desktopNotifyEnabled = process.env.PIARIUM_DESKTOP_NOTIFY === 'true'
+  || process.env.PIARIUM_RUNTIME === 'desktop';
+let broadcastGlobalUiEvent = null;
 const notificationEmitterRuntime = createNotificationEmitterRuntime({
   process,
-  getDesktopNotifyEnabled: () => ENV_DESKTOP_NOTIFY,
+  getDesktopNotifyEnabled: () => desktopNotifyEnabled,
   desktopNotifyPrefix: DESKTOP_NOTIFY_PREFIX,
   getUiNotificationClients: () => uiNotificationClients,
   getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
 });
-
 const writeSseEvent = (...args) => notificationEmitterRuntime.writeSseEvent(...args);
-const emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);
-const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
+broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiNotificationClients,
   wsClients: uiNotificationWsClients,
   writeSseEvent,
 });
+const emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);
 const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
-
-const sessionRuntime = createSessionRuntime({
-  writeSseEvent,
-  getNotificationClients: () => uiNotificationClients,
-  broadcastEvent: broadcastGlobalUiEvent,
-});
-
-const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
-
-const getUpstreamStallTimeoutMs = () => (
-  getActiveSessionCount() > 1
-    ? UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS
-    : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
-);
+const sessionRuntime = createPiSessionRuntime({ broadcastEvent: broadcastGlobalUiEvent });
 
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
-  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  projectsDirPath: PIARIUM_PROJECTS_CONFIG_DIR,
+});
+const scheduledTasksRuntime = createScheduledTasksRuntime({
+  projectConfigRuntime,
+  listProjects: async () => sanitizeProjects((await readSettingsFromDiskMigrated())?.projects || []),
+  emitTaskRunEvent: (event) => {
+    for (const client of uiPiariumEventClients) {
+      try {
+        writeSseEvent(client, {
+          type: 'piarium:scheduled-task-ran',
+          properties: {
+            projectId: event.projectID,
+            taskId: event.taskID,
+            ranAt: event.ranAt,
+            status: event.status,
+            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
+          },
+        });
+      } catch {
+        uiPiariumEventClients.delete(client);
+      }
+    }
+  },
+  logger: console,
+});
+const scheduledTaskService = createScheduledTaskService({
+  readSettingsFromDiskMigrated,
+  sanitizeProjects,
+  projectConfigRuntime,
+  scheduledTasksRuntime,
 });
 
-// HMR-persistent state via globalThis
-// These values survive Vite HMR reloads to prevent zombie OpenCode processes
-const hmrStateRuntime = createHmrStateRuntime({
-  globalThisLike: globalThis,
-  os,
-  processLike: process,
-  stateKey: '__openchamberHmrState',
-});
-const hmrState = hmrStateRuntime.getOrCreateHmrState();
-hmrStateRuntime.ensureUserProvidedOpenCodePassword(hmrState);
-
-// Non-HMR state (safe to reset on reload)
-let healthCheckInterval = null;
-let server = null;
-let expressApp = null;
-let currentRestartPromise = null;
-let isRestartingOpenCode = false;
-let openCodeApiPrefix = '';
-let openCodeApiPrefixDetected = true;
-let openCodeApiDetectionTimer = null;
-let lastOpenCodeError = null;
-let lastOpenCodeLaunchDiagnostics = null;
-let isOpenCodeReady = false;
-let openCodeNotReadySince = 0;
-let isExternalOpenCode = false;
-let exitOnShutdown = true;
-let uiAuthController = null;
-let activeTunnelController = null;
+const platformEnvironmentRuntime = createPlatformEnvironmentRuntime();
+platformEnvironmentRuntime.applyLoginShellEnvSnapshot();
 const tunnelProviderRegistry = createTunnelProviderRegistry([
   createCloudflareTunnelProvider(),
   createNgrokTunnelProvider(),
 ]);
 tunnelProviderRegistry.seal();
 const tunnelAuthController = createTunnelAuth();
-let runtimeManagedRemoteTunnelToken = '';
-let runtimeManagedRemoteTunnelHostname = '';
-let terminalRuntime = null;
-let dictationRuntime = null;
-let messageStreamRuntime = null;
-const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
-const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
-  hmrState,
-  userProvidedOpenCodePassword,
-});
-let openCodeAuthPassword = initialOpenCodeAuthState.openCodeAuthPassword;
-let openCodeAuthSource = initialOpenCodeAuthState.openCodeAuthSource;
-
-// Sync helper - call after modifying any HMR state variable
-const syncToHmrState = () => {
-  hmrStateRuntime.syncStateFromRuntime(hmrState, {
-    openCodeProcess,
-    openCodePort,
-    openCodeBaseUrl,
-    isShuttingDown,
-    signalsAttached,
-    openCodeWorkingDirectory,
-    openCodeAuthPassword,
-    openCodeAuthSource,
-  });
-};
-
-// Sync helper - call to restore state from HMR (e.g., on module reload)
-const syncFromHmrState = () => {
-  const restored = hmrStateRuntime.restoreRuntimeFromState({
-    hmrState,
-    userProvidedOpenCodePassword,
-  });
-  openCodeProcess = restored.openCodeProcess;
-  openCodePort = restored.openCodePort;
-  openCodeBaseUrl = restored.openCodeBaseUrl;
-  isShuttingDown = restored.isShuttingDown;
-  signalsAttached = restored.signalsAttached;
-  openCodeWorkingDirectory = restored.openCodeWorkingDirectory;
-  openCodeAuthPassword = restored.openCodeAuthPassword;
-  openCodeAuthSource = restored.openCodeAuthSource;
-};
-
-// Module-level variables that shadow HMR state
-// These are synced to/from hmrState to survive HMR reloads
-let openCodeProcess = hmrState.openCodeProcess;
-let openCodePort = hmrState.openCodePort;
-let openCodeBaseUrl = hmrState.openCodeBaseUrl ?? null;
-let isShuttingDown = hmrState.isShuttingDown;
-let signalsAttached = hmrState.signalsAttached;
-let openCodeWorkingDirectory = hmrState.openCodeWorkingDirectory;
-
-const {
-  configuredOpenCodePort: ENV_CONFIGURED_OPENCODE_PORT,
-  configuredOpenCodeHost: ENV_CONFIGURED_OPENCODE_HOST,
-  effectivePort: ENV_EFFECTIVE_PORT,
-  configuredOpenCodeHostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
-} = resolveOpenCodeEnvConfig({
-  env: process.env,
-  logger: console,
-});
-
-const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
-                                    process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
-const ENV_CONFIGURED_OPENCODE_WSL_DISTRO = (() => {
-  const value = process.env.OPENCHAMBER_OPENCODE_WSL_DISTRO || process.env.OPENCODE_WSL_DISTRO || '';
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-})();
-const ENV_DESKTOP_NOTIFY = (() => {
-  if (process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true') {
-    return true;
-  }
-
-  if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
-    return true;
-  }
-
-  const argv0 = typeof process.argv?.[0] === 'string' ? process.argv[0] : '';
-  const argv1 = typeof process.argv?.[1] === 'string' ? process.argv[1] : '';
-  return /openchamber-server/i.test(argv0) || /openchamber-server/i.test(argv1);
-})();
-const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
-  crypto,
-  process,
-  getAuthPassword: () => openCodeAuthPassword,
-  setAuthPassword: (value) => {
-    openCodeAuthPassword = value;
-  },
-  getAuthSource: () => openCodeAuthSource,
-  setAuthSource: (value) => {
-    openCodeAuthSource = value;
-  },
-  getUserProvidedPassword: () => userProvidedOpenCodePassword,
-  syncToHmrState,
-});
-
-const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
-const isOpenCodeConnectionSecure = (...args) => openCodeAuthStateRuntime.isOpenCodeConnectionSecure(...args);
-const ensureLocalOpenCodeServerPassword = (...args) => openCodeAuthStateRuntime.ensureLocalOpenCodeServerPassword(...args);
-
-const openCodeNetworkState = {};
-Object.defineProperties(openCodeNetworkState, {
-  openCodePort: { get: () => openCodePort, set: (value) => { openCodePort = value; } },
-  openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
-  openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
-  openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
-  openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
-});
-
-const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
-  state: openCodeNetworkState,
-  getOpenCodeAuthHeaders,
-  configuredOpenCodeHostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
-});
-
-const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
-const normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefix(...args);
-const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
-const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
-const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
-
-const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
-  process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
-);
-
-  if (ENV_CONFIGURED_API_PREFIX && ENV_CONFIGURED_API_PREFIX !== '') {
-  console.warn('Ignoring configured OpenCode API prefix; API runs at root.');
-}
-
-let cachedLoginShellEnvSnapshot;
-let resolvedOpencodeBinary = null;
-let resolvedOpencodeBinarySource = null;
-let resolvedNodeBinary = null;
-let resolvedBunBinary = null;
-let resolvedGitBinary = null;
-let useWslForOpencode = false;
-let resolvedWslBinary = null;
-let resolvedWslOpencodePath = null;
-let resolvedWslDistro = null;
-
-const openCodeEnvState = {};
-Object.defineProperties(openCodeEnvState, {
-  cachedLoginShellEnvSnapshot: { get: () => cachedLoginShellEnvSnapshot, set: (value) => { cachedLoginShellEnvSnapshot = value; } },
-  resolvedOpencodeBinary: { get: () => resolvedOpencodeBinary, set: (value) => { resolvedOpencodeBinary = value; } },
-  resolvedOpencodeBinarySource: { get: () => resolvedOpencodeBinarySource, set: (value) => { resolvedOpencodeBinarySource = value; } },
-  resolvedNodeBinary: { get: () => resolvedNodeBinary, set: (value) => { resolvedNodeBinary = value; } },
-  resolvedBunBinary: { get: () => resolvedBunBinary, set: (value) => { resolvedBunBinary = value; } },
-  resolvedGitBinary: { get: () => resolvedGitBinary, set: (value) => { resolvedGitBinary = value; } },
-  useWslForOpencode: { get: () => useWslForOpencode, set: (value) => { useWslForOpencode = value; } },
-  resolvedWslBinary: { get: () => resolvedWslBinary, set: (value) => { resolvedWslBinary = value; } },
-  resolvedWslOpencodePath: { get: () => resolvedWslOpencodePath, set: (value) => { resolvedWslOpencodePath = value; } },
-  resolvedWslDistro: { get: () => resolvedWslDistro, set: (value) => { resolvedWslDistro = value; } },
-});
-
-const openCodeEnvRuntime = createOpenCodeEnvRuntime({
-  state: openCodeEnvState,
-  normalizeDirectoryPath,
-  readSettingsFromDiskMigrated,
-  ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
-});
-
-const applyLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.applyLoginShellEnvSnapshot(...args);
-const getLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.getLoginShellEnvSnapshot(...args);
-const ensureOpencodeCliEnv = (...args) => openCodeEnvRuntime.ensureOpencodeCliEnv(...args);
-const applyOpencodeBinaryFromSettings = (...args) => openCodeEnvRuntime.applyOpencodeBinaryFromSettings(...args);
-const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCliPath(...args);
-const isBundledOpenCodeCliPath = (...args) => openCodeEnvRuntime.isBundledOpenCodeCliPath(...args);
-const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
-const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
-const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
-const resolveManagedOpenCodeLaunchSpec = (...args) => openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec(...args);
-const buildWslExecArgs = (...args) => openCodeEnvRuntime.buildWslExecArgs(...args);
-const clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
-const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
-  path,
-  resolveOpencodeCliPath,
-  applyOpencodeBinaryFromSettings,
-  ensureOpencodeCliEnv,
-  resolveManagedOpenCodeLaunchSpec,
-  getResolvedState: () => ({
-    resolvedOpencodeBinary,
-    resolvedOpencodeBinarySource,
-    useWslForOpencode,
-    resolvedWslBinary,
-    resolvedWslOpencodePath,
-    resolvedWslDistro,
-    resolvedNodeBinary,
-    resolvedBunBinary,
-  }),
-  setResolvedOpencodeBinarySource: (value) => {
-    resolvedOpencodeBinarySource = value;
-  },
-});
-const getOpenCodeResolutionSnapshot = (...args) =>
-  openCodeResolutionRuntime.getOpenCodeResolutionSnapshot(...args);
-
-applyLoginShellEnvSnapshot();
-
-notificationTemplateRuntime = createNotificationTemplateRuntime({
-  readSettingsFromDisk,
-  persistSettings,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  resolveGitBinaryForSpawn,
-});
-
-const notificationTriggerRuntime = createNotificationTriggerRuntime({
-  readSettingsFromDisk,
-  prepareNotificationLastMessage,
-  buildTemplateVariables,
-  extractLastMessageText,
-  fetchLastAssistantMessageText,
-  resolveNotificationTemplate,
-  shouldApplyResolvedTemplateMessage,
-  emitDesktopNotification,
-  broadcastUiNotification,
-  sendPushToAllUiSessions,
-  sendMobilePushToAllDevices,
-  sendApnsToAllUiSessions,
-  isAnyInteractiveClientVisible,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-});
-
-const autoReplyPendingPermissionsForServerSetting = (...args) => notificationTriggerRuntime.autoReplyPendingPermissionsForServerSetting(...args);
-clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
-
-const sessionAssistRuntime = createSessionAssistRuntime({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  getSmallModelService: async () => import('./lib/small-model/index.js'),
-});
-
-const sessionGoalRuntime = createSessionGoalRuntime({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  getSmallModelService: async () => import('./lib/small-model/index.js'),
-  emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
-    // The goal settle notification replaces the per-turn ready notifications
-    // (suppressed while the goal is active) — so it obeys the same toggle.
-    const settings = await readSettingsFromDisk();
-    if (settings.notifyOnCompletion === false) {
-      return;
-    }
-    const title = status === 'complete'
-      ? 'Goal complete'
-      : (status === 'budgetLimited' ? 'Goal reached its token budget' : 'Goal blocked');
-    const detail = goal?.statusReason && goal.statusReason !== 'verified by audit' && goal.statusReason !== 'reported by agent'
-      ? goal.statusReason
-      : (goal?.note || '');
-    const objective = typeof goal?.objective === 'string' ? goal.objective.slice(0, 140) : '';
-    const notificationPayload = {
-      title,
-      body: [objective, detail].filter(Boolean).join(' — ').slice(0, 240),
-      tag: `goal-${sessionId}`,
-      kind: 'goal',
-      sessionId,
-      directory,
-    };
-    const desktopNotificationDelivered = emitDesktopNotification(notificationPayload);
-    broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
-    void notificationTriggerRuntime.sendGoalSettlePush({
-      sessionId,
-      directory,
-      status,
-      title,
-      body: notificationPayload.body,
-    }).catch((error) => {
-      console.warn('[session-goal] push fanout failed:', error?.message || error);
-    });
-  },
-});
-const contextObligatoryRuntime = createContextObligatoryRuntime({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-});
-
-const globalMessageStreamHub = createGlobalMessageStreamHub({
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
-});
-
-
-const serverUtilsRuntime = createServerUtilsRuntime({
-  fs,
-  os,
-  path,
-  process,
-  openCodeReadyGraceMs: OPEN_CODE_READY_GRACE_MS,
-  longRequestTimeoutMs: LONG_REQUEST_TIMEOUT_MS,
-  getRuntime: () => ({
-    openCodePort,
-    openCodeBaseUrl,
-    openCodeNotReadySince,
-    isOpenCodeReady,
-    isRestartingOpenCode,
-  }),
-  getOpenCodeAuthHeaders,
-  buildOpenCodeUrl,
-  ensureOpenCodeApiPrefix,
-  getUpstreamStallTimeoutMs,
-  getUiNotificationClients: () => uiNotificationClients,
-  getOpenCodePort: () => openCodePort,
-  setOpenCodePortState: (value) => {
-    openCodePort = value;
-  },
-  syncToHmrState,
-  markOpenCodeNotReady: () => {
-    isOpenCodeReady = false;
-  },
-  setOpenCodeNotReadySince: (value) => {
-    openCodeNotReadySince = value;
-  },
-  clearLastOpenCodeError: () => {
-    lastOpenCodeError = null;
-  },
-  getLoginShellPath: () => {
-    const snapshot = getLoginShellEnvSnapshot();
-    if (!snapshot || typeof snapshot.PATH !== 'string' || snapshot.PATH.length === 0) {
-      return null;
-    }
-    return snapshot.PATH;
-  },
-});
-
-const setOpenCodePort = (...args) => serverUtilsRuntime.setOpenCodePort(...args);
-const waitForOpenCodePort = (...args) => serverUtilsRuntime.waitForOpenCodePort(...args);
-const buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
-const buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
-const staticRoutesRuntime = createStaticRoutesRuntime({
-  fs,
-  path,
-  process,
-  __dirname,
-  express,
-  resolveProjectDirectory,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  readSettingsFromDiskMigrated,
-  normalizePwaAppName,
-  normalizePwaOrientation,
-});
 const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
   fsPromises,
   path,
@@ -879,21 +398,17 @@ const clientPairingRuntime = createClientPairingRuntime({
   storePath: CLIENT_PAIRING_SESSIONS_FILE_PATH,
   remoteClientAuthRuntime,
 });
-const featureRoutesRuntime = createFeatureRoutesRuntime({
-  clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
-});
-const bootstrapRuntime = createBootstrapRuntime({
-  createUiAuth,
-  registerServerStatusRoutes,
-  registerCommonRequestMiddleware,
-  registerAuthAndAccessRoutes,
-  registerTtsRoutes,
-  registerNotificationRoutes,
-  registerMobileRoutes,
-  registerOpenChamberRoutes,
-  registerAgentToolRoutes: (app, options) => options.agentToolRuntime.registerRoutes(app, options.express),
-  express,
-});
+
+let server = null;
+let uiAuthController = null;
+let activeTunnelController = null;
+let terminalRuntime = null;
+let exitOnShutdown = true;
+let isShuttingDown = false;
+let signalsAttached = false;
+let runtimeManagedRemoteTunnelToken = '';
+let runtimeManagedRemoteTunnelHostname = '';
+
 const tunnelWiringRuntime = createTunnelWiringRuntime({
   crypto,
   URL,
@@ -916,363 +431,109 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   TUNNEL_PROVIDER_CLOUDFLARE,
   TunnelServiceError,
   getActiveTunnelController: () => activeTunnelController,
-  setActiveTunnelController: (value) => {
-    activeTunnelController = value;
-  },
+  setActiveTunnelController: (value) => { activeTunnelController = value; },
   getRuntimeManagedRemoteTunnelHostname: () => runtimeManagedRemoteTunnelHostname,
-  setRuntimeManagedRemoteTunnelHostname: (value) => {
-    runtimeManagedRemoteTunnelHostname = value;
-  },
+  setRuntimeManagedRemoteTunnelHostname: (value) => { runtimeManagedRemoteTunnelHostname = value; },
   getRuntimeManagedRemoteTunnelToken: () => runtimeManagedRemoteTunnelToken,
-  setRuntimeManagedRemoteTunnelToken: (value) => {
-    runtimeManagedRemoteTunnelToken = value;
-  },
+  setRuntimeManagedRemoteTunnelToken: (value) => { runtimeManagedRemoteTunnelToken = value; },
 });
+
+const gracefulShutdownRuntime = createGracefulShutdownRuntime({
+  process,
+  shutdownTimeoutMs: SHUTDOWN_TIMEOUT_MS,
+  getExitOnShutdown: () => exitOnShutdown,
+  getIsShuttingDown: () => isShuttingDown,
+  setIsShuttingDown: (value) => { isShuttingDown = value; },
+  sessionRuntime,
+  scheduledTasksRuntime,
+  getTerminalRuntime: () => terminalRuntime,
+  setTerminalRuntime: (value) => { terminalRuntime = value; },
+  getServer: () => server,
+  getUiAuthController: () => uiAuthController,
+  setUiAuthController: (value) => { uiAuthController = value; },
+  getActiveTunnelController: () => activeTunnelController,
+  setActiveTunnelController: (value) => { activeTunnelController = value; },
+  tunnelAuthController,
+});
+const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createDictationRuntime,
   createServerStartupRuntime,
 });
-
-const openCodeLifecycleState = {};
-Object.defineProperties(openCodeLifecycleState, {
-  openCodeProcess: { get: () => openCodeProcess, set: (value) => { openCodeProcess = value; } },
-  openCodePort: { get: () => openCodePort, set: (value) => { openCodePort = value; } },
-  openCodeBaseUrl: { get: () => openCodeBaseUrl, set: (value) => { openCodeBaseUrl = value; } },
-  openCodeWorkingDirectory: { get: () => openCodeWorkingDirectory, set: (value) => { openCodeWorkingDirectory = value; } },
-  currentRestartPromise: { get: () => currentRestartPromise, set: (value) => { currentRestartPromise = value; } },
-  isRestartingOpenCode: { get: () => isRestartingOpenCode, set: (value) => { isRestartingOpenCode = value; } },
-  openCodeApiPrefix: { get: () => openCodeApiPrefix, set: (value) => { openCodeApiPrefix = value; } },
-  openCodeApiPrefixDetected: { get: () => openCodeApiPrefixDetected, set: (value) => { openCodeApiPrefixDetected = value; } },
-  openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
-  lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
-  lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
-  isOpenCodeReady: { get: () => isOpenCodeReady, set: (value) => { isOpenCodeReady = value; } },
-  openCodeNotReadySince: { get: () => openCodeNotReadySince, set: (value) => { openCodeNotReadySince = value; } },
-  isExternalOpenCode: { get: () => isExternalOpenCode, set: (value) => { isExternalOpenCode = value; } },
-  isShuttingDown: { get: () => isShuttingDown, set: (value) => { isShuttingDown = value; } },
-  healthCheckInterval: { get: () => healthCheckInterval, set: (value) => { healthCheckInterval = value; } },
-  expressApp: { get: () => expressApp, set: (value) => { expressApp = value; } },
-  useWslForOpencode: { get: () => useWslForOpencode, set: (value) => { useWslForOpencode = value; } },
-  resolvedWslBinary: { get: () => resolvedWslBinary, set: (value) => { resolvedWslBinary = value; } },
-  resolvedWslOpencodePath: { get: () => resolvedWslOpencodePath, set: (value) => { resolvedWslOpencodePath = value; } },
-  resolvedWslDistro: { get: () => resolvedWslDistro, set: (value) => { resolvedWslDistro = value; } },
+const bootstrapRuntime = createServerBootstrapRuntime({
+  createUiAuth,
+  registerServerStatusRoutes,
+  registerCommonRequestMiddleware,
+  registerAuthAndAccessRoutes,
+  registerTtsRoutes,
+  registerNotificationRoutes,
+  registerMobileRoutes,
+  registerPiariumRoutes,
+  express,
 });
+const platformRoutesRuntime = createPlatformRoutesRuntime({ clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS });
 
-const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
-  state: openCodeLifecycleState,
-  env: {
-    ENV_CONFIGURED_OPENCODE_PORT,
-    ENV_CONFIGURED_OPENCODE_HOST,
-    ENV_EFFECTIVE_PORT,
-    ENV_CONFIGURED_OPENCODE_HOSTNAME,
-    ENV_SKIP_OPENCODE_START,
-  },
-  syncToHmrState,
-  syncFromHmrState,
-  getOpenCodeAuthHeaders,
-  buildOpenCodeUrl,
-  waitForReady,
-  normalizeApiPrefix,
-  applyOpencodeBinaryFromSettings,
-  ensureOpencodeCliEnv,
-  ensureLocalOpenCodeServerPassword,
-  resolveManagedOpenCodeLaunchSpec,
-  buildWslExecArgs,
-  setOpenCodePort,
-  setDetectedOpenCodeApiPrefix,
-  setupProxy: (...args) => setupProxy(...args),
-  ensureOpenCodeApiPrefix,
-  clearResolvedOpenCodeBinary,
-  buildAugmentedPath,
-  buildManagedOpenCodePath,
-  getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
-  getActiveSessionCount,
-  globalEventHub: globalMessageStreamHub,
-  // Most-recently-used directories first: OpenCode initializes each directory
-  // lazily on first request (seconds on large session stores), so the
-  // lifecycle warms these right after readiness — before the UI's first
-  // interactive request would otherwise pay that cost.
-  getWarmupDirectories: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    if (!settings) return [];
-    const directories = [];
-    if (typeof settings.lastDirectory === 'string' && settings.lastDirectory) {
-      directories.push(settings.lastDirectory);
-    }
-    const projects = Array.isArray(settings.projects) ? [...settings.projects] : [];
-    projects.sort((a, b) => (b?.lastOpenedAt ?? 0) - (a?.lastOpenedAt ?? 0));
-    for (const project of projects) {
-      if (typeof project?.path === 'string' && project.path) {
-        directories.push(project.path);
-      }
-    }
-    return [...new Set(directories)];
-  },
-  getManagedOpenCodeEnv: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    const managedEnv = settings?.agentControlToolEnabled === false
-      ? {}
-      : await (agentToolRuntime?.prepareManagedOpenCodeEnv() || {});
-    if (settings?.optimizeSystemPrompt !== true) return managedEnv;
-
-    const configContent = managedEnv.OPENCODE_CONFIG_CONTENT ?? process.env.OPENCODE_CONFIG_CONTENT;
-    const systemPromptEnv = await systemPromptRuntime.prepareManagedOpenCodeEnv(configContent);
-    return { ...managedEnv, ...systemPromptEnv };
-  },
-});
-
-const getOpenCodeUpgradeCapability = () => {
-  const activeBinary = lastOpenCodeLaunchDiagnostics?.sourceBinary
-    || lastOpenCodeLaunchDiagnostics?.binary
-    || resolvedOpencodeBinary;
-  return resolveOpenCodeUpgradeCapability({
-    isExternal: isExternalOpenCode,
-    hasManagedProcess: Boolean(openCodeProcess),
-    activeBinary,
-    isBundledBinary: isBundledOpenCodeCliPath,
-  });
+const requestReachedLanAddress = (req) => {
+  const raw = typeof req?.socket?.localAddress === 'string' ? req.socket.localAddress : '';
+  const address = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+  return /^\d+\.\d+\.\d+\.\d+$/.test(address) && !address.startsWith('127.') ? address : null;
 };
 
-const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
-const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
-const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
-const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
-const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
-const scheduledTasksRuntime = createScheduledTasksRuntime({
-  projectConfigRuntime,
-  listProjects: async () => {
-    const settings = await readSettingsFromDiskMigrated();
-    return sanitizeProjects(settings?.projects || []);
-  },
-  emitTaskRunEvent: (event) => {
-    for (const client of uiOpenChamberEventClients) {
-      try {
-        writeSseEvent(client, {
-          type: 'openchamber:scheduled-task-ran',
-          properties: {
-            projectId: event.projectID,
-            taskId: event.taskID,
-            ranAt: event.ranAt,
-            status: event.status,
-            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
-          },
-        });
-      } catch {
-        uiOpenChamberEventClients.delete(client);
-      }
-    }
-  },
-  logger: console,
-});
-const emitSessionCreatedEvent = (event) => {
-  for (const client of uiOpenChamberEventClients) {
-    try {
-      writeSseEvent(client, {
-        type: 'openchamber:session-created',
-        properties: {
-          sessionId: event.sessionID,
-          directory: event.directory,
-          createdAt: event.createdAt,
-          promptDispatched: event.promptDispatched === true,
-          dispatchedAsCommand: event.dispatchedAsCommand === true,
-          ...(event.projectID ? { projectId: event.projectID } : {}),
-          ...(event.title ? { title: event.title } : {}),
-        },
-      });
-    } catch {
-      uiOpenChamberEventClients.delete(client);
-    }
+const extractAssistantText = (messages) => {
+  if (!Array.isArray(messages)) return '';
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'assistant' || !Array.isArray(message.content)) continue;
+    const text = message.content
+      .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join('\n');
+    if (text) return text.slice(0, 240);
   }
+  return '';
 };
-const scheduledTaskService = createScheduledTaskService({
-  readSettingsFromDiskMigrated,
-  sanitizeProjects,
-  projectConfigRuntime,
-  scheduledTasksRuntime,
-});
-const openChamberSessionService = createOpenChamberSessionService({
-  readSettingsFromDiskMigrated,
-  sanitizeProjects,
-  validateDirectoryPath,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  waitForOpenCodeReady,
-  emitSessionCreatedEvent,
-});
-const openChamberControlService = createOpenChamberControlService({
-  readSettingsFromDiskMigrated,
-  sanitizeProjects,
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  waitForOpenCodeReady,
-  sessionService: openChamberSessionService,
-  scheduledTaskService,
-});
-
-const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
-const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
-
-const fetchAgentsSnapshot = (...args) => serverUtilsRuntime.fetchAgentsSnapshot(...args);
-const fetchProvidersSnapshot = (...args) => serverUtilsRuntime.fetchProvidersSnapshot(...args);
-const fetchModelsSnapshot = (...args) => serverUtilsRuntime.fetchModelsSnapshot(...args);
-const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
-const gracefulShutdownRuntime = createGracefulShutdownRuntime({
-  process,
-  shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
-  getExitOnShutdown: () => exitOnShutdown,
-  getIsShuttingDown: () => isShuttingDown,
-  setIsShuttingDown: (value) => {
-    isShuttingDown = value;
-  },
-  syncToHmrState,
-  sessionAssistRuntime,
-  sessionGoalRuntime,
-  contextObligatoryRuntime,
-  sessionRuntime,
-  getTerminalRuntime: () => terminalRuntime,
-  setTerminalRuntime: (value) => {
-    terminalRuntime = value;
-  },
-  getMessageStreamRuntime: () => messageStreamRuntime,
-  setMessageStreamRuntime: (value) => {
-    messageStreamRuntime = value;
-  },
-  getServer: () => server,
-  getUiAuthController: () => uiAuthController,
-  setUiAuthController: (value) => {
-    uiAuthController = value;
-  },
-  getActiveTunnelController: () => activeTunnelController,
-  setActiveTunnelController: (value) => {
-    activeTunnelController = value;
-  },
-  tunnelAuthController,
-  scheduledTasksRuntime,
-});
-
-const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
 
 async function main(options = {}) {
+  if (server?.listening) throw new Error('Piarium server is already running');
+  isShuttingDown = false;
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
-  const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
-  const effectiveBindHost = host
-    || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
-      ? process.env.OPENCHAMBER_HOST.trim()
-      : '127.0.0.1');
-  agentToolRuntime = createAgentToolRuntime({
-    crypto,
-    fsPromises,
-    path,
-    dataDir: OPENCHAMBER_DATA_DIR,
-    env: process.env,
-    executeAction: (...args) => openChamberControlService.execute(...args),
-    getActivePort: () => {
-      const address = server?.address?.();
-      return typeof address === 'object' && address ? address.port : null;
-    },
-  });
-  systemPromptRuntime = createSystemPromptRuntime({
-    fsPromises,
-    path,
-    dataDir: OPENCHAMBER_DATA_DIR,
-  });
-
-  // Pairing transports advertised to the create-device dialog. LAN reachability is
-  // derived from the SERVER's actual bind (a wildcard bind → the machine's LAN IP;
-  // a specific non-loopback host → that host), NOT from how the UI was opened — so
-  // "Local network" works even when the UI is opened on localhost, and is absent
-  // when the server is only bound to loopback (a LAN link would not connect).
-  // The IPv4 the requesting client actually reached this server on (if any).
-  // Strips the IPv6-mapped prefix; loopback means "not a LAN path".
-  const requestReachedLanAddress = (req) => {
-    const raw = typeof req?.socket?.localAddress === 'string' ? req.socket.localAddress : '';
-    const address = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
-    if (!/^\d+\.\d+\.\d+\.\d+$/.test(address)) return null;
-    if (address.startsWith('127.')) return null;
-    return address;
-  };
-  const resolvePairingTransports = (req) => {
-    const activePort = tunnelRuntimeContext.getActivePort() || port;
-    const local = `http://127.0.0.1:${activePort}`;
-    let lanHost = null;
-    if (isNetworkExposedBindHost(effectiveBindHost)) {
-      // Prefer the address the client is ALREADY talking to us on — it is the
-      // one interface guaranteed to be routable from that client's network.
-      // Interface scanning is only a fallback: on servers with virtual bridges
-      // (docker0 etc.) the first non-internal IPv4 can be an address no other
-      // machine can reach, which produced pairing links whose LAN candidate
-      // silently failed and forced devices onto the relay.
-      lanHost = requestReachedLanAddress(req);
-      try {
-        if (!lanHost) {
-          for (const list of Object.values(os.networkInterfaces())) {
-            for (const entry of (list || [])) {
-              if (entry.family === 'IPv4' && !entry.internal) { lanHost = entry.address; break; }
-            }
-            if (lanHost) break;
-          }
-        }
-      } catch {
-        lanHost = null;
-      }
-    } else {
-      const h = String(effectiveBindHost || '').toLowerCase();
-      if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') lanHost = effectiveBindHost;
-    }
-    const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
-    return { local, lan, relayAvailable: true };
-  };
-  // ALL direct LAN URLs this server is currently reachable on, for the
-  // candidates-refresh endpoint: the address the requesting client already
-  // reached us on first (guaranteed routable from its network — over the relay
-  // tunnel this is loopback and yields nothing), then every non-internal IPv4
-  // interface. A client that paired while the machine had a different DHCP
-  // lease uses this to replace its stale LAN candidate.
-  const resolveDirectLanUrls = (req) => {
-    const activePort = tunnelRuntimeContext.getActivePort() || port;
-    const urls = [];
-    const push = (host) => {
-      if (typeof host !== 'string' || !host) return;
-      const url = `http://${host.includes(':') ? `[${host}]` : host}:${activePort}`;
-      if (!urls.includes(url)) urls.push(url);
-    };
-    if (isNetworkExposedBindHost(effectiveBindHost)) {
-      push(requestReachedLanAddress(req));
-      try {
-        for (const list of Object.values(os.networkInterfaces())) {
-          for (const entry of (list || [])) {
-            if (entry.family === 'IPv4' && !entry.internal) push(entry.address);
-          }
-        }
-      } catch {
-        // interface scan failure → whatever we already collected
-      }
-    } else {
-      const h = String(effectiveBindHost || '').toLowerCase();
-      if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') push(effectiveBindHost);
-    }
-    return urls;
-  };
+  const host = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : undefined;
+  const effectiveBindHost = host || process.env.PIARIUM_HOST?.trim() || '127.0.0.1';
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
-    : (typeof process.env.OPENCHAMBER_UI_PASSWORD === 'string' ? process.env.OPENCHAMBER_UI_PASSWORD : null);
+    : typeof process.env.PIARIUM_UI_PASSWORD === 'string'
+      ? process.env.PIARIUM_UI_PASSWORD
+      : null;
   if (
     isNetworkExposedBindHost(effectiveBindHost)
-    && !(typeof uiPassword === 'string' && uiPassword.trim().length > 0)
+    && !(typeof uiPassword === 'string' && uiPassword.trim())
     && !isUnsafeUnauthenticatedLanAllowed(process.env)
   ) {
     throw new Error(getUnauthenticatedLanErrorMessage(effectiveBindHost));
   }
-  const tryCfTunnel = options.tryCfTunnel === true;
-  const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.OPENCHAMBER_API_ONLY);
-  const shouldUseCanonicalTunnelConfig = typeof options.tunnelMode === 'string'
+  if (typeof options.exitOnShutdown === 'boolean') exitOnShutdown = options.exitOnShutdown;
+  if (typeof options.onDesktopNotification === 'function') {
+    notificationEmitterRuntime.setOnDesktopNotification(options.onDesktopNotification);
+  }
+  const getIsWindowFocused = typeof options.getIsWindowFocused === 'function'
+    ? options.getIsWindowFocused
+    : () => false;
+  const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
+    ? options.getDesktopRuntimeConfig
+    : null;
+  const apiOnly = options.apiOnly === true || isEnvFlagEnabled(process.env.PIARIUM_API_ONLY);
+  const attachSignals = options.attachSignals !== false;
+  const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : null;
+  const startupTunnelRequest = (
+    typeof options.tunnelMode === 'string'
     || typeof options.tunnelProvider === 'string'
     || options.tunnelConfigPath === null
     || typeof options.tunnelConfigPath === 'string'
     || typeof options.tunnelToken === 'string'
-    || typeof options.tunnelHostname === 'string';
-  const startupTunnelRequest = shouldUseCanonicalTunnelConfig
+    || typeof options.tunnelHostname === 'string'
+  )
     ? normalizeTunnelStartRequest({
         provider: normalizeTunnelProvider(options.tunnelProvider),
         mode: options.tunnelMode,
@@ -1280,94 +541,85 @@ async function main(options = {}) {
         token: typeof options.tunnelToken === 'string' ? options.tunnelToken.trim() : '',
         hostname: normalizeManagedRemoteTunnelHostname(options.tunnelHostname),
       })
-    : (tryCfTunnel
-      ? {
-          provider: TUNNEL_PROVIDER_CLOUDFLARE,
-          mode: TUNNEL_MODE_QUICK,
-          configPath: undefined,
-          token: '',
-          hostname: undefined,
-        }
-      : null);
-  const attachSignals = options.attachSignals !== false;
-  const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : null;
-  if (typeof options.exitOnShutdown === 'boolean') {
-    exitOnShutdown = options.exitOnShutdown;
-  }
-  if (typeof options.onDesktopNotification === 'function') {
-    notificationEmitterRuntime.setOnDesktopNotification(options.onDesktopNotification);
-  }
-  if (typeof options.getIsWindowFocused === 'function') {
-    notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
-  }
-  const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
-    ? options.getDesktopRuntimeConfig
-    : null;
+    : options.tryCfTunnel === true
+      ? { provider: TUNNEL_PROVIDER_CLOUDFLARE, mode: TUNNEL_MODE_QUICK, token: '' }
+      : null;
 
   console.log(`Starting Piarium on port ${port === 0 ? 'auto' : port}`);
-
-  // Voice enumeration is independent from route registration. Start it now,
-  // but do not hold server listen or managed OpenCode startup on `say -v "?"`.
-  const sayTTSCapability = detectSayTtsCapability(process);
-
   const app = express();
-  const serverStartedAt = new Date().toISOString();
-  let piRuntimeHandshake = null;
-  const packagedClientOrigins = new Set([
-    'piarium-ui://app',
-    'capacitor://localhost',
-    'http://localhost',
-    'https://localhost',
-  ]);
-  const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
   app.set('trust proxy', true);
-  // Keep self-hosted instances out of search engines. The app shell is served
-  // publicly (it loads before prompting for the UI password), so without this
-  // even a password-protected instance gets crawled and indexed. Applies to
-  // every response; the robots.txt route makes the intent explicit for crawlers.
   app.use((_req, res, next) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     next();
   });
-  app.get('/robots.txt', (_req, res) => {
-    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
-  });
+  app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
+  const packagedClientOrigins = new Set(['piarium-ui://app', 'capacitor://localhost', 'http://localhost', 'https://localhost']);
   app.use((req, res, next) => {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
-    if (packagedClientOrigins.has(origin) || isLocalDevClientOrigin(origin)) {
+    if (packagedClientOrigins.has(origin) || /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Piarium-Directory,X-Piarium-Directory-Encoding');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
-      if (req.method === 'OPTIONS') {
-        res.status(204).end();
-        return;
-      }
+      if (req.method === 'OPTIONS') return res.status(204).end();
     }
     next();
   });
   app.use(compression({
-    filter: (req, res) => {
-      if (shouldSkipCompression(req, res)) return false;
-      return compression.filter(req, res);
-    },
+    filter: (req, res) => shouldSkipCompression(req, res) ? false : compression.filter(req, res),
     threshold: 1024,
   }));
-  expressApp = app;
   server = http.createServer(app);
-  let realtimeProxyRuntime = { stop: () => {} };
-
-  // The relay service is constructed further below (it depends on the tunnel
-  // runtime's active port). The pairing routes registered here only read the
-  // relay candidate lazily at request time, so a late-bound holder is enough.
+  const serverStartedAt = new Date().toISOString();
+  let piRuntimeHandshake = null;
   let relayServiceInstance = null;
+  let tunnelRuntimeContext = null;
+  let realtimeProxyRuntime = { stop: () => {} };
+  let dictationRuntime = null;
 
+  const activePort = () => tunnelRuntimeContext?.getActivePort() || port;
+  const resolvePairingTransports = (req) => {
+    const local = `http://127.0.0.1:${activePort()}`;
+    let lanHost = null;
+    if (isNetworkExposedBindHost(effectiveBindHost)) {
+      lanHost = requestReachedLanAddress(req);
+      if (!lanHost) {
+        for (const list of Object.values(os.networkInterfaces())) {
+          const entry = (list || []).find((candidate) => candidate.family === 'IPv4' && !candidate.internal);
+          if (entry) { lanHost = entry.address; break; }
+        }
+      }
+    } else if (!['127.0.0.1', 'localhost', '::1'].includes(effectiveBindHost.toLowerCase())) {
+      lanHost = effectiveBindHost;
+    }
+    const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort()}` : null;
+    return { local, lan, relayAvailable: true };
+  };
+  const resolveDirectLanUrls = (req) => {
+    const urls = [];
+    const add = (address) => {
+      if (!address) return;
+      const url = `http://${address.includes(':') ? `[${address}]` : address}:${activePort()}`;
+      if (!urls.includes(url)) urls.push(url);
+    };
+    if (isNetworkExposedBindHost(effectiveBindHost)) {
+      add(requestReachedLanAddress(req));
+      for (const list of Object.values(os.networkInterfaces())) {
+        for (const entry of list || []) if (entry.family === 'IPv4' && !entry.internal) add(entry.address);
+      }
+    } else if (!['127.0.0.1', 'localhost', '::1'].includes(effectiveBindHost.toLowerCase())) {
+      add(effectiveBindHost);
+    }
+    return urls;
+  };
+
+  const sayTTSCapability = detectSayTtsCapability(process);
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
     process,
-    openchamberVersion: OPENCHAMBER_VERSION,
-    runtimeName: process.env.OPENCHAMBER_RUNTIME || 'web',
+    piariumVersion: PIARIUM_VERSION,
+    runtimeName: process.env.PIARIUM_RUNTIME || 'web',
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot: () => ({
@@ -1382,38 +634,21 @@ async function main(options = {}) {
         source: piRuntimeHandshake?.runtime?.source ?? null,
       },
     }),
-    verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
+    verboseRequestLogs: isEnvFlagEnabled(process.env.PIARIUM_VERBOSE_REQUEST_LOGS),
     uiPassword,
     tunnelAuthController,
     remoteClientAuthRuntime,
     clientPairingRuntime,
-    getRelayPairingCandidate: (options) => {
-      if (!relayServiceInstance) return null;
-      // A relay pairing link enables the relay on demand; a plain link only
-      // advertises relay when it is already on.
-      return options?.ensureEnabled
+    getRelayPairingCandidate: (pairingOptions) => relayServiceInstance
+      ? pairingOptions?.ensureEnabled
         ? relayServiceInstance.ensureEnabledForPairing()
-        : relayServiceInstance.getPairingCandidate();
-    },
-    // Re-evaluate the relay lifecycle after pairing/device changes (a revoked or
-    // redeemed device can flip relay demand on or off).
-    reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
+        : relayServiceInstance.getPairingCandidate()
+      : null,
+    reconcileRelay: () => relayServiceInstance?.reconcile() ?? Promise.resolve(),
     getPairingTransports: resolvePairingTransports,
     getDirectCandidateUrls: resolveDirectLanUrls,
-    // Stable server identity for client-side verification of learned addresses.
-    // Lazily resolved: the relay service is constructed after these routes.
-    getServerId: () => (relayServiceInstance ? relayServiceInstance.getServerId() : Promise.resolve(null)),
-    // The display name a paired device shows for THIS server. Devices name the
-    // connection by the issuing machine's hostname, not the per-device pairing
-    // label typed by the operator.
-    getServerLabel: () => {
-      try {
-        const name = os.hostname();
-        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : 'Piarium';
-      } catch {
-        return 'Piarium';
-      }
-    },
+    getServerId: () => relayServiceInstance?.getServerId() ?? Promise.resolve(null),
+    getServerLabel: () => os.hostname()?.trim() || 'Piarium',
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
@@ -1426,26 +661,22 @@ async function main(options = {}) {
     addOrUpdateApnsToken,
     removeApnsToken,
     updateUiVisibility,
-    clearPendingPushBadge: () => clearPendingPushBadge(),
+    clearPendingPushBadge: () => {},
     isUiVisible,
     getUiNotificationClients: () => uiNotificationClients,
     writeSseEvent,
     sessionRuntime,
     setPushInitialized,
     fs,
-    os,
     path,
     server,
     __dirname,
-    openchamberDataDir: OPENCHAMBER_DATA_DIR,
+    piariumDataDir: PIARIUM_DATA_DIR,
     modelsDevApiUrl: MODELS_DEV_API_URL,
-    modelsMetadataCacheTtl: MODELS_METADATA_CACHE_TTL,
-    fetchFreeZenModels,
-    getCachedZenModels,
+    modelsMetadataCacheTtl: MODELS_METADATA_CACHE_TTL_MS,
     mobileDeviceStore,
     mobilePairingRuntime,
     mobilePushRuntime,
-    agentToolRuntime,
   });
   uiAuthController = bootstrapResult.uiAuthController;
   realtimeProxyRuntime = attachRealtimeProxy({
@@ -1459,26 +690,56 @@ async function main(options = {}) {
   const ownsPiRuntimeBroker = !options.piRuntimeBroker;
   const piRuntimeBroker = options.piRuntimeBroker || createWebPiRuntimeBroker({
     agentDir: process.env.PIARIUM_AGENT_DIR,
-    clientVersion: OPENCHAMBER_VERSION,
+    clientVersion: PIARIUM_VERSION,
     cwd: process.cwd(),
-    emit: (event) => {
-      if (event.kind === 'diagnostic') {
-        const write = event.level === 'error' ? console.warn : console.info;
-        write('[pi-runtime]', event.message, { role: event.role, workerId: event.workerId });
-      } else if (event.kind === 'worker.exit') {
-        console.warn('[pi-runtime] worker exited', {
-          code: event.code,
-          expected: event.expected,
-          role: event.role,
-          sessionId: event.sessionId || null,
-          signal: event.signal,
-          workerId: event.workerId,
-        });
-      }
-    },
   });
-  piRuntimeHandshake = await piRuntimeBroker.warmup();
+  recordStartupPerformance('pi-runtime.warmup.start');
+  try {
+    piRuntimeHandshake = await piRuntimeBroker.warmup();
+    recordStartupPerformance('pi-runtime.warmup.ready');
+  } catch (error) {
+    recordStartupPerformance('pi-runtime.warmup.error');
+    throw error;
+  }
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
+  const sessionNames = new Map();
+  const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
+    sessionRuntime.processBrokerEvent(event);
+    if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
+    const envelope = event.envelope;
+    const sessionId = event.sessionId || envelope.data?.sessionId;
+    if (envelope.event === 'session.snapshot' && sessionId) {
+      const name = typeof envelope.data?.name === 'string' ? envelope.data.name.trim() : '';
+      if (name) sessionNames.set(sessionId, name);
+      return;
+    }
+    if (envelope.event !== 'agent.event' || !sessionId) return;
+    const agentEvent = envelope.data?.event;
+    if (agentEvent?.type !== 'agent_end' || agentEvent.willRetry === true) return;
+    void (async () => {
+      const settings = await readSettingsFromDiskMigrated().catch(() => ({}));
+      if (settings.notifyOnCompletion === false) return;
+      const body = extractAssistantText(agentEvent.messages) || 'Pi finished the current task.';
+      const title = sessionNames.get(sessionId) || 'Piarium task complete';
+      const payload = {
+        title,
+        body,
+        tag: `pi-session-${sessionId}`,
+        kind: 'completion',
+        sessionId,
+      };
+      const desktopDelivered = getIsWindowFocused() && settings.notificationMode !== 'always'
+        ? false
+        : emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered: desktopDelivered });
+      const pushPayload = { ...payload, data: { type: 'session', sessionId, url: `/?session=${encodeURIComponent(sessionId)}` } };
+      await Promise.allSettled([
+        sendPushToAllUiSessions(pushPayload, { requireNoSse: true }),
+        isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload),
+        sendApnsToAllUiSessions(pushPayload),
+      ]);
+    })();
+  });
   const piRuntimeGateway = createPiRuntimeGateway({
     server,
     broker: piRuntimeBroker,
@@ -1487,12 +748,8 @@ async function main(options = {}) {
     rejectWebSocketUpgrade,
   });
 
-  const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
+  tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
-
-  // Private relay host service: config + management routes + host client
-  // lifecycle. Loopback port comes from the same source the tunnel uses so
-  // relay-tunneled requests hit the local Express app on 127.0.0.1.
   const relayService = createRelayService({
     crypto,
     os,
@@ -1501,28 +758,23 @@ async function main(options = {}) {
     readSettingsStrict: readSettingsFromDiskStrict,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
-    // One relay host per machine: every instance sharing this data dir shares
-    // the relay identity (serverId), so concurrent hosts evict each other at
-    // the relay worker and devices land on a random local instance.
     hostLock: createRelayHostLock({
-      lockFilePath: path.join(OPENCHAMBER_DATA_DIR, 'relay-host.lock'),
+      lockFilePath: path.join(PIARIUM_DATA_DIR, 'relay-host.lock'),
       fs,
       process,
     }),
-    // Relay demand = any paired device or pending pairing session that uses the
-    // relay transport. Drives the auto on/off lifecycle.
     hasRelayDemand: async () => {
-      const [pendingRelay, deviceRelay] = await Promise.all([
+      const [pending, paired] = await Promise.all([
         clientPairingRuntime.hasActiveRelaySession().catch(() => false),
         remoteClientAuthRuntime.hasActiveRelayClients().catch(() => false),
       ]);
-      return pendingRelay || deviceRelay;
+      return pending || paired;
     },
   });
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
 
-  await featureRoutesRuntime.registerRoutes(app, {
+  await platformRoutesRuntime.registerRoutes(app, {
     crypto,
     fs,
     os,
@@ -1530,51 +782,33 @@ async function main(options = {}) {
     process,
     fsPromises,
     spawn,
-    resolveGitBinaryForSpawn,
+    resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
     createFsSearchRuntime: createFsSearchRuntimeFactory,
-    openchamberDataDir: OPENCHAMBER_DATA_DIR,
-    openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
-    openchamberVersion: OPENCHAMBER_VERSION,
-    runtimeName: process.env.OPENCHAMBER_RUNTIME || 'web',
+    piariumDataDir: PIARIUM_DATA_DIR,
+    piariumUserConfigRoot: PIARIUM_USER_CONFIG_ROOT,
+    piariumVersion: PIARIUM_VERSION,
+    runtimeName: process.env.PIARIUM_RUNTIME || 'web',
     serverStartedAt,
     remoteClientAuthRuntime,
     __dirname,
     normalizeDirectoryPath,
     resolveProjectDirectory,
-    resolveOptionalProjectDirectory,
-    validateDirectoryPath,
     readCustomThemesFromDisk,
-    refreshOpenCodeAfterConfigChange,
-    getOpenCodeResolutionSnapshot,
-    getOpenCodeUpgradeCapability,
     formatSettingsResponse,
-    readSettingsFromDisk,
     readSettingsFromDiskMigrated,
     persistSettings,
     sanitizeProjects,
-    sanitizeSkillCatalogs,
-    isUnsafeSkillRelativePath,
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
-    autoReplyPendingPermissionsForServerSetting,
-    buildAugmentedPath,
+    buildAugmentedPath: platformEnvironmentRuntime.buildAugmentedPath,
     projectConfigRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,
-    openChamberSessionService,
-    openChamberControlService,
-    waitForOpenCodeReady,
-    emitSessionCreatedEvent,
-    getOpenChamberEventClients: () => uiOpenChamberEventClients,
+    piRuntimeBroker,
+    getPiariumEventClients: () => uiPiariumEventClients,
     writeSseEvent,
+    reloadRuntimeConfiguration: async () => { await piRuntimeBroker.warmup(); },
   });
 
-  const previewProxyRuntime = createPreviewProxyRuntime({
-    crypto,
-    URL,
-    createProxyMiddleware,
-    responseInterceptor,
-  });
+  const previewProxyRuntime = createPreviewProxyRuntime({ crypto, URL, createProxyMiddleware, responseInterceptor });
   previewProxyRuntime.attach(app, {
     server,
     express,
@@ -1582,17 +816,27 @@ async function main(options = {}) {
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
   });
-
-  const startupPipelineResult = await startupPipelineRuntime.run({
+  const staticRoutesRuntime = createStaticRoutesRuntime({
+    fs,
+    path,
+    process,
+    __dirname,
+    express,
+    listRecentSessions: () => piRuntimeBroker.listSessions(),
+    readSettingsFromDiskMigrated,
+    normalizePwaAppName,
+    normalizePwaOrientation,
+  });
+  const startupResult = await startupPipelineRuntime.run({
     app,
     server,
     express,
     fs,
     path,
     uiAuthController,
-    buildAugmentedPath,
-    searchPathFor,
-    isExecutable,
+    buildAugmentedPath: platformEnvironmentRuntime.buildAugmentedPath,
+    searchPathFor: platformEnvironmentRuntime.searchPathFor,
+    isExecutable: platformEnvironmentRuntime.isExecutable,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
@@ -1607,10 +851,7 @@ async function main(options = {}) {
     startTunnelWithNormalizedRequest,
     gracefulShutdown,
     getSignalsAttached: () => signalsAttached,
-    setSignalsAttached: (value) => {
-      signalsAttached = value;
-    },
-    syncToHmrState,
+    setSignalsAttached: (value) => { signalsAttached = value; },
     TUNNEL_MODE_QUICK,
     TUNNEL_MODE_MANAGED_LOCAL,
     TUNNEL_MODE_MANAGED_REMOTE,
@@ -1621,63 +862,37 @@ async function main(options = {}) {
     tunnelRuntimeContext,
     attachSignals,
     apiOnly,
-    dictationModelsDir: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'speech-models'),
+    dictationModelsDir: path.join(PIARIUM_USER_CONFIG_ROOT, 'speech-models'),
   });
-  terminalRuntime = startupPipelineResult.terminalRuntime;
-  dictationRuntime = startupPipelineResult.dictationRuntime;
-
-  try {
-    await scheduledTasksRuntime.start();
-  } catch (error) {
+  terminalRuntime = startupResult.terminalRuntime;
+  dictationRuntime = startupResult.dictationRuntime;
+  await scheduledTasksRuntime.start().catch((error) => {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
-  }
-
-  // Only opens a relay control socket when the user opted in (config enabled).
-  // Reconcile the relay lifecycle from demand on startup: run it if any relay
-  // device/session exists, stop it (and clear a stale enabled flag) otherwise.
+  });
   void relayService.reconcile();
-
-  // Relay demand can change outside our routes: `openchamber connect-url
-  // --relay` writes a pending relay session straight to the on-disk store, and
-  // pending sessions expire without any request hitting us. Poll reconcile so a
-  // headless instance picks the relay up (or drops it) within a minute.
-  const relayReconcileTimer = setInterval(() => {
-    void relayService.reconcile();
-  }, 60_000);
+  const relayReconcileTimer = setInterval(() => void relayService.reconcile(), 60_000);
   relayReconcileTimer.unref?.();
 
   return {
     expressApp: app,
     httpServer: server,
     getPort: () => tunnelRuntimeContext.getActivePort(),
-    getOpenCodePort: () => openCodePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
     getQuitRiskStatus: () => ({
-      tunnel: {
-        active: Boolean(tunnelService.getPublicUrl()),
-      },
+      tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
     isReady: () => Boolean(piRuntimeHandshake),
     stop: async (shutdownOptions = {}) => {
+      brokerUnsubscribe();
       await piRuntimeGateway.stop();
-      if (ownsPiRuntimeBroker) {
-        await piRuntimeBroker.dispose();
-      }
+      if (ownsPiRuntimeBroker) await piRuntimeBroker.dispose();
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
-      try {
-        relayService.stop();
-      } catch {
-        // best-effort teardown of the relay host client
-      }
-      try {
-        dictationRuntime?.stop?.();
-      } catch {
-        // best-effort shutdown of the dictation worker
-      }
+      relayService.stop();
+      dictationRuntime?.stop?.();
       return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
-    }
+    },
   };
 }
 
@@ -1688,9 +903,7 @@ runCliEntryIfMain({
   defaultPort: DEFAULT_PORT,
   cloudflareProvider: TUNNEL_PROVIDER_CLOUDFLARE,
   managedLocalMode: TUNNEL_MODE_MANAGED_LOCAL,
-  setExitOnShutdown: (value) => {
-    exitOnShutdown = value;
-  },
+  setExitOnShutdown: (value) => { exitOnShutdown = value; },
   startServer: main,
 });
 

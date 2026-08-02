@@ -7,7 +7,7 @@ import { fetchSystemInfoFromPort } from './cli-http.js';
 import { isPortAvailable, resolveAvailablePort } from './cli-ports.js';
 import { ensureLogsDir, getLogFilePath } from './cli-paths.js';
 import { rotateLogFile } from './cli-log-files.js';
-import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
+import { discoverPiariumInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
 import {
@@ -26,7 +26,6 @@ const DAEMON_READY_TIMEOUT_MS = 30000;
 function createServeCommand({
   serverPath,
   bunBin,
-  checkOpenCodeCLI,
   getPreferredServerRuntime,
   setForegroundServerActive,
   setForegroundShutdown,
@@ -67,11 +66,11 @@ async function serveCommand(options) {
     const targetPort = await resolveAvailablePort(options.port, explicitPort, emitNotice);
 
     if (targetPort !== 0 && !options.suppressUnsafePortWarning) {
-      assertSafeBrowserPort(targetPort, { context: 'OpenChamber serve' });
+      assertSafeBrowserPort(targetPort, { context: 'Piarium serve' });
     }
 
     if (targetPort !== 0) {
-      const existingInstance = await discoverOpenChamberInstanceOnPort(targetPort, { host: effectiveHost });
+      const existingInstance = await discoverPiariumInstanceOnPort(targetPort, { host: effectiveHost });
       if (existingInstance?.runtime === 'desktop') {
         throw new Error(
           `Port ${targetPort} is used by Piarium Desktop app. Choose another port or stop the desktop app.`
@@ -80,9 +79,9 @@ async function serveCommand(options) {
       if (existingInstance) {
         const pidSuffix = Number.isFinite(existingInstance.pid) ? ` (PID: ${existingInstance.pid})` : '';
         if (existingInstance.source === 'probe') {
-          throw new Error(`OpenChamber is already running on port ${targetPort}. Use \`openchamber status\` or \`openchamber stop --port ${targetPort}\`.`);
+          throw new Error(`Piarium is already running on port ${targetPort}. Use \`piarium status\` or \`piarium stop --port ${targetPort}\`.`);
         }
-        throw new Error(`OpenChamber is already running on port ${targetPort}${pidSuffix}`);
+        throw new Error(`Piarium is already running on port ${targetPort}${pidSuffix}`);
       }
 
       if (explicitPort && !(await isPortAvailable(targetPort, effectiveHost))) {
@@ -94,13 +93,12 @@ async function serveCommand(options) {
         }
         const systemInfoRuntimeMatchesPort = systemInfo?.runtime !== 'desktop' || isDesktopRuntimeForPort(systemInfo, targetPort);
         if (systemInfo?.runtime && systemInfoRuntimeMatchesPort) {
-          throw new Error(`OpenChamber is already running on port ${targetPort}. Use \`openchamber status\` or \`openchamber stop --port ${targetPort}\`.`);
+          throw new Error(`Piarium is already running on port ${targetPort}. Use \`piarium status\` or \`piarium stop --port ${targetPort}\`.`);
         }
         throw new Error(`Port ${targetPort} is already in use by another process.`);
       }
     }
 
-    const opencodeBinary = await checkOpenCodeCLI(emitNotice);
     const preferredRuntime = getPreferredServerRuntime();
     const runtimeBin = preferredRuntime === 'bun' ? bunBin : process.execPath;
 
@@ -118,11 +116,11 @@ async function serveCommand(options) {
     if (!effectiveUiPassword && !options.suppressUiPasswordWarning) {
       const bindHost = effectiveHost;
       const networkExposed = isNetworkExposedBindHost(bindHost);
-      const warningLine = 'OPENCHAMBER_UI_PASSWORD is not set';
+      const warningLine = 'PIARIUM_UI_PASSWORD is not set';
       const warningDetail = networkExposed
         ? `server is bound to ${bindHost} and reachable on your network with no UI auth. `
-          + 'Set --ui-password or OPENCHAMBER_UI_PASSWORD before exposing it over LAN.'
-        : 'browser UI is unsecured. Use --ui-password or OPENCHAMBER_UI_PASSWORD.';
+          + 'Set --ui-password or PIARIUM_UI_PASSWORD before exposing it over LAN.'
+        : 'browser UI is unsecured. Use --ui-password or PIARIUM_UI_PASSWORD.';
       if (showOutput) {
         logStatus('warning', warningLine, warningDetail);
       } else if (isJsonMode(options)) {
@@ -149,14 +147,11 @@ async function serveCommand(options) {
       }
 
       // Propagate resolved values into env before importing the server module.
-      if (opencodeBinary) {
-        process.env.OPENCODE_BINARY = opencodeBinary;
-      }
       if (effectiveUiPassword) {
-        process.env.OPENCHAMBER_UI_PASSWORD = effectiveUiPassword;
+        process.env.PIARIUM_UI_PASSWORD = effectiveUiPassword;
       }
-      process.env.OPENCHAMBER_HOST = effectiveHost;
-      process.env.OPENCHAMBER_RUNTIME = 'web';
+      process.env.PIARIUM_HOST = effectiveHost;
+      process.env.PIARIUM_RUNTIME = 'web';
 
       // In --quiet mode, redirect stdout/stderr to the log file so that
       // server runtime output (console.log calls) does not pollute the
@@ -184,7 +179,7 @@ async function serveCommand(options) {
       }
 
       if (!isQuietMode(options)) {
-        console.log(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
+        console.log(`Starting Piarium on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
       }
 
       const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
@@ -269,18 +264,16 @@ async function serveCommand(options) {
       stdio: ['ignore', logFd, logFd, 'ipc'],
       env: {
         ...process.env,
-        OPENCHAMBER_PORT: String(targetPort),
-        OPENCHAMBER_RUNTIME: 'web',
-        OPENCODE_BINARY: opencodeBinary,
-        OPENCHAMBER_HOST: effectiveHost,
-        ...(effectiveUiPassword ? { OPENCHAMBER_UI_PASSWORD: effectiveUiPassword } : {}),
-        ...(options.apiOnly === true ? { OPENCHAMBER_API_ONLY: 'true' } : {}),
-        ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
+        PIARIUM_PORT: String(targetPort),
+        PIARIUM_RUNTIME: 'web',
+        PIARIUM_HOST: effectiveHost,
+        ...(effectiveUiPassword ? { PIARIUM_UI_PASSWORD: effectiveUiPassword } : {}),
+        ...(options.apiOnly === true ? { PIARIUM_API_ONLY: 'true' } : {}),
       },
     });
 
     child.unref();
-    serveSpin?.start(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort}...`);
+    serveSpin?.start(`Starting Piarium on port ${targetPort === 0 ? 'auto' : targetPort}...`);
 
     let resolvedPort;
     try {
@@ -289,12 +282,12 @@ async function serveCommand(options) {
         const timeout = setTimeout(() => {
           if (settled) return;
           settled = true;
-          reject(new Error(`OpenChamber daemon did not report ready within ${DAEMON_READY_TIMEOUT_MS / 1000}s`));
+          reject(new Error(`Piarium daemon did not report ready within ${DAEMON_READY_TIMEOUT_MS / 1000}s`));
         }, DAEMON_READY_TIMEOUT_MS);
 
         child.on('message', (msg) => {
           if (settled) return;
-          if (msg && msg.type === 'openchamber:ready' && typeof msg.port === 'number') {
+          if (msg && msg.type === 'piarium:ready' && typeof msg.port === 'number') {
             settled = true;
             clearTimeout(timeout);
             resolve(msg.port);
@@ -312,7 +305,7 @@ async function serveCommand(options) {
           if (settled) return;
           settled = true;
           clearTimeout(timeout);
-          reject(new Error(`OpenChamber daemon exited before reporting ready${signal ? ` (${signal})` : ` (code ${code ?? 'unknown'})`}`));
+          reject(new Error(`Piarium daemon exited before reporting ready${signal ? ` (${signal})` : ` (code ${code ?? 'unknown'})`}`));
         });
       });
     } catch (error) {
@@ -341,7 +334,7 @@ async function serveCommand(options) {
     }
 
     if (!isProcessRunning(child.pid)) {
-      serveSpin?.error('Failed to start OpenChamber');
+      serveSpin?.error('Failed to start Piarium');
       throw new Error('Failed to start server in daemon mode');
     }
 
@@ -360,7 +353,7 @@ async function serveCommand(options) {
       port: resolvedPort,
       pid: child.pid,
       url: buildLocalUrl(resolvedPort, '/'),
-      logs: `openchamber logs -p ${resolvedPort}`,
+      logs: `piarium logs -p ${resolvedPort}`,
       launchMode: 'daemon',
     };
 
@@ -380,7 +373,7 @@ async function serveCommand(options) {
     serveSpin?.clear();
 
     if (!options.suppressStartupSummary && showOutput) {
-      clackIntro('OpenChamber Started');
+      clackIntro('Piarium Started');
       logStatus('success', `port ${serveResult.port} (PID: ${serveResult.pid})`);
       logStatus('info', `visit: ${serveResult.url}`);
       logStatus('info', `logs: ${serveResult.logs}`);

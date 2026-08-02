@@ -185,7 +185,7 @@ The loop here picks it up from session events like any other goal.
 ## CLI-created goals
 
 `openchamber session create --prompt <text> --goal` uses the explicit
-`POST /api/openchamber/sessions` orchestration route. The server creates the
+`POST /api/piarium/sessions` orchestration route. The server creates the
 session, fits and stores the expanded prompt as its objective, patches active
 goal metadata, appends the synthetic goal reminder, and only then dispatches
 the prompt. `--goal-token-budget` applies the same optional budget contract as

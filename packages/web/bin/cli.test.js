@@ -9,7 +9,7 @@ import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import { requestJson } from './lib/cli-http.js';
-import { requestControlAction } from './lib/cli-control.js';
+import { requestRuntimeMethod } from './lib/cli-runtime.js';
 import { inspectTunnelAttachability } from './lib/cli-lifecycle.js';
 import { formatGoal } from './lib/commands-schedule.js';
 import {
@@ -29,30 +29,30 @@ import {
 import {
   assertAuthenticatedNetworkExposure,
   commands,
-  discoverOpenChamberInstanceOnPort,
+  discoverPiariumInstanceOnPort,
   discoverLifecycleInstances,
   discoverRunningInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,
   getInstanceFilePath,
   getPidFilePath,
-  isOpenchamberCmdline,
-  isOpenchamberProcessRunning,
+  isPiariumCmdline,
+  isPiariumProcessRunning,
   parseArgs,
   resolveServeHost,
 } from './cli.js';
 
-async function withTempOpenChamberDataDir(fn) {
-  const previous = process.env.OPENCHAMBER_DATA_DIR;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-cli-test-'));
-  process.env.OPENCHAMBER_DATA_DIR = dir;
+async function withTempPiariumDataDir(fn) {
+  const previous = process.env.PIARIUM_DATA_DIR;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cli-test-'));
+  process.env.PIARIUM_DATA_DIR = dir;
   try {
     return await fn(dir);
   } finally {
     if (typeof previous === 'string') {
-      process.env.OPENCHAMBER_DATA_DIR = previous;
+      process.env.PIARIUM_DATA_DIR = previous;
     } else {
-      delete process.env.OPENCHAMBER_DATA_DIR;
+      delete process.env.PIARIUM_DATA_DIR;
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -82,7 +82,7 @@ async function captureStdout(fn) {
   }
 }
 
-async function startMockOpenChamberServer(options = {}) {
+async function startMockPiariumServer(options = {}) {
   const runtime = options.runtime || 'web';
   const pid = Number.isFinite(options.pid) ? options.pid : null;
   let shutdownRequested = false;
@@ -170,11 +170,11 @@ async function waitForTcpPort(port, timeoutMs = 3000) {
   return false;
 }
 
-function spawnOpenChamberLikeIdleProcess() {
-  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'openchamber-idle'], { stdio: 'ignore' });
+function spawnPiariumLikeIdleProcess() {
+  return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'piarium-idle'], { stdio: 'ignore' });
 }
 
-function spawnOpenChamberLikeHungServer(port) {
+function spawnPiariumLikeHungServer(port) {
   const script = `
     const net = require('net');
     const sockets = new Set();
@@ -185,7 +185,7 @@ function spawnOpenChamberLikeHungServer(port) {
     server.listen(${port}, '127.0.0.1');
     setInterval(() => {}, 1000);
   `;
-  return spawn(process.execPath, ['-e', script, 'openchamber-hung-server'], { stdio: 'ignore' });
+  return spawn(process.execPath, ['-e', script, 'piarium-hung-server'], { stdio: 'ignore' });
 }
 
 describe('cli args', () => {
@@ -202,10 +202,10 @@ describe('cli args', () => {
   });
 
   it('parses explicit connect-url server overrides', () => {
-    const parsed = parseArgs(['connect-url', '--server', 'https://openchamber.example.com', '--port', '3002']);
+    const parsed = parseArgs(['connect-url', '--server', 'https://piarium.example.com', '--port', '3002']);
 
     expect(parsed.command).toBe('connect-url');
-    expect(parsed.options.server).toBe('https://openchamber.example.com');
+    expect(parsed.options.server).toBe('https://piarium.example.com');
     expect(parsed.options.port).toBe(3002);
   });
 
@@ -293,8 +293,8 @@ describe('cli args', () => {
 
   it('formats scheduled goal state compactly', () => {
     expect(formatGoal({})).toBe('goal:no');
-    expect(formatGoal({ goalEnabled: true })).toBe('goal:yes');
-    expect(formatGoal({ goalEnabled: true, goalTokenBudget: 200000 })).toBe('goal:yes budget:200000');
+    expect(formatGoal({ runAsGoal: true })).toBe('goal:yes');
+    expect(formatGoal({ runAsGoal: true, goalTokenBudget: 200000 })).toBe('goal:yes budget:200000');
   });
 
   it('parses session create options', () => {
@@ -312,7 +312,7 @@ describe('cli args', () => {
       '--worktree',
       'side-task',
       '--branch',
-      'openchamber/side-task',
+      'piarium/side-task',
       '--base',
       'main',
       '--no-upstream',
@@ -325,15 +325,9 @@ describe('cli args', () => {
     expect(parsed.options.prompt).toBe('Investigate cache invalidation');
     expect(parsed.options.model).toBe('openai/gpt-5.5');
     expect(parsed.options.worktree).toBe('side-task');
-    expect(parsed.options.branch).toBe('openchamber/side-task');
+    expect(parsed.options.branch).toBe('piarium/side-task');
     expect(parsed.options.startRef).toBe('main');
     expect(parsed.options.setUpstream).toBe(false);
-  });
-
-  it('parses control help command', () => {
-    const parsed = parseArgs(['control', 'help']);
-    expect(parsed.command).toBe('control');
-    expect(parsed.controlAction).toBe('help');
   });
 
   it('builds session create payloads from CLI options', () => {
@@ -344,7 +338,7 @@ describe('cli args', () => {
       model: 'openai/gpt-5.5',
       agent: 'build',
       worktree: 'side-task',
-      branch: 'openchamber/side-task',
+      branch: 'piarium/side-task',
       startRef: 'main',
       setUpstream: true,
     })).toEqual({
@@ -352,7 +346,7 @@ describe('cli args', () => {
       title: 'Side task',
       worktree: {
         name: 'side-task',
-        branchName: 'openchamber/side-task',
+        branchName: 'piarium/side-task',
         startRef: 'main',
       },
       prompt: 'Investigate cache invalidation',
@@ -493,7 +487,6 @@ describe('cli args', () => {
       goal: true,
       goalTokenBudget: '200000',
     }, 'send')).toEqual({
-      directory: '/repo',
       prompt: 'Continue',
       model: 'openai/gpt-5.5',
       agent: 'build',
@@ -506,7 +499,6 @@ describe('cli args', () => {
       message: 'msg_123',
       prompt: 'Try another approach',
     }, 'fork')).toEqual({
-      directory: '/repo',
       messageId: 'msg_123',
       prompt: 'Try another approach',
     });
@@ -517,8 +509,8 @@ describe('cli args', () => {
       .rejects.toThrow('--all cannot be combined with --last or --limit.');
     await expect(sessionCommand({ session: 'ses_123', directory: '/repo', role: 'tool' }, 'messages'))
       .rejects.toThrow('--role must be one of: all, user, assistant.');
-    await expect(sessionCommand({ session: 'ses_123' }, 'status'))
-      .rejects.toThrow('Missing required --dir.');
+    await expect(sessionCommand({}, 'status'))
+      .rejects.toThrow('Missing required --session.');
     await expect(sessionCommand({ session: 'ses_123', directory: '/repo', timeout: '30' }, 'messages'))
       .rejects.toThrow('--timeout requires --wait.');
     await expect(sessionCommand({ directory: '/repo', lastAssistant: true }, 'create'))
@@ -550,9 +542,9 @@ describe('cli args', () => {
   it('formats projects compactly', () => {
     expect(formatProjectLine({
       id: 'path_repo',
-      label: 'Openchamber',
-      path: '/repo/openchamber',
-    })).toBe('- `Openchamber` — `path_repo` — `/repo/openchamber`');
+      label: 'Piarium',
+      path: '/repo/piarium',
+    })).toBe('- `Piarium` — `path_repo` — `/repo/piarium`');
   });
 
   it('formats model defaults and favorites compactly', () => {
@@ -572,10 +564,9 @@ describe('cli args', () => {
   it('formats compact session list lines', () => {
     expect(formatSessionLine({
       title: 'Default model smoke test',
-      agent: 'build',
       directory: '/repo',
       model: { providerID: 'opencode-go', id: 'deepseek-v4-flash', variant: 'default' },
-    })).toBe('- `Default model smoke test` — `opencode-go/deepseek-v4-flash`, `build` — `/repo`');
+    })).toBe('- `Default model smoke test` — `opencode-go/deepseek-v4-flash` — `/repo`');
     expect(formatSessionLine({
       title: 'Working session',
       agent: 'build',
@@ -657,7 +648,7 @@ describe('cli API target resolution', () => {
       discoverDesktopInstance: async () => null,
       discoverLifecycleInstances: async () => [{ port: 3001 }, { port: 3002 }],
       isServerHealthReady: async () => false,
-    })).rejects.toThrow('Multiple OpenChamber instances are running');
+    })).rejects.toThrow('Multiple Piarium instances are running');
   });
 });
 
@@ -678,53 +669,53 @@ describe('network-exposed auth validation', () => {
   });
 
   it('allows explicit unsafe LAN override from process env only', () => {
-    const previous = process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
-    process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = 'true';
+    const previous = process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN;
+    process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN = 'true';
     try {
       expect(() => assertAuthenticatedNetworkExposure({ host: '0.0.0.0' })).not.toThrow();
     } finally {
       if (typeof previous === 'string') {
-        process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN = previous;
+        process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN = previous;
       } else {
-        delete process.env.OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN;
+        delete process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN;
       }
     }
   });
 });
 
 describe('serve host resolution', () => {
-  it('uses OPENCHAMBER_HOST when --host is not provided', () => {
-    const previous = process.env.OPENCHAMBER_HOST;
-    process.env.OPENCHAMBER_HOST = '192.0.2.20';
+  it('uses PIARIUM_HOST when --host is not provided', () => {
+    const previous = process.env.PIARIUM_HOST;
+    process.env.PIARIUM_HOST = '192.0.2.20';
     try {
       expect(resolveServeHost(undefined)).toBe('192.0.2.20');
     } finally {
       if (typeof previous === 'string') {
-        process.env.OPENCHAMBER_HOST = previous;
+        process.env.PIARIUM_HOST = previous;
       } else {
-        delete process.env.OPENCHAMBER_HOST;
+        delete process.env.PIARIUM_HOST;
       }
     }
   });
 
-  it('prefers explicit --host over OPENCHAMBER_HOST', () => {
-    const previous = process.env.OPENCHAMBER_HOST;
-    process.env.OPENCHAMBER_HOST = '192.0.2.20';
+  it('prefers explicit --host over PIARIUM_HOST', () => {
+    const previous = process.env.PIARIUM_HOST;
+    process.env.PIARIUM_HOST = '192.0.2.20';
     try {
       expect(resolveServeHost('192.0.2.21')).toBe('192.0.2.21');
     } finally {
       if (typeof previous === 'string') {
-        process.env.OPENCHAMBER_HOST = previous;
+        process.env.PIARIUM_HOST = previous;
       } else {
-        delete process.env.OPENCHAMBER_HOST;
+        delete process.env.PIARIUM_HOST;
       }
     }
   });
 });
 
-describe('compatibility exports', () => {
+describe('CLI exports', () => {
   it('allows tunnel profile migration before command options are initialized', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const store = ensureTunnelProfilesMigrated();
 
       expect(store).toEqual({ version: 1, profiles: [] });
@@ -732,7 +723,7 @@ describe('compatibility exports', () => {
   });
 
   it('includes ngrok in fallback tunnel providers when no server is reachable', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = await allocateLoopbackPort();
       const output = await captureStdout(async () => {
         await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
@@ -745,7 +736,7 @@ describe('compatibility exports', () => {
   });
 
   it('supports ngrok quick dry-run with an explicit port', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const output = await captureStdout(async () => {
         await commands.tunnel({
           json: true,
@@ -769,29 +760,29 @@ describe('compatibility exports', () => {
 });
 
 describe('CLI HTTP helpers', () => {
-  it('sends one typed request to the shared control endpoint', async () => {
+  it('sends one typed request to the Pi runtime endpoint', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url, options = {}) => {
-      expect(new URL(String(url)).pathname).toBe('/api/openchamber/control');
+      expect(new URL(String(url)).pathname).toBe('/api/piarium/runtime/request');
       expect(options.method).toBe('POST');
       expect(JSON.parse(options.body)).toEqual({
-        action: 'session.status',
-        input: { sessionId: 'ses_1', directory: '/repo' },
+        method: 'session.snapshot',
+        params: { sessionId: 'ses_1' },
+        trustProject: true,
       });
-      return createMockJsonResponse({ status: 'ok', sessionStatus: { type: 'idle' } });
+      return createMockJsonResponse({ result: { sessionId: 'ses_1', busy: false } });
     };
     try {
-      await expect(requestControlAction(45677, 'session.status', {
+      await expect(requestRuntimeMethod(45677, 'session.snapshot', {
         sessionId: 'ses_1',
-        directory: '/repo',
-      })).resolves.toEqual({ status: 'ok', sessionStatus: { type: 'idle' } });
+      })).resolves.toEqual({ sessionId: 'ses_1', busy: false });
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   it('retries UI-authenticated API requests with the stored instance password', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45678;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'secret' }, null, 2));
       const originalFetch = globalThis.fetch;
@@ -802,11 +793,11 @@ describe('CLI HTTP helpers', () => {
           expect(JSON.parse(options.body)).toEqual({ password: 'secret' });
           return {
             ok: true,
-            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'oc_ui_session=session-token; Path=/; HttpOnly' : null },
+            headers: { get: (name) => name.toLowerCase() === 'set-cookie' ? 'piarium_ui_session=session-token; Path=/; HttpOnly' : null },
             json: async () => ({ authenticated: true }),
           };
         }
-        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+        if (options.headers?.Cookie === 'piarium_ui_session=session-token') {
           return createMockJsonResponse({ ok: true });
         }
         return {
@@ -817,7 +808,7 @@ describe('CLI HTTP helpers', () => {
       };
 
       try {
-        const { response, body } = await requestJson(port, '/api/openchamber/tunnel/start', {
+        const { response, body } = await requestJson(port, '/api/piarium/tunnel/start', {
           method: 'POST',
           body: JSON.stringify({ provider: 'ngrok', mode: 'quick' }),
         });
@@ -825,9 +816,9 @@ describe('CLI HTTP helpers', () => {
         expect(response.ok).toBe(true);
         expect(body).toEqual({ ok: true });
         expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
-          '/api/openchamber/tunnel/start',
+          '/api/piarium/tunnel/start',
           '/auth/session',
-          '/api/openchamber/tunnel/start',
+          '/api/piarium/tunnel/start',
         ]);
       } finally {
         globalThis.fetch = originalFetch;
@@ -836,7 +827,7 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('prefers the stored instance password over a non-explicit env password', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45679;
       fs.writeFileSync(await getInstanceFilePath(port), JSON.stringify({ port, uiPassword: 'stored-secret' }, null, 2));
       const originalFetch = globalThis.fetch;
@@ -845,11 +836,11 @@ describe('CLI HTTP helpers', () => {
           expect(JSON.parse(options.body)).toEqual({ password: 'stored-secret' });
           return {
             ok: true,
-            headers: { getSetCookie: () => ['oc_ui_session=session-token; Path=/; HttpOnly'] },
+            headers: { getSetCookie: () => ['piarium_ui_session=session-token; Path=/; HttpOnly'] },
             json: async () => ({ authenticated: true }),
           };
         }
-        if (options.headers?.Cookie === 'oc_ui_session=session-token') {
+        if (options.headers?.Cookie === 'piarium_ui_session=session-token') {
           return createMockJsonResponse({ ok: true });
         }
         return {
@@ -860,7 +851,7 @@ describe('CLI HTTP helpers', () => {
       };
 
       try {
-        const { response, body } = await requestJson(port, '/api/openchamber/scheduled-tasks/status', {
+        const { response, body } = await requestJson(port, '/api/piarium/scheduled-tasks/status', {
           uiPassword: 'stale-env-secret',
           explicitUiPassword: false,
         });
@@ -874,15 +865,15 @@ describe('CLI HTTP helpers', () => {
   });
 
   it('authenticates desktop-local API requests with the stored client token', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempPiariumDataDir(async (dir) => {
       const port = 57123;
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
         desktopLocalPort: port,
-        desktopLocalClientToken: 'oc_client_test',
+        desktopLocalClientToken: 'piarium_client_test',
       }, null, 2));
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async (_url, options = {}) => {
-        if (options.headers?.Authorization === 'Bearer oc_client_test') {
+        if (options.headers?.Authorization === 'Bearer piarium_client_test') {
           return createMockJsonResponse({ ok: true });
         }
         return {
@@ -893,7 +884,7 @@ describe('CLI HTTP helpers', () => {
       };
 
       try {
-        const { response, body } = await requestJson(port, '/api/openchamber/scheduled-tasks/status');
+        const { response, body } = await requestJson(port, '/api/piarium/scheduled-tasks/status');
 
         expect(response.ok).toBe(true);
         expect(body).toEqual({ ok: true });
@@ -905,11 +896,11 @@ describe('CLI HTTP helpers', () => {
 });
 
 describe('cli entry detection', () => {
-  const modulePath = '/tmp/openchamber/bin/cli.js';
+  const modulePath = '/tmp/piarium/bin/cli.js';
   const moduleUrl = pathToFileURL(modulePath).href;
 
   it('resolves symlinked entry paths before comparing', () => {
-    const symlinkPath = '/usr/local/bin/openchamber';
+    const symlinkPath = '/usr/local/bin/piarium';
     const realpath = (filePath) => {
       if (filePath === path.resolve(symlinkPath)) {
         return modulePath;
@@ -941,8 +932,8 @@ describe('cli entry detection', () => {
   });
 
   it('accepts wrapper binary name fallback when requested', () => {
-    const wrapperPath = '/home/user/.local/bin/openchamber';
-    expect(isModuleCliExecution(wrapperPath, moduleUrl, undefined, 'openchamber')).toBe(true);
+    const wrapperPath = '/home/user/.local/bin/piarium';
+    expect(isModuleCliExecution(wrapperPath, moduleUrl, undefined, 'piarium')).toBe(true);
   });
 
   it('normalizes direct paths when realpath fails', () => {
@@ -955,36 +946,36 @@ describe('cli entry detection', () => {
   });
 });
 
-describe('isOpenchamberCmdline', () => {
-  it('accepts OpenChamber CLI and daemon cmdlines', () => {
-    expect(isOpenchamberCmdline('node /x/@piarium/web/bin/cli.js serve')).toBe(true);
-    expect(isOpenchamberCmdline('node /x/@piarium/web/server/index.js --port 9090')).toBe(true);
-    expect(isOpenchamberCmdline('bun /home/u/projects/Piarium/packages/web/server/index.js --port 3001')).toBe(true);
+describe('isPiariumCmdline', () => {
+  it('accepts Piarium CLI and daemon cmdlines', () => {
+    expect(isPiariumCmdline('node /x/@piarium/web/bin/cli.js serve')).toBe(true);
+    expect(isPiariumCmdline('node /x/@piarium/web/server/index.js --port 9090')).toBe(true);
+    expect(isPiariumCmdline('bun /home/u/projects/Piarium/packages/web/server/index.js --port 3001')).toBe(true);
   });
 
   it('rejects recycled and unrelated processes (issue #1721)', () => {
-    expect(isOpenchamberCmdline('node /home/herjarsa/npm-global/bin/agentmemory')).toBe(false);
-    expect(isOpenchamberCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
-    expect(isOpenchamberCmdline('')).toBe(false);
-    expect(isOpenchamberCmdline(null)).toBe(false);
+    expect(isPiariumCmdline('node /home/herjarsa/npm-global/bin/agentmemory')).toBe(false);
+    expect(isPiariumCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
+    expect(isPiariumCmdline('')).toBe(false);
+    expect(isPiariumCmdline(null)).toBe(false);
   });
 });
 
-describe('isOpenchamberProcessRunning', () => {
+describe('isPiariumProcessRunning', () => {
   it('returns false for a dead PID', () => {
-    expect(isOpenchamberProcessRunning(2147483646)).toBe(false);
+    expect(isPiariumProcessRunning(2147483646)).toBe(false);
   });
 
   // Identity verification is available on Linux (/proc) and macOS (ps); on those
   // platforms a live but unrelated process (a recycled stale PID) must read as
   // not-running so it can't trip the "already running" guard (issue #1721).
   it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')(
-    'returns false for a live non-OpenChamber PID',
+    'returns false for a live non-Piarium PID',
     async () => {
       const child = spawn('sleep', ['30'], { stdio: 'ignore' });
       try {
         await new Promise((resolve) => setTimeout(resolve, 150));
-        expect(isOpenchamberProcessRunning(child.pid)).toBe(false);
+        expect(isPiariumProcessRunning(child.pid)).toBe(false);
       } finally {
         child.kill('SIGKILL');
       }
@@ -994,10 +985,10 @@ describe('isOpenchamberProcessRunning', () => {
 
 describe('lifecycle instance discovery', () => {
   it('does not attribute a desktop runtime response to a different explicit port', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempPiariumDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
 
-      const instance = await discoverOpenChamberInstanceOnPort(3003, {
+      const instance = await discoverPiariumInstanceOnPort(3003, {
         fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
       });
 
@@ -1006,10 +997,10 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('attributes a desktop runtime response to its configured desktop port', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempPiariumDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
 
-      const instance = await discoverOpenChamberInstanceOnPort(57123, {
+      const instance = await discoverPiariumInstanceOnPort(57123, {
         fetchImpl: async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 }),
       });
 
@@ -1022,7 +1013,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('does not mark tunnel attachability as desktop for a different explicit port', async () => {
-    await withTempOpenChamberDataDir(async (dir) => {
+    await withTempPiariumDataDir(async (dir) => {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ desktopLocalPort: 57123 }, null, 2));
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () => createMockJsonResponse({ runtime: 'desktop', pid: 934 });
@@ -1037,7 +1028,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('keeps pid and instance files when live port probe confirms a cmdline mismatch', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45123;
       const pid = 12345;
       const pidFile = await getPidFilePath(port);
@@ -1047,7 +1038,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse({ runtime: 'web', pid }),
-        getOpenchamberProcessState: () => 'mismatched',
+        getPiariumProcessState: () => 'mismatched',
       });
 
       expect(instances).toEqual([
@@ -1059,7 +1050,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('removes stale pid and instance files when a cmdline mismatch is not confirmed by live probe', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45124;
       const pid = 12346;
       const pidFile = await getPidFilePath(port);
@@ -1069,7 +1060,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse(null, false),
-        getOpenchamberProcessState: () => 'mismatched',
+        getPiariumProcessState: () => 'mismatched',
       });
 
       expect(instances).toEqual([]);
@@ -1079,7 +1070,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('preserves matched pid and instance files when the recorded port probe is inconclusive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45126;
       const pid = 12347;
       const pidFile = await getPidFilePath(port);
@@ -1089,7 +1080,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse(null, false),
-        getOpenchamberProcessState: () => 'matched',
+        getPiariumProcessState: () => 'matched',
       });
 
       expect(instances).toEqual([]);
@@ -1099,7 +1090,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('preserves unknown-identity pid and instance files when the recorded port probe is inconclusive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45129;
       const pid = 12350;
       const pidFile = await getPidFilePath(port);
@@ -1109,7 +1100,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse(null, false),
-        getOpenchamberProcessState: () => 'unknown',
+        getPiariumProcessState: () => 'unknown',
       });
 
       expect(instances).toEqual([]);
@@ -1118,8 +1109,8 @@ describe('lifecycle instance discovery', () => {
     });
   });
 
-  it('uses the live system-info pid instead of a stale OpenChamber-looking pid-file pid', async () => {
-    await withTempOpenChamberDataDir(async () => {
+  it('uses the live system-info pid instead of a stale Piarium-looking pid-file pid', async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45127;
       const stalePid = 12348;
       const livePid = 54321;
@@ -1130,7 +1121,7 @@ describe('lifecycle instance discovery', () => {
 
       const instances = await discoverRunningInstances({
         fetchImpl: async () => createMockJsonResponse({ runtime: 'web', pid: livePid }),
-        getOpenchamberProcessState: () => 'matched',
+        getPiariumProcessState: () => 'matched',
       });
 
       expect(instances).toEqual([
@@ -1140,7 +1131,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('uses the explicit host when probing a pid-file entry without a stored host', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45128;
       const pid = 12349;
       const host = '192.0.2.10';
@@ -1155,7 +1146,7 @@ describe('lifecycle instance discovery', () => {
             urls.push(String(url));
             return createMockJsonResponse({ runtime: 'web', pid });
           },
-          getOpenchamberProcessState: () => 'matched',
+          getPiariumProcessState: () => 'matched',
         },
       );
 
@@ -1167,7 +1158,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('tries loopback before treating an explicit-host pid-file probe as inconclusive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45130;
       const pid = 12351;
       const host = '192.0.2.11';
@@ -1184,7 +1175,7 @@ describe('lifecycle instance discovery', () => {
               ? createMockJsonResponse({ runtime: 'web', pid })
               : createMockJsonResponse(null, false);
           },
-          getOpenchamberProcessState: () => 'matched',
+          getPiariumProcessState: () => 'matched',
         },
       );
 
@@ -1197,7 +1188,7 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('does not accept a fallback loopback probe with a different pid for a concrete host registry', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45131;
       const pid = 12352;
       const otherPid = 54322;
@@ -1215,7 +1206,7 @@ describe('lifecycle instance discovery', () => {
               ? createMockJsonResponse({ runtime: 'web', pid: otherPid })
               : createMockJsonResponse(null, false);
           },
-          getOpenchamberProcessState: () => 'matched',
+          getPiariumProcessState: () => 'matched',
         },
       );
 
@@ -1225,8 +1216,8 @@ describe('lifecycle instance discovery', () => {
     });
   });
 
-  it('discovers an explicit live OpenChamber port without a pid-file registry entry', async () => {
-    await withTempOpenChamberDataDir(async () => {
+  it('discovers an explicit live Piarium port without a pid-file registry entry', async () => {
+    await withTempPiariumDataDir(async () => {
       const port = 45125;
       const instances = await discoverLifecycleInstances(
         { explicitPort: true, port },
@@ -1240,9 +1231,9 @@ describe('lifecycle instance discovery', () => {
   });
 
   it('cleans a matched pid-file entry without stopping it when the recorded port is free', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const child = spawnOpenChamberLikeIdleProcess();
+      const child = spawnPiariumLikeIdleProcess();
       const pidFile = await getPidFilePath(port);
       const instanceFile = await getInstanceFilePath(port);
       try {
@@ -1264,9 +1255,9 @@ describe('lifecycle instance discovery', () => {
 });
 
 describe('lifecycle commands with unmanaged explicit ports', () => {
-  it('serve refuses to start on a live OpenChamber port without requiring pid files', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+  it('serve refuses to start on a live Piarium port without requiring pid files', async () => {
+    await withTempPiariumDataDir(async () => {
+      const server = await startMockPiariumServer();
       try {
         await expect(commands.serve({ explicitPort: true, port: server.port, quiet: true })).rejects.toThrow(
           /already running on port/
@@ -1278,8 +1269,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('status --port reports a live unmanaged server when the registry is empty', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+    await withTempPiariumDataDir(async () => {
+      const server = await startMockPiariumServer();
       try {
         const output = await captureStdout(() => commands.status({ explicitPort: true, port: server.port, json: true }));
         const payload = JSON.parse(output);
@@ -1295,8 +1286,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('stop --port reaches unmanaged shutdown when the registry is empty', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+    await withTempPiariumDataDir(async () => {
+      const server = await startMockPiariumServer();
       try {
         await commands.stop({ explicitPort: true, port: server.port, quiet: true, suppressQuietOutput: true });
         expect(server.shutdownRequested).toBe(true);
@@ -1307,9 +1298,9 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('stop --port can recover a matched pid-file instance whose HTTP endpoint is unresponsive', async () => {
-    await withTempOpenChamberDataDir(async () => {
+    await withTempPiariumDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const child = spawnOpenChamberLikeHungServer(port);
+      const child = spawnPiariumLikeHungServer(port);
       const pidFile = await getPidFilePath(port);
       const instanceFile = await getInstanceFilePath(port);
       try {
@@ -1329,9 +1320,9 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('plain stop ignores a stale CLI registry entry that resolves to desktop runtime', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer({ runtime: 'desktop' });
-      const child = spawnOpenChamberLikeIdleProcess();
+    await withTempPiariumDataDir(async () => {
+      const server = await startMockPiariumServer({ runtime: 'desktop' });
+      const child = spawnPiariumLikeIdleProcess();
       const pidFile = await getPidFilePath(server.port);
       const instanceFile = await getInstanceFilePath(server.port);
       try {
@@ -1352,8 +1343,8 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
   });
 
   it('restart --port restarts a live unmanaged server through the shared explicit-port discovery path', async () => {
-    await withTempOpenChamberDataDir(async () => {
-      const server = await startMockOpenChamberServer();
+    await withTempPiariumDataDir(async () => {
+      const server = await startMockPiariumServer();
       const calls = [];
       const host = '127.0.0.1';
       try {

@@ -1,5 +1,5 @@
 const STORE_VERSION = 2;
-const TOKEN_PREFIX = 'oc_client_';
+const TOKEN_PREFIX = 'piarium_client_';
 const TOKEN_BYTES = 32;
 const MAX_LABEL_LENGTH = 80;
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
@@ -344,9 +344,9 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       return null;
     }
     // Which transport carried this request: the relay tunnel proxy stamps every
-    // forwarded request with x-openchamber-relay-connection; anything else is a
+    // forwarded request with x-piarium-relay-connection; anything else is a
     // direct (local/LAN/tunnel-URL) request. Display-only device metadata.
-    const transport = req?.headers?.['x-openchamber-relay-connection'] ? 'relay' : 'direct';
+    const transport = req?.headers?.['x-piarium-relay-connection'] ? 'relay' : 'direct';
     return withStoreMutation(async () => {
       const tokenHash = hashToken(token);
       const store = await readStore();
