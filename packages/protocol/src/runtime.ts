@@ -21,11 +21,11 @@ type DirectRuntimeMethod =
   | "agent.steer"
   | "command.execute"
   | "command.list"
-  | "recovery.apply"
   | "recovery.checkpoint.create"
-  | "recovery.list"
-  | "recovery.preview"
+  | "recovery.navigate"
+  | "recovery.repair"
   | "recovery.redo"
+  | "recovery.status"
   | "recovery.undo"
   | "session.close"
   | "session.create"
@@ -139,11 +139,11 @@ export const RUNTIME_METHODS = [
   "provider.auth.respond",
   "provider.login",
   "provider.logout",
-  "recovery.apply",
   "recovery.checkpoint.create",
-  "recovery.list",
-  "recovery.preview",
+  "recovery.navigate",
+  "recovery.repair",
   "recovery.redo",
+  "recovery.status",
   "recovery.undo",
   "session.close",
   "session.create",

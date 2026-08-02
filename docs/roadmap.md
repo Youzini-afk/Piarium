@@ -36,15 +36,16 @@ Acceptance: the prototype proved the broker/preload/session path before its temp
 removed in favor of the imported OpenChamber product base. Its protocol and host work continue in
 the maintained packages rather than a parallel desktop application.
 
-## Phase 3 — Recovery core (complete)
+## Phase 3 — Recovery semantics prototype (superseded)
 
-- Per-turn before/after workspace checkpoints.
-- Conversation-only, files-only, combined restore, fork, undo, redo, and named checkpoints.
-- Diff preview, safety checkpoint, retention, ignore policy, transaction journal, and leases.
-- Conflict detection and migration path for workspace-history and pi-wtf recovery ownership.
+- The prototype validated conversation-only, files-only, combined restore, checkpoint, undo/redo,
+  transaction, and crash-safety semantics.
+- The duplicate shadow-Git implementation was removed after ownership review. Maintained
+  `pi-workspace-history` and `pi-wtf` now remain authoritative, avoiding a permanent fork and
+  allowing their package updates to flow into Piarium.
 
-Acceptance: destructive and crash-injection tests prove rollback; two workers cannot write the same
-session/workspace; ignored secrets are not captured; Windows Unicode paths pass.
+Acceptance: the prototype evidence informed the retained UX and safety contract; production
+acceptance is now the plugin-backed Phase 6 contract below.
 
 ## Phase 4 — OpenChamber fork product base (complete)
 
@@ -66,7 +67,7 @@ retained before engine surgery begins.
   catalog/per-session worker broker; Electron owns its handshake, packaged entry verification,
   and bounded shutdown lifecycle. The authenticated WebSocket gateway now shares that broker with
   web/desktop/mobile, validates every public method, routes per-worker event sequences, and works
-  through the existing encrypted relay allowlist. Protocol v3 now projects Pi session trees,
+  through the existing encrypted relay allowlist. Protocol v4 now projects Pi session trees,
   messages, stream deltas, models, and provider-owned auth prompts/events into stable Piarium DTOs;
   SDK callbacks, signatures, and credentials remain worker-private. Pi-native user/project/operator
   provider configuration, scoped deletion, credential provenance, and credential-safe model discovery
@@ -75,6 +76,10 @@ retained before engine surgery begins.
   real runtime/queue state, model thinking selection, native rename, atomic archive/restore metadata,
   and safe deletion. Product-level queue, transport-frame, gateway concurrency, and discovery ceilings
   are absent by default; deployment budgets are opt-in.
+- Implemented protocol v4 recovery capability discovery. Pi-native conversation rollback preserves
+  text/images; workspace-history owns combined restore/undo/redo/checkpoints; pi-wtf owns prompt
+  repair; recovery bridge v1 accepts future structured/files-only capabilities. The parallel
+  `@piarium/recovery` shadow-Git engine was deleted.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.
@@ -89,8 +94,9 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
 ## Phase 6 — Recovery UX and ecosystem integrations
 
 - Connect message rollback to conversation-only, conversation+files, or always-ask policy.
-- Put diff/checkpoint/history management in the right sidebar/settings while retaining the existing
-  timeline, reverted-message dock, undo/redo, and fork UX.
+- Put provider status/checkpoint/history management in the right sidebar/settings while retaining
+  the existing timeline, reverted-message dock, undo/redo, and fork UX. Enable files-only/preview
+  controls only when a plugin advertises them through recovery bridge v1.
 
 - Subagent tree, controls, artifacts, and parent-session result projection.
 - Magic Context configuration, memory/session views, and diagnostics.

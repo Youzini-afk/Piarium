@@ -101,6 +101,7 @@
       "dependencies": {
         "@openchamber/web": "workspace:*",
         "@piarium/pi-host": "workspace:*",
+        "@piarium/protocol": "workspace:*",
         "@piarium/runtime-broker": "workspace:*",
         "better-sqlite3": "^12.10.0",
         "electron-context-menu": "^4.1.2",
@@ -145,20 +146,12 @@
         "@earendil-works/pi-ai": "0.83.0",
         "@earendil-works/pi-coding-agent": "0.83.0",
         "@piarium/protocol": "0.1.0",
-        "@piarium/recovery": "0.1.0",
         "jsonc-parser": "^3.3.1",
       },
     },
     "packages/protocol": {
       "name": "@piarium/protocol",
       "version": "0.1.0",
-    },
-    "packages/recovery": {
-      "name": "@piarium/recovery",
-      "version": "0.1.0",
-      "dependencies": {
-        "@piarium/protocol": "0.1.0",
-      },
     },
     "packages/runtime-broker": {
       "name": "@piarium/runtime-broker",
@@ -1212,8 +1205,6 @@
     "@piarium/pi-host": ["@piarium/pi-host@workspace:packages/pi-host"],
 
     "@piarium/protocol": ["@piarium/protocol@workspace:packages/protocol"],
-
-    "@piarium/recovery": ["@piarium/recovery@workspace:packages/recovery"],
 
     "@piarium/runtime-broker": ["@piarium/runtime-broker@workspace:packages/runtime-broker"],
 

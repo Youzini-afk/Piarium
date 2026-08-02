@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { PIARIUM_PROTOCOL_VERSION } from '@piarium/protocol';
 import {
   createDesktopPiRuntimeBroker,
   resolveElectronPiHostEntry,
@@ -72,7 +73,7 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
   });
   try {
     const handshake = await broker.warmup();
-    assert.equal(handshake.protocolVersion, 1);
+    assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
     assert.equal(handshake.runtime.piVersion, '0.83.0');
   } finally {
     await broker.dispose();

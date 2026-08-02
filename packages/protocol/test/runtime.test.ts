@@ -22,6 +22,10 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("session.unarchive"), true);
     assert.equal(isRuntimeMethod("session.delete"), true);
     assert.equal(isRuntimeMethod("thinking.select"), true);
+    assert.equal(isRuntimeMethod("recovery.status"), true);
+    assert.equal(isRuntimeMethod("recovery.navigate"), true);
+    assert.equal(isRuntimeMethod("recovery.repair"), true);
+    assert.equal(isRuntimeMethod("recovery.apply"), false);
   });
 
   it("carries an explicit worker source on events", () => {

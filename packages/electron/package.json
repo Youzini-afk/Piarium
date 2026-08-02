@@ -9,6 +9,7 @@
   "dependencies": {
     "@openchamber/web": "workspace:*",
     "@piarium/pi-host": "workspace:*",
+    "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",
     "better-sqlite3": "^12.10.0",
     "electron-context-menu": "^4.1.2",
@@ -64,7 +65,6 @@
       "node_modules/@earendil-works/**/*",
       "node_modules/@piarium/pi-host/**/*",
       "node_modules/@piarium/protocol/**/*",
-      "node_modules/@piarium/recovery/**/*",
       "node_modules/@piarium/runtime-broker/**/*"
     ],
     "extraResources": [

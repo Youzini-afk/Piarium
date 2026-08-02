@@ -29,5 +29,7 @@ produces the same split ESM output without changing that upstream repository.
 
 This table proves generic loading and command registration only. Phase 4 owns feature-level
 adapters, credentials, MCP OAuth/keyring behavior, web-provider workflows, subagent projection,
-Magic Context native assets, degraded states, and packaged-runtime compatibility. Phase 3 replaces
-the overlapping destructive behavior of workspace-history and pi-wtf with one transaction owner.
+Magic Context native assets, degraded states, and packaged-runtime compatibility. Recovery now
+preserves plugin ownership: Piarium discovers the current workspace-history and pi-wtf command/tree
+capabilities, delegates operations to them, and accepts richer capabilities through recovery bridge
+v1 without reading either plugin's private state.

@@ -465,16 +465,15 @@ async function dispatchRuntimeRequestUnchecked(
       return { accepted };
     }
 
-    case "recovery.list":
-    case "recovery.undo":
-    case "recovery.redo": {
+    case "recovery.status": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, method, { sessionId });
     }
-    case "recovery.apply": {
+    case "recovery.undo":
+    case "recovery.redo": {
       const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "recovery.apply", {
-        planId: requireString(input, "planId"),
+      return broker.requestForSession(sessionId, method, {
+        mode: requireEnum(input, "mode", ["conversation", "files", "both"] as const),
         sessionId,
       });
     }
@@ -485,14 +484,25 @@ async function dispatchRuntimeRequestUnchecked(
         sessionId,
       });
     }
-    case "recovery.preview": {
+    case "recovery.navigate": {
       const sessionId = requireString(input, "sessionId");
-      return broker.requestForSession(sessionId, "recovery.preview", {
+      const summarize = optionalBoolean(input, "summarize");
+      return broker.requestForSession(sessionId, "recovery.navigate", {
         mode: requireEnum(input, "mode", ["conversation", "files", "both"] as const),
-        point: requireEnum(input, "point", ["before", "after"] as const),
         sessionId,
         targetId: requireString(input, "targetId"),
-        targetKind: requireEnum(input, "targetKind", ["checkpoint", "turn"] as const),
+        ...(summarize === undefined ? {} : { summarize }),
+      });
+    }
+    case "recovery.repair": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "recovery.repair", {
+        action: requireEnum(input, "action", [
+          "recover",
+          "recover-typo",
+          "recover-destructive",
+        ] as const),
+        sessionId,
       });
     }
     default:

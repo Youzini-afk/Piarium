@@ -12,17 +12,18 @@ message/file checkpoints into one local interface.
 ## Status
 
 Piarium is under active development. Its versioned protocol, isolated Pi `0.83.0` SDK host, secure
-desktop broker, and transactional conversation/workspace recovery core are implemented and tested.
+desktop broker, and plugin-backed conversation/workspace recovery bridge are implemented and tested.
 The complete OpenChamber-derived product shell is now imported and builds from this repository.
 Its Electron lifecycle owns the Pi worker broker directly, and an authenticated Pi-native
 WebSocket surface plus browser client now carries that broker across desktop/web/mobile and the
-encrypted relay. Protocol v3 now exposes Pi's complete branch graph, tree/header/entry/summary/stats,
+encrypted relay. Protocol v4 now exposes Pi's complete branch graph, tree/header/entry/summary/stats,
 real streaming/compaction/queue state, native rename/archive/restore/delete, model and thinking
-selection, and provider-owned authentication as Piarium DTOs without leaking SDK-only callbacks or
-Pi credential objects. The host owns layered native Pi provider configuration and credential-safe
-model discovery while keeping credentials in Pi AuthStorage. Product limits are absent by default;
-deployment resource budgets are explicit opt-ins. Replacement of the remaining OpenCode UI state
-paths is the active phase.
+selection, provider-owned authentication, and recovery-provider capabilities as Piarium DTOs without
+leaking SDK-only callbacks or Pi credential objects. Conversation rollback uses Pi directly;
+workspace history and repair delegate to `pi-workspace-history` and `pi-wtf`, so their independent
+package updates remain usable. The duplicate Piarium shadow-Git engine has been removed. Product
+limits are absent by default; deployment resource budgets are explicit opt-ins. Replacement of the
+remaining OpenCode UI state paths is the active phase.
 
 The product base is the maintainer's OpenChamber fork at commit `f551150e5`. That fork is imported
 into this repository and is being directly refactored from OpenCode to Pi; the source fork remains read-only.
@@ -55,7 +56,6 @@ packages/
   pi-host/        Isolated Node worker that embeds the Pi SDK
   runtime-broker/ Trusted catalog/per-session Pi worker owner shared by product surfaces
   runtime-client/ Browser-safe request/event client for WebSocket and editor transports
-  recovery/       Message and workspace checkpoint engine
 ```
 
 The Pi runtime and maintained extensions remain independent projects. Development checkouts live

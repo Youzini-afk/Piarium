@@ -25,7 +25,7 @@
   },
   "scripts": {
     "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
-    "build:dependencies": "bun run --cwd ../protocol build && bun run --cwd ../recovery build",
+    "build:dependencies": "bun run --cwd ../protocol build",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "test": "tsx --test test/**/*.test.ts",
     "test:dist": "bun run build && node --test test/dist-smoke.test.mjs",
@@ -37,7 +37,6 @@
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@piarium/protocol": "0.1.0",
-    "@piarium/recovery": "0.1.0",
     "jsonc-parser": "^3.3.1"
   },
   "engines": {

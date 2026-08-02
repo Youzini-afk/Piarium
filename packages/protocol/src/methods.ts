@@ -7,12 +7,10 @@ import type {
   ModelDescriptor,
   PackageDescriptor,
   ProviderAuthType,
-  RecoveryApplyResult,
-  RecoveryCheckpoint,
-  RecoveryListResult,
   RecoveryMode,
-  RecoveryPoint,
-  RecoveryPreview,
+  RecoveryOperationResult,
+  RecoveryRepairAction,
+  RecoveryStatus,
   SessionHeader,
   SessionSnapshot,
   SessionStats,
@@ -122,35 +120,29 @@ export interface HostMethodMap {
     params: { providerId: string };
     result: { authenticated: false };
   };
-  "recovery.apply": {
-    params: { planId: string; sessionId: string };
-    result: RecoveryApplyResult;
-  };
   "recovery.checkpoint.create": {
     params: { name: string; sessionId: string };
-    result: RecoveryCheckpoint;
+    result: RecoveryOperationResult;
   };
-  "recovery.list": {
-    params: { sessionId: string };
-    result: RecoveryListResult;
+  "recovery.navigate": {
+    params: { mode: RecoveryMode; sessionId: string; summarize?: boolean; targetId: string };
+    result: RecoveryOperationResult;
   };
-  "recovery.preview": {
-    params: {
-      mode: RecoveryMode;
-      point: RecoveryPoint;
-      sessionId: string;
-      targetId: string;
-      targetKind: "checkpoint" | "turn";
-    };
-    result: RecoveryPreview;
+  "recovery.repair": {
+    params: { action: RecoveryRepairAction; sessionId: string };
+    result: RecoveryOperationResult;
   };
   "recovery.redo": {
+    params: { mode: RecoveryMode; sessionId: string };
+    result: RecoveryOperationResult;
+  };
+  "recovery.status": {
     params: { sessionId: string };
-    result: RecoveryApplyResult;
+    result: RecoveryStatus;
   };
   "recovery.undo": {
-    params: { sessionId: string };
-    result: RecoveryApplyResult;
+    params: { mode: RecoveryMode; sessionId: string };
+    result: RecoveryOperationResult;
   };
   "package.install": {
     params: { source: string };

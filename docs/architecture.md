@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi host, recovery core, runtime broker, and Electron worker lifecycle implemented; product engine migration in progress
+Status: Pi host, plugin recovery bridge, runtime broker, and Electron worker lifecycle implemented; product engine migration in progress
 
 Last updated: 2026-08-02
 
@@ -39,18 +39,18 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v3 WebSocket/postMessage surface protocol
+    | authenticated Piarium v4 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v3 over a private child-process IPC pipe
+    | Piarium protocol v4 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
     |- Pi resource and package loader
     |- extension UI bridge
     |- extension-specific structured adapters
-    `- recovery transaction coordinator
+    `- recovery capability adapter
 ```
 
 ### 4.1 Renderer
@@ -64,7 +64,7 @@ than preserved behind a compatibility facade.
 
 The retained shell owns windows, web/mobile/remote bootstrap, packaging, and native dialogs. The
 Piarium broker owns Pi workers and maps one live worker to each opened top-level session, with a
-separate catalog worker for discovery. Recovery adds session/workspace leases. A worker crash
+separate catalog worker for discovery. A worker crash
 cannot crash the renderer, and a renderer reload does not terminate an active task.
 
 `@piarium/runtime-broker` is now the single process client for the worker boundary. It validates protocol
@@ -84,7 +84,7 @@ Piarium does not impose renderer payload, pending-request, or buffered-output ce
 deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
 `PIARIUM_RUNTIME_MAX_PENDING_REQUESTS`, and `PIARIUM_RUNTIME_MAX_BUFFERED_BYTES`.
 
-Protocol v3 does not forward Pi SDK objects verbatim. The host projects the append-only session
+Protocol v4 does not forward Pi SDK objects verbatim. The host projects the append-only session
 tree, messages, tool calls/results, streaming updates, compaction, retry state, model metadata, and
 provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,
 thinking/text signatures, callback functions, `AbortSignal`, and credential objects remain inside
@@ -155,7 +155,7 @@ no implicit pagination or truncation. The leaf and every entry's
 contains the complete append-only tree. Streaming `agent.event` messages contain one canonical
 message plus a compact typed delta instead of duplicating Pi's mutable `partial` object.
 
-Protocol v3 also exposes native `session.header`, `session.summary`, `session.tree`,
+Protocol v4 also exposes native `session.header`, `session.summary`, `session.tree`,
 `session.entry`, `session.stats`, `session.rename`, `session.archive`, `session.unarchive`,
 `session.delete`, and `thinking.select` operations. Runtime snapshots carry Pi's actual streaming,
 compaction, retry, steering, follow-up, queue, model, and thinking state. Archive state is broker-owned
@@ -168,11 +168,12 @@ actions instead of guessing from runtime versions.
 
 | Data | Authority | Piarium behavior |
 | --- | --- | --- |
-| Pi session tree/messages | Pi SessionManager JSONL | Read/navigate via SDK; destructive edits only in recovery transactions |
+| Pi session tree/messages | Pi SessionManager JSONL | Read and navigate through the SDK; conversation-only rollback stays Pi-native |
 | Models/auth | Pi ModelRuntime/AuthStorage + layered native `models.json` | Never mirror secrets into renderer storage; preserve source provenance |
 | Pi settings/packages | Pi SettingsManager/PackageManager | Typed operations with source/provenance shown |
-| App metadata | Atomic Piarium JSON, recovery database later | Archive state now; pin, tags, and view preferences remain application-owned additions |
-| Workspace checkpoints | Recovery store + shadow Git | Per real workspace and Pi session; separate from project `.git` |
+| App metadata | Atomic Piarium JSON | Archive state now; recovery preference, pin, tags, and view preferences are application-owned additions |
+| Workspace checkpoints | `pi-workspace-history` | Access through tree hooks, commands, and recovery bridge v1; never mirror private snapshot state |
+| Prompt repair | `pi-wtf` | Invoke the plugin's registered command capabilities and preserve its configuration |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |
 | MCP | Adapter config/status events | Preserve source precedence and credential store |
@@ -204,36 +205,20 @@ still allow them to work when a user installs them independently.
 
 ## 8. Recovery model
 
-Every user turn may own a checkpoint pair:
+Piarium owns one recovery interaction model, not one recovery storage engine. Conversation-only
+rollback branches Pi's append-only session tree and restores editable user text/images without
+touching files. Combined rollback calls the same Pi tree navigation API and lets
+`pi-workspace-history` restore files through its standard `session_before_tree` hook. Undo, redo,
+and checkpoints call that plugin's registered commands. Prompt repair calls `pi-wtf`.
 
-```text
-turn id
-  |- user entry id / branch parent
-  |- prompt metadata (not duplicated unless required for recovery)
-  |- before workspace commit
-  |- after workspace commit
-  |- resulting assistant leaf id
-  `- transaction and retention metadata
-```
+Recovery providers advertise explicit modes and actions. Current command/tree integration works
+without a plugin fork; recovery bridge v1 lets future versions add structured results, files-only
+restore, preview, and richer history. Piarium does not parse `turn-snapshots.json`, copy shadow Git,
+or silently substitute an internal file engine when a provider lacks a capability.
 
-The file engine uses a shadow Git repository and never mutates the project's `.git`. The session
-engine uses official tree navigation/fork APIs for non-destructive operations. Deleting future
-conversation entries is an explicit advanced action performed under a session writer lease with a
-backup, compare-before-swap check, atomic replacement, reload verification, and rollback.
-
-User-facing actions:
-
-- restore conversation only;
-- restore files only;
-- restore both;
-- fork from a turn;
-- undo/redo;
-- create a named checkpoint;
-- preview affected files before applying.
-
-A restore first captures a safety checkpoint. Dirty state, ignored files, symlink boundaries,
-untracked files, and failed rollback are visible outcomes. `.env` and common secret files are
-excluded by default, with project-specific review before enabling broad capture.
+The normal per-message action follows the user's conversation-only, conversation+files, or
+always-ask preference. Detailed provider status, checkpoints, history, and diagnostics live in the
+right sidebar/settings. Provider notifications and dirty-workspace safeguards remain authoritative.
 
 ## 9. Trust and security
 
@@ -262,7 +247,7 @@ always visible. A source mismatch is a diagnostic state, never silently repaired
 - Extension failures are attributed to package/source and do not become anonymous chat errors.
 - Writes use explicit leases, temporary files, fsync where meaningful, atomic same-volume replace,
   and post-write verification.
-- Shutdown is asynchronous and bounded; Pi runtime disposal and active recovery transactions are
+- Shutdown is asynchronous and bounded; Pi runtime disposal and active delegated recovery calls are
   awaited before force termination.
 
 ## 12. OpenChamber product-base migration

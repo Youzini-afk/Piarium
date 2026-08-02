@@ -86,10 +86,18 @@ describe("SessionHost prompt streaming", () => {
           ? userEntry.id
           : undefined;
       assert.ok(userEntryId);
-      const recovery = await host.listRecovery(snapshot.sessionId);
+      const recovery = host.recoveryStatus(snapshot.sessionId);
       assert.equal(recovery.available, true);
-      assert.equal(recovery.turns.length, 1);
-      assert.equal(recovery.turns[0]?.userEntryId, userEntryId);
+      assert.ok(recovery.modes.includes("conversation"));
+      assert.ok(recovery.providers.some((provider) => provider.id === "pi-native"));
+      const recovered = await host.navigateRecovery(
+        snapshot.sessionId,
+        userEntryId,
+        "conversation",
+      );
+      assert.equal(recovered.handledBy, "pi-native");
+      assert.equal(recovered.outcome, "applied");
+      assert.equal(recovered.editorText, "say hello");
       const forked = await host.fork(snapshot.sessionId, userEntryId, "at");
       assert.equal(forked.cancelled, false);
       assert.notEqual(forked.snapshot.sessionId, snapshot.sessionId);

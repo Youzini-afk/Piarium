@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 3 as const;
+export const PIARIUM_PROTOCOL_VERSION = 4 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -107,68 +107,44 @@ export interface PackageDescriptor {
 
 export type RecoveryMode = "conversation" | "files" | "both";
 
-export type RecoveryPoint = "before" | "after";
+export type RecoveryPreference = "conversation" | "both" | "ask";
 
-export interface RecoveryTurn {
-  afterCommit: string;
-  beforeCommit: string;
-  completedAt: string;
-  hasImages: boolean;
-  id: string;
-  parentLeafId: string | null;
-  resultLeafId: string;
-  sessionId: string;
-  startedAt: string;
-  userEntryId: string;
-}
+export type RecoveryAction =
+  | "navigate"
+  | "undo"
+  | "redo"
+  | "checkpoint"
+  | "repair"
+  | "repair-typo"
+  | "repair-destructive";
 
-export interface RecoveryCheckpoint {
-  commit: string;
-  createdAt: string;
+export type RecoveryRepairAction = "recover" | "recover-typo" | "recover-destructive";
+
+export interface RecoveryProviderDescriptor {
+  actions: RecoveryAction[];
+  active: boolean;
+  bridgeVersion?: number;
   id: string;
-  leafId: string | null;
+  modes: RecoveryMode[];
   name: string;
-  sessionId: string;
-}
-
-export type RecoveryFileChangeKind = "added" | "deleted" | "modified" | "type-changed";
-
-export interface RecoveryFileChange {
-  kind: RecoveryFileChangeKind;
-  path: string;
+  source?: string;
 }
 
 export interface RecoveryStatus {
+  actions: RecoveryAction[];
   available: boolean;
-  canRedo: boolean;
-  canUndo: boolean;
-  gitPath?: string;
-  issue?: string;
-  root?: string;
+  issues: string[];
+  modes: RecoveryMode[];
+  providers: RecoveryProviderDescriptor[];
 }
 
-export interface RecoveryListResult extends RecoveryStatus {
-  checkpoints: RecoveryCheckpoint[];
-  turns: RecoveryTurn[];
-}
-
-export interface RecoveryPreview {
-  changes: RecoveryFileChange[];
-  currentLeafId: string | null;
-  expiresAt: string;
-  mode: RecoveryMode;
-  planId: string;
-  point: RecoveryPoint;
-  targetId: string;
-  targetKind: "checkpoint" | "turn";
-  totalChanges: number;
-  truncated: boolean;
-}
-
-export interface RecoveryApplyResult {
-  cancelled: boolean;
+export interface RecoveryOperationResult {
+  action: RecoveryAction;
+  editorImages?: ImageAttachment[];
   editorText?: string;
-  mode: RecoveryMode;
+  handledBy: string;
+  mode?: RecoveryMode;
+  outcome: "applied" | "cancelled" | "unknown";
   snapshot: SessionSnapshot;
 }
 

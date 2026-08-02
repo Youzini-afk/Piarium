@@ -17,6 +17,7 @@ import {
   type ProviderAuthResponse,
   ProtocolDecodeError,
   type RequestEnvelope,
+  type RecoveryMode,
   type RuntimeDescriptor,
   THINKING_LEVELS,
   type ThinkingLevel,
@@ -63,6 +64,14 @@ function readImages(record: Record<string, unknown>): ImageAttachment[] | undefi
       mimeType: readString(image, "mimeType"),
     };
   });
+}
+
+function readRecoveryMode(record: Record<string, unknown>): RecoveryMode {
+  const mode = readString(record, "mode");
+  if (mode !== "conversation" && mode !== "files" && mode !== "both") {
+    throw new HostError("invalid_params", "mode must be conversation, files, or both");
+  }
+  return mode;
 }
 
 function optionalString(record: Record<string, unknown>, key: string): string | undefined {
@@ -415,43 +424,41 @@ export class HostController {
       case "provider.logout":
         await this.#sessionHost.logoutProvider(readString(params, "providerId"));
         return { authenticated: false };
-      case "recovery.list":
-        return this.#sessionHost.listRecovery(readString(params, "sessionId"));
-      case "recovery.preview": {
-        const targetKind = readString(params, "targetKind");
-        const point = readString(params, "point");
-        const mode = readString(params, "mode");
-        if (targetKind !== "checkpoint" && targetKind !== "turn") {
-          throw new HostError("invalid_params", "targetKind must be checkpoint or turn");
-        }
-        if (point !== "before" && point !== "after") {
-          throw new HostError("invalid_params", "point must be before or after");
-        }
-        if (mode !== "conversation" && mode !== "files" && mode !== "both") {
-          throw new HostError("invalid_params", "mode must be conversation, files, or both");
-        }
-        return this.#sessionHost.previewRecovery(
+      case "recovery.status":
+        return this.#sessionHost.recoveryStatus(readString(params, "sessionId"));
+      case "recovery.navigate":
+        return this.#sessionHost.navigateRecovery(
           readString(params, "sessionId"),
-          targetKind,
           readString(params, "targetId"),
-          point,
-          mode,
-        );
-      }
-      case "recovery.apply":
-        return this.#sessionHost.applyRecovery(
-          readString(params, "sessionId"),
-          readString(params, "planId"),
+          readRecoveryMode(params),
+          readBoolean(params, "summarize", { optional: true }),
         );
       case "recovery.undo":
-        return this.#sessionHost.undoRecovery(readString(params, "sessionId"));
+        return this.#sessionHost.undoRecovery(
+          readString(params, "sessionId"),
+          readRecoveryMode(params),
+        );
       case "recovery.redo":
-        return this.#sessionHost.redoRecovery(readString(params, "sessionId"));
+        return this.#sessionHost.redoRecovery(
+          readString(params, "sessionId"),
+          readRecoveryMode(params),
+        );
       case "recovery.checkpoint.create":
         return this.#sessionHost.createRecoveryCheckpoint(
           readString(params, "sessionId"),
           readString(params, "name"),
         );
+      case "recovery.repair": {
+        const action = readString(params, "action");
+        if (
+          action !== "recover" &&
+          action !== "recover-typo" &&
+          action !== "recover-destructive"
+        ) {
+          throw new HostError("invalid_params", "Unknown recovery repair action");
+        }
+        return this.#sessionHost.repairRecovery(readString(params, "sessionId"), action);
+      }
       case "settings.get":
         return this.#sessionHost.getSettings();
       case "settings.update":

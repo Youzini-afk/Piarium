@@ -12,6 +12,7 @@ import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SessionManager,
+  type SessionEntry as NativeSessionEntry,
   type SessionTreeNode as NativeSessionTreeNode,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -30,12 +31,11 @@ import type {
   ProviderAuthType,
   ProviderDescriptor,
   ProviderModelDiscoveryResult,
-  RecoveryApplyResult,
-  RecoveryCheckpoint,
-  RecoveryListResult,
+  RecoveryAction,
   RecoveryMode,
-  RecoveryPoint,
-  RecoveryPreview,
+  RecoveryOperationResult,
+  RecoveryRepairAction,
+  RecoveryStatus,
   PiSessionEntry,
   SessionEntriesResult,
   SessionHeader,
@@ -46,7 +46,6 @@ import type {
   SessionTreeResult,
   ThinkingLevel,
 } from "@piarium/protocol";
-import { RecoveryCoordinator } from "@piarium/recovery";
 import { HostError } from "./errors.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { toJsonValue } from "./json.js";
@@ -59,7 +58,12 @@ import {
   projectProviderAuthEvent,
   projectSessionEntry,
 } from "./protocol-projector.js";
-import { createRecoveryExtension } from "./recovery-extension.js";
+import {
+  createRecoveryBridgeExtension,
+  RecoveryPluginAdapter,
+  type RecoveryPluginContext,
+  type RecoveryPluginExecution,
+} from "./recovery-plugin-adapter.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -169,6 +173,33 @@ function messageSearchText(message: unknown): string {
     .join("\n");
 }
 
+function editableRecoveryContent(entry: NativeSessionEntry | undefined): {
+  editorImages?: ImageAttachment[];
+  editorText?: string;
+} {
+  let content: unknown;
+  if (entry?.type === "message" && entry.message.role === "user") {
+    content = entry.message.content;
+  } else if (entry?.type === "custom_message") {
+    content = entry.content;
+  } else {
+    return {};
+  }
+  if (typeof content === "string") return { editorText: content };
+  if (!Array.isArray(content)) return {};
+  const text = content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+  const editorImages = content
+    .filter((part) => part.type === "image")
+    .map((part) => ({ data: part.data, mimeType: part.mimeType }));
+  return {
+    ...(editorImages.length === 0 ? {} : { editorImages }),
+    ...(text.length === 0 ? {} : { editorText: text }),
+  };
+}
+
 function packageNameFromSource(source: string): string {
   const value = source.startsWith("npm:") ? source.slice(4) : source;
   if (value.startsWith("@")) {
@@ -203,7 +234,7 @@ export class SessionHost {
   readonly ui: ExtensionUiBridge;
   readonly auth: ProviderAuthBridge;
   #runtime: AgentSessionRuntime | undefined;
-  #recovery: RecoveryCoordinator | undefined;
+  #recovery: RecoveryPluginAdapter | undefined;
   #unsubscribe: (() => void) | undefined;
   #disposed = false;
 
@@ -542,64 +573,78 @@ export class SessionHost {
     return wasBusy;
   }
 
-  async listRecovery(sessionId: string): Promise<RecoveryListResult> {
+  recoveryStatus(sessionId: string): RecoveryStatus {
     this.assertSession(sessionId);
-    await this.recovery.reconcileSession(sessionId, this.session.sessionManager.getEntries());
-    return this.recovery.list(sessionId, this.session.sessionManager.getLeafId());
+    return this.recovery.status(this.session, this.#recoveryContext());
   }
 
-  async previewRecovery(
+  async navigateRecovery(
     sessionId: string,
-    targetKind: "checkpoint" | "turn",
     targetId: string,
-    point: RecoveryPoint,
     mode: RecoveryMode,
-  ): Promise<RecoveryPreview> {
+    summarize?: boolean,
+  ): Promise<RecoveryOperationResult> {
     this.#assertRecoveryReady(sessionId);
-    return this.recovery.preview({
-      currentLeafId: this.session.sessionManager.getLeafId(),
+    const target = this.session.sessionManager.getEntry(targetId);
+    if (!target) throw new HostError("recovery_target_not_found", `Unknown session entry: ${targetId}`);
+    if (mode === "conversation" && summarize === true) {
+      throw new HostError(
+        "recovery_mode_unavailable",
+        "Conversation-only recovery cannot summarize through a workspace-history hook",
+      );
+    }
+    const editable = editableRecoveryContent(target);
+    const execution =
+      mode === "conversation"
+        ? await this.#navigateConversationOnly(targetId)
+        : await this.recovery.navigate(this.session, this.#recoveryContext(), {
+            mode,
+            ...(summarize === undefined ? {} : { summarize }),
+            targetId,
+          });
+    return this.#finishRecovery("navigate", execution, {
+      ...editable,
       mode,
-      point,
-      sessionId,
-      targetId,
-      targetKind,
     });
   }
 
-  async applyRecovery(sessionId: string, planId: string): Promise<RecoveryApplyResult> {
+  async undoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult> {
     this.#assertRecoveryReady(sessionId);
-    return this.recovery.apply({
-      currentLeafId: this.session.sessionManager.getLeafId(),
-      navigate: (targetLeafId) => this.#navigateForRecovery(targetLeafId),
-      planId,
-      sessionId,
-      snapshot: () => this.snapshot(),
-    });
+    const execution =
+      mode === "conversation"
+        ? await this.#undoConversationOnly()
+        : await this.recovery.undo(this.session, this.#recoveryContext(), mode);
+    return this.#finishRecovery("undo", execution, { mode });
   }
 
-  async undoRecovery(sessionId: string): Promise<RecoveryApplyResult> {
+  async redoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult> {
     this.#assertRecoveryReady(sessionId);
-    return this.recovery.undo({
-      currentLeafId: this.session.sessionManager.getLeafId(),
-      navigate: (targetLeafId) => this.#navigateForRecovery(targetLeafId),
-      sessionId,
-      snapshot: () => this.snapshot(),
-    });
+    const execution = await this.recovery.redo(this.session, this.#recoveryContext(), mode);
+    return this.#finishRecovery("redo", execution, { mode });
   }
 
-  async redoRecovery(sessionId: string): Promise<RecoveryApplyResult> {
+  async createRecoveryCheckpoint(
+    sessionId: string,
+    name: string,
+  ): Promise<RecoveryOperationResult> {
     this.#assertRecoveryReady(sessionId);
-    return this.recovery.redo({
-      currentLeafId: this.session.sessionManager.getLeafId(),
-      navigate: (targetLeafId) => this.#navigateForRecovery(targetLeafId),
-      sessionId,
-      snapshot: () => this.snapshot(),
-    });
+    const execution = await this.recovery.checkpoint(this.session, name);
+    return this.#finishRecovery("checkpoint", execution);
   }
 
-  async createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryCheckpoint> {
-    this.#assertRecoveryReady(sessionId);
-    return this.recovery.createCheckpoint(sessionId, this.session.sessionManager.getLeafId(), name);
+  async repairRecovery(
+    sessionId: string,
+    action: RecoveryRepairAction,
+  ): Promise<RecoveryOperationResult> {
+    this.assertSession(sessionId);
+    const execution = await this.recovery.repair(this.session, action);
+    const protocolAction: RecoveryAction =
+      action === "recover"
+        ? "repair"
+        : action === "recover-typo"
+          ? "repair-typo"
+          : "repair-destructive";
+    return this.#finishRecovery(protocolAction, execution);
   }
 
   listCommands(sessionId: string): Array<{ description?: string; name: string; source?: string }> {
@@ -969,19 +1014,7 @@ export class SessionHost {
       const settingsManager = SettingsManager.create(cwd, agentDir, {
         projectTrusted: initialTrust,
       });
-      const recovery = new RecoveryCoordinator({
-        agentDir,
-        cwd,
-        onChanged: (sessionId) => this.#emit("recovery.changed", { sessionId }),
-        onStatus: (sessionId, available, issue) =>
-          this.#emit("recovery.status", {
-            available,
-            canRedo: false,
-            canUndo: false,
-            ...(issue === undefined ? {} : { issue }),
-            sessionId,
-          }),
-      });
+      const recovery = new RecoveryPluginAdapter();
       this.#recovery = recovery;
       const services = await createAgentSessionServices({
         agentDir,
@@ -989,21 +1022,11 @@ export class SessionHost {
         resourceLoaderOptions: {
           extensionFactories: [
             {
-              factory: createRecoveryExtension(recovery),
+              factory: createRecoveryBridgeExtension(recovery),
               hidden: true,
-              name: "piarium-recovery",
+              name: "piarium-recovery-bridge",
             },
           ],
-          extensionsOverride: (base) => {
-            const index = base.extensions.findIndex(
-              (extension) => extension.path === "<inline:piarium-recovery>",
-            );
-            if (index > 0) {
-              const [internal] = base.extensions.splice(index, 1);
-              if (internal) base.extensions.unshift(internal);
-            }
-            return base;
-          },
         },
         settingsManager,
         ...(shouldPrompt
@@ -1100,6 +1123,10 @@ export class SessionHost {
       });
     }
     this.#emit("session.snapshot", this.snapshot());
+    this.#emit("recovery.status", {
+      ...this.recoveryStatus(session.sessionId),
+      sessionId: session.sessionId,
+    });
   }
 
   #packageManager(): DefaultPackageManager {
@@ -1151,7 +1178,7 @@ export class SessionHost {
     this.#recovery = undefined;
   }
 
-  get recovery(): RecoveryCoordinator {
+  get recovery(): RecoveryPluginAdapter {
     if (!this.#recovery) throw new HostError("recovery_unavailable", "Recovery is unavailable");
     return this.#recovery;
   }
@@ -1163,11 +1190,76 @@ export class SessionHost {
     }
   }
 
-  async #navigateForRecovery(targetLeafId: string) {
-    const result = await this.session.navigateTree(targetLeafId, { summarize: false });
+  #recoveryContext(): RecoveryPluginContext {
+    const extensions = this.runtime.services.resourceLoader.getExtensions().extensions;
     return {
-      cancelled: result.cancelled,
-      ...(result.editorText === undefined ? {} : { editorText: result.editorText }),
+      configuredSources: this.#packageManager()
+        .listConfiguredPackages()
+        .map((entry) => entry.source),
+      loadedExtensions: extensions.flatMap((extension) => [
+        extension.path,
+        extension.resolvedPath,
+        extension.sourceInfo.source,
+        extension.sourceInfo.path,
+      ]),
     };
+  }
+
+  async #navigateConversationOnly(targetId: string): Promise<RecoveryPluginExecution> {
+    const manager = this.session.sessionManager;
+    const oldLeafId = manager.getLeafId();
+    if (targetId === oldLeafId) {
+      return { handledBy: "pi-native", outcome: "applied" };
+    }
+    const target = manager.getEntry(targetId);
+    if (!target) throw new HostError("recovery_target_not_found", `Unknown session entry: ${targetId}`);
+    const editable = editableRecoveryContent(target);
+    const newLeafId =
+      (target.type === "message" && target.message.role === "user") ||
+      target.type === "custom_message"
+        ? target.parentId
+        : target.id;
+    if (newLeafId === null) manager.resetLeaf();
+    else manager.branch(newLeafId);
+    await this.#replaceWith(manager);
+    return { ...editable, handledBy: "pi-native", outcome: "applied" };
+  }
+
+  async #undoConversationOnly(): Promise<RecoveryPluginExecution> {
+    const target = this.session.sessionManager
+      .getBranch()
+      .findLast((entry) => entry.type === "message" && entry.message.role === "user");
+    if (!target) {
+      throw new HostError("recovery_action_unavailable", "This session has no user turn to undo");
+    }
+    return this.#navigateConversationOnly(target.id);
+  }
+
+  #finishRecovery(
+    action: RecoveryAction,
+    execution: RecoveryPluginExecution,
+    options: {
+      editorImages?: ImageAttachment[];
+      editorText?: string;
+      mode?: RecoveryMode;
+    } = {},
+  ): RecoveryOperationResult {
+    const sessionId = this.session.sessionId;
+    const result: RecoveryOperationResult = {
+      action,
+      ...(execution.editorImages === undefined && options.editorImages === undefined
+        ? {}
+        : { editorImages: execution.editorImages ?? options.editorImages }),
+      ...(execution.editorText === undefined && options.editorText === undefined
+        ? {}
+        : { editorText: execution.editorText ?? options.editorText }),
+      handledBy: execution.handledBy,
+      ...(options.mode === undefined ? {} : { mode: options.mode }),
+      outcome: execution.outcome,
+      snapshot: this.snapshot(),
+    };
+    this.#emit("recovery.changed", { sessionId });
+    this.#emit("recovery.status", { ...this.recoveryStatus(sessionId), sessionId });
+    return result;
   }
 }

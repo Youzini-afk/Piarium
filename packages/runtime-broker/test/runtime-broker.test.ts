@@ -108,6 +108,11 @@ test("broker owns catalog and per-session Pi workers", async () => {
 
     const created = await broker.createSession(workspace, "Broker smoke");
     assert.deepEqual(broker.activeSessionIds, [created.sessionId]);
+    const recoveryStatus = await dispatchRuntimeRequest(broker, "recovery.status", {
+      sessionId: created.sessionId,
+    });
+    assert.ok(recoveryStatus.modes.includes("conversation"));
+    assert.ok(recoveryStatus.providers.some((provider) => provider.id === "pi-native"));
     const models = await dispatchRuntimeRequest(broker, "model.list", {
       sessionId: created.sessionId,
     });
