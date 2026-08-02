@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { SessionSummary } from '@piarium/protocol';
 import {
   buildPiSessionForest,
+  collectPiSessionSubtreeIds,
   comparePiSessions,
   filterPiSessionForest,
   piSessionTitle,
@@ -71,6 +72,25 @@ describe('Pi session presentation', () => {
       'cycle-a',
       'cycle-b',
     ]));
+  });
+
+  test('collects an unlimited same-lifecycle subtree and terminates on cycles', () => {
+    const summaries = [
+      session('root'),
+      session('child-a', { parentId: 'root' }),
+      session('child-b', { parentId: 'root' }),
+      session('grandchild', { parentId: 'child-a' }),
+      session('archived-child', { archivedAt: '2026-08-02T00:00:00.000Z', parentId: 'root' }),
+      session('cycle-a', { parentId: 'cycle-b' }),
+      session('cycle-b', { parentId: 'cycle-a' }),
+    ];
+    expect(collectPiSessionSubtreeIds(summaries, 'root')).toEqual([
+      'root',
+      'child-a',
+      'grandchild',
+      'child-b',
+    ]);
+    expect(collectPiSessionSubtreeIds(summaries, 'cycle-a')).toEqual(['cycle-a', 'cycle-b']);
   });
 
   test('searches full session text and preserves matching ancestors', () => {

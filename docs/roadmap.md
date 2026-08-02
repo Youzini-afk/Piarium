@@ -84,6 +84,10 @@ retained before engine surgery begins.
 - Implemented Pi-native desktop first-launch and local recovery readiness. Both negotiate the real
   runtime WebSocket handshake and show Pi/host/Node/source versions; the former OpenCode installer,
   binary-path picker, and `/health` polling are removed while remote connection selection remains.
+- Implemented the Pi-native main header session path: title, working directory, runtime activity,
+  context statistics, rename, full-history Markdown export, subtree archive, and subtree deletion
+  now use Pi protocol/store data. The old sync cache, OpenCode message exporter, session worktree
+  attachment, share actions, and legacy mini-chat launch path are no longer loaded by the header.
 - Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
   command, permission, and question contracts.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.

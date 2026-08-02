@@ -10,6 +10,7 @@ import {
   type RuntimeMethodParams,
   type SessionEntriesResult,
   type SessionSnapshot,
+  type SessionStats,
   type SessionSummary,
 } from '@piarium/protocol';
 import {
@@ -94,6 +95,24 @@ const recoveryStatus: RecoveryStatus = {
   modes: ['conversation'],
   providers: [],
 };
+
+const stats = (sessionId: string, tokens = 1200): SessionStats => ({
+  assistantMessages: 1,
+  contextUsage: { contextWindow: 200000, percent: 0.6, tokens },
+  cost: 0.01,
+  sessionId,
+  tokens: {
+    cacheRead: 0,
+    cacheWrite: 0,
+    input: tokens,
+    output: 0,
+    total: tokens,
+  },
+  toolCalls: 0,
+  toolResults: 0,
+  totalMessages: 2,
+  userMessages: 1,
+});
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -397,6 +416,25 @@ describe('Pi session store', () => {
 
     expect(store.getState().records['session-a']?.branchEntries?.scope).toBe('branch');
     expect(store.getState().records['session-a']?.allEntries?.scope).toBe('all');
+  });
+
+  test('loads Pi session stats into the session record', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method, params) => {
+      const sessionId = (params as { sessionId?: string }).sessionId ?? '';
+      if (method === 'session.stats') return stats(sessionId);
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const result = await store.getState().refreshStats('session-a');
+
+    expect(result.contextUsage).toEqual({ contextWindow: 200000, percent: 0.6, tokens: 1200 });
+    expect(store.getState().records['session-a']?.stats).toEqual(result);
+    expect(runtime.calls).toEqual([{
+      method: 'session.stats',
+      params: { sessionId: 'session-a' },
+    }]);
   });
 
   test('preserves live output and appended entries across an overlapping branch refresh', async () => {

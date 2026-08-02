@@ -14,6 +14,7 @@ import type {
   RuntimeMethodResult,
   SessionEntriesResult,
   SessionSnapshot,
+  SessionStats,
   SessionSummary,
   ThinkingLevel,
   JsonValue,
@@ -43,6 +44,7 @@ export interface PiSessionViewState {
   recoveryStatus?: RecoveryStatus;
   sessionId: string;
   snapshot?: SessionSnapshot;
+  stats?: SessionStats;
   toolExecutions: Record<string, PiToolExecutionState>;
 }
 
@@ -106,6 +108,7 @@ export interface PiSessionStoreState {
     scope?: 'branch' | 'all',
   ): Promise<SessionEntriesResult>;
   refreshRecoveryStatus(sessionId: string): Promise<RecoveryStatus>;
+  refreshStats(sessionId: string): Promise<SessionStats>;
   renameSession(sessionId: string, name: string): Promise<void>;
   reset(): void;
   selectModel(sessionId: string, model: Pick<ModelDescriptor, 'id' | 'provider'>): Promise<SessionSnapshot>;
@@ -355,6 +358,7 @@ export const createPiSessionStore = (
   let selectionGeneration = 0;
   const entriesGeneration = new Map<string, number>();
   const recoveryGeneration = new Map<string, number>();
+  const statsGeneration = new Map<string, number>();
 
   const store = create<PiSessionStoreState>((set, get) => {
     const contextIsCurrent = (runtimeKey: string): boolean => (
@@ -885,6 +889,31 @@ export const createPiSessionStore = (
         }
       },
 
+      refreshStats: async (sessionId) => {
+        const generation = (statsGeneration.get(sessionId) ?? 0) + 1;
+        statsGeneration.set(sessionId, generation);
+        try {
+          const { result, runtimeKey } = await request('session.stats', { sessionId });
+          if (
+            statsGeneration.get(sessionId) !== generation
+            || !contextIsCurrent(runtimeKey)
+          ) {
+            return result;
+          }
+          set((state) => ({
+            lastError: null,
+            records: upsertRecord(state.records, sessionId, (current) => ({
+              ...current,
+              stats: result,
+            })),
+          }));
+          return result;
+        } catch (error) {
+          commitError(runtime.currentKey(), error);
+          throw error;
+        }
+      },
+
       renameSession: async (sessionId, name) => {
         try {
           const { result } = await request('session.rename', { name, sessionId });
@@ -914,6 +943,7 @@ export const createPiSessionStore = (
         selectionGeneration += 1;
         entriesGeneration.clear();
         recoveryGeneration.clear();
+        statsGeneration.clear();
         unsubscribeEvents?.();
         unsubscribeEvents = null;
         activeClient = null;

@@ -38,6 +38,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import {
   buildPiSessionForest,
+  collectPiSessionSubtreeIds,
   filterPiSessionForest,
   piSessionTitle,
   type PiSessionNode,
@@ -65,12 +66,6 @@ const isPathWithin = (path: string, root: string): boolean => {
   if (path === root) return true;
   const prefix = root === '/' ? '/' : `${root}/`;
   return path.startsWith(prefix);
-};
-
-const collectNodeIds = (node: PiSessionNode): string[] => {
-  const ids = [node.session.id];
-  for (const child of node.children) ids.push(...collectNodeIds(child));
-  return ids;
 };
 
 const groupSessionForest = (
@@ -601,12 +596,12 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       })}
                       onArchive={(selected) => setConfirmation({
                         action: 'archive',
-                        ids: collectNodeIds(selected),
+                        ids: collectPiSessionSubtreeIds(summaries, selected.session.id),
                         title: piSessionTitle(selected.session, untitled),
                       })}
                       onDelete={(selected) => setConfirmation({
                         action: 'delete',
-                        ids: collectNodeIds(selected),
+                        ids: collectPiSessionSubtreeIds(summaries, selected.session.id),
                         title: piSessionTitle(selected.session, untitled),
                       })}
                       onUnarchive={(session) => {

@@ -37,6 +37,38 @@ export const comparePiSessions = (
   return left.id.localeCompare(right.id);
 };
 
+export const collectPiSessionSubtreeIds = (
+  summaries: SessionSummary[],
+  rootId: string,
+): string[] => {
+  const root = summaries.find((summary) => summary.id === rootId);
+  if (!root) return [];
+  const archived = root.archivedAt !== undefined;
+  const children = new Map<string, string[]>();
+  for (const summary of summaries) {
+    if (!summary.parentId || (summary.archivedAt !== undefined) !== archived) continue;
+    const siblings = children.get(summary.parentId) ?? [];
+    siblings.push(summary.id);
+    children.set(summary.parentId, siblings);
+  }
+
+  const ids: string[] = [];
+  const visited = new Set<string>();
+  const pending = [rootId];
+  while (pending.length > 0) {
+    const sessionId = pending.pop();
+    if (!sessionId || visited.has(sessionId)) continue;
+    visited.add(sessionId);
+    ids.push(sessionId);
+    const childIds = children.get(sessionId) ?? [];
+    for (let index = childIds.length - 1; index >= 0; index -= 1) {
+      const childId = childIds[index];
+      if (childId) pending.push(childId);
+    }
+  }
+  return ids;
+};
+
 const createsParentCycle = (
   sessionId: string,
   parentId: string,
