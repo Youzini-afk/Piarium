@@ -112,8 +112,10 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
   diagnostics remain dependent on their public event/data contracts.
 - Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
   reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
-  config sources. Tools/resources/results already use the generic Pi tool projection; richer MCP Apps
-  rendering remains dependent on an explicit public webview contract from the adapter.
+  config sources. Desktop header and mobile controls now consume that same snapshot/command path;
+  the old OpenCode MCP stores, draft editor, and OAuth callback route are removed. Tools/resources/results
+  already use the generic Pi tool projection; richer MCP Apps rendering remains dependent on an
+  explicit public webview contract from the adapter.
 - Implemented: direct editing of `pi-web-access`'s native `web-search.json`; its search/fetch tools,
   activity widgets, and custom entries use the generic extension projection. Optional Curator
   embedding remains dependent on a public embedding contract from the extension.

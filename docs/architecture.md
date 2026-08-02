@@ -209,9 +209,11 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
   native Pi component/custom entries; future memory, compartment, historian/dreamer/sidekick, and
   diagnostic views continue to read its public plugin/database contracts rather than copied state.
 - **pi-mcp-adapter:** protocol v8 carries the adapter's public `pi-mcp-adapter/status/v1`
-  snapshot. The settings surface invokes `/mcp` and `/mcp-auth`, manages the normal Pi package,
-  and edits all six adapter-owned JSON/JSONC sources in their documented precedence order. The
-  adapter still owns merging, host imports, transports, OAuth/keyring data, and connection state.
+  snapshot. Settings, the desktop header, and mobile surfaces invoke the adapter's public commands,
+  manage the normal Pi package, and edit all six adapter-owned JSON/JSONC sources in their documented
+  precedence order. Piarium has no parallel MCP store, generated OpenCode configuration draft, or
+  OAuth callback route; the adapter owns merging, host imports, transports, OAuth/keyring data, and
+  connection state.
 - **pi-web-access:** Piarium edits the extension's agent-level `web-search.json`; provider routing,
   credentials, SSRF policy, search/fetch tools, activity widgets, and optional Curator server remain
   extension-owned.

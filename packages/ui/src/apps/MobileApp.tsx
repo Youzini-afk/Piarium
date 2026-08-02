@@ -45,8 +45,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
-import { useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
-import { useMcpStore } from '@/stores/useMcpStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
@@ -2073,7 +2072,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [terminalOpen, setTerminalOpen] = React.useState(false);
   const [mcpOpen, setMcpOpen] = React.useState(false);
   const [instancesOpen, setInstancesOpen] = React.useState(false);
-  const [isMcpRefreshing, setIsMcpRefreshing] = React.useState(false);
+  const [isMcpReconnecting, setIsMcpReconnecting] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [updateOpen, setUpdateOpen] = React.useState(false);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
@@ -2086,11 +2085,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const settingsAutoUpdateChecksEnabled = useConfigStore((state) => state.settingsAutoUpdateChecksEnabled);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
-  const mcpServers = useMcpConfigStore((state) => state.mcpServers);
-  const setMcpDraft = useMcpConfigStore((state) => state.setMcpDraft);
-  const setSelectedMcp = useMcpConfigStore((state) => state.setSelectedMcp);
-  const refreshMcpStatus = useMcpStore((state) => state.refresh);
-  const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
+  const currentPiSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const executePiCommand = usePiSessionStore((state) => state.executeCommand);
   const gitStatus = useGitStatus(normalizePath(currentDirectory) || null);
   const dirtyChangeCount = gitStatus?.files?.length ?? 0;
   const surfaceVariant = mobileLayout.prefersSidePanels ? 'side' : 'sheet';
@@ -2285,51 +2281,22 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   const showUpdateItem = settingsAutoUpdateChecksEnabled && updateAvailable && (updateRuntimeType === 'desktop' || updateRuntimeType === 'web');
 
-  const openMcpCreateSettings = React.useCallback(() => {
-    const baseName = 'new-mcp-server';
-    let newName = baseName;
-    let counter = 1;
-    while (mcpServers.some((server) => server.name === newName)) {
-      newName = `${baseName}-${counter}`;
-      counter += 1;
-    }
-
-    const draft: McpDraft = {
-      name: newName,
-      scope: 'user',
-      type: 'local',
-      command: [],
-      url: '',
-      environment: [],
-      headers: [],
-      oauthEnabled: true,
-      oauthClientId: '',
-      oauthClientSecret: '',
-      oauthScope: '',
-      oauthRedirectUri: '',
-      timeout: '',
-      enabled: true,
-    };
-
-    setMcpDraft(draft);
-    setSelectedMcp(newName);
+  const openMcpSettings = React.useCallback(() => {
     setSettingsPage('mcp');
     setMcpOpen(false);
     setSettingsInitialMobileStage('page-content');
     setSettingsOpen(true);
-  }, [mcpServers, setMcpDraft, setSelectedMcp, setSettingsPage]);
+  }, [setSettingsPage]);
 
-  const refreshMcpOverlay = React.useCallback(() => {
-    if (isMcpRefreshing) return;
-    setIsMcpRefreshing(true);
-    const directory = currentDirectory || null;
+  const reconnectMcpOverlay = React.useCallback(() => {
+    if (isMcpReconnecting || !currentPiSessionId) return;
+    setIsMcpReconnecting(true);
     const minSpinPromise = new Promise((resolve) => window.setTimeout(resolve, 500));
-    void Promise.all([
-      refreshMcpStatus({ directory, silent: true }),
-      loadMcpConfigs({ force: true }),
-      minSpinPromise,
-    ]).finally(() => setIsMcpRefreshing(false));
-  }, [currentDirectory, isMcpRefreshing, loadMcpConfigs, refreshMcpStatus]);
+    const reconnectPromise = executePiCommand(currentPiSessionId, '/mcp reconnect').catch((error) => {
+      console.error('Failed to reconnect Pi MCP servers:', error);
+    });
+    void Promise.all([reconnectPromise, minSpinPromise]).finally(() => setIsMcpReconnecting(false));
+  }, [currentPiSessionId, executePiCommand, isMcpReconnecting]);
 
   const overflowItems: OverflowItem[] = React.useMemo(
     () => {
@@ -2625,23 +2592,23 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                     <button
                       type="button"
                       className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
-                      onClick={openMcpCreateSettings}
-                      aria-label={t('settings.mcp.sidebar.actions.addServerTitle')}
-                      title={t('settings.mcp.sidebar.actions.addServerTitle')}
+                      onClick={openMcpSettings}
+                      aria-label={t('settings.piarium.mcp.config.title')}
+                      title={t('settings.piarium.mcp.config.title')}
                       style={{ touchAction: 'manipulation' }}
                     >
-                      <Icon name="add" className="h-5 w-5" />
+                      <Icon name="settings-3" className="h-5 w-5" />
                     </button>
                     <button
                       type="button"
                       className="flex size-8 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] disabled:opacity-60"
-                      onClick={refreshMcpOverlay}
-                      disabled={isMcpRefreshing}
-                      aria-label={t('mcpDropdown.actions.refreshAria')}
-                      title={t('mcpDropdown.actions.refreshAria')}
+                      onClick={reconnectMcpOverlay}
+                      disabled={isMcpReconnecting || !currentPiSessionId}
+                      aria-label={t('settings.piarium.mcp.actions.reconnect')}
+                      title={t('settings.piarium.mcp.actions.reconnect')}
                       style={{ touchAction: 'manipulation' }}
                     >
-                      <Icon name="refresh" className={cn('h-5 w-5', isMcpRefreshing && 'animate-spin')} />
+                      <Icon name="refresh" className={cn('h-5 w-5', isMcpReconnecting && 'animate-spin')} />
                     </button>
                     {closeButton}
                   </div>
