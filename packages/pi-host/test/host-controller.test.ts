@@ -53,6 +53,11 @@ describe("HostController", () => {
           description: "Exercise the Piarium extension UI bridge",
           handler: async (_args: string, ctx: any) => {
             const confirmed = await ctx.ui.confirm("Proceed?", "Confirm from test");
+            await ctx.ui.custom(() => ({
+              handleInput() {},
+              invalidate() {},
+              render(width: number) { return ["Custom extension panel", "width " + width]; },
+            }), { overlay: true, overlayOptions: { width: 72 } });
             ctx.ui.notify(confirmed ? "confirmed" : "cancelled", "info");
             ctx.ui.setEditorText("restored by extension");
             pi.appendEntry("piarium.test", { confirmed });
@@ -186,6 +191,23 @@ describe("HostController", () => {
         createRequest("confirm", "extension.ui.respond", {
           requestId: confirm.data.id,
           value: true,
+        }),
+      );
+      const customPanel = await transport.waitFor(
+        (entry) =>
+          isEvent(entry, "extension.ui.request")
+          && entry.event === "extension.ui.request"
+          && entry.data.method === "custom",
+      );
+      assert.ok(customPanel.kind === "event" && customPanel.event === "extension.ui.request");
+      assert.deepEqual(customPanel.data.payload, {
+        lines: ["Custom extension panel", "width 72"],
+        title: "Extension panel",
+      });
+      assert.ok(customPanel.data.id);
+      transport.receive(
+        createRequest("custom-panel", "extension.ui.respond", {
+          requestId: customPanel.data.id,
         }),
       );
       const executed = await transport.waitFor((entry) => isResponse(entry, "execute"));
@@ -327,6 +349,48 @@ describe("HostController", () => {
       );
 
       transport.receive(
+        createRequest("magic-config-get", "config.text.get", {
+          format: "jsonc",
+          path: ".cortexkit/magic-context.jsonc",
+          root: "project",
+        }),
+      );
+      const emptyMagicConfig = await transport.waitFor((entry) =>
+        isResponse(entry, "magic-config-get"),
+      );
+      assert.ok(emptyMagicConfig.kind === "response" && emptyMagicConfig.ok);
+      const magicSnapshot = emptyMagicConfig.result as {
+        content: string;
+        exists: boolean;
+        revision: string;
+      };
+      assert.equal(magicSnapshot.exists, false);
+
+      const magicContent = "{\n  // Kept for the plugin\n  \"todowrite\": { \"enabled\": true, },\n}\n";
+      transport.receive(
+        createRequest("magic-config-update", "config.text.update", {
+          content: magicContent,
+          expectedRevision: magicSnapshot.revision,
+          format: "jsonc",
+          path: ".cortexkit/magic-context.jsonc",
+          root: "project",
+        }),
+      );
+      const magicConfig = await transport.waitFor((entry) =>
+        isResponse(entry, "magic-config-update"),
+      );
+      assert.ok(magicConfig.kind === "response" && magicConfig.ok);
+      assert.equal(
+        await readFile(join(cwd, ".cortexkit", "magic-context.jsonc"), "utf8"),
+        magicContent,
+      );
+      assert.equal(
+        (await readFile(extensionLoadLog, "utf8")).trim().split("\n").length,
+        4,
+        "saving plugin-owned JSONC reloads extensions",
+      );
+
+      transport.receive(
         createRequest("config-path-escape", "config.document.get", {
           path: "../outside.json",
           scope: "global",
@@ -349,6 +413,19 @@ describe("HostController", () => {
       );
       assert.ok(reservedSettings.kind === "response" && !reservedSettings.ok);
       assert.equal(reservedSettings.error.code, "invalid_config_path");
+
+      transport.receive(
+        createRequest("config-text-path-escape", "config.text.get", {
+          format: "jsonc",
+          path: "../outside.jsonc",
+          root: "project",
+        }),
+      );
+      const escapedTextConfig = await transport.waitFor((entry) =>
+        isResponse(entry, "config-text-path-escape"),
+      );
+      assert.ok(escapedTextConfig.kind === "response" && !escapedTextConfig.ok);
+      assert.equal(escapedTextConfig.error.code, "invalid_config_path");
     } finally {
       await controller.dispose();
       await rm(root, { force: true, recursive: true });

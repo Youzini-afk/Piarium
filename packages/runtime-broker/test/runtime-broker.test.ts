@@ -117,6 +117,31 @@ test("broker owns catalog and per-session Pi workers", async () => {
       }),
       updatedWtfConfig,
     );
+    const emptyMagicConfig = await dispatchRuntimeRequest(broker, "config.text.get", {
+      cwd: workspace,
+      format: "jsonc",
+      path: ".cortexkit/magic-context.jsonc",
+      root: "project",
+    });
+    const magicContent = "{\n  // Owned by Magic Context\n  \"enabled\": true,\n}\n";
+    const updatedMagicConfig = await dispatchRuntimeRequest(broker, "config.text.update", {
+      content: magicContent,
+      cwd: workspace,
+      expectedRevision: emptyMagicConfig.revision,
+      format: "jsonc",
+      path: ".cortexkit/magic-context.jsonc",
+      root: "project",
+    });
+    assert.equal(updatedMagicConfig.content, magicContent);
+    assert.equal(
+      (await dispatchRuntimeRequest(broker, "config.text.get", {
+        cwd: workspace,
+        format: "jsonc",
+        path: ".cortexkit/magic-context.jsonc",
+        root: "project",
+      })).revision,
+      updatedMagicConfig.revision,
+    );
     assert.deepEqual(broker.activeSessionIds, []);
     let stopAuthPromptListener = () => {};
     const authPrompt = new Promise<{ requestId: string; sessionId: string }>((resolvePrompt) => {

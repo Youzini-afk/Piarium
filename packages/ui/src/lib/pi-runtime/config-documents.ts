@@ -1,6 +1,8 @@
 import type {
   JsonValue,
   PiConfigScope,
+  PiConfigTextFormat,
+  PiConfigTextRoot,
   RuntimeContextTarget,
 } from '@piarium/protocol';
 import { getPiRuntimeConnection } from './client';
@@ -26,5 +28,34 @@ export const updatePiConfigDocument = async (
     ...changes,
     path,
     scope,
+  });
+};
+
+export const getPiConfigTextDocument = async (
+  target: RuntimeContextTarget,
+  root: PiConfigTextRoot,
+  path: string,
+  format: PiConfigTextFormat,
+) => {
+  const { client } = await getPiRuntimeConnection();
+  return client.request('config.text.get', { ...target, format, path, root });
+};
+
+export const updatePiConfigTextDocument = async (
+  target: RuntimeContextTarget,
+  root: PiConfigTextRoot,
+  path: string,
+  format: PiConfigTextFormat,
+  content: string,
+  expectedRevision: string,
+) => {
+  const { client } = await getPiRuntimeConnection();
+  return client.request('config.text.update', {
+    ...target,
+    content,
+    expectedRevision,
+    format,
+    path,
+    root,
   });
 };

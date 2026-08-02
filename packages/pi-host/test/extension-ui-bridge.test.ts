@@ -64,4 +64,34 @@ describe("ExtensionUiBridge", () => {
       ["setEditorText", "notify"],
     );
   });
+
+  it("renders custom Pi components into a surface-owned read-only panel", async () => {
+    const { bridge, events } = createHarness();
+    let disposed = false;
+    const result = bridge.createContext().custom(() => ({
+      dispose: () => {
+        disposed = true;
+      },
+      handleInput: () => {},
+      invalidate: () => {},
+      render: (width) => [`width ${width}`, "\u001b[31mstatus\u001b[0m"],
+    }), {
+      overlay: true,
+      overlayOptions: { width: 78 },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const request = events.find(
+      (event) => event.event === "extension.ui.request" && event.data.method === "custom",
+    );
+    assert.ok(request && request.event === "extension.ui.request");
+    assert.ok(request.data.id);
+    assert.deepEqual(request.data.payload, {
+      lines: ["width 78", "status"],
+      title: "Extension panel",
+    });
+
+    assert.equal(bridge.respond({ requestId: request.data.id }), true);
+    assert.equal(await result, undefined);
+    assert.equal(disposed, true);
+  });
 });

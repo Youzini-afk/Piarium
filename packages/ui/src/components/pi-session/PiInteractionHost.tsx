@@ -167,7 +167,10 @@ export const PiInteractionHost: React.FC = () => {
           if (!open && dialog && !dialogBusy) void answerDialog(undefined, true);
         }}
       >
-        <DialogContent showCloseButton={false} className="max-w-lg gap-5">
+        <DialogContent
+          showCloseButton={false}
+          className={dialog?.method === 'custom' ? 'max-w-4xl gap-5' : 'max-w-lg gap-5'}
+        >
           <DialogHeader>
             <DialogTitle>{dialogTitle}</DialogTitle>
             {dialog?.method === 'confirm' && (
@@ -244,6 +247,19 @@ export const PiInteractionHost: React.FC = () => {
                 </Button>
               </DialogFooter>
             </form>
+          )}
+
+          {dialog?.method === 'custom' && (
+            <div className="space-y-4">
+              <pre className="max-h-[65vh] overflow-auto whitespace-pre font-mono typography-meta text-foreground">
+                {stringList(dialogPayload, 'lines').join('\n')}
+              </pre>
+              <DialogFooter>
+                <Button type="button" disabled={dialogBusy} onClick={() => void answerDialog()}>
+                  {t('gitView.history.actions.confirmButton')}
+                </Button>
+              </DialogFooter>
+            </div>
           )}
 
           {dialog?.method === 'confirm' && (

@@ -499,6 +499,32 @@ async function dispatchRuntimeRequestUnchecked(
         },
       );
     }
+    case "config.text.get": {
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "config.text.get",
+        {
+          format: requireEnum(input, "format", ["json", "jsonc"] as const),
+          path: requireString(input, "path"),
+          root: requireEnum(input, "root", ["agent", "project", "user-config"] as const),
+        },
+      );
+    }
+    case "config.text.update": {
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "config.text.update",
+        {
+          content: requireString(input, "content", { allowEmpty: true }),
+          expectedRevision: requireString(input, "expectedRevision"),
+          format: requireEnum(input, "format", ["json", "jsonc"] as const),
+          path: requireString(input, "path"),
+          root: requireEnum(input, "root", ["agent", "project", "user-config"] as const),
+        },
+      );
+    }
 
     case "settings.get": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.get", {});

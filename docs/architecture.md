@@ -39,11 +39,11 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v6 WebSocket/postMessage surface protocol
+    | authenticated Piarium v7 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v6 over a private child-process IPC pipe
+    | Piarium protocol v7 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -84,7 +84,7 @@ Piarium does not impose renderer payload, pending-request, or buffered-output ce
 deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
 `PIARIUM_RUNTIME_MAX_PENDING_REQUESTS`, and `PIARIUM_RUNTIME_MAX_BUFFERED_BYTES`.
 
-Protocol v6 does not forward Pi SDK objects verbatim. The host projects the append-only session
+Protocol v7 does not forward Pi SDK objects verbatim. The host projects the append-only session
 tree, messages, tool calls/results, streaming updates, compaction, retry state, model metadata, and
 provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,
 thinking/text signatures, callback functions, `AbortSignal`, and credential objects remain inside
@@ -155,12 +155,13 @@ no implicit pagination or truncation. The leaf and every entry's
 contains the complete append-only tree. Streaming `agent.event` messages contain one canonical
 message plus a compact typed delta instead of duplicating Pi's mutable `partial` object.
 
-Protocol v6 also exposes native `session.header`, `session.summary`, `session.tree`,
+Protocol v7 also exposes native `session.header`, `session.summary`, `session.tree`,
 `session.entry`, `session.stats`, `session.rename`, `session.archive`, `session.unarchive`,
 `session.delete`, and `thinking.select` operations. It adds surface-owned project trust responses,
 the full extension UI request/state bridge, locked global/project JSON changes for arbitrary
-extension settings, and path-contained extension-owned JSON documents without a package-name
-whitelist. Runtime snapshots carry Pi's actual streaming,
+extension settings, path-contained extension-owned JSON documents, and conflict-checked JSONC
+documents rooted in the agent directory, trusted project, or standard user configuration directory.
+Runtime snapshots carry Pi's actual streaming,
 compaction, retry, steering, follow-up, queue, model, and thinking state. Archive state is broker-owned
 atomic Piarium metadata; renames remain native append-only Pi session-info entries.
 
@@ -188,7 +189,8 @@ actions instead of guessing from runtime versions.
 
 The host implements Pi's standard extension UI primitives: select, confirm, input, editor,
 notifications, status, text widgets, title, and editor text. Requests with responses are abortable
-and tied to the originating worker. TUI-only custom components receive a clear unsupported fallback.
+and tied to the originating worker. TUI-only custom components are rendered by their own extension
+into a surface-owned read-only panel, so Piarium does not copy the component's private view model.
 
 Commands, custom session entries, tool details, and extension errors have generic renderers so an
 unknown package remains usable before a first-class adapter exists.
@@ -197,8 +199,9 @@ unknown package remains usable before a first-class adapter exists.
 
 - **pi-subagents:** task tree and controls from its event bus; lifecycle artifacts for restart and
   cross-process reconciliation.
-- **Magic Context:** configuration, memories, compartments, historian/dreamer/sidekick status, and
-  diagnostics from its native Pi plugin and shared database.
+- **Magic Context:** plugin-owned user/project JSONC configuration and status rendered through its
+  native Pi component/custom entries; future memory, compartment, historian/dreamer/sidekick, and
+  diagnostic views continue to read its public plugin/database contracts rather than copied state.
 - **pi-mcp-adapter:** server status, tools/resources/prompts, OAuth, and config provenance.
 - **pi-web-access:** provider routing, safe fetch settings, custom result entries, activity, and
   optional Curator flow.

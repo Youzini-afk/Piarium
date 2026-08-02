@@ -1,4 +1,5 @@
 import { lstat, readdir, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   type AgentSession,
@@ -26,6 +27,9 @@ import type {
   PackageDescriptor,
   PiConfigDocumentSnapshot,
   PiConfigScope,
+  PiConfigTextDocumentSnapshot,
+  PiConfigTextFormat,
+  PiConfigTextRoot,
   PiSettingsSnapshot,
   ProviderConfigDeleteScope,
   ProviderConfigDetails,
@@ -50,6 +54,7 @@ import type {
   ThinkingLevel,
 } from "@piarium/protocol";
 import { HostError } from "./errors.js";
+import { ConfigTextFileEditor } from "./config-text-file-editor.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
@@ -213,12 +218,20 @@ function isMissingPathError(error: unknown): boolean {
 async function resolveConfigDocumentPath(
   base: string,
   requestedPath: string,
+  options: {
+    extensions?: readonly string[];
+    reservedPaths?: readonly string[];
+  } = {},
 ): Promise<{ path: string; relativePath: string }> {
   if (requestedPath.length === 0 || requestedPath.includes("\0")) {
     throw new HostError("invalid_config_path", "Configuration path must be non-empty");
   }
-  if (extname(requestedPath).toLowerCase() !== ".json") {
-    throw new HostError("invalid_config_path", "Configuration path must name a JSON file");
+  const extensions = options.extensions ?? [".json"];
+  if (!extensions.includes(extname(requestedPath).toLowerCase())) {
+    throw new HostError(
+      "invalid_config_path",
+      `Configuration path must use one of: ${extensions.join(", ")}`,
+    );
   }
   const root = resolve(base);
   const path = resolve(root, requestedPath);
@@ -231,14 +244,15 @@ async function resolveConfigDocumentPath(
   ) {
     throw new HostError(
       "invalid_config_path",
-      "Configuration path must stay inside its Pi configuration directory",
+      "Configuration path must stay inside its configuration root",
     );
   }
   const normalizedPath = relativePath.replaceAll("\\", "/");
-  if (normalizedPath.toLowerCase() === "settings.json") {
+  const reservedPaths = options.reservedPaths ?? ["settings.json"];
+  if (reservedPaths.some((entry) => normalizedPath.toLowerCase() === entry.toLowerCase())) {
     throw new HostError(
       "invalid_config_path",
-      "Use the scoped Pi settings API for settings.json",
+      "Configuration path is owned by a dedicated Piarium settings API",
     );
   }
   let current = root;
@@ -257,6 +271,14 @@ async function resolveConfigDocumentPath(
     }
   }
   return { path, relativePath: normalizedPath };
+}
+
+function userConfigRoot(): string {
+  const configured = process.env.XDG_CONFIG_HOME?.trim();
+  if (configured && isAbsolute(configured)) return resolve(configured);
+  const configuredHome = process.env.HOME?.trim();
+  const home = configuredHome && isAbsolute(configuredHome) ? configuredHome : homedir();
+  return join(home, ".config");
 }
 
 export class SessionHost {
@@ -988,6 +1010,90 @@ export class SessionHost {
       path: location.relativePath,
       projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
       scope,
+    };
+  }
+
+  async getConfigTextDocument(
+    root: PiConfigTextRoot,
+    format: PiConfigTextFormat,
+    requestedPath: string,
+  ): Promise<PiConfigTextDocumentSnapshot> {
+    const settings = this.runtime.services.settingsManager;
+    if (root === "project" && !settings.isProjectTrusted()) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to read project configuration",
+      );
+    }
+    const base = root === "agent"
+      ? this.#agentDir
+      : root === "project"
+        ? this.runtime.cwd
+        : userConfigRoot();
+    const location = await resolveConfigDocumentPath(base, requestedPath, {
+      extensions: format === "json" ? [".json"] : [".jsonc", ".json"],
+      reservedPaths: root === "agent"
+        ? ["settings.json", "models.json"]
+        : root === "project"
+          ? [".pi/settings.json", ".pi/models.json"]
+          : [],
+    });
+    const snapshot = await new ConfigTextFileEditor(location.path, format).read();
+    return {
+      ...snapshot,
+      format,
+      path: location.relativePath,
+      projectTrusted: settings.isProjectTrusted(),
+      root,
+    };
+  }
+
+  async updateConfigTextDocument(
+    root: PiConfigTextRoot,
+    format: PiConfigTextFormat,
+    requestedPath: string,
+    content: string,
+    expectedRevision: string,
+  ): Promise<PiConfigTextDocumentSnapshot> {
+    const settings = this.runtime.services.settingsManager;
+    if (root === "project" && !settings.isProjectTrusted()) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to write project configuration",
+      );
+    }
+    const base = root === "agent"
+      ? this.#agentDir
+      : root === "project"
+        ? this.runtime.cwd
+        : userConfigRoot();
+    const location = await resolveConfigDocumentPath(base, requestedPath, {
+      extensions: format === "json" ? [".json"] : [".jsonc", ".json"],
+      reservedPaths: root === "agent"
+        ? ["settings.json", "models.json"]
+        : root === "project"
+          ? [".pi/settings.json", ".pi/models.json"]
+          : [],
+    });
+    await settings.flush();
+    const pendingErrors = settings.drainErrors();
+    if (pendingErrors.length > 0) {
+      throw new HostError(
+        "settings_write_failed",
+        pendingErrors.map((entry) => entry.error.message).join("; "),
+      );
+    }
+    const snapshot = await new ConfigTextFileEditor(location.path, format).update(
+      content,
+      expectedRevision,
+    );
+    await this.session.reload();
+    return {
+      ...snapshot,
+      format,
+      path: location.relativePath,
+      projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
+      root,
     };
   }
 

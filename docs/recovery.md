@@ -83,7 +83,9 @@ provider; repair behavior stays with `pi-wtf`.
 The configuration editor writes `workspaceHistory` through Pi's global/project `settings.json`
 documents and edits `pi-wtf`'s global `wtf.json` as an extension-owned JSON document. Piarium treats
 both as unrestricted JSON objects, applies only changed top-level keys under an atomic file lock, and
-reloads the extension instance after saving. It does not duplicate either plugin's schema, defaults,
+reloads the extension instance after saving. Magic Context remains similarly independent: its user
+and project `magic-context.jsonc` files retain comments and trailing commas and are saved atomically
+with revision conflict detection. Piarium does not duplicate any plugin's schema, defaults,
 validation, or migrations, so new fields remain owned by the updated plugin.
 
 The Sessions settings page persists that policy as `conversation`, `both`, or `ask` and manages the

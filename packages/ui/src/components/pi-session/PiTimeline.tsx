@@ -14,6 +14,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { PiToolExecutionState } from '@/stores/usePiSessionStore';
+import {
+  parseExtensionStatus,
+  parseSubagentNotifications,
+  parseSubagentRun,
+  piContentText,
+  type ExtensionStatusPresentation,
+  type SubagentNotificationPresentation,
+  type SubagentRunPresentation,
+  type SubagentStatus,
+} from './extensionPresentation';
 
 interface PiTimelineProps {
   entries: PiSessionEntry[];
@@ -33,6 +43,23 @@ const jsonText = (value: JsonValue): string => {
   if (typeof value === 'string') return value;
   return JSON.stringify(value, null, 2);
 };
+
+const formatCount = (value: number): string => new Intl.NumberFormat().format(value);
+
+const formatDuration = (durationMs: number): string => {
+  if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
+  const seconds = durationMs / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+};
+
+const formatToolEnd = (endMs: number): string => (
+  endMs > 100_000_000_000
+    ? new Date(endMs).toLocaleTimeString()
+    : `${formatDuration(endMs)} elapsed`
+);
 
 const PiUserContentView: React.FC<{
   content: string | PiUserContent[];
@@ -73,24 +100,212 @@ const PiUserContentView: React.FC<{
   );
 };
 
+const RawJsonDetails: React.FC<{
+  label?: string;
+  value: JsonValue;
+}> = ({ label = 'raw details', value }) => (
+  <details className="group/details">
+    <summary className="cursor-pointer select-none typography-micro text-muted-foreground hover:text-foreground">
+      {label}
+    </summary>
+    <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">
+      {jsonText(value)}
+    </pre>
+  </details>
+);
+
+const statusIcon = (status: SubagentStatus): React.ComponentProps<typeof Icon>['name'] => {
+  if (status === 'running') return 'loader-4';
+  if (status === 'completed') return 'check';
+  if (status === 'failed' || status === 'stopped') return 'error-warning';
+  if (status === 'paused') return 'pause';
+  if (status === 'detached') return 'share-2';
+  return 'time';
+};
+
+const statusClass = (status: SubagentStatus): string => {
+  if (status === 'running') return 'text-primary';
+  if (status === 'completed') return 'text-[var(--status-success)]';
+  if (status === 'failed' || status === 'stopped') return 'text-[var(--status-error)]';
+  if (status === 'paused' || status === 'detached') return 'text-[var(--status-warning)]';
+  return 'text-muted-foreground';
+};
+
+const SubagentRunView: React.FC<{
+  messageId: string;
+  presentation: SubagentRunPresentation;
+}> = ({ messageId, presentation }) => (
+  <div className="space-y-2 rounded-lg border border-border/60 bg-background/35 p-2.5">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 typography-meta text-muted-foreground">
+      <span className="font-medium text-foreground">Agent Task</span>
+      <span>{presentation.mode}</span>
+      <span>{presentation.agents.length} {presentation.agents.length === 1 ? 'agent' : 'agents'}</span>
+      {presentation.toolCount !== undefined && <span>{formatCount(presentation.toolCount)} tools</span>}
+      {presentation.tokens !== undefined && <span>{formatCount(presentation.tokens)} tokens</span>}
+      {presentation.durationMs !== undefined && <span>{formatDuration(presentation.durationMs)}</span>}
+      {presentation.runId && <code className="break-all typography-micro">{presentation.runId}</code>}
+    </div>
+    <div className="space-y-2">
+      {presentation.agents.map((agent) => (
+        <details
+          key={`${agent.index}:${agent.agent}`}
+          className="group/agent rounded-md border border-border/60 bg-muted/15"
+          open={agent.status === 'running' || agent.status === 'failed'}
+        >
+          <summary className="flex cursor-pointer list-none items-start gap-2 px-2.5 py-2 [&::-webkit-details-marker]:hidden">
+            <Icon
+              name={statusIcon(agent.status)}
+              className={cn('mt-0.5 size-3.5 shrink-0', statusClass(agent.status), agent.status === 'running' && 'animate-spin')}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-mono typography-ui-label text-foreground">{agent.agent}</span>
+                <span className={cn('typography-micro', statusClass(agent.status))}>{agent.status}</span>
+                {agent.model && <span className="typography-micro text-muted-foreground">{agent.model}{agent.thinking ? ` · ${agent.thinking}` : ''}</span>}
+              </div>
+              {agent.task && <p className="mt-0.5 break-words typography-meta text-muted-foreground">{agent.task}</p>}
+            </div>
+            <Icon name="arrow-down-s" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform group-open/agent:rotate-180" />
+          </summary>
+          <div className="space-y-2 border-t border-border/60 px-2.5 py-2">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 typography-micro text-muted-foreground">
+              {agent.toolCount !== undefined && <span>{formatCount(agent.toolCount)} tools</span>}
+              {agent.turnCount !== undefined && <span>{formatCount(agent.turnCount)} turns</span>}
+              {agent.tokens !== undefined && <span>{formatCount(agent.tokens)} tokens</span>}
+              {agent.inputTokens !== undefined && <span>{formatCount(agent.inputTokens)} in</span>}
+              {agent.outputTokens !== undefined && <span>{formatCount(agent.outputTokens)} out</span>}
+              {agent.durationMs !== undefined && <span>{formatDuration(agent.durationMs)}</span>}
+            </div>
+            {agent.currentTool && (
+              <div className="rounded-md bg-primary/5 px-2 py-1.5 typography-meta text-foreground">
+                <span className="text-muted-foreground">Current tool · </span>
+                <code>{agent.currentTool}</code>
+                {agent.currentToolArgs && <pre className="mt-1 whitespace-pre-wrap break-words font-mono typography-micro">{agent.currentToolArgs}</pre>}
+              </div>
+            )}
+            {agent.currentPath && <p className="break-all font-mono typography-micro text-muted-foreground">{agent.currentPath}</p>}
+            {agent.skills.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {agent.skills.map((skill) => <code key={skill} className="rounded bg-muted px-1.5 py-0.5 typography-micro">{skill}</code>)}
+              </div>
+            )}
+            {agent.recentTools.length > 0 && (
+              <details>
+                <summary className="cursor-pointer typography-micro text-muted-foreground">Recent tools ({agent.recentTools.length})</summary>
+                <div className="mt-1 space-y-1">
+                  {agent.recentTools.map((tool, index) => (
+                    <div key={`${tool.tool}:${index}`} className="rounded bg-background/70 px-2 py-1 font-mono typography-micro">
+                      <span>{tool.tool}</span>
+                      {tool.endMs !== undefined && <span className="ml-2 text-muted-foreground">{formatToolEnd(tool.endMs)}</span>}
+                      {tool.args && <pre className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{tool.args}</pre>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            {agent.recentOutput.length > 0 && (
+              <details open={agent.status === 'running'}>
+                <summary className="cursor-pointer typography-micro text-muted-foreground">Recent output</summary>
+                <pre className="mt-1 whitespace-pre-wrap break-words rounded bg-background/70 p-2 font-mono typography-micro text-foreground">{agent.recentOutput.join('\n')}</pre>
+              </details>
+            )}
+            {agent.finalOutput && (
+              <div className="rounded-md bg-background/70 px-2 py-1.5">
+                <MarkdownRenderer content={agent.finalOutput} messageId={`${messageId}:subagent:${agent.index}:output`} variant="tool" enableFileReferences />
+              </div>
+            )}
+            {agent.error && <pre className="whitespace-pre-wrap break-words rounded-md bg-[var(--status-error)]/10 p-2 font-mono typography-micro text-[var(--status-error)]">{agent.error}</pre>}
+            {agent.sessionFile && <p className="break-all font-mono typography-micro text-muted-foreground">Session · {agent.sessionFile}</p>}
+          </div>
+        </details>
+      ))}
+    </div>
+    <RawJsonDetails value={presentation.raw} />
+  </div>
+);
+
+const SubagentNotificationsView: React.FC<{
+  content: string | PiUserContent[];
+  details?: JsonValue;
+  messageId: string;
+  notifications: SubagentNotificationPresentation[];
+}> = ({ content, details, messageId, notifications }) => (
+  <article className="mr-auto w-full max-w-[52rem] space-y-2 rounded-lg border border-border/60 bg-muted/15 px-3 py-2" style={{ contentVisibility: 'auto' }}>
+    <div className="flex items-center gap-2 typography-ui-label text-foreground">
+      <Icon name="ai-agent" className="size-3.5" />
+      <span>Background Agent Task</span>
+      {notifications.length > 1 && <span className="typography-micro text-muted-foreground">{notifications.length} completed</span>}
+    </div>
+    {notifications.map((notification, index) => (
+      <div key={`${notification.agent}:${index}`} className="rounded-md border border-border/50 bg-background/45 px-2.5 py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Icon name={statusIcon(notification.status)} className={cn('size-3.5', statusClass(notification.status))} />
+          <span className="font-mono typography-ui-label text-foreground">{notification.agent}</span>
+          {notification.taskInfo && <span className="typography-micro text-muted-foreground">{notification.taskInfo}</span>}
+          <span className={cn('typography-micro', statusClass(notification.status))}>{notification.status}</span>
+          {notification.durationMs !== undefined && <span className="typography-micro text-muted-foreground">{formatDuration(notification.durationMs)}</span>}
+        </div>
+        <div className="mt-1.5">
+          <MarkdownRenderer content={notification.resultPreview} messageId={`${messageId}:notification:${index}`} variant="tool" enableFileReferences />
+        </div>
+        {notification.handoffPath && <p className="mt-1 break-all font-mono typography-micro text-muted-foreground">Handoff · {notification.handoffPath}</p>}
+        {notification.sessionValue && <p className="mt-1 break-all font-mono typography-micro text-muted-foreground">{notification.sessionLabel ?? 'Session'} · {notification.sessionValue}</p>}
+      </div>
+    ))}
+    <details>
+      <summary className="cursor-pointer typography-micro text-muted-foreground">raw message</summary>
+      <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">{piContentText(content)}</pre>
+      {details !== undefined && <div className="mt-2"><RawJsonDetails value={details} /></div>}
+    </details>
+  </article>
+);
+
+const ExtensionStatusView: React.FC<{
+  messageId: string;
+  status: ExtensionStatusPresentation;
+}> = ({ messageId, status }) => (
+  <article className={cn(
+    'mx-auto w-full max-w-[52rem] rounded-lg border bg-muted/15 px-3 py-2',
+    status.level === 'error' && 'border-[var(--status-error)]/40',
+    status.level === 'warning' && 'border-[var(--status-warning)]/40',
+    status.level === 'success' && 'border-[var(--status-success)]/40',
+    status.level === 'info' && 'border-border/60',
+  )} style={{ contentVisibility: 'auto' }}>
+    <div className="mb-1 flex items-center gap-2 typography-ui-label text-foreground">
+      <Icon
+        name={status.level === 'error' || status.level === 'warning' ? 'error-warning' : status.level === 'success' ? 'check' : 'information'}
+        className={cn(
+          'size-3.5',
+          status.level === 'error' && 'text-[var(--status-error)]',
+          status.level === 'warning' && 'text-[var(--status-warning)]',
+          status.level === 'success' && 'text-[var(--status-success)]',
+        )}
+      />
+      <span>{status.title}</span>
+    </div>
+    <MarkdownRenderer content={status.text} messageId={messageId} variant="tool" enableFileReferences />
+    {status.details !== undefined && <div className="mt-2"><RawJsonDetails value={status.details} /></div>}
+  </article>
+);
+
 const ToolResultContent: React.FC<{
   messageId: string;
   result: PiToolResultMessage;
-}> = ({ messageId, result }) => (
-  <div className="space-y-2">
-    <PiUserContentView content={result.content} messageId={messageId} variant="tool" />
-    {result.details !== undefined && (
-      <details className="group/details">
-        <summary className="cursor-pointer select-none typography-micro text-muted-foreground hover:text-foreground">
-          details
-        </summary>
-        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">
-          {jsonText(result.details)}
-        </pre>
-      </details>
-    )}
-  </div>
-);
+}> = ({ messageId, result }) => {
+  const subagentRun = (result.toolName === 'subagent' || result.toolName === 'subagent_wait') && result.details !== undefined
+    ? parseSubagentRun(result.details)
+    : undefined;
+  return (
+    <div className="space-y-2">
+      <PiUserContentView content={result.content} messageId={messageId} variant="tool" />
+      {subagentRun ? (
+        <SubagentRunView messageId={messageId} presentation={subagentRun} />
+      ) : result.details !== undefined ? (
+        <RawJsonDetails label="details" value={result.details} />
+      ) : null}
+    </div>
+  );
+};
 
 const PiToolCard: React.FC<{
   call: PiToolCall;
@@ -101,6 +316,9 @@ const PiToolCard: React.FC<{
     ? (result.isError ? 'error' : 'success')
     : execution?.status ?? 'running';
   const transientOutput = execution?.result ?? execution?.partialResult;
+  const transientSubagentRun = (call.name === 'subagent' || call.name === 'subagent_wait') && transientOutput !== undefined
+    ? parseSubagentRun(transientOutput)
+    : undefined;
   return (
     <details
       className={cn(
@@ -133,6 +351,8 @@ const PiToolCard: React.FC<{
         </div>
         {result ? (
           <ToolResultContent messageId={`tool-result:${call.id}`} result={result} />
+        ) : transientSubagentRun ? (
+          <SubagentRunView messageId={`tool-live:${call.id}`} presentation={transientSubagentRun} />
         ) : transientOutput !== undefined ? (
           <div>
             <p className="mb-1 typography-micro font-medium text-muted-foreground">output</p>
@@ -355,10 +575,39 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
               );
             }
             if (message.role === 'custom') {
+              const notifications = message.customType === 'subagent-notify'
+                ? parseSubagentNotifications(piContentText(message.content), message.details)
+                : undefined;
+              if (notifications) {
+                return (
+                  <SubagentNotificationsView
+                    key={entry.id}
+                    content={message.content}
+                    details={message.details}
+                    messageId={entry.id}
+                    notifications={notifications}
+                  />
+                );
+              }
+              const subagentRun = message.customType === 'subagent-slash-result' && message.details !== undefined
+                ? parseSubagentRun(message.details)
+                : undefined;
+              if (subagentRun) {
+                return (
+                  <article key={entry.id} className="mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
+                    <SubagentRunView messageId={entry.id} presentation={subagentRun} />
+                  </article>
+                );
+              }
+              const extensionStatus = parseExtensionStatus(message.customType, message.details);
+              if (extensionStatus) {
+                return <ExtensionStatusView key={entry.id} messageId={entry.id} status={extensionStatus} />;
+              }
               return (
                 <MetaEntry key={entry.id} icon="plug-2">
                   <strong>{message.customType}</strong>
                   <PiUserContentView content={message.content} messageId={entry.id} />
+                  {message.details !== undefined && <RawJsonDetails value={message.details} />}
                 </MetaEntry>
               );
             }
@@ -382,10 +631,39 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
           }
 
           if (entry.type === 'custom_message') {
+            const notifications = entry.customType === 'subagent-notify'
+              ? parseSubagentNotifications(piContentText(entry.content), entry.details)
+              : undefined;
+            if (notifications) {
+              return (
+                <SubagentNotificationsView
+                  key={entry.id}
+                  content={entry.content}
+                  details={entry.details}
+                  messageId={entry.id}
+                  notifications={notifications}
+                />
+              );
+            }
+            const subagentRun = entry.customType === 'subagent-slash-result' && entry.details !== undefined
+              ? parseSubagentRun(entry.details)
+              : undefined;
+            if (subagentRun) {
+              return (
+                <article key={entry.id} className="mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
+                  <SubagentRunView messageId={entry.id} presentation={subagentRun} />
+                </article>
+              );
+            }
+            const extensionStatus = parseExtensionStatus(entry.customType, entry.details);
+            if (extensionStatus) {
+              return <ExtensionStatusView key={entry.id} messageId={entry.id} status={extensionStatus} />;
+            }
             return (
               <MetaEntry key={entry.id} icon="plug-2">
                 <strong>{entry.customType}</strong>
                 <PiUserContentView content={entry.content} messageId={entry.id} />
+                {entry.details !== undefined && <RawJsonDetails value={entry.details} />}
               </MetaEntry>
             );
           }
@@ -413,6 +691,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             return <MetaEntry key={entry.id} icon="target">{entry.label ?? 'Label'} → {entry.targetId}</MetaEntry>;
           }
           if (entry.type === 'custom') {
+            const extensionStatus = parseExtensionStatus(entry.customType, entry.data);
+            if (extensionStatus) {
+              return <ExtensionStatusView key={entry.id} messageId={entry.id} status={extensionStatus} />;
+            }
             return (
               <details key={entry.id} className="mx-auto max-w-full rounded-md bg-muted/30 px-3 py-1.5 typography-meta text-muted-foreground">
                 <summary className="cursor-pointer select-none">Extension state · {entry.customType}</summary>

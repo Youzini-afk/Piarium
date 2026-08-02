@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
 import type {
   ExtensionUIContext,
   ExtensionUIDialogOptions,
@@ -58,6 +59,40 @@ export class ExtensionUiBridge {
   }
 
   createContext(): ExtensionUIContext {
+    const custom: ExtensionUIContext["custom"] = async (factory, options) => {
+      const inertUi = new Proxy({}, {
+        get: () => () => {},
+      });
+      const resolvedOverlayOptions = typeof options?.overlayOptions === "function"
+        ? options.overlayOptions()
+        : options?.overlayOptions;
+      const requestedWidth = resolvedOverlayOptions?.width;
+      const width = typeof requestedWidth === "number" && Number.isFinite(requestedWidth) && requestedWidth > 0
+        ? Math.round(requestedWidth)
+        : 100;
+      const component = await factory(
+        inertUi as never,
+        neutralTheme,
+        inertUi as never,
+        () => {},
+      );
+      try {
+        const lines = component.render(width).map((line) => stripVTControlCharacters(line));
+        await this.request(
+          "custom",
+          {
+            lines,
+            title: "Extension panel",
+          },
+          undefined,
+          undefined,
+        );
+        return undefined as never;
+      } finally {
+        component.dispose?.();
+      }
+    };
+
     return {
       select: async (title, options, dialogOptions) => {
         const value = await this.request("select", { options, title }, dialogOptions, undefined);
@@ -107,7 +142,7 @@ export class ExtensionUiBridge {
       setFooter: () => {},
       setHeader: () => {},
       setTitle: (title) => this.fire("setTitle", { title }),
-      custom: async () => undefined as never,
+      custom,
       pasteToEditor: (text) => {
         this.#editorText = text;
         this.fire("setEditorText", { text });
@@ -139,7 +174,7 @@ export class ExtensionUiBridge {
   }
 
   async request(
-    method: Extract<ExtensionUiMethod, "select" | "confirm" | "input" | "editor">,
+    method: Extract<ExtensionUiMethod, "select" | "confirm" | "input" | "editor" | "custom">,
     payload: JsonValue,
     options?: ExtensionUIDialogOptions,
     fallback?: JsonValue,

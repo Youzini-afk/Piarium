@@ -486,6 +486,38 @@ export class HostController {
           readStringList(params, "remove"),
         );
       }
+      case "config.text.get": {
+        const root = readString(params, "root");
+        const format = readString(params, "format");
+        if (root !== "agent" && root !== "project" && root !== "user-config") {
+          throw new HostError("invalid_params", "Unknown configuration root");
+        }
+        if (format !== "json" && format !== "jsonc") {
+          throw new HostError("invalid_params", "Unknown configuration format");
+        }
+        return this.#sessionHost.getConfigTextDocument(
+          root,
+          format,
+          readString(params, "path"),
+        );
+      }
+      case "config.text.update": {
+        const root = readString(params, "root");
+        const format = readString(params, "format");
+        if (root !== "agent" && root !== "project" && root !== "user-config") {
+          throw new HostError("invalid_params", "Unknown configuration root");
+        }
+        if (format !== "json" && format !== "jsonc") {
+          throw new HostError("invalid_params", "Unknown configuration format");
+        }
+        return this.#sessionHost.updateConfigTextDocument(
+          root,
+          format,
+          readString(params, "path"),
+          readString(params, "content", { allowEmpty: true }),
+          readString(params, "expectedRevision"),
+        );
+      }
       case "settings.get":
         return this.#sessionHost.getSettings();
       case "settings.update": {

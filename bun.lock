@@ -232,6 +232,7 @@
         "heic2any": "^0.0.4",
         "html-to-image": "^1.11.13",
         "http-proxy-middleware": "^3.0.5",
+        "jsonc-parser": "^3.3.1",
         "katex": "^0.17.0",
         "marked": "^17.0.3",
         "morphdom": "^2.7.7",

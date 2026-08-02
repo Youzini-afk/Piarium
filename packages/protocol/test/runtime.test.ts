@@ -30,6 +30,8 @@ describe("surface runtime protocol", () => {
     );
     assert.equal(isRuntimeMethod("config.document.get"), true);
     assert.equal(isRuntimeMethod("config.document.update"), true);
+    assert.equal(isRuntimeMethod("config.text.get"), true);
+    assert.equal(isRuntimeMethod("config.text.update"), true);
     assert.equal(isRuntimeMethod("session.tree"), true);
     assert.equal(isRuntimeMethod("session.archive"), true);
     assert.equal(isRuntimeMethod("session.unarchive"), true);

@@ -8,6 +8,9 @@ import type {
   PackageDescriptor,
   PiConfigDocumentSnapshot,
   PiConfigScope,
+  PiConfigTextDocumentSnapshot,
+  PiConfigTextFormat,
+  PiConfigTextRoot,
   PiSettingsSnapshot,
   ProviderAuthType,
   RecoveryMode,
@@ -43,6 +46,20 @@ export interface HostMethodMap {
       set: { [key: string]: JsonValue };
     };
     result: PiConfigDocumentSnapshot;
+  };
+  "config.text.get": {
+    params: { format: PiConfigTextFormat; path: string; root: PiConfigTextRoot };
+    result: PiConfigTextDocumentSnapshot;
+  };
+  "config.text.update": {
+    params: {
+      content: string;
+      expectedRevision: string;
+      format: PiConfigTextFormat;
+      path: string;
+      root: PiConfigTextRoot;
+    };
+    result: PiConfigTextDocumentSnapshot;
   };
   "catalog.context.open": {
     params: { cwd: string };

@@ -21,7 +21,7 @@ export interface PiProjectTrustPrompt extends ProjectTrustRequest {
 
 export interface PiExtensionDialog extends ExtensionUiRequest {
   id: string;
-  method: Extract<ExtensionUiMethod, 'select' | 'confirm' | 'input' | 'editor'>;
+  method: Extract<ExtensionUiMethod, 'select' | 'confirm' | 'input' | 'editor' | 'custom'>;
 }
 
 export interface PiExtensionNotice {
@@ -100,6 +100,7 @@ const INTERACTIVE_METHODS = new Set<ExtensionUiMethod>([
   'confirm',
   'input',
   'editor',
+  'custom',
 ]);
 
 const errorMessage = (error: unknown): string => (

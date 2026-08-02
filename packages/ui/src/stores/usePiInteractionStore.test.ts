@@ -140,6 +140,14 @@ describe('Pi interaction state', () => {
       sessionId: 'session-a',
     }, source, 3);
     expect(store.getState().dialogs).toEqual([]);
+
+    runtime.event('extension.ui.request', {
+      id: 'custom-1',
+      method: 'custom',
+      payload: { lines: ['Extension output'], title: 'Extension panel' },
+      sessionId: 'session-a',
+    }, source, 4);
+    expect(store.getState().dialogs.map((candidate) => candidate.method)).toEqual(['custom']);
   });
 
   test('projects persistent extension chrome and editor text without plugin whitelists', async () => {

@@ -46,6 +46,8 @@ type DirectRuntimeMethod =
 type SessionScopedRuntimeMethod =
   | "config.document.get"
   | "config.document.update"
+  | "config.text.get"
+  | "config.text.update"
   | "model.list"
   | "package.install"
   | "package.list"
@@ -135,6 +137,8 @@ export const RUNTIME_METHODS = [
   "command.list",
   "config.document.get",
   "config.document.update",
+  "config.text.get",
+  "config.text.update",
   "extension.ui.respond",
   "host.handshake",
   "model.list",
