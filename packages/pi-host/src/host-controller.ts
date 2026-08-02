@@ -358,6 +358,7 @@ export class HostController {
           readString(params, "sessionId"),
           readString(params, "text", { allowEmpty: true }),
           readImages(params),
+          optionalString(params, "instructions"),
         );
       case "agent.steer":
         return {
@@ -365,6 +366,7 @@ export class HostController {
             readString(params, "sessionId"),
             readString(params, "text", { allowEmpty: true }),
             readImages(params),
+            optionalString(params, "instructions"),
           ),
         };
       case "agent.followUp":
@@ -373,6 +375,7 @@ export class HostController {
             readString(params, "sessionId"),
             readString(params, "text", { allowEmpty: true }),
             readImages(params),
+            optionalString(params, "instructions"),
           ),
         };
       case "agent.abort":

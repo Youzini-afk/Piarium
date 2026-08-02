@@ -84,15 +84,15 @@ export interface HostMethodMap {
     result: { aborted: boolean };
   };
   "agent.followUp": {
-    params: { images?: ImageAttachment[]; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "agent.prompt": {
-    params: { images?: ImageAttachment[]; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "agent.steer": {
-    params: { images?: ImageAttachment[]; sessionId: string; text: string };
+    params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
   };
   "command.execute": {

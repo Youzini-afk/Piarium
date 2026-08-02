@@ -22,11 +22,20 @@ describe("surface runtime protocol", () => {
       scope: "global",
       set: { words: ["oops"] },
     });
+    const promptRequest = createRuntimeRequest("req-3", "agent.prompt", {
+      instructions: "hidden context",
+      sessionId: "session-1",
+      text: "visible prompt",
+    });
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(request)), request);
     assert.deepEqual(
       decodeRuntimeEnvelope(encodeRuntimeEnvelope(configRequest)),
       configRequest,
+    );
+    assert.deepEqual(
+      decodeRuntimeEnvelope(encodeRuntimeEnvelope(promptRequest)),
+      promptRequest,
     );
     assert.equal(isRuntimeMethod("config.document.get"), true);
     assert.equal(isRuntimeMethod("agentProvider.action"), true);

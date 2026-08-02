@@ -336,8 +336,10 @@ async function dispatchRuntimeRequestUnchecked(
     case "agent.followUp": {
       const sessionId = requireString(input, "sessionId");
       const images = optionalImages(input);
+      const instructions = optionalString(input, "instructions");
       return broker.requestForSession(sessionId, method, {
         ...(images === undefined ? {} : { images }),
+        ...(instructions === undefined ? {} : { instructions }),
         sessionId,
         text: requireString(input, "text", { allowEmpty: true }),
       });

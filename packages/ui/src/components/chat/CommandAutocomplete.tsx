@@ -20,7 +20,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { commandMatchesSearch } from './commandAutocompleteItems';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
-type CommandSource = 'extension' | 'prompt' | 'skill' | 'unknown';
+type CommandSource = 'extension' | 'piarium' | 'prompt' | 'skill' | 'unknown';
 
 export interface CommandInfo {
   description?: string;
@@ -45,6 +45,7 @@ const SOURCE_BADGE_CLASS = cn(
 );
 
 interface CommandAutocompleteProps {
+  additionalCommands?: readonly CommandInfo[];
   cwd?: string | null;
   onClose(): void;
   onCommandSelect(command: CommandInfo): void;
@@ -54,11 +55,12 @@ interface CommandAutocompleteProps {
 }
 
 const normalizeSource = (source: string | undefined): CommandSource => {
-  if (source === 'extension' || source === 'prompt' || source === 'skill') return source;
+  if (source === 'extension' || source === 'piarium' || source === 'prompt' || source === 'skill') return source;
   return 'unknown';
 };
 
 export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, CommandAutocompleteProps>(({
+  additionalCommands = [],
   cwd,
   onCommandSelect,
   onClose,
@@ -137,10 +139,20 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
   }, [targetCwd, targetSessionId]);
 
+  const mergedCatalog = React.useMemo(() => {
+    const seen = new Set<string>();
+    return [...additionalCommands, ...catalog].filter((command) => {
+      const key = command.name.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [additionalCommands, catalog]);
+
   const commands = React.useMemo(() => {
     const filtered = searchQuery
-      ? catalog.filter((command) => commandMatchesSearch(command, searchQuery))
-      : [...catalog];
+      ? mergedCatalog.filter((command) => commandMatchesSearch(command, searchQuery))
+      : [...mergedCatalog];
     const normalizedQuery = searchQuery.toLocaleLowerCase();
     return filtered.sort((left, right) => {
       const leftStarts = left.name.toLocaleLowerCase().startsWith(normalizedQuery);
@@ -148,7 +160,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       if (leftStarts !== rightStarts) return leftStarts ? -1 : 1;
       return left.name.localeCompare(right.name);
     });
-  }, [catalog, searchQuery]);
+  }, [mergedCatalog, searchQuery]);
 
   React.useEffect(() => setSelectedIndex(0), [commands]);
   React.useEffect(() => {

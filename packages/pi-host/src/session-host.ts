@@ -89,6 +89,8 @@ import {
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
+const PIARIUM_INSTRUCTIONS_MESSAGE_TYPE = "piarium.instructions";
+
 export interface SessionHostOptions {
   agentDir: string;
   configureServices?: (
@@ -677,9 +679,11 @@ export class SessionHost {
     sessionId: string,
     text: string,
     images?: ImageAttachment[],
+    instructions?: string,
   ): Promise<{ accepted: boolean }> {
     this.assertSession(sessionId);
     const session = this.session;
+    await this.#queueInstructions(instructions, "nextTurn");
     let accept: (accepted: boolean) => void = () => {};
     const preflight = new Promise<boolean>((resolvePreflight) => {
       accept = resolvePreflight;
@@ -709,16 +713,43 @@ export class SessionHost {
     return { accepted };
   }
 
-  async steer(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean> {
+  async steer(
+    sessionId: string,
+    text: string,
+    images?: ImageAttachment[],
+    instructions?: string,
+  ): Promise<boolean> {
     this.assertSession(sessionId);
+    await this.#queueInstructions(instructions, "steer");
     await this.session.steer(text, images === undefined ? undefined : toImages(images));
     return true;
   }
 
-  async followUp(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean> {
+  async followUp(
+    sessionId: string,
+    text: string,
+    images?: ImageAttachment[],
+    instructions?: string,
+  ): Promise<boolean> {
     this.assertSession(sessionId);
+    await this.#queueInstructions(instructions, "followUp");
     await this.session.followUp(text, images === undefined ? undefined : toImages(images));
     return true;
+  }
+
+  async #queueInstructions(
+    instructions: string | undefined,
+    deliverAs: "followUp" | "nextTurn" | "steer",
+  ): Promise<void> {
+    if (!instructions?.trim()) return;
+    await this.session.sendCustomMessage(
+      {
+        content: instructions,
+        customType: PIARIUM_INSTRUCTIONS_MESSAGE_TYPE,
+        display: false,
+      },
+      { deliverAs },
+    );
   }
 
   async abort(sessionId: string): Promise<boolean> {
@@ -1943,10 +1974,19 @@ export class SessionHost {
     const target = manager.getEntry(targetId);
     if (!target) throw new HostError("recovery_target_not_found", `Unknown session entry: ${targetId}`);
     const editable = editableRecoveryContent(target);
+    const parent = target.parentId === null ? undefined : manager.getEntry(target.parentId);
+    const parentBeforeAssociatedInstructions =
+      target.type === "message" && target.message.role === "user"
+      && parent?.type === "custom_message"
+      && parent.customType === PIARIUM_INSTRUCTIONS_MESSAGE_TYPE
+      && parent.display === false
+        ? parent.parentId
+        : target.parentId;
     const newLeafId =
-      (target.type === "message" && target.message.role === "user") ||
-      target.type === "custom_message"
-        ? target.parentId
+      target.type === "message" && target.message.role === "user"
+        ? parentBeforeAssociatedInstructions
+        : target.type === "custom_message"
+          ? target.parentId
         : target.id;
     if (newLeafId === null) manager.resetLeaf();
     else manager.branch(newLeafId);

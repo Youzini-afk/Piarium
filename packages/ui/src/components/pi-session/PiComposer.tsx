@@ -14,8 +14,16 @@ import {
   type CommandAutocompleteHandle,
   type CommandInfo,
 } from '@/components/chat/CommandAutocomplete';
+import {
+  SnippetAutocomplete,
+  type SnippetAutocompleteHandle,
+} from '@/components/chat/SnippetAutocomplete';
+import { resolveAutocompleteTrigger } from '@/components/chat/composer/language/triggers';
+import { MAGIC_PROMPT_COMMANDS } from '@/components/chat/composer/submit/slashCommands';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getMagicPromptDefinition } from '@/lib/magicPrompts';
+import type { Snippet } from '@/types/snippet';
 
 interface PiComposerProps {
   draft: string;
@@ -52,6 +60,18 @@ const fileToAttachment = (file: File): Promise<ImageAttachment> => new Promise((
   reader.readAsDataURL(file);
 });
 
+const PIARIUM_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((command) => ({
+  description: getMagicPromptDefinition(command.visiblePrompt).description,
+  id: `piarium:${command.name}`,
+  name: command.name,
+  source: 'piarium',
+}));
+
+type PiComposerAutocomplete = {
+  kind: 'command' | 'snippet';
+  query: string;
+} | null;
+
 export const PiComposer: React.FC<PiComposerProps> = ({
   draft,
   followUpBehavior,
@@ -67,10 +87,10 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const { t } = useI18n();
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
+  const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const composingRef = React.useRef(false);
-  const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
-  const [commandQuery, setCommandQuery] = React.useState('');
+  const [autocomplete, setAutocomplete] = React.useState<PiComposerAutocomplete>(null);
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
@@ -90,11 +110,9 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   }, [draft]);
 
   React.useEffect(() => {
-    if (!draft.startsWith('/')) {
-      setShowCommandAutocomplete(false);
-      setCommandQuery('');
-    }
-  }, [draft]);
+    if (autocomplete?.kind === 'command' && !draft.startsWith('/')) setAutocomplete(null);
+    if (autocomplete?.kind === 'snippet' && !draft.includes('#')) setAutocomplete(null);
+  }, [autocomplete?.kind, draft]);
 
   const addFiles = React.useCallback(async (files: Iterable<File>) => {
     const imageFiles = [...files].filter((file) => file.type.startsWith('image/'));
@@ -118,27 +136,19 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [draft, onChangeDraft]);
 
-  const updateCommandAutocomplete = React.useCallback((value: string, cursorPosition: number) => {
-    if (!value.startsWith('/')) {
-      setShowCommandAutocomplete(false);
+  const updateAutocomplete = React.useCallback((value: string, cursorPosition: number) => {
+    const trigger = resolveAutocompleteTrigger(value, cursorPosition, { inputMode: 'normal' });
+    if (trigger?.kind === 'command' || trigger?.kind === 'snippet') {
+      setAutocomplete({ kind: trigger.kind, query: trigger.query });
       return;
     }
-    const firstSpace = value.indexOf(' ');
-    const firstNewline = value.indexOf('\n');
-    const commandEnd = Math.min(
-      firstSpace === -1 ? value.length : firstSpace,
-      firstNewline === -1 ? value.length : firstNewline,
-    );
-    const shouldOpen = cursorPosition <= commandEnd && firstSpace === -1;
-    setShowCommandAutocomplete(shouldOpen);
-    if (shouldOpen) setCommandQuery(value.slice(1, commandEnd));
+    setAutocomplete(null);
   }, []);
 
   const handleCommandSelect = React.useCallback((command: CommandInfo) => {
     const value = `/${command.name} `;
     onChangeDraft(value);
-    setShowCommandAutocomplete(false);
-    setCommandQuery('');
+    setAutocomplete(null);
     requestAnimationFrame(() => {
       const input = inputRef.current;
       if (!input) return;
@@ -147,6 +157,24 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       input.selectionEnd = value.length;
     });
   }, [onChangeDraft]);
+
+  const handleSnippetSelect = React.useCallback((_snippet: Snippet, trigger: string) => {
+    const input = inputRef.current;
+    const cursorPosition = input?.selectionStart ?? draft.length;
+    const hashIndex = draft.slice(0, cursorPosition).lastIndexOf('#');
+    const startIndex = hashIndex === -1 ? cursorPosition : hashIndex;
+    const value = `${draft.slice(0, startIndex)}#${trigger} ${draft.slice(cursorPosition)}`;
+    onChangeDraft(value);
+    setAutocomplete(null);
+    const nextCursor = startIndex + trigger.length + 2;
+    requestAnimationFrame(() => {
+      const textarea = inputRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.selectionStart = nextCursor;
+      textarea.selectionEnd = nextCursor;
+    });
+  }, [draft, onChangeDraft]);
 
   return (
     <div className={cn(
@@ -209,7 +237,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             onChange={(event) => {
               const value = event.target.value;
               onChangeDraft(value);
-              updateCommandAutocomplete(value, event.target.selectionStart ?? value.length);
+              updateAutocomplete(value, event.target.selectionStart ?? value.length);
             }}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
@@ -221,7 +249,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             }}
             onKeyDown={(event) => {
               if (
-                showCommandAutocomplete
+                autocomplete !== null
                 && (event.key === 'Enter'
                   || event.key === 'ArrowUp'
                   || event.key === 'ArrowDown'
@@ -229,7 +257,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                   || event.key === 'Tab')
               ) {
                 event.preventDefault();
-                commandRef.current?.handleKeyDown(event.key);
+                if (autocomplete.kind === 'command') commandRef.current?.handleKeyDown(event.key);
+                else snippetRef.current?.handleKeyDown(event.key);
                 return;
               }
               if (
@@ -248,14 +277,24 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             )}
           />
 
-          {showCommandAutocomplete ? (
+          {autocomplete?.kind === 'command' ? (
             <CommandAutocomplete
               ref={commandRef}
+              additionalCommands={PIARIUM_COMMANDS}
               cwd={snapshot.cwd}
               sessionId={snapshot.sessionId}
-              searchQuery={commandQuery}
+              searchQuery={autocomplete.query}
               onCommandSelect={handleCommandSelect}
-              onClose={() => setShowCommandAutocomplete(false)}
+              onClose={() => setAutocomplete(null)}
+            />
+          ) : null}
+
+          {autocomplete?.kind === 'snippet' ? (
+            <SnippetAutocomplete
+              ref={snippetRef}
+              searchQuery={autocomplete.query}
+              onSnippetSelect={handleSnippetSelect}
+              onClose={() => setAutocomplete(null)}
             />
           ) : null}
 

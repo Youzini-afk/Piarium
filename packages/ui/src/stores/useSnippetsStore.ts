@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { Snippet } from '@/types/snippet';
-import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -40,8 +39,6 @@ const getRequestDirectory = (): string | null => {
   try {
     const currentDirectory = useDirectoryStore.getState().currentDirectory;
     if (currentDirectory?.trim()) return currentDirectory.trim();
-    const clientDir = opencodeClient.getDirectory();
-    if (clientDir?.trim()) return clientDir.trim();
     const activeProject = useProjectsStore.getState().getActiveProject?.();
     if (activeProject?.path?.trim()) return activeProject.path.trim();
   } catch (error) {
@@ -72,7 +69,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
             const directory = getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             const response = await runtimeFetch(`/api/config/snippets${queryParams}`, {
-              headers: { 'Cache-Control': 'no-cache', ...(directory ? { 'x-opencode-directory': directory } : {}) },
+              headers: { 'Cache-Control': 'no-cache' },
             });
             if (!response.ok) throw new Error('Failed to load snippets');
             const snippets: Snippet[] = await response.json();
@@ -100,7 +97,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
           const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
           const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, aliases: options.aliases, description: options.description, scope: options.scope }),
           });
           if (!response.ok) {
@@ -125,7 +122,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
           const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
           const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updates),
           });
           if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to update snippet');
@@ -144,7 +141,6 @@ export const useSnippetsStore = create<SnippetsStore>()(
           const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
           const response = await runtimeFetch(`/api/config/snippets/${encodeURIComponent(name)}${queryParams}`, {
             method: 'DELETE',
-            headers: directory ? { 'x-opencode-directory': directory } : undefined,
           });
           if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to delete snippet');
           if (get().selectedSnippetName === name) set({ selectedSnippetName: null });
@@ -163,7 +159,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
         const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
         const response = await runtimeFetch(`/api/config/snippets/expand${queryParams}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(directory ? { 'x-opencode-directory': directory } : {}) },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text }),
         });
         if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to expand snippets');

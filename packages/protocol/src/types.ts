@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 10 as const;
+export const PIARIUM_PROTOCOL_VERSION = 11 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 

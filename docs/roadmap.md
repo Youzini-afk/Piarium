@@ -76,7 +76,7 @@ retained before engine surgery begins.
   real runtime/queue state, model thinking selection, native rename, atomic archive/restore metadata,
   and safe deletion. Product-level queue, transport-frame, gateway concurrency, and discovery ceilings
   are absent by default; deployment budgets are opt-in.
-- Implemented protocol v8 recovery capability discovery, unrestricted scoped plugin settings,
+- Implemented protocol v11 recovery capability discovery, unrestricted scoped plugin settings,
   extension-owned JSON/JSONC configuration documents, and Pi custom-component snapshots. Pi-native conversation rollback preserves
   text/images; workspace-history owns combined restore/undo/redo/checkpoints; pi-wtf owns prompt
   repair; recovery bridge v1 accepts future structured/files-only capabilities. The parallel

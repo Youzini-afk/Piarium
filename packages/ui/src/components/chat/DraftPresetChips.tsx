@@ -45,6 +45,8 @@ type DraftPresetChipsProps = {
     onSubmit: (starter: ResolvedStarter) => void;
     /** Extra classes for the wrapper (e.g. width/spacing per surface). */
     className?: string;
+    cwd?: string | null;
+    sessionId?: string | null;
 };
 
 // Droppable id for the mobile "drag a chip here to delete" target. Kept distinct
@@ -255,8 +257,8 @@ const AddStarterPicker: React.FC<{
  * Reorder is constrained to within a chip's own group; cross-group hovers are
  * ignored.
  */
-const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, className }) => {
-    const { global, project, pinnable, ensureLoaded, addStarter, removeStarter, reorder } = useDraftStarters();
+const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, className, cwd, sessionId }) => {
+    const { global, project, pinnable, ensureLoaded, addStarter, removeStarter, reorder } = useDraftStarters({ cwd, sessionId });
     const { isMobile } = useDeviceInfo();
     const [isDragging, setIsDragging] = React.useState(false);
 

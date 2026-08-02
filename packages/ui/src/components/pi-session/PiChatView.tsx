@@ -32,11 +32,15 @@ import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import { useSnippetsStore } from '@/stores/useSnippetsStore';
+import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
+import type { ResolvedStarter } from '@/components/chat/useDraftStarters';
 import { PiComposer } from './PiComposer';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiModelSelectorDialog } from './PiModelSelectorDialog';
 import { PiTimeline } from './PiTimeline';
 import { piSessionTitle } from './sessionPresentation';
+import { renderPiComposerSubmission } from './piComposerSubmission';
 
 interface PiChatViewProps {
   active?: boolean;
@@ -120,28 +124,37 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     if (!snapshot || sending) return;
     const inlineDraftTarget = { directory: snapshot.cwd, sessionKey: sessionId };
     const inlineDraftStore = useInlineCommentDraftStore.getState();
-    const inlineDrafts = inlineDraftStore.consumeDrafts(inlineDraftTarget);
-    const promptText = appendInlineComments(currentDraft.text, inlineDrafts);
-    if (!promptText.trim() && currentDraft.images.length === 0) {
-      inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
-      return;
-    }
+    let inlineDrafts: ReturnType<typeof inlineDraftStore.consumeDrafts> = [];
     setSending(true);
     try {
+      const rendered = await renderPiComposerSubmission(currentDraft.text);
+      let promptText = rendered.text;
+      const { instructions } = rendered;
+      try {
+        promptText = await useSnippetsStore.getState().expandText(promptText);
+      } catch (error) {
+        console.warn('[PiChatView] Failed to expand snippets, sending original text:', error);
+      }
+      inlineDrafts = inlineDraftStore.consumeDrafts(inlineDraftTarget);
+      promptText = appendInlineComments(promptText, inlineDrafts);
+      if (!promptText.trim() && currentDraft.images.length === 0) {
+        inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
+        return;
+      }
       let accepted: boolean;
       if (projectPiSessionActivity(snapshot).isWorking) {
         if (followUpBehavior === 'queue') {
-          accepted = await followUp(sessionId, promptText, currentDraft.images);
+          accepted = await followUp(sessionId, promptText, currentDraft.images, instructions);
         } else {
-          accepted = await steer(sessionId, promptText, currentDraft.images);
+          accepted = await steer(sessionId, promptText, currentDraft.images, instructions);
         }
       } else {
-        accepted = await prompt(sessionId, promptText, currentDraft.images);
+        accepted = await prompt(sessionId, promptText, currentDraft.images, instructions);
       }
       if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
       clearPiDraft(sessionId);
     } catch (error) {
-      inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
+      if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
       console.error('Failed to send Pi prompt:', error);
       toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.messageSendFailed'));
     } finally {
@@ -162,6 +175,14 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       .join('\n');
     await sendDraft(currentSessionId, { ...currentDraft, text });
   }, [currentSessionId, sendDraft]);
+
+  const handleStarterSubmit = React.useCallback(async (starter: ResolvedStarter) => {
+    if (!currentSessionId) return;
+    const currentDraft = readPiDraft(currentSessionId);
+    const nextDraft = { ...currentDraft, text: starter.submitText };
+    updateDraft(currentSessionId, { text: starter.submitText });
+    await sendDraft(currentSessionId, nextDraft);
+  }, [currentSessionId, sendDraft, updateDraft]);
 
   const runRecovery = React.useCallback(async (
     entry: PiSessionMessageEntry,
@@ -274,11 +295,17 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 
         {entries.length === 0 && !currentRecord.liveAssistant ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-            <div>
+            <div className="max-w-3xl">
               <Icon name="sparkling" className="mx-auto size-7 text-primary" />
               <p className="mt-3 typography-ui-label text-muted-foreground">
                 {t('chat.chatInput.placeholder.chat')}
               </p>
+              <DraftPresetChips
+                className="mt-5"
+                cwd={snapshot.cwd}
+                sessionId={snapshot.sessionId}
+                onSubmit={(starter) => { void handleStarterSubmit(starter); }}
+              />
             </div>
           </div>
         ) : (

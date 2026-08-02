@@ -1,13 +1,16 @@
 import React from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
+import type { RuntimeContextTarget } from '@piarium/protocol';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getProjectDraftStarters, saveProjectDraftStarters } from '@/lib/openchamberConfig';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { listPiCommands } from '@/lib/pi-runtime/commands';
+import { listPiResources } from '@/lib/pi-runtime/resources';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { IconName } from '@/components/icon/icons';
 import {
     BUILTIN_STARTERS,
@@ -21,6 +24,10 @@ import {
     type DraftStarterRef,
     type DraftStarterType,
 } from '@/lib/draftStarters';
+import {
+    buildPiDraftStarterCatalog,
+    type PiDraftStarterCatalogItem,
+} from './piDraftStarterCatalog';
 
 type StarterGroup = 'global' | 'project';
 
@@ -57,21 +64,52 @@ export type UseDraftStartersResult = {
     reorder: (group: StarterGroup, fromId: string, toId: string) => void;
 };
 
-export function useDraftStarters(): UseDraftStartersResult {
+export interface UseDraftStartersOptions {
+    cwd?: string | null;
+    sessionId?: string | null;
+}
+
+const BUILTIN_INVOCATIONS = new Set(BUILTIN_STARTERS.map((starter) => starter.command));
+
+export function useDraftStarters(options: UseDraftStartersOptions = {}): UseDraftStartersResult {
     const { t } = useI18n();
-    const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
     const globalRaw = useUIStore((s) => s.globalDraftStarters);
-    const commands = useCommandsStore((s) => s.commands);
-    const skills = useSkillsStore((s) => s.skills);
     const activeProjectId = useProjectsStore((s) => s.activeProjectId);
     const projects = useProjectsStore((s) => s.projects);
+    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+    const currentSessionCwd = usePiSessionStore((state) => {
+        const sessionId = state.currentSessionId;
+        if (!sessionId) return null;
+        return state.records[sessionId]?.snapshot?.cwd
+            ?? state.summaries.find((summary) => summary.id === sessionId)?.cwd
+            ?? null;
+    });
+    const targetSessionId = options.sessionId !== undefined ? options.sessionId : currentSessionId;
+    const targetCwd = options.cwd?.trim() || currentSessionCwd || currentDirectory || null;
+    const runtimeTarget = React.useMemo<RuntimeContextTarget | null>(() => (
+        targetSessionId ? { sessionId: targetSessionId } : targetCwd ? { cwd: targetCwd } : null
+    ), [targetCwd, targetSessionId]);
+    const runtimeTargetKey = JSON.stringify([
+        getRuntimeKey(),
+        targetSessionId ? 'session' : 'cwd',
+        targetSessionId ?? targetCwd,
+    ]);
+    const runtimeTargetKeyRef = React.useRef(runtimeTargetKey);
+    runtimeTargetKeyRef.current = runtimeTargetKey;
+    const loadGenerationRef = React.useRef(0);
+    const [catalogItems, setCatalogItems] = React.useState<PiDraftStarterCatalogItem[]>([]);
 
     const projectRef = React.useMemo(() => {
-        if (!activeProjectId) return null;
-        const found = projects.find((p) => p.id === activeProjectId);
+        const normalizedTarget = targetCwd?.replace(/\\/g, '/').replace(/\/$/, '').toLocaleLowerCase();
+        const found = normalizedTarget
+            ? projects.find((project) => (
+                project.path.replace(/\\/g, '/').replace(/\/$/, '').toLocaleLowerCase() === normalizedTarget
+            ))
+            : projects.find((project) => project.id === activeProjectId);
         if (!found?.path) return null;
         return { id: found.id, path: found.path };
-    }, [activeProjectId, projects]);
+    }, [activeProjectId, projects, targetCwd]);
 
     const [projectStarters, setProjectStarters] = React.useState<DraftStarterRef[]>([]);
 
@@ -91,34 +129,59 @@ export function useDraftStarters(): UseDraftStartersResult {
     }, [projectRef?.id]);
 
     const ensureLoaded = React.useCallback(() => {
-        void useCommandsStore.getState().loadCommands?.();
-        void useSkillsStore.getState().loadSkills?.();
-    }, []);
+        if (!runtimeTarget) {
+            setCatalogItems([]);
+            return;
+        }
+        const generation = ++loadGenerationRef.current;
+        const requestKey = runtimeTargetKey;
+        const requestRuntimeKey = getRuntimeKey();
+        void Promise.all([
+            listPiCommands(runtimeTarget),
+            listPiResources(runtimeTarget, 'prompt'),
+            listPiResources(runtimeTarget, 'skill'),
+        ]).then(([commands, prompts, skills]) => {
+            if (
+                loadGenerationRef.current !== generation
+                || runtimeTargetKeyRef.current !== requestKey
+                || getRuntimeKey() !== requestRuntimeKey
+            ) return;
+            setCatalogItems(buildPiDraftStarterCatalog(commands, prompts, skills));
+        }).catch((error) => {
+            console.warn('[DraftStarters] Failed to load Pi commands and skills:', error);
+            if (
+                loadGenerationRef.current === generation
+                && runtimeTargetKeyRef.current === requestKey
+            ) setCatalogItems([]);
+        });
+    }, [runtimeTarget, runtimeTargetKey]);
 
-    // Preload commands and skills on mount so that pinned command/skill starters
-    // resolve immediately without requiring the user to open the add dialog first.
-    // Both loaders are TTL-cached and in-flight-deduped, so this is a cheap no-op
-    // if they were already loaded.
     React.useEffect(() => {
+        setCatalogItems([]);
         ensureLoaded();
     }, [ensureLoaded]);
 
-    const commandNames = React.useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
-    const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
+    const catalogByRef = React.useMemo(() => {
+        const result = new Map<string, PiDraftStarterCatalogItem>();
+        for (const item of catalogItems) result.set(`${item.type}:${item.name}`, item);
+        return result;
+    }, [catalogItems]);
 
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup): ResolvedStarter | null => {
-        if (isVSCode && ref.type === 'command' && (ref.name === 'craft-goal' || ref.name === 'schedule-task')) return null;
         if (ref.type === 'command') {
             const builtin = getBuiltInStarter(ref.name);
             if (builtin) {
                 return { id: chipId(group, ref), ref, group, label: t(builtin.labelKey), icon: builtin.icon, submitText: builtin.command };
             }
-            if (!commandNames.has(ref.name)) return null;
-            return { id: chipId(group, ref), ref, group, label: normalizeStarterLabel(ref.name), icon: COMMAND_FALLBACK_ICON, submitText: `/${ref.name}` };
+            const item = catalogByRef.get(`command:${ref.name}`);
+            if (!item) return null;
+            return { id: chipId(group, ref), ref, group, label: normalizeStarterLabel(ref.name), icon: COMMAND_FALLBACK_ICON, submitText: item.invocation };
         }
-        if (!skillNames.has(ref.name)) return null;
-        return { id: chipId(group, ref), ref, group, label: normalizeStarterLabel(ref.name), icon: SKILL_FALLBACK_ICON, submitText: `/${ref.name}` };
-    }, [t, commandNames, skillNames, isVSCode]);
+        const normalizedName = ref.name.startsWith('skill:') ? ref.name.slice('skill:'.length) : ref.name;
+        const item = catalogByRef.get(`skill:${normalizedName}`);
+        if (!item) return null;
+        return { id: chipId(group, ref), ref, group, label: normalizeStarterLabel(normalizedName), icon: SKILL_FALLBACK_ICON, submitText: item.invocation };
+    }, [catalogByRef, t]);
 
     const globalRefs = React.useMemo<readonly DraftStarterRef[]>(
         () => globalRaw ?? DEFAULT_GLOBAL_STARTERS,
@@ -144,19 +207,19 @@ export function useDraftStarters(): UseDraftStartersResult {
     const pinnable = React.useMemo<PinnableItem[]>(() => {
         const items: PinnableItem[] = [];
         for (const b of BUILTIN_STARTERS) {
-            if (isVSCode && (b.name === 'craft-goal' || b.name === 'schedule-task')) continue;
             items.push({ type: 'command', name: b.name, label: t(b.labelKey), icon: b.icon, section: 'built-in', scope: 'user' });
         }
-        for (const c of commands) {
-            if (c.isBuiltIn || c.source === 'skill' || getBuiltInStarter(c.name)) continue;
-            items.push({ type: 'command', name: c.name, label: normalizeStarterLabel(c.name), icon: COMMAND_FALLBACK_ICON, section: 'command', scope: c.scope === 'project' ? 'project' : 'user' });
-        }
-        for (const sk of skills) {
-            items.push({ type: 'skill', name: sk.name, label: normalizeStarterLabel(sk.name), icon: SKILL_FALLBACK_ICON, section: 'skill', scope: sk.scope === 'project' ? 'project' : 'user' });
+        for (const item of catalogItems) {
+            if (item.type === 'command') {
+                if (getBuiltInStarter(item.name) || BUILTIN_INVOCATIONS.has(item.invocation)) continue;
+                items.push({ type: 'command', name: item.name, label: normalizeStarterLabel(item.name), icon: COMMAND_FALLBACK_ICON, section: 'command', scope: item.scope });
+            } else {
+                items.push({ type: 'skill', name: item.name, label: normalizeStarterLabel(item.name), icon: SKILL_FALLBACK_ICON, section: 'skill', scope: item.scope });
+            }
         }
         // Only offer items that are not already pinned (removed built-ins reappear here).
         return items.filter((item) => !pinnedKeys.has(`${item.type}:${item.name}`));
-    }, [t, commands, skills, pinnedKeys, isVSCode]);
+    }, [catalogItems, pinnedKeys, t]);
 
     const persistGlobal = React.useCallback((next: DraftStarterRef[]) => {
         useUIStore.getState().setGlobalDraftStarters(next);

@@ -1,0 +1,68 @@
+import { describe, expect, test } from 'bun:test';
+import type { PiResourceCatalogSnapshot, PiResourceDescriptor } from '@piarium/protocol';
+import { buildPiDraftStarterCatalog } from './piDraftStarterCatalog';
+
+const descriptor = (
+  kind: 'prompt' | 'skill',
+  name: string,
+  scope: 'project' | 'user',
+  active = true,
+): PiResourceDescriptor => ({
+  active,
+  description: '',
+  filePath: `C:/${scope}/${name}.md`,
+  id: `${kind}:${scope}:${name}`,
+  kind,
+  name,
+  sourceInfo: {
+    origin: 'top-level',
+    path: `C:/${scope}/${name}.md`,
+    scope,
+    source: scope,
+  },
+  valid: true,
+  writable: true,
+});
+
+const catalog = (...resources: PiResourceDescriptor[]): PiResourceCatalogSnapshot => ({
+  diagnostics: [],
+  projectTrusted: true,
+  resources,
+});
+
+describe('Pi draft starter catalog', () => {
+  test('keeps Pi command invocations while normalizing skill references', () => {
+    const items = buildPiDraftStarterCatalog(
+      [
+        { name: 'review', source: 'prompt' },
+        { name: 'skill:workspace-check', source: 'skill' },
+        { name: 'reload', source: 'extension' },
+      ],
+      catalog(descriptor('prompt', 'review', 'project')),
+      catalog(descriptor('skill', 'workspace-check', 'project')),
+    );
+
+    expect(items).toEqual([
+      { invocation: '/review', name: 'review', scope: 'project', source: 'prompt', type: 'command' },
+      { invocation: '/skill:workspace-check', name: 'workspace-check', scope: 'project', source: 'skill', type: 'skill' },
+      { invocation: '/reload', name: 'reload', scope: 'user', source: 'extension', type: 'command' },
+    ]);
+  });
+
+  test('uses only active resource ownership and de-duplicates colliding commands', () => {
+    const items = buildPiDraftStarterCatalog(
+      [
+        { name: 'review', source: 'extension' },
+        { name: 'review', source: 'prompt' },
+        { name: 'skill:check', source: 'skill' },
+      ],
+      catalog(descriptor('prompt', 'review', 'project')),
+      catalog(descriptor('skill', 'check', 'project', false)),
+    );
+
+    expect(items).toEqual([
+      { invocation: '/review', name: 'review', scope: 'user', source: 'extension', type: 'command' },
+      { invocation: '/skill:check', name: 'check', scope: 'user', source: 'skill', type: 'skill' },
+    ]);
+  });
+});

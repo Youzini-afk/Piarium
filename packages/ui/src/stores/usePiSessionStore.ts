@@ -78,7 +78,12 @@ export interface PiSessionStoreState {
   createSession(cwd: string, name?: string): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
   executeCommand(sessionId: string, command: string): Promise<JsonValue>;
-  followUp(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean>;
+  followUp(
+    sessionId: string,
+    text: string,
+    images?: ImageAttachment[],
+    instructions?: string,
+  ): Promise<boolean>;
   forkSession(
     sessionId: string,
     entryId: string,
@@ -91,7 +96,12 @@ export interface PiSessionStoreState {
     summarize?: boolean,
   ): Promise<RuntimeMethodResult<'session.navigate'>>;
   openSession(params: RuntimeMethodParams<'session.open'>): Promise<SessionSnapshot>;
-  prompt(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean>;
+  prompt(
+    sessionId: string,
+    text: string,
+    images?: ImageAttachment[],
+    instructions?: string,
+  ): Promise<boolean>;
   recoverTo(
     sessionId: string,
     targetId: string,
@@ -114,7 +124,12 @@ export interface PiSessionStoreState {
   selectModel(sessionId: string, model: Pick<ModelDescriptor, 'id' | 'provider'>): Promise<SessionSnapshot>;
   selectThinking(sessionId: string, level: ThinkingLevel): Promise<SessionSnapshot>;
   setCurrentSession(sessionId: string | null): void;
-  steer(sessionId: string, text: string, images?: ImageAttachment[]): Promise<boolean>;
+  steer(
+    sessionId: string,
+    text: string,
+    images?: ImageAttachment[],
+    instructions?: string,
+  ): Promise<boolean>;
   undoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult>;
   unarchiveSession(sessionId: string): Promise<SessionSummary>;
 }
@@ -659,9 +674,10 @@ export const createPiSessionStore = (
         return result;
       },
 
-      followUp: async (sessionId, text, images) => {
+      followUp: async (sessionId, text, images, instructions) => {
         const { result } = await request('agent.followUp', {
           ...(images === undefined ? {} : { images }),
+          ...(instructions === undefined ? {} : { instructions }),
           sessionId,
           text,
         });
@@ -791,9 +807,10 @@ export const createPiSessionStore = (
         }
       },
 
-      prompt: async (sessionId, text, images) => {
+      prompt: async (sessionId, text, images, instructions) => {
         const { result } = await request('agent.prompt', {
           ...(images === undefined ? {} : { images }),
+          ...(instructions === undefined ? {} : { instructions }),
           sessionId,
           text,
         });
@@ -983,9 +1000,10 @@ export const createPiSessionStore = (
         set({ currentSessionId: sessionId });
       },
 
-      steer: async (sessionId, text, images) => {
+      steer: async (sessionId, text, images, instructions) => {
         const { result } = await request('agent.steer', {
           ...(images === undefined ? {} : { images }),
+          ...(instructions === undefined ? {} : { instructions }),
           sessionId,
           text,
         });

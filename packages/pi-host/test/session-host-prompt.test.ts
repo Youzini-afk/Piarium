@@ -14,7 +14,11 @@ describe("SessionHost prompt streaming", () => {
     const agentDir = join(root, "agent");
     const events: Array<{ data: unknown; event: string }> = [];
     const faux = registerFauxProvider();
-    faux.setResponses([fauxAssistantMessage("hello from Piarium")]);
+    let observedContext: unknown;
+    faux.setResponses([(context) => {
+      observedContext = context;
+      return fauxAssistantMessage("hello from Piarium");
+    }]);
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
       services.modelRuntime.registerProvider(model.provider, {
@@ -51,11 +55,20 @@ describe("SessionHost prompt streaming", () => {
     try {
       const snapshot = await host.create(root);
       assert.equal(snapshot.model?.provider, model.provider);
-      assert.deepEqual(await host.prompt(snapshot.sessionId, "say hello"), { accepted: true });
+      assert.deepEqual(
+        await host.prompt(
+          snapshot.sessionId,
+          "say hello",
+          undefined,
+          "Answer with the hidden Piarium instruction.",
+        ),
+        { accepted: true },
+      );
       await host.session.waitForIdle();
 
       const serialized = JSON.stringify(events);
       assert.match(serialized, /hello from Piarium/);
+      assert.match(JSON.stringify(observedContext), /hidden Piarium instruction/);
       assert.ok(
         events.some(
           (entry) =>
@@ -67,6 +80,12 @@ describe("SessionHost prompt streaming", () => {
       );
       const entries = host.entries(snapshot.sessionId, "branch");
       assert.equal(entries.scope, "branch");
+      const instructionsEntry = entries.entries.find(
+        (entry) => entry.type === "custom_message" && entry.customType === "piarium.instructions",
+      );
+      assert.ok(instructionsEntry && instructionsEntry.type === "custom_message");
+      assert.equal(instructionsEntry.display, false);
+      assert.match(JSON.stringify(instructionsEntry.content), /hidden Piarium instruction/);
       const userEntry = entries.entries.find(
         (entry) =>
           typeof entry === "object" &&
@@ -98,6 +117,12 @@ describe("SessionHost prompt streaming", () => {
       assert.equal(recovered.handledBy, "pi-native");
       assert.equal(recovered.outcome, "applied");
       assert.equal(recovered.editorText, "say hello");
+      assert.equal(
+        host.entries(snapshot.sessionId, "branch").entries.some(
+          (entry) => entry.type === "custom_message" && entry.customType === "piarium.instructions",
+        ),
+        false,
+      );
       const forked = await host.fork(snapshot.sessionId, userEntryId, "at");
       assert.equal(forked.cancelled, false);
       assert.notEqual(forked.snapshot.sessionId, snapshot.sessionId);

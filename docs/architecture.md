@@ -39,11 +39,11 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v8 WebSocket/postMessage surface protocol
+    | authenticated Piarium v11 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v8 over a private child-process IPC pipe
+    | Piarium protocol v11 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -213,7 +213,7 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
 - **Magic Context:** plugin-owned user/project JSONC configuration and status rendered through its
   native Pi component/custom entries; future memory, compartment, historian/dreamer/sidekick, and
   diagnostic views continue to read its public plugin/database contracts rather than copied state.
-- **pi-mcp-adapter:** protocol v8 carries the adapter's public `pi-mcp-adapter/status/v1`
+- **pi-mcp-adapter:** protocol v11 carries the adapter's public `pi-mcp-adapter/status/v1`
   snapshot. Settings, the desktop header, and mobile surfaces invoke the adapter's public commands,
   manage the normal Pi package, and edit all six adapter-owned JSON/JSONC sources in their documented
   precedence order. Piarium has no parallel MCP store, generated OpenCode configuration draft, or
