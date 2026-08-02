@@ -39,11 +39,11 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v2 WebSocket/postMessage surface protocol
+    | authenticated Piarium v3 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v2 over a private child-process IPC pipe
+    | Piarium protocol v3 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -68,7 +68,7 @@ separate catalog worker for discovery. Recovery adds session/workspace leases. A
 cannot crash the renderer, and a renderer reload does not terminate an active task.
 
 `@piarium/runtime-broker` is now the single process client for the worker boundary. It validates protocol
-frames and event sequence numbers, correlates bounded requests, denies project trust by default,
+frames and event sequence numbers, correlates concurrent requests, denies project trust by default,
 owns catalog/per-session workers, and performs graceful then process-tree shutdown. Electron starts
 and handshakes the catalog worker whenever the local runtime is available, verifies that packaged
 worker files are unpacked, and awaits broker disposal during ordinary quit, update, relaunch, hard
@@ -77,15 +77,18 @@ signals, and startup failure.
 `@piarium/runtime-client` is the browser-safe surface client. The Web server exposes the same
 Pi-native method names through `/api/piarium/runtime/ws`; it validates every untrusted parameter,
 removes worker-only shutdown/trust methods, authenticates UI cookies/client or short-lived URL
-tokens, checks Origin, bounds payloads and concurrency, and forwards worker events with explicit
+tokens, checks Origin, and forwards worker events with explicit
 `{workerId, role, sessionId}` routing. The private relay explicitly allowlists this socket and
 continues to carry it through the existing encrypted tunnel without injecting credentials.
+Piarium does not impose renderer payload, pending-request, or buffered-output ceilings by default;
+deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
+`PIARIUM_RUNTIME_MAX_PENDING_REQUESTS`, and `PIARIUM_RUNTIME_MAX_BUFFERED_BYTES`.
 
-Protocol v2 does not forward Pi SDK objects verbatim. The host projects the append-only session
+Protocol v3 does not forward Pi SDK objects verbatim. The host projects the append-only session
 tree, messages, tool calls/results, streaming updates, compaction, retry state, model metadata, and
 provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,
 thinking/text signatures, callback functions, `AbortSignal`, and credential objects remain inside
-the worker. Arbitrary extension/tool details cross only through the bounded JSON sanitizer.
+the worker. Arbitrary extension/tool details cross only through the JSON-safe protocol projector.
 
 Provider configuration is also Pi-native. The user layer is Pi's canonical
 `<agentDir>/models.json`; the trusted project layer is `<workspace>/.pi/models.json`; an operator may
@@ -98,20 +101,19 @@ and usable but are redacted from the surface protocol.
 Remote model discovery is a separate privileged operation. It uses the provider's host-owned auth
 when present and also supports anonymous endpoints. HTTP, HTTPS, localhost, LAN, and URL basic
 authentication remain available for explicitly configured providers. Authentication headers are
-removed on cross-origin redirects. Resource defaults are intentionally generous (20 redirects,
-five minutes, and 256 MiB), impose no model-count limit, and owners can raise or disable them with
+removed on cross-origin redirects. Discovery has no product-imposed redirect, duration, response,
+or model-count ceiling. Deployments may opt into budgets with
 `PIARIUM_PROVIDER_DISCOVERY_MAX_REDIRECTS`, `PIARIUM_PROVIDER_DISCOVERY_TIMEOUT_MS`, and
-`PIARIUM_PROVIDER_DISCOVERY_MAX_BYTES` (`0` disables the corresponding ceiling). Exact redirect
-loops are still rejected. Google keys are sent in `x-goog-api-key`, not in the URL.
+`PIARIUM_PROVIDER_DISCOVERY_MAX_BYTES`; `0` keeps a budget disabled. Exact redirect loops are still
+rejected. Google keys are sent in `x-goog-api-key`, not in the URL.
 
 The settings editor may send a credential-free draft provider definition for discovery without
 writing it to `models.json`. If the draft includes a one-shot API key, the key travels only through
 the typed auth-prompt response and is neither embedded in the discovery request nor persisted.
 
-Concurrent provider-config writes use an atomic lock. The default stale-lock and wait windows are
-60 seconds; `PIARIUM_PROVIDER_CONFIG_LOCK_STALE_MS` and
-`PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS` can raise them, while `0` disables the corresponding
-automatic cutoff.
+Concurrent provider-config writes use an atomic owner lock without a product-imposed wait cutoff.
+Dead owners are reclaimed by process identity; deployments may opt into a wait budget with
+`PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS`, while `0` keeps the budget disabled.
 
 ### 4.3 Session workers
 
@@ -119,8 +121,8 @@ Each hot top-level session runs in its own Node worker process and embeds the pu
 matches the single-active-session assumptions made by several Pi extensions while allowing
 multiple background sessions. Idle sessions are persisted by Pi and need no live worker.
 
-Phase 2 keeps opened sessions live until explicitly closed or the application exits. A bounded
-hot-worker pool and idle eviction remain a later optimization; eviction must be graceful: stop
+Opened sessions stay live until explicitly closed or the application exits. An optional hot-worker
+budget and idle eviction remain a later deployment optimization; eviction must be graceful: stop
 accepting requests, wait for idle or require explicit abort, dispose the SDK runtime, flush
 settings, and then stop the process. Subagents remain owned by their supervising extension and are
 observed through structured events and lifecycle artifacts.
@@ -147,10 +149,17 @@ are unique within a connection. Event sequence numbers are monotonic within each
 and clients track them independently by worker ID. Large binary/file payloads use a separate
 bounded stream or file grant rather than JSONL.
 
-`session.entries` returns `{sessionId, scope, leafId, entries}`. The leaf and every entry's
+`session.entries` returns the complete requested scope as `{sessionId, scope, leafId, entries}` with
+no implicit pagination or truncation. The leaf and every entry's
 `id/parentId` preserve Pi's branch graph; `scope:"branch"` is the active path and `scope:"all"`
 contains the complete append-only tree. Streaming `agent.event` messages contain one canonical
 message plus a compact typed delta instead of duplicating Pi's mutable `partial` object.
+
+Protocol v3 also exposes native `session.header`, `session.summary`, `session.tree`,
+`session.entry`, `session.stats`, `session.rename`, `session.archive`, `session.unarchive`,
+`session.delete`, and `thinking.select` operations. Runtime snapshots carry Pi's actual streaming,
+compaction, retry, steering, follow-up, queue, model, and thinking state. Archive state is broker-owned
+atomic Piarium metadata; renames remain native append-only Pi session-info entries.
 
 An initial handshake negotiates protocol version and capabilities. UI disables unavailable
 actions instead of guessing from runtime versions.
@@ -162,7 +171,7 @@ actions instead of guessing from runtime versions.
 | Pi session tree/messages | Pi SessionManager JSONL | Read/navigate via SDK; destructive edits only in recovery transactions |
 | Models/auth | Pi ModelRuntime/AuthStorage + layered native `models.json` | Never mirror secrets into renderer storage; preserve source provenance |
 | Pi settings/packages | Pi SettingsManager/PackageManager | Typed operations with source/provenance shown |
-| App metadata | Atomic Piarium JSON (Phase 2), recovery database later | Recent projects now; archive, pin, tags, and view preferences later |
+| App metadata | Atomic Piarium JSON, recovery database later | Archive state now; pin, tags, and view preferences remain application-owned additions |
 | Workspace checkpoints | Recovery store + shadow Git | Per real workspace and Pi session; separate from project `.git` |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |

@@ -65,7 +65,7 @@ describe("SessionHost prompt streaming", () => {
             JSON.stringify(entry.data).includes("agent_settled"),
         ),
       );
-      const entries = host.entries(snapshot.sessionId, true);
+      const entries = host.entries(snapshot.sessionId, "branch");
       assert.equal(entries.scope, "branch");
       const userEntry = entries.entries.find(
         (entry) =>

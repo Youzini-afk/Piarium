@@ -31,23 +31,30 @@ class MemorySocket implements RuntimeWebSocket {
   send(): void {}
 }
 
-test("WebSocket transport preserves asynchronous Blob frame order", async () => {
+test("WebSocket transport preserves asynchronous Blob frame order", { timeout: 2_000 }, async () => {
   const socket = new MemorySocket();
   const frames: string[] = [];
+  let resolveFrames!: () => void;
+  const received = new Promise<void>((resolve) => {
+    resolveFrames = resolve;
+  });
   const transport = new WebSocketRuntimeTransport({
     url: "ws://runtime.test",
     webSocketFactory: () => socket,
   });
   const started = transport.start({
     close: () => {},
-    message: (frame) => frames.push(frame),
+    message: (frame) => {
+      frames.push(frame);
+      if (frames.length === 2) resolveFrames();
+    },
   });
   socket.onopen?.();
   await started;
 
   socket.onmessage?.({ data: new DelayedBlob("first", 20) });
   socket.onmessage?.({ data: new DelayedBlob("second", 0) });
-  await delay(40);
+  await received;
 
   assert.deepEqual(frames, ["first", "second"]);
   transport.close();

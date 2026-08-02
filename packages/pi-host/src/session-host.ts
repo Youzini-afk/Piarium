@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   type AgentSession,
@@ -12,6 +12,7 @@ import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SessionManager,
+  type SessionTreeNode as NativeSessionTreeNode,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -35,9 +36,14 @@ import type {
   RecoveryMode,
   RecoveryPoint,
   RecoveryPreview,
+  PiSessionEntry,
   SessionEntriesResult,
+  SessionHeader,
   SessionSnapshot,
+  SessionStats,
   SessionSummary,
+  SessionTreeNode,
+  SessionTreeResult,
   ThinkingLevel,
 } from "@piarium/protocol";
 import { RecoveryCoordinator } from "@piarium/recovery";
@@ -125,6 +131,42 @@ function toModelDescriptor(
 
 function toImages(images: ImageAttachment[]): NonNullable<Parameters<AgentSession["steer"]>[1]> {
   return images.map((image) => ({ data: image.data, mimeType: image.mimeType, type: "image" }));
+}
+
+function sessionPathKey(path: string): string {
+  const normalized = resolve(path);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function projectSessionTree(node: NativeSessionTreeNode): SessionTreeNode {
+  return {
+    children: node.children.map(projectSessionTree),
+    entry: projectSessionEntry(node.entry),
+    ...(node.label === undefined ? {} : { label: node.label }),
+    ...(node.labelTimestamp === undefined ? {} : { labelTimestamp: node.labelTimestamp }),
+  };
+}
+
+function messageSearchText(message: unknown): string {
+  if (typeof message !== "object" || message === null || Array.isArray(message)) return "";
+  const record = message as Record<string, unknown>;
+  const content = record.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part !== "object" || part === null || Array.isArray(part)) return "";
+        const item = part as Record<string, unknown>;
+        if (typeof item.text === "string") return item.text;
+        if (typeof item.thinking === "string") return item.thinking;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return [record.command, record.output, record.summary]
+    .filter((value): value is string => typeof value === "string")
+    .join("\n");
 }
 
 function packageNameFromSource(source: string): string {
@@ -231,14 +273,29 @@ export class SessionHost {
     const infos = cwd
       ? await SessionManager.list(cwd, getSessionDir(cwd, this.#agentDir))
       : await this.#listAllFromAgentDir();
-    return infos.map((info) => ({
-      createdAt: info.created.toISOString(),
-      cwd: info.cwd,
-      id: info.id,
-      ...(info.name === undefined ? {} : { name: info.name }),
-      sessionFile: info.path,
-      updatedAt: info.modified.toISOString(),
-    }));
+    const idsByPath = new Map(infos.map((info) => [sessionPathKey(info.path), info.id]));
+    return infos.map((info) => {
+      const parentId =
+        info.parentSessionPath === undefined
+          ? undefined
+          : idsByPath.get(sessionPathKey(info.parentSessionPath));
+      return {
+        allMessagesText: info.allMessagesText,
+        createdAt: info.created.toISOString(),
+        cwd: info.cwd,
+        firstMessage: info.firstMessage,
+        id: info.id,
+        messageCount: info.messageCount,
+        ...(info.name === undefined ? {} : { name: info.name }),
+        ...(parentId === undefined ? {} : { parentId }),
+        ...(info.parentSessionPath === undefined
+          ? {}
+          : { parentSessionPath: info.parentSessionPath }),
+        persisted: true,
+        sessionFile: info.path,
+        updatedAt: info.modified.toISOString(),
+      };
+    });
   }
 
   snapshot(): SessionSnapshot {
@@ -259,25 +316,147 @@ export class SessionHost {
       activeTools: session.getActiveToolNames(),
       busy: !session.isIdle,
       cwd: this.runtime.cwd,
+      followUp: [...session.getFollowUpMessages()],
+      followUpMode: session.followUpMode,
+      isCompacting: session.isCompacting,
+      isStreaming: session.isStreaming,
       leafId: session.sessionManager.getLeafId(),
       ...(model === undefined ? {} : { model }),
       ...(name === undefined ? {} : { name }),
+      pendingMessageCount: session.pendingMessageCount,
+      retryAttempt: session.retryAttempt,
+      ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
       sessionId: session.sessionId,
+      steering: [...session.getSteeringMessages()],
+      steeringMode: session.steeringMode,
       thinkingLevel: session.thinkingLevel as ThinkingLevel,
     };
   }
 
-  entries(sessionId: string, branchOnly: boolean): SessionEntriesResult {
+  header(sessionId: string): SessionHeader | null {
     this.assertSession(sessionId);
-    const entries = branchOnly
+    const header = this.session.sessionManager.getHeader();
+    if (!header) return null;
+    return {
+      cwd: header.cwd,
+      id: header.id,
+      ...(header.parentSession === undefined ? {} : { parentSession: header.parentSession }),
+      timestamp: header.timestamp,
+      ...(header.version === undefined ? {} : { version: header.version }),
+    };
+  }
+
+  entries(sessionId: string, scope: "branch" | "all"): SessionEntriesResult {
+    this.assertSession(sessionId);
+    const entries = scope === "branch"
       ? this.session.sessionManager.getBranch()
       : this.session.sessionManager.getEntries();
     return {
       entries: entries.map(projectSessionEntry),
       leafId: this.session.sessionManager.getLeafId(),
-      scope: branchOnly ? "branch" : "all",
+      scope,
       sessionId,
     };
+  }
+
+  entry(sessionId: string, entryId: string): PiSessionEntry | null {
+    this.assertSession(sessionId);
+    const entry = this.session.sessionManager.getEntry(entryId);
+    return entry === undefined ? null : projectSessionEntry(entry);
+  }
+
+  tree(sessionId: string): SessionTreeResult {
+    this.assertSession(sessionId);
+    return {
+      leafId: this.session.sessionManager.getLeafId(),
+      sessionId,
+      tree: this.session.sessionManager.getTree().map(projectSessionTree),
+    };
+  }
+
+  stats(sessionId: string): SessionStats {
+    this.assertSession(sessionId);
+    const stats = this.session.getSessionStats();
+    return {
+      assistantMessages: stats.assistantMessages,
+      ...(stats.contextUsage === undefined
+        ? {}
+        : { contextUsage: toJsonValue(stats.contextUsage) }),
+      cost: stats.cost,
+      ...(stats.sessionFile === undefined ? {} : { sessionFile: stats.sessionFile }),
+      sessionId: stats.sessionId,
+      tokens: { ...stats.tokens },
+      toolCalls: stats.toolCalls,
+      toolResults: stats.toolResults,
+      totalMessages: stats.totalMessages,
+      userMessages: stats.userMessages,
+    };
+  }
+
+  async summary(sessionId: string): Promise<SessionSummary> {
+    this.assertSession(sessionId);
+    const manager = this.session.sessionManager;
+    const sessionFile = manager.getSessionFile();
+    if (!sessionFile) {
+      throw new HostError("session_not_persisted", "The active Pi context is not a persisted session");
+    }
+    const header = manager.getHeader();
+    const entries = manager.getEntries();
+    const messageTexts = entries
+      .filter((entry) => entry.type === "message")
+      .map((entry) => messageSearchText(entry.message));
+    let fileInfo: Awaited<ReturnType<typeof stat>> | undefined;
+    try {
+      fileInfo = await stat(sessionFile);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const name = manager.getSessionName();
+    const createdAt = header?.timestamp ?? fileInfo?.birthtime.toISOString() ?? new Date().toISOString();
+    return {
+      allMessagesText: messageTexts.filter(Boolean).join("\n"),
+      createdAt,
+      cwd: manager.getCwd(),
+      firstMessage: messageTexts.find(Boolean) ?? "",
+      id: manager.getSessionId(),
+      messageCount: messageTexts.length,
+      ...(name === undefined ? {} : { name }),
+      ...(header?.parentSession === undefined
+        ? {}
+        : { parentSessionPath: header.parentSession }),
+      persisted: fileInfo !== undefined,
+      sessionFile,
+      updatedAt: fileInfo?.mtime.toISOString() ?? createdAt,
+    };
+  }
+
+  async rename(
+    sessionId: string,
+    name: string,
+    sessionFile?: string,
+  ): Promise<{ name?: string; sessionId: string }> {
+    if (this.sessionId === sessionId) {
+      this.session.setSessionName(name);
+      const normalized = this.session.sessionName;
+      return { ...(normalized === undefined ? {} : { name: normalized }), sessionId };
+    }
+    const summary = sessionFile
+      ? undefined
+      : (await this.list()).find((entry) => entry.id === sessionId);
+    const resolvedSessionFile = sessionFile ?? summary?.sessionFile;
+    if (!resolvedSessionFile) {
+      throw new HostError("session_not_found", `Unknown Pi session: ${sessionId}`);
+    }
+    const manager = SessionManager.open(resolvedSessionFile, undefined, summary?.cwd);
+    if (manager.getSessionId() !== sessionId) {
+      throw new HostError(
+        "session_mismatch",
+        `The Pi session file belongs to ${manager.getSessionId()}, not ${sessionId}`,
+      );
+    }
+    manager.appendSessionInfo(name);
+    const normalized = manager.getSessionName();
+    return { ...(normalized === undefined ? {} : { name: normalized }), sessionId };
   }
 
   async fork(
@@ -365,17 +544,6 @@ export class SessionHost {
 
   async listRecovery(sessionId: string): Promise<RecoveryListResult> {
     this.assertSession(sessionId);
-    const conflict = this.#legacyRecoveryConflict();
-    if (conflict) {
-      return {
-        available: false,
-        canRedo: false,
-        canUndo: false,
-        checkpoints: [],
-        issue: conflict,
-        turns: [],
-      };
-    }
     await this.recovery.reconcileSession(sessionId, this.session.sessionManager.getEntries());
     return this.recovery.list(sessionId, this.session.sessionManager.getLeafId());
   }
@@ -493,6 +661,12 @@ export class SessionHost {
     const model = this.runtime.services.modelRuntime.getModel(provider, modelId);
     if (!model) throw new HostError("model_not_found", `Unknown model: ${provider}/${modelId}`);
     await this.session.setModel(model);
+    return this.snapshot();
+  }
+
+  selectThinkingLevel(sessionId: string, level: ThinkingLevel): SessionSnapshot {
+    this.assertSession(sessionId);
+    this.session.setThinkingLevel(level);
     return this.snapshot();
   }
 
@@ -911,7 +1085,10 @@ export class SessionHost {
         event.type === "agent_start" ||
         event.type === "agent_end" ||
         event.type === "agent_settled" ||
-        event.type === "queue_update"
+        event.type === "queue_update" ||
+        event.type === "session_info_changed" ||
+        event.type === "thinking_level_changed" ||
+        event.type === "compaction_end"
       ) {
         this.#emit("session.snapshot", this.snapshot());
       }
@@ -984,27 +1161,6 @@ export class SessionHost {
     if (!this.session.isIdle) {
       throw new HostError("session_busy", "Wait for the active Pi run before using recovery");
     }
-    const conflict = this.#legacyRecoveryConflict();
-    if (conflict) throw new HostError("recovery_conflict", conflict);
-  }
-
-  #legacyRecoveryConflict(): string | undefined {
-    const legacyRecoveryPackages = ["pi-workspace-history", "pi-wtf"];
-    const configured = this.#packageManager()
-      .listConfiguredPackages()
-      .some((entry) =>
-        legacyRecoveryPackages.some((name) => entry.source.toLowerCase().includes(name)),
-      );
-    const loaded = this.runtime.services.resourceLoader
-      .getExtensions()
-      .extensions.some((extension) =>
-        legacyRecoveryPackages.some((name) =>
-          `${extension.path} ${extension.resolvedPath}`.toLowerCase().includes(name),
-        ),
-      );
-    return configured || loaded
-      ? "Legacy pi-workspace-history or pi-wtf recovery is active. Disable it before using Piarium recovery so only one engine owns session and workspace restores."
-      : undefined;
   }
 
   async #navigateForRecovery(targetLeafId: string) {

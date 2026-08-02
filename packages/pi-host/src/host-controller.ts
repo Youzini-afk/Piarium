@@ -18,6 +18,8 @@ import {
   ProtocolDecodeError,
   type RequestEnvelope,
   type RuntimeDescriptor,
+  THINKING_LEVELS,
+  type ThinkingLevel,
   type WireEnvelope,
 } from "@piarium/protocol";
 import { HostError, toProtocolError } from "./errors.js";
@@ -271,9 +273,31 @@ export class HostController {
         this.#sessionHost.assertSession(readString(params, "sessionId"));
         return this.#sessionHost.snapshot();
       case "session.entries":
-        return this.#sessionHost.entries(
+        {
+          const scope = optionalString(params, "scope") ?? "branch";
+          if (scope !== "branch" && scope !== "all") {
+            throw new HostError("invalid_params", "scope must be 'branch' or 'all'");
+          }
+          return this.#sessionHost.entries(readString(params, "sessionId"), scope);
+        }
+      case "session.entry":
+        return this.#sessionHost.entry(
           readString(params, "sessionId"),
-          readBoolean(params, "branchOnly", { defaultValue: true }),
+          readString(params, "entryId"),
+        );
+      case "session.header":
+        return this.#sessionHost.header(readString(params, "sessionId"));
+      case "session.tree":
+        return this.#sessionHost.tree(readString(params, "sessionId"));
+      case "session.stats":
+        return this.#sessionHost.stats(readString(params, "sessionId"));
+      case "session.summary":
+        return this.#sessionHost.summary(readString(params, "sessionId"));
+      case "session.rename":
+        return this.#sessionHost.rename(
+          readString(params, "sessionId"),
+          readString(params, "name", { allowEmpty: true }),
+          optionalString(params, "sessionFile"),
         );
       case "session.fork": {
         const position = optionalString(params, "position") ?? "before";
@@ -295,14 +319,14 @@ export class HostController {
       case "agent.prompt":
         return this.#sessionHost.prompt(
           readString(params, "sessionId"),
-          readString(params, "text"),
+          readString(params, "text", { allowEmpty: true }),
           readImages(params),
         );
       case "agent.steer":
         return {
           accepted: await this.#sessionHost.steer(
             readString(params, "sessionId"),
-            readString(params, "text"),
+            readString(params, "text", { allowEmpty: true }),
             readImages(params),
           ),
         };
@@ -310,7 +334,7 @@ export class HostController {
         return {
           accepted: await this.#sessionHost.followUp(
             readString(params, "sessionId"),
-            readString(params, "text"),
+            readString(params, "text", { allowEmpty: true }),
             readImages(params),
           ),
         };
@@ -331,6 +355,19 @@ export class HostController {
           readString(params, "provider"),
           readString(params, "modelId"),
         );
+      case "thinking.select": {
+        const level = readString(params, "level");
+        if (!THINKING_LEVELS.includes(level as ThinkingLevel)) {
+          throw new HostError(
+            "invalid_params",
+            `level must be one of: ${THINKING_LEVELS.join(", ")}`,
+          );
+        }
+        return this.#sessionHost.selectThinkingLevel(
+          readString(params, "sessionId"),
+          level as ThinkingLevel,
+        );
+      }
       case "provider.list":
         return this.#sessionHost.listProviders();
       case "provider.config.get":

@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { lstat, realpath, rm } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   discoverPiRuntimes,
   type RuntimeCandidate,
@@ -15,8 +16,11 @@ import type {
   ProviderAuthResponse,
   ProjectTrustRequest,
   SessionSnapshot,
+  SessionSummary,
 } from "@piarium/protocol";
 import { PiHostClient, type PiHostExit } from "./host-client.js";
+import { PiRuntimeBrokerError } from "./errors.js";
+import { SessionMetadataStore } from "./session-metadata-store.js";
 
 export interface ProjectTrustDecision {
   remember: boolean;
@@ -75,6 +79,7 @@ export type PiCatalogMethod =
   | "provider.models.discover"
   | "provider.login"
   | "provider.logout"
+  | "session.rename"
   | "session.list"
   | "settings.get"
   | "settings.update";
@@ -84,12 +89,14 @@ export class PiRuntimeBroker {
   readonly #listeners = new Set<(event: PiRuntimeBrokerEvent) => void>();
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
+  readonly #knownSummaries = new Map<string, SessionSummary>();
   #catalog: PiHostClient | undefined;
   #catalogContextCwd: string | undefined;
   #catalogContextQueue: Promise<void> = Promise.resolve();
   #catalogContextSessionId: string | undefined;
   #catalogPromise: Promise<PiHostClient> | undefined;
   #disposed = false;
+  #metadata: SessionMetadataStore | undefined;
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
@@ -155,8 +162,41 @@ export class PiRuntimeBroker {
     return request;
   }
 
-  async listSessions(cwd?: string) {
-    return this.requestCatalog("session.list", cwd === undefined ? {} : { cwd });
+  async listSessions(cwd?: string): Promise<SessionSummary[]> {
+    const worker = await this.#getCatalog();
+    const catalogSummaries = await worker.request(
+      "session.list",
+      cwd === undefined ? {} : { cwd },
+    );
+    for (const summary of catalogSummaries) this.#knownSummaries.set(summary.id, summary);
+    const catalogIds = new Set(catalogSummaries.map((summary) => summary.id));
+    const cwdKey = cwd === undefined ? undefined : this.#pathKey(cwd);
+    for (const [sessionId, summary] of this.#knownSummaries) {
+      if (this.#sessions.has(sessionId) || !summary.persisted) continue;
+      if (cwdKey !== undefined && this.#pathKey(summary.cwd) !== cwdKey) continue;
+      if (!catalogIds.has(sessionId)) this.#knownSummaries.delete(sessionId);
+    }
+    const activeSummaries = await Promise.allSettled(
+      [...this.#sessions].map(([sessionId, sessionWorker]) =>
+        sessionWorker.request("session.summary", { sessionId }),
+      ),
+    );
+    for (const result of activeSummaries) {
+      if (result.status === "fulfilled") this.#knownSummaries.set(result.value.id, result.value);
+    }
+    const merged = [...this.#knownSummaries.values()]
+      .filter((summary) => cwdKey === undefined || this.#pathKey(summary.cwd) === cwdKey)
+      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const idsByPath = new Map(merged.map((summary) => [this.#pathKey(summary.sessionFile), summary.id]));
+    const linked = merged.map((summary): SessionSummary => {
+      if (!summary.parentSessionPath) return summary;
+      const parentId = idsByPath.get(this.#pathKey(summary.parentSessionPath));
+      const linkedSummary = { ...summary };
+      if (parentId === undefined) delete linkedSummary.parentId;
+      else linkedSummary.parentId = parentId;
+      return linkedSummary;
+    });
+    return (await this.#metadataFor(worker)).enrich(linked);
   }
 
   async createSession(cwd: string, name?: string): Promise<SessionSnapshot> {
@@ -167,6 +207,7 @@ export class PiRuntimeBroker {
         ...(name === undefined ? {} : { name }),
       });
       this.#bindSession(worker, snapshot.sessionId);
+      await this.#rememberSummary(worker, snapshot.sessionId);
       return snapshot;
     } catch (error) {
       await this.#removeWorker(worker);
@@ -185,8 +226,14 @@ export class PiRuntimeBroker {
     }
     const worker = await this.#spawnWorker();
     try {
-      const snapshot = await worker.request("session.open", input);
+      const known = input.sessionId ? this.#knownSummaries.get(input.sessionId) : undefined;
+      const openInput =
+        input.sessionFile === undefined && known !== undefined
+          ? { ...input, sessionFile: known.sessionFile }
+          : input;
+      const snapshot = await worker.request("session.open", openInput);
       this.#bindSession(worker, snapshot.sessionId);
+      await this.#rememberSummary(worker, snapshot.sessionId);
       return snapshot;
     } catch (error) {
       await this.#removeWorker(worker);
@@ -196,8 +243,10 @@ export class PiRuntimeBroker {
 
   async closeSession(sessionId: string): Promise<{ closed: boolean }> {
     const worker = this.#workerForSession(sessionId);
+    const summary = await this.#rememberSummary(worker, sessionId);
     const result = await worker.request("session.close", { sessionId });
     await this.#removeWorker(worker);
+    if (!summary.persisted) this.#knownSummaries.delete(sessionId);
     return result;
   }
 
@@ -211,6 +260,7 @@ export class PiRuntimeBroker {
 
   async forkSession(sessionId: string, entryId: string, position?: "before" | "at") {
     const worker = this.#workerForSession(sessionId);
+    await this.#rememberSummary(worker, sessionId);
     const result = await worker.request("session.fork", {
       entryId,
       ...(position === undefined ? {} : { position }),
@@ -218,7 +268,56 @@ export class PiRuntimeBroker {
     });
     this.#bindSession(worker, result.snapshot.sessionId);
     if (result.snapshot.sessionId !== sessionId) this.#sessions.delete(sessionId);
+    await this.#rememberSummary(worker, result.snapshot.sessionId);
     return result;
+  }
+
+  async renameSession(sessionId: string, name: string): Promise<{ name?: string; sessionId: string }> {
+    const worker = this.#sessions.get(sessionId);
+    if (worker) {
+      const result = await worker.request("session.rename", { name, sessionId });
+      await this.#rememberSummary(worker, sessionId);
+      return result;
+    }
+    const summary = (await this.listSessions()).find((entry) => entry.id === sessionId);
+    if (!summary) {
+      throw new PiRuntimeBrokerError("session_not_found", `Unknown Pi session: ${sessionId}`);
+    }
+    const result = await this.requestCatalog("session.rename", {
+      name,
+      sessionFile: summary.sessionFile,
+      sessionId,
+    });
+    const updated = { ...summary, updatedAt: new Date().toISOString() };
+    if (result.name === undefined) delete updated.name;
+    else updated.name = result.name;
+    this.#knownSummaries.set(sessionId, updated);
+    return result;
+  }
+
+  async archiveSession(sessionId: string, archived: boolean): Promise<SessionSummary> {
+    const summaries = await this.listSessions();
+    const summary = summaries.find((entry) => entry.id === sessionId);
+    if (!summary) {
+      throw new PiRuntimeBrokerError("session_not_found", `Unknown Pi session: ${sessionId}`);
+    }
+    const archivedAt = await (await this.#metadataFor()).setArchived(sessionId, archived);
+    const updated = { ...summary };
+    if (archivedAt !== undefined) updated.archivedAt = archivedAt;
+    else delete updated.archivedAt;
+    this.#knownSummaries.set(sessionId, updated);
+    return updated;
+  }
+
+  async deleteSession(sessionId: string): Promise<{ deleted: boolean; sessionId: string }> {
+    const summaries = await this.listSessions();
+    const summary = summaries.find((entry) => entry.id === sessionId);
+    if (!summary) return { deleted: false, sessionId };
+    if (this.#sessions.has(sessionId)) await this.closeSession(sessionId);
+    await this.#deleteSessionFile(summary.sessionFile);
+    await (await this.#metadataFor()).remove(sessionId);
+    this.#knownSummaries.delete(sessionId);
+    return { deleted: true, sessionId };
   }
 
   async respondToExtensionUi(
@@ -249,9 +348,11 @@ export class PiRuntimeBroker {
     const clients = [...this.#clients];
     this.#clients.clear();
     this.#sessions.clear();
+    this.#knownSummaries.clear();
     this.#catalog = undefined;
     this.#catalogContextCwd = undefined;
     this.#catalogContextSessionId = undefined;
+    this.#metadata = undefined;
     await Promise.allSettled(clients.map((client) => client.dispose()));
     this.#listeners.clear();
   }
@@ -281,6 +382,68 @@ export class PiRuntimeBroker {
     } finally {
       this.#catalogPromise = undefined;
     }
+  }
+
+  async #metadataFor(worker?: PiHostClient): Promise<SessionMetadataStore> {
+    if (this.#metadata) return this.#metadata;
+    const catalog = worker ?? (await this.#getCatalog());
+    this.#metadata = new SessionMetadataStore(catalog.handshake.runtime.agentDir);
+    return this.#metadata;
+  }
+
+  async #rememberSummary(worker: PiHostClient, sessionId: string): Promise<SessionSummary> {
+    const summary = await worker.request("session.summary", { sessionId });
+    this.#knownSummaries.set(summary.id, summary);
+    return summary;
+  }
+
+  #pathKey(path: string): string {
+    const normalized = resolve(path);
+    return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  }
+
+  async #deleteSessionFile(sessionFile: string): Promise<void> {
+    const metadata = await this.#metadataFor();
+    const rootPath = resolve(metadata.agentDir, "sessions");
+    const candidate = resolve(sessionFile);
+    const relativePath = relative(rootPath, candidate);
+    if (
+      relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath)
+    ) {
+      throw new PiRuntimeBrokerError(
+        "session_path_denied",
+        `Refusing to delete a session outside the Pi session root: ${candidate}`,
+      );
+    }
+    let info: Awaited<ReturnType<typeof lstat>>;
+    try {
+      info = await lstat(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (info.isSymbolicLink() || !info.isFile()) {
+      throw new PiRuntimeBrokerError(
+        "session_path_denied",
+        `Refusing to delete a non-regular Pi session file: ${candidate}`,
+      );
+    }
+    const root = await realpath(rootPath);
+    const resolvedCandidate = await realpath(candidate);
+    const resolvedRelativePath = relative(root, resolvedCandidate);
+    if (
+      resolvedRelativePath === ".." ||
+      resolvedRelativePath.startsWith(`..${sep}`) ||
+      isAbsolute(resolvedRelativePath)
+    ) {
+      throw new PiRuntimeBrokerError(
+        "session_path_denied",
+        `Refusing to delete a session outside the Pi session root: ${resolvedCandidate}`,
+      );
+    }
+    await rm(resolvedCandidate);
   }
 
   async #spawnWorker(): Promise<PiHostClient> {

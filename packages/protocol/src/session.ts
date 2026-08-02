@@ -222,6 +222,19 @@ export interface SessionEntriesResult {
   sessionId: string;
 }
 
+export interface SessionTreeNode {
+  children: SessionTreeNode[];
+  entry: PiSessionEntry;
+  label?: string;
+  labelTimestamp?: string;
+}
+
+export interface SessionTreeResult {
+  leafId: string | null;
+  sessionId: string;
+  tree: SessionTreeNode[];
+}
+
 export type PiAssistantStreamUpdate =
   | { type: "start" }
   | { contentIndex: number; type: "text_start" }

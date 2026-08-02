@@ -38,14 +38,14 @@ describe("message queue runtime ownership", () => {
     expect(migrated.quarantinedLegacyMessages?.["session-1"]?.[0]?.content).toBe("legacy")
   })
 
-  test("bounds each queue to the newest 20 messages", () => {
+  test("preserves the complete queue until the user sends or clears it", () => {
     const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
     for (let index = 0; index < 25; index += 1) {
       useMessageQueueStore.getState().addToQueue(target, { content: `message-${index}` })
     }
 
     const queue = useMessageQueueStore.getState().getQueueForTarget(target)
-    expect(queue).toHaveLength(20)
-    expect(queue[0]?.content).toBe("message-5")
+    expect(queue).toHaveLength(25)
+    expect(queue[0]?.content).toBe("message-0")
   })
 })

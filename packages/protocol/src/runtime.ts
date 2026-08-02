@@ -29,12 +29,19 @@ type DirectRuntimeMethod =
   | "recovery.undo"
   | "session.close"
   | "session.create"
+  | "session.entry"
   | "session.entries"
   | "session.fork"
+  | "session.header"
   | "session.list"
   | "session.navigate"
   | "session.open"
-  | "session.snapshot";
+  | "session.rename"
+  | "session.snapshot"
+  | "session.stats"
+  | "session.summary"
+  | "session.tree"
+  | "thinking.select";
 
 type SessionScopedRuntimeMethod =
   | "model.list"
@@ -75,7 +82,7 @@ type SessionScopedMethodMap = {
  * absent. Catalog operations target either a live session or a broker-owned in-memory workspace
  * context because Pi resources and provider registrations can vary by workspace.
  */
-export type RuntimeMethodMap = Pick<HostMethodMap, DirectRuntimeMethod> &
+export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "session.rename"> &
   SessionScopedMethodMap & {
     "extension.ui.respond": {
       params: { response: ExtensionUiResponse; sessionId: string };
@@ -86,6 +93,22 @@ export type RuntimeMethodMap = Pick<HostMethodMap, DirectRuntimeMethod> &
       result: HostHandshakeResult;
     };
     "model.select": HostMethodMap["model.select"];
+    "session.archive": {
+      params: { sessionId: string };
+      result: HostMethodMap["session.list"]["result"][number];
+    };
+    "session.delete": {
+      params: { sessionId: string };
+      result: { deleted: boolean; sessionId: string };
+    };
+    "session.rename": {
+      params: { name: string; sessionId: string };
+      result: HostMethodMap["session.rename"]["result"];
+    };
+    "session.unarchive": {
+      params: { sessionId: string };
+      result: HostMethodMap["session.list"]["result"][number];
+    };
     "provider.auth.respond": {
       params: { response: ProviderAuthResponse; sessionId: string };
       result: HostMethodMap["provider.auth.respond"]["result"];
@@ -103,6 +126,7 @@ export const RUNTIME_METHODS = [
   "host.handshake",
   "model.list",
   "model.select",
+  "thinking.select",
   "package.install",
   "package.list",
   "package.remove",
@@ -123,12 +147,21 @@ export const RUNTIME_METHODS = [
   "recovery.undo",
   "session.close",
   "session.create",
+  "session.delete",
+  "session.entry",
   "session.entries",
   "session.fork",
+  "session.header",
   "session.list",
   "session.navigate",
   "session.open",
+  "session.rename",
   "session.snapshot",
+  "session.stats",
+  "session.summary",
+  "session.tree",
+  "session.archive",
+  "session.unarchive",
   "settings.get",
   "settings.update",
 ] as const satisfies readonly (keyof RuntimeMethodMap)[];

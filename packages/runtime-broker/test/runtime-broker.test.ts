@@ -155,7 +155,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
       sessionId: created.sessionId,
     });
     const entries = await broker.requestForSession(created.sessionId, "session.entries", {
-      branchOnly: true,
+      scope: "branch",
       sessionId: created.sessionId,
     });
     assert.equal(entries.scope, "branch");
@@ -169,8 +169,41 @@ test("broker owns catalog and per-session Pi workers", async () => {
           entry.customType === "piarium.broker.smoke",
       ),
     );
-    assert.equal((await broker.closeSession(created.sessionId)).closed, true);
+
+    const tree = await dispatchRuntimeRequest(broker, "session.tree", {
+      sessionId: created.sessionId,
+    });
+    assert.equal(tree.sessionId, created.sessionId);
+    assert.match(JSON.stringify(tree.tree), /piarium\.broker\.smoke/);
+
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "session.rename", {
+        name: "Broker renamed",
+        sessionId: created.sessionId,
+      }),
+      { name: "Broker renamed", sessionId: created.sessionId },
+    );
+    assert.equal(
+      (await dispatchRuntimeRequest(broker, "session.archive", {
+        sessionId: created.sessionId,
+      })).id,
+      created.sessionId,
+    );
+    assert.ok((await broker.listSessions(workspace))[0]?.archivedAt);
+    const restored = await dispatchRuntimeRequest(broker, "session.unarchive", {
+      sessionId: created.sessionId,
+    });
+    assert.equal(restored.archivedAt, undefined);
+    assert.equal((await broker.listSessions(workspace))[0]?.archivedAt, undefined);
+
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "session.delete", {
+        sessionId: created.sessionId,
+      }),
+      { deleted: true, sessionId: created.sessionId },
+    );
     assert.deepEqual(broker.activeSessionIds, []);
+    assert.deepEqual(await broker.listSessions(workspace), []);
     assert.ok(events.some((event) => event.kind === "host"));
     assert.ok(subscribedEvents.some((event) => event.kind === "host"));
     await assert.rejects(

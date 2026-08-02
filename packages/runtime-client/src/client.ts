@@ -28,7 +28,7 @@ export interface PiRuntimeClientOptions {
   createId?: () => string;
   onProtocolError?(error: Error): void;
   onSequenceGap?(gap: RuntimeSequenceGap): void;
-  requestTimeoutMs?: number;
+  requestTimeoutMs?: number | null;
   transport: RuntimeTransport;
 }
 
@@ -96,7 +96,7 @@ export class PiRuntimeClient {
   async request<M extends RuntimeMethod>(
     method: M,
     params: RuntimeMethodParams<M>,
-    timeoutMs: number | null = this.#options.requestTimeoutMs ?? 120_000,
+    timeoutMs: number | null = this.#options.requestTimeoutMs ?? null,
   ): Promise<RuntimeMethodResult<M>> {
     if (!this.connected) throw new Error("Pi runtime client is not connected");
     if (timeoutMs !== null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {

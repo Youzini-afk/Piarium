@@ -7,8 +7,6 @@ import {
 } from "./runtime.js";
 import { type JsonValue, PIARIUM_PROTOCOL_VERSION } from "./types.js";
 
-const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
-
 export class ProtocolDecodeError extends Error {
   readonly code: string;
 
@@ -117,19 +115,26 @@ export function encodeRuntimeEnvelope(envelope: RuntimeWireEnvelope): string {
 }
 
 export interface JsonLineDecoderOptions {
-  maxFrameBytes?: number;
+  /** Set a positive byte count to cap frames. Omit, null, or 0 for no artificial cap. */
+  maxFrameBytes?: number | null;
 }
 
 export class JsonLineDecoder {
   readonly #decoder = new TextDecoder();
   readonly #encoder = new TextEncoder();
-  readonly #maxFrameBytes: number;
+  readonly #maxFrameBytes: number | undefined;
   #buffer = "";
 
   constructor(options: JsonLineDecoderOptions = {}) {
-    this.#maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
-    if (!Number.isSafeInteger(this.#maxFrameBytes) || this.#maxFrameBytes <= 0) {
-      throw new RangeError("maxFrameBytes must be a positive integer");
+    const configured = options.maxFrameBytes;
+    this.#maxFrameBytes = configured === undefined || configured === null || configured === 0
+      ? undefined
+      : configured;
+    if (
+      this.#maxFrameBytes !== undefined &&
+      (!Number.isSafeInteger(this.#maxFrameBytes) || this.#maxFrameBytes < 0)
+    ) {
+      throw new RangeError("maxFrameBytes must be a non-negative integer, null, or undefined");
     }
   }
 
@@ -161,7 +166,10 @@ export class JsonLineDecoder {
   }
 
   #assertWithinLimit(): void {
-    if (this.#encoder.encode(this.#buffer).byteLength > this.#maxFrameBytes) {
+    if (
+      this.#maxFrameBytes !== undefined &&
+      this.#encoder.encode(this.#buffer).byteLength > this.#maxFrameBytes
+    ) {
       this.#buffer = "";
       throw new ProtocolDecodeError(
         "frame_too_large",

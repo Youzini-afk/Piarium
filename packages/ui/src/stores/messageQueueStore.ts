@@ -60,9 +60,6 @@ export type MessageQueueTarget = {
     sessionId: string;
 };
 
-const MAX_QUEUE_TARGETS = 50;
-const MAX_MESSAGES_PER_QUEUE = 20;
-
 export const createMessageQueueTarget = (
     sessionId: string,
     directory: string | null | undefined,
@@ -141,19 +138,11 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
 
                     set((state) => {
                         const currentQueue = state.queuedMessages[key] ?? [];
-                        const queuedMessages = {
-                            ...state.queuedMessages,
-                            [key]: [...currentQueue, queuedMessage].slice(-MAX_MESSAGES_PER_QUEUE),
-                        };
-                        const keys = Object.keys(queuedMessages);
-                        if (keys.length > MAX_QUEUE_TARGETS) {
-                            keys.sort((left, right) => (
-                                (queuedMessages[left]?.[0]?.createdAt ?? 0) - (queuedMessages[right]?.[0]?.createdAt ?? 0)
-                            ));
-                            for (const staleKey of keys.slice(0, keys.length - MAX_QUEUE_TARGETS)) delete queuedMessages[staleKey];
-                        }
                         return {
-                            queuedMessages,
+                            queuedMessages: {
+                                ...state.queuedMessages,
+                                [key]: [...currentQueue, queuedMessage],
+                            },
                         };
                     });
                 },

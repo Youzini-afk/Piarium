@@ -8,6 +8,7 @@ import {
 } from '@piarium/protocol';
 import {
   dispatchRuntimeRequest,
+  PiRuntimeBrokerError,
   PiHostRequestError,
   RuntimeDispatchError,
 } from '@piarium/runtime-broker';
@@ -15,9 +16,19 @@ import { WebSocketServer } from 'ws';
 
 export const PI_RUNTIME_WS_PATH = '/api/piarium/runtime/ws';
 
-const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
-const MAX_PENDING_REQUESTS = 64;
-const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
+const configurableLimit = (name) => {
+  const raw = process.env[name];
+  if (typeof raw !== 'string' || raw.trim() === '') return 0;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative integer; 0 disables the limit`);
+  }
+  return value;
+};
+
+const MAX_PAYLOAD_BYTES = configurableLimit('PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES');
+const MAX_PENDING_REQUESTS = configurableLimit('PIARIUM_RUNTIME_MAX_PENDING_REQUESTS');
+const MAX_BUFFERED_BYTES = configurableLimit('PIARIUM_RUNTIME_MAX_BUFFERED_BYTES');
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const WS_OPEN = 1;
 
@@ -30,7 +41,11 @@ const parsePathname = (url) => {
 };
 
 const errorResponse = (id, error) => {
-  if (error instanceof RuntimeDispatchError || error instanceof PiHostRequestError) {
+  if (
+    error instanceof RuntimeDispatchError ||
+    error instanceof PiRuntimeBrokerError ||
+    error instanceof PiHostRequestError
+  ) {
     return createRuntimeErrorResponse(id, {
       code: error.code,
       ...(error.details === undefined ? {} : { details: error.details }),
@@ -65,7 +80,7 @@ const readFrameId = (frame) => {
 
 const sendEnvelope = (socket, envelope) => {
   if (socket.readyState !== WS_OPEN) return false;
-  if (socket.bufferedAmount > MAX_BUFFERED_BYTES) {
+  if (MAX_BUFFERED_BYTES > 0 && socket.bufferedAmount > MAX_BUFFERED_BYTES) {
     socket.terminate();
     return false;
   }
@@ -173,7 +188,7 @@ export function createPiRuntimeGateway({
         }));
         return;
       }
-      if (pending.size >= MAX_PENDING_REQUESTS) {
+      if (MAX_PENDING_REQUESTS > 0 && pending.size >= MAX_PENDING_REQUESTS) {
         sendEnvelope(socket, createRuntimeErrorResponse(envelope.id, {
           code: 'too_many_requests',
           message: 'Too many runtime requests are active',

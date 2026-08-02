@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 2 as const;
+export const PIARIUM_PROTOCOL_VERSION = 3 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -42,12 +42,27 @@ export interface RuntimeDescriptor {
 }
 
 export interface SessionSummary {
-  createdAt?: string;
+  allMessagesText: string;
+  archivedAt?: string;
+  createdAt: string;
+  cwd: string;
+  firstMessage: string;
+  id: string;
+  messageCount: number;
+  name?: string;
+  parentId?: string;
+  parentSessionPath?: string;
+  persisted: boolean;
+  sessionFile: string;
+  updatedAt: string;
+}
+
+export interface SessionHeader {
   cwd: string;
   id: string;
-  name?: string;
-  sessionFile?: string;
-  updatedAt?: string;
+  parentSession?: string;
+  timestamp: string;
+  version?: number;
 }
 
 export interface ModelDescriptor {
@@ -200,15 +215,46 @@ export interface ExtensionUiResponse {
   value?: JsonValue;
 }
 
-export interface SessionSnapshot {
+export interface SessionRuntimeState {
   activeTools: string[];
   busy: boolean;
+  followUp: string[];
+  followUpMode: "all" | "one-at-a-time";
+  isCompacting: boolean;
+  isStreaming: boolean;
+  pendingMessageCount: number;
+  retryAttempt: number;
+  steering: string[];
+  steeringMode: "all" | "one-at-a-time";
+}
+
+export interface SessionSnapshot extends SessionRuntimeState {
   cwd: string;
   leafId: string | null;
   model?: ModelDescriptor;
   name?: string;
+  sessionFile?: string;
   sessionId: string;
   thinkingLevel: ThinkingLevel;
+}
+
+export interface SessionStats {
+  contextUsage?: JsonValue;
+  cost: number;
+  sessionFile?: string;
+  sessionId: string;
+  tokens: {
+    cacheRead: number;
+    cacheWrite: number;
+    input: number;
+    output: number;
+    total: number;
+  };
+  totalMessages: number;
+  toolCalls: number;
+  toolResults: number;
+  assistantMessages: number;
+  userMessages: number;
 }
 
 export interface ProjectTrustRequest {

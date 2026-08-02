@@ -11,16 +11,18 @@ message/file checkpoints into one local interface.
 
 ## Status
 
-Piarium is under active development. Its bounded protocol, isolated Pi `0.83.0` SDK host, secure
+Piarium is under active development. Its versioned protocol, isolated Pi `0.83.0` SDK host, secure
 desktop broker, and transactional conversation/workspace recovery core are implemented and tested.
 The complete OpenChamber-derived product shell is now imported and builds from this repository.
 Its Electron lifecycle owns the Pi worker broker directly, and an authenticated Pi-native
 WebSocket surface plus browser client now carries that broker across desktop/web/mobile and the
-encrypted relay. Protocol v2 now exposes Pi's tree conversation, streaming lifecycle, model
-catalog, and provider-owned authentication as Piarium DTOs without leaking SDK-only callbacks or
-Pi credential objects. The host now owns layered native Pi provider configuration and secured model
-discovery while keeping credentials in Pi AuthStorage. Replacement of the remaining OpenCode UI
-state paths is the active phase.
+encrypted relay. Protocol v3 now exposes Pi's complete branch graph, tree/header/entry/summary/stats,
+real streaming/compaction/queue state, native rename/archive/restore/delete, model and thinking
+selection, and provider-owned authentication as Piarium DTOs without leaking SDK-only callbacks or
+Pi credential objects. The host owns layered native Pi provider configuration and credential-safe
+model discovery while keeping credentials in Pi AuthStorage. Product limits are absent by default;
+deployment resource budgets are explicit opt-ins. Replacement of the remaining OpenCode UI state
+paths is the active phase.
 
 The product base is the maintainer's OpenChamber fork at commit `f551150e5`. That fork is imported
 into this repository and is being directly refactored from OpenCode to Pi; the source fork remains read-only.

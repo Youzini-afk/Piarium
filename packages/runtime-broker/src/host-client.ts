@@ -18,7 +18,7 @@ import {
 interface PendingRequest {
   reject(error: unknown): void;
   resolve(value: unknown): void;
-  timer: NodeJS.Timeout;
+  timer: NodeJS.Timeout | undefined;
 }
 
 export interface PiHostExit {
@@ -38,7 +38,7 @@ export interface PiHostClientOptions {
   onEvent?(event: EventEnvelope): void;
   onExit?(exit: PiHostExit): void;
   projectTrustOverride?: boolean;
-  requestTimeoutMs?: number;
+  requestTimeoutMs?: number | null;
   shutdownTimeoutMs?: number;
   startupTimeoutMs?: number;
 }
@@ -187,11 +187,14 @@ export class PiHostClient {
   async request<M extends HostMethod>(
     method: M,
     params: HostMethodParams<M>,
-    timeoutMs: number = this.#options.requestTimeoutMs ?? 120_000,
+    timeoutMs: number | null = this.#options.requestTimeoutMs ?? null,
   ): Promise<HostMethodResult<M>> {
     if (this.#disposed || this.#disposing) throw new Error("Pi host is shutting down");
     if (this.#terminalError) throw this.#terminalError;
     if (!this.#handshake) throw new Error("Pi host handshake is not complete");
+    if (timeoutMs !== null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+      throw new RangeError("timeoutMs must be positive");
+    }
     return this.#sendRequest(method, params, timeoutMs);
   }
 
@@ -203,16 +206,18 @@ export class PiHostClient {
   async #sendRequest<M extends HostMethod>(
     method: M,
     params: HostMethodParams<M>,
-    timeoutMs: number,
+    timeoutMs: number | null,
   ): Promise<HostMethodResult<M>> {
     const child = this.#child;
     if (!child?.connected) throw new Error("Pi host IPC is not connected");
     const id = randomUUID();
     const result = new Promise<HostMethodResult<M>>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new Error(`Pi host request timed out: ${method}`));
-      }, timeoutMs);
+      const timer = timeoutMs === null
+        ? undefined
+        : setTimeout(() => {
+            this.#pending.delete(id);
+            reject(new Error(`Pi host request timed out: ${method}`));
+          }, timeoutMs);
       this.#pending.set(id, {
         reject,
         resolve: (value) => resolve(value as HostMethodResult<M>),
@@ -222,7 +227,7 @@ export class PiHostClient {
     const rejectSend = (error: unknown) => {
       const pending = this.#pending.get(id);
       if (!pending) return;
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       this.#pending.delete(id);
       pending.reject(error);
     };
@@ -285,7 +290,7 @@ export class PiHostClient {
     if (envelope.kind === "response") {
       const pending = this.#pending.get(envelope.id);
       if (!pending) return;
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       this.#pending.delete(envelope.id);
       if (envelope.ok) pending.resolve(envelope.result);
       else pending.reject(new PiHostRequestError(envelope));
@@ -337,7 +342,7 @@ export class PiHostClient {
     this.#readyReject = undefined;
     this.#readyResolve = undefined;
     for (const pending of this.#pending.values()) {
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       pending.reject(error);
     }
     this.#pending.clear();

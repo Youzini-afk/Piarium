@@ -13,8 +13,11 @@ import type {
   RecoveryMode,
   RecoveryPoint,
   RecoveryPreview,
+  SessionHeader,
   SessionSnapshot,
+  SessionStats,
   SessionSummary,
+  ThinkingLevel,
 } from "./types.js";
 import type { ProviderAuthResponse, ProviderDescriptor } from "./auth.js";
 import type {
@@ -24,7 +27,7 @@ import type {
   ProviderConfigScope,
   ProviderModelDiscoveryResult,
 } from "./provider.js";
-import type { SessionEntriesResult } from "./session.js";
+import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
 
 export interface HostMethodMap {
   "catalog.context.open": {
@@ -73,6 +76,10 @@ export interface HostMethodMap {
   };
   "model.select": {
     params: { modelId: string; provider: string; sessionId: string };
+    result: SessionSnapshot;
+  };
+  "thinking.select": {
+    params: { level: ThinkingLevel; sessionId: string };
     result: SessionSnapshot;
   };
   "project.trust.respond": {
@@ -174,8 +181,12 @@ export interface HostMethodMap {
     result: SessionSummary[];
   };
   "session.entries": {
-    params: { branchOnly?: boolean; sessionId: string };
+    params: { scope?: "all" | "branch"; sessionId: string };
     result: SessionEntriesResult;
+  };
+  "session.entry": {
+    params: { entryId: string; sessionId: string };
+    result: PiSessionEntry | null;
   };
   "session.fork": {
     params: { entryId: string; position?: "before" | "at"; sessionId: string };
@@ -189,9 +200,29 @@ export interface HostMethodMap {
     params: { cwd?: string; sessionFile?: string; sessionId?: string };
     result: SessionSnapshot;
   };
+  "session.header": {
+    params: { sessionId: string };
+    result: SessionHeader | null;
+  };
+  "session.rename": {
+    params: { name: string; sessionFile?: string; sessionId: string };
+    result: { name?: string; sessionId: string };
+  };
   "session.snapshot": {
     params: { sessionId: string };
     result: SessionSnapshot;
+  };
+  "session.stats": {
+    params: { sessionId: string };
+    result: SessionStats;
+  };
+  "session.summary": {
+    params: { sessionId: string };
+    result: SessionSummary;
+  };
+  "session.tree": {
+    params: { sessionId: string };
+    result: SessionTreeResult;
   };
   "settings.get": {
     params: Record<string, never>;

@@ -11,7 +11,7 @@ export interface ProjectTrustDecision {
 
 interface PendingTrustRequest {
   deferred: Deferred<ProjectTrustDecision>;
-  timeout: NodeJS.Timeout;
+  timeout: NodeJS.Timeout | undefined;
 }
 
 export class ProjectTrustController {
@@ -22,13 +22,22 @@ export class ProjectTrustController {
     this.#emit = emit;
   }
 
-  request(cwd: string, timeoutMs: number = 120_000): Promise<ProjectTrustDecision> {
+  request(cwd: string, timeoutMs?: number | null): Promise<ProjectTrustDecision> {
+    if (
+      timeoutMs !== undefined &&
+      timeoutMs !== null &&
+      (!Number.isFinite(timeoutMs) || timeoutMs < 0)
+    ) {
+      throw new RangeError("timeoutMs must be non-negative");
+    }
     const id = randomUUID();
     const deferred = createDeferred<ProjectTrustDecision>();
-    const timeout = setTimeout(() => {
-      this.#pending.delete(id);
-      deferred.resolve({ remember: false, trusted: false });
-    }, timeoutMs);
+    const timeout = timeoutMs === undefined || timeoutMs === null || timeoutMs === 0
+      ? undefined
+      : setTimeout(() => {
+          this.#pending.delete(id);
+          deferred.resolve({ remember: false, trusted: false });
+        }, timeoutMs);
     this.#pending.set(id, { deferred, timeout });
     this.#emit("project.trust.request", { cwd, id, reason: "project-resources" });
     return deferred.promise;
@@ -37,7 +46,7 @@ export class ProjectTrustController {
   respond(input: { remember: boolean; requestId: string; trusted: boolean }): boolean {
     const pending = this.#pending.get(input.requestId);
     if (!pending) return false;
-    clearTimeout(pending.timeout);
+    if (pending.timeout) clearTimeout(pending.timeout);
     this.#pending.delete(input.requestId);
     pending.deferred.resolve({ remember: input.remember, trusted: input.trusted });
     return true;
@@ -45,7 +54,7 @@ export class ProjectTrustController {
 
   cancelAll(): void {
     for (const pending of this.#pending.values()) {
-      clearTimeout(pending.timeout);
+      if (pending.timeout) clearTimeout(pending.timeout);
       pending.deferred.resolve({ remember: false, trusted: false });
     }
     this.#pending.clear();

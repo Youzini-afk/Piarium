@@ -200,4 +200,21 @@ describe('Pi runtime gateway', () => {
     });
     socket.close();
   });
+
+  it('does not impose a product payload ceiling by default', async () => {
+    const { url } = await setup();
+    const socket = await openSocket(url);
+    await handshake(socket);
+    const responsePromise = nextMessage(socket);
+    socket.send(JSON.stringify({
+      id: 'large-list',
+      kind: 'request',
+      method: 'session.list',
+      params: { deploymentOwnedPayload: 'x'.repeat(6 * 1024 * 1024) },
+      v: PIARIUM_PROTOCOL_VERSION,
+    }));
+
+    expect(await responsePromise).toMatchObject({ id: 'large-list', ok: true, result: [] });
+    socket.close();
+  });
 });

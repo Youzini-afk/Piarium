@@ -9,28 +9,21 @@ import {
 import { HostError } from "./errors.js";
 import type { ProviderConfigurationManager } from "./provider-configuration.js";
 
-function configurableResourceLimit(name: string, fallback: number): number | undefined {
+function configurableResourceLimit(name: string): number | undefined {
   const configured = process.env[name];
-  if (configured === undefined || configured.trim() === "") return fallback;
+  if (configured === undefined || configured.trim() === "") return undefined;
   const parsed = Number(configured);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative number; 0 disables the limit`);
+  }
   return parsed === 0 ? undefined : Math.floor(parsed);
 }
 
-// Defaults prevent a broken endpoint from owning the worker indefinitely. They are deliberately
-// generous, are not catalog/model limits, and can be raised or disabled (value 0) by the owner.
-const MAX_RESPONSE_BYTES = configurableResourceLimit(
-  "PIARIUM_PROVIDER_DISCOVERY_MAX_BYTES",
-  256 * 1024 * 1024,
-);
-const REQUEST_TIMEOUT_MS = configurableResourceLimit(
-  "PIARIUM_PROVIDER_DISCOVERY_TIMEOUT_MS",
-  5 * 60_000,
-);
-const MAX_REDIRECTS = configurableResourceLimit(
-  "PIARIUM_PROVIDER_DISCOVERY_MAX_REDIRECTS",
-  20,
-);
+// Discovery follows the configured provider without product-imposed ceilings. Deployments that
+// need resource budgets can opt into them; exact redirect loops remain rejected independently.
+const MAX_RESPONSE_BYTES = configurableResourceLimit("PIARIUM_PROVIDER_DISCOVERY_MAX_BYTES");
+const REQUEST_TIMEOUT_MS = configurableResourceLimit("PIARIUM_PROVIDER_DISCOVERY_TIMEOUT_MS");
+const MAX_REDIRECTS = configurableResourceLimit("PIARIUM_PROVIDER_DISCOVERY_MAX_REDIRECTS");
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

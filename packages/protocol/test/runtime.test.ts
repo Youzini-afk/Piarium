@@ -17,6 +17,11 @@ describe("surface runtime protocol", () => {
     });
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(request)), request);
+    assert.equal(isRuntimeMethod("session.tree"), true);
+    assert.equal(isRuntimeMethod("session.archive"), true);
+    assert.equal(isRuntimeMethod("session.unarchive"), true);
+    assert.equal(isRuntimeMethod("session.delete"), true);
+    assert.equal(isRuntimeMethod("thinking.select"), true);
   });
 
   it("carries an explicit worker source on events", () => {

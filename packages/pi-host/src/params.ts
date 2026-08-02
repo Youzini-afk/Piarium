@@ -8,21 +8,28 @@ export function expectRecord(value: unknown, label: string = "params"): Record<s
   return value as Record<string, unknown>;
 }
 
-export function readString(record: Record<string, unknown>, key: string): string;
 export function readString(
   record: Record<string, unknown>,
   key: string,
-  options: { optional: true },
+  options?: { allowEmpty?: boolean },
+): string;
+export function readString(
+  record: Record<string, unknown>,
+  key: string,
+  options: { allowEmpty?: boolean; optional: true },
 ): string | undefined;
 export function readString(
   record: Record<string, unknown>,
   key: string,
-  options: { optional?: boolean } = {},
+  options: { allowEmpty?: boolean; optional?: boolean } = {},
 ): string | undefined {
   const value = record[key];
   if (value === undefined && options.optional) return undefined;
-  if (typeof value !== "string" || value.length === 0) {
-    throw new HostError("invalid_params", `${key} must be a non-empty string`);
+  if (typeof value !== "string" || (!options.allowEmpty && value.length === 0)) {
+    throw new HostError(
+      "invalid_params",
+      options.allowEmpty ? `${key} must be a string` : `${key} must be a non-empty string`,
+    );
   }
   return value;
 }

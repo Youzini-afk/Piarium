@@ -100,4 +100,16 @@ describe("JsonLineDecoder", () => {
     );
     assert.deepEqual(decoder.finish(), []);
   });
+
+  it("accepts unrestricted frames when no deployment ceiling is configured", () => {
+    const decoder = new JsonLineDecoder({ maxFrameBytes: 0 });
+    const frame = encodeEnvelope(
+      createRequest("large", "command.execute", {
+        command: `/${"x".repeat(1024 * 1024)}`,
+        sessionId: "s",
+      }),
+    );
+
+    assert.equal(decoder.push(frame).length, 1);
+  });
 });

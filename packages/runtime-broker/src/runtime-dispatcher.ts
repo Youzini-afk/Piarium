@@ -244,17 +244,58 @@ async function dispatchRuntimeRequestUnchecked(
     case "session.close": {
       return broker.closeSession(requireString(input, "sessionId"));
     }
+    case "session.archive": {
+      return broker.archiveSession(requireString(input, "sessionId"), true);
+    }
+    case "session.unarchive": {
+      return broker.archiveSession(requireString(input, "sessionId"), false);
+    }
+    case "session.delete": {
+      return broker.deleteSession(requireString(input, "sessionId"));
+    }
     case "session.snapshot": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "session.snapshot", { sessionId });
     }
     case "session.entries": {
       const sessionId = requireString(input, "sessionId");
-      const branchOnly = optionalBoolean(input, "branchOnly");
+      const scope =
+        input.scope === undefined
+          ? undefined
+          : requireEnum(input, "scope", ["branch", "all"] as const);
       return broker.requestForSession(sessionId, "session.entries", {
-        ...(branchOnly === undefined ? {} : { branchOnly }),
+        ...(scope === undefined ? {} : { scope }),
         sessionId,
       });
+    }
+    case "session.entry": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "session.entry", {
+        entryId: requireString(input, "entryId"),
+        sessionId,
+      });
+    }
+    case "session.header": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "session.header", { sessionId });
+    }
+    case "session.tree": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "session.tree", { sessionId });
+    }
+    case "session.stats": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "session.stats", { sessionId });
+    }
+    case "session.summary": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "session.summary", { sessionId });
+    }
+    case "session.rename": {
+      return broker.renameSession(
+        requireString(input, "sessionId"),
+        requireString(input, "name", { allowEmpty: true }),
+      );
     }
     case "session.fork": {
       const sessionId = requireString(input, "sessionId");
@@ -310,6 +351,21 @@ async function dispatchRuntimeRequestUnchecked(
       return broker.requestForSession(sessionId, "model.select", {
         modelId: requireString(input, "modelId"),
         provider: requireString(input, "provider"),
+        sessionId,
+      });
+    }
+    case "thinking.select": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "thinking.select", {
+        level: requireEnum(input, "level", [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+        ] as const),
         sessionId,
       });
     }

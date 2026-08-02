@@ -50,16 +50,17 @@ interface RuntimeConfigurationState {
 const EMPTY_CONFIG = "{\n  \"providers\": {}\n}\n";
 const LOCK_RETRY_MS = 50;
 
-function configurableDuration(name: string, fallback: number): number | undefined {
+function configurableDuration(name: string): number | undefined {
   const configured = process.env[name];
-  if (configured === undefined || configured.trim() === "") return fallback;
+  if (configured === undefined || configured.trim() === "") return undefined;
   const parsed = Number(configured);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative number; 0 disables the cutoff`);
+  }
   return parsed === 0 ? undefined : Math.floor(parsed);
 }
 
-const LOCK_STALE_MS = configurableDuration("PIARIUM_PROVIDER_CONFIG_LOCK_STALE_MS", 60_000);
-const LOCK_TIMEOUT_MS = configurableDuration("PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS", 60_000);
+const LOCK_TIMEOUT_MS = configurableDuration("PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS");
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,6 +68,16 @@ function isObject(value: unknown): value is JsonObject {
 
 function errorCode(error: unknown): string | undefined {
   return isObject(error) && typeof error.code === "string" ? error.code : undefined;
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return errorCode(error) === "EPERM";
+  }
 }
 
 function isPathInside(base: string, candidate: string): boolean {
@@ -353,28 +364,66 @@ async function acquireLock(path: string): Promise<() => Promise<void>> {
   const lockPath = `${path}.piarium.lock`;
   const started = Date.now();
   for (;;) {
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      await mkdir(lockPath);
-      return () => rm(lockPath, { force: true, recursive: true });
+      handle = await open(lockPath, "wx", 0o600);
     } catch (error) {
       if (errorCode(error) !== "EEXIST") throw error;
-      try {
-        const info = await stat(lockPath);
-        if (LOCK_STALE_MS !== undefined && Date.now() - info.mtimeMs > LOCK_STALE_MS) {
-          await rm(lockPath, { force: true, recursive: true });
-          continue;
-        }
-      } catch (statError) {
-        if (errorCode(statError) === "ENOENT") continue;
-        throw statError;
-      }
-      if (LOCK_TIMEOUT_MS !== undefined && Date.now() - started >= LOCK_TIMEOUT_MS) {
-        throw new HostError("provider_config_locked", `Timed out waiting for models configuration: ${path}`, {
-          retryable: true,
-        });
-      }
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, LOCK_RETRY_MS));
     }
+    if (handle) {
+      const token = randomUUID();
+      try {
+        await handle.writeFile(
+          JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), token }),
+          "utf8",
+        );
+        return async () => {
+          await handle.close();
+          try {
+            const owner = JSON.parse(await readFile(lockPath, "utf8")) as unknown;
+            if (isObject(owner) && owner.token === token) {
+              await rm(lockPath, { force: true, recursive: true });
+            }
+          } catch (error) {
+            if (errorCode(error) !== "ENOENT") throw error;
+          }
+        };
+      } catch (error) {
+        await handle.close().catch(() => undefined);
+        await rm(lockPath, { force: true, recursive: true }).catch(() => undefined);
+        throw error;
+      }
+    }
+    let removeAbandoned = false;
+    try {
+      const owner = JSON.parse(await readFile(lockPath, "utf8")) as unknown;
+      removeAbandoned = !isObject(owner) || !processIsAlive(Number(owner.pid));
+    } catch (readError) {
+      if (errorCode(readError) === "ENOENT") continue;
+      const info = await stat(lockPath).catch((statError: unknown) => {
+        if (errorCode(statError) === "ENOENT") return undefined;
+        throw statError;
+      });
+      if (!info) continue;
+      removeAbandoned = Date.now() - info.mtimeMs > 2_000;
+    }
+    if (removeAbandoned) {
+      const abandonedPath = `${lockPath}.abandoned.${process.pid}.${randomUUID()}`;
+      try {
+        await rename(lockPath, abandonedPath);
+      } catch (error) {
+        if (errorCode(error) === "ENOENT") continue;
+        throw error;
+      }
+      await rm(abandonedPath, { force: true, recursive: true });
+      continue;
+    }
+    if (LOCK_TIMEOUT_MS !== undefined && Date.now() - started >= LOCK_TIMEOUT_MS) {
+      throw new HostError("provider_config_locked", `Timed out waiting for models configuration: ${path}`, {
+        retryable: true,
+      });
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, LOCK_RETRY_MS));
   }
 }
 

@@ -1,8 +1,9 @@
 import type { JsonValue } from "@piarium/protocol";
 
-const DEFAULT_MAX_DEPTH = 20;
-
-export function toJsonValue(value: unknown, maxDepth: number = DEFAULT_MAX_DEPTH): JsonValue {
+export function toJsonValue(value: unknown, maxDepth?: number): JsonValue {
+  if (maxDepth !== undefined && (!Number.isSafeInteger(maxDepth) || maxDepth < 0)) {
+    throw new RangeError("maxDepth must be a non-negative safe integer");
+  }
   const seen = new WeakSet<object>();
 
   const visit = (current: unknown, depth: number): JsonValue => {
@@ -16,7 +17,7 @@ export function toJsonValue(value: unknown, maxDepth: number = DEFAULT_MAX_DEPTH
     if (current === undefined || typeof current === "function" || typeof current === "symbol") {
       return null;
     }
-    if (depth >= maxDepth) return "[MaxDepth]";
+    if (maxDepth !== undefined && depth >= maxDepth) return "[MaxDepth]";
     if (current instanceof Date) return current.toISOString();
     if (current instanceof Error) {
       return { message: current.message, name: current.name };

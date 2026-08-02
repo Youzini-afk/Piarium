@@ -89,6 +89,12 @@ describe("HostController", () => {
       assert.ok(created.kind === "response" && created.ok);
       const snapshot = created.result as SessionSnapshot;
       assert.equal(snapshot.cwd, cwd);
+      assert.equal(snapshot.isCompacting, false);
+      assert.equal(snapshot.isStreaming, false);
+      assert.equal(snapshot.pendingMessageCount, 0);
+      assert.deepEqual(snapshot.steering, []);
+      assert.deepEqual(snapshot.followUp, []);
+      assert.ok(snapshot.sessionFile);
 
       transport.receive(
         createRequest("commands", "command.list", { sessionId: snapshot.sessionId }),
@@ -192,13 +198,54 @@ describe("HostController", () => {
 
       transport.receive(
         createRequest("entries", "session.entries", {
-          branchOnly: false,
+          scope: "all",
           sessionId: snapshot.sessionId,
         }),
       );
       const entries = await transport.waitFor((entry) => isResponse(entry, "entries"));
       assert.ok(entries.kind === "response" && entries.ok);
       assert.match(JSON.stringify(entries.result), /piarium\.test/);
+
+      transport.receive(
+        createRequest("tree", "session.tree", { sessionId: snapshot.sessionId }),
+      );
+      const tree = await transport.waitFor((entry) => isResponse(entry, "tree"));
+      assert.ok(tree.kind === "response" && tree.ok);
+      assert.match(JSON.stringify(tree.result), /piarium\.test/);
+
+      transport.receive(
+        createRequest("header", "session.header", { sessionId: snapshot.sessionId }),
+      );
+      const header = await transport.waitFor((entry) => isResponse(entry, "header"));
+      assert.ok(header.kind === "response" && header.ok);
+      assert.equal((header.result as { id: string }).id, snapshot.sessionId);
+
+      transport.receive(
+        createRequest("stats", "session.stats", { sessionId: snapshot.sessionId }),
+      );
+      const stats = await transport.waitFor((entry) => isResponse(entry, "stats"));
+      assert.ok(stats.kind === "response" && stats.ok);
+      assert.equal((stats.result as { sessionId: string }).sessionId, snapshot.sessionId);
+
+      transport.receive(
+        createRequest("rename", "session.rename", {
+          name: "Renamed from native Pi",
+          sessionId: snapshot.sessionId,
+        }),
+      );
+      const renamed = await transport.waitFor((entry) => isResponse(entry, "rename"));
+      assert.ok(renamed.kind === "response" && renamed.ok);
+      assert.equal((renamed.result as { name?: string }).name, "Renamed from native Pi");
+
+      transport.receive(
+        createRequest("thinking", "thinking.select", {
+          level: "off",
+          sessionId: snapshot.sessionId,
+        }),
+      );
+      const thinking = await transport.waitFor((entry) => isResponse(entry, "thinking"));
+      assert.ok(thinking.kind === "response" && thinking.ok);
+      assert.equal((thinking.result as SessionSnapshot).thinkingLevel, "off");
 
       transport.receive(
         createRequest("bad-settings", "settings.update", {
