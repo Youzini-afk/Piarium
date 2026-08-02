@@ -359,6 +359,7 @@ describe('updateDesktopSettings', () => {
         terminalShell: 'fish',
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-4' }],
         followUpBehavior: 'steer',
+        recoveryPreference: 'both',
         draftStarters: [{ type: 'command', name: 'runtime-a' }],
         draftStartersVisible: false,
         draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
@@ -373,6 +374,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().globalDraftStarters).toEqual([{ type: 'command', name: 'runtime-a' }]);
     expect(useUIStore.getState().draftStartersVisible).toBe(false);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('steer');
+    expect(useUIStore.getState().recoveryPreference).toBe('both');
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
     registerSettingsApi(async () => ({}), async () => ({
@@ -387,6 +389,7 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().globalDraftStarters).toBeNull();
     expect(useUIStore.getState().draftStartersVisible).toBe(true);
     expect(useMessageQueueStore.getState().followUpBehavior).toBe('queue');
+    expect(useUIStore.getState().recoveryPreference).toBe('conversation');
   });
 
   test('treats settings save responses as partial patches', async () => {

@@ -93,7 +93,11 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
 
 ## Phase 6 — Recovery UX and ecosystem integrations
 
-- Connect message rollback to conversation-only, conversation+files, or always-ask policy.
+- Implemented: persist the conversation-only, conversation+files, or always-ask policy across
+  application settings; manage `pi-workspace-history` and `pi-wtf` through Pi's native package
+  operations with truthful configured-versus-active status.
+- Connect the Pi-native message rollback action to that policy after the session/message UI no
+  longer uses OpenCode message IDs.
 - Put provider status/checkpoint/history management in the right sidebar/settings while retaining
   the existing timeline, reverted-message dock, undo/redo, and fork UX. Enable files-only/preview
   controls only when a plugin advertises them through recovery bridge v1.

@@ -1,4 +1,5 @@
 import type { ProjectEntry, TerminalShell } from '@/lib/api/types';
+import type { RecoveryPreference } from '@piarium/protocol';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
@@ -110,6 +111,7 @@ export type DesktopSettings = {
   autoSaveEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
+  recoveryPreference?: RecoveryPreference;
   checkpointRetentionLimit?: number;
   tunnelProvider?: string;
   tunnelMode?: 'quick' | 'managed-remote' | 'managed-local';

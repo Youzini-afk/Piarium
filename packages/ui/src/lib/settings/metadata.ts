@@ -195,7 +195,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Sessions',
     group: 'general',
     kind: 'single',
-    keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
+    keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen', 'recovery', 'rollback', 'undo', 'checkpoint', 'pi-workspace-history', 'pi-wtf'],
   },
   {
     slug: 'magic-prompts',

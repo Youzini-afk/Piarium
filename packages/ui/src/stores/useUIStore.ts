@@ -11,6 +11,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isWindowsArm64 } from '@/lib/platform';
+import type { RecoveryPreference } from '@piarium/protocol';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged' | 'turn';
@@ -638,6 +639,7 @@ interface UIStore {
   autoSaveEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
+  recoveryPreference: RecoveryPreference;
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
   fontSize: number;
@@ -803,6 +805,7 @@ interface UIStore {
   setAutoSaveEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
+  setRecoveryPreference: (value: RecoveryPreference) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
@@ -962,6 +965,7 @@ export const useUIStore = create<UIStore>()(
         autoSaveEnabled: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
+        recoveryPreference: 'conversation',
         autoDeleteLastRunAt: null,
         messageLimit: 200,
         fontSize: 100,
@@ -1776,6 +1780,10 @@ export const useUIStore = create<UIStore>()(
           set({ sessionRetentionAction: value });
         },
 
+        setRecoveryPreference: (value) => {
+          set({ recoveryPreference: value });
+        },
+
         setAutoDeleteLastRunAt: (timestamp) => {
           set({ autoDeleteLastRunAt: timestamp });
         },
@@ -2508,6 +2516,7 @@ export const useUIStore = create<UIStore>()(
           autoSaveEnabled: state.autoSaveEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
+          recoveryPreference: state.recoveryPreference,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,

@@ -80,6 +80,12 @@ Piarium persists only application policy such as the default recovery mode and v
 history stays in Pi JSONL; workspace snapshots and retention stay with the workspace-history
 provider; repair behavior stays with `pi-wtf`.
 
+The Sessions settings page persists that policy as `conversation`, `both`, or `ask` and manages the
+two maintained recovery packages through Pi's typed `package.list/install/update/remove` runtime
+operations. Package cards deliberately distinguish “configured for this workspace context” from
+“active in an open session”; command and bridge capabilities remain authoritative and are
+rediscovered after Pi reloads the package.
+
 ## Verification
 
 Automated host tests cover native conversation recovery, text and image restoration, deliberate

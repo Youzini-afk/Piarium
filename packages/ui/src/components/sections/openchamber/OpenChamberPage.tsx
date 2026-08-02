@@ -3,6 +3,7 @@ import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { CheckpointSettings } from './CheckpointSettings';
+import { RecoverySettings } from './RecoverySettings';
 import { PasskeySettings } from './PasskeySettings';
 import { DefaultsSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
@@ -54,6 +55,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 {!isVSCode && <OpenCodeCliSettings />}
                 <SessionRetentionSettings />
+                <RecoverySettings />
                 {isVSCode && <CheckpointSettings />}
                 {isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp() && <PasskeySettings />}
                 {showAbout && <AboutSettings />}
@@ -226,6 +228,7 @@ const SessionsSectionContent: React.FC = () => {
         <>
             <DefaultsSettings />
             <SessionRetentionSettings />
+            <RecoverySettings />
             {isVSCode && <CheckpointSettings />}
         </>
     );

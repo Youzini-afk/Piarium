@@ -534,6 +534,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     autoSaveEnabled: defaults.autoSaveEnabled,
     autoDeleteAfterDays: defaults.autoDeleteAfterDays,
     sessionRetentionAction: defaults.sessionRetentionAction,
+    recoveryPreference: defaults.recoveryPreference,
     followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
     showDeletionDialog: defaults.showDeletionDialog,
     nativeNotificationsEnabled: defaults.nativeNotificationsEnabled,
@@ -773,6 +774,15 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
     if (settings.chatRenderMode !== store.chatRenderMode) {
       store.setChatRenderMode(settings.chatRenderMode);
+    }
+  }
+  if (
+    settings.recoveryPreference === 'conversation'
+    || settings.recoveryPreference === 'both'
+    || settings.recoveryPreference === 'ask'
+  ) {
+    if (settings.recoveryPreference !== store.recoveryPreference) {
+      store.setRecoveryPreference(settings.recoveryPreference);
     }
   }
   if (typeof settings.activityRenderMode === 'string'
@@ -1414,6 +1424,13 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.chatRenderMode === 'string'
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {
     result.chatRenderMode = candidate.chatRenderMode;
+  }
+  if (
+    candidate.recoveryPreference === 'conversation'
+    || candidate.recoveryPreference === 'both'
+    || candidate.recoveryPreference === 'ask'
+  ) {
+    result.recoveryPreference = candidate.recoveryPreference;
   }
   if (typeof candidate.messageStreamTransport === 'string'
     && (candidate.messageStreamTransport === 'auto' || candidate.messageStreamTransport === 'ws' || candidate.messageStreamTransport === 'sse')) {

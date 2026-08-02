@@ -641,6 +641,7 @@ export interface SettingsPayload {
   autoSaveEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
+  recoveryPreference?: 'conversation' | 'both' | 'ask';
   followUpBehavior?: 'steer' | 'queue';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
