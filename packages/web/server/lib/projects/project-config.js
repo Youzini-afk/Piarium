@@ -6,6 +6,7 @@ const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
+const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') {
@@ -211,15 +212,11 @@ const normalizeExecution = (value) => {
   const prompt = clampLength(asNonEmptyString(value.prompt) || '', MAX_TASK_PROMPT_LENGTH);
   const providerID = asNonEmptyString(value.providerID);
   const modelID = asNonEmptyString(value.modelID);
-  const variant = asNonEmptyString(value.variant);
-  const agent = asNonEmptyString(value.agent);
-  const goalEnabled = value.goalEnabled === true;
-  const permissionAutoAccept = value.permissionAutoAccept === true;
-  const goalTokenBudget = typeof value.goalTokenBudget === 'number'
-    && Number.isFinite(value.goalTokenBudget)
-    && value.goalTokenBudget > 0
-    ? Math.floor(value.goalTokenBudget)
+  const requestedThinkingLevel = asNonEmptyString(value.thinkingLevel);
+  const thinkingLevel = requestedThinkingLevel && PI_THINKING_LEVELS.has(requestedThinkingLevel)
+    ? requestedThinkingLevel
     : undefined;
+  const runAsGoal = value.runAsGoal === true;
 
   if (!prompt) {
     throw new Error('execution.prompt is required');
@@ -235,11 +232,8 @@ const normalizeExecution = (value) => {
     prompt,
     providerID,
     modelID,
-    ...(variant ? { variant } : {}),
-    ...(agent ? { agent } : {}),
-    ...(goalEnabled ? { goalEnabled: true } : {}),
-    ...(goalEnabled && goalTokenBudget ? { goalTokenBudget } : {}),
-    ...(permissionAutoAccept ? { permissionAutoAccept: true } : {}),
+    ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(runAsGoal ? { runAsGoal: true } : {}),
   };
 };
 

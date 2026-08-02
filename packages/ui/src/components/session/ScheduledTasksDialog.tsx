@@ -10,9 +10,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -355,17 +354,14 @@ export function ScheduledTasksDialog() {
     setMutatingTaskID(task.id);
     try {
       const { sessionId } = await runScheduledTaskNow(selectedProjectID, task.id);
-      await Promise.all([
-        reloadTasks(selectedProjectID, { silent: true }),
-        refreshGlobalSessions(),
-      ]);
+      await reloadTasks(selectedProjectID, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
       if (sessionId) {
-        // Jump straight into the started session; selecting it also closes
-        // this surface (MainLayout closes surfaces on session selection).
         const project = projects.find((entry) => entry.id === selectedProjectID);
-        useSessionUIStore.getState().setCurrentSession(sessionId, project?.path ?? null);
-        useUIStore.getState().setActiveMainTab('chat');
+        await openPiSessionFromNavigation({
+          directory: project?.path,
+          sessionId,
+        });
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.runFailed'));
@@ -667,6 +663,7 @@ export function ScheduledTasksDialog() {
 
       <ScheduledTaskEditorDialog
         open={editorOpen}
+        projectDirectory={projects.find((project) => project.id === selectedProjectID)?.path ?? null}
         task={editorTask}
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}

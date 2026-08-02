@@ -1,4 +1,5 @@
 import * as React from 'react';
+import type { ModelDescriptor, ThinkingLevel } from '@piarium/protocol';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
@@ -7,19 +8,16 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { NumberInput } from '@/components/ui/number-input';
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
-import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
 import { Icon } from "@/components/icon/Icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePiProviderStore } from '@/stores/usePiProviderStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
@@ -28,8 +26,7 @@ import { canonicalizeTimezone } from '@/lib/timezones';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
-// Mirrors the composer's footer icon toggles (PermissionAutoAcceptButton /
-// SessionGoalButton) so the state reads the same in both places.
+// Mirrors the composer's goal toggle so scheduled goal runs remain visible.
 const EDITOR_TOGGLE_BUTTON_CLASS = 'flex h-6 w-6 cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0';
 
 const TIMEZONE_OPTIONS = (() => {
@@ -472,13 +469,25 @@ type ScheduledTaskDraft = {
     prompt: string;
     providerID: string;
     modelID: string;
-    variant: string;
-    agent: string;
-    goalEnabled: boolean;
-    goalTokenBudget: number | null;
-    permissionAutoAccept: boolean;
+    thinkingLevel: ThinkingLevel;
+    runAsGoal: boolean;
   };
   state?: ScheduledTask['state'];
+};
+
+const modelKey = (model: Pick<ModelDescriptor, 'id' | 'provider'>): string => (
+  JSON.stringify([model.provider, model.id])
+);
+
+const parseModelKey = (value: string): { id: string; provider: string } | null => {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+    const [provider, id] = parsed;
+    return typeof provider === 'string' && typeof id === 'string' ? { id, provider } : null;
+  } catch {
+    return null;
+  }
 };
 
 const normalizeDraftTimes = (task: ScheduledTask | null): string[] => {
@@ -502,8 +511,7 @@ const toDraft = (
   defaults: {
     providerID: string;
     modelID: string;
-    variant: string;
-    agent: string;
+    thinkingLevel: ThinkingLevel;
   },
 ): ScheduledTaskDraft => {
   const timezoneFallback = canonicalizeTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
@@ -524,11 +532,8 @@ const toDraft = (
         prompt: '',
         providerID: defaults.providerID,
         modelID: defaults.modelID,
-        variant: defaults.variant,
-        agent: defaults.agent,
-        goalEnabled: false,
-        goalTokenBudget: null,
-        permissionAutoAccept: false,
+        thinkingLevel: defaults.thinkingLevel,
+        runAsGoal: false,
       },
     };
   }
@@ -560,13 +565,8 @@ const toDraft = (
       prompt: task.execution.prompt,
       providerID: task.execution.providerID,
       modelID: task.execution.modelID,
-      variant: task.execution.variant || '',
-      agent: task.execution.agent || '',
-      goalEnabled: task.execution.goalEnabled === true,
-      goalTokenBudget: typeof task.execution.goalTokenBudget === 'number' && task.execution.goalTokenBudget > 0
-        ? task.execution.goalTokenBudget
-        : null,
-      permissionAutoAccept: task.execution.permissionAutoAccept === true,
+      thinkingLevel: task.execution.thinkingLevel ?? defaults.thinkingLevel,
+      runAsGoal: task.execution.runAsGoal === true,
     },
     state: task.state,
   };
@@ -725,19 +725,23 @@ const CronScheduleSection: React.FC<{
 
 export function ScheduledTaskEditorDialog(props: {
   open: boolean;
+  projectDirectory: string | null;
   task: ScheduledTask | null;
   onOpenChange: (open: boolean) => void;
   onSave: (draft: Partial<ScheduledTask>) => Promise<void>;
 }) {
-  const { open, task, onOpenChange, onSave } = props;
+  const { open, projectDirectory, task, onOpenChange, onSave } = props;
   const { t, locale } = useI18n();
-  const loadProviders = useConfigStore((state) => state.loadProviders);
-  const loadAgents = useConfigStore((state) => state.loadAgents);
-  const providers = useConfigStore((state) => state.providers);
-  const currentProviderID = useConfigStore((state) => state.currentProviderId);
-  const currentModelID = useConfigStore((state) => state.currentModelId);
-  const currentVariant = useConfigStore((state) => state.currentVariant || '');
-  const currentAgentName = useConfigStore((state) => state.currentAgentName || '');
+  const providers = usePiProviderStore((state) => state.allProviders);
+  const providersLoading = usePiProviderStore((state) => state.isLoading);
+  const providersError = usePiProviderStore((state) => state.error);
+  const loadProviders = usePiProviderStore((state) => state.load);
+  const currentSnapshot = usePiSessionStore((state) => (
+    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
+  ));
+  const currentProviderID = currentSnapshot?.model?.provider ?? '';
+  const currentModelID = currentSnapshot?.model?.id ?? '';
+  const currentThinkingLevel = currentSnapshot?.thinkingLevel ?? 'off';
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const weekStartPreference = useUIStore((state) => state.weekStartPreference);
   const isMobile = useUIStore((state) => state.isMobile);
@@ -746,8 +750,7 @@ export function ScheduledTaskEditorDialog(props: {
     toDraft(task, {
       providerID: currentProviderID,
       modelID: currentModelID,
-      variant: currentVariant,
-      agent: currentAgentName,
+      thinkingLevel: currentThinkingLevel,
     })
   );
   const [saving, setSaving] = React.useState(false);
@@ -796,12 +799,9 @@ export function ScheduledTaskEditorDialog(props: {
   }, [locale, weekStartsOn]);
 
   React.useEffect(() => {
-    if (!open) {
-      return;
-    }
-    void loadProviders({ source: 'scheduledTaskEditor' });
-    void loadAgents({ source: 'scheduledTaskEditor' });
-  }, [open, loadProviders, loadAgents]);
+    if (!open || !projectDirectory) return;
+    void loadProviders(projectDirectory).catch(() => undefined);
+  }, [loadProviders, open, projectDirectory]);
 
   React.useEffect(() => {
     if (!open) {
@@ -811,8 +811,7 @@ export function ScheduledTaskEditorDialog(props: {
       toDraft(task, {
         providerID: currentProviderID,
         modelID: currentModelID,
-        variant: currentVariant,
-        agent: currentAgentName,
+        thinkingLevel: currentThinkingLevel,
       })
     );
     const sourceDate = parseISODateToLocal(task?.schedule?.date || '') || new Date();
@@ -822,7 +821,7 @@ export function ScheduledTaskEditorDialog(props: {
     setShowFileMention(false);
     setCommandQuery('');
     setMentionQuery('');
-  }, [open, task, currentProviderID, currentModelID, currentVariant, currentAgentName]);
+  }, [currentModelID, currentProviderID, currentThinkingLevel, open, task]);
 
   React.useEffect(() => {
     if (!isDatePickerOpen) {
@@ -841,34 +840,56 @@ export function ScheduledTaskEditorDialog(props: {
     };
   }, [isDatePickerOpen]);
 
-  const variantOptions = React.useMemo(() => {
-    const provider = providers.find((item) => item.id === draft.execution.providerID);
-    const model = provider?.models?.find((item) => item.id === draft.execution.modelID) as { variants?: Record<string, unknown> } | undefined;
-    return model?.variants ? Object.keys(model.variants) : [];
-  }, [providers, draft.execution.providerID, draft.execution.modelID]);
-  const hasVariantOptions = variantOptions.length > 0;
-  const selectedVariantValue = React.useMemo(() => {
-    if (!hasVariantOptions) {
-      return '__default';
-    }
-    if (!draft.execution.variant) {
-      return '__default';
-    }
-    return variantOptions.includes(draft.execution.variant) ? draft.execution.variant : '__default';
-  }, [draft.execution.variant, hasVariantOptions, variantOptions]);
+  const models = React.useMemo(() => providers
+    .flatMap((provider) => provider.models)
+    .filter((model) => model.available)
+    .sort((left, right) => `${left.provider}/${left.name}`.localeCompare(`${right.provider}/${right.name}`)), [providers]);
+  const selectedModel = models.find((model) => (
+    model.provider === draft.execution.providerID && model.id === draft.execution.modelID
+  ));
+  const thinkingLevels: readonly ThinkingLevel[] = selectedModel?.supportedThinkingLevels.length
+    ? selectedModel.supportedThinkingLevels
+    : ['off'];
 
   React.useEffect(() => {
-    if (hasVariantOptions || !draft.execution.variant) {
-      return;
-    }
+    if (!open || models.length === 0) return;
+    const selected = models.find((model) => (
+      model.provider === draft.execution.providerID && model.id === draft.execution.modelID
+    ));
+    const current = models.find((model) => (
+      model.provider === currentProviderID && model.id === currentModelID
+    ));
+    const model = selected ?? current ?? models[0];
+    if (!model) return;
+    const thinkingLevel = model.supportedThinkingLevels.includes(draft.execution.thinkingLevel)
+      ? draft.execution.thinkingLevel
+      : model.supportedThinkingLevels.includes(currentThinkingLevel)
+        ? currentThinkingLevel
+        : model.supportedThinkingLevels[0] ?? 'off';
+    if (
+      draft.execution.providerID === model.provider
+      && draft.execution.modelID === model.id
+      && draft.execution.thinkingLevel === thinkingLevel
+    ) return;
     setDraft((prev) => ({
       ...prev,
       execution: {
         ...prev.execution,
-        variant: '',
+        modelID: model.id,
+        providerID: model.provider,
+        thinkingLevel,
       },
     }));
-  }, [hasVariantOptions, draft.execution.variant]);
+  }, [
+    currentModelID,
+    currentProviderID,
+    currentThinkingLevel,
+    draft.execution.modelID,
+    draft.execution.providerID,
+    draft.execution.thinkingLevel,
+    models,
+    open,
+  ]);
 
   const toggleWeekday = React.useCallback((weekday: number, nextChecked: boolean) => {
     setDraft((prev) => {
@@ -1048,31 +1069,6 @@ export function ScheduledTaskEditorDialog(props: {
     });
   }, [draft.execution.prompt, setPromptValue, updateAutocompleteState]);
 
-  const handleAgentSelect = React.useCallback((agentName: string) => {
-    const promptValue = draft.execution.prompt;
-    const textarea = promptTextareaRef.current;
-    const cursorPosition = textarea?.selectionStart ?? promptValue.length;
-    const textBeforeCursor = promptValue.substring(0, cursorPosition);
-    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-    const startIndex = lastAtSymbol !== -1 ? lastAtSymbol : cursorPosition;
-    const nextPrompt = `${promptValue.substring(0, startIndex)}@${agentName} ${promptValue.substring(cursorPosition)}`;
-    const nextCursor = startIndex + agentName.length + 2;
-
-    setPromptValue(nextPrompt);
-    setShowFileMention(false);
-    setMentionQuery('');
-
-    requestAnimationFrame(() => {
-      const currentTextarea = promptTextareaRef.current;
-      if (currentTextarea) {
-        currentTextarea.selectionStart = nextCursor;
-        currentTextarea.selectionEnd = nextCursor;
-        currentTextarea.focus();
-      }
-      updateAutocompleteState(nextPrompt, nextCursor);
-    });
-  }, [draft.execution.prompt, setPromptValue, updateAutocompleteState]);
-
   const handleCommandSelect = React.useCallback((command: CommandInfo) => {
     const nextPrompt = `/${command.name} `;
     setPromptValue(nextPrompt);
@@ -1170,13 +1166,8 @@ export function ScheduledTaskEditorDialog(props: {
         prompt: draft.execution.prompt,
         providerID: draft.execution.providerID,
         modelID: draft.execution.modelID,
-        ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
-        ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
-        ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
-        ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
-        ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
-          ? { goalTokenBudget: draft.execution.goalTokenBudget }
-          : {}),
+        thinkingLevel: draft.execution.thinkingLevel,
+        ...(draft.execution.runAsGoal ? { runAsGoal: true } : {}),
       },
       ...(draft.state ? { state: draft.state } : {}),
     };
@@ -1499,69 +1490,66 @@ export function ScheduledTaskEditorDialog(props: {
           <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
             <div className="flex min-w-0 flex-col gap-1">
               <FieldLabel required>{t('sessions.scheduledTasks.editor.model.label')}</FieldLabel>
-              <ModelSelector
-                providerId={draft.execution.providerID}
-                modelId={draft.execution.modelID}
-                onChange={(providerID, modelID) => {
+              <select
+                value={selectedModel ? modelKey(selectedModel) : ''}
+                disabled={providersLoading || models.length === 0}
+                onChange={(event) => {
+                  const next = parseModelKey(event.target.value);
+                  const model = next
+                    ? models.find((candidate) => candidate.provider === next.provider && candidate.id === next.id)
+                    : undefined;
+                  if (!model) return;
                   setDraft((prev) => ({
                     ...prev,
                     execution: {
                       ...prev.execution,
-                      providerID,
-                      modelID,
-                      variant: '',
+                      providerID: model.provider,
+                      modelID: model.id,
+                      thinkingLevel: model.supportedThinkingLevels.includes(prev.execution.thinkingLevel)
+                        ? prev.execution.thinkingLevel
+                        : model.supportedThinkingLevels[0] ?? 'off',
                     },
                   }));
                 }}
-              />
+                className="h-9 w-full rounded-md border border-border bg-background px-3 typography-ui-label text-foreground outline-none focus:border-primary disabled:opacity-50"
+              >
+                {models.map((model) => (
+                  <option key={modelKey(model)} value={modelKey(model)}>
+                    {model.name} ({model.provider}/{model.id})
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="flex min-w-0 flex-col gap-1">
               <FieldLabel>{t('sessions.scheduledTasks.editor.thinkingLevel.label')}</FieldLabel>
               <Select
-                value={selectedVariantValue}
-                disabled={!hasVariantOptions}
+                value={draft.execution.thinkingLevel}
+                disabled={!selectedModel}
                 onValueChange={(value) => {
                   setDraft((prev) => ({
                     ...prev,
                     execution: {
                       ...prev.execution,
-                      variant: value === '__default' ? '' : value,
+                      thinkingLevel: value as ThinkingLevel,
                     },
                   }));
                 }}
               >
                 <SelectTrigger size="lg" className="w-fit max-w-full">
-                  <SelectValue>
-                    {(value) => value === '__default'
-                      ? t('sessions.scheduledTasks.editor.thinkingLevel.default')
-                      : value}
-                  </SelectValue>
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__default">{t('sessions.scheduledTasks.editor.thinkingLevel.default')}</SelectItem>
-                  {variantOptions.map((variant) => (
-                    <SelectItem key={variant} value={variant}>{variant}</SelectItem>
+                  {thinkingLevels.map((level) => (
+                    <SelectItem key={level} value={level}>{level}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
-
-          <div className="flex min-w-0 flex-col gap-1">
-            <FieldLabel>{t('sessions.scheduledTasks.editor.agent.label')}</FieldLabel>
-            <AgentSelector
-              agentName={draft.execution.agent}
-              filter={(agent) => isPrimaryMode(agent.mode)}
-              onChange={(agent) => setDraft((prev) => ({
-                ...prev,
-                execution: {
-                  ...prev.execution,
-                  agent,
-                },
-              }))}
-            />
-          </div>
+          {providersError && !providersLoading ? (
+            <p className="typography-meta text-[var(--status-error)]">{providersError}</p>
+          ) : null}
 
           <div className="flex flex-col gap-1">
             <FieldLabel htmlFor="sched-prompt" required>{t('sessions.scheduledTasks.editor.prompt.label')}</FieldLabel>
@@ -1603,7 +1591,6 @@ export function ScheduledTaskEditorDialog(props: {
                   ref={mentionRef}
                   searchQuery={mentionQuery}
                   onFileSelect={handleFileSelect}
-                  onAgentSelect={handleAgentSelect}
                   onClose={() => setShowFileMention(false)}
                   style={{
                     left: 0,
@@ -1633,37 +1620,6 @@ export function ScheduledTaskEditorDialog(props: {
             </div>
           </div>
 
-          {draft.execution.goalEnabled ? (
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
-              <label className="inline-flex cursor-pointer items-center gap-2">
-                <Checkbox
-                  checked={draft.execution.goalTokenBudget !== null}
-                  onChange={(hasBudget) => setDraft((prev) => ({
-                    ...prev,
-                    execution: { ...prev.execution, goalTokenBudget: hasBudget ? 200_000 : null },
-                  }))}
-                  ariaLabel={t('sessions.scheduledTasks.editor.goal.budgetAria')}
-                />
-                <span className="typography-meta">{t('sessions.scheduledTasks.editor.goal.budgetLabel')}</span>
-              </label>
-            {draft.execution.goalTokenBudget !== null ? (
-              <NumberInput
-                value={draft.execution.goalTokenBudget}
-                onValueChange={(value) => {
-                  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-                    setDraft((prev) => ({
-                      ...prev,
-                      execution: { ...prev.execution, goalTokenBudget: Math.floor(value) },
-                    }));
-                  }
-                }}
-                min={1000}
-                max={100000000}
-                step={50000}
-              />
-            ) : null}
-          </div>
-          ) : null}
     </div>
   );
 
@@ -1683,36 +1639,15 @@ export function ScheduledTaskEditorDialog(props: {
           <TooltipTrigger asChild>
             <button
               type="button"
-              className={cn(EDITOR_TOGGLE_BUTTON_CLASS)}
+              className={cn(EDITOR_TOGGLE_BUTTON_CLASS, draft.execution.runAsGoal && 'text-[var(--status-info)]')}
               onClick={() => setDraft((prev) => ({
                 ...prev,
-                execution: { ...prev.execution, permissionAutoAccept: !prev.execution.permissionAutoAccept },
+                execution: { ...prev.execution, runAsGoal: !prev.execution.runAsGoal },
               }))}
-              aria-pressed={draft.execution.permissionAutoAccept}
-              aria-label={t('sessions.scheduledTasks.editor.permissionAutoAccept.aria')}
-            >
-              {draft.execution.permissionAutoAccept ? (
-                <Icon name="shield-check" className="h-[18px] w-[18px]" style={{ color: 'var(--status-info)' }} aria-hidden="true" />
-              ) : (
-                <Icon name="shield-user" className="h-[18px] w-[18px]" aria-hidden="true" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top" sideOffset={6}>{t('sessions.scheduledTasks.editor.permissionAutoAccept.label')}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className={cn(EDITOR_TOGGLE_BUTTON_CLASS, draft.execution.goalEnabled && 'text-[var(--status-info)]')}
-              onClick={() => setDraft((prev) => ({
-                ...prev,
-                execution: { ...prev.execution, goalEnabled: !prev.execution.goalEnabled },
-              }))}
-              aria-pressed={draft.execution.goalEnabled}
+              aria-pressed={draft.execution.runAsGoal}
               aria-label={t('sessions.scheduledTasks.editor.goal.aria')}
             >
-              {draft.execution.goalEnabled ? (
+              {draft.execution.runAsGoal ? (
                 <Icon name="target-fill" className="h-[18px] w-[18px] text-current" aria-hidden="true" />
               ) : (
                 <Icon name="target" className="h-[18px] w-[18px] text-current" aria-hidden="true" />

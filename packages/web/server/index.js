@@ -106,6 +106,7 @@ import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createSystemPromptRuntime } from './lib/system-prompt/runtime.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
+import { createPiScheduledTaskExecutor } from './lib/scheduled-tasks/pi-executor.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
@@ -1162,10 +1163,6 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     const settings = await readSettingsFromDiskMigrated();
     return sanitizeProjects(settings?.projects || []);
   },
-  buildOpenCodeUrl,
-  getOpenCodeAuthHeaders,
-  waitForOpenCodeReady,
-  setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
     for (const client of uiOpenChamberEventClients) {
       try {
@@ -1654,6 +1651,7 @@ async function main(options = {}) {
     },
   });
   await piRuntimeBroker.warmup();
+  scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
   const piRuntimeGateway = createPiRuntimeGateway({
     server,
     broker: piRuntimeBroker,

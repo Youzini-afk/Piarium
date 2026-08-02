@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from '@piarium/protocol';
 import { runtimeFetch } from './runtime-fetch';
 
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
@@ -19,11 +20,8 @@ export type ScheduledTask = {
     prompt: string;
     providerID: string;
     modelID: string;
-    variant?: string;
-    agent?: string;
-    goalEnabled?: boolean;
-    goalTokenBudget?: number;
-    permissionAutoAccept?: boolean;
+    thinkingLevel?: ThinkingLevel;
+    runAsGoal?: boolean;
   };
   state: {
     createdAt: number;
