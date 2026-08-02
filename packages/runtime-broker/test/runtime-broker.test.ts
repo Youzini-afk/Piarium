@@ -226,3 +226,69 @@ test("broker owns catalog and per-session Pi workers", async () => {
     await rm(root, { force: true, recursive: true });
   }
 });
+
+test("surface explicitly resolves project trust without a broker-owned deadline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-trust-"));
+  const workspace = join(root, "workspace");
+  const agentDir = join(root, "agent");
+  await mkdir(join(workspace, ".pi", "extensions"), { recursive: true });
+  await writeFile(
+    join(workspace, ".pi", "extensions", "trusted.ts"),
+    `export default function extension(pi: any) {
+      pi.registerCommand("trusted-command", { handler: async () => undefined });
+    }\n`,
+  );
+  const broker = new PiRuntimeBroker({
+    agentDir,
+    client: {
+      clientName: "runtime-trust-test",
+      clientVersion: "0.1.0",
+      mode: "test",
+    },
+    execArgv: ["--import", "tsx"],
+    hostEntry: HOST_ENTRY,
+  });
+
+  try {
+    let stop = () => {};
+    const trustRequest = new Promise<{ requestId: string; workerId: string }>((resolveRequest) => {
+      stop = broker.subscribe((event) => {
+        if (event.kind !== "host" || event.envelope.event !== "project.trust.request") return;
+        resolveRequest({
+          requestId: event.envelope.data.id,
+          workerId: event.workerId,
+        });
+      });
+    });
+    const creating = broker.createSession(workspace, "Trust from surface");
+    const request = await trustRequest;
+    stop();
+
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "project.trust.respond", {
+        remember: false,
+        requestId: request.requestId,
+        trusted: true,
+        workerId: request.workerId,
+      }),
+      { accepted: true },
+    );
+    const created = await creating;
+    const commands = await broker.requestForSession(created.sessionId, "command.list", {
+      sessionId: created.sessionId,
+    });
+    assert.ok(commands.some((command) => command.name === "trusted-command"));
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "project.trust.respond", {
+        remember: false,
+        requestId: request.requestId,
+        trusted: true,
+        workerId: request.workerId,
+      }),
+      { accepted: false },
+    );
+  } finally {
+    await broker.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});

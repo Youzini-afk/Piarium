@@ -64,6 +64,14 @@ function optionalBoolean(record: Record<string, unknown>, key: string): boolean 
   return value;
 }
 
+function requireBoolean(record: Record<string, unknown>, key: string): boolean {
+  const value = optionalBoolean(record, key);
+  if (value === undefined) {
+    throw new RuntimeDispatchError("invalid_params", `${key} must be a boolean`);
+  }
+  return value;
+}
+
 function requireEnum<T extends string>(
   record: Record<string, unknown>,
   key: string,
@@ -368,6 +376,18 @@ async function dispatchRuntimeRequestUnchecked(
         ] as const),
         sessionId,
       });
+    }
+
+    case "project.trust.respond": {
+      const accepted = await broker.respondToProjectTrust(
+        requireString(input, "workerId"),
+        requireString(input, "requestId"),
+        {
+          remember: requireBoolean(input, "remember"),
+          trusted: requireBoolean(input, "trusted"),
+        },
+      );
+      return { accepted };
     }
 
     case "provider.list": {

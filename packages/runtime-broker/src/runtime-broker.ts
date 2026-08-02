@@ -27,6 +27,10 @@ export interface ProjectTrustDecision {
   trusted: boolean;
 }
 
+interface PendingProjectTrust {
+  client: PiHostClient;
+}
+
 export type PiRuntimeBrokerEvent =
   | {
       kind: "diagnostic";
@@ -90,6 +94,7 @@ export class PiRuntimeBroker {
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
   readonly #knownSummaries = new Map<string, SessionSummary>();
+  readonly #pendingProjectTrust = new Map<string, PendingProjectTrust>();
   #catalog: PiHostClient | undefined;
   #catalogContextCwd: string | undefined;
   #catalogContextQueue: Promise<void> = Promise.resolve();
@@ -342,6 +347,21 @@ export class PiRuntimeBroker {
     return result.accepted;
   }
 
+  async respondToProjectTrust(
+    workerId: string,
+    requestId: string,
+    decision: ProjectTrustDecision,
+  ): Promise<boolean> {
+    const pending = this.#pendingProjectTrust.get(requestId);
+    if (!pending || pending.client.id !== workerId) return false;
+    const result = await pending.client.request("project.trust.respond", {
+      ...decision,
+      requestId,
+    });
+    this.#pendingProjectTrust.delete(requestId);
+    return result.accepted;
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -349,6 +369,7 @@ export class PiRuntimeBroker {
     this.#clients.clear();
     this.#sessions.clear();
     this.#knownSummaries.clear();
+    this.#pendingProjectTrust.clear();
     this.#catalog = undefined;
     this.#catalogContextCwd = undefined;
     this.#catalogContextSessionId = undefined;
@@ -477,6 +498,9 @@ export class PiRuntimeBroker {
         if (role === "session" && envelope.event === "session.snapshot") {
           this.#bindSession(client, envelope.data.sessionId);
         }
+        if (envelope.event === "project.trust.request") {
+          this.#pendingProjectTrust.set(envelope.data.id, { client });
+        }
         this.#emit({
           envelope,
           kind: "host",
@@ -485,7 +509,9 @@ export class PiRuntimeBroker {
           workerId: client.id,
         });
         if (envelope.event === "project.trust.request") {
-          void this.#resolveProjectTrust(client, role, envelope.data);
+          if (this.#options.promptForProjectTrust) {
+            void this.#resolveProjectTrust(client, role, envelope.data);
+          }
         }
       },
       onExit: (exit) => this.#handleExit(client, role, exit),
@@ -503,9 +529,7 @@ export class PiRuntimeBroker {
   ): Promise<void> {
     let decision: ProjectTrustDecision = { remember: false, trusted: false };
     try {
-      if (this.#options.promptForProjectTrust) {
-        decision = await this.#options.promptForProjectTrust(request);
-      }
+      decision = await this.#options.promptForProjectTrust!(request);
     } catch (error) {
       this.#emit({
         kind: "diagnostic",
@@ -516,10 +540,7 @@ export class PiRuntimeBroker {
       });
     }
     try {
-      await client.request("project.trust.respond", {
-        ...decision,
-        requestId: request.id,
-      });
+      await this.respondToProjectTrust(client.id, request.id, decision);
     } catch (error) {
       this.#emit({
         kind: "diagnostic",
@@ -563,6 +584,7 @@ export class PiRuntimeBroker {
     for (const [sessionId, candidate] of this.#sessions) {
       if (candidate === worker) this.#sessions.delete(sessionId);
     }
+    this.#clearProjectTrustForClient(worker);
     await worker.dispose();
   }
 
@@ -582,6 +604,7 @@ export class PiRuntimeBroker {
     for (const [mappedSessionId, worker] of this.#sessions) {
       if (worker === client) this.#sessions.delete(mappedSessionId);
     }
+    this.#clearProjectTrustForClient(client);
     this.#emit({
       code: exit.code,
       expected,
@@ -600,6 +623,12 @@ export class PiRuntimeBroker {
       } catch {
         // Surface callbacks are observational and must not break worker ownership.
       }
+    }
+  }
+
+  #clearProjectTrustForClient(client: PiHostClient): void {
+    for (const [requestId, pending] of this.#pendingProjectTrust) {
+      if (pending.client === client) this.#pendingProjectTrust.delete(requestId);
     }
   }
 }

@@ -93,6 +93,15 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
       result: HostHandshakeResult;
     };
     "model.select": HostMethodMap["model.select"];
+    "project.trust.respond": {
+      params: {
+        remember: boolean;
+        requestId: string;
+        trusted: boolean;
+        workerId: string;
+      };
+      result: HostMethodMap["project.trust.respond"]["result"];
+    };
     "session.archive": {
       params: { sessionId: string };
       result: HostMethodMap["session.list"]["result"][number];
@@ -131,6 +140,7 @@ export const RUNTIME_METHODS = [
   "package.list",
   "package.remove",
   "package.update",
+  "project.trust.respond",
   "provider.list",
   "provider.config.delete",
   "provider.config.get",
