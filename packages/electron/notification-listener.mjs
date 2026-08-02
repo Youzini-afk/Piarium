@@ -268,7 +268,7 @@ export class NotificationListener {
       const props = parsed.properties;
       if (!props) return;
       this.#onNotification({
-        title: props.title || 'OpenChamber',
+        title: props.title || 'Piarium',
         body: props.body || '',
         sessionId: props.sessionId || null,
         directory: props.directory || null,

@@ -5,8 +5,8 @@
       <feDropShadow dx="0" dy="12" stdDeviation="14" flood-opacity="0.5" flood-color="#000000"/>
     </filter>
     <linearGradient id="bgGradient" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#303030"/>
-      <stop offset="100%" stop-color="#141414"/>
+      <stop offset="0%" stop-color="#273129"/>
+      <stop offset="100%" stop-color="#10130f"/>
     </linearGradient>
   </defs>
 
@@ -15,18 +15,17 @@
     <!-- Background rounded square - 824x824 (Apple standard) - dark gradient -->
     <rect x="0" y="0" width="824" height="824" rx="185" ry="185" fill="url(#bgGradient)" filter="url(#iconShadow)"/>
 
-    <!-- OpenChamber logo centered - simplified for dock visibility -->
+    <!-- Piarium logo centered - simplified for dock visibility -->
     <g transform="translate(412, 412) scale(6.5)">
       <!-- Left face - simplified, no grid cells -->
-      <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="white" fill-opacity="0.2" stroke="white" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="#26372f" stroke="#f6e7b0" stroke-width="3" stroke-linejoin="round"/>
       <!-- Right face - simplified, no grid cells -->
-      <path d="M0 0 L41.568 -24 L41.568 24 L0 48 Z" fill="white" fill-opacity="0.35" stroke="white" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M0 0 L41.568 -24 L41.568 24 L0 48 Z" fill="#3a5746" stroke="#f6e7b0" stroke-width="3" stroke-linejoin="round"/>
       <!-- Top face - open -->
-      <path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z" fill="none" stroke="white" stroke-width="3" stroke-linejoin="round"/>
-      <!-- OpenCode logo on top face -->
+      <path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z" fill="#725f2b" stroke="#f6e7b0" stroke-width="3" stroke-linejoin="round"/>
+      <!-- Piarium π mark on top face -->
       <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, -24) scale(0.75)">
-        <path fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z" fill="white"/>
-        <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="white" fill-opacity="0.4"/>
+        <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="#f4cf70"/>
       </g>
     </g>
   </g>

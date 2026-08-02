@@ -74,7 +74,7 @@ async function serveCommand(options) {
       const existingInstance = await discoverOpenChamberInstanceOnPort(targetPort, { host: effectiveHost });
       if (existingInstance?.runtime === 'desktop') {
         throw new Error(
-          `Port ${targetPort} is used by OpenChamber Desktop app. Choose another port or stop the desktop app.`
+          `Port ${targetPort} is used by Piarium Desktop app. Choose another port or stop the desktop app.`
         );
       }
       if (existingInstance) {
@@ -89,7 +89,7 @@ async function serveCommand(options) {
         const systemInfo = await fetchSystemInfoFromPort(targetPort, globalThis.fetch, effectiveHost);
         if (isDesktopRuntimeForPort(systemInfo, targetPort)) {
           throw new Error(
-            `Port ${targetPort} is used by OpenChamber Desktop app. Choose another port or stop the desktop app.`
+            `Port ${targetPort} is used by Piarium Desktop app. Choose another port or stop the desktop app.`
           );
         }
         const systemInfoRuntimeMatchesPort = systemInfo?.runtime !== 'desktop' || isDesktopRuntimeForPort(systemInfo, targetPort);

@@ -10,7 +10,7 @@ const script = fileURLToPath(new URL('./finalize-latest-yml.mjs', import.meta.ur
 
 const manifest = (architecture) => `version: 1.2.3
 files:
-  - url: OpenChamber-1.2.3-win-${architecture}.exe
+  - url: Piarium-1.2.3-win-${architecture}.exe
     sha512: ${architecture}-checksum
     size: 123
 releaseDate: '2026-07-30T00:00:00.000Z'
@@ -34,7 +34,7 @@ const environment = ({ artifacts, output }) => ({
   ...process.env,
   LATEST_YML_DIR: artifacts,
   RUNNER_TEMP: output,
-  GH_REPO: 'openchamber/openchamber',
+  GH_REPO: 'Youzini-afk/Piarium',
   OPENCHAMBER_VERSION: '1.2.3',
 });
 

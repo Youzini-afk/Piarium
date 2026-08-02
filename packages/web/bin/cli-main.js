@@ -301,7 +301,7 @@ function buildClientConnectionPayload({ serverUrl, token, label, profile }) {
   params.set('token', token.trim());
   if (label?.trim()) params.set('label', label.trim());
   if (profile?.trim()) params.set('profile', profile.trim());
-  return `openchamber://connect?${params.toString()}`;
+  return `piarium://connect?${params.toString()}`;
 }
 
 function formatUnsafePortWarning(port) {
@@ -1134,8 +1134,8 @@ USAGE:
   openchamber connect-url [OPTIONS]
 
 DESCRIPTION:
-  Generate an openchamber:// connection link for adding this server to another
-  OpenChamber app. If no server is running on the selected port, it starts one.
+  Generate a piarium:// connection link for adding this server to another
+  Piarium app. If no server is running on the selected port, it starts one.
 
 OPTIONS:
   -p, --port <port>       Server port to use or start (default: ${DEFAULT_PORT})
@@ -1957,7 +1957,7 @@ async function resolveAvailablePort(desiredPort, explicitPort = false, onNotice)
   const occupant = await fetchSystemInfoFromPort(startPort);
   let message;
   if (occupant?.runtime === 'desktop') {
-    message = `Port ${startPort} is used by OpenChamber Desktop; using a free port`;
+    message = `Port ${startPort} is used by Piarium Desktop; using a free port`;
   } else if (occupant?.runtime) {
     message = `Port ${startPort} is used by an existing OpenChamber instance; using a free port`;
   } else {
@@ -2906,7 +2906,7 @@ async function resolveTargetInstance({
         if (!attachability.attachable) {
           if (attachability.reason === 'desktop') {
             throw new Error(
-              `Port ${options.port} is used by OpenChamber Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
+              `Port ${options.port} is used by Piarium Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
             );
           }
           throw new Error(
@@ -2921,7 +2921,7 @@ async function resolveTargetInstance({
       const systemInfo = await fetchSystemInfoFromPort(options.port);
       if (systemInfo?.runtime === 'desktop') {
         throw new Error(
-          `Port ${options.port} is used by OpenChamber Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
+          `Port ${options.port} is used by Piarium Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
         );
       }
     }
@@ -2980,7 +2980,7 @@ async function resolveTargetInstance({
     }
 
     if (sawDesktop) {
-      throw new Error('Only OpenChamber Desktop instance(s) detected. Tunnel attach requires a CLI instance from `openchamber serve`.');
+      throw new Error('Only Piarium Desktop instance(s) detected. Tunnel attach requires a CLI instance from `openchamber serve`.');
     }
 
     throw new Error('No attachable OpenChamber instance found. Start one with `openchamber serve`.');
@@ -3476,7 +3476,7 @@ const commands = {
         const systemInfo = await fetchSystemInfoFromPort(targetPort);
         if (systemInfo?.runtime === 'desktop') {
           throw new Error(
-            `Port ${targetPort} is used by OpenChamber Desktop app. Choose another port or stop the desktop app.`
+            `Port ${targetPort} is used by Piarium Desktop app. Choose another port or stop the desktop app.`
           );
         }
         if (systemInfo?.runtime) {
@@ -3888,10 +3888,10 @@ const commands = {
         if (systemInfo?.runtime === 'desktop') {
           jsonResults.push({ port: options.port, runtime: 'desktop', stopped: false, reason: 'desktop-managed' });
           if (isJsonMode(options)) {
-            printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${options.port} is managed by OpenChamber Desktop and cannot be stopped with this command.` }] });
+            printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${options.port} is managed by Piarium Desktop and cannot be stopped with this command.` }] });
           }
           if (showOutput) {
-            logStatus('warning', `port ${options.port} is managed by OpenChamber Desktop`, 'cannot be stopped with this command');
+            logStatus('warning', `port ${options.port} is managed by Piarium Desktop`, 'cannot be stopped with this command');
             finish('no changes applied');
           }
           printQuietStopResults();

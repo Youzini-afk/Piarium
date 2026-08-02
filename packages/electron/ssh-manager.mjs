@@ -355,7 +355,7 @@ const waitLocalForwardReady = async (localPort) => {
     await new Promise((resolve) => setTimeout(resolve, pollMs));
     pollMs = Math.min(pollMs * 2, 2000);
   }
-  throw new Error('Timed out waiting for forwarded OpenChamber health');
+  throw new Error('Timed out waiting for forwarded Piarium health');
 };
 
 const parseVersionToken = (raw) => {
@@ -857,11 +857,11 @@ export class ElectronSshManager {
         password,
         trustDevice: true,
         issueClientToken: true,
-        clientLabel: 'OpenChamber Desktop SSH',
+        clientLabel: 'Piarium Desktop SSH',
       }),
     });
     if (!loginResponse.ok) {
-      throw new Error(`Configured OpenChamber UI password was rejected by forwarded server (status ${loginResponse.status})`);
+      throw new Error(`Configured Piarium UI password was rejected by forwarded server (status ${loginResponse.status})`);
     }
 
     const payload = await loginResponse.json().catch(() => null);
@@ -879,7 +879,7 @@ export class ElectronSshManager {
         'Content-Type': 'application/json',
         Cookie: cookie,
       },
-      body: JSON.stringify({ label: 'OpenChamber Desktop SSH' }),
+      body: JSON.stringify({ label: 'Piarium Desktop SSH' }),
     });
     if (!tokenResponse.ok) return '';
     const tokenPayload = await tokenResponse.json().catch(() => null);
@@ -976,7 +976,7 @@ export class ElectronSshManager {
     throw new Error('SSH ControlMaster connection timed out');
   }
 
-  configuredOpenChamberPassword(instance) {
+  configuredPiariumPassword(instance) {
     const secret = instance?.auth?.openchamberPassword;
     return secret?.enabled && typeof secret.value === 'string' && secret.value.trim() ? secret.value.trim() : null;
   }
@@ -990,7 +990,7 @@ export class ElectronSshManager {
     }
   }
 
-  async currentRemoteOpenChamberVersion(parsed, controlPath) {
+  async currentRemotePiariumVersion(parsed, controlPath) {
     try {
       const output = await this.runRemoteCommand(parsed, controlPath, 'openchamber --version 2>/dev/null || true');
       return parseVersionToken(output);
@@ -999,7 +999,7 @@ export class ElectronSshManager {
     }
   }
 
-  async installOpenChamberManaged(parsed, controlPath, version, preferred) {
+  async installPiariumManaged(parsed, controlPath, version, preferred) {
     const hasBun = await this.remoteCommandExists(parsed, controlPath, 'bun');
     const hasNpm = await this.remoteCommandExists(parsed, controlPath, 'npm');
     const commands = [];
@@ -1028,7 +1028,7 @@ export class ElectronSshManager {
         lastError = error;
       }
     }
-    throw lastError || new Error('Failed to install OpenChamber on remote host');
+    throw lastError || new Error('Failed to install Piarium on remote host');
   }
 
   async probeRemoteSystemInfo(parsed, controlPath, port, openchamberPassword) {
@@ -1045,15 +1045,15 @@ export class ElectronSshManager {
     if (isLivenessHttpStatus(infoStatus)) {
       if (isAuthHttpStatus(infoStatus)) {
         if (openchamberPassword && authStatus !== 200) {
-          throw new Error(`Remote OpenChamber requires UI authentication and configured password was rejected (auth status ${authStatus})`);
+          throw new Error(`Remote Piarium requires UI authentication and configured password was rejected (auth status ${authStatus})`);
         }
         if (isLivenessHttpStatus(healthStatus)) return {};
-        throw new Error('Remote OpenChamber requires UI authentication on /api/system/info; configure OpenChamber UI password');
+        throw new Error('Remote Piarium requires UI authentication on /api/system/info; configure Piarium UI password');
       }
     } else if (isLivenessHttpStatus(healthStatus)) {
       return {};
     } else {
-      throw new Error(`Remote OpenChamber probe failed (info status ${infoStatus}, health status ${healthStatus})`);
+      throw new Error(`Remote Piarium probe failed (info status ${infoStatus}, health status ${healthStatus})`);
     }
 
     try {
@@ -1074,7 +1074,7 @@ export class ElectronSshManager {
 
   async startRemoteServerManaged(parsed, controlPath, instance, desiredPort) {
     let envPrefix = 'OPENCHAMBER_RUNTIME=ssh-remote';
-    const secret = this.configuredOpenChamberPassword(instance);
+    const secret = this.configuredPiariumPassword(instance);
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
@@ -1138,38 +1138,38 @@ export class ElectronSshManager {
   async ensureRemoteServer(instance, parsed, controlPath) {
     if (instance.remoteOpenchamber.mode === 'external') {
       if (!instance.remoteOpenchamber.preferredPort) {
-        throw new Error('External mode requires a preferred remote OpenChamber port');
+        throw new Error('External mode requires a preferred remote Piarium port');
       }
       const port = instance.remoteOpenchamber.preferredPort;
-      this.setStatus(instance.id, 'server_detecting', 'Probing external OpenChamber server', null, null, port, false, 0, false);
-      await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredOpenChamberPassword(instance));
+      this.setStatus(instance.id, 'server_detecting', 'Probing external Piarium server', null, null, port, false, 0, false);
+      await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredPiariumPassword(instance));
       return { remotePort: port, startedByUs: false };
     }
 
-    this.setStatus(instance.id, 'remote_probe', 'Checking remote OpenChamber installation');
-    const installedVersion = await this.currentRemoteOpenChamberVersion(parsed, controlPath);
+    this.setStatus(instance.id, 'remote_probe', 'Checking remote Piarium installation');
+    const installedVersion = await this.currentRemotePiariumVersion(parsed, controlPath);
     if (!installedVersion) {
-      this.setStatus(instance.id, 'installing', 'Installing OpenChamber on remote host');
-      await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
+      this.setStatus(instance.id, 'installing', 'Installing Piarium on remote host');
+      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
     } else if (installedVersion !== this.appVersion) {
-      this.setStatus(instance.id, 'updating', `Updating remote OpenChamber from ${installedVersion} to ${this.appVersion}`);
-      await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
+      this.setStatus(instance.id, 'updating', `Updating remote Piarium from ${installedVersion} to ${this.appVersion}`);
+      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
     }
 
-    this.setStatus(instance.id, 'server_detecting', 'Detecting managed OpenChamber server');
+    this.setStatus(instance.id, 'server_detecting', 'Detecting managed Piarium server');
     let remotePort = instance.remoteOpenchamber.preferredPort || null;
     let startedByUs = false;
-    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
+    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredPiariumPassword(instance)))) {
       remotePort = null;
     }
     if (!remotePort) {
-      this.setStatus(instance.id, 'server_starting', 'Starting managed OpenChamber server');
+      this.setStatus(instance.id, 'server_starting', 'Starting managed Piarium server');
       const desiredPort = instance.remoteOpenchamber.preferredPort || randomPortCandidate(instance.id);
       remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort);
       startedByUs = true;
     }
-    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
-      throw new Error('Managed OpenChamber server failed to become reachable');
+    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredPiariumPassword(instance)))) {
+      throw new Error('Managed Piarium server failed to become reachable');
     }
     return { remotePort, startedByUs };
   }
@@ -1310,7 +1310,7 @@ export class ElectronSshManager {
 
     const localUrl = `http://127.0.0.1:${localPort}`;
     const label = instance.nickname?.trim() || parsed.destination || id;
-    const clientToken = await this.issueClientToken(localUrl, this.configuredOpenChamberPassword(instance));
+    const clientToken = await this.issueClientToken(localUrl, this.configuredPiariumPassword(instance));
     await this.updateHostRuntime(id, label, localUrl, clientToken);
     if (instance.localForward?.preferredLocalPort !== localPort) {
       await this.persistLocalPort(id, localPort);

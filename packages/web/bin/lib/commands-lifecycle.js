@@ -78,10 +78,10 @@ async function stopCommand(options) {
       if (explicitInstance.runtime === 'desktop') {
         jsonResults.push({ port: options.port, runtime: 'desktop', stopped: false, reason: 'desktop-managed' });
         if (isJsonMode(options)) {
-          printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${options.port} is managed by OpenChamber Desktop and cannot be stopped with this command.` }] });
+          printJson({ stoppedCount: 0, results: jsonResults, messages: [{ level: 'warning', code: 'DESKTOP_MANAGED_PORT', message: `Port ${options.port} is managed by Piarium Desktop and cannot be stopped with this command.` }] });
         }
         if (showOutput) {
-          logStatus('warning', `port ${options.port} is managed by OpenChamber Desktop`, 'cannot be stopped with this command');
+          logStatus('warning', `port ${options.port} is managed by Piarium Desktop`, 'cannot be stopped with this command');
           finish('no changes applied');
         }
         printQuietStopResults();
@@ -289,7 +289,7 @@ async function restartCommand(options, serveCommand) {
 
     for (const instance of runningInstances) {
       if (instance.runtime === 'desktop') {
-        const message = `Port ${instance.port} is managed by OpenChamber Desktop and cannot be restarted with this command.`;
+        const message = `Port ${instance.port} is managed by Piarium Desktop and cannot be restarted with this command.`;
         if (isJsonMode(options)) {
           printJson({
             status: 'warning',
@@ -300,7 +300,7 @@ async function restartCommand(options, serveCommand) {
           return;
         }
         if (showOutput) {
-          logStatus('warning', `port ${instance.port} is managed by OpenChamber Desktop`, 'cannot be restarted with this command');
+          logStatus('warning', `port ${instance.port} is managed by Piarium Desktop`, 'cannot be restarted with this command');
           clackOutro('no changes applied');
         } else if (isQuietMode(options)) {
           process.stdout.write('restarted 0\n');

@@ -66,7 +66,7 @@ export const encodeClientConnectionPayload = (payload: ClientConnectionPayload):
   params.set('token', payload.token);
   if (payload.label) params.set('label', payload.label);
   if (payload.profile) params.set('profile', payload.profile);
-  return `openchamber://connect?${params.toString()}`;
+  return `piarium://connect?${params.toString()}`;
 };
 
 export const parseClientConnectionPayload = (value: string): ClientConnectionPayload | null => {
@@ -75,7 +75,7 @@ export const parseClientConnectionPayload = (value: string): ClientConnectionPay
 
   try {
     const url = new URL(trimmed);
-    if (url.protocol !== 'openchamber:' || url.hostname !== 'connect') return null;
+    if (url.protocol !== 'piarium:' || url.hostname !== 'connect') return null;
     const version = url.searchParams.get('v');
     const serverUrl = url.searchParams.get('server')?.trim() || '';
     const token = url.searchParams.get('token')?.trim() || '';
@@ -249,7 +249,7 @@ export const encodePairingConnectionPayload = (payload: PairingConnectionPayload
   const params = new URLSearchParams();
   params.set('v', '2');
   params.set('p', base64UrlEncode(JSON.stringify(normalized)));
-  return `openchamber://connect?${params.toString()}`;
+  return `piarium://connect?${params.toString()}`;
 };
 
 export const parsePairingConnectionPayload = (value: string): PairingConnectionPayload | null => {
@@ -257,7 +257,7 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
   if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
   try {
     const url = new URL(trimmed);
-    if (url.protocol !== 'openchamber:' || url.hostname !== 'connect') return null;
+    if (url.protocol !== 'piarium:' || url.hostname !== 'connect') return null;
     if (url.searchParams.get('v') !== '2') return null;
     const encoded = url.searchParams.get('p') || '';
     if (!encoded || encoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;

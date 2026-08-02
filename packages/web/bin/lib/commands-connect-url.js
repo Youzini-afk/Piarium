@@ -122,7 +122,7 @@ function createCliPairingRuntime() {
 // query, so the one-time secret rides the link, never the network.
 function encodePairingConnectUrl(payload) {
   const encoded = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
-  return `openchamber://connect?v=2&p=${encoded}`;
+  return `piarium://connect?v=2&p=${encoded}`;
 }
 
 function buildPairingPayload({ pairing, label, candidates }) {

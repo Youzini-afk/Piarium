@@ -155,7 +155,7 @@ async function resolveTargetInstance({
         if (!attachability.attachable) {
           if (attachability.reason === 'desktop') {
             throw new Error(
-              `Port ${options.port} is used by OpenChamber Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
+              `Port ${options.port} is used by Piarium Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
             );
           }
           throw new Error(
@@ -170,7 +170,7 @@ async function resolveTargetInstance({
       const systemInfo = await fetchSystemInfoFromPort(options.port, globalThis.fetch, options.host);
       if (isDesktopRuntimeForPort(systemInfo, options.port)) {
         throw new Error(
-          `Port ${options.port} is used by OpenChamber Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
+          `Port ${options.port} is used by Piarium Desktop app. Tunnel attach requires a CLI instance from \`openchamber serve\`.`
         );
       }
     }
@@ -229,7 +229,7 @@ async function resolveTargetInstance({
     }
 
     if (sawDesktop) {
-      throw new Error('Only OpenChamber Desktop instance(s) detected. Tunnel attach requires a CLI instance from `openchamber serve`.');
+      throw new Error('Only Piarium Desktop instance(s) detected. Tunnel attach requires a CLI instance from `openchamber serve`.');
     }
 
     throw new Error('No attachable OpenChamber instance found. Start one with `openchamber serve`.');

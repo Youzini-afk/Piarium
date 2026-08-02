@@ -244,7 +244,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
     } catch (error) {
       if (error && error.code === 'ENOENT') return {};
       if (error instanceof SyntaxError) {
-        throw makeEndpointError('Smart Search config file contains invalid JSON. Fix it before saving from OpenChamber.', 409);
+        throw makeEndpointError('Smart Search config file contains invalid JSON. Fix it before saving from Piarium.', 409);
       }
       throw error;
     }

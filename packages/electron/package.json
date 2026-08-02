@@ -1,9 +1,9 @@
 {
-  "name": "@openchamber/electron",
+  "name": "@piarium/electron",
   "version": "1.17.1",
   "private": true,
-  "description": "Electron desktop runtime for OpenChamber",
-  "author": "OpenChamber",
+  "description": "Piarium desktop runtime",
+  "author": "Youzini-afk and Piarium contributors",
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
@@ -55,8 +55,8 @@
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
-    "appId": "dev.openchamber.desktop",
-    "productName": "OpenChamber",
+    "appId": "dev.piarium.desktop",
+    "productName": "Piarium",
     "files": [
       "dist-bundle/main.mjs",
       "preload.mjs"
@@ -127,14 +127,14 @@
       ],
       "category": "Development",
       "icon": "resources/icons/icon.png",
-      "executableName": "openchamber",
+      "executableName": "piarium",
       "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
       "desktop": {
         "entry": {
-          "Name": "OpenChamber",
-          "Comment": "Desktop runtime for OpenChamber",
-          "Icon": "openchamber",
-          "StartupWMClass": "openchamber"
+          "Name": "Piarium",
+          "Comment": "Pi-native coding workspace",
+          "Icon": "piarium",
+          "StartupWMClass": "piarium"
         }
       }
     },
@@ -173,8 +173,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "openchamber",
-      "repo": "openchamber"
+      "owner": "Youzini-afk",
+      "repo": "Piarium"
     }
   }
 }

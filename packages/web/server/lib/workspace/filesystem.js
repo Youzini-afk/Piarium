@@ -289,7 +289,7 @@ export const writeWorkspaceFile = async (relativePathValue, content, config, dep
   });
   if (currentStat && typeof expectedMtimeMs === 'number' && Number.isFinite(expectedMtimeMs)) {
     if (Math.abs(currentStat.mtimeMs - expectedMtimeMs) > 2) {
-      throw new WorkspaceConflictError('File was modified outside OpenChamber');
+      throw new WorkspaceConflictError('File was modified outside Piarium');
     }
   }
   if (currentStat && !currentStat.isFile()) {

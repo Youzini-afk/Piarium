@@ -24,7 +24,7 @@ describe('connection payload helpers', () => {
 
     const encoded = encodePairingConnectionPayload(payload);
 
-    expect(encoded.startsWith('openchamber://connect?v=2&p=')).toBe(true);
+    expect(encoded.startsWith('piarium://connect?v=2&p=')).toBe(true);
     expect(parsePairingConnectionPayload(encoded)).toEqual({
       ...payload,
       candidates: [
@@ -56,11 +56,11 @@ describe('connection payload helpers', () => {
       Buffer.from(JSON.stringify({ v: 2, pairingId: 'pair_1', secret: 's', candidates: [candidate] })).toString('base64url');
 
     // https relay URL is not a WebSocket endpoint → candidate dropped → no candidates → null.
-    expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${withBadRelay({ type: 'relay', relayUrl: 'https://relay.example/ws', serverId: 'srv', hostEncPubJwk })}`)).toBeNull();
+    expect(parsePairingConnectionPayload(`piarium://connect?v=2&p=${withBadRelay({ type: 'relay', relayUrl: 'https://relay.example/ws', serverId: 'srv', hostEncPubJwk })}`)).toBeNull();
     // Missing serverId.
-    expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${withBadRelay({ type: 'relay', relayUrl: 'wss://relay.example/ws', hostEncPubJwk })}`)).toBeNull();
+    expect(parsePairingConnectionPayload(`piarium://connect?v=2&p=${withBadRelay({ type: 'relay', relayUrl: 'wss://relay.example/ws', hostEncPubJwk })}`)).toBeNull();
     // Non-P-256 key.
-    expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${withBadRelay({ type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv', hostEncPubJwk: { kty: 'EC', crv: 'P-384', x: 'a', y: 'b' } })}`)).toBeNull();
+    expect(parsePairingConnectionPayload(`piarium://connect?v=2&p=${withBadRelay({ type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv', hostEncPubJwk: { kty: 'EC', crv: 'P-384', x: 'a', y: 'b' } })}`)).toBeNull();
   });
 
   test('drops a private-key member from a relay JWK (keeps only public coordinates)', () => {
@@ -70,20 +70,20 @@ describe('connection payload helpers', () => {
       secret: 's',
       candidates: [{ type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv', hostEncPubJwk: { ...hostEncPubJwk, d: 'PRIVATE' } }],
     })).toString('base64url');
-    const parsed = parsePairingConnectionPayload(`openchamber://connect?v=2&p=${withKey}`);
+    const parsed = parsePairingConnectionPayload(`piarium://connect?v=2&p=${withKey}`);
     expect(parsed?.candidates[0]).toEqual({ type: 'relay', relayUrl: 'wss://relay.example/ws', serverId: 'srv', hostEncPubJwk });
   });
 
   test('rejects invalid v2 pairing payloads', () => {
-    expect(parsePairingConnectionPayload('openchamber://connect?v=1&server=https://runtime.example&token=t')).toBeNull();
-    expect(parsePairingConnectionPayload('openchamber://connect?v=2&p=not-json')).toBeNull();
+    expect(parsePairingConnectionPayload('piarium://connect?v=1&server=https://runtime.example&token=t')).toBeNull();
+    expect(parsePairingConnectionPayload('piarium://connect?v=2&p=not-json')).toBeNull();
 
     const missingSecret = Buffer.from(JSON.stringify({
       v: 2,
       pairingId: 'pair_123',
       candidates: [{ type: 'lan', url: 'http://runtime.example' }],
     })).toString('base64url');
-    expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${missingSecret}`)).toBeNull();
+    expect(parsePairingConnectionPayload(`piarium://connect?v=2&p=${missingSecret}`)).toBeNull();
 
     const invalidCandidate = Buffer.from(JSON.stringify({
       v: 2,
@@ -91,7 +91,7 @@ describe('connection payload helpers', () => {
       secret: 'secret',
       candidates: [{ type: 'lan', url: 'file:///tmp/socket' }],
     })).toString('base64url');
-    expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${invalidCandidate}`)).toBeNull();
+    expect(parsePairingConnectionPayload(`piarium://connect?v=2&p=${invalidCandidate}`)).toBeNull();
 
     const expired = Buffer.from(JSON.stringify({
       v: 2,
@@ -100,6 +100,6 @@ describe('connection payload helpers', () => {
       expiresAt: '2000-01-01T00:00:00.000Z',
       candidates: [{ type: 'lan', url: 'http://runtime.example' }],
     })).toString('base64url');
-    expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${expired}`)).toBeNull();
+    expect(parsePairingConnectionPayload(`piarium://connect?v=2&p=${expired}`)).toBeNull();
   });
 });

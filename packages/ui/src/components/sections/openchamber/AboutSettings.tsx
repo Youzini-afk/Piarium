@@ -6,7 +6,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
@@ -129,7 +129,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     return (
       <div className="w-full space-y-6 pb-2">
         <div className="flex flex-col items-center text-center">
-          <OpenChamberLogo width={72} height={72} />
+          <PiariumLogo width={72} height={72} />
           <h2 className={`mt-4 ${SETTINGS_BRAND_TITLE_CLASS}`}>OpenChamber</h2>
           <div className="mt-2 space-y-1 typography-ui text-muted-foreground">
             <p>{t('aboutDialog.openChamberVersionLabel', { version: currentVersion })}</p>

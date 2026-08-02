@@ -214,11 +214,11 @@ export const createExternalAccessRootRuntime = ({
       : path.join(os.homedir(), '.config', 'opencode');
 
     const roots = [
-      { id: 'deployment', label: 'OpenChamber deployment', path: discoveredDeploymentRoot, source: 'deployment' },
-      { id: 'server-package', label: 'OpenChamber web package', path: serverPackageRoot, source: 'server-package' },
+      { id: 'deployment', label: 'Piarium deployment', path: discoveredDeploymentRoot, source: 'deployment' },
+      { id: 'server-package', label: 'Piarium web package', path: serverPackageRoot, source: 'server-package' },
       { id: 'process-cwd', label: 'Server working directory', path: process.cwd(), source: 'process' },
-      { id: 'data', label: 'OpenChamber data', path: openchamberDataDir, source: 'data' },
-      { id: 'logs', label: 'OpenChamber logs', path: path.join(openchamberDataDir, 'logs'), source: 'logs' },
+      { id: 'data', label: 'Piarium data', path: openchamberDataDir, source: 'data' },
+      { id: 'logs', label: 'Piarium logs', path: path.join(openchamberDataDir, 'logs'), source: 'logs' },
       { id: 'opencode-config', label: 'OpenCode config', path: opencodeConfigDir, source: 'opencode-config' },
     ];
 

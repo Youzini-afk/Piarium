@@ -19,8 +19,8 @@ production GitHub updater provider. It supports native x64 and arm64 hosts.
    ```bash
    bun run updater:e2e:fixture -- run \
      --arch x64 \
-     --current /absolute/path/OpenChamber-N-linux-x86_64.AppImage \
-     --next /absolute/path/OpenChamber-N+1-linux-x86_64.AppImage \
+     --current /absolute/path/Piarium-N-linux-x86_64.AppImage \
+     --next /absolute/path/Piarium-N+1-linux-x86_64.AppImage \
      --version N+1 \
      --dir /tmp/openchamber-updater-e2e
    ```
@@ -31,6 +31,6 @@ production GitHub updater provider. It supports native x64 and arm64 hosts.
 
 The harness binds only `127.0.0.1`. Runtime override activation additionally requires
 `OPENCHAMBER_E2E=1`, the loopback URL set by the harness, and the build-time marker.
-Normal packages omit the build-time marker and always use `openchamber/openchamber`.
+Normal packages omit the build-time marker and always use `Youzini-afk/Piarium`.
 The renderer, IPC bridge, command-line arguments, and persistent configuration do not
 have access to the feed URL.

@@ -24,8 +24,8 @@
     <!-- Web app manifest (endpoint-first with data URL fallback) -->
     <script>
       const baseUrl = location.origin;
-      const defaultAppName = 'OpenChamber - AI Coding Assistant';
-      const defaultShortName = 'OpenChamber';
+      const defaultAppName = 'Piarium - Pi Coding Workspace';
+      const defaultShortName = 'Piarium';
       const pwaNameStorageKey = 'openchamber.pwaName';
       const pwaOrientationStorageKey = 'openchamber.pwaOrientation';
       const mobileKeyboardModeStorageKey = 'openchamber.mobileKeyboardMode';
@@ -231,7 +231,7 @@
         return {
           name: appName,
           short_name: shortName,
-          description: 'Web interface companion for OpenCode AI coding agent',
+          description: 'Pi-native coding workspace for desktop and web',
           id: `${baseUrl}/`,
           start_url: `${baseUrl}/`,
           scope: `${baseUrl}/`,
@@ -428,12 +428,12 @@
     <!-- iOS Safari PWA styling -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="OpenChamber" />
+    <meta name="apple-mobile-web-app-title" content="Piarium" />
 
-    <title>OpenChamber - AI Coding Assistant</title>
-    <meta name="description" content="Web interface companion for OpenCode AI coding agent" />
-    <meta name="application-name" content="OpenChamber" />
-    <meta name="apple-mobile-web-app-title" content="OpenChamber" />
+    <title>Piarium - Pi Coding Workspace</title>
+    <meta name="description" content="Pi-native coding workspace for desktop and web" />
+    <meta name="application-name" content="Piarium" />
+    <meta name="apple-mobile-web-app-title" content="Piarium" />
 
     <!-- Inline CSS for loading screen and Nerd Fonts (before Tailwind loads) -->
     <style>
@@ -521,7 +521,7 @@
       <!-- Loading fallback while React initializes -->
       <div id="initial-loading">
         <div style="display: flex; align-items: center; justify-content: center;">
-          <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber loading icon">
+          <svg width="120" height="120" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Piarium loading icon">
             <!-- Isometric cube: edge=48, centerY=50 -->
             <!-- Points: top(50,2), left(8.432,26), right(91.568,26), center(50,50), bottomLeft(8.432,74), bottomRight(91.568,74), bottom(50,98) -->
 
@@ -570,10 +570,9 @@
             <!-- Top face - open (no fill), only stroke -->
             <path d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
 
-            <!-- OpenCode logo on top face -->
+            <!-- Piarium π mark on top face -->
             <g transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
-              <path fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z" fill="var(--splash-logo-fill)"/>
-              <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="var(--splash-logo-fill)" fill-opacity="0.4"/>
+              <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="var(--splash-logo-fill)"/>
             </g>
           </svg>
         </div>

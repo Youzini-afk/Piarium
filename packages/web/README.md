@@ -37,7 +37,7 @@ openchamber tunnel start --provider cloudflare --mode quick --qr
 openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
 openchamber tunnel status --all      # Show tunnel state across instances
 openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
-openchamber connect-url --port 3000  # Add this server to OpenChamber Desktop
+openchamber connect-url --port 3000  # Add this server to Piarium Desktop
 openchamber connect-url --server http://host:3000 --qr
 openchamber connect-url --port 3000 --qr
 openchamber logs                     # Follow latest instance logs
@@ -65,7 +65,7 @@ external OpenCode servers.
 
 ### Connect other OpenChamber apps
 
-Use `connect-url` when a web/API server should be added to OpenChamber Desktop or another OpenChamber app. If no server is running on the selected port, OpenChamber starts one first.
+Use `connect-url` when a web/API server should be added to Piarium Desktop or another OpenChamber app. If no server is running on the selected port, OpenChamber starts one first.
 
 ```bash
 openchamber connect-url --port 3000
@@ -77,7 +77,7 @@ openchamber connect-url --port 3000 --lan --server http://workstation.local:3000
 
 ### Headless/API-only server for Desktop
 
-Use this on a remote machine when you want OpenChamber running as a web/API server, then connect to it from OpenChamber Desktop on another machine:
+Use this on a remote machine when you want OpenChamber running as a web/API server, then connect to it from Piarium Desktop on another machine:
 
 ```bash
 openchamber connect-url --port 3000 --api-only --lan --server http://workstation.local:3000 --qr --ui-password your-password
@@ -85,7 +85,7 @@ openchamber connect-url --port 3000 --api-only --lan --server http://workstation
 
 `--api-only` starts API routes without serving browser UI assets. `--lan` binds the server so other machines can reach it. `--server` is the address saved into the Desktop connection link. `--ui-password` protects browser access if UI routes are enabled elsewhere; the generated client token is what Desktop uses for API access.
 
-This creates a remote client token and prints an `openchamber://connect?...` link. The link contains the server URL, token, label, and payload version. In OpenChamber Desktop, paste it in **Settings -> Remote Instances -> Direct Instances -> Import Link** to add that server as an Instance.
+This creates a remote client token and prints an `piarium://connect?...` link. The link contains the server URL, token, label, and payload version. In Piarium Desktop, paste it in **Settings -> Remote Instances -> Direct Instances -> Import Link** to add that server as an Instance.
 
 If the server was started with `--lan` or `--host 0.0.0.0`, `connect-url` automatically advertises a detected LAN IP instead of `127.0.0.1`. Use `--server <url>` when you want to advertise a specific DNS name, Tailscale address, reverse proxy URL, or HTTPS endpoint.
 

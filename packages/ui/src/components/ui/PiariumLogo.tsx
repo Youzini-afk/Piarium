@@ -16,7 +16,7 @@ const RIGHT_FACE_CELL_OPACITIES = [
   0.45, 0.25, 0.4, 0.2,
 ];
 
-interface OpenChamberLogoProps {
+interface PiariumLogoProps {
   className?: string;
   width?: number;
   height?: number;
@@ -78,7 +78,7 @@ const generateFaceGrid = (
   return cells;
 };
 
-export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
+export const PiariumLogo: React.FC<PiariumLogoProps> = ({
   className = '',
   width = 70,
   height = 70,
@@ -146,7 +146,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
     return isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.4)';
   }, [themeContext, supportsColorMix, strokeColor, isDark]);
 
-  const logoFillColor = strokeColor;
+  const markFillColor = strokeColor;
 
 
 
@@ -192,10 +192,10 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label={t('openChamberLogo.aria.logo')}
+      aria-label={t('piariumLogo.aria.logo')}
     >
       {isAnimated ? (
-        <style>{`@keyframes oc-logo-glow{0%,100%{filter:drop-shadow(0 0 0 transparent)}50%{filter:drop-shadow(0 0 4px var(--oc-glow-color))}}.oc-logo-glow{animation:oc-logo-glow 1.8s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.oc-logo-glow{animation:none}}`}</style>
+        <style>{`@keyframes piarium-logo-glow{0%,100%{filter:drop-shadow(0 0 0 transparent)}50%{filter:drop-shadow(0 0 4px var(--piarium-glow-color))}}.piarium-logo-glow{animation:piarium-logo-glow 1.8s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.piarium-logo-glow{animation:none}}`}</style>
       ) : null}
       {/* Left face - base fill */}
       <path
@@ -244,30 +244,16 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
         strokeLinejoin="round"
       />
 
-      {/* OpenCode logo on top face */}
+      {/* Piarium's π mark on the open top face. */}
       <g
         opacity={1}
-        className={isAnimated ? 'oc-logo-glow' : undefined}
-        style={isAnimated ? ({ '--oc-glow-color': strokeColor } as React.CSSProperties) : undefined}
+        className={isAnimated ? 'piarium-logo-glow' : undefined}
+        style={isAnimated ? ({ '--piarium-glow-color': strokeColor } as React.CSSProperties) : undefined}
       >
-        {/*
-          Isometric transform for top face:
-          OpenCode logo (32x40 viewBox) centered and projected to isometric plane
-        */}
         <g transform={`${isoMatrix} scale(0.75)`}>
-          {/* OpenCode logo - outer frame with inner square */}
-          {/* Outer frame (centered at origin, original: 0,0 to 32,40) */}
           <path
-            fillRule="evenodd"
-            clipRule="evenodd"
-            d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z"
-            fill={logoFillColor}
-          />
-          {/* Inner square */}
-          <path
-            d="M-8 -4 L8 -4 L8 12 L-8 12 Z"
-            fill={logoFillColor}
-            fillOpacity="0.4"
+            d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z"
+            fill={markFillColor}
           />
         </g>
       </g>

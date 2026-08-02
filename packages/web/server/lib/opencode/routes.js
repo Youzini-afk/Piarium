@@ -190,7 +190,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
             ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER'
             : 'OPENCODE_UPGRADE_UNSUPPORTED',
           error: capability.reason === 'bundled'
-            ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
+            ? 'OpenCode is bundled with Piarium Desktop and updates with the app.'
             : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
         });
       }

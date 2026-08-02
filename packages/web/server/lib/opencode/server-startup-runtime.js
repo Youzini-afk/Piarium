@@ -50,7 +50,7 @@ export const createServerStartupRuntime = (dependencies) => {
         const displayHost = (bindHost === '0.0.0.0' || bindHost === '::' || bindHost === '[::]')
           ? 'localhost'
           : (bindHost.includes(':') ? `[${bindHost}]` : bindHost);
-        console.log(`OpenChamber server listening on ${bindHost}:${activePort}`);
+        console.log(`Piarium server listening on ${bindHost}:${activePort}`);
         console.log(`Health check: http://${displayHost}:${activePort}/health`);
         console.log(`Web interface: http://${displayHost}:${activePort}`);
 

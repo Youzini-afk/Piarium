@@ -1,6 +1,6 @@
 // Connection payload parsing + native QR scanning for the dedicated mobile app.
 //
-// Pairing v2 links (openchamber://connect?v=2&p=<base64url>) carry a one-time
+// Pairing v2 links (piarium://connect?v=2&p=<base64url>) carry a one-time
 // secret and a list of transport candidates (lan / tunnel / relay); they are
 // redeemed server-side over whichever candidate connects first. We also accept a
 // bare http(s) URL so a QR encoding only the server address works.
@@ -115,7 +115,7 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  if (/^openchamber:\/\//i.test(trimmed)) {
+  if (/^piarium:\/\//i.test(trimmed)) {
     const pairing = parsePairingConnectionPayload(trimmed);
     return pairing ? { pairing } : null;
   }

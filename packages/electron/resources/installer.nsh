@@ -1,9 +1,9 @@
-!define OPENCHAMBER_INSTALL_DIR_NAME "OpenChamber"
+!define PIARIUM_INSTALL_DIR_NAME "Piarium"
 
 !ifndef BUILD_UNINSTALLER
-Var OpenChamberDirectoryInput
+Var PiariumDirectoryInput
 
-Function OpenChamberNormalizeInstallDirectory
+Function PiariumNormalizeInstallDirectory
   Push $0
   Push $1
   Push $2
@@ -23,17 +23,17 @@ Function OpenChamberNormalizeInstallDirectory
     StrCpy $INSTDIR "$0"
 
     StrCpy $1 "$INSTDIR" 12 -12
-    StrCmp "$1" "\${OPENCHAMBER_INSTALL_DIR_NAME}" done_normalize_install_directory
+    StrCmp "$1" "\${PIARIUM_INSTALL_DIR_NAME}" done_normalize_install_directory
 
-    StrCmp "$INSTDIR" "${OPENCHAMBER_INSTALL_DIR_NAME}" done_normalize_install_directory
+    StrCmp "$INSTDIR" "${PIARIUM_INSTALL_DIR_NAME}" done_normalize_install_directory
 
     StrCpy $1 "$INSTDIR" 1 -1
     StrCmp "$1" "\" 0 append_with_separator
-      StrCpy $INSTDIR "$INSTDIR${OPENCHAMBER_INSTALL_DIR_NAME}"
+      StrCpy $INSTDIR "$INSTDIR${PIARIUM_INSTALL_DIR_NAME}"
       Goto done_normalize_install_directory
 
     append_with_separator:
-      StrCpy $INSTDIR "$INSTDIR\${OPENCHAMBER_INSTALL_DIR_NAME}"
+      StrCpy $INSTDIR "$INSTDIR\${PIARIUM_INSTALL_DIR_NAME}"
 
   done_normalize_install_directory:
     Pop $2
@@ -42,29 +42,29 @@ Function OpenChamberNormalizeInstallDirectory
 FunctionEnd
 
 !macro customPageAfterChangeDir
-  Page custom OpenChamberDirectoryPageCreate OpenChamberDirectoryPageLeave
+  Page custom PiariumDirectoryPageCreate PiariumDirectoryPageLeave
 
-  Function OpenChamberDirectoryBrowse
+  Function PiariumDirectoryBrowse
     nsDialogs::SelectFolderDialog "$(^DirBrowseText)" "$INSTDIR"
     Pop $0
-    StrCmp "$0" "error" done_openchamber_directory_browse
-    StrCmp "$0" "" done_openchamber_directory_browse
+    StrCmp "$0" "error" done_piarium_directory_browse
+    StrCmp "$0" "" done_piarium_directory_browse
 
     StrCpy $INSTDIR "$0"
-    Call OpenChamberNormalizeInstallDirectory
-    ${NSD_SetText} $OpenChamberDirectoryInput "$INSTDIR"
+    Call PiariumNormalizeInstallDirectory
+    ${NSD_SetText} $PiariumDirectoryInput "$INSTDIR"
 
-    done_openchamber_directory_browse:
+    done_piarium_directory_browse:
   FunctionEnd
 
-  Function OpenChamberDirectoryPageCreate
+  Function PiariumDirectoryPageCreate
     !insertmacro MUI_HEADER_TEXT_PAGE "$(^DirSubText)" "$(^DirBrowseText)"
     nsDialogs::Create 1018
     Pop $0
     StrCmp "$0" "error" 0 +2
       Abort
 
-    Call OpenChamberNormalizeInstallDirectory
+    Call PiariumNormalizeInstallDirectory
 
     ${NSD_CreateLabel} 0 0 100% 38u "$(^DirText)"
     Pop $0
@@ -73,19 +73,19 @@ FunctionEnd
     Pop $0
 
     ${NSD_CreateText} 16u 87u 72% 12u "$INSTDIR"
-    Pop $OpenChamberDirectoryInput
+    Pop $PiariumDirectoryInput
 
     ${NSD_CreateBrowseButton} 78% 86u 20% 14u "$(^BrowseBtn)"
     Pop $0
-    ${NSD_OnClick} $0 OpenChamberDirectoryBrowse
+    ${NSD_OnClick} $0 PiariumDirectoryBrowse
 
     nsDialogs::Show
   FunctionEnd
 
-  Function OpenChamberDirectoryPageLeave
-    ${NSD_GetText} $OpenChamberDirectoryInput $INSTDIR
-    Call OpenChamberNormalizeInstallDirectory
-    ${NSD_SetText} $OpenChamberDirectoryInput "$INSTDIR"
+  Function PiariumDirectoryPageLeave
+    ${NSD_GetText} $PiariumDirectoryInput $INSTDIR
+    Call PiariumNormalizeInstallDirectory
+    ${NSD_SetText} $PiariumDirectoryInput "$INSTDIR"
   FunctionEnd
 !macroend
 !endif

@@ -107,6 +107,10 @@ retained before engine surgery begins.
   embedded legacy routes only. Pi commands are discovered from live sessions or an in-memory
   workspace catalog, so extension, prompt-template, skill, and recovery-plugin updates appear
   without Piarium-owned copies.
+- Implemented a coherent Piarium product identity across the Windows installer, Electron AUMID,
+  native/PWA titles, updater feed, `piarium://` deep links, `piarium-ui://` packaged origin,
+  authentication device labels, translations, and generated icon assets. The retained cube motif
+  now carries Piarium's own π mark rather than the upstream OpenCode mark.
 - Implemented Pi-native scheduled execution end to end: the scheduler creates a Pi session,
   selects its Pi provider/model/thinking level, and dispatches either a Pi extension command or
   agent prompt. The editor and run-now navigation use the same Pi catalog/session contract; legacy
@@ -157,7 +161,9 @@ an integration smoke test without exposing credentials.
 
 ## Phase 7 — Windows release
 
-- Bundled compatible Node/Pi worker runtime.
+- Implemented: Electron's Node mode directly hosts the compiled Pi worker/broker; no separate Node
+  download is required. Windows product/installer identity and GitHub updater metadata now target
+  `Youzini-afk/Piarium`.
 - Git/Git Bash/npm/Pi discovery and guided repair.
 - NSIS installer, upgrade/uninstall behavior, logs, crash recovery, and update metadata.
 - Packaged-app smoke tests and artifact checks.

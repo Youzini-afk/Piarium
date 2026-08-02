@@ -32,11 +32,11 @@ describe('parseConnectionPayload', () => {
   test('rejects non-connection and legacy/relay-offer payloads', () => {
     expect(parseConnectionPayload('')).toBeNull();
     expect(parseConnectionPayload('hello world')).toBeNull();
-    expect(parseConnectionPayload('openchamber://connect')).toBeNull();
-    expect(parseConnectionPayload('openchamber://session/abc')).toBeNull();
+    expect(parseConnectionPayload('piarium://connect')).toBeNull();
+    expect(parseConnectionPayload('piarium://session/abc')).toBeNull();
     // Legacy v1 direct links are no longer accepted.
-    expect(parseConnectionPayload('openchamber://connect?v=1&server=http%3A%2F%2F192.168.1.10%3A2606&token=tok')).toBeNull();
+    expect(parseConnectionPayload('piarium://connect?v=1&server=http%3A%2F%2F192.168.1.10%3A2606&token=tok')).toBeNull();
     // Legacy relay-offer format (mode=relay + fragment) is no longer accepted.
-    expect(parseConnectionPayload('openchamber://connect?v=1&mode=relay#offer=eyJ2IjoxfQ')).toBeNull();
+    expect(parseConnectionPayload('piarium://connect?v=1&mode=relay#offer=eyJ2IjoxfQ')).toBeNull();
   });
 });

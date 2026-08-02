@@ -700,7 +700,7 @@ USAGE:
   openchamber connect-url [OPTIONS]
 
 DESCRIPTION:
-  Generate an openchamber:// connection link for adding this server to another
+  Generate an piarium:// connection link for adding this server to another
   OpenChamber app. If no server is running on the selected port, it starts one.
 
 OPTIONS:

@@ -111,7 +111,7 @@ describe('realtime proxy', () => {
         headers: {
           Accept: 'text/event-stream',
           'Last-Event-ID': 'evt-42',
-          Origin: 'openchamber-ui://app',
+          Origin: 'piarium-ui://app',
         },
       });
 
@@ -132,7 +132,7 @@ describe('realtime proxy', () => {
 
     try {
       const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/global/event`), {
-        headers: { Origin: 'openchamber-ui://app' },
+        headers: { Origin: 'piarium-ui://app' },
       });
 
       expect(response.status).toBe(401);
@@ -164,7 +164,7 @@ describe('realtime proxy', () => {
 
     try {
       const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/global/event`), {
-        headers: { Origin: 'openchamber-ui://app' },
+        headers: { Origin: 'piarium-ui://app' },
       });
 
       expect(response.status).toBe(404);
@@ -180,7 +180,7 @@ describe('realtime proxy', () => {
 
     try {
       const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/config/settings`), {
-        headers: { Origin: 'openchamber-ui://app' },
+        headers: { Origin: 'piarium-ui://app' },
       });
 
       expect(response.status).toBe(404);
@@ -206,7 +206,7 @@ describe('realtime proxy', () => {
     try {
       const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/global/event/ws?lastEventId=evt-1`;
       const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
-        headers: { Origin: 'openchamber-ui://app' },
+        headers: { Origin: 'piarium-ui://app' },
       });
       await new Promise((resolve, reject) => {
         client.once('open', resolve);
@@ -241,7 +241,7 @@ describe('realtime proxy', () => {
     try {
       const target = `${upstreamOrigin.replace(/^http:/, 'ws:')}/api/global/event/ws`;
       const client = new WebSocket(buildRealtimeProxyWsUrl(origin, target), {
-        headers: { Origin: 'openchamber-ui://app' },
+        headers: { Origin: 'piarium-ui://app' },
       });
       const message = await new Promise((resolve, reject) => {
         client.once('message', (data) => resolve(data.toString()));

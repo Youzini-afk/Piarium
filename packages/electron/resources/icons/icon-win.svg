@@ -9,15 +9,14 @@
 
     <!-- Isometric cube logo - unchanged from app-icon.svg -->
     <!-- Left face -->
-    <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="#4b4b4b" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="#26372f" stroke="#f6e7b0" stroke-width="2" stroke-linejoin="round"/>
     <!-- Right face -->
-    <path d="M0 0 L41.568 -24 L41.568 24 L0 48 Z" fill="#6d6d6d" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M0 0 L41.568 -24 L41.568 24 L0 48 Z" fill="#3a5746" stroke="#f6e7b0" stroke-width="2" stroke-linejoin="round"/>
     <!-- Top face - slightly darker than the left face -->
-    <path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z" fill="#3b3b3b" stroke="white" stroke-width="2" stroke-linejoin="round"/>
-    <!-- OpenCode logo on top face -->
+    <path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z" fill="#725f2b" stroke="#f6e7b0" stroke-width="2" stroke-linejoin="round"/>
+    <!-- Piarium π mark on top face -->
     <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, -24) scale(0.75)">
-      <path fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z" fill="white"/>
-      <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="white" fill-opacity="0.4"/>
+      <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="#f4cf70"/>
     </g>
   </g>
 </svg>

@@ -3,7 +3,7 @@ import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
-import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
@@ -144,10 +144,10 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xs p-6">
         <div className="flex flex-col items-center text-center space-y-4">
-          <OpenChamberLogo width={64} height={64} />
+          <PiariumLogo width={64} height={64} />
 
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold">OpenChamber</h2>
+            <h2 className="text-lg font-semibold">Piarium</h2>
             <div className="space-y-0.5 typography-meta text-muted-foreground">
               {displayVersion && (
                 <p>{t('aboutDialog.versionLabel', { version: displayVersion })}</p>

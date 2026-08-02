@@ -1,7 +1,7 @@
 {
-  "name": "OpenChamber - AI Coding Companion",
-  "short_name": "OpenChamber",
-  "description": "OpenChamber desktop companion for the OpenCode AI coding agent",
+  "name": "Piarium - Pi Coding Workspace",
+  "short_name": "Piarium",
+  "description": "Piarium is a Pi-native coding workspace for desktop and web",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#151313",

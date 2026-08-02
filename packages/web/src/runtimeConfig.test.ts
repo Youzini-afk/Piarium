@@ -37,7 +37,7 @@ const installWindow = (value: Record<string, unknown>) => {
 
 const makeWindow = (search = ''): Record<string, unknown> => {
   const value: Record<string, unknown> = {
-    location: { origin: 'openchamber-ui://app', search },
+    location: { origin: 'piarium-ui://app', search },
     setTimeout: vi.fn(() => 1),
   };
   value.parent = value;
@@ -99,7 +99,7 @@ describe('createConfiguredWebAPIs', () => {
     const bootstrap = {
       apiBaseUrl: 'https://remote.example.com',
       clientToken: 'client-token',
-      localOrigin: 'openchamber-ui://app',
+      localOrigin: 'piarium-ui://app',
       runtimeHeaders: { 'x-runtime': 'value' },
       relayHostId: 'host-1',
     };
@@ -123,7 +123,7 @@ describe('createConfiguredWebAPIs', () => {
       hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'public-x', y: 'public-y' },
     };
     const bootstrap = {
-      apiBaseUrl: 'openchamber-ui://app',
+      apiBaseUrl: 'piarium-ui://app',
       clientToken: 'client-token',
       localOrigin: 'http://127.0.0.1:3000',
       relayHostId: 'host-1',

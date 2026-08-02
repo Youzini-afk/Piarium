@@ -77,8 +77,8 @@ export const createMobilePushRuntime = (deps) => {
       deviceId: target.id,
       to: target.pushToken,
       sound: 'default',
-      title: normalizeString(payload?.title) || 'OpenChamber',
-      body: normalizeString(payload?.body) || 'OpenChamber has an update.',
+      title: normalizeString(payload?.title) || 'Piarium',
+      body: normalizeString(payload?.body) || 'Piarium has an update.',
       data: payload?.data && typeof payload.data === 'object' ? payload.data : {},
     }));
     return sendExpoMessages(messages);
@@ -94,7 +94,7 @@ export const createMobilePushRuntime = (deps) => {
       deviceId: target.id,
       to: target.pushToken,
       sound: 'default',
-      title: 'OpenChamber test notification',
+      title: 'Piarium test notification',
       body: 'Mobile push is connected.',
       data: { type: 'test', url: '/' },
     }]);
