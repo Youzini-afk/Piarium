@@ -29,6 +29,8 @@ describe("surface runtime protocol", () => {
       configRequest,
     );
     assert.equal(isRuntimeMethod("config.document.get"), true);
+    assert.equal(isRuntimeMethod("agentProvider.action"), true);
+    assert.equal(isRuntimeMethod("agentProvider.list"), true);
     assert.equal(isRuntimeMethod("config.document.update"), true);
     assert.equal(isRuntimeMethod("config.text.get"), true);
     assert.equal(isRuntimeMethod("config.text.update"), true);

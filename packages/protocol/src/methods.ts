@@ -6,6 +6,8 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiAgentCatalogSnapshot,
+  PiAgentProviderActionResult,
   PiConfigDocumentSnapshot,
   PiConfigScope,
   PiConfigTextDocumentSnapshot,
@@ -38,6 +40,14 @@ import type {
 import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
 
 export interface HostMethodMap {
+  "agentProvider.action": {
+    params: { action: string; agentId?: string; input?: JsonValue; providerId: string };
+    result: PiAgentProviderActionResult;
+  };
+  "agentProvider.list": {
+    params: Record<string, never>;
+    result: PiAgentCatalogSnapshot;
+  };
   "config.document.get": {
     params: { path: string; scope: PiConfigScope };
     result: PiConfigDocumentSnapshot;

@@ -347,6 +347,29 @@ async function dispatchRuntimeRequestUnchecked(
       return broker.requestForSession(sessionId, "agent.abort", { sessionId });
     }
 
+    case "agentProvider.list": {
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "agentProvider.list",
+        {},
+      );
+    }
+    case "agentProvider.action": {
+      const agentId = optionalString(input, "agentId");
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "agentProvider.action",
+        {
+          action: requireString(input, "action"),
+          ...(agentId === undefined ? {} : { agentId }),
+          ...(input.input === undefined ? {} : { input: input.input as JsonValue }),
+          providerId: requireString(input, "providerId"),
+        },
+      );
+    }
+
     case "command.list": {
       const target = requireRuntimeContext(input);
       return "sessionId" in target

@@ -201,24 +201,6 @@ const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
     },
 ];
 
-const MESSAGE_STREAM_TRANSPORT_OPTIONS: Option<'auto' | 'ws' | 'sse'>[] = [
-    {
-        id: 'auto',
-        labelKey: 'settings.openchamber.visual.option.messageTransport.auto.label',
-        descriptionKey: 'settings.openchamber.visual.option.messageTransport.auto.description',
-    },
-    {
-        id: 'ws',
-        labelKey: 'settings.openchamber.visual.option.messageTransport.ws.label',
-        descriptionKey: 'settings.openchamber.visual.option.messageTransport.ws.description',
-    },
-    {
-        id: 'sse',
-        labelKey: 'settings.openchamber.visual.option.messageTransport.sse.label',
-        descriptionKey: 'settings.openchamber.visual.option.messageTransport.sse.description',
-    },
-];
-
 const ACTIVITY_RENDER_MODE_OPTIONS: Option<'collapsed' | 'summary'>[] = [
     {
         id: 'collapsed',
@@ -282,8 +264,6 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
 };
 
 type VisibleSetting =
-    | 'sessionAssist'
-    | 'sessionGoal'
     | 'theme'
     | 'windowControlsPosition'
     | 'pwaInstallName'
@@ -301,7 +281,6 @@ type VisibleSetting =
     | 'mermaidRendering'
     | 'userMessageRendering'
     | 'chatRenderMode'
-    | 'messageTransport'
     | 'activityRenderMode'
     | 'collapsibleUserMessages'
     | 'stickyUserHeader'
@@ -315,7 +294,6 @@ type VisibleSetting =
     | 'dotfiles'
     | 'fileViewerPreview'
     | 'reasoning'
-    | 'serverPermissionAutoAccept'
     | 'showToolFileIcons'
     | 'showTurnChangedFiles'
     | 'expandedTools'
@@ -352,16 +330,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const { browserTab } = usePwaDetection();
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
-    const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
-    const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
-    const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
-    const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
-    const sessionGoalEnabled = useUIStore(state => state.sessionGoalEnabled);
-    const setSessionGoalEnabled = useUIStore(state => state.setSessionGoalEnabled);
-    const sessionGoalDefaultBudgetEnabled = useUIStore(state => state.sessionGoalDefaultBudgetEnabled);
-    const setSessionGoalDefaultBudgetEnabled = useUIStore(state => state.setSessionGoalDefaultBudgetEnabled);
-    const sessionGoalDefaultBudget = useUIStore(state => state.sessionGoalDefaultBudget);
-    const setSessionGoalDefaultBudget = useUIStore(state => state.setSessionGoalDefaultBudget);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
@@ -434,15 +402,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
-    const serverPermissionAutoAcceptEnabled = useUIStore(state => state.serverPermissionAutoAcceptEnabled);
-    const setServerPermissionAutoAcceptEnabled = useUIStore(state => state.setServerPermissionAutoAcceptEnabled);
     const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
     const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
     const draftStartersVisible = useUIStore(state => state.draftStartersVisible);
     const setDraftStartersVisible = useUIStore(state => state.setDraftStartersVisible);
-    const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
-    const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
-    const effectiveMessageStreamTransport = messageStreamTransport;
     const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
     const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
@@ -595,11 +558,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
     }, [setShowSplitAssistantMessageActions]);
 
-    const handleServerPermissionAutoAcceptChange = React.useCallback((enabled: boolean) => {
-        setServerPermissionAutoAcceptEnabled(enabled);
-        void updateDesktopSettings({ serverPermissionAutoAcceptEnabled: enabled });
-    }, [setServerPermissionAutoAcceptEnabled]);
-
     const handleInputSpellcheckChange = React.useCallback((enabled: boolean) => {
         setInputSpellcheckEnabled(enabled);
         void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
@@ -609,11 +567,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setChatRenderMode(mode);
         void updateDesktopSettings({ chatRenderMode: mode });
     }, [setChatRenderMode]);
-
-    const handleMessageStreamTransportChange = React.useCallback((mode: 'auto' | 'ws' | 'sse') => {
-        setMessageStreamTransport(mode);
-        void updateDesktopSettings({ messageStreamTransport: mode });
-    }, [setMessageStreamTransport]);
 
     const handleActivityRenderModeChange = React.useCallback((mode: 'collapsed' | 'summary') => {
         setActivityRenderMode(mode);
@@ -706,10 +659,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || (shouldShow('inputBarOffset') && isMobile);
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || ((shouldShow('terminalShell') || shouldShow('terminalLoginShell')) && !isVSCode) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || (shouldShow('expandedEditorToolbar') && !isVSCode);
     const hasBehaviorSettings = shouldShow('mermaidRendering')
-        || (shouldShow('sessionGoal') && !isVSCode)
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
-        || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
@@ -722,7 +673,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('dotfiles')
         || shouldShow('fileViewerPreview')
         || shouldShow('reasoning')
-        || shouldShow('serverPermissionAutoAccept')
         || shouldShow('draftStartersVisible')
         || shouldShow('followUpBehavior')
         || shouldShow('persistDraft')
@@ -732,16 +682,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (!isMobile && shouldShow('inputSpellcheck'));
     const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted');
-    const showTransportSection = shouldShow('messageTransport');
     const showBehaviorMessageOptions = shouldShow('userMessageRendering')
         || shouldShow('mermaidRendering')
         || (shouldShow('diffLayout') && !isVSCode)
         || shouldShow('followUpBehavior');
-    const showBehaviorFeatureCheckboxes = shouldShow('sessionAssist')
-        || (shouldShow('sessionGoal') && !isVSCode)
-        || shouldShow('draftStartersVisible')
+    const showBehaviorFeatureCheckboxes = shouldShow('draftStartersVisible')
         || shouldShow('subagentReadOnlyBanner')
-        || shouldShow('serverPermissionAutoAccept')
         || shouldShow('collapsibleUserMessages')
         || shouldShow('stickyUserHeader')
         || (shouldShow('promptNavigatorEnabled') && !isVSCode)
@@ -1756,37 +1702,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             </SettingsSection>
                         )}
 
-                        {showTransportSection && (
-                            <SettingsSection
-                                title={t('settings.openchamber.visual.section.messageStreamTransport')}
-                                divider={showBehaviorDisplaySettings || behaviorSectionDivider}
-                                settingsItem="chat.message-transport"
-                                contentClassName="space-y-2"
-                            >
-                                <SettingsChipGroup
-                                    value={effectiveMessageStreamTransport}
-                                    options={MESSAGE_STREAM_TRANSPORT_OPTIONS.map((option) => ({
-                                        value: option.id,
-                                        label: tUnsafe(option.labelKey),
-                                    }))}
-                                    onChange={handleMessageStreamTransportChange}
-                                    aria-label={t('settings.openchamber.visual.section.messageStreamTransport')}
-                                />
-                                {(() => {
-                                    const option = MESSAGE_STREAM_TRANSPORT_OPTIONS.find((item) => item.id === effectiveMessageStreamTransport);
-                                    return option?.descriptionKey ? (
-                                        <span className="typography-meta text-muted-foreground">
-                                            {tUnsafe(option.descriptionKey)}
-                                        </span>
-                                    ) : null;
-                                })()}
-                            </SettingsSection>
-                        )}
-
                         {showBehaviorMessageOptions && (
                             <SettingsSection
                                 title={t('settings.openchamber.visual.section.chatMessageOptions')}
-                                divider={showBehaviorDisplaySettings || showTransportSection || behaviorSectionDivider}
+                                divider={showBehaviorDisplaySettings || behaviorSectionDivider}
                             >
                                 {/* Flat 2×2 grid so row headers share a baseline (not stacked columns). */}
                                 <SettingsTwoColumn className="lg:gap-y-6">
@@ -1865,7 +1784,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 {shouldShow('expandedTools') && (
                                     <SettingsSection
                                         title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
-                                        divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
+                                        divider={showBehaviorDisplaySettings || showBehaviorMessageOptions || behaviorSectionDivider}
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
                                         <SettingsCheckboxRow
@@ -1882,7 +1801,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         />
                                     </SettingsSection>
                                 )}
-                                {(shouldShow('draftStartersVisible') || shouldShow('sessionAssist') || shouldShow('subagentReadOnlyBanner') || shouldShow('serverPermissionAutoAccept')) && (
+                                {(shouldShow('draftStartersVisible') || shouldShow('subagentReadOnlyBanner')) && (
                                     <SettingsSection
                                         title={t('settings.openchamber.visual.section.sessionAssistance')}
                                         settingsItem="chat.session-assistance"
@@ -1897,24 +1816,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 settingsItem="chat.draft-starters-visible"
                                             />
                                         )}
-                                        {shouldShow('sessionAssist') && (
-                                            <>
-                                                <SettingsCheckboxRow
-                                                    checked={sessionRecapEnabled}
-                                                    onChange={setSessionRecapEnabled}
-                                                    label={t('settings.openchamber.visual.field.sessionRecap')}
-                                                    ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
-                                                    settingsItem="chat.session-recap"
-                                                />
-                                                <SettingsCheckboxRow
-                                                    checked={sessionSuggestionEnabled}
-                                                    onChange={setSessionSuggestionEnabled}
-                                                    label={t('settings.openchamber.visual.field.sessionSuggestion')}
-                                                    ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
-                                                    settingsItem="chat.session-suggestion"
-                                                />
-                                            </>
-                                        )}
                                         {shouldShow('subagentReadOnlyBanner') && (
                                             <SettingsCheckboxRow
                                                 checked={allowPromptingSubagentSessions}
@@ -1924,55 +1825,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 settingsItem="chat.subagent-read-only-banner"
                                             />
                                         )}
-                                        {shouldShow('serverPermissionAutoAccept') && (
-                                            <SettingsCheckboxRow
-                                                checked={serverPermissionAutoAcceptEnabled}
-                                                onChange={handleServerPermissionAutoAcceptChange}
-                                                label={t('settings.openchamber.visual.field.serverPermissionAutoAccept')}
-                                                info={t('settings.openchamber.visual.field.serverPermissionAutoAcceptTooltip')}
-                                                ariaLabel={t('settings.openchamber.visual.field.serverPermissionAutoAcceptAria')}
-                                                settingsItem="chat.server-permission-auto-accept"
-                                            />
-                                        )}
-                                    </SettingsSection>
-                                )}
-                                {/* The goal loop runs in the web server — VS Code only renders
-                                    goal state, so the settings section is hidden there too. */}
-                                {shouldShow('sessionGoal') && !isVSCode && (
-                                    <SettingsSection
-                                        title={t('settings.openchamber.visual.goal.sectionTitle')}
-                                        info={t('settings.openchamber.visual.goal.description')}
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={sessionGoalEnabled}
-                                            onChange={setSessionGoalEnabled}
-                                            label={t('settings.openchamber.visual.field.sessionGoal')}
-                                            ariaLabel={t('settings.openchamber.visual.field.sessionGoalAria')}
-                                            settingsItem="chat.session-goal"
-                                        />
-                                        <div data-settings-item="chat.session-goal-budget" className="flex items-center gap-2">
-                                            <SettingsCheckboxRow
-                                                checked={sessionGoalDefaultBudgetEnabled}
-                                                onChange={setSessionGoalDefaultBudgetEnabled}
-                                                disabled={!sessionGoalEnabled}
-                                                label={t('settings.openchamber.visual.goal.budgetLabel')}
-                                                ariaLabel={t('settings.openchamber.visual.goal.budgetAria')}
-                                            />
-                                            {sessionGoalEnabled && sessionGoalDefaultBudgetEnabled ? (
-                                                <NumberInput
-                                                    value={sessionGoalDefaultBudget}
-                                                    onValueChange={(value) => {
-                                                        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-                                                            setSessionGoalDefaultBudget(Math.floor(value));
-                                                        }
-                                                    }}
-                                                    min={1000}
-                                                    max={100000000}
-                                                    step={50000}
-                                                />
-                                            ) : null}
-                                        </div>
                                     </SettingsSection>
                                 )}
                                 {shouldShow('reasoning') && (

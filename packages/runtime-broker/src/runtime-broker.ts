@@ -71,6 +71,8 @@ export interface PiRuntimeBrokerOptions {
 }
 
 export type PiCatalogMethod =
+  | "agentProvider.action"
+  | "agentProvider.list"
   | "config.document.get"
   | "config.document.update"
   | "config.text.get"

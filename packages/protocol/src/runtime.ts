@@ -43,6 +43,8 @@ type DirectRuntimeMethod =
   | "thinking.select";
 
 type SessionScopedRuntimeMethod =
+  | "agentProvider.action"
+  | "agentProvider.list"
   | "config.document.get"
   | "config.document.update"
   | "config.text.get"
@@ -76,6 +78,7 @@ type SessionScopedMethodMap = {
   [M in SessionScopedRuntimeMethod]: {
     params: M extends
       | "model.list"
+      | "agentProvider.list"
       | "package.list"
       | "provider.list"
       | "settings.get"
@@ -142,6 +145,8 @@ export const RUNTIME_METHODS = [
   "agent.followUp",
   "agent.prompt",
   "agent.steer",
+  "agentProvider.action",
+  "agentProvider.list",
   "command.execute",
   "command.list",
   "config.document.get",

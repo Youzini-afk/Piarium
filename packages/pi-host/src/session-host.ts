@@ -27,6 +27,8 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiAgentCatalogSnapshot,
+  PiAgentProviderActionResult,
   PiConfigDocumentSnapshot,
   PiConfigScope,
   PiConfigTextDocumentSnapshot,
@@ -62,6 +64,7 @@ import type {
   ThinkingLevel,
 } from "@piarium/protocol";
 import { HostError } from "./errors.js";
+import { AgentProviderRegistry } from "./agent-providers/registry.js";
 import { ConfigTextFileEditor } from "./config-text-file-editor.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
@@ -799,6 +802,19 @@ export class SessionHost {
     return this.#finishRecovery(protocolAction, execution);
   }
 
+  listAgentProviders(): Promise<PiAgentCatalogSnapshot> {
+    return this.#agentProviderRegistry().list();
+  }
+
+  runAgentProviderAction(
+    providerId: string,
+    action: string,
+    agentId: string | undefined,
+    input: JsonValue | undefined,
+  ): Promise<PiAgentProviderActionResult> {
+    return this.#agentProviderRegistry().action(providerId, action, agentId, input);
+  }
+
   async listResources(kind: PiResourceKind): Promise<PiResourceCatalogSnapshot> {
     const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
     const prompts = kind === "prompt" ? this.session.resourceLoader.getPrompts() : undefined;
@@ -1509,6 +1525,15 @@ export class SessionHost {
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
+    });
+  }
+
+  #agentProviderRegistry(): AgentProviderRegistry {
+    return new AgentProviderRegistry({
+      agentDir: this.#agentDir,
+      cwd: this.runtime.cwd,
+      projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
+      session: this.session,
     });
   }
 

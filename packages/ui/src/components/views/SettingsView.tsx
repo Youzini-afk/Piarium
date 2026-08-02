@@ -2,23 +2,13 @@ import React from 'react';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useAgentsStore } from '@/stores/useAgentsStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
-import { AgentsPage } from '@/components/sections/agents/AgentsPage';
-import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
-import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
-import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpPage } from '@/components/sections/mcp/McpPage';
+import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { PluginsPage } from '@/components/sections/plugins';
-import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
-import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
@@ -45,7 +35,6 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { McpIcon } from '@/components/icons/McpIcon';
-import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import {
   SETTINGS_PAGE_METADATA,
   getSettingsPageMeta,
@@ -59,13 +48,8 @@ import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/set
 // UI Kit: fixed settings navigation width
 const SETTINGS_NAV_WIDTH = 256;
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
-const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
-type SettingsDetailHistoryEntry = {
-  page: SettingsPageSlug;
-  stage: 'page-content';
-};
 
 interface SettingsViewProps {
   onClose?: () => void;
@@ -79,7 +63,7 @@ interface SettingsViewProps {
 }
 
 const pageOrder: SettingsPageSlug[] = [
-  // 'general' group — OpenChamber
+  // Piarium
   'general',
   'appearance',
   'chat',
@@ -94,21 +78,17 @@ const pageOrder: SettingsPageSlug[] = [
   'remote-instances',
   'tunnel',
   'git',
-  // 'opencode' group — OpenCode
+  // Pi runtime
   'providers',
   'agents',
-  'behavior',
-  'commands',
   'mcp',
   'plugins',
   // 'content' group — Library
   'magic-prompts',
   'snippets',
-  'skills.installed',
-  'skills.catalog',
 ];
 
-const NAV_GROUP_ORDER = ['general', 'projects', 'opencode', 'content'] as const;
+const NAV_GROUP_ORDER = ['general', 'projects', 'pi', 'content'] as const;
 
 const SNIPPETS_SETTINGS_ICON = { icon: 'chat-thread' } as const;
 const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';
@@ -126,10 +106,6 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
   return page.isAvailable(ctx);
 }
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function nextUniqueName(baseName: string, existingNames: Iterable<string>): string {
   const existing = new Set(existingNames);
   let name = baseName;
@@ -139,33 +115,6 @@ function nextUniqueName(baseName: string, existingNames: Iterable<string>): stri
     counter += 1;
   }
   return name;
-}
-
-function getSettingsDetailHistoryEntry(state: unknown): SettingsDetailHistoryEntry | null {
-  if (!isObjectRecord(state)) {
-    return null;
-  }
-
-  const detail = state[SETTINGS_DETAIL_HISTORY_KEY];
-  if (!isObjectRecord(detail)) {
-    return null;
-  }
-
-  const page = detail.page;
-  const stage = detail.stage;
-  if (typeof page !== 'string' || stage !== 'page-content') {
-    return null;
-  }
-
-  const resolvedPage = resolveSettingsSlug(page);
-  return { page: resolvedPage, stage };
-}
-
-function getCurrentHistoryState(): Record<string, unknown> {
-  if (typeof window === 'undefined' || !isObjectRecord(window.history.state)) {
-    return {};
-  }
-  return window.history.state;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -195,20 +144,11 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
     case 'providers':
       return 'cloud';
     case 'agents':
-      return 'ai-agent';
-    case 'behavior':
-      return 'brain';
-    case 'commands':
-      return 'slash-commands-2';
+      return 'robot-2';
     case 'mcp':
       return null;
     case 'plugins':
       return 'plug-2';
-
-    case 'skills.installed':
-      return 'book-open';
-    case 'skills.catalog':
-      return 'book';
 
     case 'git':
       return 'git-branch';
@@ -301,24 +241,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
 
-  // Load stores when project changes or when a page becomes active.
+  // Load project-scoped content when its page becomes active.
   React.useEffect(() => {
     if (!isSettingsDialogOpen && !runtimeCtx.isVSCode && !isWindowed) {
       return;
     }
 
-    if (settingsSlug === 'agents') {
-      void useAgentsStore.getState().loadAgents();
-      return;
-    }
-    if (settingsSlug === 'commands') {
-      void useCommandsStore.getState().loadCommands();
-      return;
-    }
-    if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
-      void useSkillsStore.getState().loadSkills();
-      void useSkillsCatalogStore.getState().loadCatalog();
-    }
     if (settingsSlug === 'snippets') {
       void useSnippetsStore.getState().loadSnippets();
     }
@@ -365,22 +293,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.remoteInstances.title');
       case 'providers':
         return t('settings.page.providers.title');
-      case 'usage':
-        return t('settings.page.usage.title');
       case 'agents':
         return t('settings.page.agents.title');
-      case 'behavior':
-        return t('settings.page.behavior.title');
-      case 'commands':
-        return t('settings.page.commands.title');
+      case 'usage':
+        return t('settings.page.usage.title');
       case 'mcp':
         return t('settings.page.mcp.title');
       case 'plugins':
         return t('settings.page.plugins.title');
-      case 'skills.installed':
-        return t('settings.page.skills.title');
-      case 'skills.catalog':
-        return t('settings.page.skillsCatalog.title');
       case 'git':
         return t('settings.page.git.title');
       case 'appearance':
@@ -420,36 +340,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [getPageTitle, isWindowsArm64, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
-    if (result.id.startsWith('agents.')) {
-      const store = useAgentsStore.getState();
-      const name = nextUniqueName('new-agent', store.agents.map((agent) => agent.name));
-      store.setAgentDraft({ name, scope: 'user' });
-      store.setSelectedAgent(name);
-      return result.id === 'agents.create' ? 'agents.name' : result.id;
-    }
-
-    if (result.id.startsWith('commands.')) {
-      const store = useCommandsStore.getState();
-      const name = nextUniqueName('new-command', store.commands.map((command) => command.name));
-      store.setCommandDraft({ name, scope: 'user' });
-      store.setSelectedCommand(name);
-      return result.id === 'commands.create' ? 'commands.name' : result.id;
-    }
-
     if (result.id.startsWith('snippets.')) {
       const store = useSnippetsStore.getState();
       const name = nextUniqueName('new-snippet', store.snippets.map((snippet) => snippet.name));
       store.setSnippetDraft({ name, scope: 'global' });
       store.setSelectedSnippet(name);
       return result.id === 'snippets.create' ? 'snippets.content' : result.id;
-    }
-
-    if (result.id.startsWith('skills.')) {
-      const store = useSkillsStore.getState();
-      const name = nextUniqueName('new-skill', store.skills.map((skill) => skill.name));
-      store.setSkillDraft({ name, scope: 'user', source: 'opencode', description: '', instructions: '' });
-      store.setSelectedSkill(name);
-      return result.id === 'skills.create' ? 'skills.basic-information' : result.id;
     }
 
     if (result.id === 'providers.connect') {
@@ -590,12 +486,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     switch (slug) {
       case 'projects':
         return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'agents':
-        return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'commands':
-        return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'skills.installed':
-        return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
         return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
       case 'usage':
@@ -620,22 +510,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsPage />;
       case 'remote-instances':
         return <RemoteInstancesPage />;
-      case 'agents':
-        return <AgentsPage />;
-      case 'behavior':
-        return <BehaviorPage />;
-      case 'commands':
-        return <CommandsPage />;
       case 'mcp':
         return <McpPage />;
       case 'plugins':
         return <PluginsPage />;
-      case 'skills.installed':
-        return <SkillsPage view="installed" />;
-      case 'skills.catalog':
-        return <SkillsPage view="catalog" />;
       case 'providers':
         return <ProvidersPage />;
+      case 'agents':
+        return <AgentsPage />;
       case 'usage':
         return <UsagePage />;
       case 'about':
@@ -690,84 +572,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [isMobile, mobileStage, settingsSlug]);
 
   const showBackButton = isMobile && mobileStage !== 'nav';
-  const backButtonTargetsPageSidebar = isMobile && mobileStage === 'page-content' && settingsSlug === 'skills.installed';
   const showOpenPageSidebarButton = mobileStage === 'page-content'
-    && activePageMeta?.kind === 'split'
-    && !backButtonTargetsPageSidebar;
-  const mobileBackButtonLabel = backButtonTargetsPageSidebar
-    ? t('settings.view.actions.back')
-    : showBackButton
-      ? t('settings.view.actions.backToSettings')
-      : t('settings.view.actions.closeSettings');
+    && activePageMeta?.kind === 'split';
+  const mobileBackButtonLabel = showBackButton
+    ? t('settings.view.actions.backToSettings')
+    : t('settings.view.actions.closeSettings');
   const shortcutKey = getModifierLabel();
-
-  const pushMobileSplitDetailHistory = React.useCallback((slug: SettingsPageSlug) => {
-    if (typeof window === 'undefined' || runtimeCtx.isVSCode) {
-      return;
-    }
-
-    const currentDetail = getSettingsDetailHistoryEntry(window.history.state);
-    if (currentDetail?.page === slug && currentDetail.stage === 'page-content') {
-      return;
-    }
-
-    window.history.pushState(
-      {
-        ...getCurrentHistoryState(),
-        [SETTINGS_DETAIL_HISTORY_KEY]: { page: slug, stage: 'page-content' },
-      },
-      '',
-      window.location.href,
-    );
-  }, [runtimeCtx.isVSCode]);
 
   const handleMobilePageSidebarItemSelect = React.useCallback(() => {
     setMobileStage('page-content');
-    if (settingsSlug === 'skills.installed') {
-      pushMobileSplitDetailHistory(settingsSlug);
-    }
-  }, [pushMobileSplitDetailHistory, settingsSlug]);
+  }, []);
 
   const handleBack = React.useCallback(() => {
-    if (backButtonTargetsPageSidebar) {
-      const currentDetail = typeof window !== 'undefined'
-        ? getSettingsDetailHistoryEntry(window.history.state)
-        : null;
-      if (currentDetail?.page === settingsSlug && !runtimeCtx.isVSCode) {
-        window.history.back();
-        return;
-      }
-      setMobileStage('page-sidebar');
-      return;
-    }
-
     setMobileStage('nav');
-  }, [backButtonTargetsPageSidebar, runtimeCtx.isVSCode, settingsSlug]);
-
-  React.useEffect(() => {
-    if (!isMobile || runtimeCtx.isVSCode) {
-      return;
-    }
-
-    const handlePopState = (event: PopStateEvent) => {
-      if (settingsSlug !== 'skills.installed') {
-        return;
-      }
-
-      const detail = getSettingsDetailHistoryEntry(event.state);
-      if (detail?.page === 'skills.installed') {
-        setMobileStage('page-content');
-        return;
-      }
-
-      setMobileStage((stage) => stage === 'page-content' ? 'page-sidebar' : stage);
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, [isMobile, runtimeCtx.isVSCode, settingsSlug]);
+  }, []);
 
   const handleOpenPageSidebar = React.useCallback(() => {
     setMobileStage('page-sidebar');
@@ -917,33 +735,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="overflow-hidden transition-opacity duration-150 opacity-100">
-          <div className="border-t border-border bg-background px-4 py-1 space-y-0.5 sm:bg-sidebar">
-            {!runtimeCtx.isVSCode && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      'flex h-11 w-full items-center gap-2 rounded-md px-3 overflow-hidden whitespace-nowrap sm:h-7 sm:px-2',
-                      'text-sm font-semibold text-sidebar-foreground/90',
-                      'hover:text-sidebar-foreground hover:bg-interactive-hover',
-                    )}
-                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting OpenCode…', mode: 'projects', scopes: ['all'] }).catch(() => undefined)}
-                  >
-                    <Icon name="restart" className="h-4 w-4 shrink-0" />
-                    <span>{t('settings.view.actions.reloadOpenCode')}</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {t('settings.view.actions.reloadOpenCodeTooltip')}
-                </TooltipContent>
-              </Tooltip>
-            )}
-
-          </div>
-        </div>
       </div>
     );
   };

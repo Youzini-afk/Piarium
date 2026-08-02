@@ -33,6 +33,7 @@ import type { HostTransport } from "./transport.js";
 export const PIARIUM_HOST_VERSION = "0.1.0";
 
 const HOST_CAPABILITIES: HostCapabilities = {
+  agentProviders: true,
   extensionUi: true,
   models: true,
   packages: true,
@@ -376,6 +377,15 @@ export class HostController {
         };
       case "agent.abort":
         return { aborted: await this.#sessionHost.abort(readString(params, "sessionId")) };
+      case "agentProvider.list":
+        return this.#sessionHost.listAgentProviders();
+      case "agentProvider.action":
+        return this.#sessionHost.runAgentProviderAction(
+          readString(params, "providerId"),
+          readString(params, "action"),
+          optionalString(params, "agentId"),
+          readJson(params, "input"),
+        );
       case "command.list":
         return this.#sessionHost.listCommands(readString(params, "sessionId"));
       case "command.execute":

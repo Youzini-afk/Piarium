@@ -85,6 +85,11 @@ test("broker owns catalog and per-session Pi workers", async () => {
         (provider) => provider.id === "workspace-provider",
       ),
     );
+    const agentCatalog = await dispatchRuntimeRequest(broker, "agentProvider.list", {
+      cwd: workspace,
+    });
+    assert.equal(agentCatalog.projectTrusted, true);
+    assert.deepEqual(agentCatalog.providers, []);
     const updatedSettings = await dispatchRuntimeRequest(broker, "settings.update", {
       cwd: workspace,
       remove: [],

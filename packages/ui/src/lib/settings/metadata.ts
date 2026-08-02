@@ -1,19 +1,13 @@
-import type { SidebarSection } from '@/constants/sidebar';
-
 export type SettingsPageSlug =
   | 'home'
   | 'general'
   | 'projects'
   | 'remote-instances'
   | 'providers'
-  | 'usage'
   | 'agents'
-  | 'behavior'
-  | 'commands'
+  | 'usage'
   | 'mcp'
   | 'plugins'
-  | 'skills.installed'
-  | 'skills.catalog'
   | 'git'
   | 'appearance'
   | 'chat'
@@ -29,7 +23,7 @@ export type SettingsPageSlug =
 type SettingsPageGroup =
   | 'general'
   | 'projects'
-  | 'opencode'
+  | 'pi'
   | 'content';
 
 export interface SettingsRuntimeContext {
@@ -64,7 +58,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'General',
     group: 'general',
     kind: 'single',
-    keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'password', 'passkey', 'security', 'privacy', 'telemetry', 'transport', 'network', 'lan', 'binary', 'cli'],
+    keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'password', 'passkey', 'security', 'privacy', 'telemetry', 'transport', 'network', 'lan'],
   },
   {
     slug: 'projects',
@@ -84,9 +78,16 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   {
     slug: 'providers',
     title: 'Providers',
-    group: 'opencode',
+    group: 'pi',
     kind: 'split',
     keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'],
+  },
+  {
+    slug: 'agents',
+    title: 'Agents',
+    group: 'pi',
+    kind: 'single',
+    keywords: ['agent', 'agents', 'subagent', 'subagents', 'roles', 'workflow', 'pi-subagents', 'magic context', 'historian', 'dreamer', 'sidekick'],
   },
   {
     slug: 'usage',
@@ -96,69 +97,18 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
   },
   {
-    slug: 'agents',
-    title: 'Agents',
-    group: 'opencode',
-    kind: 'split',
-    keywords: [
-      'agent',
-      'agents',
-      'prompts',
-      'tools',
-      'permissions',
-      'agent orchestration',
-      'oh my openagent',
-      'openagent',
-      'oh-my-openagent',
-      'oh-my-opencode-slim',
-      'slim',
-      'omo',
-      'agent routing',
-      'categories',
-      'model routes',
-    ],
-  },
-  {
-    slug: 'behavior',
-    title: 'Behavior',
-    group: 'opencode',
-    kind: 'single',
-    keywords: ['behavior', 'agents.md', 'system prompt', 'global rules', 'instructions', 'override'],
-  },
-  {
-    slug: 'commands',
-    title: 'Commands',
-    group: 'opencode',
-    kind: 'split',
-    keywords: ['command', 'commands', 'slash', 'macros', 'automation'],
-  },
-  {
     slug: 'mcp',
     title: 'MCP',
-    group: 'opencode',
+    group: 'pi',
     kind: 'single',
     keywords: ['mcp', 'model context protocol', 'pi-mcp-adapter', 'servers', 'tools', 'resources', 'oauth', 'remote', 'stdio'],
   },
   {
     slug: 'plugins',
     title: 'Pi Packages',
-    group: 'opencode',
+    group: 'pi',
     kind: 'single',
     keywords: ['pi', 'package', 'packages', 'plugin', 'plugins', 'extensions', 'npm', 'git', 'local path'],
-  },
-  {
-    slug: 'skills.installed',
-    title: 'Skills',
-    group: 'content',
-    kind: 'split',
-    keywords: ['skill', 'skills', 'instructions', 'install', 'catalog'],
-  },
-  {
-    slug: 'skills.catalog',
-    title: 'Skills Catalog',
-    group: 'content',
-    kind: 'single',
-    keywords: ['install', 'catalog', 'external', 'repository', 'skills catalog'],
   },
   {
     slug: 'git',
@@ -195,7 +145,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Sessions',
     group: 'general',
     kind: 'single',
-    keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen', 'recovery', 'rollback', 'undo', 'checkpoint', 'pi-workspace-history', 'pi-wtf'],
+    keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'zen', 'recovery', 'rollback', 'undo', 'checkpoint', 'pi-workspace-history', 'pi-wtf'],
   },
   {
     slug: 'magic-prompts',
@@ -219,18 +169,6 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode },
 ] as const;
 
-const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
-  sessions: 'sessions',
-  agents: 'agents',
-  commands: 'commands',
-  mcp: 'mcp',
-  skills: 'skills.installed',
-  providers: 'providers',
-  usage: 'usage',
-  'git-identities': 'git',
-  settings: 'home',
-};
-
 export function getSettingsPageMeta(slug: string): SettingsPageMeta | null {
   const normalized = slug.trim().toLowerCase();
   return (SETTINGS_PAGE_METADATA as readonly SettingsPageMeta[]).find((page) => page.slug === normalized) ?? null;
@@ -240,19 +178,6 @@ export function resolveSettingsSlug(value: string | null | undefined): SettingsP
   const normalized = (value ?? '').trim().toLowerCase();
   if (!normalized) {
     return 'home';
-  }
-
-  const legacy = (LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG as Record<string, SettingsPageSlug>)[normalized];
-  if (legacy) {
-    return legacy;
-  }
-
-  if (normalized === 'openagent' || normalized === 'agent-orchestration') {
-    return 'agents';
-  }
-
-  if (normalized === 'magic-context') {
-    return 'plugins';
   }
 
   const direct = getSettingsPageMeta(normalized);

@@ -24,6 +24,7 @@ class HandshakeSocket implements RuntimeWebSocket {
       this.onmessage?.({
         data: encodeRuntimeEnvelope(createRuntimeSuccessResponse(request.id, {
           capabilities: {
+            agentProviders: true,
             extensionUi: true,
             models: true,
             packages: true,

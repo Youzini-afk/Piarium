@@ -1,4 +1,4 @@
-export const PIARIUM_PROTOCOL_VERSION = 9 as const;
+export const PIARIUM_PROTOCOL_VERSION = 10 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -23,6 +23,7 @@ export const THINKING_LEVELS = [
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export interface HostCapabilities {
+  agentProviders: boolean;
   extensionUi: boolean;
   models: boolean;
   packages: boolean;
@@ -160,6 +161,89 @@ export interface PiResourceDocumentSnapshot {
   descriptor: PiResourceDescriptor;
   projectTrusted: boolean;
   revision: string;
+}
+
+export type PiAgentKind =
+  | "delegatable"
+  | "internal"
+  | "primary"
+  | "profile"
+  | "service"
+  | "workflow";
+
+export type PiAgentStatus =
+  | "available"
+  | "disabled"
+  | "error"
+  | "unavailable"
+  | "unconfigured";
+
+export type PiAgentSourceScope = "builtin" | "package" | "project" | "runtime" | "user";
+
+export interface PiAgentSource {
+  packageName?: string;
+  path?: string;
+  scope: PiAgentSourceScope;
+}
+
+export interface PiAgentActionDescriptor {
+  destructive?: boolean;
+  id: string;
+  label: string;
+  requiresScope?: boolean;
+}
+
+export interface PiAgentConfigurationTarget {
+  pluginId: string;
+  section?: string;
+}
+
+export interface PiAgentDescriptor {
+  actions: PiAgentActionDescriptor[];
+  aliases?: string[];
+  configuration?: PiAgentConfigurationTarget;
+  description: string;
+  fallbackModels?: string[];
+  id: string;
+  kind: PiAgentKind;
+  model?: string;
+  name: string;
+  providerId: string;
+  source: PiAgentSource;
+  status: PiAgentStatus;
+  thinking?: string;
+}
+
+export interface PiAgentProviderDescriptor {
+  actions: PiAgentActionDescriptor[];
+  available: boolean;
+  configuration?: PiAgentConfigurationTarget;
+  description: string;
+  id: string;
+  label: string;
+  source?: string;
+}
+
+export interface PiAgentDiagnostic {
+  message: string;
+  path?: string;
+  providerId: string;
+  severity: "error" | "warning";
+}
+
+export interface PiAgentCatalogSnapshot {
+  agents: PiAgentDescriptor[];
+  diagnostics: PiAgentDiagnostic[];
+  projectTrusted: boolean;
+  providers: PiAgentProviderDescriptor[];
+}
+
+export interface PiAgentProviderActionResult {
+  agentId?: string;
+  data?: JsonValue;
+  message: string;
+  providerId: string;
+  success: boolean;
 }
 
 export type RecoveryMode = "conversation" | "files" | "both";

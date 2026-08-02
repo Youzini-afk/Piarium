@@ -11,7 +11,6 @@ import { NotificationSettings } from './NotificationSettings';
 import { GitHubSettings } from './GitHubSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
-import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -53,7 +52,6 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 <OpenChamberVisualSettings />
                 <DefaultsSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
-                {!isVSCode && <OpenCodeCliSettings />}
                 <SessionRetentionSettings />
                 <RecoverySettings />
                 {isVSCode && <CheckpointSettings />}
@@ -138,7 +136,7 @@ const ShortcutsSectionContent: React.FC = () => {
 };
 
 // General section: app-level settings — startup/tray/network, access password,
-// passkeys, OpenCode CLI binary, message stream transport, privacy.
+// passkeys, editor behavior, and privacy.
 const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
@@ -151,7 +149,6 @@ const GeneralSectionContent: React.FC = () => {
         <>
             {showDesktopNetworkSettings && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
-            {!isVSCode && <OpenCodeCliSettings />}
             <OpenChamberVisualSettings visibleSettings={[
                 'fileEditorKeymap',
                 'autoSaveEnabled',
@@ -159,7 +156,6 @@ const GeneralSectionContent: React.FC = () => {
                 ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
                 ...(!isVSCode ? ['terminalShell' as const] : []),
                 ...(!isVSCode ? ['terminalLoginShell' as const] : []),
-                'messageTransport',
                 'reportUsage',
             ]} />
         </>
@@ -191,15 +187,12 @@ const ChatSectionContent: React.FC = () => {
     return (
         <OpenChamberVisualSettings
             visibleSettings={[
-                'sessionGoal',
-                'sessionAssist',
                 'draftStartersVisible',
                 'chatRenderMode',
                 'activityRenderMode',
                 'userMessageRendering',
                 'mermaidRendering',
                 'reasoning',
-                'serverPermissionAutoAccept',
                 'showToolFileIcons',
                 'showTurnChangedFiles',
                 'expandedTools',
