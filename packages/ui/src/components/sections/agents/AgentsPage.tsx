@@ -24,6 +24,7 @@ import {
 } from '@/lib/pi-runtime/agent-providers';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n } from '@/lib/i18n';
+import { requestPluginSettingsSelection } from '@/lib/settings/plugin-settings-navigation';
 import { cn } from '@/lib/utils';
 
 const EMPTY_CATALOG: PiAgentCatalogSnapshot = {
@@ -311,8 +312,11 @@ export const AgentsPage: React.FC = () => {
   }, [runtimeTarget, targetKey]);
 
   const openPackageSettings = React.useCallback(() => {
-    setSettingsPage('plugins');
-  }, [setSettingsPage]);
+    requestPluginSettingsSelection(
+      selectedAgent?.providerId === 'magic-context' ? 'magic-context' : 'subagents',
+    );
+    setSettingsPage('plugin-settings');
+  }, [selectedAgent?.providerId, setSettingsPage]);
 
   const selectedProvider = selectedAgent
     ? providerById.get(selectedAgent.providerId)

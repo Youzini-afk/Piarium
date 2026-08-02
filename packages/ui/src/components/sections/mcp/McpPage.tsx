@@ -20,22 +20,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/components/ui';
-import { useI18n, type I18nKey } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import {
   getPiConfigTextDocument,
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
 import {
   findPiPackage,
-  installPiPackage,
   listPiPackages,
-  removePiPackage,
-  updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useUIStore } from '@/stores/useUIStore';
 import {
   MCP_ADAPTER_STATUS_CHANNEL,
   parseMcpAdapterStatus,
@@ -90,14 +88,6 @@ const MCP_CONFIG_TARGETS: McpConfigTarget[] = [
     root: 'project',
   },
 ];
-
-type PackageAction = 'install' | 'remove' | 'update';
-
-const PACKAGE_SUCCESS_KEYS = {
-  install: 'settings.piarium.mcp.toast.package.install',
-  remove: 'settings.piarium.mcp.toast.package.remove',
-  update: 'settings.piarium.mcp.toast.package.update',
-} satisfies Record<PackageAction, I18nKey>;
 
 const statusTone = (status: McpAdapterServerStatus): string => {
   if (status === 'connected') return 'text-[var(--status-success)] bg-[var(--status-success)]/10';
@@ -383,6 +373,7 @@ export const McpPage: React.FC = () => {
       : state.records[state.currentSessionId]?.extensionStates[MCP_ADAPTER_STATUS_CHANNEL]
   ));
   const executeCommand = usePiSessionStore((state) => state.executeCommand);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const cwd = currentDirectory || sessionCwd || '';
   const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
     currentSessionId ? { sessionId: currentSessionId } : { cwd }
@@ -390,7 +381,6 @@ export const McpPage: React.FC = () => {
   const status = React.useMemo(() => parseMcpAdapterStatus(extensionState), [extensionState]);
   const [packages, setPackages] = React.useState<PackageDescriptor[]>([]);
   const [packagesLoading, setPackagesLoading] = React.useState(false);
-  const [packageAction, setPackageAction] = React.useState<PackageAction | null>(null);
   const [commandAction, setCommandAction] = React.useState<string | null>(null);
   const packageGenerationRef = React.useRef(0);
   const configuredPackage = findPiPackage(packages, 'pi-mcp-adapter');
@@ -417,23 +407,6 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => {
     void refreshPackages();
   }, [refreshPackages]);
-
-  const runPackageAction = React.useCallback(async (action: PackageAction) => {
-    const source = configuredPackage?.source ?? MCP_PACKAGE_SOURCE;
-    setPackageAction(action);
-    try {
-      if (action === 'install') await installPiPackage(runtimeTarget, source);
-      else if (action === 'update') await updatePiPackages(runtimeTarget, source);
-      else await removePiPackage(runtimeTarget, source);
-      await refreshPackages();
-      toast.success(t(PACKAGE_SUCCESS_KEYS[action]));
-    } catch (error) {
-      console.error(`Failed to ${action} pi-mcp-adapter:`, error);
-      toast.error(error instanceof Error ? error.message : t('settings.piarium.mcp.toast.packageFailed'));
-    } finally {
-      setPackageAction(null);
-    }
-  }, [configuredPackage?.source, refreshPackages, runtimeTarget, t]);
 
   const runCommand = React.useCallback(async (
     action: string,
@@ -524,41 +497,16 @@ export const McpPage: React.FC = () => {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {configuredPackage ? (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    disabled={packageAction !== null || packagesLoading}
-                    onClick={() => void runPackageAction('update')}
-                    className="!font-normal"
-                  >
-                    {t('settings.piarium.recovery.actions.update')}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    disabled={packageAction !== null || packagesLoading}
-                    onClick={() => void runPackageAction('remove')}
-                    className="!font-normal text-muted-foreground"
-                  >
-                    {t('settings.piarium.recovery.actions.remove')}
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  disabled={packageAction !== null || packagesLoading}
-                  onClick={() => void runPackageAction('install')}
-                  className="!font-normal"
-                >
-                  {t('settings.piarium.recovery.actions.install')}
-                </Button>
-              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={packagesLoading}
+                onClick={() => setSettingsPage('plugins')}
+                className="!font-normal"
+              >
+                {t('settings.piarium.pluginSettings.actions.openPackages')}
+              </Button>
             </div>
           </div>
         </div>

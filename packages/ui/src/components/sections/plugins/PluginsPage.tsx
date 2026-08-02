@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
-import { PiPluginConfigEditor } from '@/components/sections/openchamber/PiPluginConfigEditor';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
@@ -400,9 +399,6 @@ export const PluginsPage: React.FC = () => {
         </form>
       </SettingsSection>
 
-      <div data-settings-item="plugins.configuration">
-        <PiPluginConfigEditor cwd={currentDirectory} sessionId={activeSessionId} />
-      </div>
     </SettingsPageLayout>
   );
 };

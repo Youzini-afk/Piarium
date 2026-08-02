@@ -8,6 +8,7 @@ export type SettingsPageSlug =
   | 'usage'
   | 'mcp'
   | 'plugins'
+  | 'plugin-settings'
   | 'git'
   | 'appearance'
   | 'chat'
@@ -109,6 +110,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'pi',
     kind: 'single',
     keywords: ['pi', 'package', 'packages', 'plugin', 'plugins', 'extensions', 'npm', 'git', 'local path'],
+  },
+  {
+    slug: 'plugin-settings',
+    title: 'Plugin Settings',
+    group: 'pi',
+    kind: 'single',
+    keywords: ['pi', 'plugin', 'settings', 'configuration', 'subagents', 'magic context', 'web access', 'workspace history', 'wtf'],
   },
   {
     slug: 'git',

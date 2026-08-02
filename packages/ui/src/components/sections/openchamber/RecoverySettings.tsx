@@ -6,7 +6,6 @@ import type {
 } from '@piarium/protocol';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
-import { toast } from '@/components/ui';
 import {
   SettingsRadioGroup,
   SettingsRadioOption,
@@ -18,13 +17,11 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
-  installPiPackage,
   findPiPackage,
   listPiPackages,
-  removePiPackage,
-  updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { requestPluginSettingsSelection } from '@/lib/settings/plugin-settings-navigation';
 
 interface RecoveryIntegration {
   descriptionKey: I18nKey;
@@ -32,26 +29,6 @@ interface RecoveryIntegration {
   source: string;
   title: string;
 }
-
-type RecoveryPackageAction = 'install' | 'remove' | 'update';
-
-const PACKAGE_ACTION_TOAST_KEYS: Record<RecoveryPackageAction, {
-  failure: I18nKey;
-  success: I18nKey;
-}> = {
-  install: {
-    success: 'settings.piarium.recovery.toast.installComplete',
-    failure: 'settings.piarium.recovery.toast.installFailed',
-  },
-  remove: {
-    success: 'settings.piarium.recovery.toast.removeComplete',
-    failure: 'settings.piarium.recovery.toast.removeFailed',
-  },
-  update: {
-    success: 'settings.piarium.recovery.toast.updateComplete',
-    failure: 'settings.piarium.recovery.toast.updateFailed',
-  },
-};
 
 const RECOVERY_PREFERENCES: Array<{
   descriptionKey: I18nKey;
@@ -95,13 +72,10 @@ export const RecoverySettings: React.FC = () => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const preference = useUIStore((state) => state.recoveryPreference);
   const setPreference = useUIStore((state) => state.setRecoveryPreference);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const [packages, setPackages] = React.useState<PackageDescriptor[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
-  const [busyPackageAction, setBusyPackageAction] = React.useState<{
-    action: RecoveryPackageAction;
-    source: string;
-  } | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const currentSessionId = usePiSessionStore((state) => {
     const sessionId = state.currentSessionId;
@@ -114,11 +88,7 @@ export const RecoverySettings: React.FC = () => {
     if (state.currentSessionId === null) return [];
     return state.records[state.currentSessionId]?.recoveryStatus?.providers ?? [];
   });
-  const currentDirectoryRef = React.useRef(currentDirectory);
-  const currentSessionIdRef = React.useRef(currentSessionId);
   const refreshGenerationRef = React.useRef(0);
-  currentDirectoryRef.current = currentDirectory;
-  currentSessionIdRef.current = currentSessionId;
 
   const refresh = React.useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
@@ -151,39 +121,6 @@ export const RecoverySettings: React.FC = () => {
     setPreference(next);
     void updateDesktopSettings({ recoveryPreference: next });
   }, [setPreference]);
-
-  const runPackageAction = React.useCallback(async (
-    action: RecoveryPackageAction,
-    source: string,
-  ) => {
-    const actionDirectory = currentDirectory;
-    const actionSessionId = currentSessionId;
-    const runtimeKey = getRuntimeKey();
-    setBusyPackageAction({ action, source });
-    try {
-      if (action === 'install') {
-        await installPiPackage(runtimeTarget, source);
-      } else if (action === 'remove') {
-        const result = await removePiPackage(runtimeTarget, source);
-        if (!result.removed) throw new Error(`Pi package is not configured: ${source}`);
-      } else {
-        await updatePiPackages(runtimeTarget, source);
-      }
-      if (
-        currentDirectoryRef.current === actionDirectory
-        && currentSessionIdRef.current === actionSessionId
-        && getRuntimeKey() === runtimeKey
-      ) {
-        await refresh();
-      }
-      toast.success(t(PACKAGE_ACTION_TOAST_KEYS[action].success));
-    } catch (error) {
-      console.error(`Failed to ${action} Pi recovery package:`, error);
-      toast.error(t(PACKAGE_ACTION_TOAST_KEYS[action].failure));
-    } finally {
-      setBusyPackageAction(null);
-    }
-  }, [currentDirectory, currentSessionId, refresh, runtimeTarget, t]);
 
   const additionalProviders = discoveredProviders.filter((provider) => (
     provider.id !== 'pi-native'
@@ -225,7 +162,7 @@ export const RecoverySettings: React.FC = () => {
             variant="ghost"
             size="xs"
             onClick={() => void refresh()}
-            disabled={loading || busyPackageAction !== null}
+            disabled={loading}
             className="!font-normal gap-1.5"
           >
             <Icon name="refresh" className={loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
@@ -253,9 +190,6 @@ export const RecoverySettings: React.FC = () => {
         {RECOVERY_INTEGRATIONS.map((integration) => {
           const configured = findPiPackage(packages, integration.id);
           const source = configured?.source ?? integration.source;
-          const busyAction = busyPackageAction?.source === source
-            ? busyPackageAction.action
-            : null;
           return (
             <div key={integration.id} className="rounded-lg border border-border/60 px-3 py-3">
               <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
@@ -282,41 +216,26 @@ export const RecoverySettings: React.FC = () => {
                   <p className="typography-micro font-mono text-muted-foreground break-all">{source}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  {loaded && (configured ? (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        disabled={busyPackageAction !== null}
-                        onClick={() => void runPackageAction('update', source)}
-                        className="!font-normal"
-                      >
-                        {busyAction === 'update' ? t('settings.piarium.recovery.actions.updating') : t('settings.piarium.recovery.actions.update')}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        disabled={busyPackageAction !== null}
-                        onClick={() => void runPackageAction('remove', source)}
-                        className="!font-normal text-muted-foreground"
-                      >
-                        {busyAction === 'remove' ? t('settings.piarium.recovery.actions.removing') : t('settings.piarium.recovery.actions.remove')}
-                      </Button>
-                    </>
-                  ) : (
+                  {loaded && (
                     <Button
                       type="button"
                       variant="outline"
                       size="xs"
-                      disabled={busyPackageAction !== null}
-                      onClick={() => void runPackageAction('install', source)}
+                      onClick={() => {
+                        if (configured) {
+                          requestPluginSettingsSelection(
+                            integration.id === 'pi-workspace-history' ? 'workspace-history' : 'wtf',
+                          );
+                        }
+                        setSettingsPage(configured ? 'plugin-settings' : 'plugins');
+                      }}
                       className="!font-normal"
                     >
-                      {busyAction === 'install' ? t('settings.piarium.recovery.actions.installing') : t('settings.piarium.recovery.actions.install')}
+                      {configured
+                        ? t('settings.piarium.recovery.actions.configure')
+                        : t('settings.piarium.pluginSettings.actions.openPackages')}
                     </Button>
-                  ))}
+                  )}
                 </div>
               </div>
             </div>

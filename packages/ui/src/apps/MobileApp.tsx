@@ -83,6 +83,7 @@ const MOBILE_SETTINGS_PAGES = [
   'magic-prompts',
   'mcp',
   'plugins',
+  'plugin-settings',
   'providers',
   'agents',
   'usage',

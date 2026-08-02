@@ -647,11 +647,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['install', 'npm', 'git', 'url', 'local path', 'source'],
   },
   {
-    id: 'plugins.configuration',
-    page: 'plugins',
-    titleKey: 'settings.piarium.recovery.pluginSettings.title',
-    descriptionKey: 'settings.piarium.recovery.pluginSettings.description',
-    keywords: ['json', 'jsonc', 'settings', 'magic context', 'web access', 'pi-wtf'],
+    id: 'plugin-settings.configuration',
+    page: 'plugin-settings',
+    titleKey: 'settings.piarium.pluginSettings.integrations.title',
+    descriptionKey: 'settings.piarium.pluginSettings.description',
+    keywords: ['json', 'jsonc', 'settings', 'subagents', 'magic context', 'web access', 'workspace history', 'pi-wtf'],
   },
   {
     id: 'snippets.create',

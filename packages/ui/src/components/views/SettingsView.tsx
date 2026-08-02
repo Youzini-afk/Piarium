@@ -9,6 +9,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { PluginsPage } from '@/components/sections/plugins';
+import { PluginSettingsPage } from '@/components/sections/plugin-settings';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
@@ -83,6 +84,7 @@ const pageOrder: SettingsPageSlug[] = [
   'agents',
   'mcp',
   'plugins',
+  'plugin-settings',
   // 'content' group — Library
   'magic-prompts',
   'snippets',
@@ -149,6 +151,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return null;
     case 'plugins':
       return 'plug-2';
+    case 'plugin-settings':
+      return 'settings-3';
 
     case 'git':
       return 'git-branch';
@@ -301,6 +305,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.mcp.title');
       case 'plugins':
         return t('settings.page.plugins.title');
+      case 'plugin-settings':
+        return t('settings.page.pluginSettings.title');
       case 'git':
         return t('settings.page.git.title');
       case 'appearance':
@@ -514,6 +520,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <McpPage />;
       case 'plugins':
         return <PluginsPage />;
+      case 'plugin-settings':
+        return <PluginSettingsPage />;
       case 'providers':
         return <ProvidersPage />;
       case 'agents':
