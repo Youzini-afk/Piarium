@@ -14,11 +14,15 @@ describe('settings metadata', () => {
 
     expect(slugs).toContain('providers');
     expect(slugs).toContain('agents');
+    expect(slugs).toContain('prompts');
+    expect(slugs).toContain('skills');
     expect(slugs).toContain('mcp');
     expect(slugs).toContain('plugins');
     expect(slugs).toContain('plugin-settings');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'providers')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'agents')?.group).toBe('pi');
+    expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'prompts')?.group).toBe('pi');
+    expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'skills')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'mcp')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugins')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugin-settings')?.group).toBe('pi');

@@ -608,6 +608,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['agent', 'subagent', 'workflow', 'role', 'model', 'fallback', 'thinking'],
   },
   {
+    id: 'prompts.editor',
+    page: 'prompts',
+    titleKey: 'settings.piarium.prompts.catalog.title',
+    descriptionKey: 'settings.piarium.prompts.description',
+    keywords: ['prompt', 'template', 'markdown', 'argument hint', 'user', 'project', 'copy'],
+  },
+  {
+    id: 'skills.editor',
+    page: 'skills',
+    titleKey: 'settings.piarium.skills.catalog.title',
+    descriptionKey: 'settings.piarium.skills.description',
+    keywords: ['skill', 'skill.md', 'markdown', 'user', 'project', 'package', 'copy'],
+  },
+  {
     id: 'mcp.package',
     page: 'mcp',
     titleKey: 'settings.piarium.mcp.package.title',

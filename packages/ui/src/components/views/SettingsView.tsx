@@ -8,6 +8,10 @@ import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { PromptsSidebar } from '@/components/sections/prompts/PromptsSidebar';
+import { PromptsPage } from '@/components/sections/prompts/PromptsPage';
+import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
+import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { PluginsPage } from '@/components/sections/plugins';
 import { PluginSettingsPage } from '@/components/sections/plugin-settings';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -82,6 +86,8 @@ const pageOrder: SettingsPageSlug[] = [
   // Pi runtime
   'providers',
   'agents',
+  'prompts',
+  'skills',
   'mcp',
   'plugins',
   'plugin-settings',
@@ -147,6 +153,10 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'cloud';
     case 'agents':
       return 'robot-2';
+    case 'prompts':
+      return 'file-text';
+    case 'skills':
+      return 'sparkling';
     case 'mcp':
       return null;
     case 'plugins':
@@ -299,6 +309,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.providers.title');
       case 'agents':
         return t('settings.page.agents.title');
+      case 'prompts':
+        return t('settings.page.prompts.title');
+      case 'skills':
+        return t('settings.page.skills.title');
       case 'usage':
         return t('settings.page.usage.title');
       case 'mcp':
@@ -494,6 +508,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
         return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
+      case 'prompts':
+        return <PromptsSidebar onItemSelect={opts.onItemSelect} />;
+      case 'skills':
+        return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'usage':
         return <UsageSidebar onItemSelect={opts.onItemSelect} />;
       case 'magic-prompts':
@@ -526,6 +544,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProvidersPage />;
       case 'agents':
         return <AgentsPage />;
+      case 'prompts':
+        return <PromptsPage />;
+      case 'skills':
+        return <SkillsPage />;
       case 'usage':
         return <UsagePage />;
       case 'about':
