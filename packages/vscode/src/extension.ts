@@ -1,219 +1,297 @@
 import * as vscode from 'vscode';
-import { ChatViewProvider } from './ChatViewProvider';
 import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
+import { ChatViewProvider } from './ChatViewProvider';
+import {
+  resolvePiNodeExecutable,
+  resolveVSCodePiHostEntry,
+  VSCodePiRuntime,
+} from './piRuntime';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { SettingsPanelProvider } from './SettingsPanelProvider';
-import { createOpenCodeManager, type OpenCodeManager } from './opencode';
-import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { resolveWorkspaceFolders } from './workspaceResolver';
-import { VSCodePiRuntime } from './piRuntime';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
 let sessionEditorProvider: SessionEditorPanelProvider | undefined;
 let settingsPanelProvider: SettingsPanelProvider | undefined;
-let openCodeManager: OpenCodeManager | undefined;
 let piRuntime: VSCodePiRuntime | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
-
 let activeSessionId: string | null = null;
 let activeSessionTitle: string | null = null;
 
 const t = vscode.l10n.t;
-
-const SETTINGS_KEY = 'openchamber.settings';
 const CHAT_VIEW_BOOTSTRAP_DELAY_MS = 80;
-
 const waitForChatViewBootstrap = () => new Promise<void>((resolve) => setTimeout(resolve, CHAT_VIEW_BOOTSTRAP_DELAY_MS));
 
-const formatIso = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
-  try {
-    return new Date(value).toISOString();
-  } catch {
-    return String(value);
-  }
-};
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  outputChannel = vscode.window.createOutputChannel('Piarium');
+  piRuntime = new VSCodePiRuntime(context, outputChannel);
+  context.subscriptions.push(piRuntime);
 
-const formatDurationMs = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
-  const seconds = Math.round(value / 100) / 10;
-  return `${seconds}s`;
-};
-
-export async function activate(context: vscode.ExtensionContext) {
-  outputChannel = vscode.window.createOutputChannel('OpenChamber');
-
-  let moveToRightSidebarScheduled = false;
+  chatViewProvider = new ChatViewProvider(context, context.extensionUri, piRuntime);
+  agentManagerProvider = new AgentManagerPanelProvider(context, context.extensionUri, piRuntime);
+  sessionEditorProvider = new SessionEditorPanelProvider(context, context.extensionUri, piRuntime);
+  settingsPanelProvider = new SettingsPanelProvider(context, context.extensionUri, piRuntime);
+  context.subscriptions.push(agentManagerProvider, sessionEditorProvider, settingsPanelProvider);
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(
+    ChatViewProvider.viewType,
+    chatViewProvider,
+    { webviewOptions: { retainContextWhenHidden: true } },
+  ));
 
   const isCursorLikeHost = () => /\bcursor\b/i.test(vscode.env.appName);
-
   const findMoveToRightSidebarCommandId = async (): Promise<string | null> => {
     const commands = await vscode.commands.getCommands(true);
-
     const preferred = [
-      // Newer VS Code naming
       'workbench.action.moveViewToSecondarySideBar',
       'workbench.action.moveViewToSecondarySidebar',
       'workbench.action.moveFocusedViewToSecondarySideBar',
       'workbench.action.moveFocusedViewToSecondarySidebar',
-
-      // Some builds use "Auxiliary Bar" naming
       'workbench.action.moveViewToAuxiliaryBar',
       'workbench.action.moveFocusedViewToAuxiliaryBar',
     ];
-
-    for (const commandId of preferred) {
-      if (commands.includes(commandId)) return commandId;
-    }
-
-    const fuzzy = commands.find((commandId) => {
-      const id = commandId.toLowerCase();
-      const looksLikeMoveView = id.includes('workbench.action') && id.includes('move') && id.includes('view');
-      if (!looksLikeMoveView) return false;
-
-      // Support both "secondary sidebar" and "auxiliary bar" naming.
-      return (id.includes('secondary') && id.includes('side') && id.includes('bar')) || (id.includes('auxiliary') && id.includes('bar'));
-    });
-
-    return fuzzy || null;
+    for (const command of preferred) if (commands.includes(command)) return command;
+    return commands.find((command) => {
+      const id = command.toLowerCase();
+      return id.includes('workbench.action')
+        && id.includes('move')
+        && id.includes('view')
+        && ((id.includes('secondary') && id.includes('side') && id.includes('bar'))
+          || (id.includes('auxiliary') && id.includes('bar')));
+    }) ?? null;
   };
 
-  const attemptMoveChatToRightSidebar = async (): Promise<'moved' | 'unsupported' | 'failed'> => {
-    const moveCommandId = await findMoveToRightSidebarCommandId();
-    if (!moveCommandId) return 'unsupported';
-
+  const attemptMoveChatToRightSidebar = async (): Promise<void> => {
+    const command = await findMoveToRightSidebarCommandId();
+    if (!command) return;
     try {
       await vscode.commands.executeCommand('openchamber.chatView.focus');
-      await vscode.commands.executeCommand(moveCommandId);
-      return 'moved';
+      await vscode.commands.executeCommand(command);
     } catch (error) {
-      outputChannel?.appendLine(
-        `[OpenChamber] Failed moving chat view to right sidebar (command=${moveCommandId}): ${error instanceof Error ? error.message : String(error)}`
-      );
-      return 'failed';
+      outputChannel?.appendLine(`[Piarium] Failed to move chat to the right sidebar: ${String(error)}`);
     }
   };
 
-  const maybeMoveChatToRightSidebarOnStartup = async () => {
-    if (isCursorLikeHost()) return;
-
-    const attempted = context.globalState.get<boolean>('openchamber.sidebarAutoMoveAttempted') || false;
-    if (attempted) return;
-    await context.globalState.update('openchamber.sidebarAutoMoveAttempted', true);
-
-    if (moveToRightSidebarScheduled) return;
-    moveToRightSidebarScheduled = true;
-
-    // Defer until after activation to avoid stealing focus during startup.
-    setTimeout(() => {
-      void (async () => {
-        try {
-          await attemptMoveChatToRightSidebar();
-        } finally {
-          moveToRightSidebarScheduled = false;
-        }
-      })();
-    }, 800);
-  };
-
-
-  // Migration: clear legacy auto-set API URLs (ports 47680-47689 were auto-assigned by older extension versions)
-  const config = vscode.workspace.getConfiguration('openchamber');
-  const legacyApiUrl = config.get<string>('apiUrl') || '';
-  if (/^https?:\/\/localhost:4768\d\/?$/.test(legacyApiUrl.trim())) {
-    await config.update('apiUrl', '', vscode.ConfigurationTarget.Global);
+  if (!isCursorLikeHost() && !context.globalState.get<boolean>('piarium.sidebarAutoMoveAttempted')) {
+    await context.globalState.update('piarium.sidebarAutoMoveAttempted', true);
+    setTimeout(() => void attemptMoveChatToRightSidebar(), 800);
   }
 
-  // Create OpenCode manager first
-  openCodeManager = createOpenCodeManager(context);
-  piRuntime = new VSCodePiRuntime(context, outputChannel);
-  context.subscriptions.push(piRuntime);
-
-  // Create chat view provider with manager reference
-  // The webview will show a loading state until OpenCode is ready
-  chatViewProvider = new ChatViewProvider(context, context.extensionUri, openCodeManager, piRuntime);
-
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      ChatViewProvider.viewType,
-      chatViewProvider,
-      { webviewOptions: { retainContextWhenHidden: true } }
-    )
-  );
-
-  // Register sidebar/focus commands AFTER the webview view provider is registered
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openSidebar', async () => {
-      // Best-effort: open the container (if available), then focus the chat view.
-      try {
-        await vscode.commands.executeCommand('workbench.view.extension.openchamber');
-      } catch (e) {
-        outputChannel?.appendLine(`[OpenChamber] workbench.view.extension.openchamber failed: ${e}`);
-      }
-
-      try {
-        await vscode.commands.executeCommand('openchamber.chatView.focus');
-      } catch (e) {
-        outputChannel?.appendLine(`[OpenChamber] openchamber.chatView.focus failed: ${e}`);
-        vscode.window.showErrorMessage(t('OpenChamber: Failed to open sidebar - {0}', String(e)));
-        return false;
-      }
-
-      if (!chatViewProvider?.hasResolvedView()) {
-        outputChannel?.appendLine('[OpenChamber] Chat sidebar focus completed before the webview was resolved');
-        vscode.window.showWarningMessage(t('OpenChamber: Chat sidebar is not ready'));
-        return false;
-      }
-
-      return true;
-    })
-  );
-
-  const revealChatViewForPayload = async () => {
-    const opened = await vscode.commands.executeCommand<boolean>('openchamber.openSidebar');
-    if (!opened) {
+  context.subscriptions.push(vscode.commands.registerCommand('openchamber.openSidebar', async () => {
+    try {
+      await vscode.commands.executeCommand('workbench.view.extension.openchamber');
+    } catch (error) {
+      outputChannel?.appendLine(`[Piarium] Failed to open the view container: ${String(error)}`);
+    }
+    try {
+      await vscode.commands.executeCommand('openchamber.chatView.focus');
+    } catch (error) {
+      vscode.window.showErrorMessage(t('Piarium: Failed to open sidebar - {0}', String(error)));
       return false;
     }
-
-    await waitForChatViewBootstrap();
     if (!chatViewProvider?.hasResolvedView()) {
-      outputChannel?.appendLine('[OpenChamber] Chat sidebar webview was disposed before payload delivery');
-      vscode.window.showWarningMessage(t('OpenChamber: Chat sidebar is not ready'));
+      vscode.window.showWarningMessage(t('Piarium: Chat sidebar is not ready'));
       return false;
     }
-
     return true;
+  }));
+
+  const revealChatViewForPayload = async (): Promise<boolean> => {
+    if (!await vscode.commands.executeCommand<boolean>('openchamber.openSidebar')) return false;
+    await waitForChatViewBootstrap();
+    if (chatViewProvider?.hasResolvedView()) return true;
+    vscode.window.showWarningMessage(t('Piarium: Chat sidebar is not ready'));
+    return false;
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.focusChat', async () => {
-      await vscode.commands.executeCommand('openchamber.chatView.focus');
-    })
-  );
-
-  void maybeMoveChatToRightSidebarOnStartup();
-
-  // Create Agent Manager panel provider
-  agentManagerProvider = new AgentManagerPanelProvider(context, context.extensionUri, openCodeManager, piRuntime);
-  sessionEditorProvider = new SessionEditorPanelProvider(context, context.extensionUri, openCodeManager, piRuntime);
-  settingsPanelProvider = new SettingsPanelProvider(context, context.extensionUri, openCodeManager, piRuntime);
-  context.subscriptions.push(agentManagerProvider, sessionEditorProvider, settingsPanelProvider);
-
-  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.focusChat', () => vscode.commands.executeCommand('openchamber.chatView.focus')),
+    vscode.commands.registerCommand('openchamber.openAgentManager', () => agentManagerProvider?.createOrShow()),
     vscode.commands.registerCommand('openchamber.internal.settingsSynced', (settings: unknown) => {
       chatViewProvider?.notifySettingsSynced(settings);
       sessionEditorProvider?.notifySettingsSynced(settings);
       settingsPanelProvider?.notifySettingsSynced(settings);
-    })
+    }),
+    vscode.commands.registerCommand('openchamber.setActiveSession', (sessionId: unknown, title?: unknown) => {
+      activeSessionId = typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : null;
+      activeSessionTitle = activeSessionId && typeof title === 'string' && title.trim() ? title.trim() : null;
+    }),
+    vscode.commands.registerCommand('openchamber.openActiveSessionInEditor', () => {
+      if (!activeSessionId) {
+        vscode.window.showInformationMessage(t('Piarium: No active session'));
+        return;
+      }
+      sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
+    }),
+    vscode.commands.registerCommand('openchamber.openSessionInEditor', (sessionId: unknown, title?: unknown) => {
+      if (typeof sessionId !== 'string' || !sessionId.trim()) return;
+      sessionEditorProvider?.createOrShow(sessionId.trim(), typeof title === 'string' ? title : undefined);
+    }),
+    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', () => sessionEditorProvider?.createOrShowNewSession()),
+    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', () => {
+      if (activeSessionId) sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
+      else sessionEditorProvider?.createOrShowNewSession();
+    }),
+    vscode.commands.registerCommand('openchamber.restartApi', async () => {
+      try {
+        await piRuntime?.restart();
+        chatViewProvider?.reloadPiRuntime();
+        vscode.window.showInformationMessage(t('Piarium: Pi runtime restarted'));
+      } catch (error) {
+        vscode.window.showErrorMessage(t('Piarium: Failed to restart Pi runtime - {0}', String(error)));
+      }
+    }),
   );
 
+  context.subscriptions.push(vscode.commands.registerCommand('openchamber.addToContext', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage(t('Piarium [Add to Context]: No active editor'));
+      return;
+    }
+    const selectedText = editor.document.getText(editor.selection);
+    if (!selectedText) {
+      vscode.window.showWarningMessage(t('Piarium [Add to Context]: No text selected'));
+      return;
+    }
+    const startLine = editor.selection.start.line + 1;
+    const endLine = editor.selection.end.line + 1;
+    const contextSelection = {
+      filePath: editor.document.uri.fsPath,
+      filename: `${vscode.workspace.asRelativePath(editor.document.uri, false)}:${startLine === endLine ? startLine : `${startLine}-${endLine}`}`,
+      text: selectedText,
+    };
+    if (sessionEditorProvider?.addContextSelectionToActivePanel(contextSelection)) return;
+    if (await revealChatViewForPayload()) chatViewProvider?.addContextSelection(contextSelection);
+  }));
+
+  context.subscriptions.push(vscode.commands.registerCommand(
+    'openchamber.attachExplorerToChat',
+    async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
+      const candidates = [
+        ...(Array.isArray(resources) ? resources.filter((entry): entry is vscode.Uri => entry instanceof vscode.Uri) : []),
+        ...(resource instanceof vscode.Uri ? [resource] : []),
+      ];
+      if (candidates.length === 0 && vscode.window.activeTextEditor?.document.uri) {
+        candidates.push(vscode.window.activeTextEditor.document.uri);
+      }
+      const unique = Array.from(new Map(candidates.map((uri) => [uri.toString(), uri])).values());
+      const files: Array<{ filePath: string; fileName: string; fileSize: number | null }> = [];
+      let skipped = false;
+      for (const uri of unique) {
+        if (uri.scheme !== 'file') {
+          skipped = true;
+          continue;
+        }
+        try {
+          const stat = await vscode.workspace.fs.stat(uri);
+          if ((stat.type & vscode.FileType.Directory) !== 0) {
+            skipped = true;
+            continue;
+          }
+          const fileName = uri.fsPath.replace(/\\/g, '/').split('/').pop() || '';
+          if (uri.fsPath.trim() && fileName) files.push({ filePath: uri.fsPath, fileName, fileSize: stat.size });
+        } catch {
+          skipped = true;
+        }
+      }
+      if (files.length === 0) {
+        vscode.window.showWarningMessage(t('Piarium: No file selected to mention'));
+        return;
+      }
+      if (!sessionEditorProvider?.addFileAttachmentsToActivePanel(files)) {
+        if (!await revealChatViewForPayload()) return;
+        chatViewProvider?.addFileAttachments(files);
+      }
+      if (skipped) vscode.window.showInformationMessage(t('Piarium: Some folders or unsupported resources were skipped'));
+    },
+  ));
+
+  const promptFromEditor = (mode: 'explain' | 'improve'): string | null => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage(t(`Piarium [${mode === 'explain' ? 'Explain' : 'Improve Code'}]: No active editor`));
+      return null;
+    }
+    const selectedText = editor.document.getText(editor.selection);
+    if (mode === 'improve' && !selectedText) {
+      vscode.window.showWarningMessage(t('Piarium [Improve Code]: No text selected'));
+      return null;
+    }
+    const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+    if (!selectedText) return `${t('Explain the following Code / Text:')}\n\n${filePath}`;
+    const startLine = editor.selection.start.line + 1;
+    const endLine = editor.selection.end.line + 1;
+    const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+    const instruction = mode === 'explain' ? t('Explain the following Code / Text:') : t('Improve the following Code:');
+    return `${instruction}\n\n${filePath}:${lineRange}\n\`\`\`${editor.document.languageId}\n${selectedText}\n\`\`\``;
+  };
+
+  const createSessionWithEditorPrompt = async (mode: 'explain' | 'improve'): Promise<void> => {
+    const prompt = promptFromEditor(mode);
+    if (!prompt || sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) return;
+    if (await revealChatViewForPayload()) chatViewProvider?.createNewSessionWithPrompt(prompt);
+  };
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.internal.permissionAutoAcceptSynced', (snapshot: unknown) => {
-      chatViewProvider?.notifyPermissionAutoAcceptSynced(snapshot);
-      sessionEditorProvider?.notifyPermissionAutoAcceptSynced(snapshot);
-      agentManagerProvider?.notifyPermissionAutoAcceptSynced(snapshot);
-    })
+    vscode.commands.registerCommand('openchamber.explain', () => createSessionWithEditorPrompt('explain')),
+    vscode.commands.registerCommand('openchamber.improveCode', () => createSessionWithEditorPrompt('improve')),
+  );
+
+  context.subscriptions.push(vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
+    const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
+    let folderPath = typeof directory === 'string' && directory.trim() ? directory.trim() : undefined;
+    if (!folderPath && candidates.length === 0) {
+      vscode.window.showInformationMessage(t('Piarium: Open a folder to start a session'));
+      return;
+    }
+    if (!folderPath) {
+      folderPath = candidates.length === 1
+        ? candidates[0]?.path
+        : (await vscode.window.showQuickPick(
+            candidates.map((folder) => ({ label: folder.name, description: folder.path, path: folder.path })),
+            { placeHolder: t('Select a workspace folder for this session'), matchOnDescription: true },
+          ))?.path;
+    }
+    if (!folderPath) return;
+    const workspaceFolders = candidates.some((folder) => folder.path === folderPath)
+      ? candidates
+      : [...candidates, { name: folderPath.split(/[\\/]/).filter(Boolean).pop() ?? folderPath, path: folderPath }];
+    chatViewProvider?.createNewSession({ directory: folderPath, workspaceFolders });
+  }));
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      chatViewProvider?.syncWorkspaceFolders(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []));
+    }),
+    vscode.commands.registerCommand('openchamber.showSettings', (settingsPage?: unknown) => {
+      const page = typeof settingsPage === 'string'
+        ? settingsPage
+        : settingsPage && typeof settingsPage === 'object' && typeof (settingsPage as { page?: unknown }).page === 'string'
+          ? String((settingsPage as { page: string }).page)
+          : undefined;
+      settingsPanelProvider?.createOrShow(page);
+    }),
+    vscode.commands.registerCommand('openchamber.closeSettingsPanel', () => settingsPanelProvider?.dispose()),
+    vscode.commands.registerCommand('openchamber.showOpenCodeStatus', () => {
+      const status = piRuntime?.getStatus();
+      let nodePath = '(unavailable)';
+      let hostPath = '(unavailable)';
+      try { nodePath = resolvePiNodeExecutable(); } catch (error) { nodePath = String(error); }
+      try { hostPath = resolveVSCodePiHostEntry(context.extensionPath); } catch (error) { hostPath = String(error); }
+      outputChannel?.appendLine([
+        `Time: ${new Date().toISOString()}`,
+        `Piarium version: ${String(context.extension?.packageJSON?.version || '(unknown)')}`,
+        `VS Code version: ${vscode.version}`,
+        `Platform: ${process.platform} ${process.arch}`,
+        `Pi runtime status: ${status?.status ?? 'unknown'}`,
+        `Pi runtime error: ${status?.error ?? '(none)'}`,
+        `Node.js: ${nodePath}`,
+        `Pi host: ${hostPath}`,
+        `Workspace folders: ${(vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath).join(', ') || '(none)'}`,
+        '',
+      ].join('\n'));
+      outputChannel?.show(true);
+    }),
   );
 
   context.subscriptions.push(
@@ -221,574 +299,38 @@ export async function activate(context: vscode.ExtensionContext) {
       chatViewProvider?.notifyWindowFocusChanged(state.focused);
       sessionEditorProvider?.notifyWindowFocusChanged(state.focused);
       agentManagerProvider?.notifyWindowFocusChanged(state.focused);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openAgentManager', () => {
-      agentManagerProvider?.createOrShow();
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.setActiveSession', (sessionId: unknown, title?: unknown) => {
-      if (typeof sessionId === 'string' && sessionId.trim().length > 0) {
-        activeSessionId = sessionId.trim();
-        activeSessionTitle = typeof title === 'string' && title.trim().length > 0 ? title.trim() : null;
-        return;
-      }
-
-      activeSessionId = null;
-      activeSessionTitle = null;
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openActiveSessionInEditor', () => {
-      if (!activeSessionId) {
-        vscode.window.showInformationMessage(t('OpenChamber: No active session'));
-        return;
-      }
-      sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openSessionInEditor', (sessionId: string, title?: string) => {
-      if (typeof sessionId !== 'string' || sessionId.trim().length === 0) {
-        return;
-      }
-      sessionEditorProvider?.createOrShow(sessionId.trim(), title);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', () => {
-      sessionEditorProvider?.createOrShowNewSession();
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', () => {
-      if (activeSessionId) {
-        sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
-      } else {
-        sessionEditorProvider?.createOrShowNewSession();
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.restartApi', async () => {
-      try {
-        // Prefer the full in-app reload flow (overlay + managed restart via the
-        // bridge + config/data refresh) driven by the webview — same as after an
-        // OpenCode update. Fall back to a bare manager restart when no webview is
-        // open to drive it.
-        if (chatViewProvider?.reloadOpenCode()) {
-          return;
-        }
-        await openCodeManager?.restart();
-        await piRuntime?.restart();
-        vscode.window.showInformationMessage(t('OpenChamber: API connection restarted'));
-      } catch (e) {
-        vscode.window.showErrorMessage(t('OpenChamber: Failed to restart API - {0}', String(e)));
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.addToContext', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showWarningMessage(t('OpenChamber [Add to Context]: No active editor'));
-        return;
-      }
-
-      const selection = editor.selection;
-      const selectedText = editor.document.getText(selection);
-
-      if (!selectedText) {
-        vscode.window.showWarningMessage(t('OpenChamber [Add to Context]: No text selected'));
-        return;
-      }
-
-      // Get file info for context
-      // false matches the relativePath broadcast for the active editor, so this attachment dedupes against the pin-selection suggestion.
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri, false);
-      // Get line numbers (1-based for display)
-      const startLine = selection.start.line + 1;
-      const endLine = selection.end.line + 1;
-      const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-
-      const filename = `${filePath}:${lineRange}`;
-      const contextSelection = {
-        filePath: editor.document.uri.fsPath,
-        filename,
-        text: selectedText,
-      };
-
-      if (!sessionEditorProvider?.addContextSelectionToActivePanel(contextSelection)) {
-        if (!(await revealChatViewForPayload())) {
-          return;
-        }
-        chatViewProvider?.addContextSelection(contextSelection);
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.attachExplorerToChat', async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
-      const uriCandidates: vscode.Uri[] = [];
-      if (Array.isArray(resources)) {
-        uriCandidates.push(...resources.filter((entry): entry is vscode.Uri => entry instanceof vscode.Uri));
-      }
-      if (resource instanceof vscode.Uri) {
-        uriCandidates.push(resource);
-      }
-      if (uriCandidates.length === 0) {
-        const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
-        if (activeEditorUri) {
-          uriCandidates.push(activeEditorUri);
-        }
-      }
-
-      const uniqueUris = Array.from(new Map(uriCandidates.map((uri) => [uri.toString(), uri])).values());
-      const attachedFiles: Array<{ filePath: string; fileName: string; fileSize: number | null }> = [];
-      const skippedEntries: string[] = [];
-
-      for (const uri of uniqueUris) {
-        if (uri.scheme !== 'file') {
-          skippedEntries.push(uri.toString());
-          continue;
-        }
-
-        try {
-          const stat = await vscode.workspace.fs.stat(uri);
-          if ((stat.type & vscode.FileType.Directory) !== 0) {
-            skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
-            continue;
-          }
-        } catch {
-          skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
-          continue;
-        }
-
-        const filePath = uri.fsPath.trim();
-        const fileName = uri.fsPath.replace(/\\/g, '/').split('/').pop() || vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
-        if (!filePath || !fileName) {
-          skippedEntries.push(uri.fsPath || uri.toString());
-          continue;
-        }
-        let fileSize: number | null = null;
-        try {
-          const stat = await vscode.workspace.fs.stat(uri);
-          fileSize = stat.size;
-        } catch {
-          fileSize = null;
-        }
-        attachedFiles.push({ filePath, fileName, fileSize });
-      }
-
-      if (attachedFiles.length === 0) {
-        vscode.window.showWarningMessage(t('OpenChamber: No file selected to mention'));
-        return;
-      }
-
-      if (!sessionEditorProvider?.addFileAttachmentsToActivePanel(attachedFiles)) {
-        if (!(await revealChatViewForPayload())) {
-          return;
-        }
-        chatViewProvider?.addFileAttachments(attachedFiles);
-      }
-
-      if (skippedEntries.length > 0) {
-        vscode.window.showInformationMessage(t('OpenChamber: Some selected entries were skipped (folders or unsupported resources)'));
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.explain', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showWarningMessage(t('OpenChamber [Explain]: No active editor'));
-        return;
-      }
-
-      const selection = editor.selection;
-      const selectedText = editor.document.getText(selection);
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
-      const languageId = editor.document.languageId;
-
-      let prompt: string;
-
-      if (selectedText) {
-        // Selection exists - explain the selected code
-        const startLine = selection.start.line + 1;
-        const endLine = selection.end.line + 1;
-        const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-        prompt = `${t('Explain the following Code / Text:')}\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
-      } else {
-        // No selection - explain the entire file
-        prompt = `${t('Explain the following Code / Text:')}\n\n${filePath}`;
-      }
-
-      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
-        if (!(await revealChatViewForPayload())) {
-          return;
-        }
-        chatViewProvider?.createNewSessionWithPrompt(prompt);
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.improveCode', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showWarningMessage(t('OpenChamber [Improve Code]: No active editor'));
-        return;
-      }
-
-      const selection = editor.selection;
-      const selectedText = editor.document.getText(selection);
-
-      if (!selectedText) {
-        vscode.window.showWarningMessage(t('OpenChamber [Improve Code]: No text selected'));
-        return;
-      }
-
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
-      const languageId = editor.document.languageId;
-      const startLine = selection.start.line + 1;
-      const endLine = selection.end.line + 1;
-      const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-
-      const prompt = `${t('Improve the following Code:')}\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
-
-      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
-        if (!(await revealChatViewForPayload())) {
-          return;
-        }
-        chatViewProvider?.createNewSessionWithPrompt(prompt);
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
-      const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
-      let folderPath: string | undefined = typeof directory === 'string' ? directory : undefined;
-
-      if (!folderPath && candidates.length === 0) {
-        vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
-        return;
-      }
-
-      if (!folderPath) {
-        folderPath = candidates.length === 1
-          ? candidates[0].path
-          : (await vscode.window.showQuickPick(
-              candidates.map((folder) => ({ label: folder.name, description: folder.path, path: folder.path })),
-              { placeHolder: 'Select a workspace folder for this session', matchOnDescription: true }
-            ))?.path;
-      }
-
-      if (!folderPath) {
-        return;
-      }
-
-      if (openCodeManager) {
-        const result = await openCodeManager.setWorkingDirectory(folderPath);
-        if (!result.success) {
-          vscode.window.showErrorMessage(`OpenChamber: ${result.error}`);
-          return;
-        }
-      }
-      const workspaceFolders = candidates.some((folder) => folder.path === folderPath)
-        ? candidates
-        : [
-            ...candidates,
-            {
-              name: folderPath.split(/[\\/]/).filter(Boolean).pop() ?? folderPath,
-              path: folderPath,
-            },
-          ];
-      chatViewProvider?.createNewSession({ directory: folderPath, workspaceFolders });
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      chatViewProvider?.syncWorkspaceFolders(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []));
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.showSettings', (settingsPage?: unknown) => {
-      const page = typeof settingsPage === 'string'
-        ? settingsPage
-        : settingsPage && typeof settingsPage === 'object' && typeof (settingsPage as { page?: unknown }).page === 'string'
-          ? (settingsPage as { page: string }).page
-          : undefined;
-      settingsPanelProvider?.createOrShow(page);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.closeSettingsPanel', () => {
-      settingsPanelProvider?.dispose();
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.showOpenCodeStatus', async () => {
-      const config = vscode.workspace.getConfiguration('openchamber');
-      const configuredApiUrl = (config.get<string>('apiUrl') || '').trim();
-
-      const extensionVersion = String(context.extension?.packageJSON?.version || '');
-      const workspaceFolders = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
-      const primaryWorkspace = workspaceFolders[0] || '';
-
-      const debug = openCodeManager?.getDebugInfo();
-      const resolvedApiUrl = openCodeManager?.getApiUrl();
-      const workingDirectory = openCodeManager?.getWorkingDirectory() ?? '';
-      const workingDirectoryMatchesWorkspace = Boolean(primaryWorkspace && workingDirectory === primaryWorkspace);
-      let resolvedApiPath = '';
-      if (resolvedApiUrl) {
-        try {
-          resolvedApiPath = new URL(resolvedApiUrl).pathname || '/';
-        } catch {
-          resolvedApiPath = '(invalid url)';
-        }
-      }
-
-      const safeFetch = async (input: string, timeoutMs = 6000) => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        const startedAt = Date.now();
-        const openCodeAuthHeaders = openCodeManager?.getOpenCodeAuthHeaders() || {};
-        try {
-          const resp = await fetch(input, {
-            method: 'GET',
-            headers: { Accept: 'application/json', ...openCodeAuthHeaders },
-            signal: controller.signal,
-          });
-          const elapsedMs = Date.now() - startedAt;
-          const contentType = resp.headers.get('content-type') || '';
-          const isJson = contentType.toLowerCase().includes('json') && !contentType.toLowerCase().includes('text/html');
-
-          let summary = '';
-          if (isJson) {
-            const json = await resp.json().catch(() => null);
-            if (Array.isArray(json)) {
-              summary = `json[array] len=${json.length}`;
-            } else if (json && typeof json === 'object') {
-              const keys = Object.keys(json).slice(0, 8);
-              summary = `json[object] keys=${keys.join(',')}${Object.keys(json).length > keys.length ? ',…' : ''}`;
-            } else {
-              summary = `json[${typeof json}]`;
-            }
-          } else {
-            summary = contentType ? `content-type=${contentType}` : 'no content-type';
-          }
-
-          return { ok: resp.ok && isJson, status: resp.status, elapsedMs, summary };
-        } catch (error) {
-          const elapsedMs = Date.now() - startedAt;
-          const isAbort =
-            controller.signal.aborted ||
-            (error instanceof Error && (error.name === 'AbortError' || error.message.toLowerCase().includes('aborted')));
-          const message = isAbort
-            ? `timeout after ${timeoutMs}ms`
-            : error instanceof Error
-              ? error.message
-              : String(error);
-          return { ok: false, status: 0, elapsedMs, summary: `error=${message}` };
-        } finally {
-          clearTimeout(timeout);
-        }
-      };
-
-      const buildProbeUrl = (pathname: string, includeDirectory = true) => {
-        if (!resolvedApiUrl) return null;
-        const base = `${resolvedApiUrl.replace(/\/+$/, '')}/`;
-        const url = new URL(pathname.replace(/^\/+/, ''), base);
-        if (includeDirectory && workingDirectory) {
-          url.searchParams.set('directory', workingDirectory);
-        }
-        return url.toString();
-      };
-
-      const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-        { label: 'health', path: '/global/health', includeDirectory: false },
-        { label: 'config', path: '/config', includeDirectory: true },
-        { label: 'providers', path: '/config/providers', includeDirectory: true },
-        // Can be slower on large configs; keep the probe from producing false negatives.
-        { label: 'agents', path: '/agent', includeDirectory: true, timeoutMs: 12000 },
-        { label: 'commands', path: '/command', includeDirectory: true, timeoutMs: 10000 },
-        { label: 'project', path: '/project/current', includeDirectory: true },
-        { label: 'path', path: '/path', includeDirectory: true },
-        // Session listing is what powers the sidebar. This helps diagnose "no sessions shown" bugs.
-        { label: 'sessions', path: '/session', includeDirectory: true, timeoutMs: 12000 },
-        { label: 'sessionStatus', path: '/session/status', includeDirectory: true },
-      ];
-
-      const probes = resolvedApiUrl
-        ? await Promise.all(
-            probeTargets.map(async (entry) => {
-              const url = buildProbeUrl(entry.path, entry.includeDirectory !== false);
-              if (!url) {
-                return { label: entry.label, url: '(none)', result: null as null };
-              }
-              const result = await safeFetch(url, typeof entry.timeoutMs === 'number' ? entry.timeoutMs : undefined);
-              return { label: entry.label, url, result };
-            })
-          )
-        : [];
-
-      const storedSettings = context.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {};
-      const settingsKeys = Object.keys(storedSettings).filter((key) => key !== 'lastDirectory');
-
-      const lines = [
-        `Time: ${new Date().toISOString()}`,
-        `OpenChamber version: ${extensionVersion || '(unknown)'}`,
-        `OpenCode Version: ${debug?.version ?? '(unknown)'}`,
-        `VS Code version: ${vscode.version}`,
-        `Platform: ${process.platform} ${process.arch}`,
-        `Workspace folders: ${workspaceFolders.length}${workspaceFolders.length ? ` (${workspaceFolders.join(', ')})` : ''}`,
-        `Status: ${openCodeManager?.getStatus() ?? 'unknown'}`,
-        `Working directory: ${workingDirectory}`,
-        `Working dir matches workspace: ${workingDirectoryMatchesWorkspace ? 'yes' : 'no'}`,
-        `API URL (configured): ${configuredApiUrl || '(none)'}`,
-        `OpenCode binary (configured): ${(vscode.workspace.getConfiguration('openchamber').get<string>('opencodeBinary') || '').trim() || '(none)'}`,
-        `API URL (resolved): ${openCodeManager?.getApiUrl() ?? '(none)'}`,
-        `API URL path: ${resolvedApiPath || '(none)'}`,
-        debug
-          ? `OpenCode server URL: ${debug.serverUrl ?? '(none)'}`
-          : `OpenCode server URL: (unknown)`,
-        debug
-          ? `OpenCode mode: ${debug.mode} (starts=${debug.startCount}, restarts=${debug.restartCount})`
-          : `OpenCode mode: (unknown)`,
-        debug
-          ? `Secure OpenCode connection: ${debug.secureConnection ? 'true' : 'false'}`
-          : `Secure OpenCode connection: (unknown)`,
-        debug
-          ? `OpenCode auth source: ${debug.authSource ?? '(none)'}`
-          : `OpenCode auth source: (unknown)`,
-        debug
-          ? `OpenCode CLI path: ${debug.cliPath || '(not found)'}`
-          : `OpenCode CLI path: (unknown)`,
-        debug
-          ? `OpenCode detected port: ${debug.detectedPort ?? '(none)'}`
-          : `OpenCode detected port: (unknown)`,
-        debug
-          ? `OpenCode API prefix: ${debug.apiPrefixDetected ? (debug.apiPrefix || '(root)') : '(unknown)'}`
-          : `OpenCode API prefix: (unknown)`,
-        debug
-          ? `Last start: ${formatIso(debug.lastStartAt)}`
-          : `Last start: (unknown)`,
-        debug
-          ? `Last ready: ${debug.lastReadyElapsedMs !== null ? `${debug.lastReadyElapsedMs}ms` : '(unknown)'}`
-          : `Last ready: (unknown)`,
-        debug
-          ? `Ready attempts: ${debug.lastReadyAttempts ?? '(unknown)'}`
-          : `Ready attempts: (unknown)`,
-        debug
-          ? `Start attempts: ${debug.lastStartAttempts ?? '(unknown)'}`
-          : `Start attempts: (unknown)`,
-        debug
-          ? `Last connected: ${formatIso(debug.lastConnectedAt)}`
-          : `Last connected: (unknown)`,
-        debug && debug.lastConnectedAt ? `Connected for: ${formatDurationMs(Date.now() - debug.lastConnectedAt)}` : `Connected for: (n/a)`,
-        debug && debug.lastExitCode !== null ? `Last exit code: ${debug.lastExitCode}` : `Last exit code: (none)`,
-        debug?.lastError ? `Last error: ${debug.lastError}` : `Last error: (none)`,
-        `Settings keys (stored): ${settingsKeys.length ? settingsKeys.join(', ') : '(none)'}`,
-        probes.length ? '' : '',
-        ...(probes.length
-          ? [
-              'OpenCode API probes:',
-              ...probes.map((probe) => {
-                if (!probe.result) return `- ${probe.label}: (no url)`;
-                const { ok, status, elapsedMs, summary } = probe.result;
-                const suffix = ok ? '' : ` url=${probe.url}`;
-                return `- ${probe.label}: ${ok ? 'ok' : 'fail'} status=${status} time=${elapsedMs}ms ${summary}${suffix}`;
-              }),
-            ]
-          : []),
-        '',
-      ];
-
-      outputChannel?.appendLine(lines.join('\n'));
-      outputChannel?.show(true);
-    })
-  );
-
-  context.subscriptions.push(
+    }),
     vscode.window.onDidChangeActiveColorTheme((theme) => {
       chatViewProvider?.updateTheme(theme.kind);
       agentManagerProvider?.updateTheme(theme.kind);
       sessionEditorProvider?.updateTheme(theme.kind);
       settingsPanelProvider?.updateTheme(theme.kind);
-    })
-  );
-
-  // Theme changes can update the `workbench.colorTheme` setting slightly after the
-  // `activeColorTheme` event. Listen for config changes too so we can re-resolve
-  // the contributed theme JSON and update Shiki themes in the webview.
-  context.subscriptions.push(
+    }),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (
-        event.affectsConfiguration('workbench.colorTheme') ||
-        event.affectsConfiguration('workbench.preferredLightColorTheme') ||
-        event.affectsConfiguration('workbench.preferredDarkColorTheme')
-      ) {
-        chatViewProvider?.updateTheme(vscode.window.activeColorTheme.kind);
-        agentManagerProvider?.updateTheme(vscode.window.activeColorTheme.kind);
-        sessionEditorProvider?.updateTheme(vscode.window.activeColorTheme.kind);
-        settingsPanelProvider?.updateTheme(vscode.window.activeColorTheme.kind);
-      }
-    })
-  );
-
-  // Subscribe to status changes - this broadcasts to webview
-  context.subscriptions.push(
-    openCodeManager.onStatusChange((status, error) => {
+      if (!event.affectsConfiguration('workbench.colorTheme')
+        && !event.affectsConfiguration('workbench.preferredLightColorTheme')
+        && !event.affectsConfiguration('workbench.preferredDarkColorTheme')) return;
+      const kind = vscode.window.activeColorTheme.kind;
+      chatViewProvider?.updateTheme(kind);
+      agentManagerProvider?.updateTheme(kind);
+      sessionEditorProvider?.updateTheme(kind);
+      settingsPanelProvider?.updateTheme(kind);
+    }),
+    piRuntime.onStatusChange(({ status, error }) => {
       chatViewProvider?.updateConnectionStatus(status, error);
+      agentManagerProvider?.updateConnectionStatus(status, error);
       sessionEditorProvider?.updateConnectionStatus(status, error);
       settingsPanelProvider?.updateConnectionStatus(status, error);
-
-      // Start/stop global event watcher based on connection status
-      // Mirrors web server and desktop behavior
-      if (status === 'connected' && chatViewProvider && openCodeManager) {
-        setChatViewProvider(chatViewProvider);
-        void startGlobalEventWatcher(openCodeManager, chatViewProvider);
-      } else if (status === 'disconnected' || status === 'error') {
-        stopGlobalEventWatcher();
-      }
-    })
+    }),
   );
 
-  context.subscriptions.push(
-    piRuntime.onStatusChange(({ status, error }) => {
-      agentManagerProvider?.updateConnectionStatus(status, error);
-    })
-  );
-
-  // Start OpenCode API without blocking activation.
-  // Blocking here delays webview resolution and causes a blank panel until startup completes.
-  void openCodeManager.start();
   void piRuntime.start().catch(() => {
-    // Status and diagnostics are published by VSCodePiRuntime.
+    // VSCodePiRuntime publishes the actionable diagnostic and status.
   });
 }
 
-export async function deactivate() {
-  stopGlobalEventWatcher();
-  await openCodeManager?.stop();
+export async function deactivate(): Promise<void> {
   await piRuntime?.stop();
-  openCodeManager = undefined;
   piRuntime = undefined;
   chatViewProvider = undefined;
   agentManagerProvider = undefined;

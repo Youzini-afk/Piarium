@@ -7,12 +7,18 @@ import type {
   MultiRunAgentSelection,
   MultiRunFileAttachment,
 } from '@/types/multirun';
-import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
-import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
-import { removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
-import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
+import {
+  getWorktreeSetupWaitEnabled,
+  saveWorktreeSetupCommands,
+  type PiariumProjectRef,
+} from '@/lib/piariumProjectConfig';
+import {
+  checkPiariumGitRepository,
+  createPiariumWorktree,
+  removePiariumWorktree,
+  resolvePiariumRootTrackingRemote,
+} from '@/lib/piariumWorktrees';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { checkIsGitRepository } from '@/lib/gitApi';
 import { renderPiComposerSubmission } from '@/components/pi-session/piComposerSubmission';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
@@ -123,7 +129,7 @@ const invokeAgent = (agent: MultiRunAgentSelection, task: string): string => {
   return `/${command} ${agent.name}${separator}${task}`;
 };
 
-const resolveActiveProject = (): ProjectRef | null => {
+const resolveActiveProject = (): PiariumProjectRef | null => {
   const projectsState = useProjectsStore.getState();
   const activeProjectId = projectsState.activeProjectId;
   const project = activeProjectId
@@ -191,11 +197,11 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const project = resolveActiveProject();
           if (!project) throw new Error('Select a project');
           const directory = project.path;
-          const shouldIsolateRuns = await checkIsGitRepository(directory) && params.isolateRuns !== false;
+          const shouldIsolateRuns = await checkPiariumGitRepository(directory) && params.isolateRuns !== false;
           const normalizedGroupSlug = toGitSafeSlug(groupName);
           const groupSlug = normalizedGroupSlug || stableFallbackSlug(groupName);
           const rootTrackingRemote = shouldIsolateRuns
-            ? await resolveRootTrackingRemote(directory)
+            ? await resolvePiariumRootTrackingRemote(directory)
             : null;
           const setupCommands = params.setupCommands?.filter((command) => command.trim().length > 0) ?? [];
           const createdRuns: CreatedRun[] = [];
@@ -231,19 +237,20 @@ export const useMultiRunStore = create<MultiRunStore>()(
               });
 
               let sessionId: string | undefined;
-              let worktreeMetadata: Awaited<ReturnType<typeof createWorktreeWithDefaults>> | undefined;
+              let worktreeMetadata: Awaited<ReturnType<typeof createPiariumWorktree>> | undefined;
               try {
                 let worktreePath = directory;
                 if (shouldIsolateRuns) {
-                  worktreeMetadata = await createWorktreeWithDefaults(project, {
+                  worktreeMetadata = await createPiariumWorktree(project, {
                     branchName: preferredName,
                     mode: 'new',
                     preferredName,
+                    resolvedRootTrackingRemote: rootTrackingRemote,
                     returnAfterDirectoryCreated: true,
                     setupCommands,
                     startRef: params.worktreeBaseBranch || 'HEAD',
                     worktreeName: preferredName,
-                  }, { resolvedRootTrackingRemote: rootTrackingRemote });
+                  });
                   worktreePath = worktreeMetadata.path;
                   if (await getWorktreeSetupWaitEnabled(project)) {
                     await waitForWorktreeBootstrap(worktreePath);
@@ -273,7 +280,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
               } catch (error) {
                 if (sessionId) await piSessions.deleteSession(sessionId).catch(() => undefined);
                 if (worktreeMetadata) {
-                  await removeProjectWorktree(project, worktreeMetadata, { deleteLocalBranch: true })
+                  await removePiariumWorktree(project, worktreeMetadata, { deleteLocalBranch: true })
                     .catch(() => undefined);
                 }
                 failures.push({
@@ -286,7 +293,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
             }
           }
 
-          if (setupCommands.length > 0) {
+          if (params.setupCommands !== undefined) {
             void saveWorktreeSetupCommands(project, setupCommands).catch((error) => {
               console.warn('[MultiRun] Failed to save worktree setup commands', error);
             });

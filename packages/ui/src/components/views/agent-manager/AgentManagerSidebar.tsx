@@ -21,7 +21,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useAgentGroupsStore, type AgentGroup } from '@/stores/useAgentGroupsStore';
-import { useAllSessionStatuses } from '@/sync/sync-context';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useI18n } from '@/lib/i18n';
 
 const formatRelativeTime = (timestamp: number): { unit: 'now' | 'minutes' | 'hours' | 'days'; count?: number } => {
@@ -201,16 +201,16 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
   const isLoading = useAgentGroupsStore((s) => s.isLoading);
 
   // Session statuses for busy indicators
-  const allStatuses = useAllSessionStatuses();
+  const records = usePiSessionStore((state) => state.records);
   const busyGroups = React.useMemo(() => {
     const set = new Set<string>();
     for (const group of groups) {
-      if (group.sessions.some((s) => allStatuses[s.id]?.type === 'busy')) {
+      if (group.sessions.some((session) => records[session.id]?.snapshot?.busy === true)) {
         set.add(group.name);
       }
     }
     return set;
-  }, [groups, allStatuses]);
+  }, [groups, records]);
 
   const MAX_VISIBLE = 5;
 

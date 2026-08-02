@@ -3,10 +3,10 @@ import { create } from 'zustand';
 import { listPiSessions } from '@/lib/pi-runtime/sessions';
 import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import {
-  listProjectWorktrees,
-  removeProjectWorktree,
-  type ProjectRef,
-} from '@/lib/worktrees/worktreeManager';
+  listPiariumWorktrees,
+  removePiariumWorktree,
+} from '@/lib/piariumWorktrees';
+import type { PiariumProjectRef } from '@/lib/piariumProjectConfig';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useDirectoryStore } from './useDirectoryStore';
 import { usePiSessionStore } from './usePiSessionStore';
@@ -49,7 +49,7 @@ interface DeleteAgentGroupResult {
   failedWorktreePaths: string[];
 }
 
-const resolveProjectRef = (): ProjectRef | null => {
+const resolveProjectRef = (): PiariumProjectRef | null => {
   const directory = useDirectoryStore.getState().currentDirectory;
   const projectsState = useProjectsStore.getState();
   const activeProject = projectsState.activeProjectId
@@ -63,7 +63,7 @@ const resolveProjectRef = (): ProjectRef | null => {
   return { id: project?.id ?? `path:${path}`, path };
 };
 
-const resolveProjectRefForWorktree = (session: AgentGroupSession): ProjectRef | null => {
+const resolveProjectRefForWorktree = (session: AgentGroupSession): PiariumProjectRef | null => {
   const projectPath = normalize(session.worktreeMetadata?.projectDirectory ?? '');
   if (!projectPath) return resolveProjectRef();
   const project = useProjectsStore.getState().projects.find((candidate) => (
@@ -172,7 +172,7 @@ export const useAgentGroupsStore = create<AgentGroupsState>((set, get) => ({
         }
         const projectRef = pathSessions
           .map(resolveProjectRefForWorktree)
-          .find((candidate): candidate is ProjectRef => candidate !== null) ?? null;
+          .find((candidate): candidate is PiariumProjectRef => candidate !== null) ?? null;
         if (projectRef && pathKey(projectRef.path) === pathKey(path)) {
           continue;
         }
@@ -182,7 +182,7 @@ export const useAgentGroupsStore = create<AgentGroupsState>((set, get) => ({
           continue;
         }
         try {
-          await removeProjectWorktree(projectRef, metadata, { deleteLocalBranch: true });
+          await removePiariumWorktree(projectRef, metadata, { deleteLocalBranch: true });
           const directoryStore = useDirectoryStore.getState();
           if (pathKey(directoryStore.currentDirectory ?? '') === pathKey(path)) {
             directoryStore.setDirectory(projectRef.path, { showOverlay: false });
@@ -220,7 +220,7 @@ export const useAgentGroupsStore = create<AgentGroupsState>((set, get) => ({
     set({ error: null, isLoading: true });
     try {
       let worktreeError: string | null = null;
-      const worktrees = await listProjectWorktrees(projectRef).catch((error) => {
+      const worktrees = await listPiariumWorktrees(projectRef).catch((error) => {
         worktreeError = error instanceof Error ? error.message : String(error);
         return [];
       });

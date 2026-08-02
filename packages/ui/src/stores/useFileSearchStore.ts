@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { opencodeClient, type ProjectFileSearchHit } from '@/lib/opencode/client';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import type { FileSearchResult } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const CACHE_TTL_MS = 30_000;
@@ -8,23 +9,81 @@ const MAX_CACHE_ENTRIES = 40;
 const DEFAULT_SEARCH_LIMIT = 60;
 
 interface FileSearchCacheEntry {
-  files: ProjectFileSearchHit[];
+  files: PiariumFileSearchHit[];
   timestamp: number;
 }
 
 interface FileSearchStoreState {
   cache: Record<string, FileSearchCacheEntry>;
   cacheKeys: string[];
-  inFlight: Record<string, Promise<ProjectFileSearchHit[]>>;
+  inFlight: Record<string, Promise<PiariumFileSearchHit[]>>;
   searchFiles: (
     directory: string,
     query: string,
     limit?: number,
     options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory' }
-  ) => Promise<ProjectFileSearchHit[]>;
+  ) => Promise<PiariumFileSearchHit[]>;
   invalidateDirectory: (directory?: string | null) => void;
   resetForRuntimeSwitch: () => void;
 }
+
+export interface PiariumFileSearchHit {
+  extension?: string;
+  name: string;
+  path: string;
+  relativePath: string;
+}
+
+const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '');
+
+const toRelativePath = (directory: string, result: FileSearchResult): string => {
+  const preview = result.preview?.[0];
+  if (typeof preview === 'string' && preview.trim()) return normalizePath(preview.trim()).replace(/^\/+/, '');
+  const path = normalizePath(result.path);
+  const root = normalizePath(directory);
+  return path.toLocaleLowerCase().startsWith(`${root.toLocaleLowerCase()}/`)
+    ? path.slice(root.length + 1)
+    : path;
+};
+
+const toFileHit = (directory: string, result: FileSearchResult): PiariumFileSearchHit => {
+  const path = normalizePath(result.path);
+  const relativePath = toRelativePath(directory, result);
+  const name = path.split('/').filter(Boolean).pop() || relativePath || path;
+  return {
+    name,
+    path,
+    relativePath,
+    ...(name.includes('.') ? { extension: name.split('.').pop()?.toLowerCase() } : {}),
+  };
+};
+
+const toDirectoryHits = (
+  directory: string,
+  results: FileSearchResult[],
+  query: string,
+  limit: number,
+): PiariumFileSearchHit[] => {
+  const root = normalizePath(directory);
+  const normalizedQuery = query.toLocaleLowerCase();
+  const hits = new Map<string, PiariumFileSearchHit>();
+  for (const result of results) {
+    const segments = toRelativePath(directory, result).split('/').filter(Boolean);
+    segments.pop();
+    for (let index = 1; index <= segments.length; index += 1) {
+      const relativePath = segments.slice(0, index).join('/');
+      if (normalizedQuery && !relativePath.toLocaleLowerCase().includes(normalizedQuery)) continue;
+      const path = `${root}/${relativePath}`;
+      hits.set(path.toLocaleLowerCase(), {
+        name: segments[index - 1] ?? relativePath,
+        path,
+        relativePath,
+      });
+      if (hits.size >= limit) return [...hits.values()];
+    }
+  }
+  return [...hits.values()];
+};
 
 const buildCacheKey = (
   runtimeKey: string,
@@ -79,16 +138,20 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           return inflight;
         }
 
-        const searchPromise = opencodeClient
-          .searchFiles(normalizedQuery, {
+        const filesRuntime = getRegisteredRuntimeAPIs()?.files;
+        if (!filesRuntime) throw new Error('Files runtime is unavailable');
+        const searchPromise = filesRuntime
+          .search({
             directory: normalizedDirectory,
-            limit,
+            query: normalizedQuery,
+            maxResults: type === 'directory' ? Math.max(limit * 4, limit) : limit,
             includeHidden,
             respectGitignore,
-            dirs: type !== 'file',
-            type,
           })
-          .then((files) => {
+          .then((results) => {
+            const files = type === 'directory'
+              ? toDirectoryHits(normalizedDirectory, results, normalizedQuery, limit)
+              : results.map((result) => toFileHit(normalizedDirectory, result)).slice(0, limit);
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {
                 return state;

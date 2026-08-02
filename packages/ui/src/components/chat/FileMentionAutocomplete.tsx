@@ -1,13 +1,13 @@
 import React from 'react';
 import { RiCodeLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiFolder3Fill, RiRefreshLine } from '@remixicon/react';
 import { cn, truncatePathMiddle } from '@/lib/utils';
-import { useFileSearchStore } from '@/stores/useFileSearchStore';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useFileSearchStore, type PiariumFileSearchHit } from '@/stores/useFileSearchStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
-import type { ProjectFileSearchHit } from '@/lib/opencode/client';
+import { listPiAgentProviders } from '@/lib/pi-runtime/agent-providers';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
@@ -15,7 +15,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
-type FileInfo = ProjectFileSearchHit;
+type FileInfo = PiariumFileSearchHit;
 type AgentInfo = {
   name: string;
   description?: string;
@@ -60,7 +60,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       [projectRoot],
     ),
   );
-  const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const debouncedQuery = useDebouncedValue(searchQuery, 180);
   const showHidden = useDirectoryShowHidden();
@@ -263,23 +263,37 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       setAgents([]);
       return;
     }
-    const visibleAgents = getVisibleAgents();
-    const normalizedQuery = (searchQuery ?? '').trim().toLowerCase();
-    const filtered = visibleAgents
-      .filter((agent) => agent.mode && agent.mode !== 'primary')
-      .filter((agent) => {
-        if (!normalizedQuery) return true;
-        const haystack = `${agent.name} ${agent.description ?? ''}`.toLowerCase();
-        return haystack.includes(normalizedQuery);
-      })
-      .map((agent) => ({
-        name: agent.name,
-        description: agent.description,
-        mode: agent.mode,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    setAgents(filtered);
-  }, [getVisibleAgents, onAgentSelect, searchQuery]);
+    const target = currentSessionId
+      ? { sessionId: currentSessionId }
+      : currentDirectory
+        ? { cwd: currentDirectory }
+        : null;
+    if (!target) {
+      setAgents([]);
+      return;
+    }
+    let cancelled = false;
+    void listPiAgentProviders(target).then((catalog) => {
+      if (cancelled) return;
+      const normalizedQuery = (searchQuery ?? '').trim().toLowerCase();
+      const filtered = catalog.agents
+        .filter((agent) => agent.status === 'available' && agent.kind !== 'primary' && agent.kind !== 'internal')
+        .filter((agent) => {
+          if (!normalizedQuery) return true;
+          return `${agent.name} ${agent.description}`.toLowerCase().includes(normalizedQuery);
+        })
+        .map((agent) => ({
+          name: agent.name,
+          description: agent.description,
+          mode: agent.kind,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setAgents(filtered);
+    }).catch(() => {
+      if (!cancelled) setAgents([]);
+    });
+    return () => { cancelled = true; };
+  }, [currentDirectory, currentSessionId, onAgentSelect, searchQuery]);
 
   React.useEffect(() => {
     setSelectedIndex(0);

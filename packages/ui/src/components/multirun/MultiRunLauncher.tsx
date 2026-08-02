@@ -12,8 +12,7 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
-import type { ProjectRef } from '@/lib/openchamberConfig';
+import { getWorktreeSetupCommands, type PiariumProjectRef } from '@/lib/piariumProjectConfig';
 import type {
   CreateMultiRunParams,
   MultiRunAgentSelection,
@@ -132,7 +131,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     return projects.find((project) => project.id === selectedProjectId) ?? null;
   }, [projects, selectedProjectId]);
 
-  const selectedProjectDirectory = selectedProject?.path ?? currentDirectory;
+  const selectedProjectDirectory = selectedProject?.path ?? currentDirectory ?? vscodeWorkspaceFolder;
 
   const handleProjectChange = React.useCallback((projectId: string) => {
     setSelectedProjectId(projectId);
@@ -176,7 +175,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     );
   }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
-  const projectRef = React.useMemo<ProjectRef | null>(() => {
+  const projectRef = React.useMemo<PiariumProjectRef | null>(() => {
     if (selectedProject?.path) {
       return { id: selectedProject.id, path: selectedProject.path };
     }
@@ -384,7 +383,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
         worktreeBaseBranch: effectiveIsolateRuns ? worktreeBaseBranch : undefined,
         isolateRuns: effectiveIsolateRuns,
         files: filesForStore.length > 0 ? filesForStore : undefined,
-        setupCommands: commandsForStore.length > 0 ? commandsForStore : undefined,
+        setupCommands: commandsForStore,
       };
 
       const result = await createMultiRun(params);

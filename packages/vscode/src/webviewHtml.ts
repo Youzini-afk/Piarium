@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import { getThemeKindName } from './theme';
-import type { ConnectionStatus } from './opencode';
+import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
 export type PanelType = 'chat' | 'agentManager' | 'settings';
@@ -11,7 +11,7 @@ export interface WebviewHtmlOptions {
   extensionUri: vscode.Uri;
   workspaceFolder: string;
   workspaceFolders?: WorkspaceFolderCandidate[];
-  initialStatus: ConnectionStatus;
+  initialStatus: PiRuntimeConnectionStatus;
   cliAvailable: boolean;
   panelType?: PanelType;
   initialSessionId?: string;
@@ -198,6 +198,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       initialSettingsPage: ${initialSettingsPage ? JSON.stringify(initialSettingsPage) : 'null'},
     };
     window.__OPENCHAMBER_HOME__ = "${workspaceFolder.replace(/\\/g, '\\\\')}";
+    window.__PIARIUM_HOME__ = ${JSON.stringify(os.homedir())};
 
     function getBootstrapMessages() {
       var locale = 'en';

@@ -2,7 +2,6 @@ import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Button } from '@/components/ui/button';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiProviderStore, type PiProviderView } from '@/stores/usePiProviderStore';
 import { RiAddLine, RiStackLine } from '@remixicon/react';
@@ -22,8 +21,8 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   const providers = usePiProviderStore((state) => state.providers);
   const loadProviders = usePiProviderStore((state) => state.load);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
-  const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
+  const selectedProviderId = usePiProviderStore((state) => state.selectedProviderId);
+  const setSelectedProvider = usePiProviderStore((state) => state.setSelectedProvider);
 
   React.useEffect(() => {
     void loadProviders(currentDirectory).catch((error: unknown) => {

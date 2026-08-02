@@ -30,7 +30,7 @@ describe('VS Code webview bridge acquireVsCodeApi fallback', () => {
 
       const { sendBridgeMessageWithOptions } = await import(`./bridge?acquire-fallback-${Date.now()}`);
 
-      const result = await sendBridgeMessageWithOptions('api:proxy', { path: '/health' }, { timeoutMs: 20 }).then(
+      const result = await sendBridgeMessageWithOptions('api:settings:get', undefined, { timeoutMs: 20 }).then(
         () => 'resolved' as const,
         (error: unknown) => error,
       );

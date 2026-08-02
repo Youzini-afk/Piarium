@@ -30,7 +30,6 @@ import {
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
@@ -363,8 +362,8 @@ export const ProvidersPage: React.FC = () => {
   const isLoading = usePiProviderStore((state) => state.isLoading);
   const loadError = usePiProviderStore((state) => state.error);
   const loadProviders = usePiProviderStore((state) => state.load);
-  const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
-  const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
+  const selectedProviderId = usePiProviderStore((state) => state.selectedProviderId);
+  const setSelectedProvider = usePiProviderStore((state) => state.setSelectedProvider);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);

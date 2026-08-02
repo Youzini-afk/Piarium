@@ -2,7 +2,6 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@/styles/fonts';
 import '@/index.css';
-import '@/lib/debug';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';

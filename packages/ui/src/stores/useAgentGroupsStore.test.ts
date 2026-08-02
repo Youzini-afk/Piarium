@@ -1,53 +1,18 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { SessionSummary } from '@piarium/protocol';
+import type { GitWorktreeInfo, RemoveGitWorktreePayload, RuntimeAPIs } from '@/lib/api/types';
+import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { useDirectoryStore } from './useDirectoryStore';
+import { usePiSessionStore } from './usePiSessionStore';
+import { useProjectsStore } from './useProjectsStore';
 
 const summariesByDirectory = new Map<string, SessionSummary[]>();
 const deletedSessionIds: string[] = [];
 const removedWorktreePaths: string[] = [];
-let worktrees: Array<Record<string, unknown>> = [];
+let worktrees: GitWorktreeInfo[] = [];
 
 mock.module('@/lib/pi-runtime/sessions', () => ({
   listPiSessions: (cwd: string) => Promise.resolve(summariesByDirectory.get(cwd) ?? []),
-}));
-
-mock.module('@/lib/worktrees/worktreeManager', () => ({
-  listProjectWorktrees: () => Promise.resolve(worktrees),
-  removeProjectWorktree: (_project: unknown, metadata: { path: string }) => {
-    removedWorktreePaths.push(metadata.path);
-    return Promise.resolve();
-  },
-}));
-
-mock.module('./useDirectoryStore', () => ({
-  useDirectoryStore: {
-    getState: () => ({
-      currentDirectory: '/repo',
-      setDirectory: mock(() => undefined),
-    }),
-  },
-}));
-
-mock.module('./useProjectsStore', () => ({
-  useProjectsStore: {
-    getState: () => ({
-      activeProjectId: 'project-1',
-      projects: [{ id: 'project-1', path: '/repo' }],
-    }),
-  },
-}));
-
-mock.module('./usePiSessionStore', () => ({
-  usePiSessionStore: {
-    getState: () => ({
-      deleteSession: async (sessionId: string) => {
-        deletedSessionIds.push(sessionId);
-        for (const [directory, entries] of summariesByDirectory) {
-          summariesByDirectory.set(directory, entries.filter((entry) => entry.id !== sessionId));
-        }
-        return true;
-      },
-    }),
-  },
 }));
 
 const { buildAgentGroups, useAgentGroupsStore } = await import('./useAgentGroupsStore');
@@ -69,6 +34,32 @@ describe('useAgentGroupsStore', () => {
     deletedSessionIds.length = 0;
     removedWorktreePaths.length = 0;
     worktrees = [];
+    registerRuntimeAPIs({
+      git: {
+        listGitWorktrees: async () => worktrees,
+        worktree: {
+          list: async () => worktrees,
+          remove: async (_directory: string, payload: RemoveGitWorktreePayload) => {
+            removedWorktreePaths.push(payload.directory);
+            return { success: true };
+          },
+        },
+      },
+    } as unknown as RuntimeAPIs);
+    useDirectoryStore.setState({ currentDirectory: '/repo' });
+    useProjectsStore.setState({
+      activeProjectId: 'project-1',
+      projects: [{ id: 'project-1', path: '/repo' }],
+    });
+    usePiSessionStore.setState({
+      deleteSession: async (sessionId: string) => {
+        deletedSessionIds.push(sessionId);
+        for (const [directory, entries] of summariesByDirectory) {
+          summariesByDirectory.set(directory, entries.filter((entry) => entry.id !== sessionId));
+        }
+        return true;
+      },
+    });
     useAgentGroupsStore.setState({
       error: null,
       groups: [],
@@ -81,9 +72,9 @@ describe('useAgentGroupsStore', () => {
   test('loads Pi session summaries from the project root and all worktrees', async () => {
     worktrees = [{
       branch: 'agent-group/test-model',
-      label: 'test-model',
+      head: 'abc123',
+      name: 'test-model',
       path: '/repo-worktrees/test-model',
-      projectDirectory: '/repo',
     }];
     summariesByDirectory.set('/repo', [summary({
       cwd: '/repo',
@@ -137,3 +128,5 @@ describe('useAgentGroupsStore', () => {
     expect(groups[0]?.sessions.map((session) => session.id)).toEqual(['run']);
   });
 });
+
+afterAll(() => registerRuntimeAPIs(null));

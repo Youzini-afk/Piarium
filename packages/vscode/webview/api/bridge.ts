@@ -18,7 +18,7 @@ const noopVSCodeApi: VSCodeAPI = {
     // of throwing TypeError: Cannot read properties of undefined (reading 'postMessage').
     if (!noopWarned) {
       noopWarned = true;
-      console.warn('[openchamber] VS Code API unavailable; dropping postMessage', message);
+      console.warn('[piarium] VS Code API unavailable; dropping postMessage', message);
     }
   },
 };
@@ -138,64 +138,6 @@ export function sendBridgeMessageWithOptions<T = unknown>(
 
     getVSCodeAPI().postMessage(request);
   });
-}
-
-export type ProxiedApiResponse = {
-  status: number;
-  headers: Record<string, string>;
-  bodyBase64?: string;
-  bodyText?: string;
-};
-
-export async function proxyApiRequest(options: {
-  method: string;
-  path: string;
-  headers?: Record<string, string>;
-  bodyBase64?: string;
-  signal?: AbortSignal;
-}): Promise<ProxiedApiResponse> {
-  // Do not impose a bridge-level timeout. Let the original fetch's AbortSignal
-  // (or OpenCode server response timing) control the lifecycle.
-  const { signal, ...payload } = options;
-  return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:proxy', payload, {
-    timeoutMs: 0,
-    signal,
-    onAbort: (requestID) => getVSCodeAPI().postMessage({ id: `abort_${requestID}`, type: 'api:proxy:abort', payload: { requestID } }),
-  });
-}
-
-export async function proxySessionMessageRequest(options: {
-  path: string;
-  headers?: Record<string, string>;
-  bodyText: string;
-  signal?: AbortSignal;
-}): Promise<ProxiedApiResponse> {
-  // Keep parity with server-side direct forwarder: let extension host control timeout.
-  const { signal, ...payload } = options;
-  return sendBridgeMessageWithOptions<ProxiedApiResponse>('api:session:message', payload, {
-    timeoutMs: 0,
-    signal,
-    onAbort: (requestID) => getVSCodeAPI().postMessage({ id: `abort_${requestID}`, type: 'api:proxy:abort', payload: { requestID } }),
-  });
-}
-
-export type ProxiedSseStartResponse = {
-  status: number;
-  headers: Record<string, string>;
-  streamId: string | null;
-  error?: string;
-};
-
-export async function startSseProxy(options: {
-  path: string;
-  headers?: Record<string, string>;
-  streamId?: string;
-}): Promise<ProxiedSseStartResponse> {
-  return sendBridgeMessage<ProxiedSseStartResponse>('api:sse:start', options);
-}
-
-export async function stopSseProxy(options: { streamId: string }): Promise<{ stopped: boolean }> {
-  return sendBridgeMessage<{ stopped: boolean }>('api:sse:stop', options);
 }
 
 export async function executeVSCodeCommand(command: string, args?: unknown[]): Promise<{ result?: unknown }> {

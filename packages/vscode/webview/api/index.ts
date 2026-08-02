@@ -8,7 +8,6 @@ import { createVSCodeGitAPI } from './git';
 import { createVSCodeActionsAPI } from './vscode';
 import { createVSCodeGitHubAPI } from './github';
 import { createVSCodeNotificationsAPI } from './notifications';
-import { createVSCodeCheckpointsAPI } from './checkpoints';
 import { createVSCodeWorkspaceAPI } from './workspace';
 
 const terminalUnsupported = async (): Promise<never> => {
@@ -36,7 +35,6 @@ export const createVSCodeAPIs = (): RuntimeAPIs => ({
   settings: createVSCodeSettingsAPI(),
   permissions: createVSCodePermissionsAPI(),
   notifications: createVSCodeNotificationsAPI(),
-  checkpoints: createVSCodeCheckpointsAPI(),
   github: createVSCodeGitHubAPI(),
   tools: createVSCodeToolsAPI(),
   editor: createVSCodeEditorAPI(),

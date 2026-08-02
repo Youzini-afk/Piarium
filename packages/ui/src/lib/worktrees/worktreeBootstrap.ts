@@ -1,4 +1,3 @@
-import * as gitHttp from '@/lib/gitApiHttp';
 import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { toast } from '@/components/ui';
@@ -83,7 +82,7 @@ const getGitWorktreeBootstrapStatus = async (directory: string): Promise<GitWork
   if (runtimeGit?.getGitWorktreeBootstrapStatus) {
     return runtimeGit.getGitWorktreeBootstrapStatus(directory);
   }
-  return gitHttp.getGitWorktreeBootstrapStatus(directory);
+  throw new Error('Worktree bootstrap status is unavailable in this Piarium runtime');
 };
 
 export const markWorktreeBootstrapPending = (directory: string): void => {

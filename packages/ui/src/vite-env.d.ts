@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 interface Window {
+    __PIARIUM_HOME__?: string;
     __opencodeDebug?: {
         getLastAssistantMessage: () => unknown;
         getAllMessages: (truncate?: boolean) => unknown[];

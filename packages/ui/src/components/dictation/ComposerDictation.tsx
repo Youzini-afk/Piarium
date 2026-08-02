@@ -17,7 +17,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePiariumPreferencesStore } from '@/stores/usePiariumPreferencesStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 
@@ -74,7 +74,7 @@ const VolumeMeter: React.FC<{ volume: number }> = ({ volume }) => {
  * returns the download percent (null while unknown / not downloading).
  */
 const useModelDownloadProgress = (active: boolean): number | null => {
-    const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
+    const sttLocalModel = usePiariumPreferencesStore((state) => state.sttLocalModel);
     const [percent, setPercent] = React.useState<number | null>(null);
 
     React.useEffect(() => {
@@ -132,7 +132,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 }) => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
-    const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const dictationEnabled = usePiariumPreferencesStore((state) => state.dictationEnabled);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides));
     // The dictation server (WebSocket + STT worker) lives in the OpenChamber

@@ -23,10 +23,9 @@ import { PiAgentSelector } from '@/components/multirun/PiAgentSelector';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { isIMECompositionEvent } from '@/lib/ime';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { getWorktreeSetupCommands, type PiariumProjectRef } from '@/lib/piariumProjectConfig';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { ProjectRef } from '@/lib/openchamberConfig';
 import type {
   CreateMultiRunParams,
   MultiRunAgentSelection,
@@ -80,7 +79,6 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   const { currentTheme } = useThemeSystem();
   const { runtime } = useRuntimeAPIs();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
-  const { isGitRepository, isLoading: isLoadingBranches } = useBranchOptions(currentDirectory);
 
   const vscodeWorkspaceFolder = React.useMemo(() => {
     if (typeof window === 'undefined') {
@@ -95,7 +93,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   // Get project directory for setup commands
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const projects = useProjectsStore((state) => state.projects);
-  const projectRef = React.useMemo<ProjectRef | null>(() => {
+  const projectRef = React.useMemo<PiariumProjectRef | null>(() => {
     // VS Code panel should always use the current workspace root.
     if (isVSCodeRuntime && vscodeWorkspaceFolder) {
       return { id: `vscode:${vscodeWorkspaceFolder}`, path: vscodeWorkspaceFolder };
@@ -114,6 +112,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
 
     return null;
   }, [activeProjectId, projects, currentDirectory, vscodeWorkspaceFolder, isVSCodeRuntime]);
+  const projectDirectory = projectRef?.path ?? currentDirectory;
+  const { isGitRepository, isLoading: isLoadingBranches } = useBranchOptions(projectDirectory);
 
   // Load setup commands from config
   React.useEffect(() => {
@@ -348,7 +348,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         worktreeBaseBranch: isGitRepository ? baseBranch : undefined,
         isolateRuns: isGitRepository === true,
         files,
-        setupCommands: commandsToRun.length > 0 ? commandsToRun : undefined,
+        setupCommands: commandsToRun,
       });
 
       // Reset form on success - only after onCreateGroup completes
@@ -428,7 +428,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
               {t('agentManager.empty.baseBranch.label')}
             </label>
             <BranchSelector
-              directory={currentDirectory}
+              directory={projectDirectory}
               value={baseBranch}
               onChange={setBaseBranch}
             />

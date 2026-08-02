@@ -11,7 +11,7 @@ const sanitizePayload = (data: unknown): SettingsPayload => {
 export const createVSCodeSettingsAPI = (): SettingsAPI => ({
   async load(): Promise<SettingsLoadResult> {
     try {
-      const payload = sanitizePayload(await sendBridgeMessage('api:config/settings:get'));
+      const payload = sanitizePayload(await sendBridgeMessage('api:settings:get'));
       return {
         settings: {
           ...payload,
@@ -33,11 +33,6 @@ export const createVSCodeSettingsAPI = (): SettingsAPI => ({
   },
 
   async save(changes: Partial<SettingsPayload>): Promise<SettingsPayload> {
-    return sanitizePayload(await sendBridgeMessage('api:config/settings:save', changes));
-  },
-
-  async restartOpenCode(): Promise<{ restarted: boolean }> {
-    await sendBridgeMessage('api:config/reload');
-    return { restarted: true };
+    return sanitizePayload(await sendBridgeMessage('api:settings:save', changes));
   },
 });

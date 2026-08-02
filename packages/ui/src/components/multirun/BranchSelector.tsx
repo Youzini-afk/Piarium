@@ -12,7 +12,6 @@ import {
 import { cn } from '@/lib/utils';
 import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import {
   LAST_WORKTREE_SOURCE_BRANCH_KEY,
   resolveWorktreeSourceBranchPreference,
@@ -35,6 +34,7 @@ export interface BranchSelectorProps {
 }
 
 export interface BranchSelectorState {
+  currentBranch: string | null;
   localBranches: string[];
   remoteBranches: string[];
   isLoading: boolean;
@@ -94,7 +94,7 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
     return branches?.all ? true : null;
   }, [directory, isLoading, branches, isGitRepo]);
 
-  return { localBranches, remoteBranches, isLoading, isGitRepository };
+  return { currentBranch: branches?.current ?? null, localBranches, remoteBranches, isLoading, isGitRepository };
 }
 
 /**
@@ -110,7 +110,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   id,
 }) => {
   const { t } = useI18n();
-  const { localBranches, remoteBranches, isLoading, isGitRepository } = useBranchOptions(directory);
+  const { currentBranch, localBranches, remoteBranches, isLoading, isGitRepository } = useBranchOptions(directory);
   const allBranches = React.useMemo(
     () => [...localBranches, ...remoteBranches.map(b => `remotes/${b}`)],
     [localBranches, remoteBranches],
@@ -122,43 +122,18 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
     if (value && allBranches.includes(value)) return;
 
     const currentValue = value;
-    let cancelled = false;
-
-    const resolve = async () => {
-      try {
-        const rootBranch = directory ? await getRootBranch(directory).catch(() => null) : null;
-        if (cancelled) return;
-
-        const saved = localStorage.getItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
-
-        const {
-          sourceBranch,
-          shouldClearSavedSourceBranch,
-        } = resolveWorktreeSourceBranchPreference({
-          branches: allBranches,
-          savedSourceBranch: saved,
-          rootBranch,
-        });
-
-        if (shouldClearSavedSourceBranch) {
-          localStorage.removeItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
-        }
-
-        if (cancelled || (currentValue && allBranches.includes(currentValue))) return;
-
-        if (sourceBranch) {
-          onChange(sourceBranch);
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    void resolve();
-    return () => {
-      cancelled = true;
-    };
-  }, [allBranches, directory, disabled, isLoading, onChange, value]);
+    const saved = localStorage.getItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
+    const {
+      sourceBranch,
+      shouldClearSavedSourceBranch,
+    } = resolveWorktreeSourceBranchPreference({
+      branches: allBranches,
+      savedSourceBranch: saved,
+      rootBranch: currentBranch,
+    });
+    if (shouldClearSavedSourceBranch) localStorage.removeItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
+    if ((!currentValue || !allBranches.includes(currentValue)) && sourceBranch) onChange(sourceBranch);
+  }, [allBranches, currentBranch, disabled, isLoading, onChange, value]);
 
   const isDisabled = disabled || !isGitRepository || isLoading;
 

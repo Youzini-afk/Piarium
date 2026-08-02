@@ -1,14 +1,12 @@
 import * as vscode from 'vscode';
 import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
 import { getThemeKindName } from './theme';
-import type { OpenCodeManager, ConnectionStatus } from './opencode';
 import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
-import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
-import type { VSCodePiRuntime } from './piRuntime';
+import type { PiRuntimeConnectionStatus, VSCodePiRuntime } from './piRuntime';
 import { PiRuntimeWebviewBridge } from './piRuntimeWebviewBridge';
 
 type ActiveEditorFilePayload = {
@@ -45,10 +43,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   // Cache latest status/URL for when webview is resolved after connection is ready
-  private _cachedStatus: ConnectionStatus = 'connecting';
+  private _cachedStatus: PiRuntimeConnectionStatus = 'connecting';
   private _cachedError?: string;
-  private _sseCounter = 0;
-  private _sseStreams = new Map<string, { controller: AbortController; view: vscode.WebviewView | undefined }>();
   private _piRuntimeBridge?: PiRuntimeWebviewBridge;
   private readonly _webviewDevServerUrl: string | null;
   private _broadcastSelectionDebounce: ReturnType<typeof setTimeout> | undefined;
@@ -76,8 +72,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
-    private readonly _openCodeManager?: OpenCodeManager,
-    private readonly _piRuntime?: VSCodePiRuntime,
+    private readonly _piRuntime: VSCodePiRuntime,
   ) {
     this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
 
@@ -101,9 +96,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
-    this._piRuntimeBridge = this._piRuntime
-      ? new PiRuntimeWebviewBridge(webviewView.webview, this._piRuntime)
-      : undefined;
+    this._piRuntimeBridge = new PiRuntimeWebviewBridge(webviewView.webview, this._piRuntime);
     // Send theme payload (including optional Shiki theme JSON) after the webview is set up.
     void this.updateTheme(vscode.window.activeColorTheme.kind);
 
@@ -115,11 +108,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this._broadcastActiveEditorFile();
 
     webviewView.onDidDispose(() => {
-      for (const [streamId, stream] of this._sseStreams) {
-        if (stream.view !== webviewView) continue;
-        stream.controller.abort();
-        this._sseStreams.delete(streamId);
-      }
       if (this._view !== webviewView) return;
       if (this._broadcastSelectionDebounce !== undefined) {
         clearTimeout(this._broadcastSelectionDebounce);
@@ -147,31 +135,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      if (message.type === 'restartApi') {
-        await this._piRuntime?.restart();
-        await this._openCodeManager?.restart();
-        return;
-      }
-
-      if (message.type === 'api:sse:start') {
-        const response = await this._startSseProxy(message);
-        void this._sendMessageWithRetry(response);
-        return;
-      }
-
-      if (message.type === 'api:sse:stop') {
-        const response = await this._stopSseProxy(message);
-        void this._sendMessageWithRetry(response);
-        return;
-      }
-
-      const response = await handleBridgeMessage(message, {
-        manager: this._openCodeManager,
-        context: this._context,
-      });
+      const response = await handleBridgeMessage(message, { context: this._context });
       void this._sendMessageWithRetry(response);
 
-      if (message.type === 'api:config/settings:save' && response.success) {
+      if (message.type === 'api:settings:save' && response.success) {
         void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
       }
     });
@@ -189,7 +156,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public updateConnectionStatus(status: ConnectionStatus, error?: string) {
+  public updateConnectionStatus(status: PiRuntimeConnectionStatus, error?: string) {
     // Cache the latest state
     this._cachedStatus = status;
     this._cachedError = error;
@@ -342,14 +309,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
    * restart via the bridge + config/data refresh) — the same flow used after an
    * OpenCode update. Returns false if no webview is resolved to drive it.
    */
-  public reloadOpenCode(): boolean {
+  public reloadPiRuntime(): boolean {
     if (!this._view) {
       return false;
     }
 
     this._view.webview.postMessage({
       type: 'command',
-      command: 'reloadOpenCode',
+      command: 'reloadPiRuntime',
     });
     return true;
   }
@@ -527,96 +494,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private _buildSseHeaders(extra?: Record<string, string>): Record<string, string> {
-    return {
-      Accept: 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      ...(extra || {}),
-    };
-  }
-
-  private async _startSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
-    const { id, type, payload } = message;
-
-    const { path, headers, streamId: requestedStreamId } = (payload || {}) as { path?: string; headers?: Record<string, string>; streamId?: string };
-    const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
-
-    if (!this._openCodeManager) {
-      return {
-        id,
-        type,
-        success: true,
-        data: { status: 503, headers: { 'content-type': 'application/json' }, streamId: null },
-      };
-    }
-
-    const streamId = typeof requestedStreamId === 'string' && /^sse_webview_\d+_\d+$/.test(requestedStreamId)
-      ? requestedStreamId
-      : `sse_${++this._sseCounter}_${Date.now()}`;
-    const controller = new AbortController();
-    this._sseStreams.set(streamId, { controller, view: this._view });
-
-    try {
-      const start = await openSseProxy({
-        manager: this._openCodeManager,
-        path: normalizedPath,
-        headers: this._buildSseHeaders(headers),
-        signal: controller.signal,
-        onChunk: (chunk) => {
-          this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
-        },
-      });
-
-      start.run
-        .then(() => {
-          this._view?.webview.postMessage({ type: 'api:sse:end', streamId });
-        })
-        .catch((error) => {
-          if (!controller.signal.aborted) {
-            const messageText = error instanceof Error ? error.message : String(error);
-            this._view?.webview.postMessage({ type: 'api:sse:end', streamId, error: messageText });
-          }
-        })
-        .finally(() => {
-          this._sseStreams.delete(streamId);
-        });
-
-      return {
-        id,
-        type,
-        success: true,
-        data: {
-          status: 200,
-          headers: start.headers,
-          streamId,
-        },
-      };
-    } catch (error) {
-      this._sseStreams.delete(streamId);
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        id,
-        type,
-        success: true,
-        data: { status: 502, headers: { 'content-type': 'application/json' }, streamId: null, error: message },
-      };
-    }
-  }
-
-  private async _stopSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
-    const { id, type, payload } = message;
-    const { streamId } = (payload || {}) as { streamId?: string };
-    if (typeof streamId === 'string' && streamId.length > 0) {
-      const stream = this._sseStreams.get(streamId);
-      if (stream) {
-        stream.controller.abort();
-        this._sseStreams.delete(streamId);
-      }
-    }
-    return { id, type, success: true, data: { stopped: true } };
-  }
-
   private _getHtmlForWebview(webview: vscode.Webview) {
     const workspaceFolder = normalizeWindowsDriveLetter(
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ''
@@ -624,7 +501,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     // Use cached values which are updated by onStatusChange callback
     const initialStatus = this._cachedStatus;
-    const cliAvailable = this._piRuntime !== undefined || (this._openCodeManager?.isCliAvailable() ?? false);
 
     return getWebviewHtml({
       webview,
@@ -632,7 +508,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       workspaceFolder,
       workspaceFolders,
       initialStatus,
-      cliAvailable,
+      cliAvailable: true,
       extensionVersion: String(this._context.extension?.packageJSON?.version || ''),
       devServerUrl: this._webviewDevServerUrl,
     });

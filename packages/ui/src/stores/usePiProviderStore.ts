@@ -26,6 +26,8 @@ interface PiProviderState {
   load(cwd: string, options?: { force?: boolean }): Promise<PiProviderView[]>;
   providers: PiProviderView[];
   reset(): void;
+  selectedProviderId: string;
+  setSelectedProvider(providerId: string): void;
 }
 
 let loadGeneration = 0;
@@ -126,6 +128,8 @@ export const usePiProviderStore = create<PiProviderState>((set, get) => ({
       providers: [],
     });
   },
+  selectedProviderId: '',
+  setSelectedProvider: (selectedProviderId) => set({ selectedProviderId }),
 }));
 
 subscribeRuntimeEndpointChanged(() => {

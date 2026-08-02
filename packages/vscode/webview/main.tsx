@@ -1,109 +1,57 @@
 import { createVSCodeAPIs } from './api';
-import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { onCommand, onThemeChange, sendBridgeMessage } from './api/bridge';
 import { VSCodeRuntimeTransport } from './piRuntimeTransport';
-import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
-import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
-import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
-import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
 import {
   buildVSCodeThemeFromPalette,
   readVSCodeThemePalette,
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
-import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
-import type { VSCodeActiveEditorFile } from '@/sync/input-store';
-import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
-import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
 import { configurePiRuntimeSurface } from '@openchamber/ui/lib/pi-runtime/client';
-import type { PermissionRequest } from '@opencode-ai/sdk/v2/client';
+import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager' | 'settings';
 
 declare const __OPENCHAMBER_WEBVIEW_BUILD_TIME__: string;
 
-const PROVIDER_OPTIONS = Object.freeze([
-  { id: 'anthropic', name: 'Anthropic' },
-  { id: 'openai', name: 'OpenAI' },
-  { id: 'google', name: 'Google' },
-  { id: 'github-copilot', name: 'GitHub Copilot' },
-  { id: 'openrouter', name: 'OpenRouter' },
-  { id: 'groq', name: 'Groq' },
-  { id: 'deepseek', name: 'DeepSeek' },
-  { id: 'xai', name: 'xAI' },
-  { id: 'mistral', name: 'Mistral' },
-  { id: 'cohere', name: 'Cohere' },
-  { id: 'together', name: 'Together AI' },
-  { id: 'perplexity', name: 'Perplexity' },
-  { id: 'fireworks', name: 'Fireworks' },
-  { id: 'huggingface', name: 'Hugging Face' },
-  { id: 'azure', name: 'Azure OpenAI' },
-  { id: 'amazon-bedrock', name: 'Amazon Bedrock' },
-  { id: 'cloudflare', name: 'Cloudflare Workers AI' },
-]);
-
-const API_KEY_AUTH_METHOD = Object.freeze({
-  type: 'api',
-  name: 'api',
-  label: 'API key',
-});
-
-const OAUTH_AUTH_METHOD = Object.freeze({
-  type: 'oauth',
-  name: 'oauth',
-  label: 'OAuth',
-});
-
-const PROVIDER_AUTH_METHODS = Object.freeze(
-  Object.fromEntries(PROVIDER_OPTIONS.map((provider) => [
-    provider.id,
-    provider.id === 'github-copilot'
-      ? [OAUTH_AUTH_METHOD, API_KEY_AUTH_METHOD]
-      : [API_KEY_AUTH_METHOD],
-  ])),
-);
-
 declare global {
   interface Window {
     __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
-    __VSCODE_CONFIG__?: {
-      apiUrl?: string;
-      workspaceFolder: string;
-      workspaceFolders?: Array<{ name: string; path: string }>;
-      theme: string;
-      connectionStatus: string;
-      cliAvailable?: boolean;
-      extensionVersion?: string;
-      platform?: string;
-      arch?: string;
-      panelType?: PanelType;
-      viewMode?: 'sidebar' | 'editor';
-      initialSessionId?: string | null;
-      initialSettingsPage?: string | null;
-    };
     __OPENCHAMBER_VSCODE_THEME__?: VSCodeThemePayload['theme'];
-    __OPENCHAMBER_VSCODE_SHIKI_THEMES__?: { light?: Record<string, unknown>; dark?: Record<string, unknown> } | null;
-    __OPENCHAMBER_CONNECTION__?: { status: ConnectionStatus; error?: string; cliAvailable?: boolean };
+    __OPENCHAMBER_VSCODE_SHIKI_THEMES__?: {
+      dark?: Record<string, unknown>;
+      light?: Record<string, unknown>;
+    } | null;
+    __OPENCHAMBER_CONNECTION__?: { error?: string; status: ConnectionStatus };
     __OPENCHAMBER_HOME__?: string;
     __OPENCHAMBER_PANEL_TYPE__?: PanelType;
-    __OPENCHAMBER_VSCODE_WINDOW_FOCUSED__?: boolean;
+    __VSCODE_CONFIG__?: {
+      arch?: string;
+      connectionStatus?: string;
+      extensionVersion?: string;
+      initialSessionId?: string | null;
+      initialSettingsPage?: string | null;
+      panelType?: PanelType;
+      platform?: string;
+      theme?: string;
+      viewMode?: 'sidebar' | 'editor';
+      workspaceFolder: string;
+      workspaceFolders?: Array<{ name: string; path: string }>;
+    };
   }
 }
 
-console.log('[OpenChamber] VS Code webview starting...');
-console.log('[OpenChamber] VS Code webview build:', __OPENCHAMBER_WEBVIEW_BUILD_TIME__);
-console.log('[OpenChamber] Config:', window.__VSCODE_CONFIG__);
-try {
-  if (window.localStorage.getItem('openchamber_stream_debug') === '1') {
-    console.log('[OpenChamber] Debug: openchamber_stream_debug=1');
-  }
-} catch {
-  // ignore
-}
+console.log('[Piarium] VS Code webview starting...');
+console.log('[Piarium] VS Code webview build:', __OPENCHAMBER_WEBVIEW_BUILD_TIME__);
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+window.__OPENCHAMBER_PANEL_TYPE__ = window.__VSCODE_CONFIG__?.panelType || 'chat';
+window.__OPENCHAMBER_CONNECTION__ = {
+  status: (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting',
+};
+
 configurePiRuntimeSurface({
   clientName: 'piarium-vscode-webview',
   clientVersion: window.__VSCODE_CONFIG__?.extensionVersion || '0.1.0',
@@ -112,207 +60,120 @@ configurePiRuntimeSurface({
   runtimeKey: 'vscode:local',
 });
 
-const bootstrapLocale = readStoredLocaleForBootstrap();
-const bootstrapMessages = getBootstrapMessages(bootstrapLocale);
-
-const bootstrapConnectionStatus = () => {
-  const initialStatus = (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting';
-  const cliAvailable = window.__VSCODE_CONFIG__?.cliAvailable ?? true;
-  window.__OPENCHAMBER_CONNECTION__ = { status: initialStatus, cliAvailable };
-};
-
-bootstrapConnectionStatus();
-
-// Expose panel type globally for the VS Code app root to conditionally render.
-window.__OPENCHAMBER_PANEL_TYPE__ = (window.__VSCODE_CONFIG__?.panelType as PanelType) || 'chat';
-
-const handleConnectionMessage = (event: MessageEvent) => {
-  const msg = event.data;
-  if (msg?.type === 'connectionStatus') {
-    const payload: ConnectionStatus = msg.status;
-    const error: string | undefined = msg.error;
-    const prevCliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
-    window.__OPENCHAMBER_CONNECTION__ = { status: payload, error, cliAvailable: prevCliAvailable };
-    window.dispatchEvent(new CustomEvent('openchamber:connection-status', { detail: { status: payload, error } }));
-  }
-};
-
-window.addEventListener('message', handleConnectionMessage);
-window.addEventListener('openchamber:connection-status', () => {
-  maybeHideLoadingOverlay();
-});
-
 const fadeOutLoadingScreen = () => {
-  const loadingEl = document.getElementById('initial-loading');
-  if (!loadingEl) return;
-  loadingEl.classList.add('fade-out');
-  setTimeout(() => {
-    try {
-      loadingEl.remove();
-    } catch {
-      // ignore
-    }
-  }, 300);
+  const element = document.getElementById('initial-loading');
+  if (!element) return;
+  element.classList.add('fade-out');
+  window.setTimeout(() => element.remove(), 300);
 };
 
-const setLoadingStatusText = (text: string, variant: 'normal' | 'error' = 'normal') => {
-  const statusEl = document.getElementById('loading-status');
-  if (!statusEl) return;
-  statusEl.textContent = text;
-  if (variant === 'error') {
-    statusEl.classList.add('error-text');
-  } else {
-    statusEl.classList.remove('error-text');
-  }
-};
-
-const waitForUiMount = (timeoutMs = 8000): Promise<boolean> => {
-  if (typeof document === 'undefined') return Promise.resolve(false);
+const waitForUiMount = (timeoutMs = 8_000): Promise<boolean> => {
   const root = document.getElementById('root');
   if (!root) return Promise.resolve(false);
-
-  const hasContent = () => root.childNodes.length > 0;
-  if (hasContent()) return Promise.resolve(true);
-
+  if (root.childNodes.length > 0) return Promise.resolve(true);
   return new Promise((resolve) => {
     const observer = new MutationObserver(() => {
-      if (hasContent()) {
-        observer.disconnect();
-        clearTimeout(timeout);
-        resolve(true);
-      }
+      if (root.childNodes.length === 0) return;
+      observer.disconnect();
+      window.clearTimeout(timeout);
+      resolve(true);
     });
-
     observer.observe(root, { childList: true, subtree: true });
-
-    const timeout = setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       observer.disconnect();
       resolve(false);
     }, timeoutMs);
   });
 };
 
-let uiMounted = false;
+window.addEventListener('message', (event) => {
+  const message = event.data as { error?: unknown; status?: unknown; type?: unknown } | undefined;
+  if (message?.type !== 'connectionStatus') return;
+  const status = message.status;
+  if (status !== 'connecting' && status !== 'connected' && status !== 'error' && status !== 'disconnected') return;
+  const error = typeof message.error === 'string' ? message.error : undefined;
+  window.__OPENCHAMBER_CONNECTION__ = { status, ...(error ? { error } : {}) };
+  window.dispatchEvent(new CustomEvent('piarium:runtime-status', { detail: { error, status } }));
+});
 
-const maybeHideLoadingOverlay = () => {
-  const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status ?? 'connecting';
-
-  if (!uiMounted) {
-    return;
-  }
-
-  if (connectionStatus === 'connected') {
-    // The UI hydrates pickers and the sidebar from cache and refreshes
-    // providers/agents in the background, so once it's mounted and OpenCode is
-    // connected there's real interactive content underneath the splash. Don't
-    // keep the overlay up waiting on the live provider/agent fetches — on a cold
-    // start those are the slowest tail, and gating on them makes the splash
-    // linger long after the app is usable. Per-widget loaders convey any
-    // remaining background work.
-    fadeOutLoadingScreen();
-    return;
-  }
-
-  if (connectionStatus === 'error') {
-    const error = window.__OPENCHAMBER_CONNECTION__?.error;
-    setLoadingStatusText(error || bootstrapMessages.connectionError, 'error');
-    fadeOutLoadingScreen();
-    return;
-  }
-
-  if (connectionStatus === 'disconnected') {
-    setLoadingStatusText(bootstrapMessages.disconnected, 'error');
-    fadeOutLoadingScreen();
-    return;
-  }
-
-  // Connecting — no jargon; the animated logo conveys progress.
-  setLoadingStatusText('');
-};
-
-const applyInitialTheme = (theme: { metadata?: { variant?: string }; colors?: { surface?: { background?: string; foreground?: string } } }) => {
-  if (typeof document === 'undefined' || !theme) return;
-  const variant = theme.metadata?.variant === 'dark' ? 'dark' : 'light';
+const applyInitialTheme = (theme: VSCodeThemePayload['theme']) => {
   const root = document.documentElement;
+  const variant = theme.metadata?.variant === 'dark' ? 'dark' : 'light';
   root.classList.remove('light', 'dark');
   root.classList.add(variant);
-
   const background = theme.colors?.surface?.background;
-  if (background) {
-    document.body.style.backgroundColor = background;
-    let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
-    if (!meta) {
-      meta = document.createElement('meta');
-      meta.setAttribute('name', 'theme-color');
-      document.head.appendChild(meta);
-    }
-    meta.setAttribute('content', background);
+  if (!background) return;
+  document.body.style.backgroundColor = background;
+  let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
   }
+  meta.content = background;
 };
 
 const emitVSCodeTheme = (preferredKind?: VSCodeThemeKind) => {
   const palette = readVSCodeThemePalette(preferredKind);
-  if (!palette) {
-    return;
-  }
+  if (!palette) return;
   const theme = buildVSCodeThemeFromPalette(palette);
   window.__OPENCHAMBER_VSCODE_THEME__ = theme;
-   applyInitialTheme(theme);
+  applyInitialTheme(theme);
   window.dispatchEvent(new CustomEvent<VSCodeThemePayload>('openchamber:vscode-theme', {
-    detail: { theme, palette },
+    detail: { palette, theme },
   }));
 };
 
 emitVSCodeTheme(window.__VSCODE_CONFIG__?.theme as VSCodeThemeKind | undefined);
-
-const scheduleThemeRecompute = (kind?: VSCodeThemeKind) => {
-  // VS Code updates webview CSS variables asynchronously around theme changes.
-  // Re-read on the next frames so we don't snapshot the old palette.
+onThemeChange((payload) => {
+  const kind = (typeof payload === 'string' ? payload : payload?.kind) as VSCodeThemeKind | undefined;
+  if (typeof payload === 'object' && payload?.shikiThemes !== undefined) {
+    window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__ = payload.shikiThemes;
+    window.dispatchEvent(new CustomEvent('openchamber:vscode-shiki-themes', {
+      detail: { shikiThemes: payload.shikiThemes },
+    }));
+  }
   requestAnimationFrame(() => {
     emitVSCodeTheme(kind);
     requestAnimationFrame(() => emitVSCodeTheme(kind));
   });
-};
-
-onThemeChange((payload) => {
-  const kind = (typeof payload === 'string'
-    ? payload
-    : typeof payload === 'object' && payload
-      ? payload.kind
-      : undefined) as VSCodeThemeKind | undefined;
-
-  if (typeof payload === 'object' && payload?.shikiThemes !== undefined) {
-    window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__ = payload.shikiThemes;
-    window.dispatchEvent(
-      new CustomEvent('openchamber:vscode-shiki-themes', {
-        detail: { shikiThemes: payload.shikiThemes },
-      }),
-    );
-  }
-
-  scheduleThemeRecompute(kind);
 });
 
-const workspaceFolder = window.__VSCODE_CONFIG__?.workspaceFolder;
-if (workspaceFolder) {
-  const normalizeWorkspacePath = (value: string) => {
-    const normalized = value
-      .replace(/\\/g, '/')
-      .replace(/^([a-z]):\//, (_, letter: string) => `${letter.toUpperCase()}:/`)
-      .replace(/^\/([a-z]):\//, (_, letter: string) => `/${letter.toUpperCase()}:/`);
-    if (normalized === '/') {
-      return '/';
-    }
-    return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
-  };
+const normalizeWorkspacePath = (value: string): string => {
+  const normalized = value
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^([a-z]):\//, (_, letter: string) => `${letter.toUpperCase()}:/`)
+    .replace(/^\/([a-z]):\//, (_, letter: string) => `/${letter.toUpperCase()}:/`);
+  if (normalized === '/') return '/';
+  return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
+};
 
-  const normalizedWorkspaceFolder = normalizeWorkspacePath(workspaceFolder);
-  window.__OPENCHAMBER_HOME__ = normalizedWorkspaceFolder;
+const normalizeWorkspaceFolders = (value: unknown): Array<{ name: string; path: string }> => {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    const candidate = entry as { name?: unknown; path?: unknown };
+    const path = typeof candidate.path === 'string' ? normalizeWorkspacePath(candidate.path) : '';
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    return path ? { name, path } : null;
+  }).filter((entry): entry is { name: string; path: string } => entry !== null);
+};
+
+const configuredWorkspaceFolders = (): Array<{ name: string; path: string }> => {
+  const folders = normalizeWorkspaceFolders(window.__VSCODE_CONFIG__?.workspaceFolders);
+  if (folders.length > 0) return folders;
+  const workspaceFolder = window.__VSCODE_CONFIG__?.workspaceFolder;
+  return typeof workspaceFolder === 'string' && workspaceFolder.trim()
+    ? [{ name: '', path: normalizeWorkspacePath(workspaceFolder) }]
+    : [];
+};
+
+const persistWorkspace = (path: string) => {
+  if (!path) return;
+  window.__OPENCHAMBER_HOME__ = path;
   try {
-    window.localStorage.setItem('lastDirectory', normalizedWorkspaceFolder);
-    window.localStorage.setItem('homeDirectory', normalizedWorkspaceFolder);
-
-    // VS Code defaults: show dotfiles, hide gitignored
+    window.localStorage.setItem('lastDirectory', path);
+    window.localStorage.setItem('homeDirectory', path);
     if (window.localStorage.getItem('directoryTreeShowHidden') === null) {
       window.localStorage.setItem('directoryTreeShowHidden', 'true');
     }
@@ -320,1994 +181,180 @@ if (workspaceFolder) {
       window.localStorage.setItem('filesViewShowGitignored', 'false');
     }
   } catch (error) {
-    console.warn('Failed to persist workspace folder', error);
-  }
-}
-
-const normalizeUrl = (input: string | URL) => {
-  try {
-    return typeof input === 'string' ? new URL(input, window.location.href) : new URL(input.toString(), window.location.href);
-  } catch {
-    return null;
+    console.warn('[Piarium] Failed to persist VS Code workspace', error);
   }
 };
 
-const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
-  if (!headers) return {};
-  const normalized = new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
-  const result: Record<string, string> = {};
-  normalized.forEach((value, key) => {
-    result[key] = value;
-  });
-  return result;
+const syncVSCodeWorkspaceProjects = async (
+  folders: Array<{ name: string; path: string }>,
+  activePath?: string,
+) => {
+  if (window.__VSCODE_CONFIG__) window.__VSCODE_CONFIG__.workspaceFolders = folders;
+  const [{ useProjectsStore }, { useDirectoryStore }] = await Promise.all([
+    import('@/stores/useProjectsStore'),
+    import('@/stores/useDirectoryStore'),
+  ]);
+  const project = useProjectsStore.getState().syncVSCodeWorkspaceFolders(folders, activePath);
+  const path = project?.path || activePath || folders[0]?.path || '';
+  if (path) {
+    useDirectoryStore.getState().setDirectory(path, { showOverlay: false });
+    persistWorkspace(path);
+  }
+  return project;
 };
 
-const getRequestHeaders = (input?: RequestInfo | URL, init?: RequestInit): Record<string, string> => {
-  const headersFromRequest = input instanceof Request ? headersToRecord(input.headers) : {};
-  const headersFromInit = headersToRecord(init?.headers);
-  return { ...headersFromRequest, ...headersFromInit };
+const navigate = (view: 'sessions' | 'chat' | 'settings') => {
+  window.dispatchEvent(new CustomEvent('piarium:vscode:navigate', { detail: { view } }));
 };
 
-const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: RequestInit): string | undefined => {
-  const queryDirectory = url.searchParams.get('directory') || undefined;
-  if (queryDirectory) return queryDirectory;
-  const headers = getRequestHeaders(input, init);
-  const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === 'x-opencode-directory') {
-      // headersToRecord marks encoded directory hints so direct/raw percent
-      // sequences from other callers are not decoded accidentally.
-      if (directoryEncoding !== 'uri') return value;
-      try { return decodeURIComponent(value); } catch { return value; }
-    }
-  }
-  return undefined;
+const ensurePiSession = async (options?: { directory?: string; forceNew?: boolean }): Promise<string> => {
+  const [{ usePiSessionStore }, { useProjectsStore }, { useDirectoryStore }] = await Promise.all([
+    import('@/stores/usePiSessionStore'),
+    import('@/stores/useProjectsStore'),
+    import('@/stores/useDirectoryStore'),
+  ]);
+  const sessions = usePiSessionStore.getState();
+  if (!options?.forceNew && sessions.currentSessionId) return sessions.currentSessionId;
+  const projects = useProjectsStore.getState();
+  const activeProject = projects.projects.find((project) => project.id === projects.activeProjectId);
+  const cwd = options?.directory?.trim()
+    || activeProject?.path
+    || useDirectoryStore.getState().currentDirectory
+    || configuredWorkspaceFolders()[0]?.path
+    || '';
+  if (!cwd) throw new Error('Open a workspace folder before creating a Pi session.');
+  useDirectoryStore.getState().setDirectory(cwd, { showOverlay: false });
+  const snapshot = await sessions.createSession(cwd);
+  return snapshot.sessionId;
 };
 
-const decodeBase64 = (value: string): ArrayBuffer => {
-  const binary = atob(value);
-  const buffer = new ArrayBuffer(binary.length);
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
+const appendPiDraft = async (text: string): Promise<string> => {
+  const normalized = text.trim();
+  const sessionId = await ensurePiSession();
+  if (normalized) {
+    const { usePiDraftStore } = await import('@/stores/usePiDraftStore');
+    usePiDraftStore.getState().appendText(sessionId, normalized);
   }
-  return buffer;
+  navigate('chat');
+  return sessionId;
 };
 
-const jsonResponse = (body: unknown, status = 200): Response => {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-};
-
-const unsupportedWebRouteResponse = (feature: string): Response => {
-  return jsonResponse({ error: `${feature} is not supported in VS Code` }, 501);
-};
-
-const pluginConfigErrorStatus = (message: string): number => {
-  const lower = message.toLowerCase();
-  if (lower.includes('already exists')) return 409;
-  if (lower.includes('not found')) return 404;
-  if (lower.includes('required') || lower.includes('invalid') || lower.includes('must ')) return 400;
-  return 500;
-};
-
-const isNullBodyStatus = (status: number): boolean => status === 204 || status === 205 || status === 304;
-
-const buildProxiedResponse = (
-  proxied: { status: number; headers: Record<string, string>; bodyBase64?: string; bodyText?: string }
-): Response => {
-  if (isNullBodyStatus(proxied.status)) {
-    return new Response(null, { status: proxied.status, headers: proxied.headers });
-  }
-
-  if (typeof proxied.bodyText === 'string') {
-    return new Response(proxied.bodyText, { status: proxied.status, headers: proxied.headers });
-  }
-
-  const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new ArrayBuffer(0);
-  return new Response(body, { status: proxied.status, headers: proxied.headers });
-};
-
-const getHeaderValue = (headers: HeadersInit | undefined, name: string): string | undefined => {
-  if (!headers) return undefined;
-  const normalized = headers instanceof Headers ? headers : new Headers(headers);
-  return normalized.get(name) || undefined;
-};
-
-const getRequestedDirectory = (url: URL, init?: RequestInit): string | undefined => (
-  url.searchParams.get('directory')
-  || getHeaderValue(init?.headers, 'x-opencode-directory')
-  || undefined
-);
-
-const readJsonBody = async (init?: RequestInit): Promise<Record<string, unknown>> => {
-  const body = init?.body;
-  if (!body) return {};
-  if (typeof body === 'string') return JSON.parse(body) as Record<string, unknown>;
-  if (body instanceof URLSearchParams) return Object.fromEntries(body.entries());
-  if (body instanceof Blob) return JSON.parse(await body.text()) as Record<string, unknown>;
-  return {};
-};
-
-const bridgePayloadStatus = (data: unknown): number => {
-  if (!data || typeof data !== 'object') return 200;
-  const status = (data as { status?: unknown }).status;
-  return typeof status === 'number' && status >= 100 && status <= 599 ? status : 200;
-};
-
-type PendingMcpAuthContext = {
-  name: string;
-  directory: string | null;
-  expiresAt: number;
-};
-
-const MCP_PENDING_AUTH_STORAGE_KEY = 'openchamber.vscode.pendingMcpAuth.v1';
-const MCP_PENDING_AUTH_TTL_MS = 30 * 60 * 1000;
-
-const readPendingMcpAuthContexts = (): Record<string, PendingMcpAuthContext> => {
-  try {
-    const raw = window.localStorage.getItem(MCP_PENDING_AUTH_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, PendingMcpAuthContext>;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-
-    const now = Date.now();
-    const next: Record<string, PendingMcpAuthContext> = {};
-    for (const [state, entry] of Object.entries(parsed)) {
-      if (
-        typeof state !== 'string' ||
-        !state ||
-        !entry ||
-        typeof entry !== 'object' ||
-        typeof entry.name !== 'string' ||
-        !entry.name.trim() ||
-        typeof entry.expiresAt !== 'number' ||
-        entry.expiresAt <= now
-      ) {
-        continue;
-      }
-      next[state] = {
-        name: entry.name.trim(),
-        directory: typeof entry.directory === 'string' && entry.directory.trim() ? entry.directory.trim() : null,
-        expiresAt: entry.expiresAt,
-      };
-    }
-    if (Object.keys(next).length !== Object.keys(parsed).length) {
-      window.localStorage.setItem(MCP_PENDING_AUTH_STORAGE_KEY, JSON.stringify(next));
-    }
-    return next;
-  } catch {
-    return {};
-  }
-};
-
-const writePendingMcpAuthContexts = (contexts: Record<string, PendingMcpAuthContext>) => {
-  try {
-    window.localStorage.setItem(MCP_PENDING_AUTH_STORAGE_KEY, JSON.stringify(contexts));
-  } catch {
-    // Ignore storage failures; callers still get an API-shaped error where needed.
-  }
-};
-const isSseApiPath = (pathname: string) => pathname === '/api/event' || pathname === '/api/global/event';
-const isSessionMessageApiPath = (pathname: string) => /^\/api\/session\/[^/]+\/message$/.test(pathname);
-const isApiPath = (pathname: string) => pathname === '/api' || pathname.startsWith('/api/');
-const isLocalRuntimePath = (pathname: string) => isApiPath(pathname) || pathname === '/auth/session';
-
-const parseJsonRequestBody = async (init?: RequestInit): Promise<Record<string, unknown>> => {
-  const body = init?.body;
-  if (!body) return {};
-
-  let text = '';
-  if (typeof body === 'string') {
-    text = body;
-  } else if (body instanceof URLSearchParams) {
-    text = body.toString();
-  } else if (body instanceof Blob) {
-    text = await body.text();
-  }
-
-  if (!text.trim()) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
-};
-
-const readRequestDirectory = (url: URL, init?: RequestInit): string | undefined => {
-  const queryDirectory = url.searchParams.get('directory') || undefined;
-  if (queryDirectory) {
-    return queryDirectory;
-  }
-
-  const headers = init?.headers;
-  if (!headers) return undefined;
-  if (headers instanceof Headers) {
-    return headers.get('x-opencode-directory') || undefined;
-  }
-  if (Array.isArray(headers)) {
-    const found = headers.find(([key]) => key.toLowerCase() === 'x-opencode-directory');
-    return found?.[1] || undefined;
-  }
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === 'x-opencode-directory' && typeof value === 'string') {
-      return value;
-    }
-  }
-  return undefined;
-};
-
-const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: RequestInit | undefined, method: string) => {
-  const pathname = url.pathname;
-  const normalizedPathname = pathname !== '/' ? pathname.replace(/\/+$/, '') : pathname;
-
-  if (normalizedPathname === '/api/system/info' && method === 'GET') {
-    const config = window.__VSCODE_CONFIG__;
-    return jsonResponse({
-      openchamberVersion: config?.extensionVersion || 'VS Code Extension',
-      runtime: 'vscode',
-      platform: config?.platform || '',
-      arch: config?.arch || '',
-    });
-  }
-
-  if (normalizedPathname === '/api/preview/targets') {
-    return unsupportedWebRouteResponse('Preview proxy');
-  }
-
-  if (normalizedPathname.startsWith('/api/openchamber/tunnel/')) {
-    return unsupportedWebRouteResponse('Remote tunnel settings');
-  }
-
-  if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
-    return unsupportedWebRouteResponse('Scheduled tasks');
-  }
-
-  if (normalizedPathname === '/api/sessions/snapshot' && method === 'GET') {
-    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
-      .catch(() => ({}));
-    return new Response(
-      JSON.stringify({
-        statusSessions: {},
-        attentionSessions: {},
-        activitySessions: activity || {},
-        serverTime: Date.now(),
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
-  if (/^\/api\/sessions\/[^/]+\/(view|unview)$/.test(normalizedPathname) && method === 'POST') {
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (normalizedPathname === '/api/permission-auto-accept' && method === 'GET') {
-    const snapshot = await sendBridgeMessage('api:permission-auto-accept:get');
-    return new Response(JSON.stringify(snapshot), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const permissionPolicyMatch = normalizedPathname.match(/^\/api\/permission-auto-accept\/sessions\/([^/]+)$/);
-  if (permissionPolicyMatch && method === 'PUT') {
-    const bodyText = await extractBodyText(url, init, method);
-    const body = bodyText ? JSON.parse(bodyText) as { enabled?: unknown } : {};
-    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set', {
-      sessionId: decodeURIComponent(permissionPolicyMatch[1]),
-      enabled: body.enabled,
-    });
-    return new Response(JSON.stringify(snapshot), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (/^\/api\/sessions\/[^/]+\/message-sent$/.test(normalizedPathname) && method === 'POST') {
-    const sessionId = normalizedPathname.split('/')[3] || '';
-    return new Response(
-      JSON.stringify({
-        success: true,
-        sessionId,
-        messageSent: true,
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
-  if (normalizedPathname === '/api/session-activity' && method === 'GET') {
-    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
-      .catch(() => ({}));
-    return new Response(JSON.stringify(activity || {}), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (normalizedPathname === '/api/mcp/auth/pending') {
-    const state = url.searchParams.get('state')?.trim() || '';
-
-    if (method === 'POST') {
-      const body = await readJsonBody(init);
-      const nextState = typeof body.state === 'string' ? body.state.trim() : '';
-      const name = typeof body.name === 'string' ? body.name.trim() : '';
-      if (!nextState) {
-        return jsonResponse({ error: 'OAuth state is required' }, 400);
-      }
-      if (!name) {
-        return jsonResponse({ error: 'MCP server name is required' }, 400);
-      }
-
-      const contexts = readPendingMcpAuthContexts();
-      contexts[nextState] = {
-        name,
-        directory: typeof body.directory === 'string' && body.directory.trim() ? body.directory.trim() : null,
-        expiresAt: Date.now() + MCP_PENDING_AUTH_TTL_MS,
-      };
-      writePendingMcpAuthContexts(contexts);
-      return jsonResponse({ success: true });
-    }
-
-    if (method === 'GET') {
-      if (!state) {
-        return jsonResponse({ error: 'OAuth state is required' }, 400);
-      }
-      const context = readPendingMcpAuthContexts()[state];
-      if (!context) {
-        return jsonResponse({ error: 'No pending MCP auth context' }, 404);
-      }
-      return jsonResponse({ name: context.name, directory: context.directory });
-    }
-
-    if (method === 'DELETE') {
-      if (state) {
-        const contexts = readPendingMcpAuthContexts();
-        delete contexts[state];
-        writePendingMcpAuthContexts(contexts);
-      }
-      return jsonResponse({ success: true });
-    }
-
-    return jsonResponse({ error: 'Method not allowed' }, 405);
-  }
-
-  if (normalizedPathname === '/api/sessions/status' && method === 'GET') {
-    return new Response(
-      JSON.stringify({
-        sessions: {},
-        serverTime: Date.now(),
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
-  if (normalizedPathname === '/api/sessions/attention' && method === 'GET') {
-    return new Response(
-      JSON.stringify({
-        sessions: {},
-        serverTime: Date.now(),
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
-  if (/^\/api\/sessions\/[^/]+\/status$/.test(normalizedPathname) && method === 'GET') {
-    const sessionId = normalizedPathname.split('/')[3] || '';
-    return new Response(
-      JSON.stringify({
-        error: 'Session not found or no state available',
-        sessionId,
-      }),
-      {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
-  if (/^\/api\/sessions\/[^/]+\/attention$/.test(normalizedPathname) && method === 'GET') {
-    const sessionId = normalizedPathname.split('/')[3] || '';
-    return new Response(
-      JSON.stringify({
-        error: 'Session not found or no attention state available',
-        sessionId,
-      }),
-      {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
-  if (normalizedPathname === '/api/tts/status' && method === 'GET') {
-    return new Response(JSON.stringify({ available: false }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (normalizedPathname === '/api/tts/say/status' && method === 'GET') {
-    return new Response(JSON.stringify({ available: false, voices: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if ((pathname === '/api/tts/speak' || pathname === '/api/tts/say/speak') && method === 'POST') {
-    return new Response(JSON.stringify({ error: 'TTS endpoints are not available in VS Code runtime' }), {
-      status: 501,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Dictation runs on the OpenChamber web server (WebSocket + worker); the VS
-  // Code bridge has no server process, so report it deterministically
-  // unavailable. The mic button hides itself when capture is unsupported.
-  if (normalizedPathname === '/api/dictation/status' && method === 'GET') {
-    return new Response(JSON.stringify({ provider: 'local', available: false, reasonCode: 'unsupported_runtime', models: [] }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (normalizedPathname.startsWith('/api/dictation/') ) {
-    return new Response(JSON.stringify({ error: 'Dictation is not available in VS Code runtime' }), {
-      status: 501,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  // Health endpoints: reflect actual connection status
-  if (pathname === '/health' || pathname === '/api/health') {
-    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
-    const isReady = connectionStatus === 'connected';
-    const cliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
-    return new Response(JSON.stringify({
-      status: isReady ? 'ok' : 'connecting',
-      isOpenCodeReady: isReady,
-      cliAvailable,
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (pathname.startsWith('/api/fs/list')) {
-    const targetPath = url.searchParams.get('path') || '';
-    const respectGitignore = url.searchParams.get('respectGitignore') === 'true';
-    const data = await sendBridgeMessage('api:fs:list', { path: targetPath, respectGitignore });
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/fs/mkdir')) {
-    const body = await extractJsonBody(input, init, method);
-    const data = await sendBridgeMessage('api:fs:mkdir', { path: body.path });
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/fs/home')) {
-    const data = await sendBridgeMessage('api:fs/home');
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/vscode/pick-files')) {
-    const data = await sendBridgeMessage('api:files/pick');
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/vscode/drop-files') && method === 'POST') {
-    const body = await extractJsonBody(input, init, method);
-    const uris = Array.isArray((body as { uris?: unknown[] }).uris)
-      ? (body as { uris: unknown[] }).uris.filter((value): value is string => typeof value === 'string')
-      : [];
-    const data = await sendBridgeMessage('api:files/drop', { uris });
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/vscode/save-image') && method === 'POST') {
-    const body = await extractJsonBody(input, init, method);
-    const fileName = typeof (body as { fileName?: unknown }).fileName === 'string'
-      ? (body as { fileName: string }).fileName
-      : undefined;
-    const dataUrl = typeof (body as { dataUrl?: unknown }).dataUrl === 'string'
-      ? (body as { dataUrl: string }).dataUrl
-      : undefined;
-    const data = await sendBridgeMessage('api:files/save-image', { fileName, dataUrl });
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/vscode/save-markdown') && method === 'POST') {
-    const body = await extractJsonBody(input, init, method);
-    const fileName = typeof (body as { fileName?: unknown }).fileName === 'string'
-      ? (body as { fileName: string }).fileName
-      : undefined;
-    const content = typeof (body as { content?: unknown }).content === 'string'
-      ? (body as { content: string }).content
-      : undefined;
-    const data = await sendBridgeMessage('api:files/save-markdown', { fileName, content });
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/config/agents/')) {
-    const encodedName = pathname.slice('/api/config/agents/'.length);
-    const name = decodeURIComponent(encodedName);
-    const verb = method;
-    const body = await extractJsonBody(input, init, method);
-    const directory = getRequestDirectoryHint(url, input, init);
-    try {
-      const data = await sendBridgeMessage('api:config/agents', { method: verb, name, body, directory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/config/commands/')) {
-    const encodedName = pathname.slice('/api/config/commands/'.length);
-    const name = decodeURIComponent(encodedName);
-    const verb = method;
-    const body = await extractJsonBody(input, init, method);
-    const directory = getRequestDirectoryHint(url, input, init);
-    try {
-      const data = await sendBridgeMessage('api:config/commands', { method: verb, name, body, directory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/config/mcp') {
-    const verb = method;
-    const body = await extractJsonBody(input, init, method);
-    const directory = getRequestDirectoryHint(url, input, init);
-    try {
-      const data = await sendBridgeMessage('api:config/mcp', { method: verb, body, directory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/config/mcp/')) {
-    const encodedName = pathname.slice('/api/config/mcp/'.length);
-    const name = decodeURIComponent(encodedName);
-    const verb = method;
-    const body = await extractJsonBody(input, init, method);
-    const directory = getRequestDirectoryHint(url, input, init);
-    try {
-      const data = await sendBridgeMessage('api:config/mcp', { method: verb, name, body, directory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/config/snippets') {
-    const verb = method;
-    const directory = getRequestDirectoryHint(url, input, init);
-    try {
-      const data = await sendBridgeMessage('api:config/snippets', { method: verb, directory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/config/snippets/expand') {
-    const verb = method === 'GET' && !hasInitBody(init) && !(input instanceof Request) ? 'POST' : method;
-    const body = await extractJsonBody(input, init, method);
-    const directory = getRequestDirectoryHint(url, input, init);
-    try {
-      const data = await sendBridgeMessage('api:config/snippets', { method: verb, body, directory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/config/snippets/')) {
-    const encodedName = pathname.slice('/api/config/snippets/'.length);
-    const name = decodeURIComponent(encodedName);
-    const verb = method;
-    const body = await extractJsonBody(input, init, method);
-    const directory = getRequestDirectoryHint(url, input, init);
-    try {
-      const data = await sendBridgeMessage('api:config/snippets', { method: verb, name, body, directory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  // Skills file operations: /api/config/skills/:name/files/:filePath
-  const skillsFilesMatch = pathname.match(/^\/api\/config\/skills\/([^/]+)\/files\/(.+)$/);
-  if (skillsFilesMatch) {
-    const name = decodeURIComponent(skillsFilesMatch[1]);
-    const filePath = decodeURIComponent(skillsFilesMatch[2]);
-    const verb = method;
-    const body = await extractJsonBody(input, init, method);
-    try {
-      const data = await sendBridgeMessage('api:config/skills/files', {
-        method: verb,
-        name,
-        filePath,
-        content: body.content
-      });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  const skillsCatalogStatusFromPayload = (payload: unknown): number => {
-    if (!payload || typeof payload !== 'object') return 200;
-    const data = payload as { ok?: boolean; error?: { kind?: string } };
-    if (data.ok === false) {
-      const kind = data.error?.kind;
-      if (kind === 'conflicts') return 409;
-      if (kind === 'authRequired') return 401;
-      return 400;
-    }
-    return 200;
-  };
-
-  // Skills catalog: /api/config/skills/catalog
-  if (pathname === '/api/config/skills/catalog') {
-    const refresh = url.searchParams.get('refresh') === 'true';
-    try {
-      const data = await sendBridgeMessage('api:config/skills:catalog', { refresh });
-      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  // Skills scan: /api/config/skills/scan
-  if (pathname === '/api/config/skills/scan') {
-    const body = await extractJsonBody(input, init, method);
-    try {
-      const data = await sendBridgeMessage('api:config/skills:scan', body);
-      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  // Skills install: /api/config/skills/install
-  if (pathname === '/api/config/skills/install') {
-    const body = await extractJsonBody(input, init, method);
-    try {
-      const data = await sendBridgeMessage('api:config/skills:install', body);
-      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  // Skills CRUD: /api/config/skills/:name or /api/config/skills
-  if (pathname === '/api/config/skills') {
-    try {
-      const data = await sendBridgeMessage('api:config/skills', { method: 'GET' });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/config/skills/')) {
-    const encodedName = pathname.slice('/api/config/skills/'.length);
-    const name = decodeURIComponent(encodedName);
-    const verb = method;
-    const body = await extractJsonBody(input, init, method);
-    try {
-      const data = await sendBridgeMessage('api:config/skills', { method: verb, name, body });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/config/settings')) {
-    if (method === 'GET') {
-      const settings = await sendBridgeMessage('api:config/settings:get');
-      return new Response(JSON.stringify(settings), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    const body = await extractJsonBody(input, init, method);
-    const updated = await sendBridgeMessage('api:config/settings:save', body);
-    return new Response(JSON.stringify(updated), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (normalizedPathname === '/api/agent-orchestration/config' && method === 'GET') {
-    try {
-      const data = await sendBridgeMessage('api:agent-orchestration:config:get', {
-        directory: getRequestedDirectory(url, init),
-      });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, 500);
-    }
-  }
-
-  if (normalizedPathname === '/api/agent-orchestration/mode' && method === 'PATCH') {
-    try {
-      const body = await readJsonBody(init);
-      const data = await sendBridgeMessage('api:agent-orchestration:mode:set', {
-        ...body,
-        directory: getRequestedDirectory(url, init),
-      });
-      return jsonResponse(data, bridgePayloadStatus(data));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, 500);
-    }
-  }
-
-  if (normalizedPathname === '/api/agent-orchestration/provider' && method === 'PATCH') {
-    try {
-      const body = await readJsonBody(init);
-      const data = await sendBridgeMessage('api:agent-orchestration:provider:set', {
-        ...body,
-        directory: getRequestedDirectory(url, init),
-      });
-      return jsonResponse(data, bridgePayloadStatus(data));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, 500);
-    }
-  }
-
-  if (normalizedPathname === '/api/agent-orchestration/slim/config' && method === 'GET') {
-    try {
-      const data = await sendBridgeMessage('api:agent-orchestration:slim-config:get', {
-        directory: getRequestedDirectory(url, init),
-      });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, 500);
-    }
-  }
-
-  if (normalizedPathname === '/api/agent-orchestration/slim/config' && method === 'PATCH') {
-    try {
-      const body = await readJsonBody(init);
-      const data = await sendBridgeMessage('api:agent-orchestration:slim-config:save', {
-        ...body,
-        directory: getRequestedDirectory(url, init),
-      });
-      return jsonResponse(data, bridgePayloadStatus(data));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, 500);
-    }
-  }
-
-  if (normalizedPathname === '/api/openagent/config') {
-    if (method === 'GET') {
-      try {
-        const data = await sendBridgeMessage('api:openagent:config:get', {
-          directory: getRequestedDirectory(url, init),
-        });
-        return jsonResponse(data);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return jsonResponse({ error: message }, 500);
-      }
-    }
-
-    if (method === 'PATCH') {
-      try {
-        const body = await readJsonBody(init);
-        const data = await sendBridgeMessage('api:openagent:config:save', {
-          ...body,
-          directory: getRequestedDirectory(url, init),
-        });
-        return jsonResponse(data, bridgePayloadStatus(data));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return jsonResponse({ error: message }, 500);
-      }
-    }
-  }
-
-  if (normalizedPathname === '/api/openagent/plugin' && method === 'PATCH') {
-    try {
-      const body = await readJsonBody(init);
-      const data = await sendBridgeMessage('api:openagent:plugin:set', {
-        ...body,
-        directory: getRequestedDirectory(url, init),
-      });
-      return jsonResponse(data, bridgePayloadStatus(data));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, 500);
-    }
-  }
-
-  if (normalizedPathname === '/api/magic-context/config') {
-    if (method === 'GET') {
-      try {
-        const data = await sendBridgeMessage('api:magic-context:config:get', {
-          directory: getRequestedDirectory(url, init),
-        });
-        return jsonResponse(data);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return jsonResponse({ error: message }, 500);
-      }
-    }
-
-    if (method === 'PATCH') {
-      try {
-        const body = await readJsonBody(init);
-        const data = await sendBridgeMessage('api:magic-context:config:save', {
-          ...body,
-          directory: getRequestedDirectory(url, init),
-        });
-        return jsonResponse(data, bridgePayloadStatus(data));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return jsonResponse({ error: message }, 500);
-      }
-    }
-  }
-
-  if (normalizedPathname === '/api/behavior/agents-md') {
-    if (method === 'GET') {
-      const data = await sendBridgeMessage('api:behavior/agents-md:get');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    if (method === 'PUT') {
-      const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:behavior/agents-md:save', body);
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/magic-prompts') {
-    if (method === 'GET') {
-      const data = await sendBridgeMessage('api:magic-prompts:get');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    if (method === 'DELETE') {
-      const data = await sendBridgeMessage('api:magic-prompts:reset-all');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/magic-prompts/')) {
-    const id = decodeURIComponent(pathname.slice('/api/magic-prompts/'.length));
-    if (method === 'PUT') {
-      const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:magic-prompts:save', { id, text: body?.text });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    if (method === 'DELETE') {
-      const data = await sendBridgeMessage('api:magic-prompts:reset', { id });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/config/opencode-resolution' && method === 'GET') {
-    try {
-      const data = await sendBridgeMessage('api:config/opencode-resolution:get');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/config/reload')) {
-    await sendBridgeMessage('api:config/reload');
-    return new Response(JSON.stringify({ restarted: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname === '/api/config/plugins' && method === 'GET') {
-    try {
-      const directory = getRequestDirectoryHint(url, input, init);
-      const data = await sendBridgeMessage('api:config/plugins', { method, target: 'list', directory });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
-    }
-  }
-
-  if (pathname === '/api/config/plugins/registry' && method === 'GET') {
-    try {
-      const rawSpecs = url.searchParams.get('specs') || '';
-      const specs = rawSpecs ? rawSpecs.split(',').map((spec) => spec.trim()).filter(Boolean) : [];
-      const directory = getRequestDirectoryHint(url, input, init);
-      const data = await sendBridgeMessage('api:config/plugins', {
-        method,
-        target: 'registry',
-        specs,
-        refresh: url.searchParams.get('refresh') === 'true',
-        directory,
-      });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
-    }
-  }
-
-  if (pathname === '/api/config/plugins/entry' && method === 'POST') {
-    try {
-      const body = await extractJsonBody(input, init, method);
-      const directory = getRequestDirectoryHint(url, input, init);
-      const data = await sendBridgeMessage('api:config/plugins', { method, target: 'entry', body, directory });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
-    }
-  }
-
-  const pluginEntryMatch = pathname.match(/^\/api\/config\/plugins\/entry\/([^/]+)$/);
-  if (pluginEntryMatch) {
-    try {
-      const body = method === 'GET' || method === 'DELETE' ? undefined : await extractJsonBody(input, init, method);
-      const directory = getRequestDirectoryHint(url, input, init);
-      const data = await sendBridgeMessage('api:config/plugins', {
-        method,
-        target: 'entry',
-        pluginId: decodeURIComponent(pluginEntryMatch[1]),
-        body,
-        directory,
-      });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
-    }
-  }
-
-  if (pathname === '/api/config/plugins/file' && method === 'POST') {
-    try {
-      const body = await extractJsonBody(input, init, method);
-      const directory = getRequestDirectoryHint(url, input, init);
-      const data = await sendBridgeMessage('api:config/plugins', { method, target: 'file', body, directory });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
-    }
-  }
-
-  const pluginFileMatch = pathname.match(/^\/api\/config\/plugins\/file\/([^/]+)$/);
-  if (pluginFileMatch) {
-    try {
-      const body = method === 'GET' || method === 'DELETE' ? undefined : await extractJsonBody(input, init, method);
-      const directory = getRequestDirectoryHint(url, input, init);
-      const data = await sendBridgeMessage('api:config/plugins', {
-        method,
-        target: 'file',
-        pluginId: decodeURIComponent(pluginFileMatch[1]),
-        body,
-        directory,
-      });
-      return jsonResponse(data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
-    }
-  }
-
-  if (pathname.startsWith('/api/openchamber/models-metadata')) {
-    try {
-      const data = await sendBridgeMessage('api:models/metadata');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      console.warn('[OpenChamber] Failed to fetch models metadata via bridge, returning empty set:', error);
-      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/opencode/version' && method === 'GET') {
-    try {
-      const data = await sendBridgeMessage('api:opencode/version');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ version: null, error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/opencode/health' && method === 'GET') {
-    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
-    return new Response(JSON.stringify({ healthy: connectionStatus === 'connected' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (pathname === '/api/opencode/upgrade-status' && method === 'GET') {
-    const data = await sendBridgeMessage('api:opencode/upgrade-status');
-    return jsonResponse(data);
-  }
-
-  if (pathname === '/api/opencode/upgrade' && method === 'POST') {
-    const body = await extractJsonBody(input, init, method);
-    const result = await sendBridgeMessage<{ status: number; body: unknown }>('api:opencode/upgrade', body);
-    return jsonResponse(result.body, result.status);
-  }
-
-  if (pathname === '/api/zen/models' && method === 'GET') {
-    try {
-      const data = await sendBridgeMessage('api:zen:models');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message, models: [] }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/openchamber/update-check')) {
-    try {
-      const currentVersion = url.searchParams.get('currentVersion') || undefined;
-      const instanceMode = url.searchParams.get('instanceMode') || 'local';
-      const deviceClass = url.searchParams.get('deviceClass') || 'desktop';
-      const platform = url.searchParams.get('platform') || window.__VSCODE_CONFIG__?.platform || undefined;
-      const arch = url.searchParams.get('arch') || window.__VSCODE_CONFIG__?.arch || undefined;
-      const reportUsageRaw = (url.searchParams.get('reportUsage') || 'true').toLowerCase();
-      const reportUsage = !(reportUsageRaw === 'false' || reportUsageRaw === '0' || reportUsageRaw === 'no');
-      const data = await sendBridgeMessage('api:openchamber:update-check', {
-        currentVersion,
-        instanceMode,
-        deviceClass,
-        platform,
-        arch,
-        reportUsage,
-      });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ available: false, error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/auth/session') {
-    // VS Code host is trusted; mirror web server shape to keep UI logic happy
-    const body = {
-      authenticated: true,
-      requireSetup: false,
-      authenticatedAt: Date.now(),
-    };
-    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname.startsWith('/api/opencode/directory')) {
-    const body = await extractJsonBody(input, init, method);
-    const result = await sendBridgeMessage('api:opencode/directory', { path: body.path });
-    return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  if (pathname === '/api/quota/providers') {
-    try {
-      const data = await sendBridgeMessage('api:quota:providers');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(opencode-go|ollama-cloud|cursor)(?:\/(validate|import))?$/);
-  if (quotaCredentialMatch) {
-    try {
-      const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
-      const bridgeMethod = quotaCredentialMatch[2]?.toUpperCase() || method;
-      const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredentialMatch[1], method: bridgeMethod, credential: body });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  const quotaMatch = pathname.match(/^\/api\/quota\/([^/]+)$/);
-  if (quotaMatch && method === 'GET') {
-    const providerId = decodeURIComponent(quotaMatch[1]);
-    try {
-      const data = await sendBridgeMessage('api:quota:get', { providerId });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/provider' && method === 'GET') {
-    return new Response(JSON.stringify({ providers: PROVIDER_OPTIONS, all: PROVIDER_OPTIONS }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (pathname === '/api/provider/auth' && method === 'GET') {
-    return new Response(JSON.stringify(PROVIDER_AUTH_METHODS), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const providerAuthSaveMatch = pathname.match(/^\/api\/auth\/([^/]+)$/);
-  if (providerAuthSaveMatch && method === 'PUT') {
-    const providerId = decodeURIComponent(providerAuthSaveMatch[1]);
-    const body = await parseJsonRequestBody(init);
-    try {
-      const data = await sendBridgeMessage('api:provider/auth:save', {
-        providerId,
-        type: body.type,
-        key: body.key,
-        apiKey: body.apiKey,
-        token: body.token,
-      });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/provider/custom' && method === 'POST') {
-    const body = await parseJsonRequestBody(init);
-    try {
-      const data = await sendBridgeMessage('api:provider/custom:save', {
-        body,
-        directory: readRequestDirectory(url, init),
-      });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname === '/api/provider/custom/models' && method === 'POST') {
-    const body = await parseJsonRequestBody(init);
-    try {
-      const data = await sendBridgeMessage('api:provider/custom/models:fetch', body);
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message, models: [] }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  const providerConfigMatch = pathname.match(/^\/api\/provider\/([^/]+)\/config$/);
-  if (providerConfigMatch && method === 'GET') {
-    const providerId = decodeURIComponent(providerConfigMatch[1]);
-    try {
-      const data = await sendBridgeMessage('api:provider/config:get', {
-        providerId,
-        directory: readRequestDirectory(url, init),
-      });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 404, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  // Handle provider auth deletion: DELETE /api/provider/:providerId/auth
-  const providerAuthMatch = pathname.match(/^\/api\/provider\/([^/]+)\/auth$/);
-  if (providerAuthMatch && method === 'DELETE') {
-    const providerId = decodeURIComponent(providerAuthMatch[1]);
-    const scope = url.searchParams.get('scope') || 'auth';
-    const queryDirectory = url.searchParams.get('directory') || undefined;
-    try {
-      const data = await sendBridgeMessage('api:provider/auth:delete', { providerId, scope, directory: queryDirectory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  // Handle provider source lookup: GET /api/provider/:providerId/source
-  const providerSourceMatch = pathname.match(/^\/api\/provider\/([^/]+)\/source$/);
-  if (providerSourceMatch && method === 'GET') {
-    const providerId = decodeURIComponent(providerSourceMatch[1]);
-    const queryDirectory = url.searchParams.get('directory') || undefined;
-    try {
-      const data = await sendBridgeMessage('api:provider/source:get', { providerId, directory: queryDirectory });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  return null;
-};
-
-const originalFetch = window.fetch.bind(window);
-let sseStreamCounter = 0;
-window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-  const targetUrl = typeof input === 'string' || input instanceof URL ? normalizeUrl(input) : normalizeUrl((input as Request).url);
-  const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-
-  const pathname = targetUrl?.pathname || '';
-  const normalizedPathname = pathname.replace(/\/{2,}/g, '/');
-  if (targetUrl && normalizedPathname === '/health') {
-    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
-    const isReady = connectionStatus === 'connected';
-    const cliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
-    return new Response(JSON.stringify({
-      status: isReady ? 'ok' : 'connecting',
-      isOpenCodeReady: isReady,
-      cliAvailable,
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  if (targetUrl && isLocalRuntimePath(normalizedPathname)) {
-    const localResponse = await handleLocalApiRequest(input, targetUrl, init, method);
-    if (localResponse) {
-      maybeHideLoadingOverlay();
-      return localResponse;
-    }
-
-    if (!isApiPath(normalizedPathname)) {
-      return originalFetch(input as RequestInfo, init);
-    }
-
-    const suffixPath = `${targetUrl.pathname.replace(/^\/api/, '')}${targetUrl.search}`;
-
-    const headersFromRequest = input instanceof Request ? headersToRecord(input.headers) : {};
-    const headersFromInit = headersToRecord(init?.headers);
-    const headers = { ...headersFromRequest, ...headersFromInit };
-
-    if (isSseApiPath(targetUrl.pathname)) {
-      // Install the listener before the extension opens the upstream stream. A
-      // reconnect can replay an event immediately, before the start response
-      // has crossed the VS Code bridge.
-      const streamId = `sse_webview_${Date.now()}_${++sseStreamCounter}`;
-      const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
-      const encoder = new TextEncoder();
-      let unsubscribe: (() => void) | null = null;
-
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          const onMessage = (event: MessageEvent) => {
-            const msg = event.data as { type?: string; streamId?: string; chunk?: string; error?: string };
-            if (!msg || msg.streamId !== streamId) return;
-
-            if (msg.type === 'api:sse:chunk' && typeof msg.chunk === 'string') {
-              vscodeStreamPerfCount('vscode.webview.sse_chunk');
-              vscodeStreamPerfObserve('vscode.webview.sse_chunk_bytes', msg.chunk.length);
-              controller.enqueue(encoder.encode(msg.chunk));
-              return;
-            }
-
-            if (msg.type === 'api:sse:end') {
-              vscodeStreamPerfCount('vscode.webview.sse_end');
-              unsubscribe?.();
-              unsubscribe = null;
-              if (typeof msg.error === 'string' && msg.error.length > 0) {
-                controller.error(new Error(msg.error));
-              } else {
-                controller.close();
-              }
-              void stopSseProxy({ streamId }).catch(() => {});
-            }
-          };
-
-          window.addEventListener('message', onMessage);
-          unsubscribe = () => window.removeEventListener('message', onMessage);
-
-          if (signal) {
-            const onAbort = () => {
-              unsubscribe?.();
-              unsubscribe = null;
-              try {
-                controller.error(new DOMException('Aborted', 'AbortError'));
-              } catch {
-                controller.close();
-              }
-              void stopSseProxy({ streamId }).catch(() => {});
-            };
-            if (signal.aborted) {
-              onAbort();
-              return;
-            }
-            signal.addEventListener('abort', onAbort, { once: true });
-          }
-        },
-        cancel() {
-          unsubscribe?.();
-          unsubscribe = null;
-          void stopSseProxy({ streamId }).catch(() => {});
-        },
-      });
-
-      let start;
-      try {
-        start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: suffixPath, headers, streamId }));
-      } catch (error) {
-        await stream.cancel();
-        throw error;
-      }
-      if (!start.streamId) {
-        void stream.cancel();
-        return new Response(null, { status: start.status || 503, headers: start.headers || {} });
-      }
-
-      return new Response(stream, { status: start.status || 200, headers: start.headers || { 'content-type': 'text/event-stream' } });
-    }
-
-    if (method === 'POST' && isSessionMessageApiPath(targetUrl.pathname)) {
-      const bodyText = await extractBodyText(input, init, method);
-      const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
-      const proxied = await proxySessionMessageRequest({ path: suffixPath, headers, bodyText, signal });
-      const response = buildProxiedResponse(proxied);
-      maybeHideLoadingOverlay();
-      return response;
-    }
-
-    const bodyBase64 = await extractBodyBase64(input, init, method);
-    const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
-    const proxied = await proxyApiRequest({ method, path: suffixPath, headers, bodyBase64, signal });
-    const response = buildProxiedResponse(proxied);
-    maybeHideLoadingOverlay();
-    return response;
-  }
-
-  if (targetUrl && targetUrl.hostname.includes('models.dev')) {
-    try {
-      const data = await sendBridgeMessage('api:models/metadata');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      console.warn('[OpenChamber] models.dev request failed via bridge, returning empty metadata:', error);
-      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  return originalFetch(input as RequestInfo, init);
+const fenceSelection = (filePath: string, text: string): string => {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((match) => match[0].length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `Context from ${filePath}:\n${fence}\n${text}\n${fence}`;
 };
 
 onCommand('addContextSelection', (payload) => {
-  const { filePath, filename, text } = payload as { filePath?: unknown; filename?: unknown; text?: unknown };
-  if (typeof filePath !== 'string' || typeof filename !== 'string' || typeof text !== 'string') {
-    return;
-  }
-
-  const trimmedPath = filePath.trim();
-  const trimmedFilename = filename.trim();
-  if (!trimmedPath || !trimmedFilename || !text.trim()) {
-    return;
-  }
-
-  import('@/sync/input-store').then(({ useInputStore }) => {
-    const file = new File([new Blob([text], { type: 'text/plain' })], trimmedFilename, { type: 'text/plain' });
-    void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file);
+  const record = payload as { filePath?: unknown; text?: unknown } | undefined;
+  if (typeof record?.filePath !== 'string' || typeof record.text !== 'string') return;
+  void appendPiDraft(fenceSelection(record.filePath, record.text)).catch((error) => {
+    console.error('[Piarium] Failed to add editor selection:', error);
   });
 });
 
 onCommand('addFileMentions', (payload) => {
-  const rawPaths = Array.isArray((payload as { paths?: unknown[] })?.paths)
-    ? (payload as { paths: unknown[] }).paths
+  const paths = Array.isArray((payload as { paths?: unknown[] } | undefined)?.paths)
+    ? (payload as { paths: unknown[] }).paths.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     : [];
-  const paths = rawPaths
-    .filter((entry): entry is string => typeof entry === 'string')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-
-  if (paths.length === 0) {
-    return;
-  }
-
-  const mentionText = paths.map((relativePath) => `@${relativePath}`).join(' ');
-
-  import('@/sync/input-store').then(({ useInputStore }) => {
-    useInputStore.getState().setPendingInputText(mentionText, 'append-inline');
-  });
+  if (paths.length === 0) return;
+  void appendPiDraft(`Use these files as context:\n${paths.map((path) => `- ${path.trim()}`).join('\n')}`);
 });
 
 onCommand('addFileAttachments', (payload) => {
-  const rawFiles = Array.isArray((payload as { files?: unknown[] })?.files)
+  const files = Array.isArray((payload as { files?: unknown[] } | undefined)?.files)
     ? (payload as { files: unknown[] }).files
+        .map((value) => value as { fileName?: unknown; filePath?: unknown })
+        .map((file) => typeof file.filePath === 'string' && file.filePath.trim()
+          ? file.filePath.trim()
+          : typeof file.fileName === 'string' ? file.fileName.trim() : '')
+        .filter(Boolean)
     : [];
-
-  const files = rawFiles
-    .map((entry) => {
-      const record = entry as { filePath?: unknown; fileName?: unknown; fileSize?: unknown };
-      const filePath = typeof record.filePath === 'string' ? record.filePath.trim() : '';
-      const fileName = typeof record.fileName === 'string' ? record.fileName.trim() : '';
-      const fileSize = typeof record.fileSize === 'number' && Number.isFinite(record.fileSize) ? record.fileSize : null;
-      return filePath && fileName ? { filePath, fileName, fileSize } : null;
-    })
-    .filter((entry): entry is { filePath: string; fileName: string; fileSize: number | null } => entry !== null);
-
-  if (files.length === 0) {
-    return;
-  }
-
-  import('@/sync/input-store').then(({ useInputStore }) => {
-    const inputStore = useInputStore.getState();
-    for (const file of files) {
-      inputStore.addVSCodeFileAttachment(file.filePath, file.fileName, file.fileSize);
-    }
-  });
+  if (files.length === 0) return;
+  void appendPiDraft(`Use these files as context:\n${files.map((path) => `- ${path}`).join('\n')}`);
 });
 
-// Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
 onCommand('createSessionWithPrompt', (payload) => {
-  const { prompt } = payload as { prompt: string };
-
-  Promise.all([
-    import('@/sync/session-ui-store'),
-    import('@/stores/useConfigStore'),
-    import('@/sync/input-store'),
-  ]).then(([{ useSessionUIStore }, { useConfigStore }, { useInputStore }]) => {
-    const sessionStore = useSessionUIStore.getState();
-    const configStore = useConfigStore.getState();
-
-    // Get current provider/model/agent configuration
-    const { currentProviderId, currentModelId, currentAgentName } = configStore;
-
-    if (currentProviderId && currentModelId) {
-      if (!sessionStore.currentSessionId) {
-        sessionStore.openNewSessionDraft();
-      }
-
-      // Send the message - this will create the session from the draft and send
-      sessionStore.sendMessage(
-        prompt,
-        currentProviderId,
-        currentModelId,
-        currentAgentName ?? undefined,
-        undefined, // attachments
-        undefined, // agentMentionName
-        undefined  // additionalParts
-      ).catch((error: unknown) => {
-        console.error('[OpenChamber] Failed to send prompt:', error);
-      });
-    } else {
-      // If no provider/model configured, just set the text and let user send manually
-      useInputStore.getState().setPendingInputText(prompt);
-    }
-  });
+  const prompt = typeof (payload as { prompt?: unknown } | undefined)?.prompt === 'string'
+    ? (payload as { prompt: string }).prompt.trim()
+    : '';
+  if (!prompt) return;
+  void (async () => {
+    const sessionId = await ensurePiSession({ forceNew: true });
+    const { usePiSessionStore } = await import('@/stores/usePiSessionStore');
+    navigate('chat');
+    await usePiSessionStore.getState().prompt(sessionId, prompt);
+  })().catch((error) => console.error('[Piarium] Failed to run editor prompt:', error));
 });
-
-const normalizeWorkspaceFoldersPayload = (value: unknown): Array<{ name: string; path: string }> => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((entry) => {
-      const candidate = entry as { name?: unknown; path?: unknown };
-      const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-      const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-      return path ? { name, path } : null;
-    })
-    .filter((entry): entry is { name: string; path: string } => entry !== null);
-};
-
-const syncVSCodeWorkspaceProjects = async (
-  workspaceFolders: Array<{ name: string; path: string }>,
-  activePath?: string,
-) => {
-  if (window.__VSCODE_CONFIG__) {
-    window.__VSCODE_CONFIG__.workspaceFolders = workspaceFolders;
-  }
-  const { useProjectsStore } = await import('@/stores/useProjectsStore');
-  return useProjectsStore.getState().syncVSCodeWorkspaceFolders(workspaceFolders, activePath);
-};
 
 onCommand('workspaceFoldersChanged', (payload) => {
-  const record = payload as { workspaceFolders?: unknown } | undefined;
-  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
-  void syncVSCodeWorkspaceProjects(workspaceFolders);
+  const folders = normalizeWorkspaceFolders((payload as { workspaceFolders?: unknown } | undefined)?.workspaceFolders);
+  void syncVSCodeWorkspaceProjects(folders);
 });
 
-// Listen for newSession command from extension title bar button
 onCommand('newSession', (payload) => {
   const record = payload as { directory?: unknown; workspaceFolders?: unknown } | undefined;
-  const directory = record?.directory;
-  const directoryOverride = typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : undefined;
-  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
-
-  Promise.all([
-    import('@/sync/session-ui-store'),
-    syncVSCodeWorkspaceProjects(workspaceFolders, directoryOverride),
-  ]).then(([{ useSessionUIStore }, selectedProject]) => {
-    useSessionUIStore.getState().openNewSessionDraft(
-      directoryOverride
-        ? { directoryOverride, selectedProjectId: selectedProject?.id ?? undefined }
-        : undefined
-    );
-  });
-
-  // Also dispatch event to navigate to chat view in VSCodeLayout
-  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+  const folders = normalizeWorkspaceFolders(record?.workspaceFolders);
+  const directory = typeof record?.directory === 'string' ? normalizeWorkspacePath(record.directory) : undefined;
+  void (async () => {
+    if (folders.length > 0) await syncVSCodeWorkspaceProjects(folders, directory);
+    await ensurePiSession({ directory, forceNew: true });
+    navigate('chat');
+  })().catch((error) => console.error('[Piarium] Failed to create session:', error));
 });
 
-// Listen for showSettings command from extension title bar button
-onCommand('showSettings', () => {
-  // Dispatch event to navigate to settings view in VSCodeLayout
-  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'settings' } }));
-});
-
+onCommand('showSettings', () => navigate('settings'));
 onCommand('showSettingsPage', (payload) => {
   const page = typeof payload === 'string'
-    ? payload
-    : payload && typeof payload === 'object' && typeof (payload as { page?: unknown }).page === 'string'
-      ? (payload as { page: string }).page
+    ? payload.trim()
+    : typeof (payload as { page?: unknown } | undefined)?.page === 'string'
+      ? String((payload as { page: string }).page).trim()
       : '';
-  if (!page.trim()) {
-    return;
-  }
-
-  import('@/stores/useUIStore').then(({ useUIStore }) => {
-    useUIStore.getState().setSettingsPage(page.trim());
-  });
+  if (!page) return;
+  void import('@/stores/useUIStore').then(({ useUIStore }) => useUIStore.getState().setSettingsPage(page));
 });
 
-// Run the same full OpenCode reload flow the app uses after an update: shows the
-// reload overlay, restarts the managed OpenCode (via the bridge's /api/config/reload),
-// and refreshes config/data. Triggered by the "Restart API Connection" command.
-onCommand('reloadOpenCode', () => {
-  void import('@openchamber/ui/stores/useAgentsStore').then(({ reloadOpenCodeConfiguration }) => {
-    void reloadOpenCodeConfiguration().catch(() => undefined);
-  });
+onCommand('reloadPiRuntime', () => {
+  void (async () => {
+    const [{ disconnectPiRuntime }, { usePiSessionStore }] = await Promise.all([
+      import('@openchamber/ui/lib/pi-runtime/client'),
+      import('@/stores/usePiSessionStore'),
+    ]);
+    await disconnectPiRuntime();
+    usePiSessionStore.getState().reset();
+    await usePiSessionStore.getState().loadCatalog();
+  })().catch((error) => console.error('[Piarium] Failed to reconnect runtime:', error));
 });
 
-const getNotificationClaimKey = (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown } | undefined): string => {
-  const tag = typeof payload?.tag === 'string' ? payload.tag.trim() : '';
-  if (tag) return tag;
-  return [payload?.sessionId, payload?.title, payload?.body]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim())
-    .join('|');
-};
-
-const claimOpenChamberNotification = async (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown } | undefined): Promise<boolean> => {
-  const key = getNotificationClaimKey(payload);
-  if (!key) return true;
-  try {
-    const result = await sendBridgeMessage<{ claimed?: boolean }>('api:notifications:claim', { key });
-    return result?.claimed === true;
-  } catch {
-    return true;
-  }
-};
-
-const showOpenChamberNotification = (payload: { title?: unknown; body?: unknown; sessionId?: unknown; tag?: unknown; requireHidden?: unknown } | undefined) => {
-  if (typeof Notification === 'undefined') {
-    return false;
-  }
-
-  const show = async () => {
-    const isVSCodeWindowFocused = window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ ?? document.hasFocus();
-    if (payload?.requireHidden === true && isVSCodeWindowFocused) {
-      return false;
-    }
-    if (Notification.permission !== 'granted') {
-      return false;
-    }
-
-    const title = typeof payload?.title === 'string' && payload.title.trim().length > 0
-      ? payload.title.trim()
-      : 'OpenChamber';
-    const body = typeof payload?.body === 'string' ? payload.body : '';
-    const sessionId = typeof payload?.sessionId === 'string' && payload.sessionId.trim().length > 0
-      ? payload.sessionId.trim()
-      : '';
-    if (!await claimOpenChamberNotification({ ...payload, title, body, sessionId })) {
-      return false;
-    }
-
-    const notification = new Notification(title, { body });
-    notification.onclick = () => {
-      if (sessionId) {
-        import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-          useSessionUIStore.getState().setCurrentSession(sessionId);
-        });
-      }
-      window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
-    };
-    return true;
-  };
-
-  if (Notification.permission === 'default') {
-    void Notification.requestPermission().then((permission) => {
-      if (permission === 'granted') {
-        void show();
-      }
-    });
-    return true;
-  }
-
-  void show();
-  return true;
-};
-
-onCommand('showNotification', (payload) => {
-  showOpenChamberNotification(payload as { title?: unknown; body?: unknown; sessionId?: unknown; requireHidden?: unknown } | undefined);
-});
-
-onCommand('windowFocusChanged', (payload) => {
-  if (typeof payload === 'object' && payload && typeof (payload as { focused?: unknown }).focused === 'boolean') {
-    window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = (payload as { focused: boolean }).focused;
-  }
-});
-
-const readyNotificationCooldowns = new Map<string, number>();
-const errorNotificationCooldowns = new Map<string, number>();
-const READY_NOTIFICATION_COOLDOWN_MS = 5000;
-const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
-let notificationSettingsSyncPromise: Promise<void> | null = null;
-
-const getPayloadString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
-
-const normalizeNotificationPlainText = (text: string): string => text
-  .replace(/```[\s\S]*?```/g, ' ')
-  .replace(/`([^`]*)`/g, '$1')
-  .replace(/^[\t ]*[-*+]\s+/gm, '')
-  .replace(/^#{1,6}\s+/gm, '')
-  .replace(/\*\*(.*?)\*\*/g, '$1')
-  .replace(/__(.*?)__/g, '$1')
-  .replace(/\*(.*?)\*/g, '$1')
-  .replace(/_(.*?)_/g, '$1')
-  .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
-  .replace(/\s*\n\s*/g, ' ')
-  .replace(/\s+/g, ' ')
-  .trim();
-
-const truncateNotificationText = (text: string, maxLength: number): string => (
-  text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`
-);
-
-const resolvePositiveNotificationNumber = (value: unknown, fallback: number): number => (
-  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
-);
-
-const ensureNotificationSettingsSynced = async () => {
-  if (!notificationSettingsSyncPromise) {
-    notificationSettingsSyncPromise = import('@/lib/persistence')
-      .then(({ syncDesktopSettings }) => syncDesktopSettings())
-      .catch((error) => {
-        notificationSettingsSyncPromise = null;
-        console.warn('[OpenChamber] Failed to sync notification settings:', error);
-      });
-  }
-  await notificationSettingsSyncPromise;
-};
-
-const prepareNotificationLastMessage = (
-  message: string,
-  settings: { maxLastMessageLength: number },
-): string => {
-  const maxLength = resolvePositiveNotificationNumber(settings.maxLastMessageLength, DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH);
-  return truncateNotificationText(normalizeNotificationPlainText(message), maxLength);
-};
-
-const resolveTemplate = (template: string, variables: Record<string, string>): string => (
-  template.replace(/\{(\w+)\}/g, (_match, key: string) => variables[key] ?? '')
-);
-
-const shouldApplyTemplateMessage = (template: string, resolved: string, variables: Record<string, string>) => {
-  if (!resolved) return false;
-  if (template.includes('{last_message}')) {
-    return variables.last_message.trim().length > 0;
-  }
-  return true;
-};
-
-const formatNotificationLabel = (raw: string, fallback: string): string => {
-  if (!raw) return fallback;
-  return raw.split(/[-_\s]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
-};
-
-const extractNotificationTextFromParts = (parts: unknown): string => {
-  if (!Array.isArray(parts)) return '';
-  return parts
-    .map((part) => {
-      if (!part || typeof part !== 'object') return '';
-      const entry = part as { type?: unknown; text?: unknown; content?: unknown };
-      if (entry.type === 'text') {
-        return typeof entry.text === 'string' ? entry.text : typeof entry.content === 'string' ? entry.content : '';
-      }
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-};
-
-const extractNotificationLastMessage = (payload: Record<string, unknown>): string => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  if (!info) return '';
-  return extractNotificationTextFromParts(info.parts ?? properties.parts) || extractNotificationTextFromParts(info.content);
-};
-
-const fetchLastAssistantMessageText = async (sessionId: string, messageId?: string): Promise<string> => {
-  if (!sessionId) return '';
-
-  try {
-    const messages = await opencodeClient.getSessionMessages(sessionId, 5);
-    if (!Array.isArray(messages)) return '';
-
-    let target = messageId
-      ? messages.find((message) => {
-          const info = message && typeof message === 'object'
-            ? (message as { info?: { id?: unknown; role?: unknown } }).info
-            : undefined;
-          return info?.id === messageId && info?.role === 'assistant';
-        })
-      : null;
-
-    if (!target) {
-      for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        const info = message && typeof message === 'object'
-          ? (message as { info?: { role?: unknown; finish?: unknown } }).info
-          : undefined;
-        if (info?.role === 'assistant' && info?.finish === 'stop') {
-          target = message;
-          break;
-        }
-      }
-    }
-
-    if (!target || typeof target !== 'object') return '';
-    const message = target as { parts?: unknown; content?: unknown; info?: { parts?: unknown; content?: unknown } };
-    return extractNotificationTextFromParts(message.parts ?? message.info?.parts)
-      || extractNotificationTextFromParts(message.content ?? message.info?.content);
-  } catch {
-    return '';
-  }
-};
-
-const getNotificationTemplate = (
-  settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
-  key: 'completion' | 'subtask' | 'error' | 'question',
-  fallback: { title: string; message: string },
-) => {
-  const candidate = settings.notificationTemplates?.[key];
-  return {
-    title: typeof candidate?.title === 'string' ? candidate.title : fallback.title,
-    message: typeof candidate?.message === 'string' ? candidate.message : fallback.message,
-  };
-};
-
-const buildNotificationVariables = (payload: Record<string, unknown>, sessionId: string, lastMessage: string): Record<string, string> => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  const pathInfo = info?.path as { root?: unknown; cwd?: unknown } | undefined;
-  const worktree = getPayloadString(pathInfo?.root ?? pathInfo?.cwd);
-  const modelId = getPayloadString(info?.modelID ?? info?.modelId ?? (info?.model as { modelID?: unknown } | undefined)?.modelID);
-  return {
-    project_name: worktree.split(/[\\/]/).filter(Boolean).pop() || '',
-    worktree,
-    branch: '',
-    session_name: getPayloadString(properties.sessionTitle ?? (properties.session as { title?: unknown } | undefined)?.title ?? info?.sessionTitle),
-    agent_name: formatNotificationLabel(getPayloadString(info?.agent ?? info?.mode), 'Agent'),
-    model_name: formatNotificationLabel(modelId, 'Assistant'),
-    last_message: lastMessage,
-    session_id: sessionId,
-  };
-};
-
-const getNotificationSessionId = (payload: Record<string, unknown>): string => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  return getPayloadString(info?.sessionID ?? info?.sessionId ?? properties.sessionID ?? properties.sessionId ?? properties.session);
-};
-
-const getNotificationDirectory = (payload: Record<string, unknown>): string | null => {
-  const properties = (payload.properties ?? payload) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  return getPayloadString(properties.directory ?? info?.directory) || null;
-};
-
-window.addEventListener('openchamber:vscode-notification-event', (event) => {
-  const detail = (event as CustomEvent<{ directory?: string; payload?: unknown }>).detail;
-  const payload = detail?.payload;
-  if (!payload || typeof payload !== 'object') {
-    return;
-  }
-
-  const record = payload as Record<string, unknown>;
-  const type = getPayloadString(record.type);
-  const properties = (record.properties ?? record) as Record<string, unknown>;
-  const info = properties.info as Record<string, unknown> | undefined;
-  const sessionId = getNotificationSessionId(record);
-  if (!sessionId) {
-    return;
-  }
-
-  Promise.all([
-    import('@/stores/useUIStore'),
-  ]).then(async ([{ useUIStore }]) => {
-    await ensureNotificationSettingsSynced();
-    const settings = useUIStore.getState();
-    if (!settings.nativeNotificationsEnabled) {
-      return;
-    }
-    const requireHidden = settings.notificationMode !== 'always';
-    const messageId = getPayloadString(info?.id);
-    const error = properties.error;
-    const errorMessage = getPayloadString(
-      typeof error === 'object' && error
-        ? (error as { message?: unknown }).message
-        : error,
-    );
-    const rawLastMessage = extractNotificationLastMessage(record)
-      || errorMessage
-      || await fetchLastAssistantMessageText(sessionId, messageId);
-    const lastMessage = prepareNotificationLastMessage(
-      rawLastMessage,
-      settings,
-    );
-    const variables = buildNotificationVariables(record, sessionId, lastMessage);
-
-    const isAssistantMessage = type === 'message.updated' && getPayloadString(info?.role) === 'assistant';
-    const finish = isAssistantMessage ? getPayloadString(info?.finish) : '';
-    const isCompletion = type === 'session.idle' || finish === 'stop';
-    const isError = type === 'session.error' || finish === 'error';
-
-    if (isCompletion) {
-      const session = await opencodeClient.getSession(sessionId, getNotificationDirectory(record)).catch(() => undefined);
-      if (!session) return;
-      const isSubtask = Boolean(session?.parentID);
-      if (isSubtask ? !settings.notifyOnSubtasks : !settings.notifyOnCompletion) return;
-      const now = Date.now();
-      const lastAt = readyNotificationCooldowns.get(sessionId) ?? 0;
-      if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
-      readyNotificationCooldowns.set(sessionId, now);
-      const template = getNotificationTemplate(settings, isSubtask ? 'subtask' : 'completion', { title: '{agent_name} is ready', message: '{model_name} completed the task' });
-      const title = resolveTemplate(template.title, variables) || 'Agent is ready';
-      const body = resolveTemplate(template.message, variables);
-      showOpenChamberNotification({
-        title,
-        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : `${variables.model_name} completed the task`,
-        sessionId,
-        requireHidden,
-      });
-      return;
-    }
-
-    if (isError) {
-      if (!settings.notifyOnError) return;
-      const now = Date.now();
-      const lastAt = errorNotificationCooldowns.get(sessionId) ?? 0;
-      if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
-      errorNotificationCooldowns.set(sessionId, now);
-      const template = getNotificationTemplate(settings, 'error', { title: 'Tool error', message: '{last_message}' });
-      const title = resolveTemplate(template.title, variables) || 'Tool error';
-      const body = resolveTemplate(template.message, variables);
-      showOpenChamberNotification({
-        title,
-        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : 'An error occurred',
-        sessionId,
-        requireHidden,
-      });
-      return;
-    }
-
-    if (type === 'question.asked') {
-      if (!settings.notifyOnQuestion) return;
-      const questions = Array.isArray(properties.questions) ? properties.questions : [];
-      const firstQuestion = questions[0] as Record<string, unknown> | undefined;
-      const header = getPayloadString(firstQuestion?.header);
-      const questionText = getPayloadString(firstQuestion?.question);
-      const questionVariables = { ...variables, last_message: questionText || header };
-      const template = getNotificationTemplate(settings, 'question', { title: 'Input needed', message: '{last_message}' });
-      const title = resolveTemplate(template.title, questionVariables) || (/plan\s*mode/i.test(header) ? 'Switch to plan mode' : /build\s*agent/i.test(header) ? 'Switch to build mode' : header || 'Input needed');
-      const body = resolveTemplate(template.message, questionVariables);
-      showOpenChamberNotification({
-        title,
-        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : questionText || 'Agent is waiting for your response',
-        sessionId,
-        requireHidden,
-      });
-      return;
-    }
-
-    if (type === 'permission.asked') {
-      if (!settings.notifyOnQuestion) return;
-      const requestId = getPayloadString(properties.id);
-      if (requestId) {
-        const accepted = await processVSCodePermissionAutoAccept(
-          properties as unknown as PermissionRequest,
-          detail?.directory,
-        );
-        if (accepted) return;
-      }
-      const permission = getPayloadString(properties.permission);
-      const sessionTitle = getPayloadString(properties.sessionTitle);
-      const fallbackMessage = sessionTitle || permission || 'Agent is waiting for your approval';
-      const permissionVariables = { ...variables, last_message: fallbackMessage };
-      const template = getNotificationTemplate(settings, 'question', { title: 'Permission required', message: '{last_message}' });
-      const title = resolveTemplate(template.title, permissionVariables) || 'Permission required';
-      const body = resolveTemplate(template.message, permissionVariables);
-      showOpenChamberNotification({
-        title,
-        body: shouldApplyTemplateMessage(template.message, body, permissionVariables) ? body : fallbackMessage,
-        sessionId,
-        requireHidden,
-      });
-    }
-  });
-});
-
-// Listen for settings sync command from extension (broadcast to all VS Code webviews)
 onCommand('settingsSynced', () => {
-  import('@/lib/persistence').then(({ syncDesktopSettings }) => {
-    void syncDesktopSettings();
-  });
+  void import('@/lib/persistence').then(({ syncDesktopSettings }) => syncDesktopSettings());
 });
 
-onCommand('permissionAutoAcceptSynced', (payload) => {
-  if (!payload || typeof payload !== 'object') return;
-  const snapshot = payload as { sessions?: unknown; revision?: unknown };
-  const sessions = snapshot.sessions;
-  if (!sessions || typeof sessions !== 'object') return;
-  usePermissionStore.getState().applySnapshot({
-    sessions: sessions as Record<string, boolean>,
-    revision: typeof snapshot.revision === 'number' ? snapshot.revision : undefined,
-  });
-});
-
-// Listen for active editor file changes from the extension
 onCommand('activeEditorFile', (payload) => {
-  import('@/sync/input-store').then(({ useInputStore }) => {
+  void import('@/sync/input-store').then(({ useInputStore }) => {
     useInputStore.getState().setActiveEditorFile((payload as VSCodeActiveEditorFile | null) ?? null);
   });
 });
 
-import('@openchamber/ui/apps/renderVSCodeApp')
-  .then(async ({ renderVSCodeApp }) => {
-    renderVSCodeApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createVSCodeAPIs());
-    await waitForUiMount();
-    uiMounted = true;
-    maybeHideLoadingOverlay();
-  })
-  .catch((error) => {
-    console.error('[OpenChamber] Failed to bootstrap UI:', error);
-    // If the UI bundle fails to load, remove the overlay so the user at least sees errors in the root.
-    uiMounted = true;
-    fadeOutLoadingScreen();
-  });
+onCommand('showNotification', (payload) => {
+  if (typeof Notification === 'undefined') return;
+  const record = payload as { body?: unknown; title?: unknown } | undefined;
+  const title = typeof record?.title === 'string' && record.title.trim() ? record.title.trim() : 'Piarium';
+  const body = typeof record?.body === 'string' ? record.body : '';
+  if (Notification.permission === 'granted') new Notification(title, { body });
+});
+
+const bootstrap = async () => {
+  const folders = configuredWorkspaceFolders();
+  if (folders.length > 0) await syncVSCodeWorkspaceProjects(folders);
+  const { renderVSCodeApp } = await import('@openchamber/ui/apps/renderVSCodeApp');
+  renderVSCodeApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createVSCodeAPIs());
+  await waitForUiMount();
+  fadeOutLoadingScreen();
+};
+
+void bootstrap().catch((error) => {
+  console.error('[Piarium] Failed to bootstrap VS Code UI:', error);
+  fadeOutLoadingScreen();
+  void sendBridgeMessage('vscode:log', { level: 'error', message: String(error) }).catch(() => undefined);
+});

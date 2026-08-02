@@ -21,12 +21,12 @@ describe('VS Code webview bridge requests', () => {
         }),
       });
 
-      const { sendBridgeMessageWithOptions, startSseProxy } = await import('./bridge');
+      const { sendBridgeMessage, sendBridgeMessageWithOptions } = await import(`./bridge?requests-${Date.now()}`);
       const controller = new AbortController();
       controller.abort();
 
       const result = await Promise.race([
-        sendBridgeMessageWithOptions('api:proxy', undefined, { signal: controller.signal }).then(
+        sendBridgeMessageWithOptions('api:settings:get', undefined, { signal: controller.signal }).then(
           () => 'resolved',
           (error: unknown) => error,
         ),
@@ -37,18 +37,17 @@ describe('VS Code webview bridge requests', () => {
       assert.equal(result.name, 'AbortError');
       assert.equal(messages.length, 0);
 
-      const startPromise = startSseProxy({ path: '/global/event', streamId: 'sse_webview_1_1' });
-      const request = messages[0] as { id: string; payload?: { streamId?: string } };
-      assert.equal(request.payload?.streamId, 'sse_webview_1_1');
+      const settingsPromise = sendBridgeMessage('api:settings:get') as Promise<{ themeVariant: string }>;
+      const request = messages[0] as { id: string };
       globalThis.window.dispatchEvent(new MessageEvent('message', {
         data: {
           id: request.id,
-          type: 'api:sse:start',
+          type: 'api:settings:get',
           success: true,
-          data: { status: 200, headers: {}, streamId: 'sse_webview_1_1' },
+          data: { themeVariant: 'dark' },
         },
       }));
-      assert.equal((await startPromise).streamId, 'sse_webview_1_1');
+      assert.equal((await settingsPromise).themeVariant, 'dark');
     } finally {
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
       Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });

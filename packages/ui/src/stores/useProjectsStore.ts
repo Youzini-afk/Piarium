@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { opencodeClient } from '@/lib/opencode/client';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { DesktopSettings } from '@/lib/desktop';
@@ -10,7 +9,6 @@ import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig, isVSCodeRuntime } from './utils/vscodeRuntime';
@@ -610,7 +608,6 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
       const current = get();
-      const project = current.projects.find((p) => p.id === id);
       const nextProjects = current.projects.filter((project) => project.id !== id);
       let nextActiveId = current.activeProjectId;
 
@@ -622,20 +619,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
       persistProjects(nextProjects, nextActiveId, nextManualOrder);
 
-      // Clean up worktree entries for the removed project
-      if (project) {
-        const normalizedPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
-        useSessionUIStore.setState((s) => {
-          const next = new Map(s.availableWorktreesByProject);
-          next.delete(normalizedPath);
-          return { availableWorktreesByProject: next };
-        });
-      }
-
       if (nextActiveId) {
         const nextActive = nextProjects.find((project) => project.id === nextActiveId);
         if (nextActive) {
-          opencodeClient.setDirectory(nextActive.path);
           useDirectoryStore.getState().setDirectory(nextActive.path, { showOverlay: false });
         }
       } else {
@@ -664,7 +650,6 @@ export const useProjectsStore = create<ProjectsStore>()(
       set({ projects: nextProjects, activeProjectId: id });
       persistProjects(nextProjects, id, get().manualProjectOrder);
 
-      opencodeClient.setDirectory(target.path);
       useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
     },
 
@@ -922,7 +907,6 @@ export const useProjectsStore = create<ProjectsStore>()(
       if (incomingActive) {
         const activeProject = incomingProjects.find((project) => project.id === incomingActive);
         if (activeProject) {
-          opencodeClient.setDirectory(activeProject.path);
           useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
         }
       }
@@ -956,7 +940,6 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       if (result.activeProject) {
-        opencodeClient.setDirectory(result.activeProject.path);
         useDirectoryStore.getState().setDirectory(result.activeProject.path, { showOverlay: false });
       }
 

@@ -1,12 +1,8 @@
 import * as vscode from 'vscode';
-import { type OpenCodeManager } from './opencode';
 import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
-import { handleSpecialGitBridgeMessage } from './bridge-git-special-runtime';
+import { handleGitConflictBridgeMessage } from './bridge-git-conflict-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
-import { handleConfigBridgeMessage } from './bridge-config-runtime';
-import { handleSystemBridgeMessage } from './bridge-system-runtime';
-import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
-import { handleCheckpointBridgeMessage } from './bridge-checkpoint-runtime';
+import { handleNativeVSCodeBridgeMessage } from './bridge-vscode-runtime';
 import {
   DEFAULT_GITHUB_CLIENT_ID,
   DEFAULT_GITHUB_SCOPES,
@@ -38,16 +34,7 @@ import {
   getPullRequestContext,
   listPullRequests,
 } from './githubPulls';
-import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
-import {
-  fetchOpenCodeSkillsFromApi,
-  persistSettings,
-  readSettings,
-  readMagicPromptOverrides,
-  saveMagicPromptOverride,
-  resetMagicPromptOverride,
-  resetAllMagicPromptOverrides,
-} from './bridge-settings-runtime';
+import { persistSettings, readSettings } from './bridge-settings-runtime';
 import { execGit } from './bridge-git-process-runtime';
 import {
   parseDroppedFileReference,
@@ -57,15 +44,7 @@ import {
   normalizeFsPath,
   searchDirectory,
   resolveFileReadPath,
-  fetchModelsMetadata,
 } from './bridge-fs-helpers-runtime';
-import {
-  tryHandleLocalFsProxy,
-  buildUnavailableApiResponse,
-  sanitizeForwardHeaders,
-  collectHeaders,
-  base64EncodeUtf8,
-} from './bridge-localfs-proxy-runtime';
 // Reuse the web runtime's terminal auth helper so VS Code and web install the
 // same gh hosts.yml and git credential helper behavior.
 // @ts-expect-error The web package currently ships these helpers as JS modules.
@@ -86,13 +65,8 @@ export interface BridgeResponse {
 }
 
 export interface BridgeContext {
-  manager?: OpenCodeManager;
   context?: vscode.ExtensionContext;
 }
-
-const CLIENT_RELOAD_DELAY_MS = 800;
-
-const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
 const GITHUB_API_BASE = 'https://api.github.com';
 
 type JsonRecord = Record<string, unknown>;
@@ -126,7 +100,7 @@ const githubJsonFetch = async <T>(url: string, accessToken: string): Promise<T> 
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${accessToken}`,
-      'User-Agent': 'OpenChamber',
+      'User-Agent': 'Piarium',
     },
   });
 
@@ -432,30 +406,10 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
   const { id, type, payload } = message;
 
   try {
-    const permissionAutoAcceptResponse = await handlePermissionAutoAcceptBridgeMessage(
-      { id, type, payload },
-      ctx?.context,
-      {
-        broadcast: (snapshot) => vscode.commands.executeCommand(
-          'openchamber.internal.permissionAutoAcceptSynced',
-          snapshot,
-        ),
-      },
-    );
-    if (permissionAutoAcceptResponse) return permissionAutoAcceptResponse;
-
     const standardGitResponse = await handleStandardGitBridgeMessage({ id, type, payload });
-    if (standardGitResponse) {
-      return standardGitResponse;
-    }
-    const specialGitResponse = await handleSpecialGitBridgeMessage(
-      { id, type, payload },
-      ctx,
-      { readSettings, execGit }
-    );
-    if (specialGitResponse) {
-      return specialGitResponse;
-    }
+    if (standardGitResponse) return standardGitResponse;
+    const conflictResponse = await handleGitConflictBridgeMessage({ id, type, payload });
+    if (conflictResponse) return conflictResponse;
     const fsResponse = await handleFsBridgeMessage(
       { id, type, payload },
       {
@@ -469,67 +423,25 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         readUriAsAttachment,
       }
     );
-    if (fsResponse) {
-      return fsResponse;
+    if (fsResponse) return fsResponse;
+
+    if (type === 'api:settings:get') {
+      return { id, type, success: true, data: readSettings(ctx) };
     }
-    const configResponse = await handleConfigBridgeMessage(
-      { id, type, payload },
-      ctx,
-      {
-        readSettings,
-        persistSettings,
-        readMagicPromptOverrides,
-        saveMagicPromptOverride,
-        resetMagicPromptOverride,
-        resetAllMagicPromptOverrides,
-        fetchOpenCodeSkillsFromApi,
-        clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
-      },
-    );
-    if (configResponse) {
-      return configResponse;
+    if (type === 'api:settings:save') {
+      const changes = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : {};
+      return { id, type, success: true, data: await persistSettings(changes, ctx) };
     }
-    const checkpointResponse = await handleCheckpointBridgeMessage({ id, type, payload }, ctx);
-    if (checkpointResponse) {
-      return checkpointResponse;
-    }
-    const systemResponse = await handleSystemBridgeMessage(
-      { id, type, payload },
-      ctx,
-      {
-        resolveUserPath,
-        fetchModelsMetadata,
-        updateCheckUrl: UPDATE_CHECK_URL,
-        clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
-      },
-    );
-    if (systemResponse) {
-      return systemResponse;
-    }
-    const proxyResponse = await handleProxyBridgeMessage(
-      { id, type, payload },
-      ctx,
-      {
-        tryHandleLocalFsProxy,
-        buildUnavailableApiResponse,
-        sanitizeForwardHeaders,
-        collectHeaders,
-        base64EncodeUtf8,
-      },
-    );
-    if (proxyResponse) {
-      return proxyResponse;
-    }
+
+    const nativeResponse = await handleNativeVSCodeBridgeMessage({ id, type, payload }, ctx);
+    if (nativeResponse) return nativeResponse;
 
     const githubResponse = await handleGitHubBridgeMessage({ id, type, payload }, ctx);
-    if (githubResponse) {
-      return githubResponse;
-    }
+    if (githubResponse) return githubResponse;
 
-    switch (type) {
-      default:
-        return { id, type, success: false, error: `Unknown message type: ${type}` };
-    }
+    return { id, type, success: false, error: `Unknown message type: ${type}` };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     return { id, type, success: false, error: errorMessage };
