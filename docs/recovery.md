@@ -73,8 +73,8 @@ it already has as a trusted Pi extension.
 Plugins remain normal Pi packages. Installation and updates go through Pi's `PackageManager`, so
 `npm:pi-workspace-history` and `npm:pi-wtf` can advance independently of Piarium. After a package
 reload, capability discovery runs against the new extension instance. Command renames configured by
-`pi-wtf` are discovered from source metadata and command descriptions rather than hard-coded to
-`/fuck`.
+`pi-wtf` are discovered from Pi source metadata and the plugin's public base/`?`/`!` command set
+rather than hard-coded to `/fuck` or coupled to English description text.
 
 Piarium persists only application policy such as the default recovery mode and view state. Session
 history stays in Pi JSONL; workspace snapshots and retention stay with the workspace-history

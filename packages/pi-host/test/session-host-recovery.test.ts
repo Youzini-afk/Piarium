@@ -25,15 +25,15 @@ export default function workspaceHistory(pi: any) {
     await writeFile(${JSON.stringify(treeMarker)}, "tree", "utf8");
   });
   pi.registerCommand("undo", {
-    description: "Undo last agent turn and restore workspace",
+    description: "Description text may change upstream",
     handler: async () => undefined,
   });
   pi.registerCommand("redo", {
-    description: "Redo previously undone agent turn and restore workspace",
+    description: "Localized description",
     handler: async () => undefined,
   });
   pi.registerCommand("checkpoint", {
-    description: "Save current workspace state as a manual time-machine checkpoint",
+    description: "Create a named point",
     handler: async (name: string) => writeFile(${JSON.stringify(checkpointMarker)}, name, "utf8"),
   });
 }
@@ -45,8 +45,16 @@ export default function workspaceHistory(pi: any) {
       `import { writeFile } from "node:fs/promises";
 export default function piWtf(pi: any) {
   pi.registerCommand("oops", {
-    description: "Abort the current run and recover the last prompt",
+    description: "Localized recovery description",
     handler: async () => writeFile(${JSON.stringify(repairMarker)}, "repair", "utf8"),
+  });
+  pi.registerCommand("oops?", {
+    description: "Localized typo description",
+    handler: async () => undefined,
+  });
+  pi.registerCommand("oops!", {
+    description: "Localized destructive description",
+    handler: async () => undefined,
   });
 }
 `,
@@ -100,6 +108,8 @@ export default function recoveryBridge(pi: any) {
       assert.ok(status.modes.includes("files"));
       assert.ok(status.actions.includes("checkpoint"));
       assert.ok(status.actions.includes("repair"));
+      assert.ok(status.actions.includes("repair-typo"));
+      assert.ok(status.actions.includes("repair-destructive"));
       assert.ok(status.providers.some((provider) => provider.id === "pi-workspace-history"));
       assert.ok(status.providers.some((provider) => provider.id === "pi-wtf"));
 

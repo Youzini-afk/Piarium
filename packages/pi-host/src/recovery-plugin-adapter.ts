@@ -88,45 +88,32 @@ function commandIdentity(command: ResolvedCommand): string {
 }
 
 function isWorkspaceHistoryCommand(command: ResolvedCommand): boolean {
-  if (containsPlugin(commandIdentity(command), "pi-workspace-history")) return true;
-  const description = command.description?.toLowerCase() ?? "";
-  return (
-    description === "undo last agent turn and restore workspace" ||
-    description === "redo previously undone agent turn and restore workspace" ||
-    description === "save current workspace state as a manual time-machine checkpoint"
-  );
+  return containsPlugin(commandIdentity(command), "pi-workspace-history");
 }
 
 function isWtfCommand(command: ResolvedCommand): boolean {
-  if (containsPlugin(commandIdentity(command), "pi-wtf")) return true;
-  const description = command.description?.toLowerCase() ?? "";
-  return (
-    description.includes("recover the last prompt") ||
-    description.includes("remove the last prompt subtree")
-  );
+  return containsPlugin(commandIdentity(command), "pi-wtf");
 }
 
 function workspaceAction(command: ResolvedCommand): RecoveryAction | undefined {
-  const description = command.description?.toLowerCase() ?? "";
-  if (command.name === "undo" || description.startsWith("undo last agent turn")) return "undo";
-  if (command.name === "redo" || description.startsWith("redo previously undone agent turn")) {
-    return "redo";
-  }
-  if (command.name === "checkpoint" || description.includes("time-machine checkpoint")) {
-    return "checkpoint";
-  }
+  if (command.name === "undo") return "undo";
+  if (command.name === "redo") return "redo";
+  if (command.name === "checkpoint") return "checkpoint";
   return undefined;
 }
 
-function repairAction(command: ResolvedCommand): RecoveryAction | undefined {
-  const description = command.description?.toLowerCase() ?? "";
-  if (description.includes("destructively rewrite") || command.name.endsWith("!")) {
-    return "repair-destructive";
+function repairAction(
+  command: ResolvedCommand,
+  commands: readonly ResolvedCommand[],
+): RecoveryAction | undefined {
+  if (command.name.endsWith("!")) return "repair-destructive";
+  if (command.name.endsWith("?")) return "repair-typo";
+  if (
+    commands.some((candidate) => candidate.name === `${command.name}?`) &&
+    commands.some((candidate) => candidate.name === `${command.name}!`)
+  ) {
+    return "repair";
   }
-  if (description.includes("suggest a typo fix") || command.name.endsWith("?")) {
-    return "repair-typo";
-  }
-  if (description.includes("recover the last prompt")) return "repair";
   return undefined;
 }
 
@@ -292,7 +279,7 @@ export class RecoveryPluginAdapter {
       context.loadedExtensions.some((source) => containsPlugin(source, "pi-wtf"));
     if (wtfConfigured || wtfLoaded) {
       const actions = wtfCommands
-        .map(repairAction)
+        .map((command) => repairAction(command, wtfCommands))
         .filter((action): action is RecoveryAction => action !== undefined);
       const source =
         wtfCommands[0]?.sourceInfo.source ??
@@ -433,9 +420,12 @@ export class RecoveryPluginAdapter {
       sessionId: session.sessionId,
     });
     if (bridge) return bridge;
-    const command = session.extensionRunner
+    const commands = session.extensionRunner
       .getRegisteredCommands()
-      .find((candidate) => isWtfCommand(candidate) && repairAction(candidate) === protocolAction);
+      .filter(isWtfCommand);
+    const command = commands.find(
+      (candidate) => repairAction(candidate, commands) === protocolAction,
+    );
     if (!command) {
       throw new HostError("recovery_action_unavailable", `pi-wtf does not expose ${action}`);
     }
