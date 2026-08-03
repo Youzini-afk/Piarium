@@ -10,6 +10,7 @@ export const createPiResourceStarter = (kind: PiResourceKind, rawName: string): 
     return [
       '---',
       'description: Describe when to use this prompt',
+      'argument-hint: "[target] [focus]"',
       '---',
       '',
       `# ${name || 'Prompt'}`,

@@ -154,14 +154,21 @@ export const PluginSettingsPage: React.FC = () => {
   }, [loadPackages]);
 
   const selectedIntegration = PLUGIN_INTEGRATIONS.find((entry) => entry.id === selected)!;
-  const selectedInstalled = findPiPackage(packages, selectedIntegration.packageName) !== undefined;
+  const selectedPackage = findPiPackage(packages, selectedIntegration.packageName);
+  const selectedInstalled = selectedPackage?.installed === true;
 
   const renderSelectedSettings = () => {
     switch (selected) {
       case 'subagents':
         return <SubagentsSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />;
       case 'magic-context':
-        return <MagicContextSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />;
+        return (
+          <MagicContextSettings
+            initialPanel={navigationTarget?.section === 'agents' ? 'agents' : undefined}
+            runtimeTarget={runtimeTarget}
+            targetKey={targetKey}
+          />
+        );
       case 'web-access':
         return <WebAccessSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />;
       case 'workspace-history':
@@ -199,7 +206,7 @@ export const PluginSettingsPage: React.FC = () => {
       >
         <div className="grid grid-cols-1 gap-2 @xl:grid-cols-2 @4xl:grid-cols-3">
           {PLUGIN_INTEGRATIONS.map((integration) => {
-            const installed = findPiPackage(packages, integration.packageName) !== undefined;
+            const installed = findPiPackage(packages, integration.packageName)?.installed === true;
             const active = integration.id === selected;
             return (
               <button

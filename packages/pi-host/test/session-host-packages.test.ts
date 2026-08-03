@@ -47,16 +47,25 @@ describe("SessionHost Pi packages", () => {
       const installed = await host.installPackage(packageRoot, "project");
       assert.equal(installed.name, "fixture-pi-package");
       assert.equal(installed.scope, "project");
+      assert.equal(installed.installed, true);
+      assert.equal(installed.structured, false);
+      assert.equal(installed.resolvedPath, packageRoot);
       assert.equal(installed.version, "1.2.3");
-      assert.ok(
-        host.listCommands(snapshot.sessionId)
-          .some((command) => command.name === "fixture-package-command"),
-      );
+      const command = host.listCommands(snapshot.sessionId)
+        .find((entry) => entry.name === "fixture-package-command");
+      assert.equal(command?.source, "extension");
+      assert.equal(command?.sourceInfo?.source, installed.source);
+      assert.equal(command?.sourceInfo?.scope, "project");
 
       const settings = JSON.parse(
         await readFile(join(cwd, ".pi", "settings.json"), "utf8"),
       ) as { packages?: string[] };
       assert.ok(settings.packages?.includes(installed.source));
+
+      await rm(packageRoot, { force: true, recursive: true });
+      const missing = host.listPackages().find((entry) => entry.source === installed.source);
+      assert.equal(missing?.installed, false);
+      assert.equal(missing?.resolvedPath, undefined);
 
       assert.equal(await host.removePackage(installed.source, "project"), true);
       assert.deepEqual(host.listPackages(), []);

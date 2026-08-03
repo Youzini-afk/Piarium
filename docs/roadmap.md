@@ -166,6 +166,13 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused
   destructive confirmation, project-trust gating, result reporting, and catalog refresh all route
   through the plugin-owned management tool. Fleet projection remains the next subagents slice.
+- Implemented: Agents, Commands, Prompts, Skills, Pi Packages, and Plugin Settings now observe one
+  ownership model. Agents exposes provider-owned source/package/invocation facts without inventing
+  a universal override schema; Commands is a read-only live catalog with native source provenance;
+  Prompts shows its filename-derived slash invocation and `argument-hint`; package rows distinguish
+  configured sources from missing local installations, expose resolved/structured-entry state, explain Pi's
+  cross-scope update semantics, and route configuration to the matching specialized or Advanced
+  plugin surface.
 - Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
   reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
   config sources. Desktop header and mobile controls now consume that same snapshot/command path;

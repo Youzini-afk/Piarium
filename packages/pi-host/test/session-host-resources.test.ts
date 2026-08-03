@@ -25,7 +25,7 @@ describe("SessionHost Pi resources", () => {
     await mkdir(cwd, { recursive: true });
     const host = createHost(agentDir, true);
     try {
-      await host.openCatalogContext(cwd);
+      const snapshot = await host.openCatalogContext(cwd);
       const content = "---\ndescription: Review a change\nargument-hint: <path>\n---\nReview $1 carefully.\n";
       const created = await host.createResource("prompt", "user", "review", content);
       assert.equal(created.content, content);
@@ -33,6 +33,10 @@ describe("SessionHost Pi resources", () => {
       assert.equal(created.descriptor.argumentHint, "<path>");
       assert.equal(created.descriptor.sourceInfo.scope, "user");
       assert.equal(created.descriptor.writable, true);
+      const command = host.listCommands(snapshot.sessionId).find((entry) => entry.name === "review");
+      assert.equal(command?.source, "prompt");
+      assert.equal(command?.argumentHint, "<path>");
+      assert.equal(command?.sourceInfo?.path, created.descriptor.filePath);
       assert.equal(
         await readFile(join(agentDir, "prompts", "review.md"), "utf8"),
         content,
@@ -69,6 +73,7 @@ describe("SessionHost Pi resources", () => {
         ),
         false,
       );
+      assert.equal(host.listCommands(snapshot.sessionId).some((entry) => entry.name === "review"), false);
     } finally {
       await host.dispose();
       if (previousHome === undefined) delete process.env.HOME;

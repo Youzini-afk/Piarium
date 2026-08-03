@@ -150,7 +150,7 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
 
   return (
     <SettingsPageLayout
-      title={descriptor.name}
+      title={kind === 'prompt' ? `/${descriptor.name}` : descriptor.name}
       description={descriptor.description || description}
       showSaveStatus={false}
       headerEnd={(
@@ -193,10 +193,17 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
           </div>
 
           <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
+            {kind === 'prompt' ? (
+              <p className="mb-1 typography-meta text-foreground">
+                {t('settings.piarium.prompts.invocation')}{' '}
+                <code className="font-mono">
+                  /{descriptor.name}{descriptor.argumentHint ? ` ${descriptor.argumentHint}` : ''}
+                </code>
+              </p>
+            ) : null}
             <p className="break-all font-mono typography-micro text-muted-foreground">{descriptor.filePath}</p>
             <p className="mt-1 typography-micro text-muted-foreground">
               {descriptor.sourceInfo.origin} · {descriptor.sourceInfo.source}
-              {descriptor.argumentHint ? ` · ${descriptor.argumentHint}` : ''}
               {descriptor.disableModelInvocation ? ` · ${t('settings.piarium.skills.modelInvocationDisabled')}` : ''}
             </p>
           </div>

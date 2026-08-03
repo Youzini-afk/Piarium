@@ -6,6 +6,7 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiCommandDescriptor,
   PiPackageScope,
   PiAgentCatalogSnapshot,
   PiAgentProviderActionResult,
@@ -103,7 +104,7 @@ export interface HostMethodMap {
   };
   "command.list": {
     params: { sessionId: string };
-    result: Array<{ description?: string; name: string; source?: string }>;
+    result: PiCommandDescriptor[];
   };
   "extension.ui.respond": {
     params: ExtensionUiResponse;

@@ -83,6 +83,12 @@ function statusTone(status: PiAgentStatus): string {
   }
 }
 
+function invocationExample(agent: PiAgentDescriptor): string | null {
+  if (!agent.invocation) return null;
+  const separator = agent.invocation.taskSeparator === 'double-dash' ? ' -- ' : ' ';
+  return `/${agent.invocation.command} ${agent.name}${separator}<task>`;
+}
+
 const AgentBadge: React.FC<{
   children: React.ReactNode;
   className?: string;
@@ -138,7 +144,9 @@ const ProviderCard: React.FC<{
       />
     </div>
     <div className="mt-2 flex items-center justify-between gap-2 typography-micro text-muted-foreground">
-      <span className="truncate font-mono">{provider.id}</span>
+      <span className="truncate font-mono" title={provider.source ?? provider.id}>
+        {provider.source ?? provider.id}
+      </span>
       <span className="shrink-0 tabular-nums">{agentCount}</span>
     </div>
   </button>
@@ -282,8 +290,10 @@ export const AgentsPage: React.FC = () => {
         agent.thinking,
         agent.source.scope,
         agent.source.path,
+        agent.source.packageName,
         provider?.label,
         provider?.id,
+        provider?.source,
         ...(agent.aliases ?? []),
         ...(agent.fallbackModels ?? []),
       ].filter(Boolean).join(' ').toLocaleLowerCase();
@@ -296,6 +306,7 @@ export const AgentsPage: React.FC = () => {
       ?? filteredAgents[0]
       ?? null
   ), [filteredAgents, selectedAgentId]);
+  const selectedInvocation = selectedAgent ? invocationExample(selectedAgent) : null;
 
   const runAction = React.useCallback(async (input: {
     action: string;
@@ -713,6 +724,15 @@ export const AgentsPage: React.FC = () => {
                   <DetailRow label={t('settings.piarium.agents.detail.source')} value={displayEnum(selectedAgent.source.scope)} />
                   {selectedAgent.source.path ? (
                     <DetailRow label={t('settings.piarium.agents.detail.path')} value={<span className="font-mono typography-micro">{selectedAgent.source.path}</span>} />
+                  ) : null}
+                  {selectedAgent.source.packageName ? (
+                    <DetailRow label={t('settings.piarium.agents.detail.package')} value={selectedAgent.source.packageName} />
+                  ) : null}
+                  {selectedInvocation ? (
+                    <DetailRow
+                      label={t('settings.piarium.agents.detail.invocation')}
+                      value={<code className="font-mono typography-micro">{selectedInvocation}</code>}
+                    />
                   ) : null}
                   <DetailRow
                     label={t('settings.piarium.agents.detail.model')}

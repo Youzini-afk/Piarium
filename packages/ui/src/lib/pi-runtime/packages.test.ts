@@ -23,7 +23,13 @@ describe('Pi package identity', () => {
 
   test('finds a configured integration without replacing its original source', () => {
     const configured = findPiPackage([
-      { enabled: true, name: 'pi-wtf', scope: 'project', source: 'D:\\project\\opencr\\pi-wtf' },
+      {
+        installed: true,
+        name: 'pi-wtf',
+        scope: 'project',
+        source: 'D:\\project\\opencr\\pi-wtf',
+        structured: false,
+      },
     ], 'pi-wtf');
     expect(configured?.source).toBe('D:\\project\\opencr\\pi-wtf');
     expect(findPiPackage([configured!], 'pi-wtf', 'global')).toBeUndefined();

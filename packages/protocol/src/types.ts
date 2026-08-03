@@ -107,10 +107,12 @@ export interface ImageAttachment {
 export type ProviderAuthType = "api_key" | "oauth";
 
 export interface PackageDescriptor {
-  enabled: boolean;
+  installed: boolean;
   name: string;
+  resolvedPath?: string;
   scope: PiPackageScope;
   source: string;
+  structured: boolean;
   version?: string;
 }
 
@@ -126,6 +128,16 @@ export interface PiResourceSourceInfo {
   path: string;
   scope: PiResourceScope | "temporary";
   source: string;
+}
+
+export type PiCommandSource = "extension" | "prompt" | "skill";
+
+export interface PiCommandDescriptor {
+  argumentHint?: string;
+  description?: string;
+  name: string;
+  source: PiCommandSource;
+  sourceInfo: PiResourceSourceInfo;
 }
 
 export interface PiResourceCollision {

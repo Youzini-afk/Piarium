@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { PiResourceCatalogSnapshot, PiResourceDescriptor } from '@piarium/protocol';
+import type {
+  PiCommandDescriptor,
+  PiCommandSource,
+  PiResourceCatalogSnapshot,
+  PiResourceDescriptor,
+} from '@piarium/protocol';
 import { buildPiDraftStarterCatalog } from './piDraftStarterCatalog';
 
 const descriptor = (
@@ -30,13 +35,24 @@ const catalog = (...resources: PiResourceDescriptor[]): PiResourceCatalogSnapsho
   resources,
 });
 
+const command = (name: string, source: PiCommandSource): PiCommandDescriptor => ({
+  name,
+  source,
+  sourceInfo: {
+    origin: source === 'extension' ? 'package' : 'top-level',
+    path: `C:/commands/${name}`,
+    scope: 'user',
+    source,
+  },
+});
+
 describe('Pi draft starter catalog', () => {
   test('keeps Pi command invocations while normalizing skill references', () => {
     const items = buildPiDraftStarterCatalog(
       [
-        { name: 'review', source: 'prompt' },
-        { name: 'skill:workspace-check', source: 'skill' },
-        { name: 'reload', source: 'extension' },
+        command('review', 'prompt'),
+        command('skill:workspace-check', 'skill'),
+        command('reload', 'extension'),
       ],
       catalog(descriptor('prompt', 'review', 'project')),
       catalog(descriptor('skill', 'workspace-check', 'project')),
@@ -52,9 +68,9 @@ describe('Pi draft starter catalog', () => {
   test('uses only active resource ownership and de-duplicates colliding commands', () => {
     const items = buildPiDraftStarterCatalog(
       [
-        { name: 'review', source: 'extension' },
-        { name: 'review', source: 'prompt' },
-        { name: 'skill:check', source: 'skill' },
+        command('review', 'extension'),
+        command('review', 'prompt'),
+        command('skill:check', 'skill'),
       ],
       catalog(descriptor('prompt', 'review', 'project')),
       catalog(descriptor('skill', 'check', 'project', false)),

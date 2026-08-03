@@ -16,7 +16,7 @@ import type {
 } from "./types.js";
 
 const PROVIDER_ID = "magic-context";
-const CONFIGURATION = { pluginId: "@cortexkit/pi-magic-context", section: "context-memory" } as const;
+const CONFIGURATION = { pluginId: "@cortexkit/pi-magic-context", section: "agents" } as const;
 const HIDDEN_AGENT_KEYS = ["historian", "dreamer", "sidekick"] as const;
 const AGENT_ESCALATION_FIELDS = ["prompt", "permission", "tools", "system_prompt"] as const;
 

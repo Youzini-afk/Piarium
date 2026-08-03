@@ -144,13 +144,21 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
               void createNew();
             }}
           >
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={kind === 'prompt' ? 'review-change' : 'workspace-check'}
-              autoFocus
-              aria-invalid={Boolean(name && nameError)}
-            />
+            <div className="relative">
+              {kind === 'prompt' ? (
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono typography-meta text-muted-foreground">
+                  /
+                </span>
+              ) : null}
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={kind === 'prompt' ? 'review-change' : 'workspace-check'}
+                autoFocus
+                aria-invalid={Boolean(name && nameError)}
+                className={kind === 'prompt' ? 'pl-6 font-mono' : undefined}
+              />
+            </div>
             <div className="flex items-center gap-2">
               <Select value={scope} onValueChange={setScope}>
                 <SelectTrigger size="settings" className="min-w-0 flex-1">
@@ -213,7 +221,9 @@ export const PiResourceSidebar: React.FC<PiResourceSidebarProps> = ({ kind, onIt
               )} />
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
-                  <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">{resource.name}</span>
+                  <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+                    {kind === 'prompt' ? `/${resource.name}` : resource.name}
+                  </span>
                   {!resource.valid ? (
                     <span className="shrink-0 typography-micro text-[var(--status-warning)]">
                       {t('settings.piarium.resources.status.invalid')}

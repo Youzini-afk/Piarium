@@ -45,6 +45,7 @@ import {
 import { useTextObjectDraft } from './usePluginConfigDraft';
 
 interface MagicContextSettingsProps {
+  initialPanel?: MagicContextPanel;
   runtimeTarget: RuntimeContextTarget;
   targetKey: string;
 }
@@ -676,12 +677,13 @@ function issueMessage(issue: MagicContextDraftIssue, t: ReturnType<typeof useI18
 }
 
 export const MagicContextSettings: React.FC<MagicContextSettingsProps> = ({
+  initialPanel = 'overview',
   runtimeTarget,
   targetKey,
 }) => {
   const { t } = useI18n();
   const [scope, setScope] = React.useState<MagicContextScope>('user');
-  const [panel, setPanel] = React.useState<MagicContextPanel>('overview');
+  const [panel, setPanel] = React.useState<MagicContextPanel>(initialPanel);
   const userController = useTextObjectDraft({
     format: 'jsonc',
     paths: MAGIC_USER_PATHS,

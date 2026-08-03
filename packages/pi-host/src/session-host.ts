@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, type Dirent } from "node:fs";
+import { existsSync, readFileSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -27,6 +27,7 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiCommandDescriptor,
   PiPackageScope,
   PiAgentCatalogSnapshot,
   PiAgentProviderActionResult,
@@ -1174,24 +1175,28 @@ export class SessionHost {
     return this.getResource(kind, resourceId(kind, target.filePath));
   }
 
-  listCommands(sessionId: string): Array<{ description?: string; name: string; source?: string }> {
+  listCommands(sessionId: string): PiCommandDescriptor[] {
     this.assertSession(sessionId);
-    const extensionCommands = this.session.extensionRunner
+    const extensionCommands: PiCommandDescriptor[] = this.session.extensionRunner
       .getRegisteredCommands()
       .map((command) => ({
         ...(command.description === undefined ? {} : { description: command.description }),
         name: command.invocationName,
         source: "extension",
+        sourceInfo: command.sourceInfo,
       }));
-    const templates = this.session.promptTemplates.map((template) => ({
+    const templates: PiCommandDescriptor[] = this.session.promptTemplates.map((template) => ({
+      ...(template.argumentHint === undefined ? {} : { argumentHint: template.argumentHint }),
       ...(template.description === undefined ? {} : { description: template.description }),
       name: template.name,
       source: "prompt",
+      sourceInfo: template.sourceInfo,
     }));
-    const skills = this.session.resourceLoader.getSkills().skills.map((skill) => ({
+    const skills: PiCommandDescriptor[] = this.session.resourceLoader.getSkills().skills.map((skill) => ({
       description: skill.description,
       name: `skill:${skill.name}`,
       source: "skill",
+      sourceInfo: skill.sourceInfo,
     }));
     return [...extensionCommands, ...templates, ...skills];
   }
@@ -1199,7 +1204,7 @@ export class SessionHost {
   async executeCommand(sessionId: string, command: string): Promise<JsonValue> {
     this.assertSession(sessionId);
     if (!command.startsWith("/")) {
-      throw new HostError("invalid_command", "Extension commands must start with '/'");
+      throw new HostError("invalid_command", "Slash commands must start with '/'");
     }
     await this.session.prompt(command);
     return { executed: true };
@@ -1384,10 +1389,12 @@ export class SessionHost {
     return manager.listConfiguredPackages().map((entry) => {
       const version = packageVersionFromPath(entry.installedPath);
       return {
-        enabled: true,
+        installed: entry.installedPath !== undefined && existsSync(entry.installedPath),
         name: packageNameFromSource(entry.source),
+        ...(entry.installedPath === undefined ? {} : { resolvedPath: entry.installedPath }),
         scope: entry.scope === "project" ? "project" : "global",
         source: entry.source,
+        structured: entry.filtered,
         ...(version === undefined ? {} : { version }),
       };
     });
@@ -1398,14 +1405,17 @@ export class SessionHost {
     await manager.installAndPersist(source, { local: scope === "project" });
     await this.runtime.services.settingsManager.flush();
     await this.session.reload();
+    const resolvedPath = manager.getInstalledPath(source, scope === "project" ? "project" : "user");
     return this.listPackages().find((entry) => (
       entry.scope === scope
-      && (entry.source === source || entry.name === packageNameFromSource(source))
+      && (entry.source === source || (resolvedPath !== undefined && entry.resolvedPath === resolvedPath))
     )) ?? {
-      enabled: true,
+      installed: resolvedPath !== undefined,
       name: packageNameFromSource(source),
+      ...(resolvedPath === undefined ? {} : { resolvedPath }),
       scope,
       source,
+      structured: false,
     };
   }
 
@@ -1421,6 +1431,24 @@ export class SessionHost {
       // removal matcher resolves input relative to the workspace. Retry with
       // the already-resolved path so the exact configured entry is removed.
       removed = manager.removeSourceFromSettings(configured.installedPath, { local });
+    }
+    if (!removed && configured) {
+      // Pi resolves an input local path relative to the workspace, but stores a
+      // project-local source relative to `.pi`. If the source directory has
+      // disappeared there is no installed path left to bridge those bases, so
+      // remove the exact configured entry without guessing another identity.
+      const settings = this.runtime.services.settingsManager;
+      const current = local
+        ? settings.getProjectSettings().packages ?? []
+        : settings.getGlobalSettings().packages ?? [];
+      const next = current.filter((entry) => (
+        (typeof entry === "string" ? entry : entry.source) !== configured.source
+      ));
+      if (next.length !== current.length) {
+        if (local) settings.setProjectPackages(next);
+        else settings.setPackages(next);
+        removed = true;
+      }
     }
     await this.runtime.services.settingsManager.flush();
     await this.session.reload();

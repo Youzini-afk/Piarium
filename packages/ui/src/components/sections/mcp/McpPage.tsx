@@ -482,17 +482,23 @@ export const McpPage: React.FC = () => {
               <div className="flex flex-wrap items-center gap-2">
                 <Icon
                   name="plug-2"
-                  className={configuredPackage
+                  className={configuredPackage?.installed
                     ? 'size-4 text-[var(--status-success)]'
+                    : configuredPackage
+                      ? 'size-4 text-[var(--status-warning)]'
                     : 'size-4 text-muted-foreground'}
                 />
                 <span className="typography-ui-label text-foreground">pi-mcp-adapter</span>
                 {!packagesLoading && (
-                  <span className={configuredPackage
+                  <span className={configuredPackage?.installed
                     ? 'typography-micro text-[var(--status-success)]'
+                    : configuredPackage
+                      ? 'typography-micro text-[var(--status-warning)]'
                     : 'typography-micro text-muted-foreground'}>
-                    {configuredPackage
+                    {configuredPackage?.installed
                       ? t('settings.piarium.recovery.status.configured')
+                      : configuredPackage
+                        ? t('settings.piarium.plugins.status.missing')
                       : t('settings.piarium.recovery.status.notConfigured')}
                   </span>
                 )}

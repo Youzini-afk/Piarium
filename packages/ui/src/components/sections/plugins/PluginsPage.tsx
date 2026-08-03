@@ -15,6 +15,7 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useUIStore } from '@/stores/useUIStore';
 import {
   findPiPackage,
   isPiPackageUpdatable,
@@ -26,6 +27,7 @@ import {
 } from '@/lib/pi-runtime/packages';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 
 type PackageAction = 'install' | 'remove' | 'update' | 'update-all';
 
@@ -98,14 +100,20 @@ const packageActionLabel = (
         : t('settings.piarium.recovery.actions.update');
 };
 
-const PackageStatus: React.FC<{ configured: boolean }> = ({ configured }) => {
+const PackageStatus: React.FC<{ packageInfo?: PackageDescriptor }> = ({ packageInfo }) => {
   const { t } = useI18n();
+  const configured = packageInfo !== undefined;
+  const installed = packageInfo?.installed === true;
   return (
-    <span className={configured
+    <span className={configured && installed
       ? 'typography-micro text-[var(--status-success)]'
+      : configured
+        ? 'typography-micro text-[var(--status-warning)]'
       : 'typography-micro text-muted-foreground'}>
-      {configured
+      {configured && installed
         ? t('settings.piarium.recovery.status.configured')
+        : configured
+          ? t('settings.piarium.plugins.status.missing')
         : t('settings.piarium.recovery.status.notConfigured')}
     </span>
   );
@@ -118,6 +126,7 @@ export const PluginsPage: React.FC = () => {
     const sessionId = state.currentSessionId;
     return sessionId && state.records[sessionId]?.open ? sessionId : null;
   });
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
     activeSessionId ? { sessionId: activeSessionId } : { cwd: currentDirectory }
   ), [activeSessionId, currentDirectory]);
@@ -188,7 +197,11 @@ export const PluginsPage: React.FC = () => {
     if (action !== 'update-all' && !source) return;
     const actionTargetKey = targetKey;
     const runtimeKey = getRuntimeKey();
-    setBusyAction(source ? { action, scope, source } : { action });
+    setBusyAction(source
+      ? action === 'update'
+        ? { action, source }
+        : { action, scope, source }
+      : { action });
     try {
       if (action === 'install') {
         await installPiPackage(runtimeTarget, source!, scope);
@@ -213,6 +226,11 @@ export const PluginsPage: React.FC = () => {
       setBusyAction(null);
     }
   }, [installScope, refresh, runtimeTarget, t, targetKey]);
+
+  const openPackageConfiguration = React.useCallback((entry: PackageDescriptor) => {
+    requestPluginSettingsTarget(entry.name);
+    setSettingsPage('plugin-settings');
+  }, [setSettingsPage]);
 
   const normalizedCustomSource = customSource.trim();
   const customPackage = normalizedCustomSource
@@ -243,9 +261,14 @@ export const PluginsPage: React.FC = () => {
         divider={false}
       >
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-3">
-          <p className="max-w-3xl typography-meta text-muted-foreground">
-            {t('settings.piarium.plugins.ownership')}
-          </p>
+          <div className="max-w-3xl">
+            <p className="typography-meta text-muted-foreground">
+              {t('settings.piarium.plugins.ownership')}
+            </p>
+            <p className="mt-1 typography-micro text-muted-foreground">
+              {t('settings.piarium.plugins.actions.updateAllDescription')}
+            </p>
+          </div>
           <div className="flex shrink-0 items-center gap-2">
             <Select value={installScope} onValueChange={(value) => setInstallScope(value as PiPackageScope)}>
               <SelectTrigger className="h-7 w-36 typography-micro" aria-label="Package install scope">
@@ -263,6 +286,7 @@ export const PluginsPage: React.FC = () => {
               disabled={isBusy || !loaded || packages.length === 0}
               onClick={() => void runPackageAction('update-all')}
               className="!font-normal"
+              title={t('settings.piarium.plugins.actions.updateAllDescription')}
             >
               {packageActionLabel(busyAction?.action ?? null, 'update-all', t)}
             </Button>
@@ -287,7 +311,8 @@ export const PluginsPage: React.FC = () => {
         ) : null}
 
         {packages.map((entry) => {
-          const action = busyAction?.source === entry.source && busyAction.scope === entry.scope
+          const action = busyAction?.source === entry.source
+            && (busyAction.action === 'update' || busyAction.scope === entry.scope)
             ? busyAction.action
             : null;
           return (
@@ -295,17 +320,30 @@ export const PluginsPage: React.FC = () => {
               <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Icon name="plug-2" className="size-4 text-[var(--status-success)]" />
+                    <Icon
+                      name="plug-2"
+                      className={entry.installed
+                        ? 'size-4 text-[var(--status-success)]'
+                        : 'size-4 text-[var(--status-warning)]'}
+                    />
                     <span className="typography-ui-label text-foreground">{entry.name}</span>
-                    <PackageStatus configured />
+                    <PackageStatus packageInfo={entry} />
                     <span className="rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
                       {entry.scope === 'project' ? 'project' : 'user'}
                     </span>
                     {entry.version ? (
                       <span className="typography-micro text-muted-foreground">v{entry.version}</span>
                     ) : null}
+                    {entry.structured ? (
+                      <span className="rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
+                        {t('settings.piarium.plugins.status.structured')}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="break-all font-mono typography-micro text-muted-foreground">{entry.source}</p>
+                  {entry.resolvedPath ? (
+                    <p className="break-all font-mono typography-micro text-muted-foreground/80">{entry.resolvedPath}</p>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                   {isPiPackageUpdatable(entry.source) ? (
@@ -314,14 +352,25 @@ export const PluginsPage: React.FC = () => {
                       variant="outline"
                       size="xs"
                       disabled={isBusy}
-                      onClick={() => void runPackageAction('update', entry.source, entry.scope)}
+                      onClick={() => void runPackageAction('update', entry.source)}
                       className="!font-normal"
+                      title={t('settings.piarium.plugins.actions.updateSourceDescription')}
                     >
                       {packageActionLabel(action, 'update', t)}
                     </Button>
                   ) : (
                     <span className="px-1.5 typography-micro text-muted-foreground">Local source</span>
                   )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={isBusy}
+                    onClick={() => openPackageConfiguration(entry)}
+                    className="!font-normal"
+                  >
+                    {t('settings.piarium.plugins.actions.configure')}
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -364,10 +413,14 @@ export const PluginsPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     <Icon
                       name="plug-2"
-                      className={configured ? 'size-4 text-[var(--status-success)]' : 'size-4 text-muted-foreground'}
+                      className={configured?.installed
+                        ? 'size-4 text-[var(--status-success)]'
+                        : configured
+                          ? 'size-4 text-[var(--status-warning)]'
+                          : 'size-4 text-muted-foreground'}
                     />
                     <span className="typography-ui-label text-foreground">{item.name}</span>
-                    {loaded ? <PackageStatus configured={configured !== undefined} /> : null}
+                    {loaded ? <PackageStatus packageInfo={configured} /> : null}
                   </div>
                   <p className="typography-meta text-muted-foreground">{t(item.descriptionKey)}</p>
                   <p className="break-all font-mono typography-micro text-muted-foreground">{source}</p>
@@ -382,6 +435,17 @@ export const PluginsPage: React.FC = () => {
                     className="!font-normal"
                   >
                     {packageActionLabel(action, 'install', t)}
+                  </Button>
+                ) : configured ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={isBusy}
+                    onClick={() => openPackageConfiguration(configured)}
+                    className="!font-normal"
+                  >
+                    {t('settings.piarium.plugins.actions.configure')}
                   </Button>
                 ) : null}
               </div>
@@ -432,7 +496,7 @@ export const PluginsPage: React.FC = () => {
               ? 'Configured local package'
               : packageActionLabel(
                 busyAction?.source === (customPackage?.source ?? normalizedCustomSource)
-                  && busyAction.scope === installScope
+                  && (busyAction.action === 'update' || busyAction.scope === installScope)
                   ? busyAction.action
                   : null,
                 customPackage ? 'update' : 'install',

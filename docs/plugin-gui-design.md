@@ -55,6 +55,23 @@ An unknown package remains usable through Pi's generic extension UI bridge. If P
 have a specialized adapter, Plugin Settings opens its declared or user-selected native JSON/JSONC
 document rather than fabricating common fields.
 
+The current catalog surfaces follow those boundaries directly:
+
+- Pi Packages distinguishes a configured source from a source that is actually present on disk,
+  shows its resolved path and whether Pi stores a structured package entry, and links to Plugin
+  Settings. Pi's update operation is
+  truthfully described as source-wide across user and project scopes; the scope selector applies to
+  installation and removal, not to a fictional scoped update implementation.
+- Commands projects each extension, prompt, or skill command's native source path, scope, origin,
+  source identifier, and prompt argument hint. It remains read-only and links resource commands to
+  Prompts or Skills instead of editing them in place.
+- Prompts renders the filename-derived `/command` invocation and native `argument-hint` while all
+  Markdown/frontmatter parsing, collision decisions, package read-only state, and project trust
+  remain owned by Pi's resource loader.
+- Agents displays provider/source/package/invocation facts and calls only provider-advertised
+  actions. A missing model is labelled as a provider default or unreported value, never guessed to
+  be an inherited common setting.
+
 ## 4. Shared adapter shell
 
 Every first-class adapter uses the same frame:

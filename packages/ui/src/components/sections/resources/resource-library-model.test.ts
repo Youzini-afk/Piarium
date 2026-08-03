@@ -28,7 +28,9 @@ const descriptor = (overrides: Partial<PiResourceDescriptor>): PiResourceDescrip
 
 describe('Pi resource library model', () => {
   test('creates native prompt and skill markdown starters without restricting names', () => {
-    expect(createPiResourceStarter('prompt', 'review.md')).toContain('# review');
+    const prompt = createPiResourceStarter('prompt', 'review.md');
+    expect(prompt).toContain('# review');
+    expect(prompt).toContain('argument-hint: "[target] [focus]"');
     expect(createPiResourceStarter('skill', 'Workspace Check')).toContain('name: "Workspace Check"');
     expect(validatePiResourceName('Workspace Check')).toBeNull();
     expect(validatePiResourceName('../escape')).toBe('separator');

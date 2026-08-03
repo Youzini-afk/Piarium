@@ -21,7 +21,7 @@ import type {
 } from "./types.js";
 
 const PROVIDER_ID = "pi-subagents";
-const CONFIGURATION = { pluginId: "pi-subagents", section: "agents" } as const;
+const CONFIGURATION = { pluginId: "pi-subagents" } as const;
 
 const INSPECT_ACTION: PiAgentActionDescriptor = { id: "inspect", label: "Inspect" };
 const UPDATE_ACTION: PiAgentActionDescriptor = {

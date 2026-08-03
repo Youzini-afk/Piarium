@@ -1,4 +1,5 @@
 import React from 'react';
+import type { PiCommandDescriptor, PiCommandSource } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,83 +7,90 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
 import { listPiCommands } from '@/lib/pi-runtime/commands';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 
-type PiCommand = Awaited<ReturnType<typeof listPiCommands>>[number];
-
-type CommandSource = 'extension' | 'prompt' | 'skill' | 'other';
-
-const SOURCE_DETAILS: Readonly<Record<CommandSource, {
-  description: string;
-  label: string;
+const SOURCE_DETAILS: Readonly<Record<PiCommandSource, {
+  descriptionKey: I18nKey;
+  destination?: 'prompts' | 'skills';
+  labelKey: I18nKey;
 }>> = {
   extension: {
-    label: 'Extension commands',
-    description: 'Registered at runtime by the Pi extensions loaded for this workspace.',
+    labelKey: 'settings.piarium.commands.source.extension.title',
+    descriptionKey: 'settings.piarium.commands.source.extension.description',
   },
   prompt: {
-    label: 'Prompt templates',
-    description: 'Native .md prompt templates exposed as slash commands by Pi.',
+    labelKey: 'settings.piarium.commands.source.prompt.title',
+    descriptionKey: 'settings.piarium.commands.source.prompt.description',
+    destination: 'prompts',
   },
   skill: {
-    label: 'Skills',
-    description: 'Active Pi skills exposed with the /skill:name command form.',
-  },
-  other: {
-    label: 'Other commands',
-    description: 'Commands reported by the current Pi runtime without a standard source category.',
+    labelKey: 'settings.piarium.commands.source.skill.title',
+    descriptionKey: 'settings.piarium.commands.source.skill.description',
+    destination: 'skills',
   },
 };
 
-const sourceOf = (command: PiCommand): CommandSource => {
-  if (command.source === 'extension' || command.source === 'prompt' || command.source === 'skill') {
-    return command.source;
-  }
-  return 'other';
-};
-
-const invocationOf = (command: PiCommand): string => (
-  command.name.startsWith('/') ? command.name : `/${command.name}`
+const invocationOf = (command: PiCommandDescriptor): string => (
+  `${command.name.startsWith('/') ? command.name : `/${command.name}`}${command.argumentHint ? ` ${command.argumentHint}` : ''}`
 );
 
 export const CommandsPage: React.FC = () => {
   const { t } = useI18n();
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const { runtimeTarget, targetKey } = useResourceRuntimeTarget();
-  const [commands, setCommands] = React.useState<PiCommand[]>([]);
+  const [commands, setCommands] = React.useState<PiCommandDescriptor[]>([]);
   const [query, setQuery] = React.useState('');
   const [loading, setLoading] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const generationRef = React.useRef(0);
+  const targetKeyRef = React.useRef(targetKey);
+  targetKeyRef.current = targetKey;
 
   const refresh = React.useCallback(async () => {
     const generation = ++generationRef.current;
+    const actionTargetKey = targetKey;
+    const runtimeKey = getRuntimeKey();
     setLoading(true);
     setLoadError(null);
     try {
       const next = await listPiCommands(runtimeTarget);
-      if (generation !== generationRef.current) return;
+      if (
+        generation !== generationRef.current
+        || actionTargetKey !== targetKeyRef.current
+        || runtimeKey !== getRuntimeKey()
+      ) return;
       setCommands(next.slice().sort((left, right) => (
-        sourceOf(left).localeCompare(sourceOf(right))
+        left.source.localeCompare(right.source)
         || left.name.localeCompare(right.name)
       )));
       setLoaded(true);
     } catch (error) {
-      if (generation !== generationRef.current) return;
+      if (
+        generation !== generationRef.current
+        || actionTargetKey !== targetKeyRef.current
+        || runtimeKey !== getRuntimeKey()
+      ) return;
       setCommands([]);
       setLoaded(false);
       setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
-      if (generation === generationRef.current) setLoading(false);
+      if (
+        generation === generationRef.current
+        && actionTargetKey === targetKeyRef.current
+        && runtimeKey === getRuntimeKey()
+      ) setLoading(false);
     }
-  }, [runtimeTarget]);
+  }, [runtimeTarget, targetKey]);
 
   React.useEffect(() => {
     setCommands([]);
     setLoaded(false);
     void refresh();
-  }, [refresh, targetKey]);
+  }, [refresh]);
 
   const filtered = React.useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -90,19 +98,21 @@ export const CommandsPage: React.FC = () => {
     return commands.filter((command) => (
       command.name.toLocaleLowerCase().includes(normalized)
       || command.description?.toLocaleLowerCase().includes(normalized)
-      || command.source?.toLocaleLowerCase().includes(normalized)
+      || command.source.toLocaleLowerCase().includes(normalized)
+      || command.sourceInfo.path.toLocaleLowerCase().includes(normalized)
+      || command.sourceInfo.source.toLocaleLowerCase().includes(normalized)
+      || command.sourceInfo.scope.toLocaleLowerCase().includes(normalized)
     ));
   }, [commands, query]);
 
   const groups = React.useMemo(() => {
-    const result = new Map<CommandSource, PiCommand[]>();
+    const result = new Map<PiCommandSource, PiCommandDescriptor[]>();
     for (const command of filtered) {
-      const source = sourceOf(command);
-      const current = result.get(source) ?? [];
+      const current = result.get(command.source) ?? [];
       current.push(command);
-      result.set(source, current);
+      result.set(command.source, current);
     }
-    return (['extension', 'prompt', 'skill', 'other'] as const)
+    return (['extension', 'prompt', 'skill'] as const)
       .map((source) => ({ commands: result.get(source) ?? [], source }))
       .filter((group) => group.commands.length > 0);
   }, [filtered]);
@@ -110,19 +120,19 @@ export const CommandsPage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.page.commands.title')}
-      description="The live slash-command catalog for the current Pi workspace or session. Commands are invoked from chat; plugin-owned behavior remains in the plugin."
+      description={t('settings.piarium.commands.description')}
       headerEnd={(
         <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
           <Icon name="refresh" className={cn('size-4', loading && 'animate-spin')} />
-          Refresh
+          {t('settings.piarium.commands.actions.refresh')}
         </Button>
       )}
       showSaveStatus={false}
     >
       <SettingsSection
         settingsItem="commands.catalog"
-        title="Available commands"
-        description="Piarium reads this catalog from the active Pi runtime. Prompt templates and skills remain editable on their own pages."
+        title={t('settings.piarium.commands.catalog.title')}
+        description={t('settings.piarium.commands.catalog.description')}
         divider={false}
       >
         <div className="max-w-xl">
@@ -146,9 +156,24 @@ export const CommandsPage: React.FC = () => {
               const details = SOURCE_DETAILS[group.source];
               return (
                 <section key={group.source} className="space-y-2">
-                  <div>
-                    <h3 className="typography-ui-label font-medium text-foreground">{details.label}</h3>
-                    <p className="mt-0.5 typography-meta text-muted-foreground">{details.description}</p>
+                  <div className="flex flex-col gap-2 @xl:flex-row @xl:items-start @xl:justify-between">
+                    <div>
+                      <h3 className="typography-ui-label font-medium text-foreground">{t(details.labelKey)}</h3>
+                      <p className="mt-0.5 typography-meta text-muted-foreground">{t(details.descriptionKey)}</p>
+                    </div>
+                    {details.destination ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        className="shrink-0 !font-normal"
+                        onClick={() => setSettingsPage(details.destination!)}
+                      >
+                        {details.destination === 'prompts'
+                          ? t('settings.piarium.commands.actions.openPrompts')
+                          : t('settings.piarium.commands.actions.openSkills')}
+                      </Button>
+                    ) : null}
                   </div>
                   <div className="grid grid-cols-1 gap-2 @2xl:grid-cols-2">
                     {group.commands.map((command) => (
@@ -161,12 +186,18 @@ export const CommandsPage: React.FC = () => {
                             {invocationOf(command)}
                           </code>
                           <span className="shrink-0 rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
-                            {group.source}
+                            {command.sourceInfo.scope}
                           </span>
                         </div>
                         {command.description ? (
                           <p className="mt-2 typography-meta text-muted-foreground">{command.description}</p>
                         ) : null}
+                        <div className="mt-2 space-y-0.5 border-t border-border/50 pt-2 typography-micro text-muted-foreground">
+                          <p className="break-all font-mono">{command.sourceInfo.path}</p>
+                          <p className="break-all">
+                            {command.sourceInfo.origin} · {command.sourceInfo.source}
+                          </p>
+                        </div>
                       </div>
                     ))}
                   </div>
