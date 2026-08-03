@@ -15,6 +15,10 @@ import {
   type CommandInfo,
 } from '@/components/chat/CommandAutocomplete';
 import {
+  SkillAutocomplete,
+  type SkillAutocompleteHandle,
+} from '@/components/chat/SkillAutocomplete';
+import {
   SnippetAutocomplete,
   type SnippetAutocompleteHandle,
 } from '@/components/chat/SnippetAutocomplete';
@@ -70,7 +74,7 @@ const PIARIUM_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((comm
 }));
 
 type PiComposerAutocomplete = {
-  kind: 'command' | 'snippet';
+  kind: 'command' | 'skill' | 'snippet';
   query: string;
 } | null;
 
@@ -89,6 +93,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const { t } = useI18n();
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
+  const skillRef = React.useRef<SkillAutocompleteHandle>(null);
   const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const composingRef = React.useRef(false);
@@ -113,6 +118,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
   React.useEffect(() => {
     if (autocomplete?.kind === 'command' && !draft.startsWith('/')) setAutocomplete(null);
+    if (autocomplete?.kind === 'skill' && !draft.includes('/')) setAutocomplete(null);
     if (autocomplete?.kind === 'snippet' && !draft.includes('#')) setAutocomplete(null);
   }, [autocomplete?.kind, draft]);
 
@@ -140,7 +146,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
   const updateAutocomplete = React.useCallback((value: string, cursorPosition: number) => {
     const trigger = resolveAutocompleteTrigger(value, cursorPosition, { inputMode: 'normal' });
-    if (trigger?.kind === 'command' || trigger?.kind === 'snippet') {
+    if (trigger?.kind === 'command' || trigger?.kind === 'skill' || trigger?.kind === 'snippet') {
       setAutocomplete({ kind: trigger.kind, query: trigger.query });
       return;
     }
@@ -169,6 +175,24 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     onChangeDraft(value);
     setAutocomplete(null);
     const nextCursor = startIndex + trigger.length + 2;
+    requestAnimationFrame(() => {
+      const textarea = inputRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.selectionStart = nextCursor;
+      textarea.selectionEnd = nextCursor;
+    });
+  }, [draft, onChangeDraft]);
+
+  const handleSkillSelect = React.useCallback((invocation: string) => {
+    const input = inputRef.current;
+    const cursorPosition = input?.selectionStart ?? draft.length;
+    const slashIndex = draft.slice(0, cursorPosition).lastIndexOf('/');
+    const startIndex = slashIndex === -1 ? cursorPosition : slashIndex;
+    const value = `${draft.slice(0, startIndex)}/${invocation} ${draft.slice(cursorPosition)}`;
+    onChangeDraft(value);
+    setAutocomplete(null);
+    const nextCursor = startIndex + invocation.length + 2;
     requestAnimationFrame(() => {
       const textarea = inputRef.current;
       if (!textarea) return;
@@ -262,6 +286,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               ) {
                 event.preventDefault();
                 if (autocomplete.kind === 'command') commandRef.current?.handleKeyDown(event.key);
+                else if (autocomplete.kind === 'skill') skillRef.current?.handleKeyDown(event.key);
                 else snippetRef.current?.handleKeyDown(event.key);
                 return;
               }
@@ -289,6 +314,17 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               sessionId={snapshot.sessionId}
               searchQuery={autocomplete.query}
               onCommandSelect={handleCommandSelect}
+              onClose={() => setAutocomplete(null)}
+            />
+          ) : null}
+
+          {autocomplete?.kind === 'skill' ? (
+            <SkillAutocomplete
+              ref={skillRef}
+              cwd={snapshot.cwd}
+              sessionId={snapshot.sessionId}
+              searchQuery={autocomplete.query}
+              onSkillSelect={handleSkillSelect}
               onClose={() => setAutocomplete(null)}
             />
           ) : null}

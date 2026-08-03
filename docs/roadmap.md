@@ -98,10 +98,9 @@ retained before engine surgery begins.
 - Implemented Pi-native root effects and interaction controls: PWA shortcuts and retention now
   consume the global Pi catalog, the window title follows the active Pi working directory, and
   Escape abort, runtime status, model favorites, thinking levels, timeline focus, expanded input,
-  attachments, and dictation all target the active Pi session. OpenCode optimistic/queued-message
-  effects remain confined to explicitly named legacy embedded surfaces while those surfaces are
-  migrated or removed. The orphaned OpenCode session-retention hook and its stale sync documentation
-  were removed after the Pi-native retention hook became the sole production implementation.
+  attachments, and dictation all target the active Pi session. The orphaned OpenCode
+  session-retention hook and stale sync documentation were removed after the Pi-native retention
+  hook became the sole production implementation.
 - Implemented the Pi-native main application root: context panels, plans, project notes/todos,
   inline comments, drafts, archive management, project actions, worktree management, and command
   discovery no longer require the OpenCode SyncProvider. No production application root mounts that
@@ -127,11 +126,14 @@ retained before engine surgery begins.
   selects its Pi provider/model/thinking level, and dispatches either a Pi extension command or
   agent prompt. The editor and run-now navigation use the same Pi catalog/session contract; legacy
   OpenCode agent variants, permission policy, goal token ceiling, and session IDs were removed.
-- Replace OpenCode SDK domain types with Piarium-owned Pi session, message, event, provider, model,
-  command, permission, and question contracts.
-- Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.
-- Delete the OpenCode child lifecycle, proxy, watcher, downloaded CLI, provider persistence, and
-  obsolete code after each Pi-native replacement passes focused tests.
+- Implemented: all four production UI roots now use Piarium protocol DTOs without importing the
+  OpenCode SDK. The unreachable SDK client, complete sync/optimistic state graph, old chat composer,
+  turn projector, session sidebar, compiled test remnants, Vite aliases, dependency entries, and
+  lockfile package were removed together. Pi Skills autocomplete was reattached to the live Pi
+  command/resource catalog rather than discarded with the old composer.
+- Implemented: sync, lifecycle, provider, scheduling, control, and notification flows now use the
+  Pi host/broker contracts. The OpenCode child lifecycle, proxy, watcher, downloaded CLI, provider
+  persistence, and obsolete UI code are no longer part of the production graph.
 - Implemented: the cloud runtime base no longer installs or probes an OpenCode CLI, the container
   entrypoint no longer creates OpenCode configuration or installs oh-my-opencode, Compose no longer
   mounts or advertises OpenCode state, and remote deployment no longer discovers an OpenCode
@@ -180,8 +182,9 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   delegated to the installed `pi-workspace-history` / `pi-wtf` providers through their public
   bridge and commands, so package updates remain authoritative.
 - Implemented: put provider status/checkpoint/history management in the right sidebar/settings while retaining
-  the existing timeline, reverted-message dock, undo/redo, and fork UX. Enable files-only/preview
-  controls only when a plugin advertises them through recovery bridge v1.
+  the Pi timeline's normal rollback flow, undo/redo, and branch UX. Enable files-only/preview
+  controls only when a plugin advertises them through recovery bridge v1; no detached legacy
+  reverted-message dock is retained.
 
 - Implemented: native package installation/update and unrestricted configuration documents for
   `pi-subagents` and Magic Context. Subagent tree controls and Magic Context memory/session

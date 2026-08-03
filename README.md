@@ -25,8 +25,10 @@ snapshots, and extension-owned JSON/JSONC configuration documents such as `pi-wt
 and Magic Context's native files. Conversation rollback uses Pi directly;
 workspace history and repair delegate to `pi-workspace-history` and `pi-wtf`, so their independent
 package updates remain usable. The duplicate Piarium shadow-Git engine has been removed. Product
-limits are absent by default; deployment resource budgets are explicit opt-ins. Replacement of the
-remaining OpenCode UI state paths is the active phase.
+limits are absent by default; deployment resource budgets are explicit opt-ins. Every production
+renderer now mounts the Pi-native chat/session graph; the unreachable OpenCode sync graph, client,
+SDK dependency, bundler aliases, and SDK-shaped test fixtures have been removed. Current work is
+deepening first-class plugin operations and completing the Windows release journey.
 
 The product base is the maintainer's OpenChamber fork at commit `f551150e5`. That fork is imported
 into this repository and is being directly refactored from OpenCode to Pi; the source fork remains read-only.
@@ -50,7 +52,7 @@ and [the roadmap](docs/roadmap.md).
 
 ```text
 packages/
-  ui/             Shared OpenChamber-derived product UI, being refactored to Pi domain types
+  ui/             Shared Pi-native product UI and extension integration surfaces
   web/            Web/remote surface and trusted runtime service
   electron/       Windows/macOS/Linux desktop shell and packaging
   mobile/         Capacitor mobile shell

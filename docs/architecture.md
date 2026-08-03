@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi host, plugin recovery bridge, runtime broker, and Electron worker lifecycle implemented; product engine migration in progress
+Status: Pi-native engine cutover complete; plugin product surfaces and Windows release in progress
 
 Last updated: 2026-08-03
 
@@ -58,7 +58,10 @@ Pi session worker (Node >=22.19)
 The renderer contains presentation and local view state only. It never imports Pi packages, reads
 credential files, spawns commands, or loads extension code. Every native operation crosses a
 typed preload or Pi runtime capability. OpenCode SDK types are removed from feature code rather
-than preserved behind a compatibility facade.
+than preserved behind a compatibility facade. The former SDK client, sync stores, optimistic
+session graph, old chat composer/turn projection, and old session sidebar have no parallel copy:
+their unreachable source and tests were deleted after all four production roots passed type,
+lint, test, and bundle validation.
 
 Composer drafts are keyed by Pi runtime and session. Workspace surfaces may seed visible text and
 hidden instructions in that draft; if there is no active session they create one in the relevant

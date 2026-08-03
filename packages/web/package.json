@@ -27,7 +27,6 @@
     "@clack/prompts": "^1.1.0",
     "@konbakuyomu/smart-search": "^0.1.14",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "1.18.9",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",
     "@simplewebauthn/server": "13.3.1",

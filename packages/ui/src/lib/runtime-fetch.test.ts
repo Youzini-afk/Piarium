@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
@@ -49,113 +48,7 @@ describe('buildRuntimeFetchUrl', () => {
 });
 
 describe('runtimeFetch transport contract', () => {
-  test('preserves bodies from actual SDK mutation requests on same-origin runtimes', async () => {
-    const previous = getRuntimeUrlResolver();
-    const originalWindow = globalThis.window;
-    const calls: Array<{ url: string; method: string; body: string; headers: Headers }> = [];
-
-    try {
-      configureRuntimeUrlResolver({});
-      Object.defineProperty(globalThis, 'window', {
-        configurable: true,
-        value: { location: { origin: 'https://app.example', href: 'https://app.example/' } },
-      });
-
-      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = input instanceof Request ? input : new Request(input, init);
-        calls.push({
-          url: request.url,
-          method: request.method,
-          body: await request.clone().text(),
-          headers: request.headers,
-        });
-        return new Response(JSON.stringify({ ok: true, id: 'ses_1', time: { created: 1 } }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }) as typeof fetch;
-
-      const client = createOpencodeClient({
-        baseUrl: 'https://app.example/api',
-        fetch: runtimeFetch,
-      });
-
-      const v2SessionPrompt = (client as { v2?: { session?: { prompt?: (parameters: {
-        sessionID: string;
-        directory?: string;
-        prompt?: { text: string };
-        delivery?: 'immediate' | 'deferred';
-      }) => Promise<unknown> } } }).v2?.session?.prompt;
-      if (v2SessionPrompt) {
-        await v2SessionPrompt.call(client.v2.session, {
-          sessionID: 'ses_1',
-          directory: '/repo',
-          prompt: { text: 'hello' },
-          delivery: 'deferred',
-        });
-      } else {
-        await client.session.update({ sessionID: 'ses_1', directory: '/repo', time: { archived: 123 } });
-      }
-      await client.session.shell({
-        sessionID: 'ses_1',
-        directory: '/repo',
-        messageID: 'msg_2',
-        agent: 'build',
-        model: { providerID: 'anthropic', modelID: 'claude-sonnet' },
-        command: 'ls',
-      });
-      await client.session.update({ sessionID: 'ses_2', directory: '/repo', time: { archived: 456 } });
-      await client.permission.reply({ requestID: 'perm_1', directory: '/repo', reply: 'once' });
-      await client.question.reply({ requestID: 'q_1', directory: '/repo', answers: [['yes']] });
-      await client.auth.set({ providerID: 'anthropic', auth: { type: 'api', key: 'secret' } });
-      await client.provider.oauth.callback({ providerID: 'github-copilot', method: 0, code: 'oauth-code' });
-
-      expect(calls.map((call) => call.url)).toEqual([
-        calls[0].url.includes('/api/api/session/')
-          ? 'https://app.example/api/api/session/ses_1/prompt'
-          : 'https://app.example/api/session/ses_1?directory=%2Frepo',
-        'https://app.example/api/session/ses_1/shell?directory=%2Frepo',
-        'https://app.example/api/session/ses_2?directory=%2Frepo',
-        'https://app.example/api/permission/perm_1/reply?directory=%2Frepo',
-        'https://app.example/api/question/q_1/reply?directory=%2Frepo',
-        'https://app.example/api/auth/anthropic',
-        'https://app.example/api/provider/github-copilot/oauth/callback',
-      ]);
-      expect(calls.map((call) => call.method)).toEqual(['POST', 'POST', 'PATCH', 'POST', 'POST', 'PUT', 'POST']);
-      expect(calls.map((call) => call.headers.get('content-type'))).toEqual([
-        'application/json',
-        'application/json',
-        'application/json',
-        'application/json',
-        'application/json',
-        'application/json',
-        'application/json',
-      ]);
-      expect(calls.map((call) => JSON.parse(call.body))).toEqual([
-        calls[0].url.includes('/api/api/session/')
-          ? { prompt: { text: 'hello' }, delivery: 'deferred' }
-          : { time: { archived: 123 } },
-        {
-          messageID: 'msg_2',
-          agent: 'build',
-          model: { providerID: 'anthropic', modelID: 'claude-sonnet' },
-          command: 'ls',
-        },
-        { time: { archived: 456 } },
-        { reply: 'once' },
-        { answers: [['yes']] },
-        { type: 'api', key: 'secret' },
-        { method: 0, code: 'oauth-code' },
-      ]);
-    } finally {
-      setRuntimeUrlResolver(previous);
-      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
-      globalThis.fetch = originalFetch;
-      clearRuntimeAuthCredentialProvider();
-    }
-  });
-
-  test('preserves SDK-style Request method, JSON body, signal, path, query, and merges auth headers', async () => {
+  test('preserves Request method, JSON body, signal, path, query, and merges auth headers', async () => {
     const previous = getRuntimeUrlResolver();
     const originalWindow = globalThis.window;
     const controller = new AbortController();

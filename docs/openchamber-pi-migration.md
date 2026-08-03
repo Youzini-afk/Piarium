@@ -32,18 +32,18 @@ equivalence is supplemented; a materially divergent implementation is not adopte
 
 ## Direct Pi-native refactor
 
-OpenChamber currently exposes platform capabilities through `RuntimeAPIs`, while its conversation
+The imported OpenChamber baseline exposed platform capabilities through `RuntimeAPIs`, while its conversation
 sync, server lifecycle, session features, provider pages, scheduled tasks, and control service use
 OpenCode SDK/HTTP types directly. Piarium does not preserve those contracts as a second permanent
-layer. Inside the copied Piarium tree it will:
+layer. Inside the copied Piarium tree the migration:
 
-1. define one canonical set of Piarium-owned Pi domain types;
-2. rewrite session/message/event synchronization and UI stores to consume those types;
-3. rewrite provider/model/auth, agent, command, tool, permission, question, scheduling, and control
+1. defined one canonical set of Piarium-owned Pi domain types;
+2. rewrote session/message/event synchronization and UI stores to consume those types;
+3. rewrote provider/model/auth, agent, command, tool, permission, question, scheduling, and control
    flows against the existing Pi host protocol;
-4. retain the fork's platform and product services while changing their engine data source;
-5. delete OpenCode lifecycle/proxy/watcher/configuration/downloaded CLI and dead SDK-dependent code;
-6. remove `@opencode-ai/sdk` after the last real consumer is migrated.
+4. retained the fork's platform and product services while changing their engine data source;
+5. deleted OpenCode lifecycle/proxy/watcher/configuration/downloaded CLI and dead SDK-dependent code;
+6. removed `@opencode-ai/sdk` after the last real consumer was migrated.
 
 There is one runtime boundary between trusted application services and isolated Pi workers. There
 is no OpenCode-shaped compatibility server layered on top of another Pi adapter.
@@ -58,9 +58,10 @@ and displaying any provider that implements the bridge contract.
 The primary Web/Desktop layout now reads the Pi catalog and Pi branch entries directly. Its
 session tree, search, project grouping, streaming assistant state, tool executions, image prompts,
 steering/follow-up queue, abort, rename, archive, restore, delete, and message rollback do not
-project Pi data into OpenCode `Session`, `Message`, or `Part` objects. Remaining legacy surfaces
-stay migration work, not a supported compatibility layer, and are deleted as their direct Pi
-replacements land.
+project Pi data into OpenCode `Session`, `Message`, or `Part` objects. No production UI root imports
+the former OpenCode client or sync graph. The old chat/composer/turn/sidebar closure, SDK-only test
+fixtures, Vite aliases, and package dependency were deleted instead of being renamed into a
+Piarium-shaped compatibility layer.
 
 Terminal, Git, pull-request, and embedded context-panel flows now use Pi session identity and cwd
 directly. Context captured from terminal selections, PR comments/checks, merge conflicts, and
