@@ -1,5 +1,7 @@
 import React from 'react';
 import type {
+  JsonValue,
+  PiAgentActionDescriptor,
   PiAgentCatalogSnapshot,
   PiAgentDescriptor,
   PiAgentProviderDescriptor,
@@ -26,6 +28,9 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { cn } from '@/lib/utils';
+import { AgentProviderActionDialog } from './AgentProviderActionDialog';
+import { PiSubagentsDefinitionDialog } from './PiSubagentsDefinitionDialog';
+import type { PiSubagentsDefinitionMode } from './pi-subagents-action-model';
 
 const EMPTY_CATALOG: PiAgentCatalogSnapshot = {
   agents: [],
@@ -36,6 +41,15 @@ const EMPTY_CATALOG: PiAgentCatalogSnapshot = {
 
 type ProviderFilter = 'all' | string;
 type StatusFilter = 'all' | PiAgentStatus;
+
+interface AgentActionState {
+  action: string;
+  agentId?: string;
+  loading: boolean;
+  message?: string;
+  providerId: string;
+  success?: boolean;
+}
 
 const STATUS_FILTERS: readonly StatusFilter[] = [
   'all',
@@ -189,12 +203,10 @@ export const AgentsPage: React.FC = () => {
   const [providerFilter, setProviderFilter] = React.useState<ProviderFilter>('all');
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
-  const [inspectState, setInspectState] = React.useState<{
-    agentId: string;
-    loading: boolean;
-    message?: string;
-    success?: boolean;
-  } | null>(null);
+  const [actionState, setActionState] = React.useState<AgentActionState | null>(null);
+  const [definitionMode, setDefinitionMode] = React.useState<PiSubagentsDefinitionMode | null>(null);
+  const [dialogAction, setDialogAction] = React.useState<PiAgentActionDescriptor | null>(null);
+  const [dialogAgent, setDialogAgent] = React.useState<PiAgentDescriptor | null>(null);
   const refreshGenerationRef = React.useRef(0);
 
   const refresh = React.useCallback(async () => {
@@ -242,7 +254,10 @@ export const AgentsPage: React.FC = () => {
   React.useEffect(() => {
     setCatalog(EMPTY_CATALOG);
     setLoaded(false);
-    setInspectState(null);
+    setActionState(null);
+    setDefinitionMode(null);
+    setDialogAction(null);
+    setDialogAgent(null);
     void refresh();
   }, [refresh]);
 
@@ -282,63 +297,184 @@ export const AgentsPage: React.FC = () => {
       ?? null
   ), [filteredAgents, selectedAgentId]);
 
-  const inspectAgent = React.useCallback(async (agent: PiAgentDescriptor) => {
+  const runAction = React.useCallback(async (input: {
+    action: string;
+    agentId?: string;
+    payload?: JsonValue;
+    providerId: string;
+    refreshCatalog?: boolean;
+  }): Promise<boolean> => {
     const actionTargetKey = targetKey;
     const runtimeKey = getRuntimeKey();
-    setInspectState({ agentId: agent.id, loading: true });
+    setActionState({
+      action: input.action,
+      ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+      loading: true,
+      providerId: input.providerId,
+    });
     try {
       const result = await runPiAgentProviderAction(
         runtimeTarget,
-        agent.providerId,
-        'inspect',
-        agent.id,
+        input.providerId,
+        input.action,
+        input.agentId,
+        input.payload,
       );
-      if (actionTargetKey !== targetKeyRef.current || runtimeKey !== getRuntimeKey()) return;
-      setInspectState({
-        agentId: agent.id,
+      if (actionTargetKey !== targetKeyRef.current || runtimeKey !== getRuntimeKey()) return false;
+      if (result.success && input.refreshCatalog) await refresh();
+      if (actionTargetKey !== targetKeyRef.current || runtimeKey !== getRuntimeKey()) return false;
+      setActionState({
+        action: input.action,
+        ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
         loading: false,
         message: result.message,
+        providerId: input.providerId,
         success: result.success,
       });
+      return result.success;
     } catch (error) {
-      if (actionTargetKey !== targetKeyRef.current || runtimeKey !== getRuntimeKey()) return;
-      setInspectState({
-        agentId: agent.id,
+      if (actionTargetKey !== targetKeyRef.current || runtimeKey !== getRuntimeKey()) return false;
+      setActionState({
+        action: input.action,
+        ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
         loading: false,
         message: error instanceof Error ? error.message : String(error),
+        providerId: input.providerId,
         success: false,
       });
+      return false;
     }
-  }, [runtimeTarget, targetKey]);
+  }, [refresh, runtimeTarget, targetKey]);
 
-  const openPackageSettings = React.useCallback(() => {
-    if (!selectedAgent?.configuration) return;
+  const openConfiguration = React.useCallback((configuration: PiAgentDescriptor['configuration']) => {
+    if (!configuration) return;
     requestPluginSettingsTarget(
-      selectedAgent.configuration.pluginId,
-      selectedAgent.configuration.section,
+      configuration.pluginId,
+      configuration.section,
     );
     setSettingsPage('plugin-settings');
-  }, [selectedAgent?.configuration, setSettingsPage]);
+  }, [setSettingsPage]);
 
   const selectedProvider = selectedAgent
     ? providerById.get(selectedAgent.providerId)
     : undefined;
-  const selectedInspect = selectedAgent && inspectState?.agentId === selectedAgent.id
-    ? inspectState
+  const activeProvider = providerFilter === 'all'
+    ? (selectedProvider ?? catalog.providers[0])
+    : providerById.get(providerFilter);
+  const providerActionState = actionState
+    && actionState.agentId === undefined
+    && actionState.providerId === activeProvider?.id
+    ? actionState
     : null;
-  const canInspect = selectedAgent?.actions.some((action) => action.id === 'inspect') ?? false;
+  const selectedAgentActionState = selectedAgent
+    && actionState?.agentId === selectedAgent.id
+    ? actionState
+    : null;
+  const definitionAgent = definitionMode === 'update-agent' || definitionMode === 'update-workflow'
+    ? selectedAgent ?? undefined
+    : undefined;
+
+  const displayActionLabel = React.useCallback((
+    providerId: string,
+    action: PiAgentActionDescriptor,
+    agentKind?: PiAgentDescriptor['kind'],
+  ): string => {
+    if (providerId !== 'pi-subagents') return action.label;
+    switch (action.id) {
+      case 'create-agent':
+        return t('settings.piarium.agents.definition.createAgent');
+      case 'create-workflow':
+        return t('settings.piarium.agents.definition.createWorkflow');
+      case 'models':
+        return t('settings.piarium.agents.actions.models');
+      case 'inspect':
+        return t('settings.piarium.agents.actions.inspect');
+      case 'update':
+        return t(agentKind === 'workflow'
+          ? 'settings.piarium.agents.definition.editWorkflow'
+          : 'settings.piarium.agents.definition.editAgent');
+      case 'delete':
+        return t('settings.common.actions.delete');
+      case 'eject':
+        return t('settings.piarium.agents.actions.copyToScope');
+      case 'disable':
+        return t('settings.piarium.agents.actions.disable');
+      case 'enable':
+        return t('settings.piarium.agents.actions.enable');
+      case 'reset':
+        return t('settings.common.actions.reset');
+      default:
+        return action.label;
+    }
+  }, [t]);
+
+  const submitDefinition = React.useCallback(async (
+    scope: 'user' | 'project',
+    config: Record<string, JsonValue>,
+  ): Promise<boolean> => {
+    if (!definitionMode) return false;
+    const creating = definitionMode === 'create-agent' || definitionMode === 'create-workflow';
+    const action = creating ? definitionMode : 'update';
+    const agent = creating ? undefined : definitionAgent;
+    return runAction({
+      action,
+      ...(agent === undefined ? {} : { agentId: agent.id }),
+      payload: { config, scope },
+      providerId: agent?.providerId ?? 'pi-subagents',
+      refreshCatalog: true,
+    });
+  }, [definitionAgent, definitionMode, runAction]);
+
+  const requestAgentAction = React.useCallback((
+    agent: PiAgentDescriptor,
+    action: PiAgentActionDescriptor,
+  ) => {
+    if (agent.providerId === 'pi-subagents' && action.id === 'update') {
+      setDefinitionMode(agent.kind === 'workflow' ? 'update-workflow' : 'update-agent');
+      return;
+    }
+    const inferredScope = agent.source.scope === 'user' || agent.source.scope === 'project'
+      ? agent.source.scope
+      : undefined;
+    if (action.destructive || (action.requiresScope && inferredScope === undefined)) {
+      setDialogAgent(agent);
+      setDialogAction({ ...action, label: displayActionLabel(agent.providerId, action, agent.kind) });
+      return;
+    }
+    void runAction({
+      action: action.id,
+      agentId: agent.id,
+      ...(action.requiresScope && inferredScope
+        ? { payload: { scope: inferredScope } }
+        : {}),
+      providerId: agent.providerId,
+      refreshCatalog: action.id !== 'inspect',
+    });
+  }, [displayActionLabel, runAction]);
+
+  const submitDialogAction = React.useCallback(async (scope?: 'user' | 'project') => {
+    if (!dialogAction || !dialogAgent) return false;
+    return runAction({
+      action: dialogAction.id,
+      agentId: dialogAgent.id,
+      ...(scope === undefined ? {} : { payload: { scope } }),
+      providerId: dialogAgent.providerId,
+      refreshCatalog: true,
+    });
+  }, [dialogAction, dialogAgent, runAction]);
 
   return (
-    <SettingsPageLayout
-      title={t('settings.page.agents.title')}
-      description={t('settings.piarium.agents.description')}
-      headerEnd={(
-        <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-          <Icon name="refresh" className={cn('size-4', loading && 'animate-spin')} />
-          {t('settings.piarium.agents.actions.refresh')}
-        </Button>
-      )}
-    >
+    <>
+      <SettingsPageLayout
+        title={t('settings.page.agents.title')}
+        description={t('settings.piarium.agents.description')}
+        headerEnd={(
+          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+            <Icon name="refresh" className={cn('size-4', loading && 'animate-spin')} />
+            {t('settings.piarium.agents.actions.refresh')}
+          </Button>
+        )}
+      >
       <SettingsSection
         divider={false}
         title={t('settings.piarium.agents.providers.title')}
@@ -351,7 +487,8 @@ export const AgentsPage: React.FC = () => {
               <ProviderCard
                 key={provider.id}
                 provider={provider}
-                active={providerFilter === provider.id}
+                active={providerFilter === provider.id
+                  || (providerFilter === 'all' && activeProvider?.id === provider.id)}
                 agentCount={catalog.agents.filter((agent) => agent.providerId === provider.id).length}
                 onSelect={() => setProviderFilter((current) => (
                   current === provider.id ? 'all' : provider.id
@@ -368,10 +505,78 @@ export const AgentsPage: React.FC = () => {
             <p className="mx-auto mt-1 max-w-lg typography-meta text-muted-foreground">
               {t('settings.piarium.agents.empty.description')}
             </p>
-            <Button type="button" variant="outline" size="sm" className="mt-4" onClick={openPackageSettings}>
+            <Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => setSettingsPage('plugins')}>
               <Icon name="plug-2" className="size-4" />
               {t('settings.piarium.agents.actions.packages')}
             </Button>
+          </div>
+        ) : null}
+        {activeProvider ? (
+          <div className="mt-4 rounded-xl border border-border/60 bg-background/50 p-3">
+            <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
+              <div className="min-w-0">
+                <div className="typography-ui-label font-medium text-foreground">
+                  {activeProvider.label}
+                </div>
+                <p className="mt-0.5 typography-micro text-muted-foreground">
+                  {t('settings.piarium.agents.providerActions.description')}
+                </p>
+              </div>
+              {activeProvider.configuration ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => openConfiguration(activeProvider.configuration)}
+                >
+                  <Icon name="settings-3" className="size-3.5" />
+                  {t('settings.piarium.agents.actions.configure')}
+                </Button>
+              ) : null}
+            </div>
+            {activeProvider.actions.length > 0 ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {activeProvider.actions.map((action) => {
+                  const loadingAction = providerActionState?.loading === true
+                    && providerActionState.action === action.id;
+                  const createAction = activeProvider.id === 'pi-subagents'
+                    && (action.id === 'create-agent' || action.id === 'create-workflow');
+                  return (
+                    <Button
+                      key={action.id}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!activeProvider.available || actionState?.loading === true}
+                      onClick={() => {
+                        if (createAction) {
+                          setDefinitionMode(action.id as 'create-agent' | 'create-workflow');
+                          return;
+                        }
+                        void runAction({ action: action.id, providerId: activeProvider.id });
+                      }}
+                    >
+                      {loadingAction ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
+                      {displayActionLabel(activeProvider.id, action)}
+                    </Button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="mt-3 typography-micro text-muted-foreground">
+                {t('settings.piarium.agents.providerActions.none')}
+              </p>
+            )}
+            {providerActionState?.message ? (
+              <pre className={cn(
+                'mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border p-3 typography-micro',
+                providerActionState.success
+                  ? 'border-border/60 bg-background/70 text-foreground'
+                  : 'border-[color-mix(in_srgb,var(--status-error)_24%,transparent)] bg-[color-mix(in_srgb,var(--status-error)_7%,transparent)] text-[var(--status-error)]',
+              )}>
+                {providerActionState.message}
+              </pre>
+            ) : null}
           </div>
         ) : null}
         {loadError ? (
@@ -474,7 +679,7 @@ export const AgentsPage: React.FC = () => {
                   selected={selectedAgent?.id === agent.id}
                   onSelect={() => {
                     setSelectedAgentId(agent.id);
-                    setInspectState(null);
+                    setActionState(null);
                   }}
                 />
               ))}
@@ -534,7 +739,7 @@ export const AgentsPage: React.FC = () => {
                         provider: selectedProvider?.label ?? selectedAgent.configuration.pluginId,
                       })}
                     </p>
-                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={openPackageSettings}>
+                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => openConfiguration(selectedAgent.configuration)}>
                       <Icon name="settings-3" className="size-4" />
                       {t('settings.piarium.agents.actions.configure')}
                     </Button>
@@ -542,39 +747,37 @@ export const AgentsPage: React.FC = () => {
                 ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  {canInspect ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={selectedInspect?.loading === true}
-                      onClick={() => void inspectAgent(selectedAgent)}
-                    >
-                      {selectedInspect?.loading ? (
-                        <Icon name="loader-4" className="size-4 animate-spin" />
-                      ) : (
-                        <Icon name="information" className="size-4" />
-                      )}
-                      {selectedInspect?.loading
-                        ? t('settings.piarium.agents.actions.inspecting')
-                        : t('settings.piarium.agents.actions.inspect')}
-                    </Button>
-                  ) : null}
-                  {selectedAgent.actions.filter((action) => action.id !== 'inspect').map((action) => (
-                    <AgentBadge key={action.id} className="border border-border/60 text-muted-foreground">
-                      {action.label}
-                    </AgentBadge>
-                  ))}
+                  {selectedAgent.actions.map((action) => {
+                    const actionLoading = selectedAgentActionState?.loading === true
+                      && selectedAgentActionState.action === action.id;
+                    return (
+                      <Button
+                        key={action.id}
+                        type="button"
+                        variant={action.destructive ? 'destructive' : 'outline'}
+                        size="sm"
+                        disabled={actionState?.loading === true}
+                        onClick={() => requestAgentAction(selectedAgent, action)}
+                      >
+                        {actionLoading ? (
+                          <Icon name="loader-4" className="size-4 animate-spin" />
+                        ) : action.id === 'inspect' ? (
+                          <Icon name="information" className="size-4" />
+                        ) : null}
+                        {displayActionLabel(selectedAgent.providerId, action, selectedAgent.kind)}
+                      </Button>
+                    );
+                  })}
                 </div>
 
-                {selectedInspect?.message ? (
+                {selectedAgentActionState?.message ? (
                   <pre className={cn(
                     'mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border p-3 typography-micro',
-                    selectedInspect.success
+                    selectedAgentActionState.success
                       ? 'border-border/60 bg-background/70 text-foreground'
                       : 'border-[color-mix(in_srgb,var(--status-error)_24%,transparent)] bg-[color-mix(in_srgb,var(--status-error)_7%,transparent)] text-[var(--status-error)]',
                   )}>
-                    {selectedInspect.message}
+                    {selectedAgentActionState.message}
                   </pre>
                 ) : null}
               </div>
@@ -590,6 +793,34 @@ export const AgentsPage: React.FC = () => {
           </div>
         )}
       </SettingsSection>
-    </SettingsPageLayout>
+      </SettingsPageLayout>
+      <PiSubagentsDefinitionDialog
+        open={definitionMode !== null}
+        mode={definitionMode}
+        agent={definitionAgent}
+        projectTrusted={catalog.projectTrusted}
+        submitting={actionState?.loading === true}
+        onOpenChange={(open) => {
+          if (!open) setDefinitionMode(null);
+        }}
+        onSubmit={submitDefinition}
+      />
+      <AgentProviderActionDialog
+        open={dialogAction !== null && dialogAgent !== null}
+        action={dialogAction}
+        agent={dialogAgent}
+        projectTrusted={catalog.projectTrusted}
+        submitting={actionState?.loading === true
+          && actionState.agentId === dialogAgent?.id
+          && actionState.action === dialogAction?.id}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDialogAction(null);
+            setDialogAgent(null);
+          }
+        }}
+        onSubmit={submitDialogAction}
+      />
+    </>
   );
 };

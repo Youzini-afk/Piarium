@@ -240,6 +240,75 @@ export default function (pi: any) {
     }
   });
 
+  it("routes every advertised pi-subagents entity action through the plugin tool", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-agent-provider-actions-"));
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    const actionLog = join(root, "actions.jsonl");
+    await mkdir(join(agentDir, "extensions"), { recursive: true });
+    await writeFile(
+      join(agentDir, "extensions", "pi-subagents-test.ts"),
+      `import { appendFileSync } from "node:fs";
+import { Type } from "@earendil-works/pi-ai";
+export default function (pi: any) {
+  pi.registerTool({
+    name: "subagent", label: "Subagent", description: "test",
+    parameters: Type.Object({}, { additionalProperties: true }),
+    async execute(_id: string, params: any) {
+      appendFileSync(${JSON.stringify(actionLog)}, JSON.stringify(params) + "\\n", "utf8");
+      if (params.action === "list") return { content: [{ type: "text", text: "Executable agents:\\n- custom (user): Custom role\\n- worker (builtin): Worker\\n\\nChains:\\n- verify (project): Verify" }], details: {} };
+      if (params.action === "get" && params.agent === "custom") return { content: [{ type: "text", text: "Agent: custom (user)\\nDescription: Custom role" }], details: {} };
+      if (params.action === "get" && params.agent === "worker") return { content: [{ type: "text", text: "Agent: worker (builtin)\\nDescription: Worker" }], details: {} };
+      if (params.action === "get" && params.agent === "disabled") return { content: [{ type: "text", text: "Agent: disabled (builtin)\\nDescription: Disabled role\\nDisabled: true" }], details: {} };
+      if (params.action === "get" && params.chainName === "verify") return { content: [{ type: "text", text: "Chain: verify (project)\\nDescription: Verify" }], details: {} };
+      if (params.action === "get") return { content: [{ type: "text", text: "Agent not found. Available: custom, disabled, worker." }], isError: true, details: {} };
+      return { content: [{ type: "text", text: "Applied " + params.action }], details: {} };
+    },
+  });
+}
+`,
+      "utf8",
+    );
+    const host = createHost(agentDir, true);
+    try {
+      await host.openCatalogContext(cwd);
+      const catalog = await host.listAgentProviders();
+      const byName = new Map(catalog.agents.map((agent) => [agent.name, agent]));
+      const custom = byName.get("custom");
+      const worker = byName.get("worker");
+      const disabled = byName.get("disabled");
+      const workflow = byName.get("verify");
+      assert.ok(custom);
+      assert.ok(worker);
+      assert.ok(disabled);
+      assert.ok(workflow);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "models", undefined, undefined)).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "inspect", custom.id, undefined)).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "disable", custom.id, undefined)).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "reset", custom.id, undefined)).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "delete", custom.id, undefined)).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "eject", worker.id, { scope: "user" })).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "disable", worker.id, { scope: "user" })).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "enable", disabled.id, { scope: "user" })).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "reset", worker.id, { scope: "user" })).success, true);
+      assert.equal((await host.runAgentProviderAction("pi-subagents", "delete", workflow.id, undefined)).success, true);
+      const actions = (await readFile(actionLog, "utf8"))
+        .trim()
+        .split(/\r?\n/)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      for (const actionName of ["models", "delete", "eject", "disable", "enable", "reset"]) {
+        assert.ok(actions.some((action) => action.action === actionName), `missing ${actionName} action`);
+      }
+      assert.ok(actions.some((action) => action.action === "get" && action.agent === "custom"));
+      assert.ok(actions.some(
+        (action) => action.action === "delete" && action.chainName === "verify" && action.agentScope === "project",
+      ));
+    } finally {
+      await host.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("rejects project-scoped provider mutations when the project is untrusted", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-agent-provider-trust-"));
     const cwd = join(root, "workspace");

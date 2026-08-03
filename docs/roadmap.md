@@ -153,8 +153,12 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   policy, the current Watchdog review/LSP schema, Fleet and async behavior, delegation limits,
   sessions/artifacts/worktrees, Intercom, scheduled runs, completion/control notifications, and
   turn/tool/usage budgets in the plugin's native documents. Unknown keys remain intact and the raw
-  documents remain authoritative; provider-owned agent actions and Fleet projection are the next
-  slice.
+  documents remain authoritative.
+- Implemented: Agents executes every action advertised by the `pi-subagents` provider instead of
+  rendering inert badges. Provider-level creation and model-resolution actions, structured agent
+  and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused
+  destructive confirmation, project-trust gating, result reporting, and catalog refresh all route
+  through the plugin-owned management tool. Fleet projection remains the next subagents slice.
 - Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
   reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
   config sources. Desktop header and mobile controls now consume that same snapshot/command path;
