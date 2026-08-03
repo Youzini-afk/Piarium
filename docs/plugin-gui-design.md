@@ -233,17 +233,26 @@ Authority:
 - the adapter's OS keyring/OAuth implementation for credentials.
 
 The existing status-first MCP page remains the primary design. It shows servers, tools, resources,
-connection errors, active/configured distinction, and runtime actions. Native setup/panel flows own
-server creation and detailed editing. Piarium adds source provenance and precedence diagnostics
-when exposed; it does not reproduce merge, OAuth, transport, or credential logic.
+connection errors, active/configured distinction, and runtime actions. Its configuration section
+edits one of the adapter's six native sources at a time: stable root settings, imports, transports,
+lifecycle, direct-tool policy, filters, and safe per-server flags receive structured controls;
+environment maps, headers, tokens, OAuth details, complex guards, and future fields remain in the
+same revisioned raw JSONC draft. Native setup/panel flows still own discovery and authentication.
+Piarium does not compute an effective merged configuration or reproduce OAuth, transport, or
+credential storage.
 
-Changing a server URL must not silently carry inherited credentials to the new origin. Host-config
-discovery stays explicit and defaults off. OpenCode config is never an authoritative source.
+Changing an existing server URL clears URL-bound credentials present in that selected source before
+save, matching the adapter's cross-source credential binding instead of carrying old endpoint
+secrets forward. Switching transport clears fields owned by the previous transport while preserving
+unrelated and unknown server fields. Partial server overrides remain valid, so the GUI does not
+require a transport when a lower-precedence source supplies it. Host-config discovery stays
+explicit and defaults off. OpenCode is available only as an explicit compatibility import supported
+by the adapter; it is never an authoritative Piarium source.
 
 The current public `status/v1` snapshot intentionally does not expose config provenance, transport,
-or failure text, so Piarium does not reverse-engineer an effective configuration from the six raw
-files. Server actions remain command-backed; names containing whitespace are shown but their
-per-server buttons stay disabled because the adapter's current command parser has no quoting
+or failure text, so Piarium does not reverse-engineer an effective configuration from the six
+source documents. Server actions remain command-backed; names containing whitespace are shown but
+their per-server buttons stay disabled because the adapter's current command parser has no quoting
 contract. The extension panel remains available for those servers.
 
 Acceptance:

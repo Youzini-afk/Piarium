@@ -238,7 +238,11 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   config sources. Desktop header and mobile controls now consume that same snapshot/command path;
   the old OpenCode MCP stores, draft editor, and OAuth callback route are removed. Tools/resources/results
   already use the generic Pi tool projection; richer MCP Apps rendering remains dependent on an
-  explicit public webview contract from the adapter.
+  explicit public webview contract from the adapter. Each native source now also has a structured,
+  comment-preserving editor for current root settings, imports, server transports/lifecycle,
+  direct-tool policy, filters, and safe flags. Partial overrides stay valid, advanced credentials
+  remain in raw JSONC, transport changes remove obsolete fields, and URL changes clear local
+  URL-bound credentials rather than carrying them to another endpoint.
 - Implemented: the first-class `pi-web-access` adapter now edits its native `web-search.json`
   through focused routing, provider/credential, Curator/browser, content, and security areas. It
   models the plugin's current single/concurrent/all/ordered-fallback semantics, every documented

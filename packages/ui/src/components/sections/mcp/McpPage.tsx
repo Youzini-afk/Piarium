@@ -13,6 +13,11 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -41,6 +46,7 @@ import {
   type McpAdapterServerSnapshot,
   type McpAdapterServerStatus,
 } from './mcpAdapterStatus';
+import { McpStructuredConfigEditor } from './McpStructuredConfigEditor';
 
 const MCP_PACKAGE_SOURCE = 'npm:pi-mcp-adapter';
 
@@ -105,6 +111,7 @@ const McpConfigEditor: React.FC<{ runtimeTarget: RuntimeContextTarget }> = ({ ru
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [rawOpen, setRawOpen] = React.useState(false);
   const generationRef = React.useRef(0);
   const editorExtensions = React.useMemo(() => [json()], []);
   const target = MCP_CONFIG_TARGETS.find((candidate) => candidate.id === targetId)
@@ -225,16 +232,36 @@ const McpConfigEditor: React.FC<{ runtimeTarget: RuntimeContextTarget }> = ({ ru
           {target.root} · {snapshot?.path ?? target.path}
         </p>
 
-        <div className="h-80 overflow-hidden rounded-md border border-border/60 bg-background">
-          <CodeMirrorEditor
-            value={draft}
+        {parsed.valid ? (
+          <McpStructuredConfigEditor
+            content={draft}
+            disabled={loading || saving || projectBlocked}
             onChange={setDraft}
-            extensions={editorExtensions}
-            className="h-full"
-            enableSearch
-            readOnly={loading || projectBlocked}
           />
-        </div>
+        ) : null}
+
+        <Collapsible open={rawOpen || !parsed.valid} onOpenChange={setRawOpen}>
+          <CollapsibleTrigger disabled={!parsed.valid} className="border border-border/60 px-3 py-2.5">
+            <span className="typography-ui-label text-foreground">
+              {rawOpen || !parsed.valid
+                ? t('settings.piarium.pluginSettings.advanced.hide')
+                : t('settings.piarium.pluginSettings.advanced.show')}
+            </span>
+            <Icon name={rawOpen || !parsed.valid ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 text-muted-foreground" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-3">
+            <div className="h-80 overflow-hidden rounded-md border border-border/60 bg-background">
+              <CodeMirrorEditor
+                value={draft}
+                onChange={setDraft}
+                extensions={editorExtensions}
+                className="h-full"
+                enableSearch
+                readOnly={loading || projectBlocked}
+              />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
 
         {parsed.error && (
           <p className="typography-meta text-[var(--status-error)]">
