@@ -178,6 +178,9 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   stores, stale schema normalizers, layout assertions, and dedicated translations are removed;
   Pi-native provider catalogs, plugin adapters, resource pages, and still-live chat dependencies
   remain intact.
+- Implemented: remove the unreachable OpenCode agent CRUD sidebar and generic permission-map
+  editor. Pi provider actions and plugin-native configuration remain authoritative for agent
+  definitions, model policy, and permissions.
 - Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
   reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
   config sources. Desktop header and mobile controls now consume that same snapshot/command path;
