@@ -30,6 +30,7 @@ import {
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
+import { joinPiDraftInstructions } from '@/lib/pi-runtime/sessionDrafts';
 import { recoveryModeForStatus, supportsPiRecoveryAction } from '@/lib/pi-runtime/recovery';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -152,7 +153,10 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     try {
       const rendered = await renderPiComposerSubmission(currentDraft.text);
       let promptText = rendered.text;
-      const { instructions } = rendered;
+      const instructions = joinPiDraftInstructions(
+        currentDraft.instructions,
+        rendered.instructions,
+      );
       try {
         promptText = await useSnippetsStore.getState().expandText(promptText);
       } catch (error) {
@@ -238,6 +242,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         updateDraft(currentSessionId, {
           ...(result.editorImages === undefined ? {} : { images: result.editorImages }),
           ...(result.editorText === undefined ? {} : { text: result.editorText }),
+          instructions: undefined,
         });
       }
       if (result.outcome === 'applied') {

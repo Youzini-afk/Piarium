@@ -644,8 +644,6 @@ const mobileInputKeyboardProps = {
   spellCheck: false,
 } as const;
 
-const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
-
 const getProjectLabel = (path: string): string => {
   const normalized = normalizePath(path);
   if (!normalized) return '';
@@ -2639,7 +2637,6 @@ export function MobileApp({ apis }: MobileAppProps) {
   // auto-connect targets the most-recent saved connection from the same list.
   const autoConnectLabel = React.useMemo(() => getAutoConnectTargetLabel(), []);
   const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
-  const lastNativeResumeSyncEventAtRef = React.useRef(0);
   const nativeResumeValidationSeqRef = React.useRef(0);
 
   const handleNativeResume = React.useCallback(() => {
@@ -2701,12 +2698,6 @@ export function MobileApp({ apis }: MobileAppProps) {
 
       refreshInPlace();
     });
-
-    const now = Date.now();
-    if (now - lastNativeResumeSyncEventAtRef.current >= NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS) {
-      lastNativeResumeSyncEventAtRef.current = now;
-      window.dispatchEvent(new Event('piarium:system-resume'));
-    }
   }, [apis.github, loadPiCatalog, refreshGitHubAuthStatus]);
 
   useNativeMobileChrome();

@@ -11,6 +11,7 @@ describe('Pi mobile application root', () => {
     expect(source).not.toContain('SyncProvider');
     expect(source).not.toContain('opencodeClient');
     expect(source).not.toContain('useSessionUIStore');
+    expect(source).not.toContain('piarium:system-resume');
     expect(source).toContain('<PiAppEffects');
     expect(source).toContain('<PiInteractionHost');
     expect(source).toContain('<MobileShell');

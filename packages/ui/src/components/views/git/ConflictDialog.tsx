@@ -9,12 +9,16 @@ import {
 import { Button } from '@/components/ui/button';
 
 import { RiAlertLine, RiLoader4Line, RiChat1Line, RiAddLine } from '@remixicon/react';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { toast } from '@/components/ui';
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import {
+  createPiSessionWithDraft,
+  joinPiDraftInstructions,
+  stagePiSessionDraft,
+} from '@/lib/pi-runtime/sessionDrafts';
 import { useI18n } from '@/lib/i18n';
 
 interface ConflictDialogProps {
@@ -37,10 +41,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   onClearState,
 }) => {
   const { t } = useI18n();
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
-  const setPendingSyntheticParts = useInputStore((state) => state.setPendingSyntheticParts);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
 
   const [isLoading, setIsLoading] = React.useState(false);
@@ -130,12 +131,10 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
       return;
     }
 
-    // Set the visible text in the input and the synthetic parts for when user sends
-    setPendingInputText(context.visibleText, 'replace');
-    setPendingSyntheticParts([
-      { text: context.instructionsText, synthetic: true },
-      { text: context.payloadText, synthetic: true },
-    ]);
+    stagePiSessionDraft(currentSessionId, {
+      text: context.visibleText,
+      instructions: joinPiDraftInstructions(context.instructionsText, context.payloadText),
+    });
 
     setActiveMainTab('chat');
     onClearState?.();
@@ -149,19 +148,19 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
       return;
     }
 
-    // Open new session with the conflict context as initial prompt + synthetic parts
-    openNewSessionDraft({
-      directoryOverride: directory,
-      initialPrompt: context.visibleText,
-      syntheticParts: [
-        { text: context.instructionsText, synthetic: true },
-        { text: context.payloadText, synthetic: true },
-      ],
-    });
-    // Navigate to chat tab so user sees the new session
-    setActiveMainTab('chat');
-    onClearState?.();
-    onOpenChange(false);
+    try {
+      await createPiSessionWithDraft(
+        { directory },
+        {
+          text: context.visibleText,
+          instructions: joinPiDraftInstructions(context.instructionsText, context.payloadText),
+        },
+      );
+      onClearState?.();
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');

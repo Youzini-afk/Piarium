@@ -16,11 +16,15 @@ import {
 } from '@/components/ui/command';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { getGitCommitSummaries } from '@/lib/gitApi';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import {
+  createPiSessionWithDraft,
+  joinPiDraftInstructions,
+  stagePiSessionDraft,
+} from '@/lib/pi-runtime/sessionDrafts';
 import {
   abortIntegrate,
   computeIntegratePlan,
@@ -32,7 +36,6 @@ import {
   type IntegrateInProgress,
   type IntegratePlan,
 } from '@/lib/git/integrateWorktreeCommits';
-import type { WorktreeMetadata } from '@/types/worktree';
 import { useI18n } from '@/lib/i18n';
 
 type IntegrateUiState =
@@ -45,7 +48,6 @@ type IntegrateUiState =
 export const IntegrateCommitsSection: React.FC<{
   repoRoot: string;
   sourceBranch: string;
-  worktreeMetadata: WorktreeMetadata;
   localBranches: string[];
   defaultTargetBranch: string;
   refreshKey?: number;
@@ -55,7 +57,6 @@ export const IntegrateCommitsSection: React.FC<{
 }> = ({
   repoRoot,
   sourceBranch,
-  worktreeMetadata,
   localBranches,
   defaultTargetBranch,
   refreshKey,
@@ -63,15 +64,22 @@ export const IntegrateCommitsSection: React.FC<{
   showHeader = true,
 }) => {
   const { t } = useI18n();
-  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const currentSessionId = usePiSessionStore((s) => s.currentSessionId);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   const [targetBranch, setTargetBranch] = React.useState<string>(defaultTargetBranch);
+  const targetBranchStorageKey = React.useMemo(
+    () => `piarium.integrate.target:${JSON.stringify([repoRoot, sourceBranch])}`,
+    [repoRoot, sourceBranch],
+  );
   React.useEffect(() => {
-    setTargetBranch(defaultTargetBranch);
-  }, [defaultTargetBranch]);
+    const saved = typeof window === 'undefined'
+      ? null
+      : window.localStorage.getItem(targetBranchStorageKey);
+    setTargetBranch(saved && localBranches.includes(saved) ? saved : defaultTargetBranch);
+  }, [defaultTargetBranch, localBranches, targetBranchStorageKey]);
 
   // Focus search input when branch dropdown opens
   React.useEffect(() => {
@@ -93,7 +101,7 @@ export const IntegrateCommitsSection: React.FC<{
 
   const conflictStorageKey = React.useMemo(() => {
     if (!currentSessionId) return null;
-    return `openchamber.integrate.conflict:${currentSessionId}`;
+    return `piarium.integrate.conflict:${currentSessionId}`;
   }, [currentSessionId]);
 
   React.useEffect(() => {
@@ -169,16 +177,12 @@ export const IntegrateCommitsSection: React.FC<{
 
   const persistTarget = React.useCallback(
     (branch: string) => {
-      if (!currentSessionId) return;
-      useSessionUIStore.getState().setWorktreeMetadata(currentSessionId, {
-        ...worktreeMetadata,
-        createdFromBranch: branch,
-      });
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(targetBranchStorageKey, branch);
+      }
     },
-    [currentSessionId, worktreeMetadata]
+    [targetBranchStorageKey]
   );
-
-  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
 
   const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
     const visibleText = await renderMagicPrompt('git.integrate.cherrypick.resolve.visible', {
@@ -209,27 +213,25 @@ export const IntegrateCommitsSection: React.FC<{
     return { visibleText, instructionsText, payloadText };
   }, []);
 
-  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
-  const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
-
   const handleResolveWithAi = React.useCallback(async (
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
     useNewSession: boolean
   ) => {
     const context = await buildConflictContext(payload);
+    const seed = {
+      text: context.visibleText,
+      instructions: joinPiDraftInstructions(context.instructionsText, context.payloadText),
+    };
 
     if (useNewSession) {
-      // Open new session with the conflict context as initial prompt + synthetic parts
-      openNewSessionDraft({
-        directoryOverride: payload.state.tempWorktreePath,
-        initialPrompt: context.visibleText,
-        syntheticParts: [
-          { text: context.instructionsText, synthetic: true },
-          { text: context.payloadText, synthetic: true },
-        ],
-      });
-      // Navigate to chat tab so user sees the new session
-      setActiveMainTab('chat');
+      try {
+        await createPiSessionWithDraft(
+          { directory: payload.state.tempWorktreePath },
+          seed,
+        );
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      }
       return;
     }
 
@@ -239,13 +241,9 @@ export const IntegrateCommitsSection: React.FC<{
       return;
     }
 
-    setPendingInputText(context.visibleText, 'replace');
-    setPendingSyntheticParts([
-      { text: context.instructionsText, synthetic: true },
-      { text: context.payloadText, synthetic: true },
-    ]);
+    stagePiSessionDraft(currentSessionId, seed);
     setActiveMainTab('chat');
-  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
+  }, [buildConflictContext, currentSessionId, setActiveMainTab, t]);
 
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;

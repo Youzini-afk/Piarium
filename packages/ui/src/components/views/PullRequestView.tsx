@@ -3,8 +3,6 @@ import { Icon } from '@/components/icon/Icon';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDetectedWorktreeMetadata } from '@/hooks/useDetectedWorktreeRoot';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { useGitStatus, useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { useShallow } from 'zustand/react/shallow';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -15,9 +13,6 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { PullRequestSection } from './git/PullRequestSection';
 import { deriveBaseBranch } from './git/baseBranch';
-
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
 // Remotes rarely change; remembering the last fetched list per directory lets
 // a remount pick the same PR-status key immediately instead of flashing
@@ -40,53 +35,7 @@ export const PullRequestView: React.FC = () => {
   const branches = useGitBranches(currentDirectory ?? null);
   const { ensureAll } = useGitStore(useShallow((state) => ({ ensureAll: state.ensureAll })));
 
-  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-  const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-  const worktreeMap = useSessionUIStore((s) => s.worktreeMetadata);
-  const availableWorktrees = useSessionUIStore((s) => s.availableWorktrees);
-
-  const normalizedCurrentDirectory = normalizePath(currentDirectory);
-  const inferredWorktreeMetadata = React.useMemo(() => {
-    if (!normalizedCurrentDirectory) {
-      return undefined;
-    }
-
-    const fromAvailable = availableWorktrees.find(
-      (metadata) => normalizePath(metadata.path) === normalizedCurrentDirectory
-    );
-    if (fromAvailable) {
-      return fromAvailable;
-    }
-
-    for (const metadata of worktreeMap.values()) {
-      if (normalizePath(metadata.path) === normalizedCurrentDirectory) {
-        return metadata;
-      }
-    }
-
-    return undefined;
-  }, [availableWorktrees, normalizedCurrentDirectory, worktreeMap]);
-
-  const storeWorktreeMetadata = React.useMemo(() => {
-    if (currentSessionId) {
-      return worktreeMap.get(currentSessionId) ?? inferredWorktreeMetadata;
-    }
-
-    if (newSessionDraft?.open) {
-      return inferredWorktreeMetadata;
-    }
-
-    return undefined;
-  }, [currentSessionId, inferredWorktreeMetadata, newSessionDraft?.open, worktreeMap]);
-
-  const worktreeAttachment = useSessionWorktreeStore((s) =>
-    currentSessionId ? s.getAttachment(currentSessionId) : undefined
-  );
-  const authoritativeProjectRoot = worktreeAttachment && !worktreeAttachment.degraded && !worktreeAttachment.legacy
-    ? worktreeAttachment.worktreeRoot ?? undefined
-    : undefined;
-
-  const worktreeMetadata = useDetectedWorktreeMetadata(currentDirectory, storeWorktreeMetadata, status?.current ?? undefined);
+  const worktreeMetadata = useDetectedWorktreeMetadata(currentDirectory, undefined, status?.current ?? undefined);
 
   React.useEffect(() => {
     if (!currentDirectory || !git) {
@@ -97,7 +46,7 @@ export const PullRequestView: React.FC = () => {
 
   const [rootBranchHint, setRootBranchHint] = React.useState<string | null>(null);
   React.useEffect(() => {
-    const projectRoot = authoritativeProjectRoot || worktreeMetadata?.projectDirectory;
+    const projectRoot = worktreeMetadata?.projectDirectory;
     if (!projectRoot) {
       setRootBranchHint(null);
       return;
@@ -119,7 +68,7 @@ export const PullRequestView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [authoritativeProjectRoot, worktreeMetadata?.projectDirectory]);
+  }, [worktreeMetadata?.projectDirectory]);
 
   const [remotes, setRemotes] = React.useState<GitRemote[]>(() =>
     (currentDirectory ? remotesCacheByDirectory.get(remoteCacheKey(currentDirectory)) : undefined) ?? []

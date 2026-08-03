@@ -20,8 +20,6 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
-import { markSessionViewed } from '@/sync/notification-store';
-import { setExternallyViewedSession } from '@/sync/sync-context';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { addPiDraftImageFile, usePiDraftStore } from '@/stores/usePiDraftStore';
 import { useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
@@ -2450,37 +2448,6 @@ export const ContextPanel: React.FC = () => {
   }, [activeTab, directoryKey, setSelectedFilePath]);
 
   const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
-  const activeChatSessionID = activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
-
-  React.useEffect(() => {
-    if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
-      return;
-    }
-
-    const markActiveChatViewed = () => {
-      if (document.visibilityState === 'hidden' || !document.hasFocus()) {
-        setExternallyViewedSession(directoryKey, activeChatSessionID, false);
-        return;
-      }
-
-      markSessionViewed(activeChatSessionID);
-      setExternallyViewedSession(directoryKey, activeChatSessionID, true);
-    };
-
-    markActiveChatViewed();
-    const interval = window.setInterval(markActiveChatViewed, 10_000);
-    window.addEventListener('focus', markActiveChatViewed);
-    window.addEventListener('blur', markActiveChatViewed);
-    document.addEventListener('visibilitychange', markActiveChatViewed);
-
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', markActiveChatViewed);
-      window.removeEventListener('blur', markActiveChatViewed);
-      document.removeEventListener('visibilitychange', markActiveChatViewed);
-      setExternallyViewedSession(directoryKey, activeChatSessionID, false);
-    };
-  }, [activeChatSessionID, directoryKey, isOpen]);
 
   const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: string, readOnly: boolean): string => {
     return getOrCreateEmbeddedSessionChatURL(chatFrameSrcByTabIDRef.current, tabID, sessionID, directoryKey || null, readOnly, {

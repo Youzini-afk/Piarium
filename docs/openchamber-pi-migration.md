@@ -62,6 +62,14 @@ project Pi data into OpenCode `Session`, `Message`, or `Part` objects. Remaining
 stay migration work, not a supported compatibility layer, and are deleted as their direct Pi
 replacements land.
 
+Terminal, Git, pull-request, and embedded context-panel flows now use Pi session identity and cwd
+directly. Context captured from terminal selections, PR comments/checks, merge conflicts, and
+worktree integration is staged in a session-scoped Pi composer draft. When no session exists, the
+same flow creates one in the relevant directory before attaching the context. Hidden workflow
+instructions are submitted through Pi's native `instructions` field rather than projected
+OpenCode synthetic parts. Git worktree discovery and bootstrap status no longer mutate the legacy
+session UI store.
+
 ## Pi-native session features
 
 Protocol version 1 owns Goal, Assist, pinned-context state, parent-session creation, and scoped Pi

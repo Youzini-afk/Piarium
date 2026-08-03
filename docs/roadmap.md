@@ -104,10 +104,16 @@ retained before engine surgery begins.
   were removed after the Pi-native retention hook became the sole production implementation.
 - Implemented the Pi-native main application root: context panels, plans, project notes/todos,
   inline comments, drafts, archive management, project actions, worktree management, and command
-  discovery no longer require the OpenCode SyncProvider. The provider remains isolated to explicit
-  embedded legacy routes only. Pi commands are discovered from live sessions or an in-memory
+  discovery no longer require the OpenCode SyncProvider. No production application root mounts that
+  provider. Pi commands are discovered from live sessions or an in-memory
   workspace catalog, so extension, prompt-template, skill, and recovery-plugin updates appear
   without Piarium-owned copies.
+- Implemented: terminal selections, pull-request comments/check failures, merge conflicts, and
+  worktree-integration conflicts now seed the active Pi composer or create a Pi session in the
+  required directory. Visible text and hidden instructions travel through Pi's native prompt
+  contract; the old global new-session draft, synthetic OpenCode parts, and externally-viewed sync
+  marker are no longer loaded by terminal, Git, pull-request, or context-panel surfaces. Git
+  worktree bootstrap status is tracked by path instead of mutating the legacy session UI store.
 - Implemented a coherent Piarium product identity across the Windows installer, Electron AUMID,
   native/PWA titles, updater feed, `piarium://` deep links, `piarium-ui://` packaged origin,
   authentication device labels, translations, and generated icon assets. The retained cube motif

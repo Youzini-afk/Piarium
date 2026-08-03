@@ -4,6 +4,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export interface PiDraftState {
   images: ImageAttachment[];
+  instructions?: string;
   text: string;
 }
 

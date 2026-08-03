@@ -16,8 +16,6 @@ import type {
   GitWorktreeBootstrapStatus,
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 
 type WorktreeListEntry = {
   path?: string;
@@ -58,16 +56,13 @@ const normalizePath = (value: string): string => {
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
 };
 
+const latestWorktreeStatus = new Map<string, NonNullable<WorktreeMetadata['worktreeStatus']>>();
+
 export const getLatestWorktreeMetadata = (metadata: WorktreeMetadata): WorktreeMetadata => {
-  const target = normalizePath(metadata.path);
-  const state = useSessionUIStore.getState();
-  const available = state.availableWorktrees.find((candidate) => normalizePath(candidate.path) === target);
-  if (available) return available;
-  for (const worktrees of state.availableWorktreesByProject.values()) {
-    const candidate = worktrees.find((worktree) => normalizePath(worktree.path) === target);
-    if (candidate) return candidate;
-  }
-  return metadata;
+  const status = latestWorktreeStatus.get(normalizePath(metadata.path));
+  return status && status !== metadata.worktreeStatus
+    ? { ...metadata, worktreeStatus: status }
+    : metadata;
 };
 
 const slugifyWorktreeName = (value: string): string => {
@@ -95,87 +90,7 @@ const normalizeBranchName = (value: string): string => {
 
 const setStoredWorktreeStatus = (directory: string, status: NonNullable<WorktreeMetadata['worktreeStatus']>): void => {
   const target = normalizePath(directory);
-  if (!target) {
-    return;
-  }
-
-  const changedSessionIds: string[] = [];
-  useSessionUIStore.setState((state) => {
-    let changed = false;
-
-    const applyStatus = (metadata: WorktreeMetadata): WorktreeMetadata => {
-      if (normalizePath(metadata.path) !== target || metadata.worktreeStatus === status) {
-        return metadata;
-      }
-      changed = true;
-      return { ...metadata, worktreeStatus: status };
-    };
-
-    let availableWorktrees = state.availableWorktrees;
-    let availableWorktreesChanged = false;
-    const nextAvailableWorktrees = state.availableWorktrees.map((metadata) => {
-      const next = applyStatus(metadata);
-      if (next !== metadata) {
-        availableWorktreesChanged = true;
-      }
-      return next;
-    });
-    if (availableWorktreesChanged) {
-      availableWorktrees = nextAvailableWorktrees;
-    }
-    let availableWorktreesByProject = state.availableWorktreesByProject;
-    for (const [projectKey, entries] of state.availableWorktreesByProject) {
-      let projectChanged = false;
-      const nextEntries = entries.map((metadata) => {
-        const next = applyStatus(metadata);
-        if (next !== metadata) {
-          projectChanged = true;
-        }
-        return next;
-      });
-      if (projectChanged) {
-        if (availableWorktreesByProject === state.availableWorktreesByProject) {
-          availableWorktreesByProject = new Map(state.availableWorktreesByProject);
-        }
-        availableWorktreesByProject.set(projectKey, nextEntries);
-      }
-    }
-
-    let worktreeMetadata = state.worktreeMetadata;
-    for (const [sessionId, metadata] of state.worktreeMetadata) {
-      const next = applyStatus(metadata);
-      if (next !== metadata) {
-        changedSessionIds.push(sessionId);
-        if (worktreeMetadata === state.worktreeMetadata) {
-          worktreeMetadata = new Map(state.worktreeMetadata);
-        }
-        worktreeMetadata.set(sessionId, next);
-      }
-    }
-
-    if (!changed) {
-      return {};
-    }
-
-    return {
-      availableWorktrees,
-      availableWorktreesByProject,
-      worktreeMetadata,
-    };
-  });
-
-  if (changedSessionIds.length > 0) {
-    useSessionWorktreeStore.setState((state) => {
-      let attachments = state.attachments;
-      for (const sessionId of changedSessionIds) {
-        const attachment = attachments.get(sessionId);
-        if (!attachment || attachment.worktreeStatus === status) continue;
-        if (attachments === state.attachments) attachments = new Map(state.attachments);
-        attachments.set(sessionId, { ...attachment, worktreeStatus: status });
-      }
-      return attachments === state.attachments ? state : { attachments };
-    });
-  }
+  if (target) latestWorktreeStatus.set(target, status);
 };
 
 const getWorktreeStatusFromBootstrap = (status?: GitWorktreeBootstrapStatus): WorktreeMetadata['worktreeStatus'] => {
@@ -270,9 +185,8 @@ const toCreatePayload = (args: {
  * could go stale until the next worktree create/remove or project
  * switch, since there is no periodic worktree-list refresh.
  *
- * Status changes (`worktreeStatus`) are not compared here: those
- * flow through `setStoredWorktreeStatus`, which writes a new Map
- * reference that the persist subscriber picks up directly.
+ * Status changes (`worktreeStatus`) are intentionally not compared here;
+ * bootstrap status is tracked independently by normalized worktree path.
  *
  */
 export const worktreeMapsEqual = (
@@ -338,7 +252,7 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
         branch: branch,
         label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
         worktreeRoot: canonical.worktreeRoot,
-        worktreeStatus: canonical.worktreeStatus,
+        worktreeStatus: latestWorktreeStatus.get(worktreePath) ?? canonical.worktreeStatus,
         headState: canonical.headState,
         worktreeSource: canonical.worktreeSource,
       };
@@ -429,6 +343,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     headState: returnedBranch ? 'branch' : 'unborn',
     worktreeSource: 'created-for-session',
   };
+  setStoredWorktreeStatus(metadata.path, metadata.worktreeStatus ?? 'ready');
 
   if (created?.bootstrapStatus) {
     setWorktreeBootstrapState(metadata.path, created.bootstrapStatus);
@@ -448,17 +363,6 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   // The new worktree changes the repo's worktree topology; drop cached root
   // resolutions so root-branch lookups re-resolve against the new layout.
   invalidateResolvedProjectRootCache();
-
-  // Update sidebar store so new worktree appears immediately
-  const sidebarProjectKey = projectDirectory;
-  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-  const updatedByProject = new Map(currentByProject);
-  const existing = updatedByProject.get(sidebarProjectKey) ?? [];
-  updatedByProject.set(sidebarProjectKey, [...existing, metadata]);
-  useSessionUIStore.setState({
-    availableWorktreesByProject: updatedByProject,
-    availableWorktrees: [...useSessionUIStore.getState().availableWorktrees, metadata],
-  });
 
   return metadata;
 }
@@ -488,39 +392,12 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   }
 
   clearWorktreeBootstrapState(worktree.path);
+  latestWorktreeStatus.delete(normalizePath(worktree.path));
 
   invalidateWorktreeList(normalizePath(project.path));
   // Removing a worktree changes the repo's worktree topology; drop cached root
   // resolutions so root-branch lookups re-resolve against the new layout.
   invalidateResolvedProjectRootCache();
-
-  // Update sidebar store so removed worktree disappears immediately
-  const normalizedWorktreePath = normalizePath(worktree.path);
-  const sidebarProjectKey = projectDirectory;
-  const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-  const updatedByProject = new Map(currentByProject);
-  const projectWorktrees = updatedByProject.get(sidebarProjectKey) ?? [];
-  updatedByProject.set(
-    sidebarProjectKey,
-    projectWorktrees.filter((w) => normalizePath(w.path) !== normalizedWorktreePath),
-  );
-
-  // Clean up worktreeMetadata for sessions in the removed worktree
-  const currentMetadata = useSessionUIStore.getState().worktreeMetadata;
-  const updatedMetadata = new Map(currentMetadata);
-  for (const [sid, meta] of currentMetadata.entries()) {
-    if (meta && normalizePath(meta.path) === normalizedWorktreePath) {
-      updatedMetadata.delete(sid);
-    }
-  }
-
-  useSessionUIStore.setState({
-    availableWorktreesByProject: updatedByProject,
-    availableWorktrees: useSessionUIStore.getState().availableWorktrees.filter(
-      (w) => normalizePath(w.path) !== normalizedWorktreePath,
-    ),
-    worktreeMetadata: updatedMetadata,
-  });
 
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {

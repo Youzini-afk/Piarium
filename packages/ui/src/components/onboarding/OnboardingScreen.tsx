@@ -55,6 +55,7 @@ export function OnboardingScreen({
         variant={recoveryVariant}
         hostUrl={recoveryHostUrl}
         hostLabel={recoveryHostLabel}
+        onRetry={onRuntimeAvailable}
         onChooseRemote={() => setShowRecoveryRemoteForm(true)}
         showRemoteForm={showRecoveryRemoteForm}
         onCloseRemoteForm={() => setShowRecoveryRemoteForm(false)}

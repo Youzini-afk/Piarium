@@ -24,6 +24,7 @@ describe('Pi draft store', () => {
   test('clears the complete draft after a successful send', () => {
     usePiDraftStore.getState().setDraft('session-1', {
       images: [{ data: 'image', mimeType: 'image/png' }],
+      instructions: 'Hidden context',
       text: 'Prompt',
     });
     usePiDraftStore.getState().clear('session-1');

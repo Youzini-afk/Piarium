@@ -34,7 +34,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -337,8 +337,6 @@ export const PullRequestSection: React.FC<{
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const openGitHubSettings = React.useCallback(() => {
@@ -768,17 +766,18 @@ export const PullRequestSection: React.FC<{
   // PR comments/checks are pinned as inline-comment drafts above the chat
   // input (like terminal selections), not sent as an immediate message — the
   // user decides how to prompt and when to send.
-  const resolveDraftTarget = React.useCallback((): InlineCommentDraftTarget | null => {
-    // Same convention as diff/file comments: a new-session draft pins context
-    // under the 'draft' key, which the composer adopts when the session is
-    // created — starting a fresh session from a PR comment is a valid flow.
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
-      toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
+  const resolveDraftTarget = React.useCallback(async (): Promise<InlineCommentDraftTarget | null> => {
+    try {
+      return await ensurePiSessionDraftTarget(directory);
+    } catch (error) {
+      toast.error(t('gitView.pr.toast.noActiveSession'), {
+        description: error instanceof Error
+          ? error.message
+          : t('gitView.pr.toast.noActiveSessionDescription'),
+      });
       return null;
     }
-    return { directory, sessionKey };
-  }, [currentSessionId, directory, newSessionDraftOpen, t]);
+  }, [directory, t]);
 
   const attachCommentDraft = React.useCallback((target: InlineCommentDraftTarget, comment: TimelineCommentItem) => {
     const authorLabel = comment.authorLogin ? `@${comment.authorLogin}` : comment.authorName;
@@ -935,7 +934,7 @@ export const PullRequestSection: React.FC<{
       return;
     }
     if (!directory || !pr) return;
-    const target = resolveDraftTarget();
+    const target = await resolveDraftTarget();
     if (!target) {
       return;
     }
@@ -1000,7 +999,7 @@ export const PullRequestSection: React.FC<{
       return;
     }
     if (!directory || !pr) return;
-    const target = resolveDraftTarget();
+    const target = await resolveDraftTarget();
     if (!target) {
       return;
     }
@@ -1030,7 +1029,7 @@ export const PullRequestSection: React.FC<{
   }, [attachCommentDraft, directory, ensurePrContext, github, pr, resolveDraftTarget, setActiveMainTab, status?.repo, t, timelineComments]);
 
   const sendSingleCommentToChat = React.useCallback(async (comment: TimelineCommentItem) => {
-    const target = resolveDraftTarget();
+    const target = await resolveDraftTarget();
     if (!target) {
       return;
     }

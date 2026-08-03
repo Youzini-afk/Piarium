@@ -1,8 +1,9 @@
 import React from 'react';
 
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
 import { type TerminalStreamEvent } from '@/lib/api/types';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
@@ -12,6 +13,7 @@ import { TerminalViewport, type TerminalController } from '@/components/terminal
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { Icon } from "@/components/icon/Icon";
 import { useDeviceInfo } from '@/lib/device';
@@ -44,11 +46,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
     const showQuickKeys = isTouchTerminal || showTerminalQuickKeysOnDesktop;
 
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-    const hasActiveContext = currentSessionId !== null || newSessionDraft?.open === true;
-
+    const currentSessionId = usePiSessionStore((s) => s.currentSessionId);
     const effectiveDirectory = useEffectiveDirectory() ?? null;
+    const hasActiveContext = currentSessionId !== null || effectiveDirectory !== null;
     const directoryTerminalState = useTerminalStore((s) => effectiveDirectory ? s.sessions.get(effectiveDirectory) : undefined);
     const terminalHydrated = useTerminalStore((s) => s.hasHydrated);
     const ensureDirectory = useTerminalStore((s) => s.ensureDirectory);
@@ -611,20 +611,24 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         disconnectStream();
     }, [createTab, disconnectStream, effectiveDirectory, setActiveTab]);
 
-    const handleAttachSelection = React.useCallback(() => {
+    const handleAttachSelection = React.useCallback(async () => {
         const selection = terminalControllerRef.current?.getSelection();
-        const sessionKey = currentSessionId ?? (newSessionDraft?.open ? 'draft' : null);
-        if (!selection || !sessionKey || !activeTab || !effectiveDirectory) return;
-        addContextDraft({ directory: effectiveDirectory, sessionKey }, {
-            source: 'terminal',
-            fileLabel: activeTab.label,
-            startLine: selection.startLine,
-            endLine: selection.endLine,
-            code: selection.text,
-            language: activeTab.terminalSessionId ?? activeTab.id,
-            text: '',
-        });
-    }, [activeTab, addContextDraft, currentSessionId, effectiveDirectory, newSessionDraft?.open]);
+        if (!selection || !activeTab || !effectiveDirectory) return;
+        try {
+            const target = await ensurePiSessionDraftTarget(effectiveDirectory);
+            addContextDraft(target, {
+                source: 'terminal',
+                fileLabel: activeTab.label,
+                startLine: selection.startLine,
+                endLine: selection.endLine,
+                code: selection.text,
+                language: activeTab.terminalSessionId ?? activeTab.id,
+                text: '',
+            });
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : String(error));
+        }
+    }, [activeTab, addContextDraft, effectiveDirectory]);
 
     const handleSelectTab = React.useCallback(
         (tabId: string) => {
@@ -1028,7 +1032,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                                 size="xs"
                                 variant="ghost"
                                 className="h-7 w-7 p-0"
-                                onClick={handleAttachSelection}
+                                onClick={() => void handleAttachSelection()}
                                 title={t('terminalView.actions.attachSelection')}
                                 aria-label={t('terminalView.actions.attachSelection')}
                             >

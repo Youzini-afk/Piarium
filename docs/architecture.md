@@ -60,6 +60,12 @@ credential files, spawns commands, or loads extension code. Every native operati
 typed preload or Pi runtime capability. OpenCode SDK types are removed from feature code rather
 than preserved behind a compatibility facade.
 
+Composer drafts are keyed by Pi runtime and session. Workspace surfaces may seed visible text and
+hidden instructions in that draft; if there is no active session they create one in the relevant
+cwd first. A Pi session's snapshot/catalog cwd is authoritative, including for worktrees, so Git,
+terminal, and pull-request views do not maintain a second session-to-directory or
+session-to-worktree map.
+
 ### 4.2 Electron/web shell and broker
 
 The retained shell owns windows, web/mobile/remote bootstrap, packaging, and native dialogs. The

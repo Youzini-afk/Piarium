@@ -95,6 +95,7 @@ export const PiRecoveryPanel: React.FC = () => {
     setDraft(sessionId, {
       ...(result.editorImages === undefined ? {} : { images: result.editorImages }),
       ...(result.editorText === undefined ? {} : { text: result.editorText }),
+      instructions: undefined,
     });
   }, [sessionId, setDraft]);
 

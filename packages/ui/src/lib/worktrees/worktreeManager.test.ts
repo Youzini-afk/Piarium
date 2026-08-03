@@ -21,16 +21,7 @@ const createdWorktree = {
 };
 let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
-const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
-
-const sessionState = {
-  availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
-  availableWorktrees: [] as WorktreeMetadata[],
-  worktreeMetadata: new Map<string, WorktreeMetadata>(),
-};
-const attachmentState = {
-  attachments: new Map<string, { worktreeStatus: 'pending' | 'ready'; worktreeRoot: string }>(),
-};
+const bootstrapWatcherOptions: Array<{ onFailed?: () => void; onReady?: () => void }> = [];
 
 mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
@@ -46,28 +37,9 @@ mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   },
 }));
 
-mock.module('@/sync/session-worktree-store', () => ({
-  useSessionWorktreeStore: {
-    setState: (patch: Partial<typeof attachmentState> | ((state: typeof attachmentState) => Partial<typeof attachmentState>)) => {
-      const next = typeof patch === 'function' ? patch(attachmentState) : patch;
-      Object.assign(attachmentState, next);
-    },
-  },
-}));
-
 mock.module('@/lib/worktrees/worktreeStatus', () => ({
   invalidateResolvedProjectRootCache: mock(),
   resolveProjectRoot: (directory: string) => Promise.resolve(directory),
-}));
-
-mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: {
-    getState: () => sessionState,
-    setState: (patch: Partial<typeof sessionState> | ((state: typeof sessionState) => Partial<typeof sessionState>)) => {
-      const next = typeof patch === 'function' ? patch(sessionState) : patch;
-      Object.assign(sessionState, next);
-    },
-  },
 }));
 
 mock.module('@/lib/gitApi', () => ({
@@ -105,10 +77,6 @@ describe('worktreeManager list invalidation', () => {
     bootstrapWatcherCalls.length = 0;
     bootstrapWatcherOptions.length = 0;
     createdWorktreeResult = createdWorktree;
-    sessionState.availableWorktreesByProject = new Map();
-    sessionState.availableWorktrees = [];
-    sessionState.worktreeMetadata = new Map();
-    attachmentState.attachments = new Map();
   });
 
   test('retries an in-flight list when a worktree is created before it resolves', async () => {
@@ -144,7 +112,6 @@ describe('worktreeManager list invalidation', () => {
     });
 
     expect(metadata.worktreeStatus).toBe('pending');
-    expect(sessionState.availableWorktrees[0]?.worktreeStatus).toBe('pending');
     expect(bootstrapWatcherCalls).toEqual(['/repo-feature']);
   });
 
@@ -166,26 +133,6 @@ describe('worktreeManager list invalidation', () => {
 
     expect(metadata.worktreeStatus).toBe('ready');
     expect(bootstrapWatcherCalls).toEqual([]);
-  });
-
-  test('reconciles session attachments when bootstrap becomes ready', async () => {
-    const metadata = await createWorktree({ id: 'project-1', path: '/repo' }, {
-      preferredName: 'feature',
-      mode: 'new',
-      branchName: 'feature',
-      worktreeName: 'feature',
-      returnAfterDirectoryCreated: true,
-    });
-    sessionState.worktreeMetadata.set('session-1', metadata);
-    attachmentState.attachments.set('session-1', {
-      worktreeRoot: metadata.path,
-      worktreeStatus: 'pending',
-    });
-
-    bootstrapWatcherOptions[0]?.onReady?.();
-
-    expect(sessionState.worktreeMetadata.get('session-1')?.worktreeStatus).toBe('ready');
-    expect(attachmentState.attachments.get('session-1')?.worktreeStatus).toBe('ready');
   });
 
   test('resolves ready metadata when bootstrap settles before the session is attached', async () => {
