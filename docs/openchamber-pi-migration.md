@@ -106,3 +106,15 @@ The iframe URL ABI is Piarium-owned: `piPanel`, `piSessionId`, `piDirectory`, an
 Legacy `ocPanel`/OpenCode-shaped aliases are deliberately not accepted. The parent still supplies
 the authenticated runtime bootstrap through the same-origin message handshake, while the child
 opens the target Pi session directly and keeps in-panel navigation stable.
+
+## Server event and notification transport
+
+The Web server no longer opens or exposes OpenCode `/event` or `/global/event` streams. Their SSE
+readers, WebSocket bridges, replay hub, proxy/auth/relay allowlist entries, and orphaned
+OpenCode-session notification trigger/template runtimes are removed. Pi session notifications are
+derived from runtime-broker `session.snapshot` and `agent.event` envelopes.
+
+The remaining transports have separate product ownership: `/api/piarium/runtime/ws` carries the Pi
+runtime protocol, `/api/piarium/events` carries scheduled-task events, and
+`/api/notifications/stream` carries UI notifications. Desktop relay proxying explicitly permits
+those Pi-native endpoints and does not retain an OpenCode event alias.

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createNotificationEmitterRuntime } from './emitter-runtime.js';
+import {
+  createGlobalUiEventBroadcaster,
+  createNotificationEmitterRuntime,
+} from './emitter-runtime.js';
 
 const createRuntime = (overrides = {}) => createNotificationEmitterRuntime({
   process: { stdout: { write: vi.fn() } },
@@ -12,6 +15,22 @@ const createRuntime = (overrides = {}) => createNotificationEmitterRuntime({
 });
 
 describe('notification emitter runtime', () => {
+  it('broadcasts Pi events to every active notification SSE response', () => {
+    const first = { write: vi.fn() };
+    const second = { write: vi.fn() };
+    const writeSseEvent = vi.fn((response, payload) => response.write(payload));
+    const broadcast = createGlobalUiEventBroadcaster({
+      sseClients: new Set([first, second]),
+      writeSseEvent,
+    });
+
+    broadcast({ type: 'piarium:notification' });
+
+    expect(writeSseEvent).toHaveBeenCalledTimes(2);
+    expect(first.write).toHaveBeenCalledWith({ type: 'piarium:notification' });
+    expect(second.write).toHaveBeenCalledWith({ type: 'piarium:notification' });
+  });
+
   it('reports desktop delivery through the injected native callback', () => {
     const onDesktopNotification = vi.fn();
     const runtime = createRuntime({ onDesktopNotification });

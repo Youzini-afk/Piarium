@@ -39,10 +39,12 @@ import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
 import { createDictationRuntime } from './lib/dictation/runtime.js';
-import { createGlobalUiEventBroadcaster } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
-import { createNotificationEmitterRuntime } from './lib/notifications/emitter-runtime.js';
+import {
+  createGlobalUiEventBroadcaster,
+  createNotificationEmitterRuntime,
+} from './lib/notifications/emitter-runtime.js';
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createPiSessionRuntime } from './lib/notifications/pi-session-runtime.js';
@@ -321,7 +323,6 @@ const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
 const sendApnsToAllUiSessions = (...args) => apnsRuntime.sendApnsToAllUiSessions(...args);
 
 const uiNotificationClients = new Set();
-const uiNotificationWsClients = new Set();
 const uiPiariumEventClients = new Set();
 const desktopNotifyEnabled = process.env.PIARIUM_DESKTOP_NOTIFY === 'true'
   || process.env.PIARIUM_RUNTIME === 'desktop';
@@ -336,7 +337,6 @@ const notificationEmitterRuntime = createNotificationEmitterRuntime({
 const writeSseEvent = (...args) => notificationEmitterRuntime.writeSseEvent(...args);
 broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiNotificationClients,
-  wsClients: uiNotificationWsClients,
   writeSseEvent,
 });
 const emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);

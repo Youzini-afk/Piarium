@@ -31,4 +31,6 @@ The mobile module owns the server-side contract for a single-server OpenChamber 
 
 ## Notification integration
 
-`packages/web/server/lib/notifications/runtime.js` fans completion, error, question, and permission notifications to `sendMobilePushToAllDevices` in addition to existing desktop/UI/WebPush channels.
+`packages/web/server/index.js` consumes Pi runtime broker events and fans session
+completion notifications out through `sendMobilePushToAllDevices` together with
+desktop, UI SSE, Web Push, and APNs channels.

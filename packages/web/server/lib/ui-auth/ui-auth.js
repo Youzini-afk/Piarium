@@ -292,9 +292,7 @@ const isWebSocketUpgrade = (req) => {
 };
 
 const isUrlAuthReadableHttpPath = (pathname) => {
-  return pathname === '/api/event'
-    || pathname === '/api/global/event'
-    || pathname === '/api/piarium/events'
+  return pathname === '/api/piarium/events'
     || pathname === '/api/piarium/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
@@ -305,9 +303,7 @@ const isUrlAuthReadableHttpPath = (pathname) => {
 };
 
 const isUrlAuthWebSocketPath = (pathname) => {
-  return pathname === '/api/event/ws'
-    || pathname === '/api/global/event/ws'
-    || pathname === '/api/piarium/runtime/ws'
+  return pathname === '/api/piarium/runtime/ws'
     || pathname === '/api/piarium/realtime-proxy/ws'
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'

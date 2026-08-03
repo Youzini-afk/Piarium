@@ -29,8 +29,6 @@ const isAllowedHttpPath = (pathname) =>
   || pathname.startsWith('/auth/');
 
 const ALLOWED_WS_PATHS = new Set([
-  '/api/global/event/ws',
-  '/api/event/ws',
   '/api/piarium/runtime/ws',
   '/api/terminal/ws',
   '/api/dictation/ws',

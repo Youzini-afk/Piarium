@@ -10,8 +10,6 @@ const createRuntime = () => createStaticRoutesRuntime({
   __dirname: '/server',
   express,
   resolveProjectDirectory: () => '',
-  buildOpenCodeUrl: () => '',
-  getOpenCodeAuthHeaders: () => ({}),
   readSettingsFromDiskMigrated: async () => ({}),
   normalizePwaAppName: (value) => value,
   normalizePwaOrientation: (value) => value,

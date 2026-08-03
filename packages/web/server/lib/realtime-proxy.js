@@ -4,16 +4,14 @@ const PROXY_SSE_PATH = '/api/piarium/realtime-proxy/sse';
 const PROXY_WS_PATH = '/api/piarium/realtime-proxy/ws';
 
 const isAllowedSsePath = (pathname) => {
-  return pathname === '/api/event'
-    || pathname === '/api/global/event'
-    || pathname === '/api/piarium/events'
+  return pathname === '/api/piarium/events'
     || pathname === '/api/notifications/stream';
 };
 
 const isAllowedWebSocketPath = (pathname) => {
-  return pathname === '/api/event/ws'
-    || pathname === '/api/global/event/ws'
-    || pathname === '/api/terminal/ws';
+  return pathname === '/api/piarium/runtime/ws'
+    || pathname === '/api/terminal/ws'
+    || pathname === '/api/dictation/ws';
 };
 
 const normalizeBaseUrl = (value) => {

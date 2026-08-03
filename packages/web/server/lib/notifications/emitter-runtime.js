@@ -1,3 +1,15 @@
+export const createGlobalUiEventBroadcaster = ({ sseClients, writeSseEvent }) => {
+  return (payload) => {
+    for (const res of sseClients) {
+      try {
+        writeSseEvent(res, payload);
+      } catch {
+        // A disconnected response is removed by the owning SSE route.
+      }
+    }
+  };
+};
+
 export const createNotificationEmitterRuntime = (dependencies) => {
   const {
     process,
