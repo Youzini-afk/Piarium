@@ -128,6 +128,10 @@ retained before engine surgery begins.
   and no longer probes or displays a nonexistent OpenCode upgrade endpoint. The unreachable
   OpenCode upgrade toast, its persisted preferences, and its Web settings API shim were removed;
   Piarium application updates and the independent PWA install prompt remain intact.
+- Implemented: managed Git worktrees now live below Piarium's own data directory and use the
+  canonical Piarium path-based project ID plus `piarium/<name>` default branches. Worktree setup
+  no longer writes `.git/opencode`, OpenCode project JSON, or `opencode.db`; Git itself is the
+  authoritative registry and the Piarium UI passes the configured setup command explicitly.
 - Preserve local/remote authentication, workspace containment, audit, reconnect, materialization,
   queue, parent/child session, revert, fork, and archive behavior.
 

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createProjectIdFromPath } from '../projects/project-id.js';
 
 import {
   checkoutCommit,
@@ -33,7 +34,7 @@ const normalizeGitPath = (value) => value.replace(/\\/g, '/');
 
 /** Create a temp dir and register it for afterEach cleanup. */
 const createTempDir = () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-git-service-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-git-service-'));
   tempDirs.push(dir);
   return dir;
 };
@@ -358,14 +359,60 @@ describe('createWorktree', () => {
     });
   });
 
-  it('reports directory, Git, and setup bootstrap phases while preserving legacy status', async () => {
+  it('uses Piarium-owned storage and branch names by default', async () => {
     if (!canRunGit()) return;
 
-    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const dataHome = createTempDir();
+    process.env.PIARIUM_DATA_DIR = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'native-default',
+      });
+
+      expect(created.branch).toBe('piarium/native-default');
+      expect(created.path).toBe(path.join(
+        dataHome,
+        'worktrees',
+        createProjectIdFromPath(repo),
+        'native-default',
+      ));
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
+        { timeout: 5_000 },
+      ).toBe('setup-ready');
+      expect(fs.existsSync(path.join(created.path, 'README.md'))).toBe(true);
+      expect(fs.existsSync(path.join(repo, '.git', 'opencode'))).toBe(false);
+      expect(fs.existsSync(path.join(dataHome, 'opencode'))).toBe(false);
+
+      await expect(removeWorktree(repo, { directory: created.path })).resolves.toBe(true);
+    } finally {
+      if (previousPiariumDataDir === undefined) {
+        delete process.env.PIARIUM_DATA_DIR;
+      } else {
+        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
+      }
+    }
+  });
+
+  it('reports directory, Git, and setup bootstrap phases', async () => {
+    if (!canRunGit()) return;
+
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
     const dataHome = createTempDir();
     const setupMarker = path.join(dataHome, 'setup-started');
     const setupScript = path.join(dataHome, 'setup-phase.cjs');
-    process.env.XDG_DATA_HOME = dataHome;
+    process.env.PIARIUM_DATA_DIR = dataHome;
 
     fs.writeFileSync(
       setupScript,
@@ -388,6 +435,15 @@ describe('createWorktree', () => {
         returnAfterDirectoryCreated: true,
         startCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(setupScript)}`,
       });
+
+      expect(created.path).toBe(path.join(
+        dataHome,
+        'worktrees',
+        createProjectIdFromPath(repo),
+        'bootstrap-phases',
+      ));
+      expect(fs.existsSync(path.join(repo, '.git', 'opencode'))).toBe(false);
+      expect(fs.existsSync(path.join(dataHome, 'opencode'))).toBe(false);
 
       expect(created.bootstrapStatus).toMatchObject({
         status: 'pending',
@@ -412,10 +468,10 @@ describe('createWorktree', () => {
         error: null,
       });
     } finally {
-      if (previousXdgDataHome === undefined) {
-        delete process.env.XDG_DATA_HOME;
+      if (previousPiariumDataDir === undefined) {
+        delete process.env.PIARIUM_DATA_DIR;
       } else {
-        process.env.XDG_DATA_HOME = previousXdgDataHome;
+        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
       }
     }
   });
@@ -423,12 +479,12 @@ describe('createWorktree', () => {
   it('waits for active bootstrap work before removing a worktree', async () => {
     if (!canRunGit()) return;
 
-    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
     const dataHome = createTempDir();
     const setupStarted = path.join(dataHome, 'remove-race-started');
     const setupCompleted = path.join(dataHome, 'remove-race-completed');
     const setupScript = path.join(dataHome, 'remove-race.cjs');
-    process.env.XDG_DATA_HOME = dataHome;
+    process.env.PIARIUM_DATA_DIR = dataHome;
 
     fs.writeFileSync(
       setupScript,
@@ -469,10 +525,10 @@ describe('createWorktree', () => {
         phase: 'setup-ready',
       });
     } finally {
-      if (previousXdgDataHome === undefined) {
-        delete process.env.XDG_DATA_HOME;
+      if (previousPiariumDataDir === undefined) {
+        delete process.env.PIARIUM_DATA_DIR;
       } else {
-        process.env.XDG_DATA_HOME = previousXdgDataHome;
+        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
       }
     }
   });
@@ -502,9 +558,9 @@ describe('createWorktree', () => {
   it('preflights fast create branch-in-use failures before creating the candidate directory', async () => {
     if (!canRunGit()) return;
 
-    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.XDG_DATA_HOME = dataHome;
+    process.env.PIARIUM_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -515,7 +571,7 @@ describe('createWorktree', () => {
       fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
       runGit(repo, ['add', 'README.md']);
       runGit(repo, ['commit', '-m', 'Initial commit']);
-      const projectID = runGit(repo, ['rev-list', '--max-parents=0', '--all']).trim();
+      const projectId = createProjectIdFromPath(repo);
 
       fs.rmSync(worktree, { recursive: true, force: true });
       runGit(repo, ['worktree', 'add', '-b', 'feature/in-use', worktree, 'HEAD']);
@@ -529,13 +585,15 @@ describe('createWorktree', () => {
         returnAfterDirectoryCreated: true,
       })).rejects.toThrow(`Branch is already checked out in ${normalizeGitPath(canonicalWorktree)}`);
 
-      const candidateDirectory = path.join(dataHome, 'opencode', 'worktree', projectID, 'feature-in-use');
+      const candidateDirectory = path.join(dataHome, 'worktrees', projectId, 'feature-in-use');
       expect(fs.existsSync(candidateDirectory)).toBe(false);
+      expect(fs.existsSync(path.join(repo, '.git', 'opencode'))).toBe(false);
+      expect(fs.existsSync(path.join(dataHome, 'opencode'))).toBe(false);
     } finally {
-      if (previousXdgDataHome === undefined) {
-        delete process.env.XDG_DATA_HOME;
+      if (previousPiariumDataDir === undefined) {
+        delete process.env.PIARIUM_DATA_DIR;
       } else {
-        process.env.XDG_DATA_HOME = previousXdgDataHome;
+        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
       }
     }
   });
@@ -549,9 +607,9 @@ describe('removeWorktree', () => {
   it('forgets unmanaged orphan worktree entries without deleting files', async () => {
     if (!canRunGit()) return;
 
-    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
     const dataHome = createTempDir();
-    process.env.XDG_DATA_HOME = dataHome;
+    process.env.PIARIUM_DATA_DIR = dataHome;
 
     try {
       const repo = createTempDir();
@@ -572,10 +630,10 @@ describe('removeWorktree', () => {
       })).resolves.toBe(true);
       expect(fs.existsSync(canary)).toBe(true);
     } finally {
-      if (previousXdgDataHome === undefined) {
-        delete process.env.XDG_DATA_HOME;
+      if (previousPiariumDataDir === undefined) {
+        delete process.env.PIARIUM_DATA_DIR;
       } else {
-        process.env.XDG_DATA_HOME = previousXdgDataHome;
+        process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
       }
     }
   });

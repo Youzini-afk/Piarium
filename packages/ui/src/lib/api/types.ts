@@ -365,17 +365,15 @@ export interface GitWorktreeBootstrapStatus {
 
 export interface CreateGitWorktreePayload {
   mode?: 'new' | 'existing';
-  /** Worktree folder name (falls back to OpenCode name generation when omitted). */
+  /** Worktree folder name (falls back to Piarium name generation when omitted). */
   worktreeName?: string;
-  /** Backward-compatible alias for worktreeName. */
-  name?: string;
   /** New local branch name for mode=new. */
   branchName?: string;
   /** Existing local/remote branch for mode=existing. */
   existingBranch?: string;
   /** Start ref for mode=new (local/remote branch or commit SHA). */
   startRef?: string;
-  /** Additional startup script to run after project startup script. */
+  /** Setup script to run after Git has populated the worktree. */
   startCommand?: string;
   /** Configure upstream tracking for the created/attached local branch. */
   setUpstream?: boolean;

@@ -89,7 +89,7 @@ The following functions are internal helpers used by exported functions:
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.
 - `parseWorktreePorcelain(raw)`: Parse `git worktree list --porcelain` output.
-- `resolveWorktreeProjectContext(directory)`: Resolve project context (projectID, primaryWorktree, worktreeRoot).
+- `resolveWorktreeProjectContext(directory)`: Resolve the Piarium project ID, primary worktree, and managed worktree root.
 - `resolveCandidateDirectory(...)`: Generate unique worktree directory candidates.
 - `resolveBranchForExistingMode(...)`: Resolve branch for existing-mode worktree creation.
 - `applyUpstreamConfiguration(...)`: Set upstream tracking for new branches.
@@ -120,8 +120,8 @@ The following functions are internal helpers used by exported functions:
 - `branch`: Local branch name.
 - `path`: Absolute path to worktree directory.
 - `directoryCreated`: Present when create returned after the target directory exists while background Git/bootstrap work continues.
-- `bootstrapStatus`: Background setup state. The legacy `status` remains `pending`, `ready`, or `failed`, while `phase` reports `directory-created`, `git-ready`, or `setup-ready`. Fast create starts at `pending`/`directory-created`; population and upstream Git completion advances to `pending`/`git-ready` before setup/start scripts; completed setup is `ready`/`setup-ready`. A missing in-memory state falls back to `ready`/`setup-ready`; clients continue to accept legacy status responses that omit `phase`.
-- Fast-create background failures remove OpenCode sandbox metadata for directories that never became Git worktrees, and remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
+- `bootstrapStatus`: Background setup state. `status` is `pending`, `ready`, or `failed`; `phase` is `directory-created`, `git-ready`, or `setup-ready`. Fast create starts at `pending`/`directory-created`; population and upstream Git completion advances to `pending`/`git-ready` before setup scripts; completed setup is `ready`/`setup-ready`. A missing in-memory state falls back to `ready`/`setup-ready`.
+- Fast-create background failures remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 - Worktree removal waits for any active create/bootstrap task for that directory before deleting it, preventing a background Git or setup task from restoring removed state or racing filesystem cleanup.
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
 
@@ -148,8 +148,9 @@ The following functions are internal helpers used by exported functions:
 
 ### Worktree Naming
 - Worktree names are slugified via `slugWorktreeName`.
-- Random names use adjectives/nouns from `OPENCODE_ADJECTIVES` and `OPENCODE_NOUNS` lists.
-- Branches created for new worktrees use `openchamber/<worktree-name>` pattern.
+- Managed worktrees live under `PIARIUM_DATA_DIR/worktrees/<Piarium project ID>`; Git remains the authoritative worktree registry, so Piarium does not duplicate sandbox state in another database.
+- Random names use adjectives/nouns from `PIARIUM_WORKTREE_ADJECTIVES` and `PIARIUM_WORKTREE_NOUNS`.
+- Branches created without an explicit branch name use the `piarium/<worktree-name>` pattern.
 
 ### Cross-Platform Considerations
 - Use `normalizeDirectoryPath` for all directory inputs to handle `~` and path separators.
