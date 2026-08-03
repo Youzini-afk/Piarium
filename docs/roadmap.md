@@ -128,6 +128,9 @@ without starting or bundling OpenCode and without a permanent OpenCode compatibi
 
 ## Phase 6 — Recovery UX and ecosystem integrations
 
+Implementation follows the native-ownership and per-adapter acceptance contract in
+[plugin-gui-design.md](plugin-gui-design.md).
+
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across
   application settings; manage `pi-workspace-history` and `pi-wtf` through Pi's native package
   operations with truthful configured-versus-active status.

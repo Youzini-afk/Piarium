@@ -228,6 +228,10 @@ PiDeck-installed local extensions are not product dependencies. Local working tr
 package sources remain installable directly, and the generic UI bridge allows unknown packages to
 work without a Piarium-specific adapter.
 
+The page boundaries, native authorities, risk treatment, and adapter acceptance criteria are
+defined in [plugin-gui-design.md](plugin-gui-design.md). The imported Magic Context, OpenAgent, and
+Agent Orchestration screens are reference material only and do not define the new interaction model.
+
 ## 8. Recovery model
 
 Piarium owns one recovery interaction model, not one recovery storage engine. Conversation-only
