@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useDeviceInfo } from '@/lib/device';
 
 import {
@@ -414,18 +414,18 @@ const OPENAI_VOICE_OPTIONS = [
 export const VoiceSettings: React.FC = () => {
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
-    const voiceProvider = useConfigStore((state) => state.voiceProvider);
-    const setVoiceProvider = useConfigStore((state) => state.setVoiceProvider);
-    const speechRate = useConfigStore((state) => state.speechRate);
-    const setSpeechRate = useConfigStore((state) => state.setSpeechRate);
-    const speechPitch = useConfigStore((state) => state.speechPitch);
-    const setSpeechPitch = useConfigStore((state) => state.setSpeechPitch);
-    const speechVolume = useConfigStore((state) => state.speechVolume);
-    const setSpeechVolume = useConfigStore((state) => state.setSpeechVolume);
-    const sayVoice = useConfigStore((state) => state.sayVoice);
-    const setSayVoice = useConfigStore((state) => state.setSayVoice);
-    const localTtsVoiceId = useConfigStore((state) => state.localTtsVoiceId);
-    const setLocalTtsVoiceId = useConfigStore((state) => state.setLocalTtsVoiceId);
+    const voiceProvider = usePreferencesStore((state) => state.voiceProvider);
+    const setVoiceProvider = usePreferencesStore((state) => state.setVoiceProvider);
+    const speechRate = usePreferencesStore((state) => state.speechRate);
+    const setSpeechRate = usePreferencesStore((state) => state.setSpeechRate);
+    const speechPitch = usePreferencesStore((state) => state.speechPitch);
+    const setSpeechPitch = usePreferencesStore((state) => state.setSpeechPitch);
+    const speechVolume = usePreferencesStore((state) => state.speechVolume);
+    const setSpeechVolume = usePreferencesStore((state) => state.setSpeechVolume);
+    const sayVoice = usePreferencesStore((state) => state.sayVoice);
+    const setSayVoice = usePreferencesStore((state) => state.setSayVoice);
+    const localTtsVoiceId = usePreferencesStore((state) => state.localTtsVoiceId);
+    const setLocalTtsVoiceId = usePreferencesStore((state) => state.setLocalTtsVoiceId);
     const { speak: speakLocalTts, stop: stopLocalTts, isPlaying: isLocalTtsPlaying, error: localTtsError } = useLocalTTS();
 
     const previewLocalVoice = useCallback(() => {
@@ -437,46 +437,46 @@ export const VoiceSettings: React.FC = () => {
             ?? String(localTtsVoiceId);
         void speakLocalTts(t('settings.voice.page.preview.voiceLine', { voiceName: voiceLabel }), {
             speakerId: localTtsVoiceId,
-            speed: useConfigStore.getState().speechRate,
+        speed: usePreferencesStore.getState().speechRate,
         });
     }, [isLocalTtsPlaying, localTtsVoiceId, speakLocalTts, stopLocalTts, t]);
-    const browserVoice = useConfigStore((state) => state.browserVoice);
-    const setBrowserVoice = useConfigStore((state) => state.setBrowserVoice);
-    const openaiVoice = useConfigStore((state) => state.openaiVoice);
-    const setOpenaiVoice = useConfigStore((state) => state.setOpenaiVoice);
-    const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
-    const setOpenaiApiKey = useConfigStore((state) => state.setOpenaiApiKey);
-    const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
-    const setOpenaiCompatibleUrl = useConfigStore((state) => state.setOpenaiCompatibleUrl);
-    const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
-    const setOpenaiCompatibleApiKey = useConfigStore((state) => state.setOpenaiCompatibleApiKey);
-    const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
-    const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
-    const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
-    const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
-    const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
-    const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
-    const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
+    const browserVoice = usePreferencesStore((state) => state.browserVoice);
+    const setBrowserVoice = usePreferencesStore((state) => state.setBrowserVoice);
+    const openaiVoice = usePreferencesStore((state) => state.openaiVoice);
+    const setOpenaiVoice = usePreferencesStore((state) => state.setOpenaiVoice);
+    const openaiApiKey = usePreferencesStore((state) => state.openaiApiKey);
+    const setOpenaiApiKey = usePreferencesStore((state) => state.setOpenaiApiKey);
+    const openaiCompatibleUrl = usePreferencesStore((state) => state.openaiCompatibleUrl);
+    const setOpenaiCompatibleUrl = usePreferencesStore((state) => state.setOpenaiCompatibleUrl);
+    const openaiCompatibleApiKey = usePreferencesStore((state) => state.openaiCompatibleApiKey);
+    const setOpenaiCompatibleApiKey = usePreferencesStore((state) => state.setOpenaiCompatibleApiKey);
+    const openaiCompatibleVoice = usePreferencesStore((state) => state.openaiCompatibleVoice);
+    const setOpenaiCompatibleVoice = usePreferencesStore((state) => state.setOpenaiCompatibleVoice);
+    const openaiCompatibleTtsModel = usePreferencesStore((state) => state.openaiCompatibleTtsModel);
+    const setOpenaiCompatibleTtsModel = usePreferencesStore((state) => state.setOpenaiCompatibleTtsModel);
+    const showMessageTTSButtons = usePreferencesStore((state) => state.showMessageTTSButtons);
+    const ttsInputMode = usePreferencesStore((state) => state.ttsInputMode);
+    const setTtsInputMode = usePreferencesStore((state) => state.setTtsInputMode);
     // STT settings
-    const sttProvider = useConfigStore((state) => state.sttProvider);
-    const setSttProvider = useConfigStore((state) => state.setSttProvider);
-    const sttServerUrl = useConfigStore((state) => state.sttServerUrl);
-    const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
-    const sttApiKey = useConfigStore((state) => state.sttApiKey);
-    const setSttApiKey = useConfigStore((state) => state.setSttApiKey);
-    const sttModel = useConfigStore((state) => state.sttModel);
-    const setSttModel = useConfigStore((state) => state.setSttModel);
-    const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
-    const setSttLocalModel = useConfigStore((state) => state.setSttLocalModel);
-    const sttLanguage = useConfigStore((state) => state.sttLanguage);
-    const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
-    const sttSilenceThresholdDb = useConfigStore((state) => state.sttSilenceThresholdDb);
-    const setSttSilenceThresholdDb = useConfigStore((state) => state.setSttSilenceThresholdDb);
-    const sttSilenceHoldMs = useConfigStore((state) => state.sttSilenceHoldMs);
-    const setSttSilenceHoldMs = useConfigStore((state) => state.setSttSilenceHoldMs);
-    const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
-    const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
-    const setDictationEnabled = useConfigStore((state) => state.setDictationEnabled);
+    const sttProvider = usePreferencesStore((state) => state.sttProvider);
+    const setSttProvider = usePreferencesStore((state) => state.setSttProvider);
+    const sttServerUrl = usePreferencesStore((state) => state.sttServerUrl);
+    const setSttServerUrl = usePreferencesStore((state) => state.setSttServerUrl);
+    const sttApiKey = usePreferencesStore((state) => state.sttApiKey);
+    const setSttApiKey = usePreferencesStore((state) => state.setSttApiKey);
+    const sttModel = usePreferencesStore((state) => state.sttModel);
+    const setSttModel = usePreferencesStore((state) => state.setSttModel);
+    const sttLocalModel = usePreferencesStore((state) => state.sttLocalModel);
+    const setSttLocalModel = usePreferencesStore((state) => state.setSttLocalModel);
+    const sttLanguage = usePreferencesStore((state) => state.sttLanguage);
+    const setSttLanguage = usePreferencesStore((state) => state.setSttLanguage);
+    const sttSilenceThresholdDb = usePreferencesStore((state) => state.sttSilenceThresholdDb);
+    const setSttSilenceThresholdDb = usePreferencesStore((state) => state.setSttSilenceThresholdDb);
+    const sttSilenceHoldMs = usePreferencesStore((state) => state.sttSilenceHoldMs);
+    const setSttSilenceHoldMs = usePreferencesStore((state) => state.setSttSilenceHoldMs);
+    const setShowMessageTTSButtons = usePreferencesStore((state) => state.setShowMessageTTSButtons);
+    const dictationEnabled = usePreferencesStore((state) => state.dictationEnabled);
+    const setDictationEnabled = usePreferencesStore((state) => state.setDictationEnabled);
 
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);

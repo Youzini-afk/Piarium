@@ -3,7 +3,7 @@ import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { McpPage } from '@/components/sections/mcp/McpPage';
@@ -369,7 +369,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     if (result.id === 'providers.connect') {
-      useConfigStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
+      usePiProviderStore.getState().setSelectedProvider(ADD_PROVIDER_SETTINGS_ID);
     }
 
     return result.id;

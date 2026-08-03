@@ -8,14 +8,16 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from '@/components/icon/Icon';
 import { useModelLists } from '@/hooks/useModelLists';
-import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import { toModelPickerProvider } from '@/lib/piModelPicker';
+import type { ModelMetadata } from '@/types';
 
 interface ModelSelectorProps {
     providerId: string;
@@ -39,9 +41,19 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     dropdownPortalToBody = false,
 }) => {
     const { t } = useI18n();
-    const { isReady, isUnavailable } = useOpenCodeReadiness();
-    const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
-    const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
+    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const piProviders = usePiProviderStore((state) => state.providers);
+    const providers = React.useMemo<ModelPickerProvider[]>(
+        () => piProviders.map(toModelPickerProvider),
+        [piProviders],
+    );
+    const providersLoaded = usePiProviderStore((state) => state.loaded);
+    const providersLoading = usePiProviderStore((state) => state.isLoading);
+    const providerError = usePiProviderStore((state) => state.error);
+    const loadProviders = usePiProviderStore((state) => state.load);
+    const isReady = providersLoaded && !providersLoading;
+    const isUnavailable = Boolean(providerError) && !providersLoading;
+    const modelsMetadata = React.useMemo(() => new Map<string, ModelMetadata>(), []);
     const isMobile = useUIStore((state) => state.isMobile);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
@@ -55,6 +67,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const [isMobilePanelOpen, setIsMobilePanelOpen] = React.useState(false);
     const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
     const [searchQuery, setSearchQuery] = React.useState('');
+
+    React.useEffect(() => {
+        if (!currentDirectory) return;
+        void loadProviders(currentDirectory).catch(() => undefined);
+    }, [currentDirectory, loadProviders]);
 
     const closePicker = React.useCallback(() => {
         setIsMobilePanelOpen(false);

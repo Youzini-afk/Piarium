@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { Message } from '@opencode-ai/sdk/v2/client';
+import type { PiSessionEntry } from '@piarium/protocol';
 import { switchRuntimeEndpoint } from './runtime-switch';
 
 import {
@@ -40,8 +40,8 @@ describe('reviewFlow auto-review helpers', () => {
   });
 
   test('requires assistant parent to match the auto-sent user message when provided', () => {
-    const matching = { id: 'msg_assistant_1', parentID: 'msg_user_auto' } as Message;
-    const unrelated = { id: 'msg_assistant_2', parentID: 'msg_user_manual' } as Message;
+    const matching = { id: 'msg_assistant_1', parentId: 'msg_user_auto' } as PiSessionEntry;
+    const unrelated = { id: 'msg_assistant_2', parentId: 'msg_user_manual' } as PiSessionEntry;
 
     expect(isExpectedAutoReviewAssistantParent(matching, 'msg_user_auto')).toBe(true);
     expect(isExpectedAutoReviewAssistantParent(unrelated, 'msg_user_auto')).toBe(false);

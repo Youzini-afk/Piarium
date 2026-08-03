@@ -497,7 +497,6 @@ export const settingsDict = {
   'settings.openchamber.about.state.unknown': 'nieznane',
   'settings.openchamber.about.title': 'O Piarium',
   'settings.openchamber.about.toast.latestVersion': 'Używasz najnowszej wersji',
-  'settings.openchamber.defaults.field.defaultAgent': 'Domyślny Agent',
   'settings.openchamber.defaults.field.defaultModel': 'Domyślny Model',
   'settings.openchamber.defaults.field.defaultThinking': 'Domyślne Myślenie',
   'settings.openchamber.defaults.field.openFilesPreview': 'Otwieraj pliki z podglądem w trybie podglądu',
@@ -512,7 +511,6 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.thinkingPlaceholder': 'Myślenie',
   'settings.openchamber.defaults.option.default': 'Domyślne',
   'settings.openchamber.defaults.option.defaultLowercase': 'domyślne',
-  'settings.openchamber.defaults.summaryOpenCodeDefault': 'Domyślny agent OpenCode',
   'settings.openchamber.defaults.summaryPrefix': 'Nowe sesje będą rozpoczynać się od:',
   'settings.openchamber.defaults.title': 'Domyślne ustawienia sesji',
   'settings.openchamber.desktopNetwork.actions.saveAndRestart': 'Zapisz + Zrestartuj',
@@ -2593,4 +2591,7 @@ export const settingsDict = {
   'settings.piarium.skills.actions.description': 'Copying a skill preserves its complete directory. Deleting a writable skill removes its managed directory and supporting files.',
   'settings.piarium.skills.deleteConfirm': 'Delete skill “{name}” and its managed directory, including supporting files?',
   'settings.piarium.skills.modelInvocationDisabled': 'model invocation disabled',
+  'settings.openchamber.defaults.field.scope': 'Zakres ustawień',
+  'settings.openchamber.defaults.option.inheritGlobal': 'Dziedzicz ustawienie globalne',
+  'settings.openchamber.defaults.option.piDefault': 'Domyślne ustawienie Pi',
 };

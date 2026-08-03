@@ -305,7 +305,11 @@ export class HostController {
       case "catalog.context.open":
         return this.#sessionHost.openCatalogContext(readString(params, "cwd"));
       case "session.create":
-        return this.#sessionHost.create(readString(params, "cwd"), optionalString(params, "name"));
+        return this.#sessionHost.create(
+          readString(params, "cwd"),
+          optionalString(params, "name"),
+          optionalString(params, "parentSession"),
+        );
       case "session.open": {
         const cwd = optionalString(params, "cwd");
         const sessionFile = optionalString(params, "sessionFile");

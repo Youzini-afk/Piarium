@@ -6,7 +6,8 @@
  */
 
 import { useCallback, useState } from 'react';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
@@ -55,19 +56,23 @@ export interface UseMessageTTSReturn {
 export function useMessageTTS(): UseMessageTTSReturn {
     const [isPlaying, setIsPlaying] = useState(false);
 
-    const voiceProvider = useConfigStore((state) => state.voiceProvider);
-    const speechRate = useConfigStore((state) => state.speechRate);
-    const speechPitch = useConfigStore((state) => state.speechPitch);
-    const speechVolume = useConfigStore((state) => state.speechVolume);
-    const sayVoice = useConfigStore((state) => state.sayVoice);
-    const localTtsVoiceId = useConfigStore((state) => state.localTtsVoiceId);
-    const browserVoice = useConfigStore((state) => state.browserVoice);
-    const openaiVoice = useConfigStore((state) => state.openaiVoice);
-    const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
-    const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
-    const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
-    const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
-    const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
+    const voiceProvider = usePreferencesStore((state) => state.voiceProvider);
+    const speechRate = usePreferencesStore((state) => state.speechRate);
+    const speechPitch = usePreferencesStore((state) => state.speechPitch);
+    const speechVolume = usePreferencesStore((state) => state.speechVolume);
+    const sayVoice = usePreferencesStore((state) => state.sayVoice);
+    const localTtsVoiceId = usePreferencesStore((state) => state.localTtsVoiceId);
+    const browserVoice = usePreferencesStore((state) => state.browserVoice);
+    const openaiVoice = usePreferencesStore((state) => state.openaiVoice);
+    const openaiCompatibleVoice = usePreferencesStore((state) => state.openaiCompatibleVoice);
+    const openaiCompatibleUrl = usePreferencesStore((state) => state.openaiCompatibleUrl);
+    const openaiCompatibleTtsModel = usePreferencesStore((state) => state.openaiCompatibleTtsModel);
+    const showMessageTTSButtons = usePreferencesStore((state) => state.showMessageTTSButtons);
+    const ttsInputMode = usePreferencesStore((state) => state.ttsInputMode);
+    const currentModel = usePiSessionStore((state) => {
+        const sessionId = state.currentSessionId;
+        return sessionId ? state.records[sessionId]?.snapshot?.model : undefined;
+    });
 
     const isServerProvider = voiceProvider === 'openai' || voiceProvider === 'openai-compatible';
     const shouldCheckOpenAIAvailability = showMessageTTSButtons && isServerProvider;
@@ -104,10 +109,9 @@ export function useMessageTTS(): UseMessageTTSReturn {
             // original when summarization is unavailable.
             let sourceText = text;
             if (ttsInputMode === 'summarized' && text.length >= TTS_SUMMARIZE_MIN_CHARS) {
-                const { currentProviderId, currentModelId } = useConfigStore.getState();
                 const summary = await summarizeForSpeech(text, {
-                    providerID: currentProviderId || undefined,
-                    modelID: currentModelId || undefined,
+                    providerID: currentModel?.provider,
+                    modelID: currentModel?.id,
                 });
                 if (summary) {
                     sourceText = summary;
@@ -183,6 +187,7 @@ export function useMessageTTS(): UseMessageTTSReturn {
         isServerTTSAvailable,
         isSayTTSAvailable,
         ttsInputMode,
+        currentModel,
         speakServerTTS,
         speakSayTTS,
         speakLocalTTS,

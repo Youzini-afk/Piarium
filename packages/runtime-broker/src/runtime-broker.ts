@@ -226,12 +226,13 @@ export class PiRuntimeBroker {
     return (await this.#metadataFor(worker)).enrich(linked);
   }
 
-  async createSession(cwd: string, name?: string): Promise<SessionSnapshot> {
+  async createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
     const worker = await this.#spawnWorker();
     try {
       const snapshot = await worker.request("session.create", {
         cwd,
         ...(name === undefined ? {} : { name }),
+        ...(parentSession === undefined ? {} : { parentSession }),
       });
       this.#bindSession(worker, snapshot.sessionId);
       await this.#rememberSummary(worker, snapshot.sessionId);

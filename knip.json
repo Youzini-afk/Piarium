@@ -12,6 +12,10 @@
     },
     "packages/ui": {
       "entry": [
+        "src/main.tsx",
+        "src/apps/renderMobileApp.tsx",
+        "src/apps/renderElectronMiniChatApp.tsx",
+        "src/apps/renderVSCodeApp.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
       ],
@@ -21,6 +25,7 @@
     },
     "packages/web": {
       "entry": [
+        "src/main.tsx",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/sw.ts",
@@ -50,12 +55,22 @@
     },
     "packages/vscode": {
       "entry": [
+        "src/extension.ts",
+        "webview/main.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
         "webview/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/mobile": {
+      "entry": [
+        "scripts/**/*.mjs"
+      ],
+      "project": [
+        "scripts/**/*.mjs"
       ]
     }
   }

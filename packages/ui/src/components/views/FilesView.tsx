@@ -58,7 +58,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useGitStatus } from '@/stores/useGitStore';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -1015,8 +1015,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const setPendingFileFocusPath = useUIStore((state) => state.setPendingFileFocusPath);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
-  const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
-  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+  const settingsDefaultFileViewerPreview = usePreferencesStore((state) => state.settingsDefaultFileViewerPreview);
+  const showMessageTTSButtons = usePreferencesStore((state) => state.showMessageTTSButtons);
   const settingsExpandedEditorToolbar = useUIStore((state) => state.expandedEditorToolbar);
 
   // Global mouseup to end drag selection

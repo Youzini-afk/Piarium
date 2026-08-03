@@ -1,124 +1,111 @@
-import type { Message, Session } from '@opencode-ai/sdk/v2/client';
-import { opencodeClient } from '@/lib/opencode/client';
+import type {
+  PiAssistantMessage,
+  PiSessionEntry,
+  PiSessionMessageEntry,
+  SessionEntriesResult,
+  SessionSnapshot,
+  SessionSummary,
+  ThinkingLevel,
+} from '@piarium/protocol';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { flattenAssistantTextParts } from '@/lib/messages/messageText';
-import {
-  getOriginalSessionID,
-  getReviewSessionID,
-  isReviewSession,
-  withoutReviewSessionLink,
-  withReviewSessionLink,
-  withReviewSessionMarker,
-} from '@/lib/sessionReviewMetadata';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
-import { useSelectionStore } from '@/sync/selection-store';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getSyncMessages, getSyncParts, getSyncSessionStatus, registerSessionDirectory } from '@/sync/sync-refs';
-import { markPendingUserSendAnimation } from '@/lib/userSendAnimation';
+import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
+import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import {
+  reviewLinkKey,
+  useReviewFlowStore,
+  type ReviewSessionLink,
+} from '@/stores/useReviewFlowStore';
+import { useUIStore } from '@/stores/useUIStore';
+import type { MultiRunAgentSelection } from '@/types/multirun';
 
 const HANDOFF_TIMEOUT_MS = 180_000;
 const HANDOFF_POLL_MS = 400;
+const SENT_ENTRY_TIMEOUT_MS = 15_000;
 const AUTO_REVIEW_POLL_MS = 300;
 const AUTO_REVIEW_MAX_ITERATIONS = 15;
 const AUTO_REVIEW_FINAL_MARKER = 'FINAL_REVIEW_STATUS: no_remaining_findings';
 const AUTO_REVIEW_FINAL_MARKER_NORMALIZED = AUTO_REVIEW_FINAL_MARKER.toLowerCase();
+const REVIEW_SESSION_PREFIX = 'Review: ';
 const activeAutoReviewLoops = new Set<string>();
 const activeAutoReviewForwardKeys = new Set<string>();
 
 type SessionModelContext = {
-  providerID: string;
-  modelID: string;
-  agent?: string;
-  variant?: string;
+  agent?: MultiRunAgentSelection | null;
+  modelId: string;
+  providerId: string;
+  thinkingLevel?: ThinkingLevel;
 };
 
 type StartReviewFlowInput = SessionModelContext & {
-  originalSessionID: string;
+  originalSessionId: string;
   directory: string;
-  agentMentionName?: string;
   generateHandoff?: boolean;
   returnAfterHandoffRequest?: boolean;
   autoReview?: boolean;
 };
 
-type AssistantTextMessage = {
+type AssistantTextEntry = {
   id: string;
+  parentId: string | null;
   text: string;
+  timestamp: number;
 };
 
-const isMessageCompleted = (message: Message): boolean => {
-  const finish = (message as { finish?: unknown }).finish;
-  if (typeof finish === 'string' && finish.length > 0) return true;
-  const completed = (message as { time?: { completed?: unknown } }).time?.completed;
-  return typeof completed === 'number' && completed > 0;
+const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+
+const entryTimestamp = (entry: PiSessionEntry): number => {
+  const parsed = Date.parse(entry.timestamp);
+  if (Number.isFinite(parsed)) return parsed;
+  if (entry.type === 'message' && typeof entry.message.timestamp === 'number') {
+    return entry.message.timestamp;
+  }
+  return 0;
 };
 
-const getMessageCreatedAt = (message: Message): number => {
-  const created = (message as { time?: { created?: unknown } }).time?.created;
-  return typeof created === 'number' && Number.isFinite(created) ? created : 0;
+const userMessageText = (entry: PiSessionMessageEntry): string => {
+  if (entry.message.role !== 'user') return '';
+  if (typeof entry.message.content === 'string') return entry.message.content.trim();
+  return entry.message.content
+    .filter((content) => content.type === 'text')
+    .map((content) => content.text)
+    .join('\n')
+    .trim();
 };
 
-const getMessageRole = (message: Message): string => {
-  const role = (message as { role?: unknown }).role;
-  return typeof role === 'string' ? role : '';
+const assistantMessageText = (message: PiAssistantMessage): string => message.content
+  .filter((content) => content.type === 'text')
+  .map((content) => content.text)
+  .join('\n')
+  .trim();
+
+const completedAssistantText = (entry: PiSessionEntry): string => {
+  if (entry.type !== 'message' || entry.message.role !== 'assistant') return '';
+  if (entry.message.stopReason === 'pending') return '';
+  return assistantMessageText(entry.message);
 };
 
-const getMessageParentID = (message: Message): string | null => {
-  const parentID = (message as { parentID?: unknown }).parentID;
-  return typeof parentID === 'string' && parentID.trim().length > 0 ? parentID : null;
-};
-
-const isCompactionCommandMessage = (message: Message, directory: string): boolean => {
-  const parts = getSyncParts(message.id, directory);
-  return parts.some((part) => {
-    const type = (part as { type?: unknown }).type;
-    if (type === 'compaction') return true;
-    if (type !== 'text') return false;
-    const text = (part as { text?: unknown }).text;
-    return typeof text === 'string' && text.trim() === '/compact';
-  });
-};
-
-const getLatestAssistantTextMessage = (
-  sessionID: string,
-  directory: string,
-  lastForwardedMessageID?: string,
+const latestAssistantTextEntry = (
+  entries: readonly PiSessionEntry[],
+  lastForwardedEntryId?: string,
   afterCreatedAt = 0,
-  expectedParentID?: string,
-): AssistantTextMessage | null => {
-  const messages = getSyncMessages(sessionID, directory);
-  const compactionCommandIDs = new Set<string>();
-  for (const message of messages) {
-    if (isCompactionCommandMessage(message, directory)) {
-      compactionCommandIDs.add(message.id);
-    }
-  }
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.id === lastForwardedMessageID) return null;
-    if (getMessageRole(message) !== 'assistant') continue;
-    if (!isMessageCompleted(message)) continue;
-    if (getMessageCreatedAt(message) < afterCreatedAt - 1000) continue;
-    const parentID = getMessageParentID(message);
-    if (!isExpectedAutoReviewAssistantParent(message, expectedParentID)) continue;
-    if (parentID && compactionCommandIDs.has(parentID)) continue;
-    const text = flattenAssistantTextParts(getSyncParts(message.id, directory)).trim();
+  expectedParentId?: string,
+): AssistantTextEntry | null => {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.id === lastForwardedEntryId) return null;
+    const timestamp = entryTimestamp(entry);
+    if (timestamp < afterCreatedAt - 1000) continue;
+    if (!isExpectedAutoReviewAssistantParent(entry, expectedParentId)) continue;
+    const text = completedAssistantText(entry);
     if (!text) continue;
-    return { id: message.id, text };
+    return { id: entry.id, parentId: entry.parentId, text, timestamp };
   }
-
   return null;
-};
-
-const isSessionIdle = (sessionID: string, directory: string): boolean => {
-  const status = getSyncSessionStatus(sessionID, directory);
-  return status?.type === 'idle';
 };
 
 export const isAutoReviewRuntimeCurrent = (runtimeKey: string): boolean => runtimeKey === getRuntimeKey();
@@ -156,21 +143,21 @@ export const stripFinalReviewMarker = (text: string): string => {
   return lines.join('\n').trim();
 };
 
-export const isExpectedAutoReviewAssistantParent = (message: Message, expectedParentID?: string): boolean => {
-  if (!expectedParentID) return true;
-  return getMessageParentID(message) === expectedParentID;
-};
+export const isExpectedAutoReviewAssistantParent = (
+  entry: Pick<PiSessionEntry, 'parentId'>,
+  expectedParentId?: string,
+): boolean => !expectedParentId || entry.parentId === expectedParentId;
 
-const getAutoReviewForwardKey = (run: AutoReviewRun, messageID: string): string => [
+const getAutoReviewForwardKey = (run: AutoReviewRun, entryId: string): string => [
   run.runtimeKey,
   run.originalSessionID,
   run.phase,
   run.expectedAssistantParentID ?? '',
-  messageID,
+  entryId,
 ].join(':');
 
-export const claimAutoReviewForward = (run: AutoReviewRun, messageID: string): string | null => {
-  const key = getAutoReviewForwardKey(run, messageID);
+export const claimAutoReviewForward = (run: AutoReviewRun, entryId: string): string | null => {
+  const key = getAutoReviewForwardKey(run, entryId);
   if (activeAutoReviewForwardKeys.has(key)) return null;
   activeAutoReviewForwardKeys.add(key);
   return key;
@@ -180,228 +167,42 @@ export const releaseAutoReviewForward = (key: string): void => {
   activeAutoReviewForwardKeys.delete(key);
 };
 
-const autoReviewReviewerInstructions = (): Array<{ text: string; synthetic: true }> => [{
-  synthetic: true,
-  text: `This review is part of an automatic review loop. If there are no remaining issues, end your response with this exact final line:\n${AUTO_REVIEW_FINAL_MARKER}\nIf you found issues that require changes, do not include that final status line.`,
-}];
+const autoReviewReviewerInstructions = (): string => (
+  `This review is part of an automatic review loop. If there are no remaining issues, end your response with this exact final line:\n${AUTO_REVIEW_FINAL_MARKER}\nIf you found issues that require changes, do not include that final status line.`
+);
 
-const runAutoReviewLoop = async (originalSessionID: string): Promise<void> => {
-  while (true) {
-    const run = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionID];
-    if (!run || run.status !== 'running') return;
-    if (!isAutoReviewRuntimeCurrent(run.runtimeKey)) {
-      stopRunForRuntimeMismatch(run);
-      return;
-    }
-
-    const sourceSessionID = run.phase === 'waiting_for_reviewer' ? run.reviewSessionID : run.originalSessionID;
-    if (!isSessionIdle(sourceSessionID, run.directory)) {
-      await new Promise((resolve) => setTimeout(resolve, AUTO_REVIEW_POLL_MS));
-      continue;
-    }
-
-    const latest = getLatestAssistantTextMessage(
-      sourceSessionID,
-      run.directory,
-      run.lastForwardedMessageID,
-      run.waitAfterCreatedAt,
-      run.expectedAssistantParentID,
-    );
-    if (!latest) {
-      await new Promise((resolve) => setTimeout(resolve, AUTO_REVIEW_POLL_MS));
-      continue;
-    }
-
-    if (run.phase === 'waiting_for_reviewer') {
-      const forwardKey = claimAutoReviewForward(run, latest.id);
-      if (!forwardKey) {
-        await new Promise((resolve) => setTimeout(resolve, AUTO_REVIEW_POLL_MS));
-        continue;
-      }
-      if (!isAutoReviewRuntimeCurrent(run.runtimeKey)) {
-        releaseAutoReviewForward(forwardKey);
-        stopRunForRuntimeMismatch(run);
-        return;
-      }
-      try {
-        const waitAfterCreatedAt = Date.now();
-        const isFinalReview = hasFinalReviewMarker(latest.text);
-        const reviewFeedback = isFinalReview ? stripFinalReviewMarker(latest.text) : latest.text;
-        const sentMessageID = await sendReviewFeedbackToOriginal(run.reviewSessionID, run.directory, reviewFeedback, run.runtimeKey);
-        if (isFinalReview) {
-          useAutoReviewStore.getState().completeRun(run.originalSessionID);
-          return;
-        }
-        useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
-          ...current,
-          phase: 'waiting_for_implementer',
-          lastForwardedMessageID: latest.id,
-          expectedAssistantParentID: sentMessageID,
-          waitAfterCreatedAt,
-        }));
-      } finally {
-        releaseAutoReviewForward(forwardKey);
-      }
-    } else {
-      if (run.iteration >= run.maxIterations) {
-        useAutoReviewStore.getState().stopRun(run.originalSessionID);
-        return;
-      }
-      const forwardKey = claimAutoReviewForward(run, latest.id);
-      if (!forwardKey) {
-        await new Promise((resolve) => setTimeout(resolve, AUTO_REVIEW_POLL_MS));
-        continue;
-      }
-      if (!isAutoReviewRuntimeCurrent(run.runtimeKey)) {
-        releaseAutoReviewForward(forwardKey);
-        stopRunForRuntimeMismatch(run);
-        return;
-      }
-      try {
-        const waitAfterCreatedAt = Date.now();
-        const sentMessageID = await sendImplementationResponseToReviewer(run.originalSessionID, run.directory, latest.text, true, run.runtimeKey);
-        useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
-          ...current,
-          phase: 'waiting_for_reviewer',
-          iteration: current.iteration + 1,
-          lastForwardedMessageID: latest.id,
-          expectedAssistantParentID: sentMessageID,
-          waitAfterCreatedAt,
-        }));
-      } finally {
-        releaseAutoReviewForward(forwardKey);
-      }
-    }
-  }
+const ensureSessionOpen = async (sessionId: string, directory: string): Promise<SessionSnapshot> => {
+  const { client } = await getPiRuntimeConnection();
+  return client.request('session.open', { cwd: directory, sessionId });
 };
 
-const startAutoReviewRun = (run: AutoReviewRun): void => {
-  useAutoReviewStore.getState().upsertRun(run);
-  resumeAutoReviewRun(run.originalSessionID);
+const readSessionState = async (
+  sessionId: string,
+): Promise<{ entries: SessionEntriesResult; snapshot: SessionSnapshot }> => {
+  const { client } = await getPiRuntimeConnection();
+  const [snapshot, entries] = await Promise.all([
+    client.request('session.snapshot', { sessionId }),
+    client.request('session.entries', { scope: 'branch', sessionId }),
+  ]);
+  return { entries, snapshot };
 };
 
-export const resumeAutoReviewRun = (originalSessionID: string): void => {
-  const run = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionID];
-  if (!run || run.status !== 'running' || !isAutoReviewRuntimeCurrent(run.runtimeKey) || activeAutoReviewLoops.has(originalSessionID)) return;
-  activeAutoReviewLoops.add(originalSessionID);
-  void runAutoReviewLoop(run.originalSessionID).catch((error) => {
-    console.error('[review-flow] auto-review loop failed', error);
-    useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
-      ...current,
-      status: isRuntimeChangeError(error) ? 'stopped' : 'error',
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }).finally(() => {
-    activeAutoReviewLoops.delete(originalSessionID);
-  });
-};
-
-const waitForAssistantText = async (sessionID: string, directory: string, afterCreatedAt: number): Promise<string> => {
-  const deadline = Date.now() + HANDOFF_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const messages = getSyncMessages(sessionID, directory);
-    const candidates = messages
-      .filter((message) => getMessageRole(message) === 'assistant')
-      .filter((message) => getMessageCreatedAt(message) >= afterCreatedAt - 1000)
-      .filter(isMessageCompleted)
-      .sort((left, right) => getMessageCreatedAt(right) - getMessageCreatedAt(left));
-
-    for (const message of candidates) {
-      const text = flattenAssistantTextParts(getSyncParts(message.id, directory)).trim();
-      if (text) return text;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, HANDOFF_POLL_MS));
-  }
-  throw new Error('Timed out waiting for handoff response');
-};
-
-const resolveModelContext = (sessionID: string): SessionModelContext | null => {
-  const selection = useSelectionStore.getState();
-  const config = useConfigStore.getState();
-  const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionID);
-  const agent = lastChoice?.agent || selection.getSessionAgentSelection(sessionID) || config.currentAgentName || undefined;
-  const sessionModel = selection.getSessionModelSelection(sessionID);
-  const agentModel = agent ? selection.getAgentModelForSession(sessionID, agent) : null;
-  const lastChoiceModel = lastChoice?.providerID && lastChoice.modelID
-    ? { providerId: lastChoice.providerID, modelId: lastChoice.modelID }
-    : null;
-  const selectedModel = lastChoiceModel || agentModel || sessionModel || (config.currentProviderId && config.currentModelId
-    ? { providerId: config.currentProviderId, modelId: config.currentModelId }
-    : null);
-  if (!selectedModel?.providerId || !selectedModel?.modelId) return null;
-  if (lastChoiceModel) {
-    return {
-      providerID: lastChoiceModel.providerId,
-      modelID: lastChoiceModel.modelId,
-      agent,
-      variant: lastChoice?.variant,
-    };
-  }
-  // Variants are model-specific; only reuse one resolved for the same model.
-  const selectionVariant = agent
-    ? selection.getAgentModelVariantForSession(sessionID, agent, selectedModel.providerId, selectedModel.modelId)
-    : undefined;
-  const configVariant = config.currentProviderId === selectedModel.providerId && config.currentModelId === selectedModel.modelId
-    ? config.currentVariant
-    : undefined;
-  return {
-    providerID: selectedModel.providerId,
-    modelID: selectedModel.modelId,
-    agent,
-    variant: selectionVariant || configVariant || undefined,
-  };
-};
-
-const sendPlainMessage = async (
-  sessionID: string,
-  directory: string,
-  text: string,
-  modelContext?: SessionModelContext | null,
-  additionalParts?: Array<{ text: string; synthetic?: boolean }>,
-  expectedRuntimeKey?: string,
+const waitForSentUserEntry = async (
+  sessionId: string,
+  previousEntryIds: ReadonlySet<string>,
+  afterCreatedAt: number,
 ): Promise<string> => {
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const resolved = modelContext ?? resolveModelContext(sessionID);
-  if (!resolved) throw new Error('Select a model before sending review flow messages');
-  const selection = useSelectionStore.getState();
-  selection.saveSessionModelSelection(sessionID, resolved.providerID, resolved.modelID);
-  if (resolved.agent) {
-    selection.saveSessionAgentSelection(sessionID, resolved.agent);
-    selection.saveAgentModelForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID);
-    selection.saveAgentModelVariantForSession(sessionID, resolved.agent, resolved.providerID, resolved.modelID, resolved.variant);
+  const deadline = Date.now() + SENT_ENTRY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const { entries } = await readSessionState(sessionId);
+    for (let index = entries.entries.length - 1; index >= 0; index -= 1) {
+      const entry = entries.entries[index];
+      if (previousEntryIds.has(entry.id) || entryTimestamp(entry) < afterCreatedAt - 1000) continue;
+      if (entry.type === 'message' && userMessageText(entry)) return entry.id;
+    }
+    await sleep(HANDOFF_POLL_MS);
   }
-  markPendingUserSendAnimation(sessionID);
-  let sentMessageID: string | null = null;
-  await optimisticSend({
-    sessionId: sessionID,
-    content: text,
-    directory,
-    providerID: resolved.providerID,
-    modelID: resolved.modelID,
-    agent: resolved.agent,
-    onMessageID: (messageID) => {
-      sentMessageID = messageID;
-    },
-    beforeOptimisticInsert: () => assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey),
-    onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
-    send: (messageID) => {
-      assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-      return opencodeClient.sendMessage({
-        id: sessionID,
-        directory,
-        providerID: resolved.providerID,
-        modelID: resolved.modelID,
-        agent: resolved.agent,
-        variant: resolved.variant,
-        text,
-        additionalParts,
-        messageId: messageID,
-      }).then(() => undefined);
-    },
-  });
-  if (!sentMessageID) throw new Error('Failed to prepare review flow message');
-  return sentMessageID;
+  throw new Error('Timed out waiting for the Pi runtime to persist the review prompt');
 };
 
 const requestChatForceScrollBottom = (sessionId: string): void => {
@@ -411,192 +212,452 @@ const requestChatForceScrollBottom = (sessionId: string): void => {
   }));
 };
 
-const openReviewSessionPanel = (directory: string, session: Session): void => {
-  useUIStore.getState().openContextPanelTab(directory, {
-    mode: 'chat',
-    dedupeKey: `session:${session.id}`,
-    label: session.title ?? null,
-    sessionTitleFallback: session.title ?? null,
+const sendPiMessage = async (
+  sessionId: string,
+  directory: string,
+  text: string,
+  modelContext?: SessionModelContext,
+  instructions?: string,
+  expectedRuntimeKey?: string,
+): Promise<string> => {
+  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
+  await ensureSessionOpen(sessionId, directory);
+  const { client } = await getPiRuntimeConnection();
+  if (modelContext) {
+    await client.request('model.select', {
+      modelId: modelContext.modelId,
+      provider: modelContext.providerId,
+      sessionId,
+    });
+    if (modelContext.thinkingLevel) {
+      await client.request('thinking.select', {
+        level: modelContext.thinkingLevel,
+        sessionId,
+      });
+    }
+  }
+  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
+  const before = await client.request('session.entries', { scope: 'branch', sessionId });
+  const previousEntryIds = new Set(before.entries.map((entry) => entry.id));
+  const startedAt = Date.now();
+  const task = modelContext?.agent && instructions
+    ? `${text}\n\n<piarium-review-instructions>\n${instructions}\n</piarium-review-instructions>`
+    : text;
+  const promptText = modelContext?.agent
+    ? renderPiAgentInvocation(modelContext.agent, task)
+    : task;
+  const result = await client.request('agent.prompt', {
+    ...(modelContext?.agent || !instructions ? {} : { instructions }),
+    sessionId,
+    text: promptText,
+  });
+  if (!result.accepted) throw new Error('The Pi runtime did not accept the review prompt');
+  requestChatForceScrollBottom(sessionId);
+  return waitForSentUserEntry(sessionId, previousEntryIds, startedAt);
+};
+
+const waitForAssistantText = async (
+  sessionId: string,
+  directory: string,
+  afterCreatedAt: number,
+  expectedParentId?: string,
+): Promise<string> => {
+  await ensureSessionOpen(sessionId, directory);
+  const deadline = Date.now() + HANDOFF_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const { entries } = await readSessionState(sessionId);
+    const latest = latestAssistantTextEntry(
+      entries.entries,
+      undefined,
+      afterCreatedAt,
+      expectedParentId,
+    );
+    if (latest) return latest.text;
+    await sleep(HANDOFF_POLL_MS);
+  }
+  throw new Error('Timed out waiting for the handoff response');
+};
+
+const getReviewSessionTitle = (original: SessionSummary | undefined, originalSessionId: string): string => {
+  const implementationTitle = original?.name?.trim() || original?.firstMessage.trim() || originalSessionId;
+  return `${REVIEW_SESSION_PREFIX}${implementationTitle}`;
+};
+
+const findStoredLink = (originalSessionId: string): ReviewSessionLink | undefined => (
+  useReviewFlowStore.getState().linksByOriginal[reviewLinkKey(getRuntimeKey(), originalSessionId)]
+);
+
+const listDirectorySessions = async (directory: string): Promise<SessionSummary[]> => {
+  const { client } = await getPiRuntimeConnection();
+  return client.request('session.list', { cwd: directory });
+};
+
+const resolveReviewSummary = (
+  originalSessionId: string,
+  summaries: readonly SessionSummary[],
+): SessionSummary | undefined => {
+  const stored = findStoredLink(originalSessionId);
+  if (stored) {
+    const linked = summaries.find((summary) => summary.id === stored.reviewSessionId);
+    if (linked) return linked;
+  }
+  return summaries.find((summary) => (
+    summary.parentId === originalSessionId && summary.name?.startsWith(REVIEW_SESSION_PREFIX)
+  ));
+};
+
+const rememberReviewLink = (
+  originalSessionId: string,
+  reviewSessionId: string,
+  directory: string,
+): void => {
+  useReviewFlowStore.getState().upsertLink({
+    directory,
+    originalSessionId,
+    reviewSessionId,
+    runtimeKey: getRuntimeKey(),
   });
 };
 
-const getSessionOrNull = async (sessionID: string, directory: string): Promise<Session | null> => {
-  try {
-    return await opencodeClient.getSession(sessionID, directory);
-  } catch {
-    return null;
-  }
-};
-
-const getReviewSessionTitle = (original: Session): string => {
-  const implementationTitle = original.title?.trim() || original.id;
-  return `Review: ${implementationTitle}`;
-};
-
-const createOrReuseReviewSession = async (originalSessionID: string, directory: string, expectedRuntimeKey?: string): Promise<Session> => {
+const createOrReuseReviewSession = async (
+  originalSessionId: string,
+  directory: string,
+  expectedRuntimeKey?: string,
+): Promise<SessionSnapshot> => {
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const original = await opencodeClient.getSession(originalSessionID, directory);
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const existingReviewID = getReviewSessionID(original);
-  if (existingReviewID) {
-    const existing = await getSessionOrNull(existingReviewID, directory);
-    assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-    if (existing && isReviewSession(existing)) return existing;
-    await patchSessionMetadata(originalSessionID, directory, (metadata) => {
-      const next = { ...metadata };
-      const piarium = next.piarium;
-      if (piarium && typeof piarium === 'object' && !Array.isArray(piarium)) {
-        const rest = { ...(piarium as Record<string, unknown>) };
-        delete rest.reviewSessionID;
-        next.piarium = rest;
-      }
-      return next;
-    });
+  await ensureSessionOpen(originalSessionId, directory);
+  let summaries = await listDirectorySessions(directory);
+  const existing = resolveReviewSummary(originalSessionId, summaries);
+  if (existing) {
+    try {
+      const snapshot = await ensureSessionOpen(existing.id, directory);
+      rememberReviewLink(originalSessionId, existing.id, directory);
+      return snapshot;
+    } catch {
+      useReviewFlowStore.getState().removeLink(getRuntimeKey(), originalSessionId);
+    }
   }
 
+  summaries = await listDirectorySessions(directory);
+  const original = summaries.find((summary) => summary.id === originalSessionId);
+  const originalSnapshot = await ensureSessionOpen(originalSessionId, directory);
+  const parentSession = original?.sessionFile || originalSnapshot.sessionFile;
+  const { client } = await getPiRuntimeConnection();
+  const review = await client.request('session.create', {
+    cwd: directory,
+    name: getReviewSessionTitle(original, originalSessionId),
+    ...(parentSession ? { parentSession } : {}),
+  });
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const review = await opencodeClient.createSession({
-    title: getReviewSessionTitle(original),
-    metadata: withReviewSessionMarker({}, originalSessionID),
-  }, directory);
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  registerSessionDirectory(review.id, directory);
-  try {
-    assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-    await patchSessionMetadata(originalSessionID, directory, (metadata) => withReviewSessionLink(metadata, review.id));
-  } catch (error) {
-    assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-    await opencodeClient.deleteSession(review.id, directory).catch((deleteError) => {
-      console.warn('[review-flow] failed to delete unlinked review session after link failure', deleteError);
-    });
-    throw error;
-  }
-  useGlobalSessionsStore.getState().upsertSession(review);
+  rememberReviewLink(originalSessionId, review.sessionId, directory);
+  void usePiSessionStore.getState().loadCatalog(directory).catch(() => undefined);
   return review;
 };
 
+const openReviewSessionPanel = (
+  directory: string,
+  reviewSessionId: string,
+  label?: string,
+  readOnly = false,
+): void => {
+  useUIStore.getState().openContextPanelTab(directory, {
+    mode: 'chat',
+    dedupeKey: `session:${reviewSessionId}`,
+    label: label ?? null,
+    sessionTitleFallback: label ?? null,
+    readOnly,
+  });
+};
+
+const findLinkByReviewSession = (
+  reviewSessionId: string,
+  directory: string,
+  summaries: readonly SessionSummary[],
+): ReviewSessionLink | undefined => {
+  const runtimeKey = getRuntimeKey();
+  const stored = Object.values(useReviewFlowStore.getState().linksByOriginal).find((link) => (
+    link.runtimeKey === runtimeKey && link.reviewSessionId === reviewSessionId
+  ));
+  if (stored) return stored;
+  const review = summaries.find((summary) => summary.id === reviewSessionId);
+  if (!review?.parentId) return undefined;
+  return {
+    directory,
+    originalSessionId: review.parentId,
+    reviewSessionId,
+    runtimeKey,
+  };
+};
+
+const runAutoReviewLoop = async (originalSessionId: string): Promise<void> => {
+  const initial = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionId];
+  if (!initial) return;
+  await Promise.all([
+    ensureSessionOpen(initial.originalSessionID, initial.directory),
+    ensureSessionOpen(initial.reviewSessionID, initial.directory),
+  ]);
+
+  while (true) {
+    const run = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionId];
+    if (!run || run.status !== 'running') return;
+    if (!isAutoReviewRuntimeCurrent(run.runtimeKey)) {
+      stopRunForRuntimeMismatch(run);
+      return;
+    }
+
+    const sourceSessionId = run.phase === 'waiting_for_reviewer'
+      ? run.reviewSessionID
+      : run.originalSessionID;
+    const { entries, snapshot } = await readSessionState(sourceSessionId);
+    if (snapshot.busy) {
+      await sleep(AUTO_REVIEW_POLL_MS);
+      continue;
+    }
+    const latest = latestAssistantTextEntry(
+      entries.entries,
+      run.lastForwardedMessageID,
+      run.waitAfterCreatedAt,
+      run.expectedAssistantParentID,
+    );
+    if (!latest) {
+      await sleep(AUTO_REVIEW_POLL_MS);
+      continue;
+    }
+
+    const forwardKey = claimAutoReviewForward(run, latest.id);
+    if (!forwardKey) {
+      await sleep(AUTO_REVIEW_POLL_MS);
+      continue;
+    }
+    try {
+      assertAutoReviewRuntimeStillCurrent(run.runtimeKey);
+      const waitAfterCreatedAt = Date.now();
+      if (run.phase === 'waiting_for_reviewer') {
+        const finalReview = hasFinalReviewMarker(latest.text);
+        const reviewFeedback = finalReview ? stripFinalReviewMarker(latest.text) : latest.text;
+        const sentEntryId = await sendReviewFeedbackToOriginal(
+          run.reviewSessionID,
+          run.directory,
+          reviewFeedback,
+          run.runtimeKey,
+        );
+        if (finalReview) {
+          useAutoReviewStore.getState().completeRun(run.originalSessionID);
+          return;
+        }
+        useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
+          ...current,
+          phase: 'waiting_for_implementer',
+          lastForwardedMessageID: latest.id,
+          expectedAssistantParentID: sentEntryId,
+          waitAfterCreatedAt,
+        }));
+      } else {
+        if (run.iteration >= run.maxIterations) {
+          useAutoReviewStore.getState().stopRun(run.originalSessionID);
+          return;
+        }
+        const sentEntryId = await sendImplementationResponseToReviewer(
+          run.originalSessionID,
+          run.directory,
+          latest.text,
+          true,
+          run.runtimeKey,
+        );
+        useAutoReviewStore.getState().updateRun(run.originalSessionID, (current) => ({
+          ...current,
+          phase: 'waiting_for_reviewer',
+          iteration: current.iteration + 1,
+          lastForwardedMessageID: latest.id,
+          expectedAssistantParentID: sentEntryId,
+          waitAfterCreatedAt,
+        }));
+      }
+    } finally {
+      releaseAutoReviewForward(forwardKey);
+    }
+  }
+};
+
+const startAutoReviewRun = (run: AutoReviewRun): void => {
+  useAutoReviewStore.getState().upsertRun(run);
+  resumeAutoReviewRun(run.originalSessionID);
+};
+
+export const resumeAutoReviewRun = (originalSessionId: string): void => {
+  const run = useAutoReviewStore.getState().runsByOriginalSessionID[originalSessionId];
+  if (
+    !run
+    || run.status !== 'running'
+    || !isAutoReviewRuntimeCurrent(run.runtimeKey)
+    || activeAutoReviewLoops.has(originalSessionId)
+  ) return;
+  activeAutoReviewLoops.add(originalSessionId);
+  void runAutoReviewLoop(originalSessionId).catch((error) => {
+    console.error('[review-flow] auto-review loop failed', error);
+    useAutoReviewStore.getState().updateRun(originalSessionId, (current) => ({
+      ...current,
+      status: isRuntimeChangeError(error) ? 'stopped' : 'error',
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }).finally(() => {
+    activeAutoReviewLoops.delete(originalSessionId);
+  });
+};
+
 export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void> => {
-  await waitForConnectionOrThrow();
-  const expectedAutoReviewRuntimeKey = input.autoReview ? getRuntimeKey() : undefined;
-  let reviewPrompt: string;
+  const expectedRuntimeKey = input.autoReview ? getRuntimeKey() : undefined;
+  const modelContext: SessionModelContext = {
+    agent: input.agent,
+    modelId: input.modelId,
+    providerId: input.providerId,
+    thinkingLevel: input.thinkingLevel,
+  };
+
+  const startReviewSession = async (reviewPrompt: string): Promise<void> => {
+    const review = await createOrReuseReviewSession(
+      input.originalSessionId,
+      input.directory,
+      expectedRuntimeKey,
+    );
+    const runtimeKey = expectedRuntimeKey ?? getRuntimeKey();
+    const waitAfterCreatedAt = Date.now();
+    const sentEntryId = await sendPiMessage(
+      review.sessionId,
+      input.directory,
+      reviewPrompt,
+      modelContext,
+      input.autoReview ? autoReviewReviewerInstructions() : undefined,
+      input.autoReview ? runtimeKey : undefined,
+    );
+    if (input.autoReview) {
+      startAutoReviewRun({
+        originalSessionID: input.originalSessionId,
+        reviewSessionID: review.sessionId,
+        directory: input.directory,
+        runtimeKey,
+        status: 'running',
+        phase: 'waiting_for_reviewer',
+        iteration: 0,
+        maxIterations: AUTO_REVIEW_MAX_ITERATIONS,
+        expectedAssistantParentID: sentEntryId,
+        waitAfterCreatedAt,
+      });
+    } else {
+      openReviewSessionPanel(input.directory, review.sessionId, review.name);
+    }
+  };
 
   if (input.generateHandoff ?? true) {
     const visibleText = await renderMagicPrompt('session.reviewHandoff.visible');
     const instructionsText = await renderMagicPrompt('session.reviewHandoff.instructions');
     const startedAt = Date.now();
-    await sendPlainMessage(input.originalSessionID, input.directory, visibleText, null, [
-      { text: instructionsText, synthetic: true },
-    ], expectedAutoReviewRuntimeKey);
-
+    const sentEntryId = await sendPiMessage(
+      input.originalSessionId,
+      input.directory,
+      visibleText,
+      undefined,
+      instructionsText,
+      expectedRuntimeKey,
+    );
     const continueFromHandoff = async (): Promise<void> => {
-      const handoff = await waitForAssistantText(input.originalSessionID, input.directory, startedAt);
-      assertAutoReviewRuntimeStillCurrent(expectedAutoReviewRuntimeKey);
-      const handoffReviewPrompt = await renderMagicPrompt('session.reviewSession.visible', { handoff });
-      const reviewSession = await createOrReuseReviewSession(input.originalSessionID, input.directory, expectedAutoReviewRuntimeKey);
-      const runtimeKey = expectedAutoReviewRuntimeKey ?? getRuntimeKey();
-      const waitAfterCreatedAt = Date.now();
-      const sentMessageID = await sendPlainMessage(reviewSession.id, input.directory, handoffReviewPrompt, {
-        providerID: input.providerID,
-        modelID: input.modelID,
-        agent: input.agent,
-        variant: input.variant,
-      }, input.autoReview ? autoReviewReviewerInstructions() : undefined, input.autoReview ? runtimeKey : undefined);
-      if (input.autoReview) {
-        startAutoReviewRun({
-          originalSessionID: input.originalSessionID,
-          reviewSessionID: reviewSession.id,
-          directory: input.directory,
-          runtimeKey,
-          status: 'running',
-          phase: 'waiting_for_reviewer',
-          iteration: 0,
-          maxIterations: AUTO_REVIEW_MAX_ITERATIONS,
-          expectedAssistantParentID: sentMessageID,
-          waitAfterCreatedAt,
-        });
-      }
-      if (!input.autoReview) {
-        openReviewSessionPanel(input.directory, reviewSession);
-      }
+      const handoff = await waitForAssistantText(
+        input.originalSessionId,
+        input.directory,
+        startedAt,
+        sentEntryId,
+      );
+      assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
+      const prompt = await renderMagicPrompt('session.reviewSession.visible', { handoff });
+      await startReviewSession(prompt);
     };
-
     if (input.returnAfterHandoffRequest) {
       void continueFromHandoff().catch((error) => {
         console.error('[review-flow] failed to finish background review flow', error);
       });
       return;
     }
-
     await continueFromHandoff();
     return;
-  } else {
-    reviewPrompt = await renderMagicPrompt('session.reviewSessionWithoutHandoff.visible');
   }
 
-  const reviewSession = await createOrReuseReviewSession(input.originalSessionID, input.directory, expectedAutoReviewRuntimeKey);
-  const runtimeKey = expectedAutoReviewRuntimeKey ?? getRuntimeKey();
-  const waitAfterCreatedAt = Date.now();
-  const sentMessageID = await sendPlainMessage(reviewSession.id, input.directory, reviewPrompt, {
-    providerID: input.providerID,
-    modelID: input.modelID,
-    agent: input.agent,
-    variant: input.variant,
-  }, input.autoReview ? autoReviewReviewerInstructions() : undefined, input.autoReview ? runtimeKey : undefined);
-  if (input.autoReview) {
-    startAutoReviewRun({
-      originalSessionID: input.originalSessionID,
-      reviewSessionID: reviewSession.id,
-      directory: input.directory,
-      runtimeKey,
-      status: 'running',
-      phase: 'waiting_for_reviewer',
-      iteration: 0,
-      maxIterations: AUTO_REVIEW_MAX_ITERATIONS,
-      expectedAssistantParentID: sentMessageID,
-      waitAfterCreatedAt,
-    });
-  }
-  if (!input.autoReview) {
-    openReviewSessionPanel(input.directory, reviewSession);
-  }
+  await startReviewSession(await renderMagicPrompt('session.reviewSessionWithoutHandoff.visible'));
 };
 
-export const sendReviewFeedbackToOriginal = async (reviewSessionID: string, directory: string, reviewFeedback: string, expectedRuntimeKey?: string): Promise<string> => {
+export const sendReviewFeedbackToOriginal = async (
+  reviewSessionId: string,
+  directory: string,
+  reviewFeedback: string,
+  expectedRuntimeKey?: string,
+): Promise<string> => {
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const reviewSession = await opencodeClient.getSession(reviewSessionID, directory);
-  const originalSessionID = getOriginalSessionID(reviewSession);
-  if (!originalSessionID) throw new Error('Original session is missing');
-  const prompt = await renderMagicPrompt('session.reviewFeedbackToImplementer.visible', { review_feedback: reviewFeedback });
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  return sendPlainMessage(originalSessionID, directory, prompt, undefined, undefined, expectedRuntimeKey);
+  const summaries = await listDirectorySessions(directory);
+  const link = findLinkByReviewSession(reviewSessionId, directory, summaries);
+  if (!link) throw new Error('Original session is missing');
+  rememberReviewLink(link.originalSessionId, reviewSessionId, directory);
+  const prompt = await renderMagicPrompt('session.reviewFeedbackToImplementer.visible', {
+    review_feedback: reviewFeedback,
+  });
+  return sendPiMessage(
+    link.originalSessionId,
+    directory,
+    prompt,
+    undefined,
+    undefined,
+    expectedRuntimeKey,
+  );
 };
 
-export const sendImplementationResponseToReviewer = async (originalSessionID: string, directory: string, implementationResponse: string, autoReview = false, expectedRuntimeKey?: string): Promise<string> => {
+export const sendImplementationResponseToReviewer = async (
+  originalSessionId: string,
+  directory: string,
+  implementationResponse: string,
+  autoReview = false,
+  expectedRuntimeKey?: string,
+): Promise<string> => {
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const originalSession = await opencodeClient.getSession(originalSessionID, directory);
-  const reviewSessionID = getReviewSessionID(originalSession);
-  if (!reviewSessionID) throw new Error('Review session is missing');
-  let reviewSession: Session;
-  try {
-    reviewSession = await opencodeClient.getSession(reviewSessionID, directory);
-  } catch (error) {
-    assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-    await patchSessionMetadata(originalSessionID, directory, (metadata) => withoutReviewSessionLink(metadata, reviewSessionID));
-    throw error;
-  }
-  const prompt = await renderMagicPrompt('session.implementationResponseToReviewer.visible', { implementation_response: implementationResponse });
-  assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
-  const sentMessageID = await sendPlainMessage(reviewSessionID, directory, prompt, undefined, autoReview ? autoReviewReviewerInstructions() : undefined, expectedRuntimeKey);
-  if (!autoReview) {
-    openReviewSessionPanel(directory, reviewSession);
-  }
-  return sentMessageID;
+  const summaries = await listDirectorySessions(directory);
+  const review = resolveReviewSummary(originalSessionId, summaries);
+  if (!review) throw new Error('Review session is missing');
+  rememberReviewLink(originalSessionId, review.id, directory);
+  const prompt = await renderMagicPrompt('session.implementationResponseToReviewer.visible', {
+    implementation_response: implementationResponse,
+  });
+  const sentEntryId = await sendPiMessage(
+    review.id,
+    directory,
+    prompt,
+    undefined,
+    autoReview ? autoReviewReviewerInstructions() : undefined,
+    expectedRuntimeKey,
+  );
+  if (!autoReview) openReviewSessionPanel(directory, review.id, review.name);
+  return sentEntryId;
 };
 
 export type ReviewTransferDirection = 'review-to-original' | 'original-to-review';
 
-export const getReviewTransferDirection = (session: Session | null | undefined): ReviewTransferDirection | null => {
-  if (isReviewSession(session)) return 'review-to-original';
-  if (getReviewSessionID(session)) return 'original-to-review';
+type SessionReference = string | { id: string } | null | undefined;
+
+export const getReviewTransferDirection = (
+  session: SessionReference,
+): ReviewTransferDirection | null => {
+  const sessionId = typeof session === 'string' ? session : session?.id;
+  if (!sessionId) return null;
+  const runtimeKey = getRuntimeKey();
+  const links = Object.values(useReviewFlowStore.getState().linksByOriginal).filter((link) => (
+    link.runtimeKey === runtimeKey
+  ));
+  if (links.some((link) => link.reviewSessionId === sessionId)) return 'review-to-original';
+  if (links.some((link) => link.originalSessionId === sessionId)) return 'original-to-review';
+
+  const summaries = usePiSessionStore.getState().summaries;
+  const summary = summaries.find((candidate) => candidate.id === sessionId);
+  if (summary?.parentId && summary.name?.startsWith(REVIEW_SESSION_PREFIX)) {
+    return 'review-to-original';
+  }
+  if (summaries.some((candidate) => (
+    candidate.parentId === sessionId && candidate.name?.startsWith(REVIEW_SESSION_PREFIX)
+  ))) return 'original-to-review';
   return null;
 };

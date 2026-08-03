@@ -461,12 +461,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setReviewFlowSubmitting(true);
         try {
             await startReviewFlow({
-                originalSessionID: currentSessionId,
+                originalSessionId: currentSessionId,
                 directory,
-                providerID: execution.providerID,
-                modelID: execution.modelID,
-                agent: execution.agent || undefined,
-                variant: execution.variant || undefined,
+                providerId: execution.providerId,
+                modelId: execution.modelId,
+                agent: execution.agent,
+                thinkingLevel: execution.thinkingLevel,
                 generateHandoff: execution.generateHandoff,
                 returnAfterHandoffRequest: execution.generateHandoff,
                 autoReview: execution.autoReview,
@@ -2742,6 +2742,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         <ReviewFlowDialog
             open={reviewDialogOpen}
             onOpenChange={setReviewDialogOpen}
+            originalSessionId={currentSessionId}
             projectDirectory={currentSessionDirectoryForSync ?? currentDirectory ?? null}
             submitting={reviewFlowSubmitting}
             onConfirm={handleStartReviewFlow}

@@ -4,7 +4,6 @@ import { devtools } from 'zustand/middleware';
 import type {
   CreateMultiRunParams,
   CreateMultiRunResult,
-  MultiRunAgentSelection,
   MultiRunFileAttachment,
 } from '@/types/multirun';
 import {
@@ -25,6 +24,7 @@ import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
 import { usePiSessionStore } from './usePiSessionStore';
 import { getMultiRunSessionTitle } from '@/lib/multirun/title';
+import { renderPiAgentInvocation } from '@/lib/piAgentInvocation';
 
 const toGitSafeSlug = (value: string): string => value
   .normalize('NFKC')
@@ -118,15 +118,6 @@ const prepareAttachments = (
       ? {}
       : { instructions: `The user attached the following files to this run:\n${blocks.join('\n')}` }),
   };
-};
-
-const invokeAgent = (agent: MultiRunAgentSelection, task: string): string => {
-  const { command, taskSeparator } = agent.invocation;
-  if (!/^[\w:-]+$/u.test(command) || !/^[\p{L}\p{N}_.:-]+$/u.test(agent.name)) {
-    throw new Error(`Agent ${agent.name} exposes an invalid invocation contract`);
-  }
-  const separator = taskSeparator === 'double-dash' ? ' -- ' : ' ';
-  return `/${command} ${agent.name}${separator}${task}`;
 };
 
 const resolveActiveProject = (): PiariumProjectRef | null => {
@@ -317,7 +308,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
               const task = params.agent && directInstructions
                 ? `${expanded}\n\n<piarium-run-instructions>\n${directInstructions}\n</piarium-run-instructions>`
                 : expanded;
-              const text = params.agent ? invokeAgent(params.agent, task) : task;
+              const text = params.agent ? renderPiAgentInvocation(params.agent, task) : task;
               const accepted = await piSessions.prompt(
                 run.sessionId,
                 text,

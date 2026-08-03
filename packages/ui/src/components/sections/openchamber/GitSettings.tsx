@@ -1,6 +1,6 @@
 import React from 'react';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
@@ -17,8 +17,8 @@ import {
 
 export const GitSettings: React.FC = () => {
   const { t } = useI18n();
-  const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
-  const setSettingsGitmojiEnabled = useConfigStore((state) => state.setSettingsGitmojiEnabled);
+  const settingsGitmojiEnabled = usePreferencesStore((state) => state.settingsGitmojiEnabled);
+  const setSettingsGitmojiEnabled = usePreferencesStore((state) => state.setSettingsGitmojiEnabled);
   const showGitignored = useFilesViewShowGitignored();
   const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
   const setGitChangesViewMode = useUIStore((state) => state.setGitChangesViewMode);

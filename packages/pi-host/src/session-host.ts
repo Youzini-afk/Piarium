@@ -429,8 +429,12 @@ export class SessionHost {
     return this.runtime.session;
   }
 
-  async create(cwd: string, name?: string): Promise<SessionSnapshot> {
-    await this.#replaceWith(SessionManager.create(cwd, getSessionDir(cwd, this.#agentDir)));
+  async create(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
+    await this.#replaceWith(SessionManager.create(
+      cwd,
+      getSessionDir(cwd, this.#agentDir),
+      parentSession === undefined ? undefined : { parentSession },
+    ));
     if (name) this.session.setSessionName(name);
     return this.snapshot();
   }

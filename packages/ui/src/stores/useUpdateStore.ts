@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { getDeviceInfo } from '@/lib/device';
 import { useUIStore } from './useUIStore';
-import { useConfigStore } from './useConfigStore';
+import { usePreferencesStore } from './usePreferencesStore';
 import {
   checkForDesktopUpdates,
   downloadDesktopUpdate,
@@ -206,7 +206,7 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   ...initialState,
 
   checkForUpdates: async (options) => {
-    if (options?.automatic === true && !useConfigStore.getState().settingsAutoUpdateChecksEnabled) {
+    if (options?.automatic === true && !usePreferencesStore.getState().settingsAutoUpdateChecksEnabled) {
       return null;
     }
 

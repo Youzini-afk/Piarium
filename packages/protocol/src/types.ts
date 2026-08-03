@@ -1,6 +1,6 @@
 import type { PiSessionFeatureState } from "./session-features.js";
 
-export const PIARIUM_PROTOCOL_VERSION = 12 as const;
+export const PIARIUM_PROTOCOL_VERSION = 13 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 

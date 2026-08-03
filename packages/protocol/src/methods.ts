@@ -242,7 +242,7 @@ export interface HostMethodMap {
     result: { closed: boolean };
   };
   "session.create": {
-    params: { cwd: string; name?: string };
+    params: { cwd: string; name?: string; parentSession?: string };
     result: SessionSnapshot;
   };
   "session.list": {

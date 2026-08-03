@@ -1,6 +1,11 @@
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { getSessionLastAssistantModel } from '@/sync/session-actions';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+
+const preferredPiModel = (sessionId?: string | null) => {
+  const state = usePiSessionStore.getState();
+  const targetSessionId = sessionId || state.currentSessionId;
+  return targetSessionId ? state.records[targetSessionId]?.snapshot?.model : undefined;
+};
 
 // Selections shorter than this are already note-sized — summarizing them
 // would only add latency and risk losing the exact wording.
@@ -30,10 +35,9 @@ export async function summarizeSelectionForNotes(text: string, sessionId?: strin
   try {
     // The selection's session provider is authoritative — the text came from
     // that conversation. The composer picker only serves as a fallback.
-    const sessionModel = sessionId ? getSessionLastAssistantModel(sessionId) : null;
-    const { currentProviderId, currentModelId } = useConfigStore.getState();
-    const preferredProviderID = sessionModel?.providerID || currentProviderId || '';
-    const preferredModelID = sessionModel?.modelID || currentModelId || '';
+    const sessionModel = preferredPiModel(sessionId);
+    const preferredProviderID = sessionModel?.provider || '';
+    const preferredModelID = sessionModel?.id || '';
     const response = await runtimeFetch('/api/small-model/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -76,7 +80,7 @@ const GOAL_OBJECTIVE_SYSTEM_PROMPT = [
  */
 export async function distillGoalObjective(planContent: string): Promise<string | null> {
   try {
-    const { currentProviderId, currentModelId } = useConfigStore.getState();
+    const sessionModel = preferredPiModel();
     const response = await runtimeFetch('/api/small-model/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -84,8 +88,8 @@ export async function distillGoalObjective(planContent: string): Promise<string 
         prompt: planContent,
         system: GOAL_OBJECTIVE_SYSTEM_PROMPT,
         restrictToPreferredProvider: true,
-        ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),
-        ...(currentModelId ? { preferredModelID: currentModelId } : {}),
+        ...(sessionModel?.provider ? { preferredProviderID: sessionModel.provider } : {}),
+        ...(sessionModel?.id ? { preferredModelID: sessionModel.id } : {}),
       }),
     });
     if (!response.ok) return null;

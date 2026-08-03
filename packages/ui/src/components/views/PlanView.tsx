@@ -26,7 +26,7 @@ import { RiCheckLine, RiClipboardLine, RiCodeAiLine, RiLoopRightAiLine } from '@
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useGitStore } from '@/stores/useGitStore';
@@ -198,7 +198,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   }, [resolvedPath, sessionDirectory, homeDirectory]);
   const [content, setContent] = React.useState<string>('');
   const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
-  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+  const showMessageTTSButtons = usePreferencesStore((state) => state.showMessageTTSButtons);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const planFileLabel = React.useMemo(() => {
     return displayPath ? displayPath.split('/').pop() || t('planView.file.defaultName') : t('planView.file.defaultName');

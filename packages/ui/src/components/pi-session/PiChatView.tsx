@@ -35,6 +35,7 @@ import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore'
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
+import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
 import type { ResolvedStarter } from '@/components/chat/useDraftStarters';
 import { PiComposer } from './PiComposer';
 import { PiAssistBar } from './PiAssistBar';
@@ -389,6 +390,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         <div className="px-3 sm:px-5">
           <PiGoalStrip snapshot={snapshot} />
         </div>
+
+        <AutoReviewBanner />
 
         {!readOnly && (
           <PiComposer

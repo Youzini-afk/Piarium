@@ -252,7 +252,11 @@ async function dispatchRuntimeRequestUnchecked(
       return broker.listSessions(optionalString(input, "cwd"));
     }
     case "session.create": {
-      return broker.createSession(requireString(input, "cwd"), optionalName(input));
+      return broker.createSession(
+        requireString(input, "cwd"),
+        optionalName(input),
+        optionalString(input, "parentSession"),
+      );
     }
     case "session.open": {
       const cwd = optionalString(input, "cwd");

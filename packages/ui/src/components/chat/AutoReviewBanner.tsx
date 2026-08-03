@@ -6,12 +6,12 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 
 export const AutoReviewBanner = memo(() => {
   const { t } = useI18n();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const run = useAutoReviewStore(React.useCallback((state) => {
     if (!currentSessionId) return null;
     const run = state.runsByOriginalSessionID[currentSessionId] ?? null;

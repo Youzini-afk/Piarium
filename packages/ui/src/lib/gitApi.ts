@@ -1,11 +1,9 @@
 
 import * as gitHttp from './gitApiHttp';
-import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
-import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { generateStructuredInPiSession } from '@/lib/piStructuredGeneration';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 export type {
   GitStatus,
@@ -215,7 +213,7 @@ async function generateCommitMessageViaSession(
   visiblePrompt: string,
   hiddenPrompt: string,
 ): Promise<{ message: import('./api/types').GeneratedCommitMessage }> {
-  const generationSession = await resolveGenerationSessionContext();
+  const generationSession = await resolveGenerationSessionContext(directory);
   const structured = await runStructuredGenerationInActiveSession({
     directory,
     visiblePrompt,
@@ -247,7 +245,7 @@ export async function generateCommitMessage(
     selected_files: files.map((file) => `- ${file}`).join('\n'),
   });
 
-  const generationSession = await resolveGenerationSessionContext();
+  const generationSession = await resolveGenerationSessionContext(directory);
 
   try {
     const structured = await runStructuredGenerationInActiveSession({
@@ -369,7 +367,7 @@ export async function generatePullRequestDescription(
     body: typeof structured?.body === 'string' ? structured.body.trim() : '',
   });
 
-  const generationSession = await resolveGenerationSessionContext();
+  const generationSession = await resolveGenerationSessionContext(directory);
 
   try {
     const structured = await runStructuredGenerationInActiveSession({
@@ -397,7 +395,7 @@ export async function generatePullRequestDescription(
       primaryError: primaryError instanceof Error ? primaryError.message : String(primaryError),
     });
     try {
-      const fallbackSession = await resolveGenerationSessionContext();
+      const fallbackSession = await resolveGenerationSessionContext(directory);
       const structured = await runStructuredGenerationInActiveSession({
         directory,
         visiblePrompt,
@@ -430,97 +428,27 @@ export async function generatePullRequestDescription(
 
 type SessionGenerationContext = {
   sessionId: string;
-  providerID: string;
-  modelID: string;
-  agent?: string;
-  variant?: string;
+  providerId: string;
+  modelId: string;
+  thinkingLevel: string;
 };
 
 const GENERATION_CONFIG_ERROR = 'No default provider or model configured. Please select a provider and model in settings first.';
 
-async function resolveGenerationSessionContext(): Promise<SessionGenerationContext> {
-  const activeSession = resolveSessionGenerationContext();
-  if (activeSession) {
-    return activeSession;
+async function resolveGenerationSessionContext(directory: string): Promise<SessionGenerationContext> {
+  const sessions = usePiSessionStore.getState();
+  let sessionId = sessions.currentSessionId;
+  let snapshot = sessionId ? sessions.records[sessionId]?.snapshot : undefined;
+  if (!sessionId || !snapshot) {
+    snapshot = await sessions.createSession(directory, 'Git generation');
+    sessionId = snapshot.sessionId;
   }
-
-  const draft = useSessionUIStore.getState().newSessionDraft;
-  if (!draft?.open) {
-    throw new Error('Select existing session for generation');
-  }
-
-  const config = useConfigStore.getState();
-  if (!config.currentProviderId || !config.currentModelId) {
-    throw new Error(GENERATION_CONFIG_ERROR);
-  }
-
-  const createdDraftSession = await materializeOpenDraftSession({
-    providerID: config.currentProviderId,
-    modelID: config.currentModelId,
-    agent: config.currentAgentName || undefined,
-    variant: config.currentVariant || undefined,
-  });
-
-  if (!createdDraftSession) {
-    const retry = resolveSessionGenerationContext();
-    if (retry) {
-      return retry;
-    }
-    throw new Error('Failed to create session for generation');
-  }
-
-  return {
-    sessionId: createdDraftSession.sessionId,
-    providerID: config.currentProviderId,
-    modelID: config.currentModelId,
-    agent: createdDraftSession.agent,
-    variant: config.currentVariant || undefined,
-  };
-}
-
-const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
-  const sessionId = useSessionUIStore.getState().currentSessionId;
-  if (!sessionId) {
-    return null;
-  }
-
-  const selection = useSelectionStore.getState();
-  const config = useConfigStore.getState();
-  const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionId);
-
-  const agent = selection.getSessionAgentSelection(sessionId) || lastChoice?.agent || config.currentAgentName || undefined;
-  const sessionModel = selection.getSessionModelSelection(sessionId);
-  const agentModel = agent ? selection.getAgentModelForSession(sessionId, agent) : null;
-  const lastChoiceModel = lastChoice?.providerID && lastChoice.modelID
-    ? { providerId: lastChoice.providerID, modelId: lastChoice.modelID }
-    : null;
-  const selectedModel = agentModel || sessionModel || lastChoiceModel || (config.currentProviderId && config.currentModelId
-    ? { providerId: config.currentProviderId, modelId: config.currentModelId }
-    : null);
-
-  if (!selectedModel?.providerId || !selectedModel?.modelId) {
-    return null;
-  }
-
-  const selectionVariant = agent
-    ? selection.getAgentModelVariantForSession(sessionId, agent, selectedModel.providerId, selectedModel.modelId)
-    : undefined;
-  const lastChoiceVariant = lastChoiceModel
-    && lastChoiceModel.providerId === selectedModel.providerId
-    && lastChoiceModel.modelId === selectedModel.modelId
-      ? lastChoice?.variant
-      : undefined;
-  const configVariant = config.currentProviderId === selectedModel.providerId && config.currentModelId === selectedModel.modelId
-    ? config.currentVariant
-    : undefined;
-  const variant = selectionVariant || lastChoiceVariant || configVariant || undefined;
-
+  if (!snapshot.model) throw new Error(GENERATION_CONFIG_ERROR);
   return {
     sessionId,
-    providerID: selectedModel.providerId,
-    modelID: selectedModel.modelId,
-    agent,
-    variant,
+    providerId: snapshot.model.provider,
+    modelId: snapshot.model.id,
+    thinkingLevel: snapshot.thinkingLevel,
   };
 };
 
@@ -544,66 +472,34 @@ const runStructuredGenerationInActiveSession = async ({
     kind,
     directory,
     sessionId: generationSession.sessionId,
-    providerID: generationSession.providerID,
-    modelID: generationSession.modelID,
-    agent: generationSession.agent,
-    variant: generationSession.variant,
+    providerId: generationSession.providerId,
+    modelId: generationSession.modelId,
+    thinkingLevel: generationSession.thinkingLevel,
   });
-  const trimmedDirectory = typeof directory === 'string' ? directory.trim() : '';
   const visiblePromptText = typeof visiblePrompt === 'string' ? visiblePrompt.trim() : '';
   const hiddenPromptText = typeof hiddenPrompt === 'string' ? hiddenPrompt.trim() : '';
-  const promptParts: Array<{ type: 'text'; text: string; synthetic?: boolean }> = [];
-  if (visiblePromptText) {
-    promptParts.push({ type: 'text', text: visiblePromptText, synthetic: false });
-  }
-  if (hiddenPromptText) {
-    promptParts.push({ type: 'text', text: hiddenPromptText, synthetic: true });
-  }
-  if (promptParts.length === 0) {
+  if (!visiblePromptText && !hiddenPromptText) {
     throw new Error('Generation prompts are empty');
   }
 
   requestChatForceScrollBottom(generationSession.sessionId);
-
-  const response = await opencodeClient.withDirectory(directory, async () => {
-    return opencodeClient.getApiClient().session.prompt({
-      sessionID: generationSession.sessionId,
-      ...(trimmedDirectory.length > 0 ? { directory: trimmedDirectory } : {}),
-      model: {
-        providerID: generationSession.providerID,
-        modelID: generationSession.modelID,
-      },
-      ...(generationSession.agent ? { agent: generationSession.agent } : {}),
-      ...(generationSession.variant ? { variant: generationSession.variant } : {}),
-      format: {
-        type: 'json_schema',
-        schema,
-        retryCount: 2,
-      },
-      parts: promptParts,
+  try {
+    return await generateStructuredInPiSession({
+      cwd: directory,
+      instructions: hiddenPromptText || undefined,
+      schema,
+      sessionId: generationSession.sessionId,
+      visiblePrompt: visiblePromptText || hiddenPromptText,
     });
-  });
-
-  const responseError = response?.error as { message?: string } | undefined;
-  if (!response?.data) {
-    throw new Error(responseError?.message || `Failed to generate ${kind} output`);
-  }
-
-  const info = response.data.info as { finish?: string; structured_output?: unknown; structured?: unknown; error?: unknown };
-  const structuredOutput = info?.structured_output || info?.structured;
-  if (!structuredOutput || typeof structuredOutput !== 'object' || Array.isArray(structuredOutput)) {
-    console.error('[git-generation][browser] invalid structured output', {
+  } catch (error) {
+    console.error('[git-generation][pi] structured generation failed', {
       kind,
       sessionId: generationSession.sessionId,
       elapsedMs: Date.now() - requestStartedAt,
-      finish: info?.finish,
-      messageInfo: response.data.info,
-      messageParts: response.data.parts,
+      message: error instanceof Error ? error.message : String(error),
     });
-    throw new Error('No structured output returned by session');
+    throw error;
   }
-
-  return structuredOutput as Record<string, unknown>;
 };
 
 export async function listGitWorktrees(directory: string): Promise<import('./api/types').GitWorktreeInfo[]> {

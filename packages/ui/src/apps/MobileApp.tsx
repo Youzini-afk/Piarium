@@ -41,7 +41,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { useMobileAppViewport } from '@/lib/mobileAppRuntime';
 import { useMobileLayoutInfo, useMobileLayoutRootAttributes } from '@/lib/mobileLayoutTier';
 import { cn } from '@/lib/utils';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -2015,7 +2015,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const updateAvailable = useUpdateStore((state) => state.available);
   const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
-  const settingsAutoUpdateChecksEnabled = useConfigStore((state) => state.settingsAutoUpdateChecksEnabled);
+  const settingsAutoUpdateChecksEnabled = usePreferencesStore((state) => state.settingsAutoUpdateChecksEnabled);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
   const currentPiSessionId = usePiSessionStore((state) => state.currentSessionId);
   const executePiCommand = usePiSessionStore((state) => state.executeCommand);
@@ -2619,15 +2619,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
 export function MobileApp({ apis }: MobileAppProps) {
   const { t } = useI18n();
-  const initializeApp = useConfigStore((state) => state.initializeApp);
-  const isInitialized = useConfigStore((state) => state.isInitialized);
-  const isConnected = useConfigStore((state) => state.isConnected);
-  const connectionPhase = useConfigStore((state) => state.connectionPhase);
-  const providersCount = useConfigStore((state) => state.providers.length);
-  const agentsCount = useConfigStore((state) => state.agents.length);
-  const loadProviders = useConfigStore((state) => state.loadProviders);
-  const loadAgents = useConfigStore((state) => state.loadAgents);
   const piCatalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
+  const piCatalogLoading = usePiSessionStore((state) => state.catalogLoading);
   const loadPiCatalog = usePiSessionStore((state) => state.loadCatalog);
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
@@ -2639,6 +2632,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // splash so we don't flash the connect screen; 'done' means we either connected or
   // exhausted the attempt (then the connect screen shows).
   const [autoConnectPhase, setAutoConnectPhase] = React.useState<'pending' | 'attempting' | 'done'>('pending');
+  const [hasLoadedPiCatalog, setHasLoadedPiCatalog] = React.useState(piCatalogLoaded);
   // The instance the splash says we are connecting to. Read once on mount —
   // auto-connect targets the most-recent saved connection from the same list.
   const autoConnectLabel = React.useMemo(() => getAutoConnectTargetLabel(), []);
@@ -2668,10 +2662,8 @@ export function MobileApp({ apis }: MobileAppProps) {
     // runtime-endpoint-changed subscription (which re-bootstraps the app), so we
     // only refresh in place when the transport is 'unchanged'.
     const refreshInPlace = () => {
-      void initializeApp();
+      void loadPiCatalog();
       void refreshGitHubAuthStatus(apis.github, { force: true });
-      if (providersCount === 0) void loadProviders({ source: 'mobileApp:nativeResume' });
-      if (agentsCount === 0) void loadAgents({ source: 'mobileApp:nativeResume' });
     };
     const disconnect = () => {
       switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
@@ -2713,7 +2705,7 @@ export function MobileApp({ apis }: MobileAppProps) {
       lastNativeResumeSyncEventAtRef.current = now;
       window.dispatchEvent(new Event('piarium:system-resume'));
     }
-  }, [agentsCount, apis.github, initializeApp, loadAgents, loadProviders, providersCount, refreshGitHubAuthStatus]);
+  }, [apis.github, loadPiCatalog, refreshGitHubAuthStatus]);
 
   useNativeMobileChrome();
   useNativeMobileLifecycle(handleNativeResume);
@@ -2774,7 +2766,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // to the connect screen. A successful switchRuntimeEndpoint fires the endpoint-
   // changed subscription above, which bumps the epochs and bootstraps the app.
   React.useEffect(() => {
-    if (!isNativeMobileApp || isConnected || getRuntimeApiBaseUrl()) {
+    if (!isNativeMobileApp || piCatalogLoaded || getRuntimeApiBaseUrl()) {
       setAutoConnectPhase('done');
       return;
     }
@@ -2800,13 +2792,8 @@ export function MobileApp({ apis }: MobileAppProps) {
     // Never bootstrap without a runtime endpoint on native: with apiBaseUrl ''
     // the resolver falls back to the webview's own origin, where Capacitor's
     // static server answers every request with index.html — the bootstrap
-    // "succeeds" against a fake backend and flips isConnected back on, leaving
+    // could otherwise appear to load against a fake backend, leaving
     // the user in an empty shell after a disconnect.
-    if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
-    void initializeApp();
-  }, [connectionEpoch, initializeApp, isNativeMobileApp]);
-
-  React.useEffect(() => {
     if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
     void loadPiCatalog().catch((catalogError) => {
       console.warn('[Piarium] failed to load the mobile Pi session catalog:', catalogError);
@@ -2814,18 +2801,16 @@ export function MobileApp({ apis }: MobileAppProps) {
   }, [isNativeMobileApp, loadPiCatalog, runtimeEndpointEpoch]);
 
   React.useEffect(() => {
-    if (!isConnected) return;
-    if (providersCount === 0) void loadProviders({ source: 'mobileApp:recovery' });
-    if (agentsCount === 0) void loadAgents({ source: 'mobileApp:recovery' });
-  }, [agentsCount, isConnected, loadAgents, loadProviders, providersCount]);
+    if (piCatalogLoaded) setHasLoadedPiCatalog(true);
+  }, [piCatalogLoaded]);
 
-  // Gated on isConnected (and re-run on reconnect/instance switch): probing the
+  // Gated on the Pi catalog handshake (and re-run on instance switch): probing the
   // GitHub auth status before the runtime is reachable cached a "not connected"
   // answer that stuck until something else forced a re-check.
   React.useEffect(() => {
-    if (!isConnected) return;
+    if (!piCatalogLoaded) return;
     void refreshGitHubAuthStatus(apis.github, { force: true });
-  }, [apis.github, isConnected, refreshGitHubAuthStatus]);
+  }, [apis.github, piCatalogLoaded, refreshGitHubAuthStatus]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -2850,14 +2835,14 @@ export function MobileApp({ apis }: MobileAppProps) {
     // Native: only while an instance is selected and reconnecting. Browser: the
     // runtime is same-origin (no explicit base URL), so any not-connected spell
     // counts — the splash holds until this fires, then the error screen shows.
-    const waitingOnConnection = !isConnected && (isNativeMobileApp ? Boolean(getRuntimeApiBaseUrl()) : true);
+    const waitingOnConnection = !piCatalogLoaded && (isNativeMobileApp ? Boolean(getRuntimeApiBaseUrl()) : true);
     if (!waitingOnConnection) {
       setShowConnectionRecovery(false);
       return;
     }
     const timeout = window.setTimeout(() => setShowConnectionRecovery(true), 8000);
     return () => window.clearTimeout(timeout);
-  }, [isConnected, isNativeMobileApp, connectionEpoch, runtimeEndpointEpoch]);
+  }, [piCatalogLoaded, isNativeMobileApp, connectionEpoch, runtimeEndpointEpoch]);
 
   useAppFontEffects();
   usePushVisibilityBeacon({ enabled: true });
@@ -2869,20 +2854,20 @@ export function MobileApp({ apis }: MobileAppProps) {
   // intentionally disabled — they can't tell foreground from background in a WKWebView
   // (document.hasFocus() is unreliable) and leaked while the app was open; the in-app SSE
   // notification dispatch is no-op'd for native in renderMobileApp.
-  useNativePushRegistration({ enabled: isNativeMobileApp && isConnected });
+  useNativePushRegistration({ enabled: isNativeMobileApp && piCatalogLoaded });
   // Single native deep-link entry point: notification taps AND the piarium:// URL
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until
   // the app is ready (connected + initialized) and shell handlers are registered.
-  useDeepLinkSource({ ready: isNativeMobileApp && isConnected && isInitialized && piCatalogLoaded });
+  useDeepLinkSource({ ready: isNativeMobileApp && piCatalogLoaded });
   const fontsReady = useFontsReady();
 
-  // `isConnected` is a LIVE flag that flips false on every transient SSE/WS drop and
+  // A runtime switch resets the Pi catalog. During an in-flight reload after a
   // back true on reconnect. We must NOT blank the whole app to a loader on those —
   // only on the initial connect / instance switch (connectionPhase 'connecting').
-  // While 'reconnecting' (we were connected before), keep MobileShell mounted so the
+  // previously successful connection, keep MobileShell mounted so the
   // UI doesn't reload on every network blip.
-  const isReconnecting = !isConnected && connectionPhase === 'reconnecting';
+  const isReconnecting = !piCatalogLoaded && piCatalogLoading && hasLoadedPiCatalog;
 
   // Hold a logo splash until the UI web font is loaded, so the first UI the user sees
   // already uses the real font instead of flashing the fallback and reflowing (FOUT).
@@ -2900,7 +2885,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // be poisoned by a bootstrap that ran against the webview's own origin).
   const hasRuntimeEndpoint = Boolean(getRuntimeApiBaseUrl());
 
-  if (isNativeMobileApp && (!hasRuntimeEndpoint || (!isConnected && !isReconnecting))) {
+  if (isNativeMobileApp && (!hasRuntimeEndpoint || (!piCatalogLoaded && !isReconnecting))) {
     // A runtime endpoint is already selected (first connect or switching instances):
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
     if (hasRuntimeEndpoint) {
@@ -2954,7 +2939,7 @@ export function MobileApp({ apis }: MobileAppProps) {
     return <MobileConnectionWelcome onConnected={() => setConnectionEpoch((value) => value + 1)} />;
   }
 
-  if (!isConnected && !isReconnecting) {
+  if (!piCatalogLoaded && !isReconnecting) {
     // Browser: the initial connect takes a beat — hold the logo splash instead
     // of flashing the unreachable-server error while it resolves. The error
     // only shows once the recovery delay has expired (genuinely unreachable).
@@ -2980,7 +2965,7 @@ export function MobileApp({ apis }: MobileAppProps) {
       <RuntimeAPIProvider apis={apis}>
         <TooltipProvider delayDuration={300} skipDelayDuration={150}>
           <div className="h-full bg-background text-foreground">
-            <PiAppEffects backgroundWorkEnabled={isInitialized} />
+            <PiAppEffects backgroundWorkEnabled={piCatalogLoaded} />
             <PiInteractionHost />
             <MobileAppUpdateToast />
             <MobileShell onActiveConnectionDeleted={() => {
@@ -2988,7 +2973,7 @@ export function MobileApp({ apis }: MobileAppProps) {
               setConnectionEpoch((value) => value + 1);
             }} />
             <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
-            {isInitialized ? <ConfigUpdateOverlay /> : null}
+            {piCatalogLoaded ? <ConfigUpdateOverlay /> : null}
           </div>
         </TooltipProvider>
       </RuntimeAPIProvider>

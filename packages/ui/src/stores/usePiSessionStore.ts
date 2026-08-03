@@ -77,7 +77,7 @@ export interface PiSessionStoreState {
   abort(sessionId: string): Promise<boolean>;
   archiveSession(sessionId: string): Promise<SessionSummary>;
   closeSession(sessionId: string): Promise<boolean>;
-  createSession(cwd: string, name?: string): Promise<SessionSnapshot>;
+  createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
   executeCommand(sessionId: string, command: string): Promise<JsonValue>;
   followUp(
@@ -622,12 +622,13 @@ export const createPiSessionStore = (
         }
       },
 
-      createSession: async (cwd, name) => {
+      createSession: async (cwd, name, parentSession) => {
         const selectionIntent = beginSelectionIntent();
         try {
           const { result, runtimeKey } = await request('session.create', {
             cwd,
             ...(name === undefined ? {} : { name }),
+            ...(parentSession === undefined ? {} : { parentSession }),
           });
           set((state) => ({
             currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)

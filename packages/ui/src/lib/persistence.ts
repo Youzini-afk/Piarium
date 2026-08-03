@@ -20,6 +20,10 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+import {
+  usePreferencesStore,
+  type PreferencesState,
+} from '@/stores/usePreferencesStore';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -607,12 +611,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
 
 const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   const store = useUIStore.getState();
-  const configStore = typeof window !== 'undefined'
-    ? window.__zustand_config_store__?.getState?.() ?? null
-    : null;
-  const configStoreApi = typeof window !== 'undefined'
-    ? window.__zustand_config_store__ ?? null
-    : null;
+  const preferences = usePreferencesStore.getState();
   const queueStore = useMessageQueueStore.getState();
 
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
@@ -806,12 +805,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.collapsibleUserMessages === 'boolean' && settings.collapsibleUserMessages !== store.collapsibleUserMessages) {
     store.setCollapsibleUserMessages(settings.collapsibleUserMessages);
   }
-  if (typeof settings.messageStreamTransport === 'string'
-    && (settings.messageStreamTransport === 'auto' || settings.messageStreamTransport === 'ws' || settings.messageStreamTransport === 'sse')) {
-    if (configStore && settings.messageStreamTransport !== configStore.settingsMessageStreamTransport) {
-      configStore.setSettingsMessageStreamTransport(settings.messageStreamTransport);
-    }
-  }
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
   }
@@ -920,28 +913,52 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setMobileKeyboardMode(mode);
     }
   }
-  if (configStoreApi && configStore) {
-    const nextConfigState: Partial<typeof configStore> = {};
-    if (typeof settings.dictationEnabled === 'boolean' && settings.dictationEnabled !== configStore.dictationEnabled) {
-      nextConfigState.dictationEnabled = settings.dictationEnabled;
+  {
+    const nextPreferences: Partial<PreferencesState> = {};
+    if (typeof settings.autoCreateWorktree === 'boolean' && settings.autoCreateWorktree !== preferences.settingsAutoCreateWorktree) {
+      nextPreferences.settingsAutoCreateWorktree = settings.autoCreateWorktree;
     }
-    if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') && settings.sttProvider !== configStore.sttProvider) {
-      nextConfigState.sttProvider = settings.sttProvider;
+    if (typeof settings.gitmojiEnabled === 'boolean' && settings.gitmojiEnabled !== preferences.settingsGitmojiEnabled) {
+      nextPreferences.settingsGitmojiEnabled = settings.gitmojiEnabled;
     }
-    if (typeof settings.sttServerUrl === 'string' && settings.sttServerUrl !== configStore.sttServerUrl) {
-      nextConfigState.sttServerUrl = settings.sttServerUrl;
+    if (typeof settings.defaultFileViewerPreview === 'boolean' && settings.defaultFileViewerPreview !== preferences.settingsDefaultFileViewerPreview) {
+      nextPreferences.settingsDefaultFileViewerPreview = settings.defaultFileViewerPreview;
     }
-    if (typeof settings.sttModel === 'string' && settings.sttModel !== configStore.sttModel) {
-      nextConfigState.sttModel = settings.sttModel;
+    if (typeof settings.zenModel === 'string' && settings.zenModel !== preferences.settingsZenModel) {
+      nextPreferences.settingsZenModel = settings.zenModel;
     }
-    if (typeof settings.sttLocalModel === 'string' && settings.sttLocalModel !== configStore.sttLocalModel) {
-      nextConfigState.sttLocalModel = settings.sttLocalModel;
+    if (typeof settings.autoUpdateChecksEnabled === 'boolean' && settings.autoUpdateChecksEnabled !== preferences.settingsAutoUpdateChecksEnabled) {
+      nextPreferences.settingsAutoUpdateChecksEnabled = settings.autoUpdateChecksEnabled;
     }
-    if (typeof settings.sttLanguage === 'string' && settings.sttLanguage !== configStore.sttLanguage) {
-      nextConfigState.sttLanguage = settings.sttLanguage;
+    if (typeof settings.dictationEnabled === 'boolean' && settings.dictationEnabled !== preferences.dictationEnabled) {
+      nextPreferences.dictationEnabled = settings.dictationEnabled;
     }
-    if (Object.keys(nextConfigState).length > 0) {
-      configStoreApi.setState(nextConfigState);
+    if ((settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') && settings.sttProvider !== preferences.sttProvider) {
+      nextPreferences.sttProvider = settings.sttProvider;
+    }
+    if (typeof settings.sttServerUrl === 'string' && settings.sttServerUrl !== preferences.sttServerUrl) {
+      nextPreferences.sttServerUrl = settings.sttServerUrl;
+    }
+    if (typeof settings.sttModel === 'string' && settings.sttModel !== preferences.sttModel) {
+      nextPreferences.sttModel = settings.sttModel;
+    }
+    if (typeof settings.sttLocalModel === 'string' && settings.sttLocalModel !== preferences.sttLocalModel) {
+      nextPreferences.sttLocalModel = settings.sttLocalModel;
+    }
+    if (typeof settings.sttLanguage === 'string' && settings.sttLanguage !== preferences.sttLanguage) {
+      nextPreferences.sttLanguage = settings.sttLanguage;
+    }
+    if (typeof settings.sttSilenceThresholdDb === 'number' && settings.sttSilenceThresholdDb !== preferences.sttSilenceThresholdDb) {
+      nextPreferences.sttSilenceThresholdDb = settings.sttSilenceThresholdDb;
+    }
+    if (typeof settings.sttSilenceHoldMs === 'number' && settings.sttSilenceHoldMs !== preferences.sttSilenceHoldMs) {
+      nextPreferences.sttSilenceHoldMs = settings.sttSilenceHoldMs;
+    }
+    if (typeof settings.sttTranscribeOnStop === 'boolean' && settings.sttTranscribeOnStop !== preferences.sttTranscribeOnStop) {
+      nextPreferences.sttTranscribeOnStop = settings.sttTranscribeOnStop;
+    }
+    if (Object.keys(nextPreferences).length > 0) {
+      usePreferencesStore.setState(nextPreferences);
     }
   }
 

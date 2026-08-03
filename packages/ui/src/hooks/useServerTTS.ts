@@ -17,7 +17,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { usePreferencesStore } from '@/stores/usePreferencesStore';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 interface ServerTTSStatusCache {
@@ -135,12 +136,13 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Get current model and API settings from config store.
-  const currentProviderId = useConfigStore((state) => state.currentProviderId);
-  const currentModelId = useConfigStore((state) => state.currentModelId);
-  const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
-  const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
-  const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
+  const currentModel = usePiSessionStore((state) => {
+    const sessionId = state.currentSessionId;
+    return sessionId ? state.records[sessionId]?.snapshot?.model : undefined;
+  });
+  const openaiApiKey = usePreferencesStore((state) => state.openaiApiKey);
+  const openaiCompatibleUrl = usePreferencesStore((state) => state.openaiCompatibleUrl);
+  const openaiCompatibleApiKey = usePreferencesStore((state) => state.openaiCompatibleApiKey);
 
   // Check if server TTS is available
   const checkAvailability = useCallback(async (): Promise<boolean> => {
@@ -276,8 +278,8 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
           instructions: options?.instructions,
           summarize: false,
           // Use provided provider/model, or fall back to current chat model
-          providerId: options?.providerId || currentProviderId || undefined,
-          modelId: options?.modelId || currentModelId || undefined,
+          providerId: options?.providerId || currentModel?.provider,
+          modelId: options?.modelId || currentModel?.id,
           // Send API key from settings if available
           apiKey: options?.baseURL ? (openaiCompatibleApiKey || undefined) : (openaiApiKey || undefined),
           // Send custom base URL for OpenAI-compatible servers
@@ -344,7 +346,7 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
       options?.onError?.(errorMsg);
       setIsPlaying(false);
     }
-  }, [stop, currentProviderId, currentModelId, openaiApiKey, openaiCompatibleApiKey]);
+  }, [stop, currentModel, openaiApiKey, openaiCompatibleApiKey]);
 
   // Cleanup on unmount
   useEffect(() => {

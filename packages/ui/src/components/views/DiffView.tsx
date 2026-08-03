@@ -39,7 +39,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
 
@@ -960,7 +960,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const diffWrapLinesStore = useUIStore((state) => state.diffWrapLines);
     const setDiffWrapLines = useUIStore((state) => state.setDiffWrapLines);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
     const diffWrapLines = diffWrapLinesStore;
     const forcedStaged = activeDiffScope === 'staged' ? true : activeDiffScope === 'working' ? false : null;
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
@@ -1279,7 +1279,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
         if (!currentSessionId) return;
-        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || effectiveDirectory || '';
+        const directory = effectiveDirectory || '';
         if (!directory) {
             toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
             return;
@@ -1288,12 +1288,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
         setReviewFlowSubmitting(true);
         try {
             await startReviewFlow({
-                originalSessionID: currentSessionId,
+                originalSessionId: currentSessionId,
                 directory,
-                providerID: execution.providerID,
-                modelID: execution.modelID,
-                agent: execution.agent || undefined,
-                variant: execution.variant || undefined,
+                providerId: execution.providerId,
+                modelId: execution.modelId,
+                agent: execution.agent,
+                thinkingLevel: execution.thinkingLevel,
                 generateHandoff: execution.generateHandoff,
                 returnAfterHandoffRequest: execution.generateHandoff,
                 autoReview: execution.autoReview,
@@ -1691,6 +1691,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             <ReviewFlowDialog
                 open={reviewDialogOpen}
                 onOpenChange={setReviewDialogOpen}
+                originalSessionId={currentSessionId}
                 projectDirectory={effectiveDirectory ?? null}
                 submitting={reviewFlowSubmitting}
                 onConfirm={handleStartReviewFlow}
