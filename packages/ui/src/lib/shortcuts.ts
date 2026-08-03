@@ -126,10 +126,10 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
-    id: 'open_status',
+    id: 'open_diagnostics',
     defaultCombo: 'mod+shift+o',
-    label: 'Show Pi runtime status',
-    description: 'Show the active Pi runtime connection and protocol version',
+    label: 'Show Piarium diagnostics',
+    description: 'Inspect the active Pi runtime, packages, resources, and project context',
   },
   {
     id: 'open_settings',

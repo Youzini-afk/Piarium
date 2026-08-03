@@ -275,6 +275,12 @@ Development and diagnostics support:
 The selected source, Pi version, Node version, package root, agent directory, and Git Bash path are
 always visible. A source mismatch is a diagnostic state, never silently repaired.
 
+The production diagnostics surface is Pi-native and shared by About, the desktop Help menu, the
+keyboard shortcut, and `window.__piariumDebug`. It combines the negotiated host handshake, the
+server `/health` snapshot, package/resource/agent-provider diagnostics, fleet and recovery status,
+and bounded project/session metadata. It never probes OpenCode endpoints or serializes provider
+settings, package source URLs, message content, fleet goals, or unknown health fields.
+
 ## 11. Failure semantics
 
 - Protocol parse errors close only the offending connection after a bounded diagnostic.

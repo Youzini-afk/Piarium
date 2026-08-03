@@ -100,7 +100,8 @@ retained before engine surgery begins.
   Escape abort, runtime status, model favorites, thinking levels, timeline focus, expanded input,
   attachments, and dictation all target the active Pi session. OpenCode optimistic/queued-message
   effects remain confined to explicitly named legacy embedded surfaces while those surfaces are
-  migrated or removed.
+  migrated or removed. The orphaned OpenCode session-retention hook and its stale sync documentation
+  were removed after the Pi-native retention hook became the sole production implementation.
 - Implemented the Pi-native main application root: context panels, plans, project notes/todos,
   inline comments, drafts, archive management, project actions, worktree management, and command
   discovery no longer require the OpenCode SyncProvider. The provider remains isolated to explicit
@@ -140,6 +141,11 @@ retained before engine surgery begins.
   project directories outside the current workspace; `GitAPI` clones with the selected identity on
   Web/Electron/mobile and VS Code. The reachable directory dialog no longer calls `opencodeClient`
   or assembles private filesystem routes.
+- Implemented: About, the desktop Help menu, and the runtime-status shortcut now open one production
+  Piarium diagnostics surface. It reports the negotiated Pi handshake, `/health`, package/resource/
+  agent-provider diagnostics, fleet/recovery availability, and project/session state without reading
+  OpenCode SDK endpoints or copying provider settings, package source URLs, message bodies, or fleet
+  goals. The old invisible OpenCode status dialog and `window.__opencodeDebug` entry point were removed.
 - Preserve local/remote authentication, workspace containment, audit, reconnect, materialization,
   queue, parent/child session, revert, fork, and archive behavior.
 

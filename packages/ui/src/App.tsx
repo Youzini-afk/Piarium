@@ -34,6 +34,7 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
+import { PiariumDiagnosticsDialog } from '@/components/ui/PiariumDiagnosticsDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
@@ -64,10 +65,12 @@ const OnboardingScreen = lazyWithChunkRecovery(() =>
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
+  const setPiariumDiagnosticsDialogOpen = useUIStore((s) => s.setPiariumDiagnosticsDialogOpen);
   return (
     <AboutDialog
       open={isAboutDialogOpen}
       onOpenChange={setAboutDialogOpen}
+      onOpenDiagnostics={() => setPiariumDiagnosticsDialogOpen(true)}
     />
   );
 };
@@ -621,6 +624,7 @@ function App({ apis }: AppProps) {
                 <>
                   <ConfigUpdateOverlay />
                   <AboutDialogWrapper />
+                  <PiariumDiagnosticsDialog />
                 </>
               )}
             </div>

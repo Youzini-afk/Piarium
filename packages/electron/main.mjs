@@ -4726,7 +4726,7 @@ const buildMacMenu = () => {
       label: 'Help',
       submenu: [
         { label: 'Keyboard Shortcuts', accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
-        { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('show-diagnostics') },
         { label: 'Toggle Developer Tools', accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
@@ -4839,7 +4839,7 @@ const buildAutoHiddenMenu = () => {
       label: 'Help',
       submenu: [
         { label: 'Keyboard Shortcuts', accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
-        { label: 'Show Diagnostics', accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: 'Show Diagnostics', accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('show-diagnostics') },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },

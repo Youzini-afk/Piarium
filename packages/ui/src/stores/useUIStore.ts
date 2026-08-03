@@ -604,8 +604,7 @@ interface UIStore {
   isCommandPaletteOpen: boolean;
   isHelpDialogOpen: boolean;
   isAboutDialogOpen: boolean;
-  isOpenCodeStatusDialogOpen: boolean;
-  openCodeStatusText: string;
+  isPiariumDiagnosticsDialogOpen: boolean;
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
@@ -771,8 +770,7 @@ interface UIStore {
   toggleHelpDialog: () => void;
   setHelpDialogOpen: (open: boolean) => void;
   setAboutDialogOpen: (open: boolean) => void;
-  setOpenCodeStatusDialogOpen: (open: boolean) => void;
-  setOpenCodeStatusText: (text: string) => void;
+  setPiariumDiagnosticsDialogOpen: (open: boolean) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setArchivePageOpen: (open: boolean) => void;
@@ -931,8 +929,7 @@ export const useUIStore = create<UIStore>()(
         isCommandPaletteOpen: false,
         isHelpDialogOpen: false,
         isAboutDialogOpen: false,
-        isOpenCodeStatusDialogOpen: false,
-        openCodeStatusText: '',
+        isPiariumDiagnosticsDialogOpen: false,
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
@@ -1615,12 +1612,8 @@ export const useUIStore = create<UIStore>()(
           set({ isAboutDialogOpen: open });
         },
 
-        setOpenCodeStatusDialogOpen: (open) => {
-          set({ isOpenCodeStatusDialogOpen: open });
-        },
-
-        setOpenCodeStatusText: (text) => {
-          set({ openCodeStatusText: text });
+        setPiariumDiagnosticsDialogOpen: (open) => {
+          set({ isPiariumDiagnosticsDialogOpen: open });
         },
 
         setSessionCreateDialogOpen: (open) => {

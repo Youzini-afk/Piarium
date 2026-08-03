@@ -14,25 +14,11 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { nextPiFavoriteModel, nextPiThinkingLevel } from '@/lib/pi-runtime/keyboardActions';
 import { listPiModels } from '@/lib/pi-runtime/providers';
-import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 
 const focusPiTimeline = (): void => {
   const timeline = document.querySelector<HTMLElement>('[data-pi-timeline="true"]');
   timeline?.focus({ preventScroll: true });
   timeline?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-};
-
-const showPiRuntimeStatus = async (): Promise<void> => {
-  try {
-    const { handshake, runtimeKey } = await getPiRuntimeConnection();
-    toast.success('Pi runtime connected', {
-      description: `${runtimeKey} · Pi ${handshake.runtime.piVersion} · protocol ${handshake.protocolVersion}`,
-    });
-  } catch (error) {
-    toast.error('Pi runtime unavailable', {
-      description: error instanceof Error ? error.message : String(error),
-    });
-  }
 };
 
 export const useKeyboardShortcuts = () => {
@@ -250,6 +236,7 @@ export const useKeyboardShortcuts = () => {
           isHelpDialogOpen,
           isSessionSwitcherOpen,
           isAboutDialogOpen,
+          isPiariumDiagnosticsDialogOpen,
           isMultiRunLauncherOpen,
           isImagePreviewOpen,
         } = useUIStore.getState();
@@ -263,6 +250,7 @@ export const useKeyboardShortcuts = () => {
           || isHelpDialogOpen
           || isSessionSwitcherOpen
           || isAboutDialogOpen
+          || isPiariumDiagnosticsDialogOpen
           || isMultiRunLauncherOpen
           || isImagePreviewOpen;
 
@@ -275,9 +263,9 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('open_status'))) {
+      if (eventMatchesShortcut(e, combo('open_diagnostics'))) {
         e.preventDefault();
-        void showPiRuntimeStatus();
+        useUIStore.getState().setPiariumDiagnosticsDialogOpen(true);
         return;
       }
 

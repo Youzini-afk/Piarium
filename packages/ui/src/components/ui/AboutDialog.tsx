@@ -4,10 +4,7 @@ import {
   DialogContent,
 } from '@/components/ui/dialog';
 import { PiariumLogo } from '@/components/ui/PiariumLogo';
-import { debugUtils } from '@/lib/debug';
-import { cn } from '@/lib/utils';
-import { toast } from '@/components/ui';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -15,49 +12,16 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 interface AboutDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenDiagnostics: () => void;
 }
 
 export const AboutDialog: React.FC<AboutDialogProps> = ({
   open,
   onOpenChange,
+  onOpenDiagnostics,
 }) => {
   const { t } = useI18n();
-  const showDiagnostics = import.meta.env.DEV;
   const [version, setVersion] = React.useState<string | null>(null);
-  const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
-  const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
-  const [diagnosticsReport, setDiagnosticsReport] = React.useState<string | null>(null);
-  const [isPreparingDiagnostics, setIsPreparingDiagnostics] = React.useState(false);
-
-  const handleCopyDiagnostics = React.useCallback(async () => {
-    if (!showDiagnostics) return;
-    if (isCopyingDiagnostics) return;
-    setIsCopyingDiagnostics(true);
-    setCopiedDiagnostics(false);
-    try {
-      if (!diagnosticsReport) {
-        toast.error(t('aboutDialog.toast.copyFailed'), {
-          description: t('aboutDialog.toast.diagnosticsNotReady'),
-        });
-        return;
-      }
-
-      const result = await debugUtils.copyTextToClipboard(diagnosticsReport);
-      if (result.ok) {
-        setCopiedDiagnostics(true);
-        toast.success(t('aboutDialog.toast.diagnosticsCopied'));
-      } else {
-        toast.error(t('aboutDialog.toast.copyFailed'), {
-          description: result.error,
-        });
-      }
-    } catch (error) {
-      toast.error(t('aboutDialog.toast.copyFailed'));
-      console.error('Failed to copy diagnostics:', error);
-    } finally {
-      setIsCopyingDiagnostics(false);
-    }
-  }, [diagnosticsReport, isCopyingDiagnostics, showDiagnostics, t]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -82,36 +46,12 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     void fetchVersion();
   }, [open]);
 
-  React.useEffect(() => {
-    if (!open || !showDiagnostics) {
-      setDiagnosticsReport(null);
-      setIsPreparingDiagnostics(false);
-      return;
-    }
-
-    let cancelled = false;
-    setIsPreparingDiagnostics(true);
-    void debugUtils.buildDiagnosticsReport()
-      .then((report) => {
-        if (cancelled) return;
-        setDiagnosticsReport(report);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error('Failed to prepare diagnostics:', error);
-        setDiagnosticsReport(null);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setIsPreparingDiagnostics(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, showDiagnostics]);
-
   const displayVersion = version;
+
+  const handleOpenDiagnostics = React.useCallback(() => {
+    onOpenChange(false);
+    onOpenDiagnostics();
+  }, [onOpenChange, onOpenDiagnostics]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -128,28 +68,18 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             </div>
           </div>
 
-          {showDiagnostics && (
-            <div className="flex flex-col items-center gap-2 pt-2">
-              <button
-                onClick={handleCopyDiagnostics}
-                disabled={isCopyingDiagnostics || isPreparingDiagnostics || !diagnosticsReport}
-                className={cn(
-                  'typography-meta text-muted-foreground hover:text-foreground',
-                  'underline-offset-2 hover:underline',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
-                )}
-              >
-                {copiedDiagnostics
-                  ? t('aboutDialog.actions.diagnosticsCopied')
-                  : isPreparingDiagnostics
-                    ? t('aboutDialog.actions.preparingDiagnostics')
-                    : t('aboutDialog.actions.copyDiagnostics')}
-              </button>
-              <p className="typography-micro text-muted-foreground">
-                {t('aboutDialog.diagnosticsDescription')}
-              </p>
-            </div>
-          )}
+          <div className="flex flex-col items-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={handleOpenDiagnostics}
+              className="typography-meta text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              {t('aboutDialog.actions.openDiagnostics')}
+            </button>
+            <p className="typography-micro text-muted-foreground">
+              {t('aboutDialog.diagnosticsDescription')}
+            </p>
+          </div>
 
           <div className="flex flex-col items-center gap-2 pt-2">
             <div className="flex items-center justify-center gap-4">

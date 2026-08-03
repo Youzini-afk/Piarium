@@ -105,14 +105,6 @@ Persisted sidebar state is never reconciled destructively from the first success
 
 Session materialization recency is keyed by runtime and directory. Foreground loads and successful prefetches participate in the same bounded per-directory session LRU. Prefetch pagination metadata has a global count ceiling and is removed with session eviction, directory disposal, loader runtime reconfiguration, and loader disposal.
 
-### Global session list
-
-Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
-
-Current consumers:
-
-- `useSessionAutoCleanup.ts`
-
 ### Live cross-directory session/status view
 
 Use the sync hooks backed by aggregated child stores when the UI needs **live truth** for sessions or statuses across all initialized directories.

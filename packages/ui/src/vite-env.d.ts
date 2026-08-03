@@ -2,16 +2,19 @@
 
 interface Window {
     __PIARIUM_HOME__?: string;
-    __opencodeDebug?: {
+    __piariumDebug?: {
+        getCurrentSession: () => unknown;
         getLastAssistantMessage: () => unknown;
         getAllMessages: (truncate?: boolean) => unknown[];
-        truncateMessages: (messages: unknown[]) => unknown[];
+        getSessionEntries: (scope?: 'all' | 'branch') => unknown;
         getAppStatus: () => Promise<unknown>;
         checkLastMessage: () => boolean;
         findEmptyMessages: () => unknown[];
         showRetryHelp: () => void;
-        getStreamingState: () => unknown;
-        analyzeMessageCompletionConsistency: (options?: unknown) => unknown;
+        getRuntimeState: () => unknown;
+        buildDiagnosticsReport: () => Promise<string>;
+        copyDiagnosticsReport: () => Promise<unknown>;
+        copyTextToClipboard: (text: string) => Promise<unknown>;
         checkCompletionStatus: () => unknown;
     };
 }

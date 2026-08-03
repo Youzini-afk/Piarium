@@ -6,7 +6,6 @@ import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUISto
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { canChooseDesktopWorkspace, switchDesktopWorkspaceFromPicker } from '@/lib/desktopWorkspace';
 import {
   createPiSessionFromNavigation,
@@ -91,7 +90,7 @@ type MenuAction =
   | 'previous-project'
   | 'next-project'
   | 'help-dialog'
-  | 'download-logs';
+  | 'show-diagnostics';
 
 export const useMenuActions = (options: { enabled?: boolean } = {}) => {
   const enabled = options.enabled ?? true;
@@ -101,6 +100,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
+  const setPiariumDiagnosticsDialogOpen = useUIStore((s) => s.setPiariumDiagnosticsDialogOpen);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { setThemeMode } = useThemeSystem();
   const checkUpdatesInFlightRef = React.useRef(false);
@@ -313,10 +313,8 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
           toggleHelpDialog();
           break;
 
-        case 'download-logs': {
-          void showOpenCodeStatus().catch(() => {
-            toast.error('Failed to collect OpenCode status');
-          });
+        case 'show-diagnostics': {
+          setPiariumDiagnosticsDialogOpen(true);
           break;
         }
       }
@@ -327,6 +325,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
       navigateSession,
       setAboutDialogOpen,
       setCommandPaletteOpen,
+      setPiariumDiagnosticsDialogOpen,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,
