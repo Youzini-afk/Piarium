@@ -18,7 +18,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
-  consumePluginSettingsSelection,
+  consumePluginSettingsTarget,
   type PluginSettingsIntegrationId,
 } from '@/lib/settings/plugin-settings-navigation';
 import { AdvancedPluginConfigEditor } from './AdvancedPluginConfigEditor';
@@ -109,13 +109,16 @@ export const PluginSettingsPage: React.FC = () => {
   const targetKey = activeSessionId ? `session:${activeSessionId}` : `cwd:${currentDirectory}`;
   const targetKeyRef = React.useRef(targetKey);
   targetKeyRef.current = targetKey;
-  const [selected, setSelected] = React.useState<PluginSettingsIntegrationId>(() => (
-    consumePluginSettingsSelection() ?? 'subagents'
-  ));
+  const [navigationTarget] = React.useState(() => consumePluginSettingsTarget());
+  const [selected, setSelected] = React.useState<PluginSettingsIntegrationId>(
+    navigationTarget?.integrationId ?? 'subagents',
+  );
   const [packages, setPackages] = React.useState<PackageDescriptor[]>([]);
   const [packagesLoaded, setPackagesLoaded] = React.useState(false);
   const [packageError, setPackageError] = React.useState<string | null>(null);
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [advancedOpen, setAdvancedOpen] = React.useState(
+    navigationTarget !== null && navigationTarget.integrationId === null,
+  );
   const generationRef = React.useRef(0);
 
   const loadPackages = React.useCallback(async () => {
@@ -248,6 +251,15 @@ export const PluginSettingsPage: React.FC = () => {
         title={t('settings.piarium.pluginSettings.advanced.sectionTitle')}
         description={t('settings.piarium.pluginSettings.advanced.sectionDescription')}
       >
+        {navigationTarget !== null && navigationTarget.integrationId === null ? (
+          <div className="mb-3 rounded-lg border border-border/60 bg-background/50 px-3 py-2.5">
+            <p className="typography-ui-label text-foreground">{navigationTarget.pluginId}</p>
+            <p className="mt-1 typography-meta text-muted-foreground">
+              This plugin owns its configuration. Choose its native JSON or JSONC file below;
+              Piarium will preserve the complete document while editing it.
+            </p>
+          </div>
+        ) : null}
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger className="border border-border/60 px-3 py-2.5">
             <span className="typography-ui-label text-foreground">

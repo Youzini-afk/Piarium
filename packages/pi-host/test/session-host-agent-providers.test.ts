@@ -61,6 +61,46 @@ export default function (pi: any) {
       "utf8",
     );
     await writeFile(
+      join(agentDir, "extensions", "generic-agent-provider.ts"),
+      `export default function (pi: any) {
+  pi.events.on("piarium.agent-provider.discover/v1", (discovery: any) => {
+    discovery.register({
+      bridgeVersion: 1,
+      descriptor: {
+        actions: [{ id: "inspect", label: "Inspect" }],
+        available: true,
+        configuration: { pluginId: "example-agents", section: "agents" },
+        description: "Agents supplied by an unrelated extension",
+        id: "example-agent-provider",
+        label: "Example agents",
+        source: "project:generic-agent-provider",
+      },
+      list: () => ({
+        agents: [{
+          actions: [{ id: "inspect", label: "Inspect" }],
+          configuration: { pluginId: "example-agents", section: "agents" },
+          description: "Agent discovered through the public bridge",
+          id: "example-agent-provider:reviewer",
+          kind: "profile",
+          name: "reviewer",
+          source: { packageName: "example-agents", scope: "package" },
+          status: "available",
+        }],
+        diagnostics: [],
+      }),
+      action: ({ action, agentId }: any) => ({
+        agentId,
+        message: "bridged " + action,
+        providerId: "ignored-by-host",
+        success: true,
+      }),
+    });
+  });
+}
+`,
+      "utf8",
+    );
+    await writeFile(
       join(home, ".config", "cortexkit", "magic-context.jsonc"),
       `{
   // User-owned historian selection must win.
@@ -85,6 +125,7 @@ export default function (pi: any) {
       await host.openCatalogContext(cwd);
       const catalog = await host.listAgentProviders();
       assert.deepEqual(catalog.providers.map((provider) => provider.id).sort(), [
+        "example-agent-provider",
         "magic-context",
         "pi-subagents",
       ]);
@@ -117,6 +158,20 @@ export default function (pi: any) {
       assert.equal(byName.get("magic-context:sidekick")?.thinking, "low");
       assert.equal(byName.get("magic-context:sidekick")?.kind, "service");
       assert.equal(byName.get("magic-context:dreamer-reviewer")?.kind, "internal");
+      assert.equal(byName.get("example-agent-provider:reviewer")?.kind, "profile");
+      assert.equal(
+        byName.get("example-agent-provider:reviewer")?.configuration?.pluginId,
+        "example-agents",
+      );
+
+      const bridged = await host.runAgentProviderAction(
+        "example-agent-provider",
+        "inspect",
+        "example-agent-provider:reviewer",
+        undefined,
+      );
+      assert.equal(bridged.providerId, "example-agent-provider");
+      assert.equal(bridged.message, "bridged inspect");
 
       const custom = byName.get("pi-subagents:custom");
       assert.ok(custom);
@@ -178,6 +233,57 @@ export default function (pi: any) {
         ),
         (error: unknown) => error instanceof HostError && error.code === "project_not_trusted",
       );
+    } finally {
+      await host.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("prefers a plugin-owned provider bridge over the built-in fallback adapter", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-agent-provider-priority-"));
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    await mkdir(join(agentDir, "extensions"), { recursive: true });
+    await writeFile(
+      join(agentDir, "extensions", "pi-subagents-owned-provider.ts"),
+      `import { Type } from "@earendil-works/pi-ai";
+export default function (pi: any) {
+  pi.registerTool({
+    name: "subagent",
+    label: "Subagent",
+    description: "Fallback-compatible tool",
+    parameters: Type.Object({}, { additionalProperties: true }),
+    async execute() {
+      return { content: [{ type: "text", text: "Executable agents:\\n- fallback (user): Must not win" }], details: {} };
+    },
+  });
+  pi.events.on("piarium.agent-provider.discover/v1", (discovery: any) => {
+    discovery.register({
+      bridgeVersion: 1,
+      descriptor: {
+        actions: [], available: true, description: "Plugin-owned catalog",
+        id: "pi-subagents", label: "Pi Subagents owned",
+      },
+      list: () => ({
+        agents: [{
+          actions: [], description: "Authoritative plugin entry", id: "owned",
+          kind: "delegatable", name: "owned", source: { scope: "runtime" }, status: "available",
+        }],
+        diagnostics: [],
+      }),
+    });
+  });
+}
+`,
+      "utf8",
+    );
+    const host = createHost(agentDir, true);
+    try {
+      await host.openCatalogContext(cwd);
+      const catalog = await host.listAgentProviders();
+      assert.deepEqual(catalog.providers.map((provider) => provider.id), ["pi-subagents"]);
+      assert.equal(catalog.providers[0]?.label, "Pi Subagents owned");
+      assert.deepEqual(catalog.agents.map((agent) => agent.name), ["owned"]);
     } finally {
       await host.dispose();
       await rm(root, { force: true, recursive: true });

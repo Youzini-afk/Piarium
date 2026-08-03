@@ -5,6 +5,7 @@ export type SettingsPageSlug =
   | 'remote-instances'
   | 'providers'
   | 'agents'
+  | 'commands'
   | 'prompts'
   | 'skills'
   | 'usage'
@@ -91,6 +92,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'pi',
     kind: 'single',
     keywords: ['agent', 'agents', 'subagent', 'subagents', 'roles', 'workflow', 'pi-subagents', 'magic context', 'historian', 'dreamer', 'sidekick'],
+  },
+  {
+    slug: 'commands',
+    title: 'Commands',
+    group: 'pi',
+    kind: 'single',
+    keywords: ['pi', 'command', 'commands', 'slash command', 'extension command', 'prompt command', 'skill command'],
   },
   {
     slug: 'prompts',

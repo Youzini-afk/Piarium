@@ -83,6 +83,7 @@ const MOBILE_SETTINGS_PAGES = [
   'plugin-settings',
   'providers',
   'agents',
+  'commands',
   'prompts',
   'skills',
   'usage',

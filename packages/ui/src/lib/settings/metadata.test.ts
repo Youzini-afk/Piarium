@@ -14,6 +14,7 @@ describe('settings metadata', () => {
 
     expect(slugs).toContain('providers');
     expect(slugs).toContain('agents');
+    expect(slugs).toContain('commands');
     expect(slugs).toContain('prompts');
     expect(slugs).toContain('skills');
     expect(slugs).toContain('mcp');
@@ -21,6 +22,7 @@ describe('settings metadata', () => {
     expect(slugs).toContain('plugin-settings');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'providers')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'agents')?.group).toBe('pi');
+    expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'commands')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'prompts')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'skills')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'mcp')?.group).toBe('pi');
@@ -31,7 +33,6 @@ describe('settings metadata', () => {
   test('does not route removed OpenCode settings through compatibility aliases', () => {
     for (const slug of [
       'behavior',
-      'commands',
       'skills.installed',
       'skills.catalog',
       'openagent',
@@ -40,5 +41,6 @@ describe('settings metadata', () => {
       expect(resolveSettingsSlug(slug)).toBe('home');
     }
     expect(resolveSettingsSlug('agents')).toBe('agents');
+    expect(resolveSettingsSlug('commands')).toBe('commands');
   });
 });

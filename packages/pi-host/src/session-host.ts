@@ -66,6 +66,10 @@ import type {
   ThinkingLevel,
 } from "@piarium/protocol";
 import { HostError } from "./errors.js";
+import {
+  AgentProviderBridge,
+  createAgentProviderBridgeExtension,
+} from "./agent-providers/bridge.js";
 import { AgentProviderRegistry } from "./agent-providers/registry.js";
 import { ConfigTextFileEditor } from "./config-text-file-editor.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
@@ -398,6 +402,7 @@ export class SessionHost {
   readonly trust: ProjectTrustController;
   readonly ui: ExtensionUiBridge;
   readonly auth: ProviderAuthBridge;
+  #agentProviders: AgentProviderBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
   #recovery: RecoveryPluginAdapter | undefined;
   #unsubscribe: (() => void) | undefined;
@@ -1606,12 +1611,15 @@ export class SessionHost {
   }
 
   #agentProviderRegistry(): AgentProviderRegistry {
-    return new AgentProviderRegistry({
-      agentDir: this.#agentDir,
-      cwd: this.runtime.cwd,
-      projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
-      session: this.session,
-    });
+    return new AgentProviderRegistry(
+      {
+        agentDir: this.#agentDir,
+        cwd: this.runtime.cwd,
+        projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
+        session: this.session,
+      },
+      this.#agentProviders,
+    );
   }
 
   async #resourceOwnership(
@@ -1817,6 +1825,8 @@ export class SessionHost {
       });
       const recovery = new RecoveryPluginAdapter();
       this.#recovery = recovery;
+      const agentProviders = new AgentProviderBridge();
+      this.#agentProviders = agentProviders;
       const services = await createAgentSessionServices({
         agentDir,
         cwd,
@@ -1831,6 +1841,11 @@ export class SessionHost {
               factory: createExtensionStateBridgeExtension(this.#emit),
               hidden: true,
               name: "piarium-extension-state-bridge",
+            },
+            {
+              factory: createAgentProviderBridgeExtension(agentProviders),
+              hidden: true,
+              name: "piarium-agent-provider-bridge",
             },
             {
               factory: createRecoveryBridgeExtension(recovery),
@@ -1986,6 +2001,7 @@ export class SessionHost {
     const runtime = this.#runtime;
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();
+    this.#agentProviders = undefined;
     this.#recovery = undefined;
   }
 

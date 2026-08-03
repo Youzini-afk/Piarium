@@ -21,7 +21,7 @@ import {
   listPiPackages,
 } from '@/lib/pi-runtime/packages';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { requestPluginSettingsSelection } from '@/lib/settings/plugin-settings-navigation';
+import { requestPluginSettingsIntegration } from '@/lib/settings/plugin-settings-navigation';
 
 interface RecoveryIntegration {
   descriptionKey: I18nKey;
@@ -223,7 +223,7 @@ export const RecoverySettings: React.FC = () => {
                       size="xs"
                       onClick={() => {
                         if (configured) {
-                          requestPluginSettingsSelection(
+                          requestPluginSettingsIntegration(
                             integration.id === 'pi-workspace-history' ? 'workspace-history' : 'wtf',
                           );
                         }

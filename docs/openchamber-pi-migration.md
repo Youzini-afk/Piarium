@@ -93,6 +93,23 @@ UIs. Individual tools and packages keep their own explicit safety and confirmati
 future Pi permission contract is introduced, it must be integrated as a Pi-native capability with
 an independently reviewable policy.
 
+## Pi agents, commands, prompts, and skills
+
+Agents are a catalog, not a second universal configuration format. Piarium includes fallback
+adapters for `pi-subagents` and Magic Context, and exposes the versioned
+`piarium.agent-provider.discover/v1` event contract so any loaded Pi extension can register its own
+provider. A provider-owned bridge takes precedence over Piarium's fallback adapter with the same
+ID. Provider-specific configuration remains authoritative and opens the matching GUI adapter when
+one exists; otherwise Piarium opens the native JSON/JSONC editor without projecting the plugin into
+a reduced common schema.
+
+Commands are the live slash-command catalog of the current Pi session or workspace. The host
+combines extension commands, native `.md` prompt templates, and active skills; the settings page is
+therefore read-only discovery and explanation, while invocation stays in chat. Prompts and skills
+are managed through Pi's resource loader and their native roots. Piarium preserves loader ownership,
+collision diagnostics, read-only package resources, complete skill directories, and project trust
+instead of restoring the former OpenCode command/skill stores.
+
 ## Mobile and embedded session surfaces
 
 The dedicated mobile application and the context-panel iframe now mount the same `PiChatView`, Pi
