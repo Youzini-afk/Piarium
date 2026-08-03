@@ -14,6 +14,7 @@ import {
   listPiResources,
   updatePiResource,
 } from '@/lib/pi-runtime/resources';
+import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 interface PiResourcePaneState {
@@ -128,6 +129,7 @@ export const usePiResourcesStore = create<PiResourcesStore>()((set, get) => {
       mutating: false,
       selectedId: document.descriptor.id,
     }));
+    if (kind === 'skill') notifyPiRuntimeCatalogChanged('skill');
     return true;
   };
 
@@ -360,6 +362,7 @@ export const usePiResourcesStore = create<PiResourcesStore>()((set, get) => {
           selectedId: nextId,
         }));
         if (nextId) await get().selectResource(kind, target, targetKey, nextId);
+        if (kind === 'skill') notifyPiRuntimeCatalogChanged('skill');
         return true;
       } catch (error) {
         if (

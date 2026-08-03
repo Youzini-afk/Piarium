@@ -39,22 +39,6 @@ mock.module("@/stores/useProjectsStore", () => ({
   },
 }))
 
-mock.module("@/stores/useSkillsCatalogStore", () => ({
-  useSkillsCatalogStore: {
-    getState: () => ({
-      loadCatalog: () => Promise.resolve(true),
-    }),
-  },
-}))
-
-mock.module("@/stores/useSkillsStore", () => ({
-  useSkillsStore: {
-    getState: () => ({
-      loadSkills: () => Promise.resolve(true),
-    }),
-  },
-}))
-
 describe("refreshAfterOpenCodeRestart", () => {
   beforeEach(async () => {
     configMessages.length = 0

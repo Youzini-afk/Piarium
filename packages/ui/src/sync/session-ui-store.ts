@@ -23,8 +23,11 @@ import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
-import { useCommandsStore } from "@/stores/useCommandsStore"
-import { useSkillsStore } from "@/stores/useSkillsStore"
+import {
+  createPiChatCatalogTargetKey,
+  usePiChatCatalogStore,
+} from "@/stores/usePiChatCatalogStore"
+import { notifyPiRuntimeCatalogChanged } from "@/lib/pi-runtime/catalog-events"
 import { getDeferredSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -75,39 +78,11 @@ import { rememberRuntimeLiveStatus } from "./runtime-live-memory"
 
 export type { AttachedFile }
 
-type GoalCommand = { name: string; template?: string }
-
-export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
-  if (!content.startsWith("/")) return content
-  const [head, ...tail] = content.split(" ")
-  const command = commands.find((candidate) => candidate.name === head.slice(1))
-  if (!command?.template?.trim()) return content
-  const argumentsText = tail.join(" ")
-  if (command.template.includes("$ARGUMENTS")) {
-    return command.template.replaceAll("$ARGUMENTS", argumentsText)
-  }
-
-  const positions = [...command.template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]))
-  if (positions.length > 0) {
-    const parsedArguments = [...argumentsText.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
-      .map((match) => match[1] ?? match[2] ?? match[3] ?? "")
-    const lastPosition = Math.max(...positions)
-    return command.template.replace(/\$(\d+)/g, (_match, value: string) => {
-      const position = Number(value)
-      return position === lastPosition
-        ? parsedArguments.slice(position - 1).join(" ")
-        : (parsedArguments[position - 1] ?? "")
-    })
-  }
-
-  return argumentsText ? `${command.template}\n\n${argumentsText}` : command.template
-}
-
 // ---------------------------------------------------------------------------
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-export function routeMessage(params: {
+export async function routeMessage(params: {
   sessionId: string
   directory?: string | null
   content: string
@@ -137,21 +112,17 @@ export function routeMessage(params: {
     const [head, ...tail] = params.content.split(" ")
     const cmdName = head.slice(1)
 
-    const dirState = getDirectoryState(requestDirectory)
-    const syncCommands = dirState?.command ?? []
-    const storeCommands = useCommandsStore.getState().commands
-
-    // OpenCode registers every skill as a command (source: "skill"), but the
-    // commands store filters skills out and the synced command list is only
-    // hydrated at bootstrap. Consult the live skills store so a skill selected
-    // from the slash menu is invoked via session.command (injecting its
-    // content) instead of being sent as a literal "/name" message (#1605).
-    const isCommand = syncCommands.find((c) => c.name === cmdName)
-      || storeCommands.find((c) => c.name === cmdName)
-      || useSkillsStore.getState().skills.some((s) => s.name === cmdName)
+    const target = { sessionId: params.sessionId } as const
+    const targetKey = createPiChatCatalogTargetKey(target)
+    const catalogStore = usePiChatCatalogStore.getState()
+    if (!catalogStore.entries[targetKey]?.loaded) {
+      await catalogStore.load(target, targetKey)
+    }
+    const isCommand = usePiChatCatalogStore.getState().entries[targetKey]
+      ?.commands.some((command) => command.name === cmdName) ?? false
 
     if (isCommand) {
-      return optimisticSend({
+      await optimisticSend({
         sessionId: params.sessionId,
         content: params.content,
         providerID: params.providerID,
@@ -172,6 +143,8 @@ export function routeMessage(params: {
           directory: requestDirectory,
         }).then(() => {}),
       })
+      if (cmdName === 'reload') notifyPiRuntimeCatalogChanged('reload')
+      return
     }
   }
 
@@ -1109,23 +1082,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!goalArmed) return
       const uiState = useUIStore.getState()
       const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
-      let objective = goalArm.objectiveOverride?.trim() || content
-      if (!goalArm.objectiveOverride && content.startsWith("/")) {
-        const directoryCommands = getDirectoryState(goalDirectory ?? undefined)?.command ?? []
-        const storedCommands = useCommandsStore.getState().commands
-        const knownCommands = [...directoryCommands, ...storedCommands]
-        objective = expandSlashCommandGoalObjective(content, knownCommands)
-        if (objective === content) {
-          try {
-            objective = expandSlashCommandGoalObjective(
-              content,
-              await opencodeClient.listCommandsWithDetails(goalDirectory),
-            )
-          } catch {
-            // Command dispatch remains authoritative; raw invocation is a safe objective fallback.
-          }
-        }
-      }
+      // Pi exposes the callable invocation but deliberately keeps prompt and
+      // skill bodies authoritative on the host. The raw invocation is the
+      // truthful goal objective; duplicating template expansion in the client
+      // would create a second, drifting command implementation.
+      const objective = goalArm.objectiveOverride?.trim() || content
       try {
         await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
       } catch (error) {

@@ -3,9 +3,11 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
-import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import {
+  createPiChatCatalogTargetKey,
+  usePiChatCatalogStore,
+} from '@/stores/usePiChatCatalogStore';
 
 // Load session-ui-store through a cache-busting query so cross-test mock state
 // or prior imports from other test files cannot leak a stale singleton into
@@ -13,7 +15,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 // test and session-ui-store share the same attachment store instance.
 const { useSessionWorktreeStore } = await import('./session-worktree-store');
 const sessionUiStoreMod = await import('./session-ui-store?test-isolate');
-const { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } = sessionUiStoreMod;
+const { routeMessage, useSessionUIStore } = sessionUiStoreMod;
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -254,31 +256,6 @@ describe('routeMessage directory scoping', () => {
   });
 });
 
-describe('slash-command goal objectives', () => {
-  test('expands every $ARGUMENTS reference from the authoritative command template', () => {
-    expect(expandSlashCommandGoalObjective('/issue--to-pr LIN-123 --draft', [{
-      name: 'issue--to-pr',
-      template: 'Run the issue pipeline for $ARGUMENTS. Verify $ARGUMENTS is represented by the PR.',
-    }])).toBe('Run the issue pipeline for LIN-123 --draft. Verify LIN-123 --draft is represented by the PR.');
-  });
-
-  test('keeps the invocation when the command template is unavailable', () => {
-    expect(expandSlashCommandGoalObjective('/issue--to-pr LIN-123', [{ name: 'issue--to-pr' }]))
-      .toBe('/issue--to-pr LIN-123');
-  });
-
-  test('matches OpenCode positional and implicit argument expansion', () => {
-    expect(expandSlashCommandGoalObjective('/move "src old" dist extra', [{
-      name: 'move',
-      template: 'Move $1 to $2',
-    }])).toBe('Move src old to dist extra');
-    expect(expandSlashCommandGoalObjective('/review auth module', [{
-      name: 'review',
-      template: 'Review the requested scope.',
-    }])).toBe('Review the requested scope.\n\nauth module');
-  });
-});
-
 describe('runtime worktree topology', () => {
   test('restores independent in-memory maps across A -> B -> A', () => {
     const topologyA = new Map([['/repo', [{ path: '/repo/a', branch: 'a' }]]]);
@@ -382,13 +359,36 @@ describe('createSession draft lifecycle', () => {
 });
 
 describe('routeMessage skill invocation', () => {
-  // OpenCode registers every skill as a command (source: "skill"), so a skill
-  // selected from the slash menu must be dispatched via session.command so its
-  // content is injected — not sent as a plain "/name" text message (issue #1605).
+  // Pi exposes callable skills as `skill:name` entries in command.list. The
+  // send path must use that same catalog rather than a second skills registry.
   const sendCommandCalls = [];
   const sendMessageCalls = [];
   let originalSendCommand;
   let originalSendMessage;
+  const setCommands = (names) => {
+    const targetKey = createPiChatCatalogTargetKey({ sessionId: 'session-skill' });
+    usePiChatCatalogStore.setState((state) => ({
+      entries: {
+        ...state.entries,
+        [targetKey]: {
+          commands: names.map((name) => ({
+            name,
+            source: name.startsWith('skill:') ? 'skill' : 'extension',
+            sourceInfo: {
+              origin: 'package',
+              path: `/commands/${name}`,
+              scope: 'user',
+              source: 'test',
+            },
+          })),
+          error: null,
+          loaded: true,
+          loading: false,
+          skills: [],
+        },
+      },
+    }));
+  };
 
   beforeEach(() => {
     sendCommandCalls.length = 0;
@@ -413,10 +413,10 @@ describe('routeMessage skill invocation', () => {
     setOptimisticRefs(() => {}, () => {});
     useConfigStore.setState({ isConnected: true });
 
-    // The sync command list and the commands store both exclude user skills,
-    // so they start empty here — the skill is only known to the skills store.
-    useCommandsStore.setState({ commands: [] });
-    useSkillsStore.setState({ skills: [] });
+    // Keep the catalog loaded so an unknown slash token takes the plain-message
+    // branch without attempting a runtime connection in this unit test.
+    usePiChatCatalogStore.setState({ entries: {}, epoch: 0 });
+    setCommands([]);
 
     originalSendCommand = opencodeClient.sendCommand;
     originalSendMessage = opencodeClient.sendMessage;
@@ -433,42 +433,38 @@ describe('routeMessage skill invocation', () => {
   afterEach(() => {
     opencodeClient.sendCommand = originalSendCommand;
     opencodeClient.sendMessage = originalSendMessage;
-    useSkillsStore.setState({ skills: [] });
+    usePiChatCatalogStore.setState({ entries: {}, epoch: 0 });
   });
 
   test('invokes a user-installed skill as a command', async () => {
-    useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
-    });
+    setCommands(['skill:grill-with-docs']);
 
     await routeMessage({
       sessionId: 'session-skill',
       directory: '/skills/project',
-      content: '/grill-with-docs',
+      content: '/skill:grill-with-docs',
       providerID: 'provider-a',
       modelID: 'model-a',
     });
 
     expect(sendCommandCalls).toHaveLength(1);
-    expect(sendCommandCalls[0].command).toBe('grill-with-docs');
+    expect(sendCommandCalls[0].command).toBe('skill:grill-with-docs');
     expect(sendMessageCalls).toHaveLength(0);
   });
 
   test('forwards trailing arguments to the skill command', async () => {
-    useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
-    });
+    setCommands(['skill:grill-with-docs']);
 
     await routeMessage({
       sessionId: 'session-skill',
       directory: '/skills/project',
-      content: '/grill-with-docs focus on auth',
+      content: '/skill:grill-with-docs focus on auth',
       providerID: 'provider-a',
       modelID: 'model-a',
     });
 
     expect(sendCommandCalls).toHaveLength(1);
-    expect(sendCommandCalls[0].command).toBe('grill-with-docs');
+    expect(sendCommandCalls[0].command).toBe('skill:grill-with-docs');
     expect(sendCommandCalls[0].arguments).toBe('focus on auth');
   });
 

@@ -11,10 +11,7 @@ import {
 } from "@/lib/configUpdate";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useConfigStore } from "@/stores/useConfigStore";
-import { useCommandsStore } from "@/stores/useCommandsStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
-import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
-import { useSkillsStore } from "@/stores/useSkillsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 
 // Note: useDirectoryStore cannot be imported at top level to avoid circular dependency
@@ -638,6 +635,7 @@ async function waitForOpenCodeConnection(delayMs?: number) {
 }
 
 type ConfigRefreshMode = "active" | "projects";
+type AgentConfigRefreshScope = ConfigChangeScope;
 
 type ConfigRefreshExpectations = {
   expectedProviderId?: string;
@@ -655,7 +653,7 @@ const notifyRealtimePipelineReconnect = () => {
   window.dispatchEvent(new Event("piarium:system-resume"));
 };
 
-const normalizeRefreshScopes = (scopes?: ConfigChangeScope[]): ConfigChangeScope[] => {
+const normalizeRefreshScopes = (scopes?: AgentConfigRefreshScope[]): AgentConfigRefreshScope[] => {
   if (!scopes || scopes.length === 0) {
     return ["all"];
   }
@@ -674,7 +672,7 @@ const normalizeExpectedId = (value?: string): string | null => {
 };
 
 const isRefreshSettled = (
-  scopes: ConfigChangeScope[],
+  scopes: AgentConfigRefreshScope[],
   expectations: ConfigRefreshExpectations,
 ): boolean => {
   const configState = useConfigStore.getState();
@@ -713,7 +711,7 @@ const isRefreshSettled = (
 async function performConfigRefresh(options: {
   message?: string;
   delayMs?: number;
-  scopes?: ConfigChangeScope[];
+  scopes?: AgentConfigRefreshScope[];
   mode?: ConfigRefreshMode;
 } & ConfigRefreshExpectations = {}) {
   const { message, delayMs } = options;
@@ -732,15 +730,10 @@ async function performConfigRefresh(options: {
 
     const configStore = useConfigStore.getState();
     const agentConfigStore = useAgentsStore.getState();
-    const commandsStore = useCommandsStore.getState();
-    const skillsStore = useSkillsStore.getState();
-    const skillsCatalogStore = useSkillsCatalogStore.getState();
 
     const refreshProviders = scopes.includes("all") || scopes.includes("providers");
     const refreshSdkAgents = scopes.includes("all") || scopes.includes("agents");
     const refreshAgentConfigs = scopes.includes("all") || scopes.includes("agents");
-    const refreshCommands = scopes.includes("all") || scopes.includes("commands");
-    const refreshSkills = scopes.includes("all") || scopes.includes("skills");
 
     const currentDirectory = getCurrentDirectory();
     const projects = mode === "projects" ? useProjectsStore.getState().projects : [];
@@ -758,7 +751,6 @@ async function performConfigRefresh(options: {
     if (refreshProviders) {
       useConfigStore.getState().invalidateModelMetadataCache();
     }
-
     const refreshOnce = async () => {
       const sdkRefreshTasks: Promise<void>[] = [];
       for (const directory of directoriesToRefresh) {
@@ -774,14 +766,6 @@ async function performConfigRefresh(options: {
       if (refreshAgentConfigs) {
         uiRefreshTasks.push(agentConfigStore.loadAgents({ force: true }).then(() => undefined));
       }
-      if (refreshCommands) {
-        uiRefreshTasks.push(commandsStore.loadCommands().then(() => undefined));
-      }
-      if (refreshSkills) {
-        uiRefreshTasks.push(skillsStore.loadSkills().then(() => undefined));
-        uiRefreshTasks.push(skillsCatalogStore.loadCatalog().then(() => undefined));
-      }
-
       await Promise.all([...sdkRefreshTasks, ...uiRefreshTasks]);
     };
 
@@ -819,7 +803,7 @@ async function performConfigRefresh(options: {
 export async function refreshAfterOpenCodeRestart(options?: {
   message?: string;
   delayMs?: number;
-  scopes?: ConfigChangeScope[];
+  scopes?: AgentConfigRefreshScope[];
   mode?: ConfigRefreshMode;
 } & ConfigRefreshExpectations) {
   await performConfigRefresh(options);
@@ -828,7 +812,7 @@ export async function refreshAfterOpenCodeRestart(options?: {
 export async function reloadOpenCodeConfiguration(options?: {
   message?: string;
   delayMs?: number;
-  scopes?: ConfigChangeScope[];
+  scopes?: AgentConfigRefreshScope[];
   mode?: ConfigRefreshMode;
   skipServerReload?: boolean;
 } & ConfigRefreshExpectations) {

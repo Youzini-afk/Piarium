@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import {
   PIARIUM_PROTOCOL_VERSION,
   type PiAgentEvent,
@@ -331,6 +332,24 @@ describe('Pi session store', () => {
       method: 'command.execute',
       params: { command: '/mcp reconnect docs', sessionId: 'session-a' },
     }]);
+  });
+
+  test('invalidates command metadata after a successful Pi reload', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'command.execute') return { executed: true };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    const reasons: string[] = [];
+    const unsubscribe = subscribePiRuntimeCatalogChanged((reason) => reasons.push(reason));
+
+    try {
+      await store.getState().executeCommand('session-a', '/reload');
+      expect(reasons).toEqual(['reload']);
+    } finally {
+      unsubscribe();
+    }
   });
 
   test('applies a Pi-native feature mutation to the live session snapshot', async () => {

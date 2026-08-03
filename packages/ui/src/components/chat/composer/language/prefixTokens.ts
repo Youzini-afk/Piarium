@@ -1,5 +1,5 @@
 /**
- * The composer's prefix-token grammar: `/skill`, `/command` and `#snippet`.
+ * The composer's prefix-token grammar: `/skill:name`, `/command` and `#snippet`.
  *
  * Structurally these are the same construct — a sigil at a word boundary
  * followed by an identifier — and they were previously scanned by three
@@ -17,11 +17,12 @@
  */
 
 /**
- * Identifier body shared by all prefix tokens: starts alphanumeric, then
- * alphanumerics, `-` and `_`. Kept in one place so `/` and `#` cannot drift
- * apart again.
+ * Identifier body shared by prefix tokens: starts alphanumeric, then
+ * alphanumerics, `-` and `_`. Slash commands additionally allow `:` because
+ * Pi exposes skills under their native `skill:name` invocation.
  */
 const TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9_-]*';
+const SLASH_TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9_:-]*';
 
 /** Sigils that introduce a prefix token. */
 export type TokenPrefix = '/' | '#';
@@ -38,7 +39,7 @@ export interface PrefixToken {
 }
 
 const SCANNERS: Record<TokenPrefix, RegExp> = {
-    '/': new RegExp(`(^|\\s)\\/(${TOKEN_NAME})`, 'g'),
+    '/': new RegExp(`(^|\\s)\\/(${SLASH_TOKEN_NAME})`, 'g'),
     '#': new RegExp(`(^|\\s)#(${TOKEN_NAME})`, 'g'),
 };
 

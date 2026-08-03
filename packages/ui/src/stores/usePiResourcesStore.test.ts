@@ -7,6 +7,7 @@ import type {
   PiResourceScope,
   RuntimeContextTarget,
 } from '@piarium/protocol';
+import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 
 let runtimeKey = 'runtime-a';
 let listImpl: (
@@ -235,5 +236,38 @@ describe('usePiResourcesStore', () => {
     expect(pane.selectedId).toBe('managed-copy');
     expect(pane.document?.descriptor.writable).toBe(true);
     expect(pane.catalog?.resources).toHaveLength(2);
+  });
+
+  test('invalidates the runtime catalog only after a skill mutation succeeds', async () => {
+    const reasons: string[] = [];
+    const unsubscribe = subscribePiRuntimeCatalogChanged((reason) => reasons.push(reason));
+    const created = document('workspace-check', '# skill', 'skill-revision', {
+      filePath: 'C:/workspace/project/.pi/skills/workspace-check/SKILL.md',
+      kind: 'skill',
+      sourceInfo: {
+        origin: 'top-level',
+        path: 'C:/workspace/project/.pi/skills/workspace-check/SKILL.md',
+        scope: 'project',
+        source: 'project',
+      },
+    });
+    createImpl = async () => created;
+    listImpl = async () => catalog(created.descriptor);
+
+    try {
+      const success = await usePiResourcesStore.getState().createResource(
+        'skill',
+        target,
+        targetKey,
+        'project',
+        'workspace-check',
+        '# skill',
+      );
+
+      expect(success).toBe(true);
+      expect(reasons).toEqual(['skill']);
+    } finally {
+      unsubscribe();
+    }
   });
 });

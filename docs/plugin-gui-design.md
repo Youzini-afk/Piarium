@@ -71,6 +71,11 @@ The current catalog surfaces follow those boundaries directly:
 - Agents displays provider/source/package/invocation facts and calls only provider-advertised
   actions. A missing model is labelled as a provider default or unreported value, never guessed to
   be an inherited common setting.
+- The composer, command picker, inline skill picker, sent-message links, and skill activity rows
+  share one runtime/session/workspace-keyed Pi catalog. Callable skills use Pi's native
+  `/skill:name` invocation; the editable resource catalog enriches them with file and scope data
+  but never creates a second command registry. Successful skill/package mutations and `/reload`
+  invalidate that catalog at their host-success boundary.
 
 ### 3.1 Retired-page capability disposition
 
@@ -85,13 +90,14 @@ that can accidentally become a second configuration system.
 | OpenAgent | Agent/category model routing, fallback chains, hook toggles, team/background task, Tmux, skills, MCP, and experimental settings | Rejected as a generic Piarium schema because these were fields of the unrelated Oh My OpenAgent OpenCode plugin. A future Pi package receives its own adapter only from its current native schema. |
 | OpenAgent | Discovering agents, showing defaults/source, and invoking lifecycle actions | Implemented by the provider-owned Agents catalog. Provider configuration remains higher priority than generic catalog presentation. |
 | OpenCode agent editor | Generic agent create/rename/duplicate controls and a shared OpenCode permission-map editor | Rejected from the Pi catalog. Definitions and permissions are mutated only through provider-advertised actions, a specialized package adapter, or that package's native configuration document. |
+| OpenCode Commands, Skills, and external Skills Catalog stores | Slash completion, inline skill links, command dispatch, resource editing, supporting files, and catalog installation | Callable/resource behavior is replaced by Pi `command.list`, `resource.list/get/create/update/delete/copy`, and Pi Packages. The client accepts only native `/skill:name`; old `/name` aliases, OpenCode CRUD/catalog endpoints, duplicate persisted selections, and browser debug globals are retired. The unused private supporting-file editor is not carried forward: Piarium will add it only through a native Pi resource contract, not by restoring OpenCode HTTP paths. |
 | Agent Orchestration | Switching among native OpenCode, oh-my-opencode-slim, and oh-my-openagent modes | Rejected. Piarium has one Pi runtime and does not retain an OpenCode orchestration-mode compatibility layer. |
 | Agent Orchestration | Provider discovery, presets, model policy, fallback, runtime limits, and feature controls | Discovery/actions live in Agents; settings belong to the contributing Pi package adapter or its native JSON/JSONC document. No shared form fabricates unsupported fields. |
 
 The cleanup removes only the unreachable OpenCode pages, their private HTTP stores, their schema
 normalizers, and tests/translations that existed solely for those pages. It deliberately retains
 the Pi-native Agents provider registry, Plugin Settings adapters, Prompts and Skills resource
-pages, generic extension UI bridge, and any chat store that still has a live consumer.
+pages, generic extension UI bridge, and the target-keyed Pi runtime catalog used by chat.
 
 ## 4. Shared adapter shell
 

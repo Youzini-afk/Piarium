@@ -52,6 +52,14 @@ describe('scanPrefixTokens — boundaries', () => {
         ]);
     });
 
+    test('slash commands include Pi namespaced skill invocations', () => {
+        expect(slashNames('/skill:workspace-check /mcp:status')).toEqual([
+            'skill:workspace-check',
+            'mcp:status',
+        ]);
+        expect(hashNames('#skill:workspace-check')).toEqual(['skill']);
+    });
+
     test('a bare sigil is not a token', () => {
         expect(slashNames('a / b')).toEqual([]);
         expect(hashNames('a # b')).toEqual([]);
@@ -85,6 +93,12 @@ describe('scanPrefixTokens — offsets', () => {
         const text = '/a /b';
         const tokens = scanPrefixTokens(text, '/');
         expect(tokens.map((token) => text.slice(token.start, token.end))).toEqual(['/a', '/b']);
+    });
+
+    test('a namespaced invocation offset covers the complete command', () => {
+        const text = 'use /skill:workspace-check now';
+        const [token] = scanPrefixTokens(text, '/');
+        expect(text.slice(token.start, token.end)).toBe('/skill:workspace-check');
     });
 });
 
@@ -124,6 +138,15 @@ describe('collectKnownTokenNames', () => {
     test('unknown tokens are dropped', () => {
         expect(collectKnownTokenNames('/plan /nope', '/', new Set(['plan'])))
             .toEqual(['plan']);
+    });
+
+    test('collects a known Pi skill invocation as one token', () => {
+        expect(collectKnownTokenNames(
+            'use /skill:workspace-check here',
+            '/',
+            new Set(['skill:workspace-check']),
+            'exact',
+        )).toEqual(['skill:workspace-check']);
     });
 
     test('exact comparison is available for registry-cased names', () => {

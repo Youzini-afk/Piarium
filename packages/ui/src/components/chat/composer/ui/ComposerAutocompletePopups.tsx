@@ -65,12 +65,14 @@ export interface ComposerAutocompletePopupsProps {
     skillRef: React.RefObject<SkillAutocompleteHandle | null>;
     snippetRef: React.RefObject<SnippetAutocompleteHandle | null>;
     mentionRef: React.RefObject<FileMentionHandle | null>;
+    cwd?: string | null;
     onCommandSelect: (command: CommandInfo) => void;
-    onSkillSelect: (skillName: string) => void;
+    onSkillSelect: (invocation: string) => void;
     onSnippetSelect: (snippet: unknown, trigger: string) => void;
     onFileSelect: (file: { name: string; path: string; relativePath?: string }) => void;
     onAgentSelect: (agentName: string) => void;
     onClose: () => void;
+    sessionId?: string | null;
 }
 
 export function ComposerAutocompletePopups(props: ComposerAutocompletePopupsProps) {
@@ -84,7 +86,9 @@ export function ComposerAutocompletePopups(props: ComposerAutocompletePopupsProp
             return (
                 <CommandAutocomplete
                     ref={props.commandRef}
+                    cwd={props.cwd}
                     searchQuery={query}
+                    sessionId={props.sessionId}
                     onCommandSelect={props.onCommandSelect}
                     onClose={onClose}
                     style={style}
@@ -94,7 +98,9 @@ export function ComposerAutocompletePopups(props: ComposerAutocompletePopupsProp
             return (
                 <SkillAutocomplete
                     ref={props.skillRef}
+                    cwd={props.cwd}
                     searchQuery={query}
+                    sessionId={props.sessionId}
                     onSkillSelect={props.onSkillSelect}
                     onClose={onClose}
                     style={style}

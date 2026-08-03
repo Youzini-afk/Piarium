@@ -1,7 +1,7 @@
 import type { AgentMentionInfo } from '../types';
 import { buildAgentHref, buildSkillHref } from '@/lib/messages/inlineMessageLinks';
 
-export const SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
+export const SKILL_TOKEN_PATTERN = /(^|\s)\/(skill:([A-Za-z0-9][A-Za-z0-9_-]*))/g;
 
 const FENCED_CODE_SEGMENT_PATTERN = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
@@ -31,11 +31,11 @@ const applyHardLineBreaks = (markdown: string): string => {
 export const prepareUserMarkdownContent = ({
     textContent,
     agentMention,
-    skillNames,
+    skillInvocations,
 }: {
     textContent: string;
     agentMention?: AgentMentionInfo;
-    skillNames: ReadonlySet<string>;
+    skillInvocations: ReadonlySet<string>;
 }): string => {
     let content = mapNonFencedSegments(textContent, escapeHtml);
 
@@ -45,9 +45,14 @@ export const prepareUserMarkdownContent = ({
         content = content.replace(agentMention.token, mentionMarkdown);
     }
 
-    content = content.replace(SKILL_TOKEN_PATTERN, (match, prefix: string, skillName: string) => {
-        if (!skillNames.has(skillName)) return match;
-        return `${prefix}[/${skillName}](${buildSkillHref(skillName)})`;
+    content = content.replace(SKILL_TOKEN_PATTERN, (
+        match,
+        prefix: string,
+        invocation: string,
+        skillName: string,
+    ) => {
+        if (!skillInvocations.has(invocation)) return match;
+        return `${prefix}[/${invocation}](${buildSkillHref(skillName)})`;
     });
 
     // Preserve user newlines (markdown soft breaks would otherwise collapse to spaces)

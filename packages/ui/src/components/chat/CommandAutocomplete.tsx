@@ -11,13 +11,11 @@ import {
   RiTimeLine,
 } from '@remixicon/react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
-import { listPiCommands } from '@/lib/pi-runtime/commands';
 import { cn } from '@/lib/utils';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { commandMatchesSearch } from './commandAutocompleteItems';
+import { usePiChatCatalog } from './usePiChatCatalog';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
 type CommandSource = 'extension' | 'piarium' | 'prompt' | 'skill' | 'unknown';
@@ -69,24 +67,12 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   style,
 }, ref) => {
   const { t } = useI18n();
-  const fallbackDirectory = useEffectiveDirectory();
-  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const currentSessionDirectory = usePiSessionStore((state) => {
-    if (!state.currentSessionId) return null;
-    return state.records[state.currentSessionId]?.snapshot?.cwd
-      ?? state.summaries.find((summary) => summary.id === state.currentSessionId)?.cwd
-      ?? null;
-  });
-  const explicitWorkspace = cwd !== undefined;
-  const targetSessionId = sessionId !== undefined
-    ? sessionId
-    : explicitWorkspace
-      ? null
-      : currentSessionId;
-  const targetCwd = cwd?.trim() || currentSessionDirectory || fallbackDirectory || null;
   const isMobile = useUIStore((state) => state.isMobile);
-  const [catalog, setCatalog] = React.useState<CommandInfo[]>([]);
-  const [loading, setLoading] = React.useState(false);
+  const { commands: piCommands, loading } = usePiChatCatalog({
+    cwd,
+    refreshOnMount: true,
+    sessionId,
+  });
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const keyboardNavigationRef = React.useRef(false);
@@ -106,38 +92,16 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     return () => document.removeEventListener('pointerdown', handlePointerDown, true);
   }, [onClose]);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    if (!targetSessionId && !targetCwd) {
-      setCatalog([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    void listPiCommands(targetSessionId ? { sessionId: targetSessionId } : { cwd: targetCwd! })
-      .then((commands) => {
-        if (cancelled) return;
-        setCatalog(commands.map((command, index) => {
-          const source = normalizeSource(command.source);
-          return {
-            ...(command.description === undefined ? {} : { description: command.description }),
-            id: `pi:${source}:${command.name}:${index}`,
-            isSkill: source === 'skill',
-            name: command.name,
-            source,
-          };
-        }));
-      })
-      .catch(() => {
-        if (!cancelled) setCatalog([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
+  const catalog = React.useMemo<CommandInfo[]>(() => piCommands.map((command, index) => {
+    const source = normalizeSource(command.source);
+    return {
+      ...(command.description === undefined ? {} : { description: command.description }),
+      id: `pi:${source}:${command.name}:${index}`,
+      isSkill: source === 'skill',
+      name: command.name,
+      source,
     };
-  }, [targetCwd, targetSessionId]);
+  }), [piCommands]);
 
   const mergedCatalog = React.useMemo(() => {
     const seen = new Set<string>();

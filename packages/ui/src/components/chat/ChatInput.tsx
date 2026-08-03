@@ -65,8 +65,6 @@ import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
@@ -140,6 +138,7 @@ import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessageDock } from './composer/ui/RevertedMessageDock';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
+import { usePiChatCatalog } from './usePiChatCatalog';
 
 const MAX_VISIBLE_COMPOSER_LINES = 8;
 /**
@@ -175,8 +174,8 @@ const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMen
 );
 
 /**
- * Skills the user named inline with `/name`. Matched against the registry's
- * exact casing, since the name is echoed back to the model as a skill to load.
+ * Pi skills the user named inline with `/skill:name`. Invocation names are
+ * matched exactly because they are echoed back to the model as callable skills.
  */
 const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] =>
     collectKnownTokenNames(text, '/', skillNames, 'exact');
@@ -184,7 +183,7 @@ const collectInlineSkillMentions = (text: string, skillNames: Set<string>): stri
 const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
     if (skillNames.length === 0) return null;
     const formatted = skillNames.map((name) => `/${name}`).join(', ');
-    return `The user explicitly mentioned these skills in their message: ${formatted}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`;
+    return `The user explicitly mentioned these Pi skills in their message: ${formatted}. Load and follow the corresponding skill when it is relevant to the request.`;
 };
 
 const hasUserMessages = (sessionId: string, directory?: string) => {
@@ -299,6 +298,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
     const activeRuntimeKey = getRuntimeKey();
+    const piChatCatalog = usePiChatCatalog({
+        cwd: currentDirectory,
+        sessionId: currentSessionId,
+    });
     const chatDraftIdentity = React.useMemo(
         () => createChatDraftIdentity(
             activeRuntimeKey,
@@ -521,15 +524,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Known slash-invocations (commands + skills + built-ins) used to highlight
     // matching /tokens in the composer, the same way confirmed @files are.
-    const availableCommands = useCommandsStore((s) => s.commands);
-    const availableSkills = useSkillsStore((s) => s.skills);
+    const availableCommands = piChatCatalog.commands;
+    const availableSkills = piChatCatalog.skills;
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
             'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
-        for (const skill of availableSkills) names.add(skill.name.toLowerCase());
+        for (const skill of availableSkills) names.add(skill.invocation.toLowerCase());
         return names;
     }, [availableCommands, availableSkills, isMobile]);
 
@@ -1008,7 +1011,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             : [];
 
         const availableSkillNames = new Set(
-            useSkillsStore.getState().skills.map((skill) => skill.name),
+            availableSkills.map((skill) => skill.invocation),
         );
 
         const outgoing = buildOutgoingMessage({
@@ -1838,7 +1841,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         composerRef.current?.focus();
     };
 
-    const handleSkillSelect = (skillName: string) => {
+    const handleSkillSelect = (skillInvocation: string) => {
         const textarea = composerRef.current;
         const cursorPosition = textarea?.getSelection().start ?? message.length;
         const textBeforeCursor = message.substring(0, cursorPosition);
@@ -1847,11 +1850,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (lastSlashSymbol !== -1) {
             const newMessage =
                 message.substring(0, lastSlashSymbol) +
-                `/${skillName} ` +
+                `/${skillInvocation} ` +
                 message.substring(cursorPosition);
             setMessage(newMessage);
 
-            const nextCursor = lastSlashSymbol + skillName.length + 2;
+            const nextCursor = lastSlashSymbol + skillInvocation.length + 2;
             requestAnimationFrame(() => {
                 if (composerRef.current) {
                     composerRef.current.setSelection(nextCursor);
@@ -2555,12 +2558,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         skillRef={skillRef}
                         snippetRef={snippetRef}
                         mentionRef={mentionRef}
+                        cwd={currentDirectory}
                         onCommandSelect={handleCommandSelect}
                         onSkillSelect={handleSkillSelect}
                         onSnippetSelect={handleSnippetSelect}
                         onFileSelect={handleFileSelect}
                         onAgentSelect={handleAgentSelect}
                         onClose={closeAutocomplete}
+                        sessionId={currentSessionId}
                     />
                     {/* Positioning context for the dictation overlay: covers the
                         text area + footer exactly, excluding MobileSessionStatusBar. */}

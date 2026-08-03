@@ -1,92 +1,79 @@
 import React from 'react';
-import { cn, fuzzyMatch } from '@/lib/utils';
-import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { RiRefreshLine } from '@remixicon/react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useI18n } from '@/lib/i18n';
+import { cn, fuzzyMatch } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
+import type { PiChatSkill } from '@/lib/pi-runtime/chat-catalog';
+import { usePiChatCatalog } from './usePiChatCatalog';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
-
-interface SkillInfo {
-  name: string;
-  scope: string;
-  source?: string;
-  description?: string;
-}
 
 export interface SkillAutocompleteHandle {
   handleKeyDown: (key: string) => void;
 }
 
 interface SkillAutocompleteProps {
-  searchQuery: string;
-  onSkillSelect: (skillName: string) => void;
+  cwd?: string | null;
   onClose: () => void;
+  onSkillSelect: (invocation: string) => void;
+  searchQuery: string;
+  sessionId?: string | null;
   style?: React.CSSProperties;
 }
 
 export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, SkillAutocompleteProps>(({
-  searchQuery,
-  onSkillSelect,
+  cwd,
   onClose,
+  onSkillSelect,
+  searchQuery,
+  sessionId,
   style,
 }, ref) => {
+  const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const isMobile = useUIStore((state) => state.isMobile);
   const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, isMobile);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const keyboardNavigationRef = React.useRef(false);
-  const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const skills = useSkillsStore((s) => s.skills);
-  const loadSkills = useSkillsStore((s) => s.loadSkills);
+  const { loading, skills } = usePiChatCatalog({
+    cwd,
+    refreshOnMount: true,
+    sessionId,
+  });
 
-  React.useEffect(() => {
-    // Always trigger loadSkills when autocomplete opens to ensure project context is fresh
-    void loadSkills();
-  }, [loadSkills]);
-
-  React.useEffect(() => {
+  const filteredSkills = React.useMemo(() => {
     const normalizedQuery = searchQuery.trim();
     const matches = normalizedQuery.length
-      ? skills.filter((skill) => fuzzyMatch(skill.name, normalizedQuery))
+      ? skills.filter((skill) => (
+          fuzzyMatch(skill.name, normalizedQuery)
+          || fuzzyMatch(skill.invocation, normalizedQuery)
+        ))
       : skills;
 
-    const sorted = [...matches].sort((a, b) => {
-      // Sort by project scope first, then name
-      if (a.scope === 'project' && b.scope !== 'project') return -1;
-      if (a.scope !== 'project' && b.scope === 'project') return 1;
-      return a.name.localeCompare(b.name);
+    return [...matches].sort((left, right) => {
+      if (left.scope === 'project' && right.scope !== 'project') return -1;
+      if (left.scope !== 'project' && right.scope === 'project') return 1;
+      return left.name.localeCompare(right.name);
     });
+  }, [searchQuery, skills]);
 
-    setFilteredSkills(sorted);
-    setSelectedIndex(0);
-  }, [skills, searchQuery]);
-
+  React.useEffect(() => setSelectedIndex(0), [filteredSkills]);
   React.useEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
-
   React.useEffect(() => {
-    itemRefs.current[selectedIndex]?.scrollIntoView({
-      block: 'nearest',
-    });
+    itemRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex]);
 
   React.useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node | null;
-      if (!target || !containerRef.current) {
-        return;
-      }
-      if (!containerRef.current.contains(target)) {
-        onClose();
-      }
+      if (target && containerRef.current && !containerRef.current.contains(target)) onClose();
     };
-
     document.addEventListener('pointerdown', handlePointerDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true);
-    };
+    return () => document.removeEventListener('pointerdown', handlePointerDown, true);
   }, [onClose]);
 
   React.useImperativeHandle(ref, () => ({
@@ -95,48 +82,37 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
         onClose();
         return;
       }
-
-      if (!filteredSkills.length) {
-        return;
-      }
-
+      if (filteredSkills.length === 0) return;
       if (key === 'ArrowDown') {
         keyboardNavigationRef.current = true;
-        setSelectedIndex((prev) => (prev + 1) % filteredSkills.length);
+        setSelectedIndex((previous) => (previous + 1) % filteredSkills.length);
         return;
       }
-
       if (key === 'ArrowUp') {
         keyboardNavigationRef.current = true;
-        setSelectedIndex((prev) => (prev - 1 + filteredSkills.length) % filteredSkills.length);
+        setSelectedIndex((previous) => (previous - 1 + filteredSkills.length) % filteredSkills.length);
         return;
       }
-
       if (key === 'Enter' || key === 'Tab') {
         const safeIndex = ((selectedIndexRef.current % filteredSkills.length) + filteredSkills.length) % filteredSkills.length;
         const skill = filteredSkills[safeIndex];
-        if (skill) {
-          onSkillSelect(skill.name);
-        }
+        if (skill) onSkillSelect(skill.invocation);
       }
     },
-  }), [filteredSkills, onSkillSelect, onClose]);
+  }), [filteredSkills, onClose, onSkillSelect]);
 
-  const renderSkill = (skill: SkillInfo, index: number) => {
+  const renderSkill = (skill: PiChatSkill, index: number) => {
     const isProject = skill.scope === 'project';
-    const source = skill.source || 'opencode';
     return (
       <div
-        key={`${skill.name}-${skill.scope}`}
-        ref={(el) => {
-          itemRefs.current[index] = el;
-        }}
-          className={cn(
-            'flex gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label',
-            isMobile ? 'items-center' : 'items-start',
-          index === selectedIndex && 'bg-interactive-selection'
+        key={skill.invocation}
+        ref={(element) => { itemRefs.current[index] = element; }}
+        className={cn(
+          'flex gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label',
+          isMobile ? 'items-center' : 'items-start',
+          index === selectedIndex && 'bg-interactive-selection',
         )}
-        onClick={() => onSkillSelect(skill.name)}
+        onClick={() => onSkillSelect(skill.invocation)}
         onMouseMove={() => {
           keyboardNavigationRef.current = false;
           setSelectedIndex(index);
@@ -144,24 +120,24 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-semibold truncate">{skill.name}</span>
+            <span className="font-semibold truncate">/{skill.invocation}</span>
             <span className={cn(
-              "text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 transition-colors",
+              'text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 transition-colors',
               isProject
-                ? "bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)]"
-                : "bg-[var(--status-success-background)] text-[var(--status-success)] border-[var(--status-success-border)]"
+                ? 'bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)]'
+                : 'bg-[var(--status-success-background)] text-[var(--status-success)] border-[var(--status-success-border)]',
             )}>
               {skill.scope}
             </span>
             <span className="text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60">
-              {source}
+              {skill.source}
             </span>
           </div>
-          {skill.description && !isMobile && (
+          {skill.description && !isMobile ? (
             <div className="typography-meta text-muted-foreground mt-0.5 truncate">
               {skill.description}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     );
@@ -174,21 +150,23 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
       <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
-        {filteredSkills.length ? (
-          <div>
-            {filteredSkills.map((skill, index) => renderSkill(skill, index))}
+        {loading && filteredSkills.length === 0 ? (
+          <div className="flex items-center justify-center py-4">
+            <RiRefreshLine className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
+        ) : filteredSkills.length > 0 ? (
+          <div>{filteredSkills.map((skill, index) => renderSkill(skill, index))}</div>
         ) : (
           <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-            No skills found
+            {t('chat.fileMentionAutocomplete.empty')}
           </div>
         )}
       </ScrollableOverlay>
-      {!isMobile && (
+      {!isMobile ? (
         <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-          ↑↓ navigate • Enter select • Esc close
+          {t('chat.autocomplete.keyboardHint')}
         </div>
-      )}
+      ) : null}
     </div>
   );
 });

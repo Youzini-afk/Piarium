@@ -18,13 +18,13 @@ import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUt
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { getExternalFaviconUrl } from '@/lib/url';
 import { getDirectoryForFilePath, getRelativeFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { usePiChatCatalog } from '../../usePiChatCatalog';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -574,7 +574,7 @@ const StaticToolRowInner: React.FC<{
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-    const skills = useSkillsStore((state) => state.skills);
+    const { skills } = usePiChatCatalog();
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
@@ -598,7 +598,7 @@ const StaticToolRowInner: React.FC<{
             if (!name) continue;
 
             const skill = skillByName.get(name);
-            const rawPath = skill?.path || getToolSkillDirectory(activity);
+            const rawPath = skill?.filePath || getToolSkillDirectory(activity);
             const path = rawPath ? resolveSkillFilePath(rawPath) : '';
             if (!path || entries.some((entry) => entry.name === name && entry.path === path)) continue;
             entries.push({ name, path });

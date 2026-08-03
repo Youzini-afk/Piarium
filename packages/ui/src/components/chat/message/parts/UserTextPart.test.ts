@@ -6,7 +6,7 @@ describe('prepareUserMarkdownContent', () => {
     test('keeps fenced code < and -> unescaped for the markdown renderer', () => {
         const content = prepareUserMarkdownContent({
             textContent: '```rust\nlet values: Vec<i32> = vec![];\nlet next = old -> new;\n```',
-            skillNames: new Set(),
+            skillInvocations: new Set(),
         });
 
         expect(content).toContain('Vec<i32>');
@@ -18,7 +18,7 @@ describe('prepareUserMarkdownContent', () => {
     test('escapes raw HTML outside fences so tags display as text', () => {
         const content = prepareUserMarkdownContent({
             textContent: 'Use <b>bold</b> and <script>alert("x")</script>',
-            skillNames: new Set(),
+            skillInvocations: new Set(),
         });
 
         expect(content).toContain('&lt;b&gt;bold&lt;/b&gt;');
@@ -30,7 +30,7 @@ describe('prepareUserMarkdownContent', () => {
     test('adds hard line breaks outside fences but not inside', () => {
         const content = prepareUserMarkdownContent({
             textContent: 'first\nsecond\n```ts\nconst x = 1\nconst y = 2\n```\nthird',
-            skillNames: new Set(),
+            skillInvocations: new Set(),
         });
 
         expect(content).toContain('first  \nsecond  \n```ts\n');
@@ -40,13 +40,24 @@ describe('prepareUserMarkdownContent', () => {
 
     test('preserves mention conversion', () => {
         const content = prepareUserMarkdownContent({
-            textContent: '@agent hello\n/skill-name',
+            textContent: '@agent hello\n/skill:skill-name',
             agentMention: { name: 'build-agent', token: '@agent' },
-            skillNames: new Set(['skill-name']),
+            skillInvocations: new Set(['skill:skill-name']),
         });
 
         expect(content).toContain('[@agent](#openchamber-agent:build-agent)');
-        expect(content).toContain('[/skill-name](#openchamber-skill:skill-name)');
-        expect(content).toContain('hello  \n[/skill-name]');
+        expect(content).toContain('[/skill:skill-name](#openchamber-skill:skill-name)');
+        expect(content).toContain('hello  \n[/skill:skill-name]');
+    });
+
+    test('does not turn legacy bare slash aliases into Pi skill links', () => {
+        const content = prepareUserMarkdownContent({
+            textContent: '/skill-name /skill:skill-name',
+            skillInvocations: new Set(['skill:skill-name']),
+        });
+
+        expect(content).toContain('/skill-name');
+        expect(content).not.toContain('[/skill-name]');
+        expect(content).toContain('[/skill:skill-name](#openchamber-skill:skill-name)');
     });
 });

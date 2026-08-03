@@ -25,6 +25,7 @@ import {
   removePiPackage,
   updatePiPackages,
 } from '@/lib/pi-runtime/packages';
+import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
@@ -213,6 +214,7 @@ export const PluginsPage: React.FC = () => {
       } else {
         await updatePiPackages(runtimeTarget);
       }
+      notifyPiRuntimeCatalogChanged('package');
       if (actionTargetKey === targetKeyRef.current && runtimeKey === getRuntimeKey()) {
         await refresh();
       }

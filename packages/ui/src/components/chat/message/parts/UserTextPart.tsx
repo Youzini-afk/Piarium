@@ -4,7 +4,6 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
 import { Icon } from "@/components/icon/Icon";
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getDirectoryForFilePath } from '@/lib/path-utils';
@@ -15,6 +14,7 @@ import {
 } from '@/lib/messages/inlineMessageLinks';
 import { prepareUserMarkdownContent, SKILL_TOKEN_PATTERN } from './userTextPartContent';
 import { extractTerminalContexts } from '@/lib/messages/terminalContext';
+import { usePiChatCatalog } from '../../usePiChatCatalog';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -40,7 +40,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const [isTruncated, setIsTruncated] = React.useState(false);
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
     const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
-    const skills = useSkillsStore((state) => state.skills);
+    const { skills } = usePiChatCatalog();
     const openContextFile = useUIStore((state) => state.openContextFile);
     const effectiveDirectory = useEffectiveDirectory();
     const { t } = useI18n();
@@ -48,11 +48,18 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const isCollapsed = collapsibleUserMessages && !isExpanded;
     const textRef = React.useRef<HTMLDivElement>(null);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
+    const skillInvocations = React.useMemo(
+        () => new Set(skills.map((skill) => skill.invocation)),
+        [skills],
+    );
 
     const openSkill = React.useCallback((name: string) => {
         const skill = skillByName.get(name);
-        if (!skill?.path) return;
-        openContextFile(effectiveDirectory || getDirectoryForFilePath('', skill.path) || '/', skill.path);
+        if (!skill?.filePath) return;
+        openContextFile(
+            effectiveDirectory || getDirectoryForFilePath('', skill.filePath) || '/',
+            skill.filePath,
+        );
     }, [effectiveDirectory, openContextFile, skillByName]);
 
     const hasActiveSelectionInElement = React.useCallback((element: HTMLElement): boolean => {
@@ -129,9 +136,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         return prepareUserMarkdownContent({
             textContent,
             agentMention,
-            skillNames: new Set(skillByName.keys()),
+            skillInvocations,
         });
-    }, [agentMention, skillByName, textContent]);
+    }, [agentMention, skillInvocations, textContent]);
 
     const plainTextContent = React.useMemo(() => {
         const nodes: React.ReactNode[] = [];
@@ -142,15 +149,16 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
 
         while ((match = SKILL_TOKEN_PATTERN.exec(textContent)) !== null) {
             const prefix = match[1] || '';
-            const skillName = match[2];
+            const invocation = match[2];
+            const skillName = match[3];
             const slashIndex = match.index + prefix.length;
-            if (!skillByName.has(skillName)) continue;
+            if (!skillInvocations.has(invocation) || !skillByName.has(skillName)) continue;
 
             if (match.index > cursor) nodes.push(textContent.slice(cursor, match.index));
             if (prefix) nodes.push(prefix);
             nodes.push(
                 <button
-                    key={`skill-${slashIndex}-${skillName}`}
+                    key={`skill-${slashIndex}-${invocation}`}
                     type="button"
                     className="text-primary hover:underline"
                     onClick={(event) => {
@@ -158,10 +166,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                         openSkill(skillName);
                     }}
                 >
-                    /{skillName}
+                    /{invocation}
                 </button>
             );
-            cursor = slashIndex + skillName.length + 1;
+            cursor = slashIndex + invocation.length + 1;
         }
 
         if (cursor < textContent.length) nodes.push(textContent.slice(cursor));
@@ -191,7 +199,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 node.slice(idx + agentMention.token.length),
             ];
         });
-    }, [agentMention, openSkill, skillByName, textContent]);
+    }, [agentMention, openSkill, skillByName, skillInvocations, textContent]);
 
     if ((!textContent || textContent.trim().length === 0) && terminalContextState.contexts.length === 0) {
         return null;

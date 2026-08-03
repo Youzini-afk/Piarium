@@ -23,6 +23,7 @@ import type {
 } from '@piarium/protocol';
 import type { PiRuntimeClient } from '@piarium/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
+import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
@@ -679,6 +680,9 @@ export const createPiSessionStore = (
 
       executeCommand: async (sessionId, command) => {
         const { result } = await request('command.execute', { command, sessionId });
+        if (command.trim() === '/reload') {
+          notifyPiRuntimeCatalogChanged('reload');
+        }
         return result;
       },
 

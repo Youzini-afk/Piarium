@@ -47,6 +47,13 @@ describe('tokenizeComposer — reference constructs', () => {
         expect(styled('run /nosuchthing now')).toEqual([]);
     });
 
+    test('a Pi skill invocation is styled as one complete slash token', () => {
+        expect(styled(
+            'use /skill:workspace-check now',
+            context({ knownSlashNames: new Set(['skill:workspace-check']) }),
+        )).toEqual([['/skill:workspace-check', 'mentionCommand']]);
+    });
+
     test('a known snippet trigger is styled as a snippet', () => {
         expect(styled('end with #sig')).toEqual([['#sig', 'mentionSnippet']]);
     });

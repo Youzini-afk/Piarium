@@ -142,22 +142,6 @@ mock.module("@/stores/useSessionFoldersStore", () => ({
   },
 }))
 
-mock.module("@/stores/useCommandsStore", () => ({
-  useCommandsStore: {
-    getState: () => ({
-      commands: [],
-    }),
-  },
-}))
-
-mock.module("@/stores/useSkillsStore", () => ({
-  useSkillsStore: {
-    getState: () => ({
-      skills: [],
-    }),
-  },
-}))
-
 mock.module("@/components/ui", () => ({
   toast: {
     error: () => undefined,
