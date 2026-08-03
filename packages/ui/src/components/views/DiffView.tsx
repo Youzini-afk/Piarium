@@ -33,7 +33,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
 import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
@@ -1170,7 +1170,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return;
         }
 
-        return sessionEvents.onGitRefreshHint((hint) => {
+        return workspaceEvents.onGitRefreshHint((hint) => {
             if (normalizePath(hint.directory) !== normalizePath(effectiveDirectory)) {
                 return;
             }

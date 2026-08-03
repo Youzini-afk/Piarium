@@ -68,7 +68,7 @@ import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { cn } from '@/lib/utils';
 import { generateCommitMessage as generateSessionCommitMessage, getGitWorktreeBootstrapStatus } from '@/lib/gitApi';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useI18n } from '@/lib/i18n';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
@@ -835,7 +835,7 @@ export const GitView: React.FC<GitViewProps> = ({
       return;
     }
 
-    return sessionEvents.onGitRefreshHint((hint) => {
+    return workspaceEvents.onGitRefreshHint((hint) => {
       if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) {
         return;
       }

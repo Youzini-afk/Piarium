@@ -9,7 +9,7 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { cn } from '@/lib/utils';
 import { RiAddLine, RiFolderLine } from '@remixicon/react';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
@@ -24,7 +24,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
   const handleAddProject = React.useCallback(() => {
-    sessionEvents.requestDirectoryDialog();
+    workspaceEvents.requestDirectoryDialog();
   }, []);
 
   React.useEffect(() => {

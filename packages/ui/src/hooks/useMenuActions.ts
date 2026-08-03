@@ -5,7 +5,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import { canChooseDesktopWorkspace, switchDesktopWorkspaceFromPicker } from '@/lib/desktopWorkspace';
 import {
   createPiSessionFromNavigation,
@@ -142,7 +142,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
       return;
     }
 
-    sessionEvents.requestDirectoryDialog();
+    workspaceEvents.requestDirectoryDialog();
   }, []);
 
   const navigateSession = React.useCallback((direction: -1 | 1) => {

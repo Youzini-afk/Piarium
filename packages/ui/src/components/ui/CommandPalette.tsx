@@ -38,7 +38,7 @@ import { McpIcon } from '@/components/icons/McpIcon';
 import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
@@ -207,7 +207,7 @@ export const CommandPalette: React.FC = () => {
         icon: <Icon name="folder-add" className="mr-2 h-4 w-4" />,
         searchText: t('commandPalette.item.addProject'),
         onSelect: run(() => {
-          sessionEvents.requestDirectoryDialog();
+          workspaceEvents.requestDirectoryDialog();
         }),
       },
       {

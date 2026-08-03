@@ -13,6 +13,7 @@ import { HelpDialog } from '../ui/HelpDialog';
 import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
+import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { ArchiveView } from '@/components/views/ArchiveView';
 import { WorktreesView } from '@/components/views/WorktreesView';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
@@ -27,6 +28,7 @@ import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 
 import { ChatView } from '@/components/views/ChatView';
 import { DiffView } from '@/components/views/DiffView';
@@ -82,6 +84,7 @@ export const MainLayout: React.FC = () => {
     const [mobileRightSidebarOpen, setMobileRightSidebarOpen] = React.useState(false);
     const [mobileLeftDrawerVisible, setMobileLeftDrawerVisible] = React.useState(false);
     const [mobileRightDrawerVisible, setMobileRightDrawerVisible] = React.useState(false);
+    const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
     const setMobileSessionPanelOpen = React.useCallback((open: boolean) => {
         setMobileLeftDrawerOpen(open);
         useUIStore.getState().setSessionSwitcherOpen(open);
@@ -190,6 +193,10 @@ export const MainLayout: React.FC = () => {
 
     useUpdatePolling();
 
+    React.useEffect(() => workspaceEvents.onDirectoryRequest(() => {
+        setDirectoryDialogOpen(true);
+    }), []);
+
     React.useEffect(() => {
         const previous = useUIStore.getState().isMobile;
         if (previous !== isMobile) {
@@ -247,6 +254,10 @@ export const MainLayout: React.FC = () => {
                 <PiInteractionHost />
                 <HelpDialog />
                 <WorkspaceOverlays />
+                <DirectoryExplorerDialog
+                    open={directoryDialogOpen}
+                    onOpenChange={setDirectoryDialogOpen}
+                />
 
                 {isMobile ? (
                 <DrawerProvider value={{

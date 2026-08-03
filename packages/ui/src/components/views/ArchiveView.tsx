@@ -2,7 +2,7 @@ import React from 'react';
 import type { SessionSummary } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
-import { formatSessionDateLabel } from '@/components/session/sidebar/utils';
+import { formatSessionDateLabel } from '@/lib/sessionDateLabels';
 import { toast } from '@/components/ui';
 import {
   Dialog,

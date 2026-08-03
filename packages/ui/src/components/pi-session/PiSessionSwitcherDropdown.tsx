@@ -21,7 +21,7 @@ import {
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore, isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
+import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
 import { buildPiSessionForest, piSessionTitle, type PiSessionNode } from './sessionPresentation';
 
 interface PiSessionSwitcherDropdownProps {

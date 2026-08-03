@@ -72,7 +72,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { IconName } from "@/components/icon/icons";
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { buildExportFilename, downloadAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
+import { buildExportFilename, downloadAsMarkdown, saveAsMarkdownDesktop } from '@/lib/pi-runtime/markdownExport';
 import { formatPiSessionAsMarkdown } from '@/lib/pi-runtime/exportSession';
 import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';

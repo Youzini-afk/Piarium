@@ -39,7 +39,7 @@ import {
   useSessionPinnedStore,
 } from '@/stores/useSessionPinnedStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
+import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
 import {
   buildPiSessionForest,
   collectPiSessionSubtreeIds,

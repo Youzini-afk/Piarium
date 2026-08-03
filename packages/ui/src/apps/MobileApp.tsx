@@ -37,7 +37,7 @@ import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindo
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
-import { sessionEvents } from '@/lib/sessionEvents';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useMobileAppViewport } from '@/lib/mobileAppRuntime';
 import { useMobileLayoutInfo, useMobileLayoutRootAttributes } from '@/lib/mobileLayoutTier';
 import { cn } from '@/lib/utils';
@@ -1719,7 +1719,7 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
 
   React.useEffect(() => {
     if (!gitDirectory) return;
-    return sessionEvents.onGitRefreshHint((hint) => {
+    return workspaceEvents.onGitRefreshHint((hint) => {
       if (normalizePath(hint.directory) !== gitDirectory) return;
       void fetchStatus(gitDirectory, git);
     });
