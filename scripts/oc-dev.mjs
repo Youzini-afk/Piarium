@@ -36,7 +36,7 @@ const configPath = path.join(os.homedir(), '.config', 'openchamber', 'oc-dev.jso
 const GLOBAL_PORT = '2606';
 const TESTING_PORT = '1202';
 const TESTING_DIR = 'testing-dev';
-const REMOTE_RUNTIME_ENV = 'PATH=$HOME/.opencode/bin:$HOME/.local/bin:$HOME/.bun/bin:$PATH; if [ -z "${OPENCODE_BINARY:-}" ]; then OPENCODE_CANDIDATE=$(command -v opencode 2>/dev/null || true); if [ -n "$OPENCODE_CANDIDATE" ]; then export OPENCODE_BINARY="$OPENCODE_CANDIDATE"; fi; fi';
+const REMOTE_RUNTIME_ENV = 'PATH=$HOME/.local/bin:$HOME/.bun/bin:$PATH';
 
 const isTty = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY);
 const isMac = process.platform === 'darwin';

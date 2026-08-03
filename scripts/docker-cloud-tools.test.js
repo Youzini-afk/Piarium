@@ -5,9 +5,10 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const appDockerfile = fs.readFileSync(path.join(repoRoot, 'Dockerfile'), 'utf8');
 const runtimeBaseDockerfile = fs.readFileSync(path.join(repoRoot, 'Dockerfile.base'), 'utf8');
-const dockerAppWorkflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/docker-app.yml'), 'utf8');
 const dockerBuildOnlyWrapper = fs.readFileSync(path.join(repoRoot, 'scripts/docker-build-only-wrapper.sh'), 'utf8');
 const dockerEntrypoint = fs.readFileSync(path.join(repoRoot, 'scripts/docker-entrypoint.sh'), 'utf8');
+const dockerCompose = fs.readFileSync(path.join(repoRoot, 'docker-compose.yml'), 'utf8');
+const developmentHelper = fs.readFileSync(path.join(repoRoot, 'scripts/oc-dev.mjs'), 'utf8');
 
 const getAptInstallPackages = () => {
   const matches = runtimeBaseDockerfile.matchAll(/apt-get install\s+-y\s+--no-install-recommends\s+([\s\S]*?)(?=\s+&&)/g);
@@ -48,19 +49,6 @@ describe('cloud Docker toolbelt', () => {
     expect(appDockerfile).toContain('bun install --frozen-lockfile --ignore-scripts');
     expect(appDockerfile).toContain('node ./fix-deprecation.js');
     expect(appDockerfile).toContain('node ./node_modules/patch-package/index.js');
-  });
-
-  it('publishes runtime base and app images from one ordered workflow', () => {
-    expect(dockerAppWorkflow).toContain('name: Docker Images');
-    expect(dockerAppWorkflow).toContain('build-runtime-base:');
-    expect(dockerAppWorkflow).toContain('build-app:');
-    expect(dockerAppWorkflow).toContain('needs: [build-runtime-base]');
-    expect(dockerAppWorkflow).toContain('Dockerfile.base');
-    expect(dockerAppWorkflow).toContain('BASE_IMAGE_NAME: youzini-afk/openchamber-runtime-base');
-    expect(dockerAppWorkflow).toContain('APP_IMAGE_NAME: youzini-afk/openchamber');
-    expect(dockerAppWorkflow).toContain('DEFAULT_RUNTIME_BASE_IMAGE: ghcr.io/youzini-afk/openchamber-runtime-base:main');
-    expect(dockerAppWorkflow).toContain('scripts/docker-build-only-wrapper.sh');
-    expect(dockerAppWorkflow).not.toContain('github.repository_owner }}/openchamber');
   });
 
   it('installs GitHub CLI from the official apt repository', () => {
@@ -122,11 +110,23 @@ describe('cloud Docker toolbelt', () => {
     expect(dockerEntrypoint).toContain('ln -s "${PIARIUM_VALIDATION_NODE_MODULES}/.bin/vitest"');
   });
 
-  it('pins the bundled OpenCode CLI version in the runtime base image', () => {
-    expect(runtimeBaseDockerfile).toContain('ARG OPENCODE_VERSION=1.17.8');
-    expect(runtimeBaseDockerfile).toContain('npm install -g "opencode-ai@${OPENCODE_VERSION}"');
-    expect(runtimeBaseDockerfile).toContain('opencode --version');
-    expect(runtimeBaseDockerfile).not.toContain('npm install -g opencode-ai pnpm');
+  it('does not bundle or configure an OpenCode compatibility runtime', () => {
+    for (const source of [runtimeBaseDockerfile, dockerEntrypoint, dockerCompose]) {
+      expect(source).not.toContain('opencode-ai@');
+      expect(source).not.toContain('opencode --version');
+      expect(source).not.toContain('OPENCODE_CONFIG_DIR');
+      expect(source).not.toContain('OH_MY_OPENCODE');
+      expect(source).not.toContain('OPENCODE_HOST');
+      expect(source).not.toContain('OPENCODE_SKIP_START');
+      expect(source).not.toContain('PIARIUM_OPENCODE_HOSTNAME');
+      expect(source).not.toContain('/opencode');
+    }
+  });
+
+  it('does not discover or export an OpenCode binary for remote Piarium deployments', () => {
+    expect(developmentHelper).not.toContain('$HOME/.opencode/bin');
+    expect(developmentHelper).not.toContain('OPENCODE_BINARY');
+    expect(developmentHelper).not.toContain('command -v opencode');
   });
 
   it('provides a daemonless Docker build-only wrapper without host socket access', () => {
@@ -135,8 +135,9 @@ describe('cloud Docker toolbelt', () => {
     expect(runtimeBaseDockerfile).toContain('/usr/bin/rootlesskit /usr/local/bin/rootlesskit');
     expect(aptInstallPackages.has('slirp4netns')).toBe(true);
     expect(aptInstallPackages.has('uidmap')).toBe(true);
-    expect(runtimeBaseDockerfile).toContain("echo 'piarium:100000:65536' >> /etc/subuid");
-    expect(runtimeBaseDockerfile).toContain("echo 'piarium:100000:65536' >> /etc/subgid");
+    expect(runtimeBaseDockerfile).toContain("echo 'openchamber:100000:65536' >> /etc/subuid");
+    expect(runtimeBaseDockerfile).toContain("echo 'openchamber:100000:65536' >> /etc/subgid");
+    expect(runtimeBaseDockerfile).toContain('chown -R openchamber:openchamber /home/openchamber');
     expect(runtimeBaseDockerfile).toContain('COPY --chmod=0755 scripts/docker-build-only-wrapper.sh /usr/local/bin/docker');
     expect(runtimeBaseDockerfile).toContain('docker --version && buildctl --version');
     expect(runtimeBaseDockerfile).not.toContain('/var/run/docker.sock');

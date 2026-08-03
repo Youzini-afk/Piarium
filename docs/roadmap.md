@@ -120,6 +120,10 @@ retained before engine surgery begins.
 - Rewrite sync, lifecycle, provider, scheduling, control, and notification flows against the Pi host.
 - Delete the OpenCode child lifecycle, proxy, watcher, downloaded CLI, provider persistence, and
   obsolete code after each Pi-native replacement passes focused tests.
+- Implemented: the cloud runtime base no longer installs or probes an OpenCode CLI, the container
+  entrypoint no longer creates OpenCode configuration or installs oh-my-opencode, Compose no longer
+  mounts or advertises OpenCode state, and remote deployment no longer discovers an OpenCode
+  binary. The unreachable managed OpenCode system-prompt injector and its tests were removed.
 - Preserve local/remote authentication, workspace containment, audit, reconnect, materialization,
   queue, parent/child session, revert, fork, and archive behavior.
 
