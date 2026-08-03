@@ -6,7 +6,9 @@ import {
   type HostMethodResult,
   type ImageAttachment,
   type JsonValue,
+  parsePiSessionFeatureMutation,
   parseProviderConfigInput,
+  PiSessionFeatureValidationError,
   type ProviderConfigInput,
   ProviderConfigValidationError,
   type ProviderAuthResponse,
@@ -185,6 +187,17 @@ function requireProviderConfig(value: unknown): ProviderConfigInput {
   }
 }
 
+function requireSessionFeatureMutation(value: unknown) {
+  try {
+    return parsePiSessionFeatureMutation(value);
+  } catch (error) {
+    if (error instanceof PiSessionFeatureValidationError) {
+      throw new RuntimeDispatchError("invalid_params", error.message);
+    }
+    throw error;
+  }
+}
+
 function assertNever(value: never): never {
   throw new RuntimeDispatchError("unsupported_method", `Unsupported runtime method: ${String(value)}`);
 }
@@ -281,6 +294,17 @@ async function dispatchRuntimeRequestUnchecked(
           : requireEnum(input, "scope", ["branch", "all"] as const);
       return broker.requestForSession(sessionId, "session.entries", {
         ...(scope === undefined ? {} : { scope }),
+        sessionId,
+      });
+    }
+    case "session.features.get": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "session.features.get", { sessionId });
+    }
+    case "session.features.mutate": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "session.features.mutate", {
+        mutation: requireSessionFeatureMutation(input.mutation),
         sessionId,
       });
     }

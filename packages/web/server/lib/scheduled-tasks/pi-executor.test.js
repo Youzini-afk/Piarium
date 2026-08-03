@@ -69,10 +69,34 @@ describe('Pi scheduled task executor', () => {
     });
   });
 
-  it('adds explicit completion instructions in goal mode', () => {
-    const prompt = buildScheduledPiPrompt(task({ runAsGoal: true }));
-    expect(prompt).toContain('Inspect the project');
-    expect(prompt).toContain('Treat this scheduled task as an end-to-end goal');
+  it('starts a persisted Pi-native goal before dispatching the scheduled prompt', async () => {
+    const calls = [];
+    const broker = {
+      createSession: vi.fn(async () => ({ sessionId: 'pi-session-goal' })),
+      requestForSession: vi.fn(async (sessionID, method, params) => {
+        calls.push({ method, params, sessionID });
+        return method === 'agent.prompt' ? { accepted: true } : {};
+      }),
+    };
+    const execute = createPiScheduledTaskExecutor({ broker });
+    await execute({
+      projectPath: 'C:/project/piarium',
+      task: task({ goalTokenBudget: 25_000, runAsGoal: true }),
+      title: 'Goal task',
+    });
+    expect(calls.map((call) => call.method)).toEqual([
+      'model.select',
+      'session.features.mutate',
+      'agent.prompt',
+    ]);
+    expect(calls[1].params).toEqual({
+      mutation: {
+        objective: 'Inspect the project',
+        tokenBudget: 25_000,
+        type: 'goal.start',
+      },
+      sessionId: 'pi-session-goal',
+    });
   });
 
   it('keeps the created Pi session ID on dispatch failures', async () => {

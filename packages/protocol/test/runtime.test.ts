@@ -27,6 +27,14 @@ describe("surface runtime protocol", () => {
       sessionId: "session-1",
       text: "visible prompt",
     });
+    const featureRequest = createRuntimeRequest("req-4", "session.features.mutate", {
+      mutation: {
+        objective: "Ship the Pi-native feature",
+        tokenBudget: 20_000,
+        type: "goal.start",
+      },
+      sessionId: "session-1",
+    });
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(request)), request);
     assert.deepEqual(
@@ -37,6 +45,10 @@ describe("surface runtime protocol", () => {
       decodeRuntimeEnvelope(encodeRuntimeEnvelope(promptRequest)),
       promptRequest,
     );
+    assert.deepEqual(
+      decodeRuntimeEnvelope(encodeRuntimeEnvelope(featureRequest)),
+      featureRequest,
+    );
     assert.equal(isRuntimeMethod("config.document.get"), true);
     assert.equal(isRuntimeMethod("agentProvider.action"), true);
     assert.equal(isRuntimeMethod("agentProvider.list"), true);
@@ -44,6 +56,8 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("config.text.get"), true);
     assert.equal(isRuntimeMethod("config.text.update"), true);
     assert.equal(isRuntimeMethod("session.tree"), true);
+    assert.equal(isRuntimeMethod("session.features.get"), true);
+    assert.equal(isRuntimeMethod("session.features.mutate"), true);
     assert.equal(isRuntimeMethod("session.archive"), true);
     assert.equal(isRuntimeMethod("session.unarchive"), true);
     assert.equal(isRuntimeMethod("session.delete"), true);

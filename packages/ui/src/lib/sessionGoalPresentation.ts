@@ -1,4 +1,4 @@
-import type { SessionGoalStatus } from '@/lib/sessionGoalMetadata';
+import type { PiSessionGoalStatus as SessionGoalStatus } from '@piarium/protocol';
 
 // Shared presentation mapping for the goal status across chat, sidebar and
 // mobile surfaces. Colors are theme tokens; labels resolve through i18n at

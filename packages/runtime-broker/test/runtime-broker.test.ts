@@ -245,6 +245,27 @@ test("broker owns catalog and per-session Pi workers", async () => {
 
     const created = await broker.createSession(workspace, "Broker smoke");
     assert.deepEqual(broker.activeSessionIds, [created.sessionId]);
+    assert.deepEqual(created.features, {
+      pinnedContext: [],
+      revision: 0,
+      schemaVersion: 1,
+    });
+    const goalFeatures = await dispatchRuntimeRequest(broker, "session.features.mutate", {
+      mutation: {
+        objective: "Finish the broker-owned Pi migration",
+        tokenBudget: 50_000,
+        type: "goal.start",
+      },
+      sessionId: created.sessionId,
+    });
+    assert.equal(goalFeatures.goal?.objective, "Finish the broker-owned Pi migration");
+    assert.equal(goalFeatures.goal?.tokenBudget, 50_000);
+    assert.deepEqual(
+      await dispatchRuntimeRequest(broker, "session.features.get", {
+        sessionId: created.sessionId,
+      }),
+      goalFeatures,
+    );
     const recoveryStatus = await dispatchRuntimeRequest(broker, "recovery.status", {
       sessionId: created.sessionId,
     });

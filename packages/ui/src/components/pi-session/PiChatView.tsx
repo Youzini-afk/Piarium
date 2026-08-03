@@ -33,10 +33,13 @@ import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import type { ResolvedStarter } from '@/components/chat/useDraftStarters';
 import { PiComposer } from './PiComposer';
+import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
+import { PiGoalStrip } from './PiGoalControls';
 import { PiModelSelectorDialog } from './PiModelSelectorDialog';
 import { PiTimeline } from './PiTimeline';
 import { piSessionTitle } from './sessionPresentation';
@@ -71,6 +74,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const steer = usePiSessionStore((state) => state.steer);
   const followUp = usePiSessionStore((state) => state.followUp);
   const abort = usePiSessionStore((state) => state.abort);
+  const mutateFeatures = usePiSessionStore((state) => state.mutateFeatures);
   const recoverTo = usePiSessionStore((state) => state.recoverTo);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
@@ -92,6 +96,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [creating, setCreating] = React.useState(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
+  const [pinBusyEntryId, setPinBusyEntryId] = React.useState<string | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const untitled = t('sessions.sidebar.session.untitled');
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
@@ -127,6 +132,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     const inlineDraftTarget = { directory: snapshot.cwd, sessionKey: sessionId };
     const inlineDraftStore = useInlineCommentDraftStore.getState();
     let inlineDrafts: ReturnType<typeof inlineDraftStore.consumeDrafts> = [];
+    let consumedGoalArm: { armed: boolean; objectiveOverride: string | null } = {
+      armed: false,
+      objectiveOverride: null,
+    };
+    let startedGoalId: string | null = null;
     setSending(true);
     try {
       const rendered = await renderPiComposerSubmission(currentDraft.text);
@@ -143,6 +153,19 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
         return;
       }
+      consumedGoalArm = useSessionGoalArmStore.getState().consume();
+      if (consumedGoalArm.armed) {
+        const settings = useUIStore.getState();
+        const objective = (consumedGoalArm.objectiveOverride || promptText).trim();
+        const featureState = await mutateFeatures(sessionId, {
+          objective,
+          ...(settings.sessionGoalDefaultBudgetEnabled && settings.sessionGoalDefaultBudget > 0
+            ? { tokenBudget: settings.sessionGoalDefaultBudget }
+            : {}),
+          type: 'goal.start',
+        });
+        startedGoalId = featureState.goal?.id ?? null;
+      }
       let accepted: boolean;
       if (projectPiSessionActivity(snapshot).isWorking) {
         if (followUpBehavior === 'queue') {
@@ -157,12 +180,18 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       clearPiDraft(sessionId);
     } catch (error) {
       if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
+      if (startedGoalId) {
+        await mutateFeatures(sessionId, { goalId: startedGoalId, type: 'goal.clear' }).catch(() => undefined);
+      }
+      if (consumedGoalArm.armed) {
+        useSessionGoalArmStore.getState().setArmed(true, consumedGoalArm.objectiveOverride);
+      }
       console.error('Failed to send Pi prompt:', error);
       toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.messageSendFailed'));
     } finally {
       setSending(false);
     }
-  }, [clearPiDraft, followUp, followUpBehavior, prompt, sending, steer, t]);
+  }, [clearPiDraft, followUp, followUpBehavior, mutateFeatures, prompt, sending, steer, t]);
 
   const handleSend = React.useCallback(async () => {
     if (!currentSessionId) return;
@@ -220,6 +249,30 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     }
     void runRecovery(entry, recoveryPreference);
   }, [recoveryPreference, runRecovery]);
+
+  const handleTogglePinned = React.useCallback(async (
+    entry: PiSessionMessageEntry,
+    pinned: boolean,
+  ) => {
+    if (!currentSessionId || pinBusyEntryId) return;
+    setPinBusyEntryId(entry.id);
+    try {
+      await mutateFeatures(currentSessionId, {
+        entryId: entry.id,
+        pinned,
+        type: 'context.set',
+      });
+    } catch (error) {
+      console.warn('[pi-session] context pin failed:', error);
+      toast.error(t('chat.messageBody.actions.contextPinFailed'));
+    } finally {
+      setPinBusyEntryId(null);
+    }
+  }, [currentSessionId, mutateFeatures, pinBusyEntryId, t]);
+
+  const pinnedEntryIds = React.useMemo(() => new Set(
+    currentRecord?.snapshot?.features.pinnedContext.map((entry) => entry.entryId) ?? [],
+  ), [currentRecord?.snapshot?.features.pinnedContext]);
 
   if (currentSessionId === null) {
     return (
@@ -316,6 +369,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
             liveAssistant={currentRecord.liveAssistant}
             onRecover={handleRecover}
+            onTogglePinned={handleTogglePinned}
+            pinBusyEntryId={pinBusyEntryId}
+            pinnedEntryIds={pinnedEntryIds}
             recoveryBusyEntryId={recoveryBusyEntryId}
             sessionId={currentSessionId}
             toolExecutions={currentRecord.toolExecutions}
@@ -323,6 +379,16 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         )}
 
         <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} />
+
+        <PiAssistBar
+          draftEmpty={draft.text.trim().length === 0 && draft.images.length === 0}
+          entries={entries}
+          onApplySuggestion={(value) => updateDraft(currentSessionId, { text: value })}
+          snapshot={snapshot}
+        />
+        <div className="px-3 sm:px-5">
+          <PiGoalStrip snapshot={snapshot} />
+        </div>
 
         {!readOnly && (
           <PiComposer

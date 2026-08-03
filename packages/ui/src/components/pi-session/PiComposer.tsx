@@ -24,6 +24,7 @@ import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/u
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getMagicPromptDefinition } from '@/lib/magicPrompts';
 import type { Snippet } from '@/types/snippet';
+import { PiGoalButton } from './PiGoalControls';
 
 interface PiComposerProps {
   draft: string;
@@ -351,6 +352,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 radius="0.75rem"
                 sendIconSizeClass="size-4"
               />
+              <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} />
               {inlineDraftCount > 0 && (
                 <span className="truncate px-1 typography-micro text-muted-foreground">
                   {inlineDraftCount} attached context

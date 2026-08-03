@@ -2,15 +2,6 @@ const buildScheduledInstructions = (execution) => [
   ...(typeof execution?.agent === 'string' && execution.agent.trim()
     ? [`Use the Pi agent role or profile named "${execution.agent.trim()}" for this turn when it is available.`]
     : []),
-  ...(execution?.runAsGoal === true ? [
-  '<system-reminder>',
-  'Treat this scheduled task as an end-to-end goal. Continue using tools until the requested outcome is complete,',
-  'verify the result before finishing, and report clearly what was completed and what remains.',
-  ...(Number.isSafeInteger(execution.goalTokenBudget)
-    ? [`The requested goal token budget is ${execution.goalTokenBudget}.`]
-    : []),
-  '</system-reminder>',
-  ] : []),
 ].join('\n');
 
 export const buildScheduledPiPrompt = (task) => {
@@ -44,6 +35,18 @@ export const createPiScheduledTaskExecutor = ({ broker }) => {
       }
 
       const prompt = buildScheduledPiPrompt(task);
+      if (task.execution.runAsGoal === true) {
+        await broker.requestForSession(sessionID, 'session.features.mutate', {
+          mutation: {
+            objective: typeof task.execution.prompt === 'string' ? task.execution.prompt.trim() : prompt,
+            ...(Number.isSafeInteger(task.execution.goalTokenBudget) && task.execution.goalTokenBudget > 0
+              ? { tokenBudget: task.execution.goalTokenBudget }
+              : {}),
+            type: 'goal.start',
+          },
+          sessionId: sessionID,
+        });
+      }
       const dispatchedAsCommand = prompt.startsWith('/');
       if (dispatchedAsCommand) {
         await broker.requestForSession(sessionID, 'command.execute', {

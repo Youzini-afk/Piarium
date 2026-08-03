@@ -26,6 +26,7 @@ const snapshot = (sessionId: string, cwd = 'D:/work'): SessionSnapshot => ({
   activeTools: [],
   busy: false,
   cwd,
+  features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: 'all',
   isCompacting: false,
@@ -330,6 +331,58 @@ describe('Pi session store', () => {
       method: 'command.execute',
       params: { command: '/mcp reconnect docs', sessionId: 'session-a' },
     }]);
+  });
+
+  test('applies a Pi-native feature mutation to the live session snapshot', async () => {
+    const runtime = new FakeRuntime();
+    const features = {
+      goal: {
+        auditFailStreak: 0,
+        blockedStreak: 0,
+        createdAt: 1,
+        id: 'goal-1',
+        objective: 'Finish the native migration',
+        status: 'active' as const,
+        tokenBaseline: 0,
+        tokensUsed: 0,
+        turnsUsed: 0,
+        updatedAt: 1,
+      },
+      pinnedContext: [],
+      revision: 1,
+      schemaVersion: 1 as const,
+    };
+    runtime.handler = (method) => {
+      if (method === 'session.features.mutate') return features;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({
+      currentSessionId: 'session-a',
+      records: {
+        'session-a': {
+          extensionStates: {},
+          open: true,
+          sessionId: 'session-a',
+          snapshot: snapshot('session-a'),
+          toolExecutions: {},
+        },
+      },
+    });
+
+    await store.getState().mutateFeatures('session-a', {
+      objective: 'Finish the native migration',
+      type: 'goal.start',
+    });
+
+    expect(runtime.calls.at(-1)).toEqual({
+      method: 'session.features.mutate',
+      params: {
+        mutation: { objective: 'Finish the native migration', type: 'goal.start' },
+        sessionId: 'session-a',
+      },
+    });
+    expect(store.getState().records['session-a']?.snapshot?.features).toEqual(features);
   });
 
   test('ignores ephemeral catalog-worker session events', async () => {

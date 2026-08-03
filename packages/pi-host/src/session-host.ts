@@ -54,6 +54,8 @@ import type {
   RecoveryRepairAction,
   RecoveryStatus,
   PiSessionEntry,
+  PiSessionFeatureMutation,
+  PiSessionFeatureState,
   SessionEntriesResult,
   SessionHeader,
   SessionSnapshot,
@@ -86,6 +88,12 @@ import {
   type RecoveryPluginContext,
   type RecoveryPluginExecution,
 } from "./recovery-plugin-adapter.js";
+import {
+  createSessionFeaturesExtension,
+  mutateSessionFeatures,
+  readSessionFeatures,
+  SessionFeatureConflictError,
+} from "./session-features.js";
 
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
@@ -504,6 +512,7 @@ export class SessionHost {
       activeTools: session.getActiveToolNames(),
       busy: !session.isIdle,
       cwd: this.runtime.cwd,
+      features: readSessionFeatures(session.sessionManager),
       followUp: [...session.getFollowUpMessages()],
       followUpMode: session.followUpMode,
       isCompacting: session.isCompacting,
@@ -756,7 +765,40 @@ export class SessionHost {
     this.assertSession(sessionId);
     const wasBusy = !this.session.isIdle;
     await this.session.abort();
+    const goal = readSessionFeatures(this.session.sessionManager).goal;
+    if (wasBusy && goal?.status === "active") {
+      this.mutateFeatures(sessionId, {
+        goalId: goal.id,
+        status: "paused",
+        statusReason: "paused after abort",
+        type: "goal.update",
+      });
+    }
     return wasBusy;
+  }
+
+  features(sessionId: string): PiSessionFeatureState {
+    this.assertSession(sessionId);
+    return readSessionFeatures(this.session.sessionManager);
+  }
+
+  mutateFeatures(
+    sessionId: string,
+    mutation: PiSessionFeatureMutation,
+  ): PiSessionFeatureState {
+    this.assertSession(sessionId);
+    try {
+      const state = mutateSessionFeatures(this.session.sessionManager, mutation, {
+        tokenBaseline: this.session.getSessionStats().tokens.total,
+      });
+      this.#emit("session.snapshot", this.snapshot());
+      return state;
+    } catch (error) {
+      if (error instanceof SessionFeatureConflictError) {
+        throw new HostError("session_feature_conflict", error.message);
+      }
+      throw error;
+    }
   }
 
   recoveryStatus(sessionId: string): RecoveryStatus {
@@ -1776,6 +1818,11 @@ export class SessionHost {
         cwd,
         resourceLoaderOptions: {
           extensionFactories: [
+            {
+              factory: createSessionFeaturesExtension(),
+              hidden: true,
+              name: "piarium-session-features",
+            },
             {
               factory: createExtensionStateBridgeExtension(this.#emit),
               hidden: true,

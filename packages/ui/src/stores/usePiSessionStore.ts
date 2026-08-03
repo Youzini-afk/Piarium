@@ -4,6 +4,8 @@ import type {
   PiAgentEvent,
   PiAssistantMessage,
   PiSessionEntry,
+  PiSessionFeatureMutation,
+  PiSessionFeatureState,
   RecoveryMode,
   RecoveryOperationResult,
   RecoveryRepairAction,
@@ -90,6 +92,10 @@ export interface PiSessionStoreState {
     position?: 'before' | 'at',
   ): Promise<RuntimeMethodResult<'session.fork'>>;
   loadCatalog(cwd?: string): Promise<SessionSummary[]>;
+  mutateFeatures(
+    sessionId: string,
+    mutation: PiSessionFeatureMutation,
+  ): Promise<PiSessionFeatureState>;
   navigateSession(
     sessionId: string,
     targetId: string,
@@ -745,6 +751,18 @@ export const createPiSessionStore = (
           }
           throw error;
         }
+      },
+
+      mutateFeatures: async (sessionId, mutation) => {
+        const { result } = await request('session.features.mutate', { mutation, sessionId });
+        set((state) => ({
+          lastError: null,
+          records: upsertRecord(state.records, sessionId, (current) => ({
+            ...current,
+            snapshot: updateSnapshot(current.snapshot, { features: result }),
+          })),
+        }));
+        return result;
       },
 
       navigateSession: async (sessionId, targetId, summarize) => {

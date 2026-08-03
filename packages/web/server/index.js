@@ -63,6 +63,7 @@ import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createPiScheduledTaskExecutor } from './lib/scheduled-tasks/pi-executor.js';
+import { createPiSessionAutomationRuntime } from './lib/pi-session-automation/runtime.js';
 import { createServerBootstrapRuntime } from './lib/platform/bootstrap-runtime.js';
 import { parseServeCliOptions } from './lib/platform/cli-options.js';
 import {
@@ -703,12 +704,51 @@ async function main(options = {}) {
   }
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
   const sessionNames = new Map();
+  const sessionSnapshots = new Map();
+  const sendPiSessionNotification = async ({ body, kind, sessionId, tag, title }) => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => ({}));
+    if (settings.notifyOnCompletion === false) return;
+    const payload = { body, kind, sessionId, tag, title };
+    const desktopDelivered = getIsWindowFocused() && settings.notificationMode !== 'always'
+      ? false
+      : emitDesktopNotification(payload);
+    broadcastUiNotification(payload, { desktopNotificationDelivered: desktopDelivered });
+    const pushPayload = {
+      ...payload,
+      data: { type: 'session', sessionId, url: `/?session=${encodeURIComponent(sessionId)}` },
+    };
+    await Promise.allSettled([
+      sendPushToAllUiSessions(pushPayload, { requireNoSse: true }),
+      isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload),
+      sendApnsToAllUiSessions(pushPayload),
+    ]);
+  };
+  const piSessionAutomation = createPiSessionAutomationRuntime({
+    broker: piRuntimeBroker,
+    getSmallModelService: () => import('./lib/small-model/index.js'),
+    readSettings: readSettingsFromDiskMigrated,
+    onGoalSettled: async ({ goal, sessionId }) => {
+      const complete = goal.status === 'complete';
+      const statusLabel = goal.status === 'budgetLimited' ? 'budget reached' : goal.status;
+      await sendPiSessionNotification({
+        body: goal.note || goal.statusReason || (complete
+          ? 'The active goal was completed and independently verified.'
+          : `The active goal stopped: ${statusLabel}.`),
+        kind: complete ? 'completion' : 'error',
+        sessionId,
+        tag: `pi-goal-${sessionId}`,
+        title: sessionNames.get(sessionId) || (complete ? 'Piarium goal complete' : 'Piarium goal needs attention'),
+      });
+    },
+  });
   const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
+    piSessionAutomation.processBrokerEvent(event);
     sessionRuntime.processBrokerEvent(event);
     if (event?.kind !== 'host' || event.envelope?.kind !== 'event') return;
     const envelope = event.envelope;
     const sessionId = event.sessionId || envelope.data?.sessionId;
     if (envelope.event === 'session.snapshot' && sessionId) {
+      sessionSnapshots.set(sessionId, envelope.data);
       const name = typeof envelope.data?.name === 'string' ? envelope.data.name.trim() : '';
       if (name) sessionNames.set(sessionId, name);
       return;
@@ -717,27 +757,16 @@ async function main(options = {}) {
     const agentEvent = envelope.data?.event;
     if (agentEvent?.type !== 'agent_end' || agentEvent.willRetry === true) return;
     void (async () => {
-      const settings = await readSettingsFromDiskMigrated().catch(() => ({}));
-      if (settings.notifyOnCompletion === false) return;
+      if (sessionSnapshots.get(sessionId)?.features?.goal?.status === 'active') return;
       const body = extractAssistantText(agentEvent.messages) || 'Pi finished the current task.';
       const title = sessionNames.get(sessionId) || 'Piarium task complete';
-      const payload = {
+      await sendPiSessionNotification({
         title,
         body,
         tag: `pi-session-${sessionId}`,
         kind: 'completion',
         sessionId,
-      };
-      const desktopDelivered = getIsWindowFocused() && settings.notificationMode !== 'always'
-        ? false
-        : emitDesktopNotification(payload);
-      broadcastUiNotification(payload, { desktopNotificationDelivered: desktopDelivered });
-      const pushPayload = { ...payload, data: { type: 'session', sessionId, url: `/?session=${encodeURIComponent(sessionId)}` } };
-      await Promise.allSettled([
-        sendPushToAllUiSessions(pushPayload, { requireNoSse: true }),
-        isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload),
-        sendApnsToAllUiSessions(pushPayload),
-      ]);
+      });
     })();
   });
   const piRuntimeGateway = createPiRuntimeGateway({
@@ -884,6 +913,7 @@ async function main(options = {}) {
     }),
     isReady: () => Boolean(piRuntimeHandshake),
     stop: async (shutdownOptions = {}) => {
+      piSessionAutomation.stop();
       brokerUnsubscribe();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeBroker.dispose();

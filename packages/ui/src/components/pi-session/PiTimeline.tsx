@@ -30,6 +30,9 @@ interface PiTimelineProps {
   hiddenThinkingLabel?: string;
   liveAssistant?: PiAssistantMessage;
   onRecover(entry: PiSessionMessageEntry): void;
+  onTogglePinned(entry: PiSessionMessageEntry, pinned: boolean): void;
+  pinBusyEntryId?: string | null;
+  pinnedEntryIds: ReadonlySet<string>;
   recoveryBusyEntryId?: string | null;
   sessionId: string;
   toolExecutions: Record<string, PiToolExecutionState>;
@@ -438,6 +441,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   hiddenThinkingLabel,
   liveAssistant,
   onRecover,
+  onTogglePinned,
+  pinBusyEntryId,
+  pinnedEntryIds,
   recoveryBusyEntryId,
   sessionId,
   toolExecutions,
@@ -477,6 +483,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   }, [entries, liveAssistant, toolExecutions]);
 
   const renderedEntries = entries.filter((entry) => {
+    if (entry.type === 'custom' && entry.customType === 'piarium.session-features/v1') return false;
     if (entry.type === 'custom_message' && !entry.display) return false;
     if (entry.type === 'message' && entry.message.role === 'custom' && !entry.message.display) return false;
     if (
@@ -503,12 +510,36 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
           if (entry.type === 'message') {
             const { message } = entry;
             if (message.role === 'user') {
+              const pinned = pinnedEntryIds.has(entry.id);
               return (
                 <article key={entry.id} className="group/message ml-auto max-w-[min(85%,48rem)]" style={{ contentVisibility: 'auto' }}>
                   <div className="rounded-2xl rounded-br-md bg-primary/10 px-4 py-3 text-foreground">
                     <PiUserContentView content={message.content} messageId={entry.id} />
                   </div>
                   <div className="mt-1 flex h-6 items-center justify-end opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => onTogglePinned(entry, !pinned)}
+                          disabled={pinBusyEntryId !== null && pinBusyEntryId !== undefined}
+                          className={cn(
+                            'flex size-6 items-center justify-center rounded hover:bg-interactive-hover hover:text-foreground disabled:opacity-50',
+                            pinned ? 'text-[var(--status-info)]' : 'text-muted-foreground',
+                          )}
+                          aria-label={t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                          aria-pressed={pinned}
+                        >
+                          <Icon
+                            name={pinBusyEntryId === entry.id ? 'loader-4' : pinned ? 'pushpin-2-fill' : 'pushpin-2'}
+                            className={cn('size-3.5', pinBusyEntryId === entry.id && 'animate-spin')}
+                          />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                      </TooltipContent>
+                    </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
@@ -531,8 +562,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
               );
             }
             if (message.role === 'assistant') {
+              const pinned = pinnedEntryIds.has(entry.id);
               return (
-                <article key={entry.id} className="mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
+                <article key={entry.id} className="group/message mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
                   <AssistantMessage
                     entryId={entry.id}
                     executionById={toolExecutions}
@@ -540,6 +572,31 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                     message={message}
                     resultByCallId={resultByCallId}
                   />
+                  <div className="mt-1 flex h-6 items-center opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => onTogglePinned(entry, !pinned)}
+                          disabled={pinBusyEntryId !== null && pinBusyEntryId !== undefined}
+                          className={cn(
+                            'flex size-6 items-center justify-center rounded hover:bg-interactive-hover hover:text-foreground disabled:opacity-50',
+                            pinned ? 'text-[var(--status-info)]' : 'text-muted-foreground',
+                          )}
+                          aria-label={t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                          aria-pressed={pinned}
+                        >
+                          <Icon
+                            name={pinBusyEntryId === entry.id ? 'loader-4' : pinned ? 'pushpin-2-fill' : 'pushpin-2'}
+                            className={cn('size-3.5', pinBusyEntryId === entry.id && 'animate-spin')}
+                          />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                 </article>
               );
             }

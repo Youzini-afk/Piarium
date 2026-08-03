@@ -6,4 +6,5 @@ export * from "./methods.js";
 export * from "./provider.js";
 export * from "./runtime.js";
 export * from "./session.js";
+export * from "./session-features.js";
 export * from "./types.js";

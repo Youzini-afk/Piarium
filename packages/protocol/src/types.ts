@@ -1,4 +1,6 @@
-export const PIARIUM_PROTOCOL_VERSION = 11 as const;
+import type { PiSessionFeatureState } from "./session-features.js";
+
+export const PIARIUM_PROTOCOL_VERSION = 12 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -30,6 +32,7 @@ export interface HostCapabilities {
   providerConfiguration: boolean;
   recovery: boolean;
   resources: boolean;
+  sessionFeatures: boolean;
   sessions: boolean;
   settings: boolean;
 }
@@ -355,6 +358,7 @@ export interface SessionRuntimeState {
 
 export interface SessionSnapshot extends SessionRuntimeState {
   cwd: string;
+  features: PiSessionFeatureState;
   leafId: string | null;
   model?: ModelDescriptor;
   name?: string;

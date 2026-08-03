@@ -38,6 +38,7 @@ import type {
   ProviderModelDiscoveryResult,
 } from "./provider.js";
 import type { PiSessionEntry, SessionEntriesResult, SessionTreeResult } from "./session.js";
+import type { PiSessionFeatureMutation, PiSessionFeatureState } from "./session-features.js";
 
 export interface HostMethodMap {
   "agentProvider.action": {
@@ -259,6 +260,14 @@ export interface HostMethodMap {
   "session.fork": {
     params: { entryId: string; position?: "before" | "at"; sessionId: string };
     result: { cancelled: boolean; editorText?: string; snapshot: SessionSnapshot };
+  };
+  "session.features.get": {
+    params: { sessionId: string };
+    result: PiSessionFeatureState;
+  };
+  "session.features.mutate": {
+    params: { mutation: PiSessionFeatureMutation; sessionId: string };
+    result: PiSessionFeatureState;
   };
   "session.navigate": {
     params: { sessionId: string; summarize?: boolean; targetId: string };

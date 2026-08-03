@@ -9,7 +9,9 @@ import {
   type HostEventData,
   type ImageAttachment,
   type JsonValue,
+  parsePiSessionFeatureMutation,
   parseProviderConfigInput,
+  PiSessionFeatureValidationError,
   PIARIUM_PROTOCOL_VERSION,
   type ProviderConfigDeleteScope,
   type ProviderConfigInput,
@@ -40,6 +42,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
   providerConfiguration: true,
   recovery: true,
   resources: true,
+  sessionFeatures: true,
   sessions: true,
   settings: true,
 };
@@ -76,6 +79,17 @@ function readRecoveryMode(record: Record<string, unknown>): RecoveryMode {
     throw new HostError("invalid_params", "mode must be conversation, files, or both");
   }
   return mode;
+}
+
+function readSessionFeatureMutation(value: unknown) {
+  try {
+    return parsePiSessionFeatureMutation(value);
+  } catch (error) {
+    if (error instanceof PiSessionFeatureValidationError) {
+      throw new HostError("invalid_params", error.message);
+    }
+    throw error;
+  }
 }
 
 function readResourceKind(record: Record<string, unknown>): PiResourceKind {
@@ -317,6 +331,13 @@ export class HostController {
           }
           return this.#sessionHost.entries(readString(params, "sessionId"), scope);
         }
+      case "session.features.get":
+        return this.#sessionHost.features(readString(params, "sessionId"));
+      case "session.features.mutate":
+        return this.#sessionHost.mutateFeatures(
+          readString(params, "sessionId"),
+          readSessionFeatureMutation(params.mutation),
+        );
       case "session.entry":
         return this.#sessionHost.entry(
           readString(params, "sessionId"),

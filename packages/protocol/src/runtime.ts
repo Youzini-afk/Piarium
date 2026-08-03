@@ -30,6 +30,8 @@ type DirectRuntimeMethod =
   | "session.create"
   | "session.entry"
   | "session.entries"
+  | "session.features.get"
+  | "session.features.mutate"
   | "session.fork"
   | "session.header"
   | "session.list"
@@ -188,6 +190,8 @@ export const RUNTIME_METHODS = [
   "session.delete",
   "session.entry",
   "session.entries",
+  "session.features.get",
+  "session.features.mutate",
   "session.fork",
   "session.header",
   "session.list",
