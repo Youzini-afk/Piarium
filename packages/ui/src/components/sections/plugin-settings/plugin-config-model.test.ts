@@ -6,6 +6,7 @@ import {
   normalizeCommandWords,
   parseJsoncObject,
   readJsonPath,
+  removeJsoncPath,
   removeJsonPath,
   setJsonPath,
   updateJsoncPath,
@@ -41,6 +42,14 @@ describe('plugin config model', () => {
     expect(updated).toContain('// retained');
     expect(asJsonObject(parsed.historian).future).toBe(true);
     expect(asJsonObject(parsed.historian).model).toBe('new');
+  });
+
+  test('removes empty JSONC parents while preserving sibling fields and comments', () => {
+    const source = '{\n  "subc": { "connection_file": "connection.json" },\n  "future": {\n    // retained\n    "enabled": true\n  }\n}\n';
+    const updated = removeJsoncPath(source, ['subc', 'connection_file']);
+
+    expect(updated).toContain('// retained');
+    expect(parseJsoncObject(updated)).toEqual({ future: { enabled: true } });
   });
 
   test('normalizes and validates pi-wtf command words', () => {

@@ -24,6 +24,7 @@ import { useI18n } from '@/lib/i18n';
 import {
   asJsonObject,
   jsonObjectsEqual,
+  removeJsoncPath,
   removeJsonPath,
   setJsonPath,
   updateJsoncPath,
@@ -402,7 +403,7 @@ export const useTextObjectDraft = ({
   }, [format]);
 
   const removeValue = React.useCallback((path: readonly string[]) => {
-    const next = updateJsoncPath(contentRef.current, path, undefined);
+    const next = removeJsoncPath(contentRef.current, path);
     contentRef.current = next;
     setContent(next);
     setState((current) => ({ ...current, draft: parseTextObject(next, format) }));

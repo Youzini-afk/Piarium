@@ -129,6 +129,25 @@ export const updateJsoncPath = (
   return applyEdits(source, edits);
 };
 
+export const removeJsoncPath = (
+  content: string,
+  path: readonly string[],
+): string => {
+  let next = updateJsoncPath(content, path, undefined);
+  for (let depth = path.length - 1; depth > 0; depth -= 1) {
+    const parentPath = path.slice(0, depth);
+    const parent = readJsonPath(parseJsoncObject(next), parentPath);
+    if (
+      typeof parent !== 'object'
+      || parent === null
+      || Array.isArray(parent)
+      || Object.keys(parent).length > 0
+    ) break;
+    next = updateJsoncPath(next, parentPath, undefined);
+  }
+  return next;
+};
+
 export const validString = (value: JsonValue | undefined): string | undefined => (
   typeof value === 'string' && value.trim() ? value : undefined
 );

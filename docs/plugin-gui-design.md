@@ -134,6 +134,14 @@ Project configuration is not rendered as an identical user form. Keys stripped o
 the package's project override rules are explained and remain user-only. Expensive recompression
 requires a focused confirmation that explains range and model cost; routine operations do not.
 
+Implemented configuration slice: the native settings page now separates Overview, Context pipeline,
+Memory, Embedding and storage, Internal agents, and Dreamer tasks. It keeps independent unsaved
+user/project drafts, hides fields the real project loader strips, reports ignored fields already
+present in a project document, validates the plugin's numeric five-field cron and embedding
+requirements, and preserves polymorphic per-model maps for Advanced JSONC editing instead of
+flattening them into scalar controls. Health, database inspection, and `ctx-*` session operations
+remain a later public-contract slice rather than being inferred from configuration.
+
 Acceptance:
 
 - every field shown by the GUI maps to the current package schema and correct scope;

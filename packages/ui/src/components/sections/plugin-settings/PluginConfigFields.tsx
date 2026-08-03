@@ -84,12 +84,15 @@ const useField = ({
 
 interface StringFieldProps extends BaseFieldProps {
   allowEmpty?: boolean;
+  autoComplete?: string;
   defaultValue?: string;
+  inputType?: React.HTMLInputTypeAttribute;
   placeholder?: string;
 }
 
 export const PluginStringField: React.FC<StringFieldProps> = ({
   allowEmpty = false,
+  autoComplete,
   defaultValue = '',
   description,
   disabled,
@@ -98,6 +101,7 @@ export const PluginStringField: React.FC<StringFieldProps> = ({
   onRemove,
   onSet,
   path,
+  inputType = 'text',
   placeholder,
 }) => {
   const field = useField({ draft, onRemove, onSet, path });
@@ -105,8 +109,10 @@ export const PluginStringField: React.FC<StringFieldProps> = ({
   return (
     <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
       <Input
+        type={inputType}
         value={value}
         disabled={disabled}
+        autoComplete={autoComplete}
         placeholder={placeholder}
         onChange={(event) => {
           const next = event.target.value;
@@ -330,6 +336,100 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
           ))}
         </SelectContent>
       </Select>
+      <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
+    </SettingsFieldRow>
+  );
+};
+
+interface OptionalSelectFieldProps extends BaseFieldProps {
+  options: readonly SelectOption[];
+}
+
+export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
+  description,
+  disabled,
+  draft,
+  label,
+  onRemove,
+  onSet,
+  options,
+  path,
+}) => {
+  const { t } = useI18n();
+  const field = useField({ draft, onRemove, onSet, path });
+  const current = options.find((option) => option.value === field.raw);
+  const value = current ? optionKey(current.value) : 'default';
+  return (
+    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+      <Select
+        value={value}
+        disabled={disabled}
+        onValueChange={(key) => {
+          if (key === 'default') {
+            field.remove();
+            return;
+          }
+          const option = options.find((entry) => optionKey(entry.value) === key);
+          if (option) field.set(option.value);
+        }}
+      >
+        <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="default">
+            {t('settings.piarium.pluginSettings.field.pluginDefault')}
+          </SelectItem>
+          {options.map((option) => (
+            <SelectItem key={optionKey(option.value)} value={optionKey(option.value)}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
+    </SettingsFieldRow>
+  );
+};
+
+interface TextareaFieldProps extends BaseFieldProps {
+  allowEmpty?: boolean;
+  defaultValue?: string;
+  placeholder?: string;
+}
+
+export const PluginTextareaField: React.FC<TextareaFieldProps> = ({
+  allowEmpty = false,
+  defaultValue = '',
+  description,
+  disabled,
+  draft,
+  label,
+  onRemove,
+  onSet,
+  path,
+  placeholder,
+}) => {
+  const field = useField({ draft, onRemove, onSet, path });
+  const value = typeof field.raw === 'string' ? field.raw : defaultValue;
+  return (
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      alignEnd={false}
+      controlClassName="w-full max-w-lg items-start"
+    >
+      <Textarea
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (!next && !allowEmpty) field.remove();
+          else field.set(next);
+        }}
+        className="min-h-28 min-w-0 flex-1"
+      />
       <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
     </SettingsFieldRow>
   );
