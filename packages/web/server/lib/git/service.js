@@ -2976,14 +2976,26 @@ export async function cloneRepository(directory, options = {}) {
   if (!url) {
     throw new Error('repository url is required');
   }
+  if (/^ext::/i.test(url)) {
+    throw new Error('ext:: git remotes are not supported');
+  }
 
   const branch = String(options.branch || '').trim();
   const directoryName = String(options.directoryName || '').trim();
-  const args = ['clone'];
+  const identity = options.identity && typeof options.identity === 'object' ? options.identity : null;
+  const args = [];
+  const sshKey = typeof identity?.sshKey === 'string' ? identity.sshKey.trim() : '';
+  if (sshKey) {
+    args.push(
+      '-c',
+      `core.sshCommand=${buildSshCommand(sshKey)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`,
+    );
+  }
+  args.push('clone');
   if (branch) {
     args.push('--branch', branch);
   }
-  args.push(url);
+  args.push('--', url);
   if (directoryName) {
     args.push(directoryName);
   }
@@ -2993,11 +3005,25 @@ export async function cloneRepository(directory, options = {}) {
     throw new Error(result.message || result.stderr || result.stdout || 'Failed to clone repository');
   }
 
+  const clonedPath = directoryName
+    ? path.resolve(normalizeDirectoryPath(directory), directoryName)
+    : null;
+  if (clonedPath && identity?.userName && identity?.userEmail) {
+    try {
+      await setLocalIdentity(clonedPath, identity);
+    } catch (error) {
+      console.warn('Failed to apply git identity after clone:', error);
+    }
+  }
+
+  const output = `${result.stdout}\n${result.stderr}`.trim();
   return {
     success: true,
     stdout: result.stdout,
     stderr: result.stderr,
     directoryName: directoryName || null,
+    ...(clonedPath ? { path: normalizePath(clonedPath) } : {}),
+    ...(output ? { output } : {}),
   };
 }
 

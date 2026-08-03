@@ -6,6 +6,7 @@ import type {
 } from '@piarium/ui/lib/api/types';
 
 export const createWebGitAPI = (): GitAPI => ({
+  cloneRepository: gitApiHttp.cloneRepository,
   checkIsGitRepository: gitApiHttp.checkIsGitRepository,
   getGitStatus: gitApiHttp.getGitStatus,
   getGitDiff: gitApiHttp.getGitDiff,

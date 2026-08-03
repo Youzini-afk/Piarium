@@ -297,6 +297,18 @@ export interface GitIdentitySummary {
   sshCommand: string | null;
 }
 
+export interface GitCloneRepositoryInput {
+  remoteUrl: string;
+  destinationPath: string;
+  gitIdentity?: GitIdentityProfile | null;
+}
+
+export interface GitCloneRepositoryResult {
+  success: boolean;
+  path: string;
+  output?: string;
+}
+
 export interface GitLogEntry {
   hash: string;
   date: string;
@@ -448,6 +460,7 @@ interface GitWorktreeAPI {
 }
 
 export interface GitAPI {
+  cloneRepository(input: GitCloneRepositoryInput): Promise<GitCloneRepositoryResult>;
   checkIsGitRepository(directory: string): Promise<boolean>;
   getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
@@ -585,9 +598,10 @@ export interface FileReadOptions {
 }
 
 export interface FilesAPI {
+  getHomeDirectory(): Promise<string>;
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
-  createDirectory(path: string): Promise<{ success: boolean; path: string }>;
+  createDirectory(path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<{ success: boolean; path: string }>;
   statFile?(path: string, options?: FileReadOptions): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
   readFile?(path: string, options?: FileReadOptions): Promise<{ content: string; path: string }>;
   readFileBinary?(path: string, options?: FileReadOptions): Promise<{ dataUrl: string; path: string }>;

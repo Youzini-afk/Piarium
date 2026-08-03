@@ -1,11 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 const gitLibraries = {
+  cloneRepository: vi.fn(),
+  getProfile: vi.fn(),
+  getGlobalIdentity: vi.fn(),
   stageFiles: vi.fn(),
   unstageFiles: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
+  cloneRepository: gitLibraries.cloneRepository,
+  getProfile: gitLibraries.getProfile,
+  getGlobalIdentity: gitLibraries.getGlobalIdentity,
   stageFiles: gitLibraries.stageFiles,
   unstageFiles: gitLibraries.unstageFiles,
 }));
@@ -60,8 +69,71 @@ const createMockResponse = () => {
 
 describe('git routes index mutations', () => {
   beforeEach(() => {
+    gitLibraries.cloneRepository.mockReset();
+    gitLibraries.getProfile.mockReset();
+    gitLibraries.getGlobalIdentity.mockReset();
     gitLibraries.stageFiles.mockReset();
     gitLibraries.unstageFiles.mockReset();
+  });
+
+  it('clones a project through the Git service with the selected identity', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-git-route-clone-'));
+    const destination = path.join(root, 'demo');
+    const normalizedDestination = destination.replace(/\\/g, '/');
+    const identity = {
+      id: 'work',
+      name: 'Work',
+      userName: 'Pi User',
+      userEmail: 'pi@example.com',
+      sshKey: '/home/pi/.ssh/id_ed25519',
+    };
+    gitLibraries.getProfile.mockReturnValue(identity);
+    gitLibraries.cloneRepository.mockResolvedValue({
+      success: true,
+      path: normalizedDestination,
+      output: 'cloned',
+    });
+
+    try {
+      const { app, getRoute } = createRouteRegistry();
+      registerGitRoutes(app);
+      const response = createMockResponse();
+
+      await getRoute('POST', '/api/git/clone')({
+        body: {
+          remoteUrl: 'git@example.com:team/demo.git',
+          destinationPath: destination,
+          gitIdentityId: 'work',
+        },
+      }, response);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({ success: true, path: normalizedDestination, output: 'cloned' });
+      expect(gitLibraries.cloneRepository).toHaveBeenCalledWith(root, {
+        url: 'git@example.com:team/demo.git',
+        directoryName: 'demo',
+        identity,
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects remote-ext clone URLs before reaching Git', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/clone')({
+      body: {
+        remoteUrl: 'ext::sh -c calc',
+        destinationPath: '/projects/demo',
+      },
+    }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toEqual({ error: 'ext:: git remotes are not supported' });
+    expect(gitLibraries.cloneRepository).not.toHaveBeenCalled();
   });
 
   it('accepts legacy stage path payloads', async () => {

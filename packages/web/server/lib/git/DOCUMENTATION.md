@@ -22,6 +22,9 @@ The following functions are exported and used by the web server:
 - `hasLocalIdentity(directory)`: Check if local Git identity is configured.
 - `setLocalIdentity(directory, profile)`: Set local Git identity (userName, userEmail, authType, sshKey/host).
 - `getRemoteUrl(directory, remoteName)`: Get URL for a specific remote.
+- `cloneRepository(directory, options)`: Clone into a parent directory with an optional branch,
+  destination name, and Git identity. The public project-onboarding route is `POST /api/git/clone`;
+  it returns the normalized absolute clone path and rejects Git `ext::` remote helpers.
 
 ### Status and Diff Operations
 - `getStatus(directory)`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state.

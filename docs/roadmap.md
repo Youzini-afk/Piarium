@@ -135,6 +135,11 @@ retained before engine surgery begins.
 - Implemented: both reachable file trees now use the required cross-runtime `FilesAPI` directly;
   the unreachable OpenCode directory-list fallback and the server's `.opencode/plans` missing-path
   exception were removed. Web list mapping and the server directory-list contract are tested.
+- Implemented: project onboarding and directory selection now use Piarium runtime capabilities end
+  to end. `FilesAPI` resolves the active host home, lists directories, and explicitly creates new
+  project directories outside the current workspace; `GitAPI` clones with the selected identity on
+  Web/Electron/mobile and VS Code. The reachable directory dialog no longer calls `opencodeClient`
+  or assembles private filesystem routes.
 - Preserve local/remote authentication, workspace containment, audit, reconnect, materialization,
   queue, parent/child session, revert, fork, and archive behavior.
 

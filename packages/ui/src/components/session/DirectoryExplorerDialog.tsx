@@ -26,10 +26,9 @@ import {
   RiFolder6Line,
   RiFolderAddLine,
 } from '@remixicon/react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { opencodeClient } from '@/lib/opencode/client';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import {
   setDirectoryShowHidden,
   useDirectoryShowHidden,
@@ -135,25 +134,6 @@ const focusPathInput = (input: HTMLInputElement | null): void => {
   input.scrollLeft = input.scrollWidth;
 };
 
-const resolveFreshFilesystemHome = async (): Promise<string | null> => {
-  try {
-    const response = await runtimeFetch('/api/fs/home', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    if (response.ok) {
-      const data = await response.json() as { home?: unknown };
-      if (typeof data.home === 'string' && data.home.trim().length > 0) {
-        return normalizeSeparators(data.home.trim());
-      }
-    }
-  } catch {
-    // Fall back to the client helper below.
-  }
-
-  return opencodeClient.getFilesystemHome().catch(() => null);
-};
-
 export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = ({
   open,
   onOpenChange,
@@ -165,6 +145,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   onSelectDirectory,
 }) => {
   const { t } = useI18n();
+  const { files, git } = useRuntimeAPIs();
   const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
   const projects = useProjectsStore((s) => s.projects);
   const addProject = useProjectsStore((s) => s.addProject);
@@ -216,16 +197,16 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
     let cancelled = false;
     const resolveHome = async () => {
-      const resolved = await resolveFreshFilesystemHome();
+      const resolved = await files.getHomeDirectory().catch(() => null);
       if (cancelled) return;
-      setDialogHomeDirectory(resolved || homeDirectory || '');
+      setDialogHomeDirectory(resolved ? normalizeSeparators(resolved) : homeDirectory || '');
       requestAnimationFrame(() => focusPathInput(inputRef.current));
     };
     void resolveHome();
     return () => {
       cancelled = true;
     };
-  }, [homeDirectory, initialPath, open]);
+  }, [files, homeDirectory, initialPath, open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -282,11 +263,11 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     let cancelled = false;
     setIsLoading(true);
     setIsBrowseDirectoryMissing(false);
-    opencodeClient.listLocalDirectory(browseDirectoryAbsolutePath)
+    files.listDirectory(browseDirectoryAbsolutePath)
       .then((result) => {
         if (cancelled) return;
         setIsBrowseDirectoryMissing(false);
-        const nextEntries = result
+        const nextEntries = result.entries
           .filter((entry) => entry.isDirectory)
           .map((entry) => ({
             name: entry.name,
@@ -308,7 +289,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     return () => {
       cancelled = true;
     };
-  }, [browseDirectoryAbsolutePath, open]);
+  }, [browseDirectoryAbsolutePath, files, open]);
 
   const filteredEntries = React.useMemo(() => {
     const lowerFilter = browseFilterQuery.toLowerCase();
@@ -451,14 +432,14 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           toast.error(t('directoryExplorerDialog.toast.cloneUrlRequired'));
           return;
         }
-        const result = await opencodeClient.cloneRepository({
+        const result = await git.cloneRepository({
           remoteUrl,
           destinationPath: target,
-          gitIdentityId: selectedGitIdentity?.id ?? null,
+          gitIdentity: selectedGitIdentity,
         });
         selectedTarget = result.path;
       } else if (shouldCreateSelection) {
-        await opencodeClient.createDirectory(target);
+        await files.createDirectory(target, { allowOutsideWorkspace: true });
       }
       const added = addProject(selectedTarget);
       if (!added) {
@@ -475,7 +456,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     } finally {
       setIsConfirming(false);
     }
-  }, [addProject, addedProjectPaths, canUseCloneMode, cloneRemoteUrl, handleClose, isCloneMode, isConfirming, mode, onSelectDirectory, selectedGitIdentity?.id, shouldCreateTarget, targetPath, t]);
+  }, [addProject, addedProjectPaths, canUseCloneMode, cloneRemoteUrl, files, git, handleClose, isCloneMode, isConfirming, mode, onSelectDirectory, selectedGitIdentity, shouldCreateTarget, targetPath, t]);
 
   const browseToDisplayPath = React.useCallback((displayPath: string) => {
     setQuery(ensureBrowseDirectoryPath(displayPath));

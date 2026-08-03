@@ -12,6 +12,15 @@ import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 const normalizePath = (value: string): string => value.replace(/\\/g, '/');
 
 export const createVSCodeFilesAPI = (): FilesAPI => ({
+  async getHomeDirectory(): Promise<string> {
+    const data = await sendBridgeMessage<{ home?: string }>('api:fs:home');
+    const home = typeof data?.home === 'string' ? data.home.trim() : '';
+    if (!home) {
+      throw new Error('Failed to resolve home directory');
+    }
+    return normalizePath(home);
+  },
+
   async listDirectory(path: string, options?: { respectGitignore?: boolean }): Promise<DirectoryListResult> {
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{

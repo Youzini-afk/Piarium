@@ -3,9 +3,11 @@
  * Uses bridge messages to communicate with the extension host
  */
 
-import { sendBridgeMessage } from './bridge';
+import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
 import type {
   GitAPI,
+  GitCloneRepositoryInput,
+  GitCloneRepositoryResult,
   GitStatus,
   GitDiffResponse,
   GetGitDiffOptions,
@@ -65,6 +67,10 @@ const getGitIdentityStore = (): GitIdentityStoreApi | undefined => (
 ).__zustand_git_identities_store__;
 
 export const createVSCodeGitAPI = (): GitAPI => ({
+  cloneRepository: async (input: GitCloneRepositoryInput): Promise<GitCloneRepositoryResult> => {
+    return sendBridgeMessageWithOptions<GitCloneRepositoryResult>('api:git/clone', input, { timeoutMs: 0 });
+  },
+
   checkIsGitRepository: async (directory: string): Promise<boolean> => {
     return sendBridgeMessage<boolean>('api:git/check', { directory });
   },

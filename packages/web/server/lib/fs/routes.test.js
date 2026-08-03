@@ -471,7 +471,7 @@ describe('fs read', () => {
     expect(res.getHeader('referrer-policy')).toBe('no-referrer');
   });
 
-  it('rejects outside workspace mkdir without a trusted directory grant', async () => {
+  it('allows explicit outside-workspace directory creation for project onboarding', async () => {
     const fsPromises = {
       mkdir: vi.fn(async () => undefined),
     };
@@ -479,9 +479,9 @@ describe('fs read', () => {
 
     const res = await callMkdir(handler, { path: '/tmp/staging', allowOutsideWorkspace: true });
 
-    expect(res.statusCode).toBe(403);
-    expect(res.body).toEqual({ error: 'Outside workspace directory creation requires a grant' });
-    expect(fsPromises.mkdir).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, path: '/tmp/staging' });
+    expect(fsPromises.mkdir).toHaveBeenCalledWith('/tmp/staging', { recursive: true });
   });
 
   it('logs when empty-read retries are exhausted after non-empty stat', async () => {

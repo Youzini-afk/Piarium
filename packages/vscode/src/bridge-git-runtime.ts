@@ -22,6 +22,32 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
   const { id, type, payload } = message;
 
   switch (type) {
+    case 'api:git/clone': {
+      const { remoteUrl, destinationPath, gitIdentity } = (payload || {}) as {
+        remoteUrl?: string;
+        destinationPath?: string;
+        gitIdentity?: {
+          userName?: string;
+          userEmail?: string;
+          sshKey?: string | null;
+          signCommits?: boolean;
+          signingKey?: string | null;
+        } | null;
+      };
+      if (typeof remoteUrl !== 'string' || remoteUrl.trim().length === 0) {
+        return { id, type, success: false, error: 'Repository URL is required' };
+      }
+      if (typeof destinationPath !== 'string' || destinationPath.trim().length === 0) {
+        return { id, type, success: false, error: 'Destination path is required' };
+      }
+      const result = await gitService.cloneRepository({
+        remoteUrl: remoteUrl.trim(),
+        destinationPath: destinationPath.trim(),
+        gitIdentity: gitIdentity && typeof gitIdentity === 'object' ? gitIdentity : null,
+      });
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/check': {
       const { directory } = (payload || {}) as { directory?: string };
       const dirError = requireDirectory(id, type, directory);

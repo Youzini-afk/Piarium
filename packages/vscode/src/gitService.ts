@@ -288,6 +288,14 @@ function normalizeDirectoryPath(value: string): string {
   return trimmed;
 }
 
+function deriveCloneDirectoryName(remoteUrl: string): string {
+  const remote = remoteUrl.trim();
+  if (!remote) return '';
+  const withoutQuery = remote.split(/[?#]/, 1)[0] || remote;
+  const match = withoutQuery.match(/([^/:]+?)(?:\.git)?\/?$/);
+  return match?.[1]?.trim() || '';
+}
+
 function cleanBranchName(branch: string): string {
   if (!branch) {
     return branch;
@@ -341,6 +349,109 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
       resolve({ stdout: '', stderr: error instanceof Error ? error.message : String(error), exitCode: 1 });
     });
   });
+}
+
+export async function cloneRepository(input: {
+  remoteUrl: string;
+  destinationPath: string;
+  gitIdentity?: {
+    userName?: string;
+    userEmail?: string;
+    sshKey?: string | null;
+    signCommits?: boolean;
+    signingKey?: string | null;
+  } | null;
+}): Promise<{ success: true; path: string; output?: string }> {
+  const remote = typeof input?.remoteUrl === 'string' ? input.remoteUrl.trim() : '';
+  const destination = typeof input?.destinationPath === 'string' ? input.destinationPath.trim() : '';
+  if (!remote) {
+    throw new Error('Repository URL is required');
+  }
+  if (!destination) {
+    throw new Error('Destination path is required');
+  }
+
+  let resolvedDestination = path.resolve(normalizeDirectoryPath(destination));
+  let parentPath = path.dirname(resolvedDestination);
+  let directoryName = path.basename(resolvedDestination);
+
+  const cloneIntoDestinationDirectory = destination.endsWith('/') || destination.endsWith('\\');
+  if (cloneIntoDestinationDirectory) {
+    const inferredName = deriveCloneDirectoryName(remote);
+    if (!inferredName) {
+      throw new Error('Could not infer repository directory name from URL');
+    }
+    parentPath = resolvedDestination;
+    directoryName = inferredName;
+    resolvedDestination = path.join(parentPath, directoryName);
+  } else {
+    try {
+      const stat = await fs.promises.stat(resolvedDestination);
+      if (stat.isDirectory()) {
+        const inferredName = deriveCloneDirectoryName(remote);
+        if (!inferredName) {
+          throw new Error('Could not infer repository directory name from URL');
+        }
+        parentPath = resolvedDestination;
+        directoryName = inferredName;
+        resolvedDestination = path.join(parentPath, directoryName);
+      }
+    } catch (error) {
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
+  if (!directoryName || directoryName === '.' || directoryName === '..') {
+    throw new Error('Destination path must include a directory name');
+  }
+
+  await fs.promises.mkdir(parentPath, { recursive: true });
+  try {
+    await fs.promises.access(resolvedDestination);
+    throw new Error('Destination path already exists');
+  } catch (error) {
+    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const gitArgs = ['clone', '--', remote, directoryName];
+  const sshKey = typeof input.gitIdentity?.sshKey === 'string' ? input.gitIdentity.sshKey.trim() : '';
+  if (sshKey) {
+    gitArgs.unshift(`core.sshCommand=${buildSshCommand(sshKey)} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`);
+    gitArgs.unshift('-c');
+  }
+
+  const result = await execGit(gitArgs, parentPath);
+  const output = `${result.stdout}\n${result.stderr}`.trim();
+  if (result.exitCode !== 0) {
+    throw new Error(output || `git clone failed with exit code ${result.exitCode}`);
+  }
+
+  const userName = typeof input.gitIdentity?.userName === 'string' ? input.gitIdentity.userName.trim() : '';
+  const userEmail = typeof input.gitIdentity?.userEmail === 'string' ? input.gitIdentity.userEmail.trim() : '';
+  if (userName && userEmail) {
+    try {
+      await setGitIdentity(
+        resolvedDestination,
+        userName,
+        userEmail,
+        sshKey || null,
+        input.gitIdentity?.signCommits === true,
+        input.gitIdentity?.signingKey ?? null,
+      );
+    } catch (error) {
+      console.warn('[GitService] Failed to apply git identity after clone:', error);
+    }
+  }
+
+  return {
+    success: true,
+    path: normalizePath(resolvedDestination),
+    ...(output ? { output } : {}),
+  };
 }
 
 function isValidCommitHash(hash: string): boolean {

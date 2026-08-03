@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  cloneRepository,
   getGitBranches,
   getGitStatus,
   gitFetch,
@@ -57,6 +58,42 @@ const captureError = async (callback: () => Promise<void>): Promise<unknown> => 
 };
 
 describe('gitApiHttp index mutations', () => {
+  test('clones through the Piarium runtime and sends only the selected identity id', async () => {
+    installWindowMock();
+    const calls: FetchCall[] = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      return new Response(JSON.stringify({ success: true, path: '/projects/demo', output: 'done' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const result = await cloneRepository({
+        remoteUrl: 'git@example.com:team/demo.git',
+        destinationPath: '/projects',
+        gitIdentity: {
+          id: 'work',
+          name: 'Work',
+          userName: 'Pi User',
+          userEmail: 'pi@example.com',
+          sshKey: '/home/pi/.ssh/id_ed25519',
+        },
+      });
+      expect(result).toEqual({ success: true, path: '/projects/demo', output: 'done' });
+
+      expect(String(calls[0].input)).toBe('/api/git/clone');
+      expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+        remoteUrl: 'git@example.com:team/demo.git',
+        destinationPath: '/projects',
+        gitIdentityId: 'work',
+      });
+    } finally {
+      restoreMocks();
+    }
+  });
+
   test('sends bulk stage payloads as paths', async () => {
     installWindowMock();
     const calls = installFetchMock();

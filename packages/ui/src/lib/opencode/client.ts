@@ -1,7 +1,5 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
-import type { FilesAPI } from "../api/types";
-import { getDesktopHomeDirectory } from "../desktop";
 import type {
   Session,
   Message,
@@ -27,8 +25,6 @@ export type FetchPermissionResult =
   | { state: "unknown" };
 import { getRuntimeUrlResolver } from "@/lib/runtime-url";
 import { runtimeFetch } from "@/lib/runtime-fetch";
-import { getRuntimeKey } from "@/lib/runtime-switch";
-import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { markStartupTrace } from "@/lib/startupTrace";
 import {
   assertProviderCircuitClosed,
@@ -194,14 +190,6 @@ interface App {
   [key: string]: unknown;
 }
 
-type FilesystemEntry = {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-  isFile: boolean;
-  isSymbolicLink?: boolean;
-};
-
 export type ProjectFileSearchHit = {
   name: string;
   path: string;
@@ -237,15 +225,6 @@ type DirectorySwitchResult = {
 };
 
 const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/");
-const FS_LIST_CACHE_TTL_MS = 400;
-
-const getDesktopFilesApi = (): FilesAPI | null => {
-  const apis = getRegisteredRuntimeAPIs();
-  if (apis && apis.runtime?.isDesktop && apis.files) {
-    return apis.files;
-  }
-  return null;
-};
 
 class OpencodeService {
   private client: OpencodeClient;
@@ -253,13 +232,11 @@ class OpencodeService {
   private scopedClients: Map<string, OpencodeClient> = new Map();
   private currentDirectory: string | undefined = undefined;
   private directoryContextQueue: Promise<void> = Promise.resolve();
-  private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
   private configProvidersInFlight: Map<string, Promise<{ providers: Provider[]; default: { [key: string]: string } }>> = new Map();
   private listAgentsInFlight: Map<string, Promise<Agent[]>> = new Map();
   private configInFlight: Map<string, Promise<Config>> = new Map();
   private configCache: Map<string, { config: Config; expiresAt: number }> = new Map();
   private configCacheGeneration = 0;
-  private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const runtimeBase = resolveRuntimeBaseUrl();
@@ -281,11 +258,9 @@ class OpencodeService {
     this.baseUrl = nextBaseUrl;
     this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl });
     this.scopedClients.clear();
-    this.listDirectoryInFlight.clear();
     this.configProvidersInFlight.clear();
     this.listAgentsInFlight.clear();
     this.clearConfigCache();
-    this.listDirectoryCache.clear();
   }
 
   /** Expose the raw SDK client for direct use (e.g., SyncProvider) */
@@ -1678,143 +1653,7 @@ class OpencodeService {
     }
   }
 
-  // File System Operations
-  async createDirectory(
-    dirPath: string,
-    options?: { allowOutsideWorkspace?: boolean }
-  ): Promise<{ success: boolean; path: string }> {
-    const desktopFiles = getDesktopFilesApi();
-    if (desktopFiles?.createDirectory) {
-      try {
-        return await desktopFiles.createDirectory(dirPath);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(message || 'Failed to create directory');
-      }
-    }
-
-    const payload = {
-      path: dirPath,
-      ...(options?.allowOutsideWorkspace ? { allowOutsideWorkspace: true } : {}),
-    };
-
-    const response = await runtimeFetch(`${this.baseUrl}/fs/mkdir`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to create directory' }));
-      throw new Error(error.error || 'Failed to create directory');
-    }
-
-    const result = await response.json();
-    return result;
-  }
-
-  async cloneRepository(input: { remoteUrl: string; destinationPath: string; gitIdentityId?: string | null }): Promise<{ success: boolean; path: string; output?: string }> {
-    const response = await runtimeFetch(`${this.baseUrl}/fs/clone`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(input),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to clone repository' }));
-      throw new Error(error.error || 'Failed to clone repository');
-    }
-
-    return await response.json();
-  }
-
-  async listLocalDirectory(directoryPath: string | null | undefined, options?: { respectGitignore?: boolean }): Promise<FilesystemEntry[]> {
-    const normalizedDirectoryPath = typeof directoryPath === 'string' ? normalizeFsPath(directoryPath.trim()) : '';
-    const cacheKey = `${normalizedDirectoryPath}|${options?.respectGitignore ? '1' : '0'}`;
-    const now = Date.now();
-    const cached = this.listDirectoryCache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
-      return cached.entries;
-    }
-
-    const inFlight = this.listDirectoryInFlight.get(cacheKey);
-    if (inFlight) {
-      return inFlight;
-    }
-
-    const task = (async () => {
-    const desktopFiles = getDesktopFilesApi();
-    if (desktopFiles) {
-      try {
-        const result = await desktopFiles.listDirectory(directoryPath || '', options);
-        if (!result || !Array.isArray(result.entries)) {
-          return [];
-        }
-        const entries = result.entries.map<FilesystemEntry>((entry) => ({
-          name: entry.name,
-          path: normalizeFsPath(entry.path),
-          isDirectory: !!entry.isDirectory,
-          isFile: !entry.isDirectory,
-          isSymbolicLink: false,
-        }));
-        this.listDirectoryCache.set(cacheKey, {
-          entries,
-          expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
-        });
-        return entries;
-      } catch (error) {
-        console.error('Failed to list directory contents:', error);
-        throw error;
-      }
-    }
-
-    try {
-      const params = new URLSearchParams();
-      if (directoryPath && directoryPath.trim().length > 0) {
-        params.set('path', directoryPath);
-      }
-      if (options?.respectGitignore) {
-        params.set('respectGitignore', 'true');
-      }
-      const query = params.toString();
-      const response = await runtimeFetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
-        throw new Error(message);
-      }
-
-      const result = await response.json();
-      if (!result || !Array.isArray(result.entries)) {
-        return [];
-      }
-
-      const entries = result.entries as FilesystemEntry[];
-      this.listDirectoryCache.set(cacheKey, {
-        entries,
-        expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
-      });
-      return entries;
-    } catch (error) {
-      console.error('Failed to list directory contents:', error);
-      throw error;
-    }
-    })();
-
-    const trackedTask = task.finally(() => {
-      if (this.listDirectoryInFlight.get(cacheKey) === trackedTask) {
-        this.listDirectoryInFlight.delete(cacheKey);
-      }
-    });
-    this.listDirectoryInFlight.set(cacheKey, trackedTask);
-    return trackedTask;
-  }
-
+  // File Search Operations
   async searchFiles(
     query: string,
     options?: {
@@ -1858,47 +1697,6 @@ class OpencodeService {
     } catch (error) {
       console.error('Failed to search files:', error);
       throw error;
-    }
-  }
-
-  async getFilesystemHome(): Promise<string | null> {
-    // The injected desktop home describes the LOCAL machine. It is only a
-    // valid answer while the active runtime is the local one — after an
-    // in-place switch to a remote host the home must come from that host's
-    // /api/fs/home, not from the local Electron global.
-    const runtimeKey = getRuntimeKey();
-    if (!runtimeKey || runtimeKey === 'local') {
-      const desktopHome = await getDesktopHomeDirectory();
-      if (desktopHome) {
-        return desktopHome;
-      }
-    }
-
-    try {
-      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        const message =
-          typeof error.error === 'string' && error.error.length > 0
-            ? error.error
-            : 'Failed to resolve home directory';
-        throw new Error(message);
-      }
-
-      const payload = await response.json();
-      if (payload && typeof payload.home === 'string' && payload.home.length > 0) {
-        return payload.home;
-      }
-      return null;
-    } catch (error) {
-      console.warn('Failed to resolve filesystem home directory:', error);
-      return null;
     }
   }
 

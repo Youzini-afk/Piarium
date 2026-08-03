@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@piarium/ui/lib/gitApiHttp', () => ({
+  cloneRepository: vi.fn(),
   checkIsGitRepository: vi.fn(),
   getGitStatus: vi.fn(),
   getGitDiff: vi.fn(),
@@ -75,6 +76,7 @@ describe('createWebGitAPI', () => {
     const { createWebGitAPI } = await import('./git');
     const api = createWebGitAPI();
 
+    expect(typeof api.cloneRepository).toBe('function');
     expect(typeof api.stageGitFiles).toBe('function');
     expect(typeof api.unstageGitFiles).toBe('function');
     expect(typeof api.stageGitHunk).toBe('function');

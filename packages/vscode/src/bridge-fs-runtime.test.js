@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import * as realChildProcess from 'node:child_process';
 import { promisify } from 'node:util';
 import { spawnSync } from 'node:child_process';
+import * as os from 'node:os';
 
 const execCalls = [];
 const execMock = mock(() => {
@@ -56,6 +57,19 @@ const deps = {
   parseDroppedFileReference: mock(),
   readUriAsAttachment: mock(),
 };
+
+describe('bridge fs host paths', () => {
+  it('returns the active VS Code host home directory', async () => {
+    const response = await handleFsBridgeMessage({ id: 'home', type: 'api:fs:home' }, deps);
+
+    expect(response).toEqual({
+      id: 'home',
+      type: 'api:fs:home',
+      success: true,
+      data: { home: os.homedir() },
+    });
+  });
+});
 
 describe('bridge fs exec git read cache', () => {
   beforeEach(() => {

@@ -8,6 +8,7 @@ import { createProjectIdFromPath } from '../projects/project-id.js';
 import {
   checkoutCommit,
   cherryPick,
+  cloneRepository,
   createWorktree,
   getWorktreeBootstrapStatus,
   getStatus,
@@ -98,6 +99,32 @@ async function createTempRepo() {
   };
   return { tmpDir, git };
 }
+
+describe('cloneRepository', () => {
+  it('clones safely into the requested directory and applies the selected identity', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'README.md'), '# Source\n');
+    await git.add('README.md');
+    await git.commit('Initial commit');
+    const destinationRoot = createTempDir();
+
+    const result = await cloneRepository(destinationRoot, {
+      url: tmpDir,
+      directoryName: 'copy',
+      identity: {
+        userName: 'Pi User',
+        userEmail: 'pi@example.com',
+      },
+    });
+    const destination = path.join(destinationRoot, 'copy');
+
+    expect(path.resolve(result.path)).toBe(path.resolve(destination));
+    expect(normalizeEol(fs.readFileSync(path.join(destination, 'README.md'), 'utf8'))).toBe('# Source\n');
+    expect(runGit(destination, ['config', 'user.name']).trim()).toBe('Pi User');
+    expect(runGit(destination, ['config', 'user.email']).trim()).toBe('pi@example.com');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // resolveBaseRefForLog

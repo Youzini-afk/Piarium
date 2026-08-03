@@ -249,7 +249,7 @@ export async function handleFsBridgeMessage(
       return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedPath) } };
     }
 
-    case 'api:fs/home': {
+    case 'api:fs:home': {
       return { id, type, success: true, data: { home: deps.normalizeFsPath(os.homedir()) } };
     }
 

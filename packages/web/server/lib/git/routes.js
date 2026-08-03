@@ -1,3 +1,30 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+const deriveCloneDirectoryName = (remoteUrl) => {
+  const remote = typeof remoteUrl === 'string' ? remoteUrl.trim() : '';
+  if (!remote) return '';
+  const withoutQuery = remote.split(/[?#]/, 1)[0] || remote;
+  const match = withoutQuery.match(/([^/:]+?)(?:\.git)?\/?$/);
+  return match?.[1]?.trim() || '';
+};
+
+const resolveCloneDestinationPath = (value) => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed === '~') return os.homedir();
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    return path.resolve(os.homedir(), trimmed.slice(2));
+  }
+  return path.resolve(trimmed);
+};
+
+const extractSshKeyPath = (sshCommand) => {
+  const command = typeof sshCommand === 'string' ? sshCommand.trim() : '';
+  const match = command.match(/(?:^|\s)-i\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
+  return match?.[1] || match?.[2] || match?.[3] || null;
+};
+
 export function registerGitRoutes(app) {
   let gitLibraries = null;
   const getGitLibraries = async () => {
@@ -73,6 +100,106 @@ export function registerGitRoutes(app) {
     } catch (error) {
       console.error('Failed to discover git credentials:', error);
       res.status(500).json({ error: 'Failed to discover git credentials' });
+    }
+  });
+
+  app.post('/api/git/clone', async (req, res) => {
+    const git = await getGitLibraries();
+    try {
+      const remoteUrl = typeof req.body?.remoteUrl === 'string' ? req.body.remoteUrl.trim() : '';
+      const destinationPath = typeof req.body?.destinationPath === 'string' ? req.body.destinationPath.trim() : '';
+      const gitIdentityId = typeof req.body?.gitIdentityId === 'string' ? req.body.gitIdentityId.trim() : '';
+      if (!remoteUrl) {
+        return res.status(400).json({ error: 'Repository URL is required' });
+      }
+      if (/^ext::/i.test(remoteUrl)) {
+        return res.status(400).json({ error: 'ext:: git remotes are not supported' });
+      }
+      if (!destinationPath) {
+        return res.status(400).json({ error: 'Destination path is required' });
+      }
+
+      let resolvedDestination = resolveCloneDestinationPath(destinationPath);
+      let parentPath = path.dirname(resolvedDestination);
+      let directoryName = path.basename(resolvedDestination);
+      const cloneIntoDestinationDirectory = destinationPath.endsWith('/') || destinationPath.endsWith('\\');
+
+      if (cloneIntoDestinationDirectory) {
+        const inferredName = deriveCloneDirectoryName(remoteUrl);
+        if (!inferredName) {
+          return res.status(400).json({ error: 'Could not infer repository directory name from URL' });
+        }
+        parentPath = resolvedDestination;
+        directoryName = inferredName;
+        resolvedDestination = path.join(parentPath, directoryName);
+      } else {
+        try {
+          const stat = await fs.stat(resolvedDestination);
+          if (stat.isDirectory()) {
+            const inferredName = deriveCloneDirectoryName(remoteUrl);
+            if (!inferredName) {
+              return res.status(400).json({ error: 'Could not infer repository directory name from URL' });
+            }
+            parentPath = resolvedDestination;
+            directoryName = inferredName;
+            resolvedDestination = path.join(parentPath, directoryName);
+          }
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+      }
+
+      if (!directoryName || directoryName === '.' || directoryName === '..') {
+        return res.status(400).json({ error: 'Destination path must include a directory name' });
+      }
+
+      let identity = null;
+      if (gitIdentityId === 'global') {
+        const globalIdentity = await git.getGlobalIdentity();
+        if (!globalIdentity?.userName || !globalIdentity?.userEmail) {
+          return res.status(404).json({ error: 'Global identity is not configured' });
+        }
+        identity = {
+          id: 'global',
+          name: 'Global Identity',
+          userName: globalIdentity.userName,
+          userEmail: globalIdentity.userEmail,
+          sshKey: extractSshKeyPath(globalIdentity.sshCommand),
+        };
+      } else if (gitIdentityId) {
+        identity = git.getProfile(gitIdentityId);
+        if (!identity) {
+          return res.status(404).json({ error: 'Git identity profile not found' });
+        }
+      }
+
+      await fs.mkdir(parentPath, { recursive: true });
+      try {
+        await fs.access(resolvedDestination);
+        return res.status(409).json({ error: 'Destination path already exists' });
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+
+      const result = await git.cloneRepository(parentPath, {
+        url: remoteUrl,
+        directoryName,
+        identity,
+      });
+      const clonedPath = typeof result?.path === 'string' && result.path.trim()
+        ? result.path.replace(/\\/g, '/')
+        : resolvedDestination.replace(/\\/g, '/');
+      const output = typeof result?.output === 'string'
+        ? result.output
+        : `${result?.stdout || ''}\n${result?.stderr || ''}`.trim();
+      return res.json({
+        success: true,
+        path: clonedPath,
+        ...(output ? { output } : {}),
+      });
+    } catch (error) {
+      console.error('Failed to clone repository:', error);
+      return res.status(500).json({ error: error?.message || 'Failed to clone repository' });
     }
   });
 

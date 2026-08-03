@@ -26,6 +26,8 @@ import type {
   CommitFileDiffResponse,
   GitIdentityProfile,
   GitIdentitySummary,
+  GitCloneRepositoryInput,
+  GitCloneRepositoryResult,
   DiscoveredGitCredential,
   MergeConflictDetails,
   CheckoutCommitResponse,
@@ -75,6 +77,36 @@ function buildUrl(
   if (directory) query.directory = directory;
 
   return getRuntimeUrlResolver().api(path, query);
+}
+
+export async function cloneRepository(input: GitCloneRepositoryInput): Promise<GitCloneRepositoryResult> {
+  const response = await runtimeFetch('/api/git/clone', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      remoteUrl: input.remoteUrl,
+      destinationPath: input.destinationPath,
+      gitIdentityId: input.gitIdentity?.id ?? null,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to clone repository');
+  }
+
+  const result = await response.json().catch(() => null) as Partial<GitCloneRepositoryResult> | null;
+  if (result?.success !== true || typeof result.path !== 'string' || result.path.trim().length === 0) {
+    throw new Error('Malformed clone repository response');
+  }
+  return {
+    success: true,
+    path: result.path.replace(/\\/g, '/'),
+    ...(typeof result.output === 'string' ? { output: result.output } : {}),
+  };
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {

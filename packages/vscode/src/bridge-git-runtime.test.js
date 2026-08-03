@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 const gitService = {
+  cloneRepository: mock(),
   stageGitFiles: mock(),
   unstageGitFiles: mock(),
   checkoutCommit: mock(),
@@ -17,6 +18,7 @@ const { handleStandardGitBridgeMessage } = await import('./bridge-git-runtime');
 
 describe('bridge git runtime index mutations', () => {
   beforeEach(() => {
+    gitService.cloneRepository.mockReset();
     gitService.stageGitFiles.mockReset();
     gitService.unstageGitFiles.mockReset();
     gitService.checkoutCommit.mockReset();
@@ -25,6 +27,64 @@ describe('bridge git runtime index mutations', () => {
     gitService.resetToCommit.mockReset();
     gitService.createWorktree.mockReset();
     gitService.getWorktreeBootstrapStatus.mockReset();
+  });
+
+  it('clones repositories with the selected Git identity', async () => {
+    gitService.cloneRepository.mockResolvedValue({ success: true, path: '/projects/demo' });
+    const gitIdentity = {
+      userName: 'Pi User',
+      userEmail: 'pi@example.com',
+      sshKey: '/home/pi/.ssh/id_ed25519',
+    };
+
+    const response = await handleStandardGitBridgeMessage({
+      id: 'clone',
+      type: 'api:git/clone',
+      payload: {
+        remoteUrl: 'git@example.com:team/demo.git',
+        destinationPath: '/projects',
+        gitIdentity,
+      },
+    });
+
+    expect(response).toEqual({
+      id: 'clone',
+      type: 'api:git/clone',
+      success: true,
+      data: { success: true, path: '/projects/demo' },
+    });
+    expect(gitService.cloneRepository).toHaveBeenCalledWith({
+      remoteUrl: 'git@example.com:team/demo.git',
+      destinationPath: '/projects',
+      gitIdentity,
+    });
+  });
+
+  it('rejects incomplete clone requests before reaching git service', async () => {
+    const missingUrl = await handleStandardGitBridgeMessage({
+      id: 'clone-url',
+      type: 'api:git/clone',
+      payload: { destinationPath: '/projects' },
+    });
+    const missingDestination = await handleStandardGitBridgeMessage({
+      id: 'clone-destination',
+      type: 'api:git/clone',
+      payload: { remoteUrl: 'https://example.com/demo.git' },
+    });
+
+    expect(missingUrl).toEqual({
+      id: 'clone-url',
+      type: 'api:git/clone',
+      success: false,
+      error: 'Repository URL is required',
+    });
+    expect(missingDestination).toEqual({
+      id: 'clone-destination',
+      type: 'api:git/clone',
+      success: false,
+      error: 'Destination path is required',
+    });
+    expect(gitService.cloneRepository).not.toHaveBeenCalled();
   });
 
   it('accepts legacy stage path payloads', async () => {

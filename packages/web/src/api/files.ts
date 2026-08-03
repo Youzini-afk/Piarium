@@ -51,6 +51,26 @@ const directoryHeaders = (getDirectory?: () => string | undefined, override?: st
 };
 
 export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({
+  async getHomeDirectory(): Promise<string> {
+    const response = await runtimeFetch('/api/fs/home', {
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error((error as { error?: string }).error || 'Failed to resolve home directory');
+    }
+
+    const result = await response.json().catch(() => ({}));
+    const home = typeof (result as { home?: unknown }).home === 'string'
+      ? (result as { home: string }).home.trim()
+      : '';
+    if (!home) {
+      throw new Error('Failed to resolve home directory');
+    }
+    return normalizePath(home);
+  },
+
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
     const params = new URLSearchParams();
@@ -110,12 +130,15 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     }));
   },
 
-  async createDirectory(path: string): Promise<{ success: boolean; path: string }> {
+  async createDirectory(path: string, options): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/mkdir', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
-      body: JSON.stringify({ path: target }),
+      body: JSON.stringify({
+        path: target,
+        allowOutsideWorkspace: options?.allowOutsideWorkspace === true,
+      }),
     });
 
     if (!response.ok) {

@@ -25,6 +25,18 @@ const urls: RuntimeUrlResolver = {
 };
 
 describe('createWebFilesAPI', () => {
+  it('resolves the active runtime home directory', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ home: 'C:\\Users\\Pi' }));
+
+    await expect(api.getHomeDirectory()).resolves.toBe('C:/Users/Pi');
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/home', {
+      headers: { Accept: 'application/json' },
+    });
+  });
+
   it('lists directories through the Piarium files endpoint', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
@@ -47,6 +59,26 @@ describe('createWebFilesAPI', () => {
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/list', {
       query: new URLSearchParams({ path: '/current-workspace', respectGitignore: 'true' }),
       headers: { 'x-piarium-directory': '/current-workspace' },
+    });
+  });
+
+  it('opts into outside-workspace directory creation for project onboarding', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ success: true, path: '/projects/new-app' }));
+
+    await expect(api.createDirectory('/projects/new-app', { allowOutsideWorkspace: true })).resolves.toEqual({
+      success: true,
+      path: '/projects/new-app',
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/mkdir', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-piarium-directory': '/current-workspace',
+      },
+      body: JSON.stringify({ path: '/projects/new-app', allowOutsideWorkspace: true }),
     });
   });
 
