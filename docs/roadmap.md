@@ -142,7 +142,7 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   navigation remains Pi-native; combined/files recovery, checkpoint, undo/redo, and repair are
   delegated to the installed `pi-workspace-history` / `pi-wtf` providers through their public
   bridge and commands, so package updates remain authoritative.
-- Put provider status/checkpoint/history management in the right sidebar/settings while retaining
+- Implemented: put provider status/checkpoint/history management in the right sidebar/settings while retaining
   the existing timeline, reverted-message dock, undo/redo, and fork UX. Enable files-only/preview
   controls only when a plugin advertises them through recovery bridge v1.
 

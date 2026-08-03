@@ -16,6 +16,13 @@ or rewrite that private state into an application database.
 - the normal entry point stays on the existing per-message revert action, while detailed controls
   belong in the right sidebar or settings.
 
+The desktop/web right-side Recovery surface now shows current provider health and issues, lets the
+user choose conversation or combined scope, and exposes undo, redo, named checkpoints, and all
+advertised prompt-repair actions. Each control is enabled only when one active provider advertises
+both the requested action and mode; Piarium never combines the independent global action and mode
+unions into a capability that no provider actually offers. Destructive prompt repair has its own
+explicit confirmation.
+
 Returning to a user entry restores its text and images to the composer. Piarium reports the provider
 that handled every operation. Native and bridged operations report `applied` or `cancelled` when
 known. Current command-only plugins do not return structured results, so their fallback result is
@@ -37,6 +44,10 @@ the current public releases without pinning their internal storage formats:
 command result. Those capabilities remain unavailable rather than falling back to a duplicate
 Piarium engine. When the plugin adds them through the bridge, the same Piarium UI can enable them
 without reading `turn-snapshots.json` or any other private file.
+
+`pi-wtf` is reported as a conversation-repair provider. Installing workspace history does not make
+`pi-wtf` claim combined file recovery; that capability remains attributed to the provider that
+actually owns workspace snapshots.
 
 ## Recovery bridge v1
 
@@ -102,3 +113,6 @@ bypass of workspace hooks for conversation-only recovery, combined navigation th
 workspace-history hook, command delegation for checkpoints and `pi-wtf`, bridge v1 discovery, and
 files-only execution by a bridged provider. Protocol, broker, and packaged-host tests verify that
 the capability contract crosses the isolated worker boundary.
+
+UI tests additionally cover provider-local action/mode capability checks, all sidebar recovery
+store operations, single-instance Recovery surface behavior, and independent per-surface width.

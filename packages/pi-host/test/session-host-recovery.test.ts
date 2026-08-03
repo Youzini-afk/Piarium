@@ -110,8 +110,14 @@ export default function recoveryBridge(pi: any) {
       assert.ok(status.actions.includes("repair"));
       assert.ok(status.actions.includes("repair-typo"));
       assert.ok(status.actions.includes("repair-destructive"));
-      assert.ok(status.providers.some((provider) => provider.id === "pi-workspace-history"));
-      assert.ok(status.providers.some((provider) => provider.id === "pi-wtf"));
+      assert.deepEqual(
+        status.providers.find((provider) => provider.id === "pi-workspace-history")?.modes,
+        ["both"],
+      );
+      assert.deepEqual(
+        status.providers.find((provider) => provider.id === "pi-wtf")?.modes,
+        ["conversation"],
+      );
 
       const conversation = await host.navigateRecovery(
         snapshot.sessionId,

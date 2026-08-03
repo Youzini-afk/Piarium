@@ -3052,6 +3052,22 @@ export const dict = {
   'workspace.terminal.error.sendFailed': 'Failed to send input',
   'workspace.terminal.status.connecting': 'Connecting...',
   'workspace.terminal.status.processExited': 'process exited',
+  'contextPanel.mode.recovery': 'Récupération',
+  'contextRail.surface.recovery.description': 'Récupération de session, points de contrôle et réparation des instructions',
+  'contextPanel.recovery.combinedUnavailable': 'La récupération de la conversation et des fichiers est indisponible dans cette session. Activez un fournisseur prenant en charge l’annulation combinée.',
+  'contextPanel.recovery.sessionBusy': 'Attendez la fin de l’exécution Pi active avant de modifier l’historique.',
+  'contextPanel.recovery.actions.undo': 'Annuler',
+  'contextPanel.recovery.actions.redo': 'Rétablir',
+  'contextPanel.recovery.actions.checkpoint': 'Créer un point de contrôle',
+  'contextPanel.recovery.checkpoint.placeholder': 'Nom du point de contrôle',
+  'contextPanel.recovery.actions.repair': 'Réparer l’instruction',
+  'contextPanel.recovery.actions.repairTypo': 'Corriger la faute de frappe',
+  'contextPanel.recovery.actions.repairDestructive': 'Réparation destructive',
+  'contextPanel.recovery.toast.failed': 'Échec de la récupération : {message}',
+  'contextPanel.recovery.toast.applied': 'Récupération appliquée par {provider}',
+  'contextPanel.recovery.toast.cancelled': '{provider} a annulé la récupération',
+  'contextPanel.recovery.toast.delegated': 'La récupération a été déléguée à {provider} ; l’extension indiquera le résultat final',
+  'contextPanel.recovery.destructive.description': 'La réparation destructive réécrit l’historique de session Pi. Elle est irréversible et n’annule ni les fichiers ni les effets externes.',
 } as const;
 
 export type I18nKey = keyof typeof dict;

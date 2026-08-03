@@ -591,6 +591,68 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([]);
   });
 
+  test('executes sidebar recovery controls through the session store', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method, params) => {
+      const sessionId = (params as { sessionId?: string }).sessionId ?? '';
+      if (method === 'session.entries') return branch(sessionId);
+      if (method === 'recovery.status') return recoveryStatus;
+      if (method === 'recovery.checkpoint.create') {
+        return {
+          action: 'checkpoint',
+          handledBy: 'pi-workspace-history',
+          outcome: 'unknown',
+          snapshot: snapshot(sessionId),
+        };
+      }
+      if (method === 'recovery.undo' || method === 'recovery.redo') {
+        return {
+          action: method === 'recovery.undo' ? 'undo' : 'redo',
+          handledBy: method === 'recovery.undo' ? 'pi-native' : 'pi-workspace-history',
+          mode: (params as { mode: 'conversation' | 'both' }).mode,
+          outcome: 'applied',
+          snapshot: snapshot(sessionId),
+        };
+      }
+      if (method === 'recovery.repair') {
+        return {
+          action: 'repair-typo',
+          handledBy: 'pi-wtf',
+          outcome: 'unknown',
+          snapshot: snapshot(sessionId),
+        };
+      }
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    await store.getState().createRecoveryCheckpoint('session-a', 'Known good');
+    await store.getState().undoRecovery('session-a', 'conversation');
+    await store.getState().redoRecovery('session-a', 'both');
+    await store.getState().repairRecovery('session-a', 'recover-typo');
+
+    expect(runtime.calls.filter((call) => call.method.startsWith('recovery.') && call.method !== 'recovery.status'))
+      .toEqual([
+        {
+          method: 'recovery.checkpoint.create',
+          params: { name: 'Known good', sessionId: 'session-a' },
+        },
+        {
+          method: 'recovery.undo',
+          params: { mode: 'conversation', sessionId: 'session-a' },
+        },
+        {
+          method: 'recovery.redo',
+          params: { mode: 'both', sessionId: 'session-a' },
+        },
+        {
+          method: 'recovery.repair',
+          params: { action: 'recover-typo', sessionId: 'session-a' },
+        },
+      ]);
+    expect(store.getState().records['session-a']?.snapshot?.sessionId).toBe('session-a');
+  });
+
   test('resets catalog, current session, and event ownership on runtime change', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

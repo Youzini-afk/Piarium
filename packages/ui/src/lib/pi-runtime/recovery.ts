@@ -1,7 +1,9 @@
 import type {
+  RecoveryAction,
   RecoveryMode,
   RecoveryPreference,
   RecoveryRepairAction,
+  RecoveryStatus,
 } from '@piarium/protocol';
 import { getPiRuntimeConnection } from './client';
 
@@ -10,6 +12,27 @@ export const recoveryModeFromPreference = (
 ): Exclude<RecoveryMode, 'files'> | null => (
   preference === 'ask' ? null : preference
 );
+
+export const supportsPiRecoveryAction = (
+  status: RecoveryStatus | null | undefined,
+  action: RecoveryAction,
+  mode?: RecoveryMode,
+): boolean => (
+  status?.providers.some((provider) => (
+    provider.active
+    && provider.actions.includes(action)
+    && (mode === undefined || provider.modes.includes(mode))
+  )) === true
+);
+
+export const recoveryModeForStatus = (
+  preference: RecoveryPreference,
+  status: RecoveryStatus | null | undefined,
+): Exclude<RecoveryMode, 'files'> | null => {
+  const mode = recoveryModeFromPreference(preference);
+  if (mode !== 'both') return mode;
+  return supportsPiRecoveryAction(status, 'navigate', 'both') ? mode : null;
+};
 
 export const getPiRecoveryStatus = async (sessionId: string) => {
   const { client } = await getPiRuntimeConnection();

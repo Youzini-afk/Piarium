@@ -10,6 +10,7 @@ import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
 import { PlanView } from '@/components/views/PlanView';
 import { ProjectContextPanel } from './RightSidebarTabs';
+import { PiRecoveryPanel } from './PiRecoveryPanel';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { openExternalUrl } from '@/lib/url';
@@ -165,6 +166,7 @@ const getModeLabel = (
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
+  if (mode === 'recovery') return t('contextPanel.mode.recovery');
   return t('contextPanel.mode.context');
 };
 
@@ -269,6 +271,10 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
 
   if (tab.mode === 'context') {
     return <Icon name="donut-chart-fill" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'recovery') {
+    return <Icon name="history" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'chat') {
@@ -2663,6 +2669,8 @@ export const ContextPanel: React.FC = () => {
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
+        : activeTab?.mode === 'recovery'
+            ? <PiRecoveryPanel />
         : activeTab?.mode === 'git'
             ? (
               <GitView

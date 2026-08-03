@@ -3054,6 +3054,22 @@ export const dict = {
   'workspace.terminal.error.sendFailed': 'Failed to send input',
   'workspace.terminal.status.connecting': 'Connecting...',
   'workspace.terminal.status.processExited': 'process exited',
+  'contextPanel.mode.recovery': 'Recovery',
+  'contextRail.surface.recovery.description': 'Session recovery, checkpoints, and prompt repair',
+  'contextPanel.recovery.combinedUnavailable': 'Conversation-and-files recovery is unavailable in this session. Activate a provider that supports combined undo.',
+  'contextPanel.recovery.sessionBusy': 'Wait for the active Pi run before changing history.',
+  'contextPanel.recovery.actions.undo': 'Undo',
+  'contextPanel.recovery.actions.redo': 'Redo',
+  'contextPanel.recovery.actions.checkpoint': 'Create checkpoint',
+  'contextPanel.recovery.checkpoint.placeholder': 'Checkpoint name',
+  'contextPanel.recovery.actions.repair': 'Repair prompt',
+  'contextPanel.recovery.actions.repairTypo': 'Repair typo',
+  'contextPanel.recovery.actions.repairDestructive': 'Destructive repair',
+  'contextPanel.recovery.toast.failed': 'Recovery failed: {message}',
+  'contextPanel.recovery.toast.applied': 'Recovery applied by {provider}',
+  'contextPanel.recovery.toast.cancelled': '{provider} cancelled the recovery',
+  'contextPanel.recovery.toast.delegated': 'Recovery was delegated to {provider}; the plugin will report the final result',
+  'contextPanel.recovery.destructive.description': 'Destructive repair rewrites the Pi session history. This cannot be undone and does not reverse file or external side effects.',
 } as const;
 
 export type I18nKey = keyof typeof dict;

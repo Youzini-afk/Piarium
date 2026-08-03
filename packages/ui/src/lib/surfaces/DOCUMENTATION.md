@@ -43,5 +43,8 @@ the `openContext*` actions in `useUIStore`.
   positions). Singleton surfaces (git, pr, notes, plan, context) and preview
   tabs intentionally remount on switch and must restore themselves from
   their stores/snapshots instead.
+- Recovery is a singleton surface. It follows the currently selected Pi session
+  and reads provider state from `usePiSessionStore`; history and snapshots
+  remain owned by Pi and the active recovery extensions.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.

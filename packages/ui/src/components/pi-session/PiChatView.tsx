@@ -30,6 +30,7 @@ import {
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
+import { recoveryModeForStatus, supportsPiRecoveryAction } from '@/lib/pi-runtime/recovery';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -83,6 +84,15 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
   const recoveryPreference = useUIStore((state) => state.recoveryPreference);
+  const supportsCombinedRecovery = supportsPiRecoveryAction(
+    currentRecord?.recoveryStatus,
+    'navigate',
+    'both',
+  );
+  const preferredRecoveryMode = recoveryModeForStatus(
+    recoveryPreference,
+    currentRecord?.recoveryStatus,
+  );
   const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
@@ -244,12 +254,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   }, [currentSessionId, recoverTo, t, updateDraft]);
 
   const handleRecover = React.useCallback((entry: PiSessionMessageEntry) => {
-    if (recoveryPreference === 'ask') {
+    if (preferredRecoveryMode === null) {
       setRecoveryEntry(entry);
       return;
     }
-    void runRecovery(entry, recoveryPreference);
-  }, [recoveryPreference, runRecovery]);
+    void runRecovery(entry, preferredRecoveryMode);
+  }, [preferredRecoveryMode, runRecovery]);
 
   const handleTogglePinned = React.useCallback(async (
     entry: PiSessionMessageEntry,
@@ -318,8 +328,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const title = extensionUi?.title?.trim() || (currentSummary
     ? piSessionTitle(currentSummary, untitled)
     : snapshot.name?.trim() || untitled);
-  const supportsCombinedRecovery = currentRecord.recoveryStatus?.modes.includes('both') === true;
-
   return (
     <TooltipProvider>
       <div className={cn('flex h-full min-h-0 flex-col bg-background', !active && 'pointer-events-none')}>
@@ -445,6 +453,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
               <span className="mt-1 block typography-meta text-muted-foreground">
                 {t('settings.piarium.recovery.preference.both.description')}
               </span>
+              {!supportsCombinedRecovery ? (
+                <span className="mt-2 block typography-meta text-[var(--status-warning)]">
+                  {t('contextPanel.recovery.combinedUnavailable')}
+                </span>
+              ) : null}
             </button>
           </div>
           <DialogFooter>

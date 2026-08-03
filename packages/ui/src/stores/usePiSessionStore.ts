@@ -77,6 +77,7 @@ export interface PiSessionStoreState {
   abort(sessionId: string): Promise<boolean>;
   archiveSession(sessionId: string): Promise<SessionSummary>;
   closeSession(sessionId: string): Promise<boolean>;
+  createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryOperationResult>;
   createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
   executeCommand(sessionId: string, command: string): Promise<JsonValue>;
@@ -834,6 +835,11 @@ export const createPiSessionStore = (
           text,
         });
         return result.accepted;
+      },
+
+      createRecoveryCheckpoint: async (sessionId, name) => {
+        const { result } = await request('recovery.checkpoint.create', { name, sessionId });
+        return applyRecoveryResult(sessionId, result);
       },
 
       recoverTo: async (sessionId, targetId, mode, summarize) => {

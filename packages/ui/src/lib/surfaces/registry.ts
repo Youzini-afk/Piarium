@@ -11,6 +11,7 @@ export type ContextSurfaceId =
   | 'plan'
   | 'notes'
   | 'context'
+  | 'recovery'
   | 'browser'
   | 'preview'
   | 'chat';
@@ -45,6 +46,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'context',
     icon: 'donut-chart-fill',
     labelKey: 'contextPanel.mode.context',
+    availability: 'always',
+  },
+  {
+    id: 'recovery',
+    descriptionKey: 'contextRail.surface.recovery.description',
+    defaultWidthFraction: 0.4,
+    mode: 'recovery',
+    icon: 'history',
+    labelKey: 'contextPanel.mode.recovery',
     availability: 'always',
   },
   {

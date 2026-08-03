@@ -41,6 +41,21 @@ describe('useUIStore openContextSurface', () => {
     expect(state?.tabs.map((tab) => tab.mode)).toEqual(['diff']);
   });
 
+  test('opens recovery as a persistent singleton surface', () => {
+    useUIStore.getState().openContextSurface(directory, 'recovery');
+    useUIStore.getState().setContextPanelWidth(directory, 'recovery', 640);
+
+    let state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(true);
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['recovery']);
+    expect(state?.widthByMode.recovery).toBe(640);
+
+    useUIStore.getState().openContextSurface(directory, 'recovery');
+    state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(false);
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['recovery']);
+  });
+
   test('activates the existing tab of the requested mode instead of duplicating it', () => {
     useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
     useUIStore.getState().openContextPanelTab(directory, { mode: 'file', targetPath: '/repo/a.ts' });

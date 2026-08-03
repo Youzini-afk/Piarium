@@ -288,7 +288,7 @@ export class RecoveryPluginAdapter {
         actions: [...new Set(actions)],
         active: wtfLoaded,
         id: "pi-wtf",
-        modes: wtfLoaded ? [workspaceLoaded ? "both" : "conversation"] : [],
+        modes: wtfLoaded ? ["conversation"] : [],
         name: "Pi WTF",
         ...(source === undefined ? {} : { source }),
       });

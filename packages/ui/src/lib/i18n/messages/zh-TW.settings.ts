@@ -2549,7 +2549,7 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.advanced.custom': 'Other plugin · custom JSON/JSONC',
   'settings.piarium.pluginSettings.advanced.customPath': 'Relative configuration path, for example extensions/example/config.jsonc',
   'settings.piarium.pluginSettings.advanced.loadCustom': 'Load',
-  'settings.piarium.recovery.actions.configure': 'Configure',
+  'settings.piarium.recovery.actions.configure': '設定',
   'settings.piarium.pluginSettings.webAccess.provider.baseDescription': 'General provider fallback. searchProvider, when set, takes precedence for search calls.',
   'settings.page.prompts.title': 'Prompts',
   'settings.piarium.resources.search.placeholder': 'Search name, description, path, or source',
