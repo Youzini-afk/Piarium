@@ -466,7 +466,6 @@ export const settingsDict = {
   'settings.projects.actions.toast.saved': 'プロジェクトアクションを保存しました',
   'settings.openchamber.about.title': 'Piarium について',
   'settings.openchamber.about.field.version': 'バージョン',
-  'settings.openchamber.about.field.openCodeVersion': 'OpenCode バージョン',
   'settings.openchamber.about.state.checking': '確認中...',
   'settings.openchamber.about.state.upToDate': '最新です',
   'settings.openchamber.about.state.unknown': '不明',

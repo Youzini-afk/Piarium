@@ -1702,7 +1702,6 @@ export const settingsDict = {
   'settings.remoteInstances.relay.toast.disableFailed': 'Échec de la désactivation du relais',
   'settings.remoteInstances.relay.toast.offerFailed': 'Échec de la création du lien d’association',
   'settings.remoteInstances.relay.toast.linkCopied': 'Lien d’association copié',
-  'settings.openchamber.about.field.openCodeVersion': 'Version d’OpenCode',
   'settings.openchamber.about.state.unknown': 'inconnue',
   'settings.voice.page.field.ttsInputMode': 'Mode d’entrée TTS',
   'settings.voice.page.field.ttsInputModeSanitized': 'Nettoyé',

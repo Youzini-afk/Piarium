@@ -24,7 +24,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   const { t } = useI18n();
   const showDiagnostics = import.meta.env.DEV;
   const [version, setVersion] = React.useState<string | null>(null);
-  const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null>(null);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
   const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = React.useState<string | null>(null);
@@ -68,8 +67,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
         const response = await runtimeFetch('/api/system/info');
         if (response.ok) {
           const data = await response.json();
-          if (typeof data.openchamberVersion === 'string' && data.openchamberVersion.trim()) {
-            setVersion(data.openchamberVersion);
+          if (typeof data.piariumVersion === 'string' && data.piariumVersion.trim()) {
+            setVersion(data.piariumVersion);
             return;
           }
         }
@@ -81,32 +80,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     };
 
     void fetchVersion();
-  }, [open]);
-
-  React.useEffect(() => {
-    if (!open) return;
-
-    let cancelled = false;
-    const fetchOpenCodeVersion = async () => {
-      try {
-        const response = await runtimeFetch('/api/opencode/upgrade-status', {
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) return;
-        const data = await response.json().catch(() => null) as null | { currentVersion?: unknown };
-        const currentVersion = typeof data?.currentVersion === 'string' ? data.currentVersion.trim() : '';
-        if (!cancelled && currentVersion) {
-          setOpenCodeVersion(currentVersion);
-        }
-      } catch {
-        // OpenCode version is best-effort in About.
-      }
-    };
-
-    void fetchOpenCodeVersion();
-    return () => {
-      cancelled = true;
-    };
   }, [open]);
 
   React.useEffect(() => {
@@ -152,9 +125,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               {displayVersion && (
                 <p>{t('aboutDialog.versionLabel', { version: displayVersion })}</p>
               )}
-              {openCodeVersion && (
-                <p>OpenCode {openCodeVersion}</p>
-              )}
             </div>
           </div>
 
@@ -184,7 +154,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           <div className="flex flex-col items-center gap-2 pt-2">
             <div className="flex items-center justify-center gap-4">
               <a
-                href="https://github.com/openchamber/openchamber"
+                href="https://github.com/Youzini-afk/Piarium"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
@@ -192,25 +162,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
                 <Icon name="github-fill" className="h-4 w-4" />
                 <span>GitHub</span>
               </a>
-              <a
-                href="https://discord.gg/ZYRSdnwwKA"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <Icon name="discord-fill" className="h-4 w-4" />
-                <span>Discord</span>
-              </a>
             </div>
-            <a
-              href="https://x.com/openchamber_dev"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Icon name="twitter-xfill" className="h-4 w-4" />
-              <span>@openchamber_dev</span>
-            </a>
           </div>
 
           <p className="typography-meta text-muted-foreground/60 pt-2">

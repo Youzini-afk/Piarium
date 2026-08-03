@@ -430,7 +430,6 @@ export const settingsDict = {
   'settings.projects.actions.toast.saved': '프로젝트 작업이 저장되었습니다',
   'settings.openchamber.about.title': 'Piarium 정보',
   'settings.openchamber.about.field.version': '버전',
-  'settings.openchamber.about.field.openCodeVersion': 'OpenCode 버전',
   'settings.openchamber.about.state.checking': '확인 중...',
   'settings.openchamber.about.state.upToDate': '최신 상태',
   'settings.openchamber.about.state.unknown': '알 수 없음',

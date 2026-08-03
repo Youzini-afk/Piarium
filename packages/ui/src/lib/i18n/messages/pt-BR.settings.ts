@@ -430,7 +430,6 @@ export const settingsDict = {
   "settings.projects.actions.toast.saved": "Ações do projeto salvas",
   "settings.openchamber.about.title": "Sobre o Piarium",
   "settings.openchamber.about.field.version": "Versão",
-  "settings.openchamber.about.field.openCodeVersion": "Versão do OpenCode",
   "settings.openchamber.about.state.checking": "Verificando...",
   "settings.openchamber.about.state.upToDate": "Atualizado",
   "settings.openchamber.about.state.unknown": "desconhecido",

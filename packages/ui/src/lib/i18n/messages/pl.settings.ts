@@ -439,7 +439,6 @@ export const settingsDict = {
   'settings.openchamber.about.actions.update': 'Aktualizuj',
   'settings.openchamber.about.actions.updateToVersion': 'Aktualizuj do wersji {version}',
   'settings.openchamber.about.field.version': 'Wersja',
-  'settings.openchamber.about.field.openCodeVersion': 'Wersja OpenCode',
   'settings.openchamber.about.state.checking': 'Sprawdzanie...',
   'settings.openchamber.about.state.upToDate': 'Aktualna wersja',
   'settings.openchamber.about.state.unknown': 'nieznane',

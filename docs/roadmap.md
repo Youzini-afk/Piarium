@@ -124,6 +124,10 @@ retained before engine surgery begins.
   entrypoint no longer creates OpenCode configuration or installs oh-my-opencode, Compose no longer
   mounts or advertises OpenCode state, and remote deployment no longer discovers an OpenCode
   binary. The unreachable managed OpenCode system-prompt injector and its tests were removed.
+- Implemented: About now reads the server's real `piariumVersion`, links to the Piarium repository,
+  and no longer probes or displays a nonexistent OpenCode upgrade endpoint. The unreachable
+  OpenCode upgrade toast, its persisted preferences, and its Web settings API shim were removed;
+  Piarium application updates and the independent PWA install prompt remain intact.
 - Preserve local/remote authentication, workspace containment, audit, reconnect, materialization,
   queue, parent/child session, revert, fork, and archive behavior.
 

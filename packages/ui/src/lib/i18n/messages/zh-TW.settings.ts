@@ -427,7 +427,6 @@ export const settingsDict = {
   'settings.projects.actions.toast.saved': '專案操作已儲存',
   'settings.openchamber.about.title': '關於 Piarium',
   'settings.openchamber.about.field.version': '版本',
-  'settings.openchamber.about.field.openCodeVersion': 'OpenCode 版本',
   'settings.openchamber.about.state.checking': '檢查中...',
   'settings.openchamber.about.state.upToDate': '已是最新',
   'settings.openchamber.about.state.unknown': '未知',
