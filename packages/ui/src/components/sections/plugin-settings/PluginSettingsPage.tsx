@@ -1,5 +1,10 @@
 import React from 'react';
-import type { PackageDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type {
+  PackageDescriptor,
+  PiAgentCatalogSnapshot,
+  RuntimeContextTarget,
+} from '@piarium/protocol';
+import { usePiChatCatalog } from '@/components/chat/usePiChatCatalog';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
@@ -14,6 +19,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { findPiPackage, listPiPackages } from '@/lib/pi-runtime/packages';
+import { listPiAgentProviders } from '@/lib/pi-runtime/agent-providers';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -27,6 +33,14 @@ import { SubagentsSettings } from './SubagentsSettings';
 import { WebAccessSettings } from './WebAccessSettings';
 import { WorkspaceHistorySettings } from './WorkspaceHistorySettings';
 import { WtfSettings } from './WtfSettings';
+import {
+  MCP_ADAPTER_STATUS_CHANNEL,
+  parseMcpAdapterStatus,
+} from '../mcp/mcpAdapterStatus';
+import {
+  pluginRuntimeStatus,
+  type PluginRuntimeStatus,
+} from './plugin-runtime-status';
 
 interface PluginIntegration {
   descriptionKey: I18nKey;
@@ -81,17 +95,41 @@ const PLUGIN_INTEGRATIONS: readonly PluginIntegration[] = [
   },
 ] as const;
 
-const IntegrationStatus: React.FC<{ installed: boolean; loaded: boolean }> = ({ installed, loaded }) => {
+type PluginInstallStatus = 'checking' | 'configured-missing' | 'error' | 'installed' | 'not-configured';
+
+const statusClassName = (status: PluginRuntimeStatus | PluginInstallStatus): string => {
+  if (status === 'available' || status === 'installed') {
+    return 'border-[var(--status-success)]/30 text-[var(--status-success)]';
+  }
+  if (status === 'unavailable' || status === 'configured-missing') {
+    return 'border-[var(--status-warning)]/30 text-[var(--status-warning)]';
+  }
+  if (status === 'error') {
+    return 'border-[var(--status-error)]/30 text-[var(--status-error)]';
+  }
+  return 'border-border/60 text-muted-foreground';
+};
+
+const IntegrationStatus: React.FC<{
+  installStatus: PluginInstallStatus;
+  runtimeStatus: PluginRuntimeStatus;
+}> = ({ installStatus, runtimeStatus }) => {
   const { t } = useI18n();
-  if (!loaded) return null;
   return (
-    <span className={installed
-      ? 'typography-micro text-[var(--status-success)]'
-      : 'typography-micro text-muted-foreground'}>
-      {installed
-        ? t('settings.piarium.pluginSettings.status.installed')
-        : t('settings.piarium.pluginSettings.status.notInstalled')}
-    </span>
+    <div className="mt-auto flex flex-wrap gap-1.5 pt-3">
+      <span className={cn(
+        'rounded-full border px-2 py-0.5 typography-micro',
+        statusClassName(installStatus),
+      )}>
+        {t(`settings.piarium.pluginSettings.status.install.${installStatus}`)}
+      </span>
+      <span className={cn(
+        'rounded-full border px-2 py-0.5 typography-micro',
+        statusClassName(runtimeStatus),
+      )}>
+        {t(`settings.piarium.pluginSettings.status.runtime.${runtimeStatus}`)}
+      </span>
+    </div>
   );
 };
 
@@ -102,6 +140,10 @@ export const PluginSettingsPage: React.FC = () => {
     const sessionId = state.currentSessionId;
     return sessionId && state.records[sessionId]?.open ? sessionId : null;
   });
+  const sessionRecord = usePiSessionStore((state) => (
+    activeSessionId ? state.records[activeSessionId] : undefined
+  ));
+  const refreshRecoveryStatus = usePiSessionStore((state) => state.refreshRecoveryStatus);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
     activeSessionId ? { sessionId: activeSessionId } : { cwd: currentDirectory }
@@ -116,10 +158,21 @@ export const PluginSettingsPage: React.FC = () => {
   const [packages, setPackages] = React.useState<PackageDescriptor[]>([]);
   const [packagesLoaded, setPackagesLoaded] = React.useState(false);
   const [packageError, setPackageError] = React.useState<string | null>(null);
+  const [agentCatalog, setAgentCatalog] = React.useState<PiAgentCatalogSnapshot | null>(null);
+  const [agentProvidersChecked, setAgentProvidersChecked] = React.useState(false);
+  const [agentProvidersFailed, setAgentProvidersFailed] = React.useState(false);
+  const [recoveryChecked, setRecoveryChecked] = React.useState(false);
+  const [recoveryFailed, setRecoveryFailed] = React.useState(false);
+  const [statusRefreshing, setStatusRefreshing] = React.useState(false);
   const [advancedOpen, setAdvancedOpen] = React.useState(
     navigationTarget !== null && navigationTarget.integrationId === null,
   );
   const generationRef = React.useRef(0);
+  const runtimeGenerationRef = React.useRef(0);
+  const commandCatalog = usePiChatCatalog({
+    sessionId: activeSessionId,
+    refreshOnMount: activeSessionId !== null,
+  });
 
   const loadPackages = React.useCallback(async () => {
     const generation = ++generationRef.current;
@@ -153,9 +206,88 @@ export const PluginSettingsPage: React.FC = () => {
     void loadPackages();
   }, [loadPackages]);
 
+  const loadRuntimeSignals = React.useCallback(async () => {
+    const generation = ++runtimeGenerationRef.current;
+    setAgentCatalog(null);
+    setAgentProvidersChecked(false);
+    setAgentProvidersFailed(false);
+    setRecoveryChecked(false);
+    setRecoveryFailed(false);
+    if (!activeSessionId) return;
+
+    const target = { sessionId: activeSessionId } as const;
+    await Promise.allSettled([
+      listPiAgentProviders(target)
+        .then((next) => {
+          if (generation === runtimeGenerationRef.current) setAgentCatalog(next);
+        })
+        .catch(() => {
+          if (generation === runtimeGenerationRef.current) setAgentProvidersFailed(true);
+        })
+        .finally(() => {
+          if (generation === runtimeGenerationRef.current) setAgentProvidersChecked(true);
+        }),
+      refreshRecoveryStatus(activeSessionId)
+        .catch(() => {
+          if (generation === runtimeGenerationRef.current) setRecoveryFailed(true);
+        })
+        .finally(() => {
+          if (generation === runtimeGenerationRef.current) setRecoveryChecked(true);
+        }),
+    ]);
+  }, [activeSessionId, refreshRecoveryStatus]);
+
+  React.useEffect(() => {
+    void loadRuntimeSignals();
+  }, [loadRuntimeSignals]);
+
+  const commandNames = React.useMemo(
+    () => new Set(commandCatalog.commands.map((command) => command.name)),
+    [commandCatalog.commands],
+  );
+  const runtimeSignals = React.useMemo(() => ({
+    agentProviders: agentCatalog?.providers ?? [],
+    agentProvidersChecked,
+    agentProvidersFailed,
+    commandNames,
+    commandsChecked: commandCatalog.loaded || commandCatalog.error !== null,
+    commandsFailed: commandCatalog.error !== null,
+    hasActiveSession: activeSessionId !== null,
+    mcpStatusReported: parseMcpAdapterStatus(
+      sessionRecord?.extensionStates[MCP_ADAPTER_STATUS_CHANNEL],
+    ) !== null,
+    recoveryChecked,
+    recoveryFailed,
+    recoveryProviders: sessionRecord?.recoveryStatus?.providers ?? [],
+  }), [
+    activeSessionId,
+    agentCatalog?.providers,
+    agentProvidersChecked,
+    agentProvidersFailed,
+    commandCatalog.error,
+    commandCatalog.loaded,
+    commandNames,
+    recoveryChecked,
+    recoveryFailed,
+    sessionRecord?.extensionStates,
+    sessionRecord?.recoveryStatus?.providers,
+  ]);
+
   const selectedIntegration = PLUGIN_INTEGRATIONS.find((entry) => entry.id === selected)!;
   const selectedPackage = findPiPackage(packages, selectedIntegration.packageName);
   const selectedInstalled = selectedPackage?.installed === true;
+  const refreshStatuses = React.useCallback(async (): Promise<void> => {
+    setStatusRefreshing(true);
+    try {
+      await Promise.allSettled([
+        loadPackages(),
+        loadRuntimeSignals(),
+        activeSessionId ? commandCatalog.refresh() : Promise.resolve(),
+      ]);
+    } finally {
+      setStatusRefreshing(false);
+    }
+  }, [activeSessionId, commandCatalog, loadPackages, loadRuntimeSignals]);
 
   const renderSelectedSettings = () => {
     switch (selected) {
@@ -203,10 +335,32 @@ export const PluginSettingsPage: React.FC = () => {
         title={t('settings.piarium.pluginSettings.integrations.title')}
         description={t('settings.piarium.pluginSettings.integrations.description')}
         divider={false}
+        headerAction={(
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={statusRefreshing}
+            onClick={() => void refreshStatuses()}
+          >
+            <Icon name="refresh" className={statusRefreshing ? 'size-4 animate-spin' : 'size-4'} />
+            {t('settings.piarium.recovery.actions.refresh')}
+          </Button>
+        )}
       >
         <div className="grid grid-cols-1 gap-2 @xl:grid-cols-2 @4xl:grid-cols-3">
           {PLUGIN_INTEGRATIONS.map((integration) => {
-            const installed = findPiPackage(packages, integration.packageName)?.installed === true;
+            const packageDescriptor = findPiPackage(packages, integration.packageName);
+            const installStatus: PluginInstallStatus = packageError
+              ? 'error'
+              : !packagesLoaded
+              ? 'checking'
+              : packageDescriptor?.installed === true
+                ? 'installed'
+                : packageDescriptor
+                  ? 'configured-missing'
+                  : 'not-configured';
+            const runtimeStatus = pluginRuntimeStatus(integration.id, runtimeSignals);
             const active = integration.id === selected;
             return (
               <button
@@ -226,11 +380,14 @@ export const PluginSettingsPage: React.FC = () => {
                   <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
                     {integration.name}
                   </span>
-                  <IntegrationStatus installed={installed} loaded={packagesLoaded} />
                 </div>
                 <p className="mt-2 line-clamp-3 typography-meta text-muted-foreground">
                   {t(integration.descriptionKey)}
                 </p>
+                <IntegrationStatus
+                  installStatus={installStatus}
+                  runtimeStatus={runtimeStatus}
+                />
               </button>
             );
           })}

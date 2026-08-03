@@ -142,8 +142,10 @@ Target settings sections:
 
 The current settings adapter also discovers the live `pi-subagents` catalog by provider id and uses
 the descriptor's runtime `name`—never Piarium's opaque descriptor id—as the `agentOverrides` key.
-It supports every currently parsed scalar/list override, preserves arbitrary future agent names,
-and leaves `toolBudget` plus unknown fields in Advanced. `false` is rendered as the plugin's
+It supports the complete current override contract, including a structured three-state
+`toolBudget`, while preserving arbitrary future agent names and unknown future keys. Fields known
+to belong to agent Markdown or an individual run contract are diagnosed instead of being saved to
+a location the plugin ignores. `false` is rendered as the plugin's
 “clear resolved value” sentinel, which is distinct from an absent override and, for list fields,
 from an explicit empty array. Runtime configuration includes the current control notification
 event/channel lists and proactive skill-delegation settings. The one-value watchdog delivery and
@@ -214,6 +216,11 @@ two-invocation, 60-second confirmation instead of trying to infer its armed stat
 prose. The adapter renders the newest persisted public `ctx-status` entry from the current Pi
 branch with the same renderer used by chat. It never reads SQLite or copies status into Piarium
 storage.
+
+The runtime surface groups those operations by intent: Context health contains the newest public
+status entry and lightweight refresh/flush actions; session maintenance owns wrap-up,
+recompression, upgrade, and Sidekick augmentation; Dreamer and embedding workers are kept in their
+own long-running section. It does not synthesize progress that the extension has not published.
 
 Acceptance:
 

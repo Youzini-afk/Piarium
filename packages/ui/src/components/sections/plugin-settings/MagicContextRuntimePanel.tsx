@@ -196,56 +196,55 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
       <SettingsControlGroup
         title={t('settings.piarium.pluginSettings.magic.runtime.session.title')}
         description={t('settings.piarium.pluginSettings.magic.runtime.session.description')}
-        contentClassName="flex flex-wrap gap-2"
+        contentClassName="space-y-4"
       >
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={actionsDisabled || !commandAvailable('status')}
-          onClick={() => void runAction('status')}
-        >
-          {runningCommand === 'ctx-status' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-          {t('settings.piarium.pluginSettings.magic.runtime.action.status')}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={actionsDisabled || !commandAvailable('flush')}
-          onClick={() => void runAction('flush')}
-        >
-          {runningCommand === 'ctx-flush' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-          {t('settings.piarium.pluginSettings.magic.runtime.action.flush')}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={actionsDisabled || !commandAvailable('embedding-status')}
-          onClick={() => void runAction('embedding-status')}
-        >
-          {runningCommand === 'ctx-embed' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-          {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStatus')}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={actionsDisabled || !commandAvailable('embedding-start')}
-          onClick={() => void runAction('embedding-start')}
-        >
-          {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStart')}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={actionsDisabled || !commandAvailable('embedding-pause')}
-          onClick={() => void runAction('embedding-pause')}
-        >
-          {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingPause')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('status')}
+            onClick={() => void runAction('status')}
+          >
+            {runningCommand === 'ctx-status' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
+            {t('settings.piarium.pluginSettings.magic.runtime.action.status')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('flush')}
+            onClick={() => void runAction('flush')}
+          >
+            {runningCommand === 'ctx-flush' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
+            {t('settings.piarium.pluginSettings.magic.runtime.action.flush')}
+          </Button>
+        </div>
+        <div className="space-y-2 border-t border-border/60 pt-4">
+          <div className="space-y-1">
+            <h4 className="typography-settings-field-label text-foreground">
+              {t('settings.piarium.pluginSettings.magic.runtime.latest.title')}
+            </h4>
+            <p className="typography-meta text-muted-foreground">
+              {t('settings.piarium.pluginSettings.magic.runtime.latest.description')}
+            </p>
+          </div>
+          {latestStatus ? (
+            <div className="space-y-2">
+              <p className="typography-micro text-muted-foreground">
+                {new Date(latestStatus.timestamp).toLocaleString()}
+              </p>
+              <PiExtensionStatusCard
+                messageId={`magic-settings:${latestStatus.entryId}`}
+                status={latestStatus.status}
+              />
+            </div>
+          ) : (
+            <p className="typography-meta text-muted-foreground">
+              {t('settings.piarium.pluginSettings.magic.runtime.latest.empty')}
+            </p>
+          )}
+        </div>
       </SettingsControlGroup>
 
       <SettingsControlGroup
@@ -308,34 +307,6 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             onClick={() => setConfirmAction('wrapup')}
           >
             {t('settings.piarium.pluginSettings.magic.runtime.action.wrapup')}
-          </Button>
-        </div>
-
-        <div className="flex flex-col gap-2 @xl:flex-row @xl:items-end">
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <label className="typography-settings-field-label text-foreground" htmlFor="magic-dream-task">
-              {t('settings.piarium.pluginSettings.magic.runtime.dreamTask')}
-            </label>
-            <Select value={dreamTask} onValueChange={setDreamTask} disabled={runningCommand !== null}>
-              <SelectTrigger id="magic-dream-task" size="settings" className="w-full max-w-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">
-                  {t('settings.piarium.pluginSettings.magic.runtime.dreamAll')}
-                </SelectItem>
-                {DREAM_TASKS.map((task) => <SelectItem key={task} value={task}>{task}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={actionsDisabled || !commandAvailable('dream', dreamTask === 'all' ? undefined : { dreamTask })}
-            onClick={() => setConfirmAction('dream')}
-          >
-            {t('settings.piarium.pluginSettings.magic.runtime.action.dream')}
           </Button>
         </div>
 
@@ -408,31 +379,76 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
         <p className="typography-meta text-muted-foreground">
           {t('settings.piarium.pluginSettings.magic.runtime.recompConfirmation')}
         </p>
-        <p className="typography-meta text-muted-foreground">
-          {t('settings.piarium.pluginSettings.magic.runtime.longRunningNote')}
-        </p>
       </SettingsControlGroup>
 
       <SettingsControlGroup
         className="border-t border-border/60 pt-5"
-        title={t('settings.piarium.pluginSettings.magic.runtime.latest.title')}
-        description={t('settings.piarium.pluginSettings.magic.runtime.latest.description')}
+        title={t('settings.piarium.pluginSettings.magic.runtime.dreamer.title')}
+        description={t('settings.piarium.pluginSettings.magic.runtime.dreamer.description')}
+        contentClassName="space-y-4"
       >
-        {latestStatus ? (
-          <div className="space-y-2">
-            <p className="typography-micro text-muted-foreground">
-              {new Date(latestStatus.timestamp).toLocaleString()}
-            </p>
-            <PiExtensionStatusCard
-              messageId={`magic-settings:${latestStatus.entryId}`}
-              status={latestStatus.status}
-            />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('embedding-status')}
+            onClick={() => void runAction('embedding-status')}
+          >
+            {runningCommand === 'ctx-embed' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
+            {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStatus')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('embedding-start')}
+            onClick={() => void runAction('embedding-start')}
+          >
+            {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStart')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('embedding-pause')}
+            onClick={() => void runAction('embedding-pause')}
+          >
+            {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingPause')}
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-2 border-t border-border/60 pt-4 @xl:flex-row @xl:items-end">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <label className="typography-settings-field-label text-foreground" htmlFor="magic-dream-task">
+              {t('settings.piarium.pluginSettings.magic.runtime.dreamTask')}
+            </label>
+            <Select value={dreamTask} onValueChange={setDreamTask} disabled={runningCommand !== null}>
+              <SelectTrigger id="magic-dream-task" size="settings" className="w-full max-w-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">
+                  {t('settings.piarium.pluginSettings.magic.runtime.dreamAll')}
+                </SelectItem>
+                {DREAM_TASKS.map((task) => <SelectItem key={task} value={task}>{task}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
-        ) : (
-          <p className="typography-meta text-muted-foreground">
-            {t('settings.piarium.pluginSettings.magic.runtime.latest.empty')}
-          </p>
-        )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('dream', dreamTask === 'all' ? undefined : { dreamTask })}
+            onClick={() => setConfirmAction('dream')}
+          >
+            {t('settings.piarium.pluginSettings.magic.runtime.action.dream')}
+          </Button>
+        </div>
+
+        <p className="typography-meta text-muted-foreground">
+          {t('settings.piarium.pluginSettings.magic.runtime.longRunningNote')}
+        </p>
       </SettingsControlGroup>
 
       <Dialog open={confirmAction !== null} onOpenChange={(open) => !open && setConfirmAction(null)}>

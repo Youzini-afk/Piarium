@@ -13,6 +13,7 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import {
   Select,
   SelectContent,
@@ -171,6 +172,117 @@ const OverrideListOrClearField: React.FC<OverrideFieldProps> = ({
         ) : null}
       </div>
     </SettingsFieldRow>
+  );
+};
+
+const OverrideToolBudgetField: React.FC<OverrideFieldProps> = ({
+  disabled,
+  draft,
+  label,
+  onRemove,
+  onSet,
+  path,
+}) => {
+  const { t } = useI18n();
+  const raw = readJsonPath(draft, path);
+  const budget = asJsonObject(raw);
+  const mode = raw === false ? 'clear' : budget ? 'override' : 'inherit';
+  const block = budget?.block;
+  const blockList = validStringArray(block);
+  const blockMode = block === '*' ? 'all' : blockList ? 'list' : 'default';
+
+  return (
+    <div className="space-y-3 rounded-md border border-border/60 px-3 py-3">
+      <SettingsFieldRow label={label} controlClassName="w-full max-w-lg">
+        <Select
+          value={mode}
+          disabled={disabled}
+          onValueChange={(next) => {
+            if (next === 'inherit') onRemove(path);
+            else if (next === 'clear') onSet(path, false);
+            else onSet(path, budget ?? { hard: 16 });
+          }}
+        >
+          <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={`${label} mode`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inherit">{t('settings.piarium.pluginSettings.subagents.overrides.mode.inherit')}</SelectItem>
+            <SelectItem value="clear">{t('settings.piarium.pluginSettings.subagents.overrides.mode.clear')}</SelectItem>
+            <SelectItem value="override">{t('settings.piarium.pluginSettings.subagents.overrides.mode.override')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingsFieldRow>
+
+      {mode === 'override' ? (
+        <div className="space-y-3 border-t border-border/60 pt-3">
+          <SettingsFieldRow label="hard" controlClassName="w-full max-w-lg">
+            <NumberInput
+              value={typeof budget?.hard === 'number' ? budget.hard : undefined}
+              fallbackValue={16}
+              disabled={disabled}
+              min={1}
+              step={1}
+              onValueChange={(value) => onSet([...path, 'hard'], value)}
+              containerClassName="w-36"
+              aria-label={`${label}.hard`}
+            />
+          </SettingsFieldRow>
+          <SettingsFieldRow label="soft" controlClassName="w-full max-w-lg">
+            <NumberInput
+              value={typeof budget?.soft === 'number' ? budget.soft : undefined}
+              fallbackValue={10}
+              disabled={disabled}
+              min={1}
+              step={1}
+              onClear={() => onRemove([...path, 'soft'])}
+              onValueChange={(value) => onSet([...path, 'soft'], value)}
+              containerClassName="w-36"
+              emptyLabel={t('settings.piarium.pluginSettings.field.pluginDefault')}
+              aria-label={`${label}.soft`}
+            />
+          </SettingsFieldRow>
+          <SettingsFieldRow label="block" alignEnd={false} controlClassName="w-full max-w-lg items-start">
+            <div className="flex min-w-0 flex-1 flex-col gap-2 @xl:flex-row">
+              <Select
+                value={blockMode}
+                disabled={disabled}
+                onValueChange={(next) => {
+                  if (next === 'default') onRemove([...path, 'block']);
+                  else if (next === 'all') onSet([...path, 'block'], '*');
+                  else onSet([...path, 'block'], blockList ?? ['read', 'grep', 'find', 'ls']);
+                }}
+              >
+                <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={`${label}.block mode`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
+                  <SelectItem value="all">*</SelectItem>
+                  <SelectItem value="list">{t('settings.piarium.pluginSettings.subagents.overrides.mode.override')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {blockMode === 'list' ? (
+                <Textarea
+                  value={(blockList ?? []).join('\n')}
+                  disabled={disabled}
+                  placeholder={'read\ngrep\nfind\nls'}
+                  aria-label={`${label}.block`}
+                  onChange={(event) => onSet(
+                    [...path, 'block'],
+                    event.target.value
+                      .split(/\r?\n/)
+                      .map((entry) => entry.trim())
+                      .filter(Boolean),
+                  )}
+                  className="min-h-20 min-w-0 flex-1 font-mono"
+                />
+              ) : null}
+            </div>
+          </SettingsFieldRow>
+        </div>
+      ) : null}
+    </div>
   );
 };
 
@@ -374,6 +486,11 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
                 placeholder={placeholder}
               />
             ))}
+            <OverrideToolBudgetField
+              {...fieldProps}
+              path={[...selectedPath, 'toolBudget']}
+              label="toolBudget"
+            />
             <PluginTextareaField
               {...fieldProps}
               path={[...selectedPath, 'systemPrompt']}

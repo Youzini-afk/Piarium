@@ -32,7 +32,7 @@ describe('subagents config model', () => {
           model: 'openai/gpt-5.2',
           systemPromptMode: 'append',
           thinking: false,
-          toolBudget: { hard: 20, soft: 10 },
+          toolBudget: { block: ['read', 'grep'], hard: 20, soft: 10 },
           tools: [],
           unknownFutureField: { preserved: true },
         },
@@ -50,6 +50,18 @@ describe('subagents config model', () => {
       code: 'invalid-value',
       field: 'agentOverrides.reviewer.defaultContext',
     });
+    expect(subagentsSettingsDraftIssue({
+      agentOverrides: { reviewer: { output: 'json' } },
+    })).toEqual({
+      code: 'invalid-value',
+      field: 'agentOverrides.reviewer.output',
+    });
+    expect(subagentsSettingsDraftIssue({
+      agentOverrides: { reviewer: { toolBudget: { hard: 5, block: [] } } },
+    })).toEqual({
+      code: 'invalid-value',
+      field: 'agentOverrides.reviewer.toolBudget.block',
+    });
   });
 
   test('requires complete turn and tool budget objects', () => {
@@ -61,6 +73,11 @@ describe('subagents config model', () => {
       code: 'soft-exceeds-hard',
       field: 'toolBudget.soft',
     });
+    expect(subagentsRuntimeDraftIssue({ toolBudget: false })).toEqual({
+      code: 'invalid-value',
+      field: 'toolBudget',
+    });
+    expect(subagentsRuntimeDraftIssue({ toolBudget: { hard: 10, block: '*' } })).toBeNull();
     expect(subagentsRuntimeDraftIssue({ turnBudget: { graceTurns: 0, maxTurns: 1 } })).toBeNull();
   });
 

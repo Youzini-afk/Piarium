@@ -27,8 +27,10 @@ workspace history and repair delegate to `pi-workspace-history` and `pi-wtf`, so
 package updates remain usable. The duplicate Piarium shadow-Git engine has been removed. Product
 limits are absent by default; deployment resource budgets are explicit opt-ins. Every production
 renderer now mounts the Pi-native chat/session graph; the unreachable OpenCode sync graph, client,
-SDK dependency, bundler aliases, and SDK-shaped test fixtures have been removed. Current work is
-deepening first-class plugin operations and completing the Windows release journey.
+SDK dependency, bundler aliases, and SDK-shaped test fixtures have been removed. First-class plugin
+settings now distinguish package installation from current-session capability evidence, and the
+pi-subagents and Magic Context adapters follow their current native contracts. Current work is the
+Windows release journey and packaged-app smoke testing.
 
 The product base is the maintainer's OpenChamber fork at commit `f551150e5`. That fork is imported
 into this repository and is being directly refactored from OpenCode to Pi; the source fork remains read-only.

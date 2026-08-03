@@ -195,9 +195,11 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   turn/tool/usage budgets in the plugin's native documents. Unknown keys remain intact and the raw
   documents remain authoritative. Per-agent overrides now use the live provider catalog's runtime
   names while still accepting arbitrary future/package names; all current scalar/list/clear
-  sentinels are structured, and custom/package frontmatter precedence is explained rather than
-  flattened into the generic Agents page. Current notification channels/events and proactive skill
-  delegation are also covered.
+  sentinels and per-agent tool budgets are structured, and custom/package frontmatter precedence is
+  explained rather than flattened into the generic Agents page. Fields owned by Agent Markdown or
+  individual runs are diagnosed at their invalid override path, while unknown future keys remain
+  round-trippable. Current notification channels/events and proactive skill delegation are also
+  covered.
 - Implemented: the first-class Magic Context settings surface now follows the current Pi Zod loader
   rather than the retired OpenCode-era page. Separate user/project drafts, six focused capability
   areas, project security filtering, Pi-only runtime controls, context/compression budgets, memory
@@ -209,7 +211,14 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   status/start/pause, Sidekick augmentation, wrap-up, full/ranged recompression, session upgrade,
   and selected Dreamer tasks preserve provider validation and confirmations. The newest public
   `ctx-status` branch entry is rendered in settings without reading SQLite, and augmentation is
-  presented truthfully as a new user turn.
+  presented truthfully as a new user turn. The runtime UI separates Context health, session
+  maintenance, Sidekick augmentation, and long-running Dreamer/embedding work.
+- Implemented: first-class plugin cards now report package configuration/presence separately from
+  current-session observations. Subagents and Magic Context use agent-provider availability,
+  Web Access uses its registered command, recovery plugins use recovery-provider status, and MCP
+  uses its public status channel. Transport failures, no active session, unavailable providers,
+  and successful-but-absent observations remain distinct; no generic loaded or reload-needed state
+  is fabricated where Pi exposes no such contract.
 - Implemented: Agents executes every action advertised by the `pi-subagents` provider instead of
   rendering inert badges. Provider-level creation and model-resolution actions, structured agent
   and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused

@@ -1,7 +1,9 @@
 import React from 'react';
 import type { PiConfigScope, RuntimeContextTarget } from '@piarium/protocol';
-import { SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
+import { SettingsChipGroup, SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
+import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
 import {
   PluginBooleanField,
   PluginNumberField,
@@ -30,10 +32,13 @@ interface SubagentsSettingsProps {
 }
 
 const SUBGROUP_CLASS = 'border-t border-border/60 pt-5';
+type SubagentsPanel = 'agents' | 'watchdog' | 'runtime' | 'budgets';
 
 export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTarget, targetKey }) => {
   const { t } = useI18n();
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const [scope, setScope] = React.useState<PiConfigScope>('global');
+  const [panel, setPanel] = React.useState<SubagentsPanel>('agents');
   const settings = useSettingsObjectDraft({
     property: 'subagents',
     runtimeTarget,
@@ -115,24 +120,54 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
   const pluginDefault = t('settings.piarium.pluginSettings.field.pluginDefault');
   const unlimited = t('settings.piarium.pluginSettings.subagents.value.unlimited');
   const off = t('settings.piarium.pluginSettings.subagents.value.off');
+  const panelOptions: Array<{ value: SubagentsPanel; label: string }> = [
+    { value: 'agents', label: t('settings.page.agents.title') },
+    { value: 'watchdog', label: t('settings.piarium.pluginSettings.subagents.watchdog.title') },
+    { value: 'runtime', label: t('settings.piarium.pluginSettings.subagents.runtime.title') },
+    { value: 'budgets', label: t('settings.piarium.pluginSettings.subagents.runtime.budgets') },
+  ];
 
   return (
     <div className="space-y-8">
       <PluginRuntimeNote>{t('settings.piarium.pluginSettings.subagents.runtimeNote')}</PluginRuntimeNote>
 
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('agents')}>
+          {t('settings.page.agents.title')}
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('fleet')}>
+          {t('settings.page.fleet.title')}
+        </Button>
+      </div>
+
+      <div className="rounded-lg border border-border/60 px-4 py-3">
+        <SettingsChipGroup
+          value={panel}
+          options={panelOptions}
+          onChange={setPanel}
+          aria-label="pi-subagents"
+        />
+      </div>
+
+      {panel === 'agents' || panel === 'watchdog' ? (
       <div className="space-y-5 rounded-lg border border-border/60 px-4 py-4">
         <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
           <div className="space-y-1">
             <h3 className="typography-settings-group-title text-foreground">
-              {t('settings.piarium.pluginSettings.subagents.defaults.title')}
+              {panel === 'agents'
+                ? t('settings.piarium.pluginSettings.subagents.defaults.title')
+                : t('settings.piarium.pluginSettings.subagents.watchdog.title')}
             </h3>
             <p className="typography-meta text-muted-foreground">
-              {t('settings.piarium.pluginSettings.subagents.defaults.description')}
+              {panel === 'agents'
+                ? t('settings.piarium.pluginSettings.subagents.defaults.description')
+                : t('settings.piarium.pluginSettings.subagents.watchdog.description')}
             </p>
           </div>
           <ScopeSelector value={scope} onChange={setScope} disabled={settings.saving} />
         </div>
 
+        {panel === 'agents' ? <>
         <div className="space-y-4">
           <PluginStringField {...settingsFields} path={['defaultModel']} label="defaultModel" placeholder="provider/model" />
           <PluginStringField {...settingsFields} path={['defaultThinking']} label="defaultThinking" placeholder="off | minimal | low | medium | high | xhigh | max" />
@@ -167,7 +202,9 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           runtimeTarget={runtimeTarget}
           targetKey={`${targetKey}:${scope}`}
         />
+        </> : null}
 
+        {panel === 'watchdog' ? <>
         <SettingsControlGroup
           className={SUBGROUP_CLASS}
           title={t('settings.piarium.pluginSettings.subagents.watchdog.title')}
@@ -177,6 +214,7 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           <PluginBooleanField {...settingsFields} path={['watchdog', 'enabled']} label="watchdog.enabled" defaultValue={false} />
           <PluginBooleanField {...settingsFields} path={['watchdog', 'showDuringRun']} label="watchdog.showDuringRun" defaultValue={false} />
         </SettingsControlGroup>
+        </> : null}
 
         <SettingsControlGroup
           className={SUBGROUP_CLASS}
@@ -242,7 +280,9 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           blockedMessage={settingsTrustBlocked || !settingsIssue ? undefined : issueMessage(settingsIssue)}
         />
       </div>
+      ) : null}
 
+      {panel === 'runtime' || panel === 'budgets' ? (
       <div className="space-y-5 rounded-lg border border-border/60 px-4 py-4">
         <div className="space-y-1">
           <h3 className="typography-settings-group-title text-foreground">
@@ -253,6 +293,7 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           </p>
         </div>
 
+        {panel === 'runtime' ? <>
         <SettingsControlGroup
           title={t('settings.piarium.pluginSettings.subagents.runtime.execution')}
           contentClassName="space-y-4"
@@ -290,7 +331,9 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
             defaultValue
           />
         </SettingsControlGroup>
+        </> : null}
 
+        {panel === 'budgets' ? (
         <SettingsControlGroup
           className={SUBGROUP_CLASS}
           title={t('settings.piarium.pluginSettings.subagents.runtime.limits')}
@@ -303,6 +346,7 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           <PluginNumberField {...runtimeFields} path={['parallel', 'concurrency']} label="parallel.concurrency" defaultValue={4} min={1} />
           <PluginOptionalNumberField {...runtimeFields} path={['chain', 'dynamicFanout', 'maxItems']} label="chain.dynamicFanout.maxItems" emptyLabel={pluginDefault} min={0} fallbackValue={0} />
         </SettingsControlGroup>
+        ) : null}
 
         <SettingsControlGroup
           className={SUBGROUP_CLASS}
@@ -418,6 +462,7 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           blockedMessage={runtimeIssue ? issueMessage(runtimeIssue) : undefined}
         />
       </div>
+      ) : null}
     </div>
   );
 };

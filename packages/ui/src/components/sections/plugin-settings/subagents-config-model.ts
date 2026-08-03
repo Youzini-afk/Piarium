@@ -23,6 +23,47 @@ function positiveNumber(value: JsonValue | undefined, integer: boolean): number 
   return !integer || Number.isInteger(value) ? value : undefined;
 }
 
+const UNSUPPORTED_AGENT_OVERRIDE_FIELDS = new Set([
+  'acceptance',
+  'maxRuntimeMs',
+  'mcpDirectTools',
+  'memory',
+  'output',
+  'outputSchema',
+  'skillPath',
+  'timeoutMs',
+  'turnBudget',
+  'usageBudget',
+  'worktree',
+]);
+
+function toolBudgetIssue(
+  raw: JsonValue | undefined,
+  field: string,
+  allowClear: boolean,
+): SubagentsDraftIssue | null {
+  if (raw === undefined || (allowClear && raw === false)) return null;
+  const budget = asObject(raw);
+  if (!budget) return { code: 'invalid-value', field };
+  const hardIssue = requiredPositive(budget, 'hard', `${field}.hard`, true);
+  if (hardIssue) return hardIssue;
+  const softIssue = optionalPositive(budget, 'soft', `${field}.soft`, true);
+  if (softIssue) return softIssue;
+  const hard = budget.hard as number;
+  const soft = budget.soft;
+  if (typeof soft === 'number' && soft > hard) {
+    return { code: 'soft-exceeds-hard', field: `${field}.soft` };
+  }
+  const block = budget.block;
+  if (block !== undefined && block !== '*') {
+    const names = validStringArray(block);
+    if (!names?.length || names.some((name) => !name.trim())) {
+      return { code: 'invalid-value', field: `${field}.block` };
+    }
+  }
+  return null;
+}
+
 export function subagentsSettingsDraftIssue(draft: JsonObject): SubagentsDraftIssue | null {
   const rawAllow = readJsonPath(draft, ['modelScope', 'allow']);
   const allow = validStringArray(rawAllow)
@@ -58,6 +99,12 @@ export function subagentsSettingsDraftIssue(draft: JsonObject): SubagentsDraftIs
   for (const [name, rawOverride] of Object.entries(overrides)) {
     const override = asObject(rawOverride);
     if (!override) return { code: 'invalid-value', field: `agentOverrides.${name}` };
+    const unsupported = Object.keys(override).find((field) => (
+      UNSUPPORTED_AGENT_OVERRIDE_FIELDS.has(field)
+    ));
+    if (unsupported) {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.${unsupported}` };
+    }
 
     for (const field of stringOrFalseFields) {
       const value = override[field];
@@ -103,13 +150,12 @@ export function subagentsSettingsDraftIssue(draft: JsonObject): SubagentsDraftIs
     if (override.systemPrompt !== undefined && typeof override.systemPrompt !== 'string') {
       return { code: 'invalid-value', field: `agentOverrides.${name}.systemPrompt` };
     }
-    if (
-      override.toolBudget !== undefined
-      && override.toolBudget !== false
-      && !asObject(override.toolBudget)
-    ) {
-      return { code: 'invalid-value', field: `agentOverrides.${name}.toolBudget` };
-    }
+    const budgetIssue = toolBudgetIssue(
+      override.toolBudget,
+      `agentOverrides.${name}.toolBudget`,
+      true,
+    );
+    if (budgetIssue) return budgetIssue;
   }
   return null;
 }
@@ -172,9 +218,9 @@ export function subagentsRuntimeDraftIssue(draft: JsonObject): SubagentsDraftIss
     if (issue) return issue;
   }
 
-  const toolBudget = asObject(readJsonPath(draft, ['toolBudget']));
-  if (toolBudget) {
-    const issue = limitGroupIssue(toolBudget, 'toolBudget', true);
+  const rawToolBudget = readJsonPath(draft, ['toolBudget']);
+  if (rawToolBudget !== undefined) {
+    const issue = toolBudgetIssue(rawToolBudget, 'toolBudget', false);
     if (issue) return issue;
   }
 
