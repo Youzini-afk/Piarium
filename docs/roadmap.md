@@ -114,6 +114,11 @@ retained before engine surgery begins.
   contract; the old global new-session draft, synthetic OpenCode parts, and externally-viewed sync
   marker are no longer loaded by terminal, Git, pull-request, or context-panel surfaces. Git
   worktree bootstrap status is tracked by path instead of mutating the legacy session UI store.
+- Implemented: VS Code active-editor suggestions now target the Pi composer instead of writing to
+  the detached OpenCode input store. Accepted selections preserve relative path and line range in
+  session-scoped Pi context; whole files become explicit readable path context. Pi session events
+  now drive one completion/error attention state shared by background-session indicators, session
+  switchers, and mobile widget snapshots, and opening a session clears that state.
 - Implemented a coherent Piarium product identity across the Windows installer, Electron AUMID,
   native/PWA titles, updater feed, `piarium://` deep links, `piarium-ui://` packaged origin,
   authentication device labels, translations, and generated icon assets. The retained cube motif

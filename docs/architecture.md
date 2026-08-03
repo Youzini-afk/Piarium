@@ -66,6 +66,13 @@ cwd first. A Pi session's snapshot/catalog cwd is authoritative, including for w
 terminal, and pull-request views do not maintain a second session-to-directory or
 session-to-worktree map.
 
+VS Code active-editor state is transient Piarium view state, not an OpenCode attachment contract.
+The Pi composer turns an accepted selection into the same session-scoped structured context used by
+file/diff comments, preserving the relative path and line range; accepting the whole file adds an
+explicit path context for Pi to read. Session completion/error attention is likewise owned by the Pi
+session store, derived from routed `agent.event`/`host.error` envelopes, cleared when the session is
+viewed, and shared by the sidebar, switcher, and mobile widget snapshot.
+
 ### 4.2 Electron/web shell and broker
 
 The retained shell owns windows, web/mobile/remote bootstrap, packaging, and native dialogs. The

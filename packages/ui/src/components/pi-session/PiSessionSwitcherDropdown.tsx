@@ -13,7 +13,11 @@ import { useI18n } from '@/lib/i18n';
 import { normalizePath } from '@/lib/pathNormalization';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
+import {
+  selectActivePiSessions,
+  type PiSessionAttentionState,
+  usePiSessionStore,
+} from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore, isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -26,14 +30,24 @@ interface PiSessionSwitcherDropdownProps {
 }
 
 const SwitcherNode: React.FC<{
+  attentionBySession: Readonly<Record<string, PiSessionAttentionState>>;
+  busySessionIds: ReadonlySet<string>;
   currentSessionId: string | null;
   depth: number;
   node: PiSessionNode;
   onSelect(session: SessionSummary): void;
   untitled: string;
-}> = ({ currentSessionId, depth, node, onSelect, untitled }) => {
+}> = ({ attentionBySession, busySessionIds, currentSessionId, depth, node, onSelect, untitled }) => {
   const { session } = node;
   const timestamp = Date.parse(session.updatedAt);
+  const attention = attentionBySession[session.id];
+  const icon = busySessionIds.has(session.id)
+    ? <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" />
+    : attention?.kind === 'error'
+      ? <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" />
+      : attention
+        ? <Icon name="notification-3" className="size-3.5 shrink-0 text-[var(--status-warning)]" />
+        : <Icon name={depth > 0 ? 'ai-agent' : 'chat-4'} className="size-3.5 shrink-0 text-muted-foreground" />;
   return (
     <>
       <DropdownMenuItem
@@ -41,7 +55,7 @@ const SwitcherNode: React.FC<{
         className={cn('min-w-0 gap-2', currentSessionId === session.id && 'bg-interactive-active')}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
-        <Icon name={depth > 0 ? 'ai-agent' : 'chat-4'} className="size-3.5 shrink-0 text-muted-foreground" />
+        {icon}
         <span className="min-w-0 flex-1">
           <span className="block truncate typography-ui-label text-foreground">
             {piSessionTitle(session, untitled)}
@@ -55,6 +69,8 @@ const SwitcherNode: React.FC<{
       {node.children.map((child) => (
         <SwitcherNode
           key={child.session.id}
+          attentionBySession={attentionBySession}
+          busySessionIds={busySessionIds}
           currentSessionId={currentSessionId}
           depth={depth + 1}
           node={child}
@@ -73,6 +89,8 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   const { t } = useI18n();
   const sessions = usePiSessionStore(selectActivePiSessions);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
+  const records = usePiSessionStore((state) => state.records);
   const openSession = usePiSessionStore((state) => state.openSession);
   const createSession = usePiSessionStore((state) => state.createSession);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
@@ -87,6 +105,11 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
     sessions,
     (session) => isSessionPinned(pinnedIds, session.cwd, session.id),
   ), [pinnedIds, sessions]);
+  const busySessionIds = React.useMemo(() => new Set(
+    Object.values(records)
+      .filter((record) => record.snapshot?.busy)
+      .map((record) => record.sessionId),
+  ), [records]);
 
   const select = React.useCallback(async (session: SessionSummary) => {
     try {
@@ -134,6 +157,8 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
         ) : forest.map((node) => (
           <SwitcherNode
             key={node.session.id}
+            attentionBySession={attentionBySession}
+            busySessionIds={busySessionIds}
             currentSessionId={currentSessionId}
             depth={0}
             node={node}

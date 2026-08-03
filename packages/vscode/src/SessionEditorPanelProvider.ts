@@ -204,6 +204,11 @@ export class SessionEditorPanelProvider implements vscode.Disposable {
       command: 'windowFocusChanged',
       payload: { focused: vscode.window.state.focused },
     });
+    void entry.panel.webview.postMessage({
+      type: 'command',
+      command: 'activeEditorFile',
+      payload: this._lastActiveEditorFilePayload,
+    });
   }
 
   private _postCommandToPanels(command: string, payload: unknown): void {

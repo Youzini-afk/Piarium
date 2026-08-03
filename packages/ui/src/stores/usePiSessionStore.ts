@@ -51,6 +51,13 @@ export interface PiSessionViewState {
   toolExecutions: Record<string, PiToolExecutionState>;
 }
 
+export type PiSessionAttentionKind = 'complete' | 'error';
+
+export interface PiSessionAttentionState {
+  kind: PiSessionAttentionKind;
+  updatedAt: number;
+}
+
 export type PiSessionRuntimeClient = Pick<PiRuntimeClient, 'request' | 'subscribe'>;
 
 export interface PiSessionRuntimeConnection {
@@ -65,6 +72,7 @@ export interface PiSessionStoreRuntime {
 }
 
 export interface PiSessionStoreState {
+  attentionBySession: Record<string, PiSessionAttentionState>;
   catalogCwd: string | null;
   catalogLoaded: boolean;
   catalogLoading: boolean;
@@ -78,6 +86,7 @@ export interface PiSessionStoreState {
   abort(sessionId: string): Promise<boolean>;
   archiveSession(sessionId: string): Promise<SessionSummary>;
   closeSession(sessionId: string): Promise<boolean>;
+  clearSessionAttention(sessionId: string): void;
   createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryOperationResult>;
   createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
@@ -170,6 +179,39 @@ export const selectCurrentPiSession = (
   state: PiSessionStoreState,
 ): PiSessionViewState | undefined => (
   state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
+);
+
+const piAgentEventAttentionKind = (
+  event: PiAgentEvent,
+): PiSessionAttentionKind | null => {
+  if (event.type === 'auto_retry_end' && !event.success && event.finalError) return 'error';
+  if (event.type !== 'agent_end' || event.willRetry) return null;
+  const lastAssistant = [...event.messages]
+    .reverse()
+    .find((message): message is PiAssistantMessage => message.role === 'assistant');
+  if (!lastAssistant || lastAssistant.stopReason === 'aborted') return null;
+  return lastAssistant.stopReason === 'error' ? 'error' : 'complete';
+};
+
+const clearAttention = (
+  attentionBySession: Record<string, PiSessionAttentionState>,
+  sessionId: string,
+): Record<string, PiSessionAttentionState> => {
+  if (!(sessionId in attentionBySession)) return attentionBySession;
+  const next = { ...attentionBySession };
+  delete next[sessionId];
+  return next;
+};
+
+const isPiSessionActivelyVisible = (
+  sessionId: string,
+  currentSessionId: string | null,
+): boolean => (
+  currentSessionId === sessionId
+  && (typeof document === 'undefined' || (
+    document.visibilityState === 'visible'
+    && (typeof document.hasFocus !== 'function' || document.hasFocus())
+  ))
 );
 
 const emptySession = (sessionId: string): PiSessionViewState => ({
@@ -351,6 +393,7 @@ const upsertSummary = (
 
 const initialFields = (runtimeKey: string): Pick<
   PiSessionStoreState,
+  | 'attentionBySession'
   | 'catalogCwd'
   | 'catalogLoaded'
   | 'catalogLoading'
@@ -361,6 +404,7 @@ const initialFields = (runtimeKey: string): Pick<
   | 'runtimeKey'
   | 'summaries'
 > => ({
+  attentionBySession: {},
   catalogCwd: null,
   catalogLoaded: false,
   catalogLoading: false,
@@ -429,6 +473,7 @@ export const createPiSessionStore = (
           const { sessionId } = envelope.data;
           if (get().currentSessionId === sessionId) beginSelectionIntent();
           set((state) => ({
+            attentionBySession: clearAttention(state.attentionBySession, sessionId),
             currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
             records: upsertRecord(state.records, sessionId, (current) => ({
               ...current,
@@ -439,8 +484,9 @@ export const createPiSessionStore = (
         }
         case 'agent.event': {
           const { sessionId, event } = envelope.data;
-          set((state) => ({
-            records: upsertRecord(state.records, sessionId, (current) => {
+          const attentionKind = piAgentEventAttentionKind(event);
+          set((state) => {
+            const records = upsertRecord(state.records, sessionId, (current) => {
               const reduced = reducePiAgentEvent(current, event);
               if (event.type !== 'entry_appended') return reduced;
               const branchKey = entriesRequestKey(sessionId, 'branch');
@@ -462,8 +508,16 @@ export const createPiSessionStore = (
                     : undefined,
                 ),
               };
-            }),
-          }));
+            });
+            if (attentionKind === null) return { records };
+            const attentionBySession = isPiSessionActivelyVisible(sessionId, state.currentSessionId)
+              ? clearAttention(state.attentionBySession, sessionId)
+              : {
+                  ...state.attentionBySession,
+                  [sessionId]: { kind: attentionKind, updatedAt: Date.now() },
+                };
+            return { attentionBySession, records };
+          });
           if (event.type === 'agent_settled') {
             void get().refreshEntries(sessionId).catch(() => undefined);
             void get().loadCatalog(get().catalogCwd ?? undefined).catch(() => undefined);
@@ -499,9 +553,19 @@ export const createPiSessionStore = (
           }));
           return;
         }
-        case 'host.error':
-          set({ lastError: envelope.data.message });
+        case 'host.error': {
+          const sessionId = envelope.source.sessionId;
+          set((state) => ({
+            attentionBySession: sessionId && !isPiSessionActivelyVisible(sessionId, state.currentSessionId)
+              ? {
+                  ...state.attentionBySession,
+                  [sessionId]: { kind: 'error', updatedAt: Date.now() },
+                }
+              : state.attentionBySession,
+            lastError: envelope.data.message,
+          }));
           return;
+        }
         default:
           return;
       }
@@ -583,6 +647,7 @@ export const createPiSessionStore = (
           const wasOpen = get().records[sessionId]?.open === true;
           const { result, runtimeKey } = await request('session.archive', { sessionId });
           set((state) => ({
+            attentionBySession: clearAttention(state.attentionBySession, sessionId),
             currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
             lastError: null,
             records: upsertRecord(state.records, sessionId, (current) => ({
@@ -624,6 +689,12 @@ export const createPiSessionStore = (
         }
       },
 
+      clearSessionAttention: (sessionId) => {
+        set((state) => ({
+          attentionBySession: clearAttention(state.attentionBySession, sessionId),
+        }));
+      },
+
       createSession: async (cwd, name, parentSession) => {
         const selectionIntent = beginSelectionIntent();
         try {
@@ -633,6 +704,7 @@ export const createPiSessionStore = (
             ...(parentSession === undefined ? {} : { parentSession }),
           });
           set((state) => ({
+            attentionBySession: clearAttention(state.attentionBySession, result.sessionId),
             currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
               ? result.sessionId
               : state.currentSessionId,
@@ -665,6 +737,7 @@ export const createPiSessionStore = (
             const records = { ...state.records };
             delete records[sessionId];
             return {
+              attentionBySession: clearAttention(state.attentionBySession, sessionId),
               currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
               lastError: null,
               records,
@@ -708,6 +781,9 @@ export const createPiSessionStore = (
           const previousId = sessionId;
           const nextId = result.snapshot.sessionId;
           set((state) => ({
+            attentionBySession: selectionIntentIsCurrent(selectionIntent, runtimeKey)
+              ? clearAttention(state.attentionBySession, nextId)
+              : state.attentionBySession,
             currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
               ? nextId
               : state.currentSessionId,
@@ -781,6 +857,9 @@ export const createPiSessionStore = (
           });
           if (!result.cancelled) {
             set((state) => ({
+              attentionBySession: selectionIntentIsCurrent(selectionIntent, runtimeKey)
+                ? clearAttention(state.attentionBySession, result.snapshot.sessionId)
+                : state.attentionBySession,
               currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
                 ? result.snapshot.sessionId
                 : state.currentSessionId,
@@ -807,6 +886,9 @@ export const createPiSessionStore = (
         try {
           const { result, runtimeKey } = await request('session.open', params);
           set((state) => ({
+            attentionBySession: selectionIntentIsCurrent(selectionIntent, runtimeKey)
+              ? clearAttention(state.attentionBySession, result.sessionId)
+              : state.attentionBySession,
             currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
               ? result.sessionId
               : state.currentSessionId,
@@ -1026,7 +1108,12 @@ export const createPiSessionStore = (
 
       setCurrentSession: (sessionId) => {
         beginSelectionIntent();
-        set({ currentSessionId: sessionId });
+        set((state) => ({
+          attentionBySession: sessionId === null
+            ? state.attentionBySession
+            : clearAttention(state.attentionBySession, sessionId),
+          currentSessionId: sessionId,
+        }));
       },
 
       steer: async (sessionId, text, images, instructions) => {

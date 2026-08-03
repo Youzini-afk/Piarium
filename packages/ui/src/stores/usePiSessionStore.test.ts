@@ -58,13 +58,16 @@ const summary = (
   updatedAt,
 });
 
-const assistant = (text: string): PiAssistantMessage => ({
+const assistant = (
+  text: string,
+  stopReason: PiAssistantMessage['stopReason'] = 'pending',
+): PiAssistantMessage => ({
   api: 'messages',
   content: [{ text, type: 'text' }],
   model: 'model',
   provider: 'provider',
   role: 'assistant',
-  stopReason: 'pending',
+  stopReason,
   timestamp: 1,
   usage: {
     cacheRead: 0,
@@ -316,6 +319,78 @@ describe('Pi session store', () => {
       value: null,
     }, 'session-a');
     expect(store.getState().records['session-a']?.extensionStates).toEqual({});
+  });
+
+  test('tracks background completion and errors as Pi-native session attention', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    store.getState().setCurrentSession('session-visible');
+
+    runtime.event('agent.event', {
+      event: {
+        messages: [assistant('done', 'stop')],
+        type: 'agent_end',
+        willRetry: false,
+      } satisfies PiAgentEvent,
+      sessionId: 'session-background',
+    }, 'session-background');
+    runtime.event('agent.event', {
+      event: {
+        messages: [{ ...assistant('failed', 'error'), errorMessage: 'failed' }],
+        type: 'agent_end',
+        willRetry: false,
+      } satisfies PiAgentEvent,
+      sessionId: 'session-error',
+    }, 'session-error');
+    runtime.event('agent.event', {
+      event: {
+        messages: [assistant('visible', 'stop')],
+        type: 'agent_end',
+        willRetry: false,
+      } satisfies PiAgentEvent,
+      sessionId: 'session-visible',
+    }, 'session-visible');
+
+    expect(store.getState().attentionBySession['session-background']?.kind).toBe('complete');
+    expect(store.getState().attentionBySession['session-error']?.kind).toBe('error');
+    expect(store.getState().attentionBySession['session-visible']).toBeUndefined();
+
+    store.getState().setCurrentSession('session-background');
+    expect(store.getState().attentionBySession['session-background']).toBeUndefined();
+  });
+
+  test('does not mark retrying or aborted work as attention', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+
+    runtime.event('agent.event', {
+      event: {
+        messages: [assistant('retrying', 'error')],
+        type: 'agent_end',
+        willRetry: true,
+      } satisfies PiAgentEvent,
+      sessionId: 'session-retry',
+    }, 'session-retry');
+    runtime.event('agent.event', {
+      event: {
+        messages: [assistant('aborted', 'aborted')],
+        type: 'agent_end',
+        willRetry: false,
+      } satisfies PiAgentEvent,
+      sessionId: 'session-aborted',
+    }, 'session-aborted');
+
+    expect(store.getState().attentionBySession).toEqual({});
   });
 
   test('executes extension commands through the active Pi session', async () => {

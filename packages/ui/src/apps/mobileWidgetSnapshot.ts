@@ -6,7 +6,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { useNotificationStore } from '@/sync/notification-store';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 /**
@@ -14,15 +13,15 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
  * lock-screen, Control Center). The widget process can't see the WebView, so the native
  * shell pulls this snapshot via `window.__PIARIUM_WIDGET_SNAPSHOT__()` on
  * background/activate, writes it to the shared App Group, and reloads the widget timelines
- * (see SceneDelegate.writeWidgetSnapshot). Mirrors the sidebar's attention logic so the
- * widget's "needs attention" mark matches the in-app unread dot exactly:
- *   needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks)
+ * (see SceneDelegate.writeWidgetSnapshot). Mirrors the sidebar's Pi attention logic so the
+ * widget's "needs attention" mark matches the in-app completion/error indicator exactly:
+ *   needsAttention = Pi completion/error attention && (!isSubtask || notifyOnSubtasks)
  */
 
 export interface MobileWidgetSession {
   id: string;
   title: string;
-  /** True when the session needs attention (unread + honouring the subtask setting). */
+  /** True when the session needs attention (completion/error + subtask preference). */
   unread: boolean;
   /** Project label for the session's directory (matched project name, else folder name). */
   project: string;
@@ -69,7 +68,7 @@ const projectLabelForDirectory = (directory: string | null, projects: ProjectEnt
 
 export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
   const sessions = selectActivePiSessions(usePiSessionStore.getState());
-  const unseenBySession = useNotificationStore.getState().index.session.unseenCount;
+  const attentionBySession = usePiSessionStore.getState().attentionBySession;
   const notifyOnSubtasks = useUIStore.getState().notifyOnSubtasks;
   const projects = useProjectsStore.getState().projects;
   const pinnedSessionIds = useSessionPinnedStore.getState().ids;
@@ -79,8 +78,8 @@ export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
 
   for (const session of sessions) {
     const isSubtask = session.parentId !== undefined;
-    const unseenCount = unseenBySession[session.id] ?? 0;
-    const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
+    const needsAttention = attentionBySession[session.id] !== undefined
+      && (!isSubtask || notifyOnSubtasks);
     if (needsAttention) {
       attentionCount += 1;
     }

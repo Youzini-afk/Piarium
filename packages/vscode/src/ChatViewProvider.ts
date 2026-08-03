@@ -455,18 +455,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._clearActiveEditorFileTimer = undefined;
     }
 
-    const filePath = normalizeWindowsDriveLetter(editor.document.uri.fsPath);
-    const rawFileName = editor.document.uri.fsPath;
+    const editorUri = editor.document.uri;
+    const filePath = normalizeWindowsDriveLetter(editorUri.fsPath);
+    const rawFileName = editorUri.fsPath;
     const fileName = rawFileName.replace(/\\/g, '/').split('/').pop() || '';
-    const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false);
+    const relativePath = vscode.workspace.asRelativePath(editorUri, false);
 
     let fileSize: number | null = null;
     try {
-      const stat = await vscode.workspace.fs.stat(editor.document.uri);
+      const stat = await vscode.workspace.fs.stat(editorUri);
       fileSize = stat.size;
     } catch {
       // File may not be saved yet or inaccessible
     }
+
+    if (vscode.window.activeTextEditor?.document.uri.toString() !== editorUri.toString()) return;
 
     let selection: { startLine: number; endLine: number; text: string } | null = null;
     if (!editor.selection.isEmpty) {

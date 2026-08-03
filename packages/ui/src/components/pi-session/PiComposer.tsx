@@ -24,6 +24,7 @@ import { getInlineCommentDraftKey, useInlineCommentDraftStore } from '@/stores/u
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getMagicPromptDefinition } from '@/lib/magicPrompts';
 import type { Snippet } from '@/types/snippet';
+import { PiActiveEditorContextSuggestion } from './PiActiveEditorContextSuggestion';
 import { PiGoalButton } from './PiGoalControls';
 
 interface PiComposerProps {
@@ -215,6 +216,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             ))}
           </div>
         )}
+
+        <PiActiveEditorContextSuggestion snapshot={snapshot} />
 
         <div
           className={cn(

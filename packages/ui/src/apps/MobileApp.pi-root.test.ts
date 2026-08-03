@@ -27,6 +27,7 @@ describe('Pi mobile application root', () => {
       '../components/session/NewWorktreeDialog.tsx',
     ].map(read).join('\n');
     expect(sources).not.toContain('@opencode-ai/sdk');
+    expect(sources).not.toContain('@/sync/');
     expect(sources).not.toContain('useSessionUIStore');
     expect(sources).toContain('usePiSessionStore');
     expect(sources).toContain('openPiSessionFromNavigation');

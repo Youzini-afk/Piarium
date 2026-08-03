@@ -30,6 +30,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   selectActivePiSessions,
   selectArchivedPiSessions,
+  type PiSessionAttentionState,
   usePiSessionStore,
 } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -120,7 +121,8 @@ const groupSessionForest = (
 };
 
 interface SessionRowProps {
-  busySessionId: string | null;
+  attentionBySession: Readonly<Record<string, PiSessionAttentionState>>;
+  busySessionIds: ReadonlySet<string>;
   currentSessionId: string | null;
   editingId: string | null;
   editingName: string;
@@ -153,7 +155,8 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
   const timestamp = Date.parse(session.updatedAt);
   const timeLabel = formatSessionCompactDateLabel(Number.isFinite(timestamp) ? timestamp : Date.now());
   const isCurrent = props.currentSessionId === session.id;
-  const isBusy = props.busySessionId === session.id;
+  const isBusy = props.busySessionIds.has(session.id);
+  const attention = props.attentionBySession[session.id];
   const archived = session.archivedAt !== undefined;
   const pendingRenameRef = React.useRef(false);
 
@@ -180,6 +183,10 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
 
         {isBusy ? (
           <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" />
+        ) : attention?.kind === 'error' ? (
+          <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" />
+        ) : attention ? (
+          <Icon name="notification-3" className="size-3.5 shrink-0 text-[var(--status-warning)]" />
         ) : pinned ? (
           <Icon name="pushpin" className="size-3.5 shrink-0 text-primary" />
         ) : (
@@ -298,6 +305,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const activeSessions = usePiSessionStore(selectActivePiSessions);
   const archivedSessions = usePiSessionStore(selectArchivedPiSessions);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
   const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
   const catalogLoading = usePiSessionStore((state) => state.catalogLoading);
   const lastError = usePiSessionStore((state) => state.lastError);
@@ -348,10 +356,11 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     }).filter((group) => group.forest.length > 0);
   }, [activeSessions, archivedSessions, isPinned, projects, query, showArchived, untitled]);
 
-  const busySessionId = React.useMemo(() => {
-    if (currentSessionId === null) return null;
-    return records[currentSessionId]?.snapshot?.busy ? currentSessionId : null;
-  }, [currentSessionId, records]);
+  const busySessionIds = React.useMemo(() => new Set(
+    Object.values(records)
+      .filter((record) => record.snapshot?.busy)
+      .map((record) => record.sessionId),
+  ), [records]);
 
   const selectProjectForPath = React.useCallback((cwd: string) => {
     const normalizedCwd = normalizePath(cwd);
@@ -584,7 +593,8 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                     <PiSessionRow
                       key={node.session.id}
                       node={node}
-                      busySessionId={busySessionId}
+                      attentionBySession={attentionBySession}
+                      busySessionIds={busySessionIds}
                       currentSessionId={currentSessionId}
                       editingId={editingId}
                       editingName={editingName}

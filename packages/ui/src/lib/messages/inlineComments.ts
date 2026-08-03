@@ -1,6 +1,11 @@
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendTerminalContexts } from './terminalContext';
 
+const markdownFenceFor = (content: string): string => {
+  const longest = Math.max(0, ...[...content.matchAll(/`+/g)].map((match) => match[0].length));
+  return '`'.repeat(Math.max(3, longest + 1));
+};
+
 /**
  * Format a single inline comment draft into the standard message format
  * used by diff, plan, and file viewers
@@ -27,6 +32,15 @@ function formatInlineCommentDraft(draft: InlineCommentDraft): string {
 
   if (draft.source === 'pr-check') {
     return `Attached failed GitHub PR check (${fileLabel}):\n\`\`\`\n${code}\n\`\`\`${text ? `\n\n${text}` : ''}`;
+  }
+
+  if (draft.source === 'editor-file') {
+    return `Use the active editor file as context:\n- Relative path: ${fileLabel}\n- Absolute path: ${code}${text ? `\n\n${text}` : ''}`;
+  }
+
+  if (draft.source === 'editor-selection') {
+    const fence = markdownFenceFor(code);
+    return `Context from \`${fileLabel}\` lines ${startLine}-${endLine}:\n${fence}${language}\n${code}\n${fence}${text ? `\n\n${text}` : ''}`;
   }
 
   // Plan and file format (no side)

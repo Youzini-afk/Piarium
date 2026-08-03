@@ -4,7 +4,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-console' | 'preview-annotation' | 'terminal' | 'pr-comment' | 'pr-check';
+export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'editor-file' | 'editor-selection' | 'preview-console' | 'preview-annotation' | 'terminal' | 'pr-comment' | 'pr-check';
 
 export type InlineCommentDraftTarget = {
   directory: string;
@@ -186,14 +186,17 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
           let accepted = false;
           set((state) => {
             const current = state.drafts[key] ?? [];
-            const isDuplicateTerminalDraft = draft.source === 'terminal' && current.some((item) => (
-              item.source === 'terminal'
+            const isDeduplicatedContext = draft.source === 'terminal'
+              || draft.source === 'editor-file'
+              || draft.source === 'editor-selection';
+            const isDuplicateContext = isDeduplicatedContext && current.some((item) => (
+              item.source === draft.source
               && item.fileLabel === draft.fileLabel
               && item.startLine === draft.startLine
               && item.endLine === draft.endLine
               && item.code === draft.code
             ));
-            if (isDuplicateTerminalDraft) return state;
+            if (isDuplicateContext) return state;
 
             const bounded = boundState(
               state,

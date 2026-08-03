@@ -9,7 +9,6 @@ import {
   type VSCodeThemePayload,
 } from '@piarium/ui/lib/theme/vscode/adapter';
 import { configurePiRuntimeSurface } from '@piarium/ui/lib/pi-runtime/client';
-import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager' | 'settings';
@@ -245,9 +244,12 @@ const fenceSelection = (filePath: string, text: string): string => {
 };
 
 onCommand('addContextSelection', (payload) => {
-  const record = payload as { filePath?: unknown; text?: unknown } | undefined;
+  const record = payload as { filePath?: unknown; filename?: unknown; text?: unknown } | undefined;
   if (typeof record?.filePath !== 'string' || typeof record.text !== 'string') return;
-  void appendPiDraft(fenceSelection(record.filePath, record.text)).catch((error) => {
+  const label = typeof record.filename === 'string' && record.filename.trim()
+    ? record.filename.trim()
+    : record.filePath;
+  void appendPiDraft(fenceSelection(label, record.text)).catch((error) => {
     console.error('[Piarium] Failed to add editor selection:', error);
   });
 });
@@ -330,8 +332,8 @@ onCommand('settingsSynced', () => {
 });
 
 onCommand('activeEditorFile', (payload) => {
-  void import('@/sync/input-store').then(({ useInputStore }) => {
-    useInputStore.getState().setActiveEditorFile((payload as VSCodeActiveEditorFile | null) ?? null);
+  void import('@/stores/usePiEditorContextStore').then(({ normalizePiActiveEditorFile, usePiEditorContextStore }) => {
+    usePiEditorContextStore.getState().setActiveEditorFile(normalizePiActiveEditorFile(payload));
   });
 });
 

@@ -133,7 +133,8 @@ creates an OpenCode `SyncProvider`. Mobile session grouping, parent/child expans
 ordering, create/open/archive, edge-swipe navigation, deep links, widget snapshots, and worktree
 deletion all operate on `SessionSummary` and Pi runtime methods. The worktree creation flow creates
 Pi sessions directly and submits linked GitHub issue or pull-request context through Pi's native
-prompt/instructions contract.
+prompt/instructions contract. Mobile widget completion/error badges read Pi session attention state;
+they no longer read the legacy OpenCode notification index.
 
 The iframe URL ABI is Piarium-owned: `piPanel`, `piSessionId`, `piDirectory`, and `piReadOnly`.
 Legacy `ocPanel`/OpenCode-shaped aliases are deliberately not accepted. The parent still supplies
@@ -145,7 +146,9 @@ opens the target Pi session directly and keeps in-panel navigation stable.
 The Web server no longer opens or exposes OpenCode `/event` or `/global/event` streams. Their SSE
 readers, WebSocket bridges, replay hub, proxy/auth/relay allowlist entries, and orphaned
 OpenCode-session notification trigger/template runtimes are removed. Pi session notifications are
-derived from runtime-broker `session.snapshot` and `agent.event` envelopes.
+derived from runtime-broker `session.snapshot` and `agent.event` envelopes. Renderer-owned attention
+for background completion and failure is derived from the same routed events, is cleared on view,
+and is the single input for Pi session lists and mobile widget snapshots.
 
 The remaining transports have separate product ownership: `/api/piarium/runtime/ws` carries the Pi
 runtime protocol, `/api/piarium/events` carries scheduled-task events, and
