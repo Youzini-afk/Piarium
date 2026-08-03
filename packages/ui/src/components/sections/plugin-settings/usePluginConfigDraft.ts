@@ -20,6 +20,7 @@ import {
 } from '@/lib/pi-runtime/json-object-document';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { useI18n } from '@/lib/i18n';
 import {
   asJsonObject,
@@ -211,6 +212,7 @@ export const useSettingsObjectDraft = ({
         saving: false,
         source: document,
       }));
+      notifyPiRuntimeCatalogChanged('plugin-config');
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
       if (
@@ -317,6 +319,7 @@ export const useConfigDocumentObjectDraft = ({
         source: snapshot.document,
         targetKey: actionTargetKey,
       });
+      notifyPiRuntimeCatalogChanged('plugin-config');
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
       if (
@@ -489,6 +492,7 @@ export const useTextObjectDraft = ({
         source: document,
         targetKey: actionTargetKey,
       });
+      notifyPiRuntimeCatalogChanged('plugin-config');
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
       if (

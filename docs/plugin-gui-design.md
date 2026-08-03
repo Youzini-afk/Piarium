@@ -74,8 +74,8 @@ The current catalog surfaces follow those boundaries directly:
 - The composer, command picker, inline skill picker, sent-message links, and skill activity rows
   share one runtime/session/workspace-keyed Pi catalog. Callable skills use Pi's native
   `/skill:name` invocation; the editable resource catalog enriches them with file and scope data
-  but never creates a second command registry. Successful skill/package mutations and `/reload`
-  invalidate that catalog at their host-success boundary.
+  but never creates a second command registry. Successful skill/package/plugin-configuration
+  mutations and `/reload` invalidate that catalog at their host-success boundary.
 
 ### 3.1 Retired-page capability disposition
 
@@ -85,7 +85,7 @@ that can accidentally become a second configuration system.
 | Retired surface | Useful capability clue | Piarium disposition |
 | --- | --- | --- |
 | Magic Context | Compression thresholds, memory/search, embeddings, SQLite, internal agents, fallbacks, and Dreamer schedules | Implemented in the current schema-driven Magic Context adapter with separate user/project documents and Advanced JSONC. |
-| Magic Context | Runtime status, diagnostics, memory inspection, recompression, wrap-up, dream, and embedding actions | Deferred until the package exposes a stable public status/action contract; Piarium will not inspect its private database or infer success from files. |
+| Magic Context | Runtime status, diagnostics, memory inspection, recompression, wrap-up, dream, and embedding actions | Current registered `ctx-*` commands are integrated as provider-owned session operations, including focused cost/maintenance confirmation and persisted public result entries. Private database inspection and cancellable embedding control still wait for explicit public contracts. |
 | Magic Context | OpenCode plugin registration, OpenCode TUI sidebar, and Oh My OpenAgent hook-conflict diagnostics | Rejected as OpenCode-only behavior. Pi package health is derived from Pi package/runtime contracts instead. |
 | OpenAgent | Agent/category model routing, fallback chains, hook toggles, team/background task, Tmux, skills, MCP, and experimental settings | Rejected as a generic Piarium schema because these were fields of the unrelated Oh My OpenAgent OpenCode plugin. A future Pi package receives its own adapter only from its current native schema. |
 | OpenAgent | Discovering agents, showing defaults/source, and invoking lifecycle actions | Implemented by the provider-owned Agents catalog. Provider configuration remains higher priority than generic catalog presentation. |
@@ -193,14 +193,25 @@ Memory, Embedding and storage, Internal agents, and Dreamer tasks. It keeps inde
 user/project drafts, hides fields the real project loader strips, reports ignored fields already
 present in a project document, validates the plugin's numeric five-field cron and embedding
 requirements, and preserves polymorphic per-model maps for Advanced JSONC editing instead of
-flattening them into scalar controls. Health, database inspection, and `ctx-*` session operations
-remain a later public-contract slice rather than being inferred from configuration.
+flattening them into scalar controls.
+
+Implemented session-operations slice: when a live session advertises the current command set, the
+adapter opens the plugin-owned status dialog, flushes pending context, queries embedding status,
+and invokes wrap-up, recompression, session upgrade, or a selected Dreamer task. Wrap-up, upgrade,
+and Dreamer receive focused explanations of model cost/state effects. Recompression deliberately
+keeps Magic Context's native two-invocation, 60-second confirmation instead of trying to infer its
+armed state from output prose. The adapter renders the newest persisted public `ctx-status` entry
+from the current Pi branch with the same renderer used by chat. It never reads SQLite or copies
+status into Piarium storage. `/ctx-aug` remains a prompt command in chat because it submits a real
+user turn; embedding start/pause remains on the native command surface until the package exposes a
+cancellable action contract that does not serialize pause behind the active start request.
 
 Acceptance:
 
 - every field shown by the GUI maps to the current package schema and correct scope;
 - unknown JSONC content and comments survive a GUI edit;
-- commands are invoked through the active extension and report cancellation/failure honestly;
+- commands are invoked through the active extension and transport failures remain distinct from
+  provider-reported status entries;
 - no memory or SQLite content is copied into Piarium storage.
 
 ### 5.3 pi-mcp-adapter

@@ -159,8 +159,13 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   areas, project security filtering, Pi-only runtime controls, context/compression budgets, memory
   and Git indexing, embedding/SQLite/Synapse, internal-agent tuning, and all current Dreamer tasks
   write the canonical CortexKit JSONC files without losing comments or unknown fields. Polymorphic
-  per-model maps remain explicitly visible and editable through the authoritative Advanced document;
-  runtime health and `ctx-*` operations still require a stable public plugin status/action bridge.
+  per-model maps remain explicitly visible and editable through the authoritative Advanced document.
+- Implemented: Magic Context session operations now discover and invoke its current registered
+  `ctx-*` commands in a live session. Status stays in the plugin-owned dialog; flush, embedding
+  status, wrap-up, recompression, session upgrade, and selected Dreamer tasks preserve provider
+  validation and confirmations. The newest public `ctx-status` branch entry is rendered in settings
+  without reading SQLite. Prompt augmentation stays in chat, while cancellable embedding start/pause
+  waits for a non-serialized public action contract.
 - Implemented: Agents executes every action advertised by the `pi-subagents` provider instead of
   rendering inert badges. Provider-level creation and model-resolution actions, structured agent
   and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused

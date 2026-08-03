@@ -43,6 +43,7 @@ import {
   type MagicContextScope,
 } from './magic-context-config-model';
 import { useTextObjectDraft } from './usePluginConfigDraft';
+import { MagicContextRuntimePanel } from './MagicContextRuntimePanel';
 
 interface MagicContextSettingsProps {
   initialPanel?: MagicContextPanel;
@@ -722,6 +723,8 @@ export const MagicContextSettings: React.FC<MagicContextSettingsProps> = ({
   return (
     <div className="space-y-7">
       <PluginRuntimeNote>{t('settings.piarium.pluginSettings.magic.runtimeNote')}</PluginRuntimeNote>
+
+      <MagicContextRuntimePanel runtimeTarget={runtimeTarget} />
 
       <div className="flex flex-col gap-4 rounded-lg border border-border/60 px-4 py-4">
         <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">

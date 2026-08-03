@@ -36,6 +36,9 @@ plugin ownership intact:
 - Fleet handshakes with pi-subagents' public `subagents:rpc:v1`, requires its advertised
   `fleetStatus: { version: 1 }`, and projects only the bounded public display entries. The local
   `0.38.0` smoke returned an active provider through this real RPC path;
+- the Magic Context `0.33.0` smoke exposes all nine current Pi commands used by the adapter. Session
+  operations invoke those registered commands and render only their public custom entries or UI;
+  no private database is inspected;
 - MCP consumes `pi-mcp-adapter/status/v1`, invokes the adapter's commands, and edits its native config
   sources without taking over merging, transports, OAuth, or the credential store;
 - Web Access uses its native `web-search.json` while search/fetch tools, widgets, and custom entries

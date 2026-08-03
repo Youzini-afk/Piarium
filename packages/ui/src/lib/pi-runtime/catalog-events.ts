@@ -1,4 +1,4 @@
-type PiRuntimeCatalogChangeReason = 'package' | 'reload' | 'skill';
+type PiRuntimeCatalogChangeReason = 'package' | 'plugin-config' | 'reload' | 'skill';
 
 type PiRuntimeCatalogChangeListener = (reason: PiRuntimeCatalogChangeReason) => void;
 

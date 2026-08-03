@@ -14,12 +14,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { PiToolExecutionState } from '@/stores/usePiSessionStore';
+import { PiExtensionStatusCard } from './PiExtensionStatusCard';
 import {
   parseExtensionStatus,
   parseSubagentNotifications,
   parseSubagentRun,
   piContentText,
-  type ExtensionStatusPresentation,
   type SubagentNotificationPresentation,
   type SubagentRunPresentation,
   type SubagentStatus,
@@ -260,34 +260,6 @@ const SubagentNotificationsView: React.FC<{
       <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">{piContentText(content)}</pre>
       {details !== undefined && <div className="mt-2"><RawJsonDetails value={details} /></div>}
     </details>
-  </article>
-);
-
-const ExtensionStatusView: React.FC<{
-  messageId: string;
-  status: ExtensionStatusPresentation;
-}> = ({ messageId, status }) => (
-  <article className={cn(
-    'mx-auto w-full max-w-[52rem] rounded-lg border bg-muted/15 px-3 py-2',
-    status.level === 'error' && 'border-[var(--status-error)]/40',
-    status.level === 'warning' && 'border-[var(--status-warning)]/40',
-    status.level === 'success' && 'border-[var(--status-success)]/40',
-    status.level === 'info' && 'border-border/60',
-  )} style={{ contentVisibility: 'auto' }}>
-    <div className="mb-1 flex items-center gap-2 typography-ui-label text-foreground">
-      <Icon
-        name={status.level === 'error' || status.level === 'warning' ? 'error-warning' : status.level === 'success' ? 'check' : 'information'}
-        className={cn(
-          'size-3.5',
-          status.level === 'error' && 'text-[var(--status-error)]',
-          status.level === 'warning' && 'text-[var(--status-warning)]',
-          status.level === 'success' && 'text-[var(--status-success)]',
-        )}
-      />
-      <span>{status.title}</span>
-    </div>
-    <MarkdownRenderer content={status.text} messageId={messageId} variant="tool" enableFileReferences />
-    {status.details !== undefined && <div className="mt-2"><RawJsonDetails value={status.details} /></div>}
   </article>
 );
 
@@ -660,7 +632,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
               }
               const extensionStatus = parseExtensionStatus(message.customType, message.details);
               if (extensionStatus) {
-                return <ExtensionStatusView key={entry.id} messageId={entry.id} status={extensionStatus} />;
+                return <PiExtensionStatusCard key={entry.id} className="mx-auto max-w-[52rem]" messageId={entry.id} status={extensionStatus} />;
               }
               return (
                 <MetaEntry key={entry.id} icon="plug-2">
@@ -716,7 +688,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             }
             const extensionStatus = parseExtensionStatus(entry.customType, entry.details);
             if (extensionStatus) {
-              return <ExtensionStatusView key={entry.id} messageId={entry.id} status={extensionStatus} />;
+              return <PiExtensionStatusCard key={entry.id} className="mx-auto max-w-[52rem]" messageId={entry.id} status={extensionStatus} />;
             }
             return (
               <MetaEntry key={entry.id} icon="plug-2">
@@ -752,7 +724,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
           if (entry.type === 'custom') {
             const extensionStatus = parseExtensionStatus(entry.customType, entry.data);
             if (extensionStatus) {
-              return <ExtensionStatusView key={entry.id} messageId={entry.id} status={extensionStatus} />;
+              return <PiExtensionStatusCard key={entry.id} className="mx-auto max-w-[52rem]" messageId={entry.id} status={extensionStatus} />;
             }
             return (
               <details key={entry.id} className="mx-auto max-w-full rounded-md bg-muted/30 px-3 py-1.5 typography-meta text-muted-foreground">

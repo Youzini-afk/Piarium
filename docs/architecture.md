@@ -213,9 +213,10 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
   cross-process reconciliation. The first native Fleet surface consumes its public in-process RPC
   `fleetStatus/v1` projection; private run identifiers and artifact paths remain host-side, while
   the plugin's own inspector/stop/doctor commands retain their validation and selectors.
-- **Magic Context:** plugin-owned user/project JSONC configuration and status rendered through its
-  native Pi component/custom entries; future memory, compartment, historian/dreamer/sidekick, and
-  diagnostic views continue to read its public plugin/database contracts rather than copied state.
+- **Magic Context:** plugin-owned user/project JSONC configuration, registered `ctx-*` session
+  operations, native Pi status component, and persisted public custom entries. Memory,
+  compartment, historian/dreamer/sidekick, and diagnostic views read only future public
+  plugin/database contracts rather than copied or privately inspected state.
 - **pi-mcp-adapter:** protocol v1 carries the adapter's public `pi-mcp-adapter/status/v1`
   snapshot. Settings, the desktop header, and mobile surfaces invoke the adapter's public commands,
   manage the normal Pi package, and edit all six adapter-owned JSON/JSONC sources in their documented
