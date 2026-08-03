@@ -9,6 +9,7 @@ export type SubagentsDraftIssue =
   | { code: 'model-scope-allow-required'; field: 'modelScope.allow' }
   | { code: 'required'; field: string }
   | { code: 'invalid-number'; field: string }
+  | { code: 'invalid-value'; field: string }
   | { code: 'soft-exceeds-hard'; field: string };
 
 function asObject(value: JsonValue | undefined): JsonObject | undefined {
@@ -30,9 +31,87 @@ export function subagentsSettingsDraftIssue(draft: JsonObject): SubagentsDraftIs
   if (rawAllow !== undefined && !allow?.length) {
     return { code: 'model-scope-allow-required', field: 'modelScope.allow' };
   }
-  return readJsonPath(draft, ['modelScope', 'enforce']) === true && !allow?.length
-    ? { code: 'model-scope-allow-required', field: 'modelScope.allow' }
-    : null;
+  if (readJsonPath(draft, ['modelScope', 'enforce']) === true && !allow?.length) {
+    return { code: 'model-scope-allow-required', field: 'modelScope.allow' };
+  }
+
+  const rawOverrides = readJsonPath(draft, ['agentOverrides']);
+  if (rawOverrides === undefined) return null;
+  const overrides = asObject(rawOverrides);
+  if (!overrides) return { code: 'invalid-value', field: 'agentOverrides' };
+
+  const stringOrFalseFields = ['model', 'thinking'] as const;
+  const stringArrayOrFalseFields = [
+    'fallbackModels',
+    'skills',
+    'tools',
+    'extensions',
+    'subagentOnlyExtensions',
+  ] as const;
+  const booleanFields = [
+    'inheritProjectContext',
+    'inheritSkills',
+    'disabled',
+    'completionGuard',
+  ] as const;
+
+  for (const [name, rawOverride] of Object.entries(overrides)) {
+    const override = asObject(rawOverride);
+    if (!override) return { code: 'invalid-value', field: `agentOverrides.${name}` };
+
+    for (const field of stringOrFalseFields) {
+      const value = override[field];
+      if (value !== undefined && value !== false && typeof value !== 'string') {
+        return { code: 'invalid-value', field: `agentOverrides.${name}.${field}` };
+      }
+    }
+    for (const field of stringArrayOrFalseFields) {
+      const value = override[field];
+      if (value !== undefined && value !== false && !validStringArray(value)) {
+        return { code: 'invalid-value', field: `agentOverrides.${name}.${field}` };
+      }
+    }
+    for (const field of booleanFields) {
+      const value = override[field];
+      if (value !== undefined && typeof value !== 'boolean') {
+        return { code: 'invalid-value', field: `agentOverrides.${name}.${field}` };
+      }
+    }
+    if (
+      override.systemPromptMode !== undefined
+      && override.systemPromptMode !== 'append'
+      && override.systemPromptMode !== 'replace'
+    ) {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.systemPromptMode` };
+    }
+    if (
+      override.defaultContext !== undefined
+      && override.defaultContext !== false
+      && override.defaultContext !== 'fresh'
+      && override.defaultContext !== 'fork'
+    ) {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.defaultContext` };
+    }
+    if (
+      override.acceptanceRole !== undefined
+      && override.acceptanceRole !== false
+      && override.acceptanceRole !== 'read-only'
+      && override.acceptanceRole !== 'writer'
+    ) {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.acceptanceRole` };
+    }
+    if (override.systemPrompt !== undefined && typeof override.systemPrompt !== 'string') {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.systemPrompt` };
+    }
+    if (
+      override.toolBudget !== undefined
+      && override.toolBudget !== false
+      && !asObject(override.toolBudget)
+    ) {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.toolBudget` };
+    }
+  }
+  return null;
 }
 
 function requiredPositive(

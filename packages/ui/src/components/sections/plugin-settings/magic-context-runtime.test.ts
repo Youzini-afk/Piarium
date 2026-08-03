@@ -10,10 +10,18 @@ describe('Magic Context runtime actions', () => {
     expect(buildMagicContextRuntimeCommand('status')).toEqual({ command: 'ctx-status' });
     expect(buildMagicContextRuntimeCommand('flush')).toEqual({ command: 'ctx-flush' });
     expect(buildMagicContextRuntimeCommand('embedding-status')).toEqual({ command: 'ctx-embed' });
+    expect(buildMagicContextRuntimeCommand('embedding-start')).toEqual({ command: 'ctx-embed start' });
+    expect(buildMagicContextRuntimeCommand('embedding-pause')).toEqual({ command: 'ctx-embed pause' });
+    expect(buildMagicContextRuntimeCommand('augment', { prompt: '  Explain this branch  ' })).toEqual({
+      command: 'ctx-aug Explain this branch',
+    });
     expect(buildMagicContextRuntimeCommand('wrapup', { messagesToKeep: 32 })).toEqual({
       command: 'ctx-wrapup 32',
     });
     expect(buildMagicContextRuntimeCommand('recomp')).toEqual({ command: 'ctx-recomp' });
+    expect(buildMagicContextRuntimeCommand('recomp', {
+      recompRange: { end: 11322, start: 1 },
+    })).toEqual({ command: 'ctx-recomp 1-11322' });
     expect(buildMagicContextRuntimeCommand('session-upgrade')).toEqual({
       command: 'ctx-session-upgrade',
     });
@@ -21,6 +29,10 @@ describe('Magic Context runtime actions', () => {
       command: 'ctx-dream verify',
     });
     expect(() => buildMagicContextRuntimeCommand('wrapup', { messagesToKeep: 0 })).toThrow();
+    expect(() => buildMagicContextRuntimeCommand('augment', { prompt: '   ' })).toThrow();
+    expect(() => buildMagicContextRuntimeCommand('recomp', {
+      recompRange: { end: 4, start: 5 },
+    })).toThrow();
   });
 
   test('finds the latest valid public ctx-status entry', () => {

@@ -190,7 +190,11 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   policy, the current Watchdog review/LSP schema, Fleet and async behavior, delegation limits,
   sessions/artifacts/worktrees, Intercom, scheduled runs, completion/control notifications, and
   turn/tool/usage budgets in the plugin's native documents. Unknown keys remain intact and the raw
-  documents remain authoritative.
+  documents remain authoritative. Per-agent overrides now use the live provider catalog's runtime
+  names while still accepting arbitrary future/package names; all current scalar/list/clear
+  sentinels are structured, and custom/package frontmatter precedence is explained rather than
+  flattened into the generic Agents page. Current notification channels/events and proactive skill
+  delegation are also covered.
 - Implemented: the first-class Magic Context settings surface now follows the current Pi Zod loader
   rather than the retired OpenCode-era page. Separate user/project drafts, six focused capability
   areas, project security filtering, Pi-only runtime controls, context/compression budgets, memory
@@ -199,10 +203,10 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   per-model maps remain explicitly visible and editable through the authoritative Advanced document.
 - Implemented: Magic Context session operations now discover and invoke its current registered
   `ctx-*` commands in a live session. Status stays in the plugin-owned dialog; flush, embedding
-  status, wrap-up, recompression, session upgrade, and selected Dreamer tasks preserve provider
-  validation and confirmations. The newest public `ctx-status` branch entry is rendered in settings
-  without reading SQLite. Prompt augmentation stays in chat, while cancellable embedding start/pause
-  waits for a non-serialized public action contract.
+  status/start/pause, Sidekick augmentation, wrap-up, full/ranged recompression, session upgrade,
+  and selected Dreamer tasks preserve provider validation and confirmations. The newest public
+  `ctx-status` branch entry is rendered in settings without reading SQLite, and augmentation is
+  presented truthfully as a new user turn.
 - Implemented: Agents executes every action advertised by the `pi-subagents` provider instead of
   rendering inert badges. Provider-level creation and model-resolution actions, structured agent
   and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused
@@ -243,10 +247,11 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   fields. Custom Pi agent directories are propagated through `PI_CODING_AGENT_DIR`, keeping the
   GUI and extension on the same file. The live-session panel now discovers the registered command
   catalog, opens the native Search Curator with optional initial queries, invokes Gemini Web account
-  diagnostics, and opens the plugin-owned stored-result selector. The GUI maps `/curator` to the
-  authoritative workflow field instead of introducing a competing toggle. Search/fetch tools,
-  widgets, dialogs, and custom entries use the generic extension projection; provider health and
-  activity still require a public versioned contract from the extension.
+  diagnostics, opens the plugin-owned stored-result selector, and invokes the public
+  `/curator on|off|summary-review` modes while leaving persistence and immediate effects with the
+  plugin. Search/fetch tools, widgets, dialogs, and custom entries use the generic extension
+  projection; provider health and activity still require a public versioned contract from the
+  extension.
 
 Acceptance: each adapter has an unavailable/degraded state, version compatibility diagnostics, and
 an integration smoke test without exposing credentials.

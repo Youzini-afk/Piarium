@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -33,6 +34,7 @@ import {
   buildMagicContextRuntimeCommand,
   latestMagicContextStatus,
   type MagicContextRuntimeActionId,
+  type MagicContextRuntimeCommandOptions,
 } from './magic-context-runtime';
 
 interface MagicContextRuntimePanelProps {
@@ -47,7 +49,7 @@ const DREAM_TASKS = Object.keys(
 
 const actionCommandName = (
   action: MagicContextRuntimeActionId,
-  options?: { dreamTask?: MagicContextDreamerTask; messagesToKeep?: number },
+  options?: MagicContextRuntimeCommandOptions,
 ): string => buildMagicContextRuntimeCommand(action, options).command.split(' ', 1)[0] ?? '';
 
 export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> = ({
@@ -65,6 +67,9 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
   const [confirmAction, setConfirmAction] = React.useState<ConfirmedAction | null>(null);
   const [messagesToKeepText, setMessagesToKeepText] = React.useState('20');
   const [dreamTask, setDreamTask] = React.useState<'all' | MagicContextDreamerTask>('all');
+  const [augmentationPrompt, setAugmentationPrompt] = React.useState('');
+  const [recompStartText, setRecompStartText] = React.useState('');
+  const [recompEndText, setRecompEndText] = React.useState('');
   const commandNames = React.useMemo(
     () => new Set(catalog.commands.map((command) => command.name)),
     [catalog.commands],
@@ -77,6 +82,12 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
   const magicActive = sessionId !== null && commandNames.has('ctx-status');
   const messagesToKeep = Number(messagesToKeepText);
   const validMessagesToKeep = Number.isSafeInteger(messagesToKeep) && messagesToKeep > 0;
+  const recompStart = Number(recompStartText);
+  const recompEnd = Number(recompEndText);
+  const validRecompRange = Number.isSafeInteger(recompStart)
+    && Number.isSafeInteger(recompEnd)
+    && recompStart >= 1
+    && recompEnd >= recompStart;
 
   React.useEffect(() => {
     if (!sessionId || sessionRecord?.branchEntries) return;
@@ -85,12 +96,12 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
 
   const commandAvailable = React.useCallback((
     action: MagicContextRuntimeActionId,
-    options?: { dreamTask?: MagicContextDreamerTask; messagesToKeep?: number },
+    options?: MagicContextRuntimeCommandOptions,
   ) => commandNames.has(actionCommandName(action, options)), [commandNames]);
 
   const runAction = React.useCallback(async (
     action: MagicContextRuntimeActionId,
-    options?: { dreamTask?: MagicContextDreamerTask; messagesToKeep?: number },
+    options?: MagicContextRuntimeCommandOptions,
   ): Promise<boolean> => {
     if (!sessionId || runningCommand || sessionBusy) return false;
     let command: string;
@@ -217,6 +228,54 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
           {runningCommand === 'ctx-embed' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
           {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStatus')}
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={actionsDisabled || !commandAvailable('embedding-start')}
+          onClick={() => void runAction('embedding-start')}
+        >
+          {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingStart')}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={actionsDisabled || !commandAvailable('embedding-pause')}
+          onClick={() => void runAction('embedding-pause')}
+        >
+          {t('settings.piarium.pluginSettings.magic.runtime.action.embeddingPause')}
+        </Button>
+      </SettingsControlGroup>
+
+      <SettingsControlGroup
+        className="border-t border-border/60 pt-5"
+        title={t('settings.piarium.pluginSettings.magic.runtime.augmentation.title')}
+        description={t('settings.piarium.pluginSettings.magic.runtime.augmentation.description')}
+        contentClassName="space-y-3"
+      >
+        <div className="space-y-1.5">
+          <label className="typography-settings-field-label text-foreground" htmlFor="magic-augmentation-prompt">
+            {t('settings.piarium.pluginSettings.magic.runtime.augmentation.prompt')}
+          </label>
+          <Textarea
+            id="magic-augmentation-prompt"
+            value={augmentationPrompt}
+            disabled={actionsDisabled}
+            placeholder={t('settings.piarium.pluginSettings.magic.runtime.augmentation.placeholder')}
+            onChange={(event) => setAugmentationPrompt(event.target.value)}
+            className="min-h-24"
+          />
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={actionsDisabled || !augmentationPrompt.trim() || !commandAvailable('augment', { prompt: augmentationPrompt })}
+          onClick={() => void runAction('augment', { prompt: augmentationPrompt })}
+        >
+          {t('settings.piarium.pluginSettings.magic.runtime.action.augment')}
+        </Button>
       </SettingsControlGroup>
 
       <SettingsControlGroup
@@ -277,6 +336,52 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             onClick={() => setConfirmAction('dream')}
           >
             {t('settings.piarium.pluginSettings.magic.runtime.action.dream')}
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-2 @xl:flex-row @xl:items-end">
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <label className="typography-settings-field-label text-foreground" htmlFor="magic-recomp-start">
+                {t('settings.piarium.pluginSettings.magic.runtime.recompStart')}
+              </label>
+              <Input
+                id="magic-recomp-start"
+                type="number"
+                min={1}
+                step={1}
+                value={recompStartText}
+                disabled={runningCommand !== null}
+                onChange={(event) => setRecompStartText(event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="typography-settings-field-label text-foreground" htmlFor="magic-recomp-end">
+                {t('settings.piarium.pluginSettings.magic.runtime.recompEnd')}
+              </label>
+              <Input
+                id="magic-recomp-end"
+                type="number"
+                min={1}
+                step={1}
+                value={recompEndText}
+                disabled={runningCommand !== null}
+                onChange={(event) => setRecompEndText(event.target.value)}
+              />
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !validRecompRange || !commandAvailable('recomp', {
+              recompRange: { end: recompEnd, start: recompStart },
+            })}
+            onClick={() => void runAction('recomp', {
+              recompRange: { end: recompEnd, start: recompStart },
+            })}
+          >
+            {t('settings.piarium.pluginSettings.magic.runtime.action.recompRange')}
           </Button>
         </div>
 

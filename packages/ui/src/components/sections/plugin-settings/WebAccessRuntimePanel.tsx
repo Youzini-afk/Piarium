@@ -152,6 +152,35 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
             {t('settings.piarium.pluginSettings.webAccess.runtime.action.openCurator')}
           </Button>
         </form>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('curator-on')}
+            onClick={() => void runAction('curator-on')}
+          >
+            {t('settings.piarium.pluginSettings.webAccess.runtime.action.curatorOn')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('curator-summary-review')}
+            onClick={() => void runAction('curator-summary-review')}
+          >
+            {t('settings.piarium.pluginSettings.webAccess.runtime.action.curatorSummaryReview')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('curator-off')}
+            onClick={() => void runAction('curator-off')}
+          >
+            {t('settings.piarium.pluginSettings.webAccess.runtime.action.curatorOff')}
+          </Button>
+        </div>
       </SettingsControlGroup>
 
       <SettingsControlGroup

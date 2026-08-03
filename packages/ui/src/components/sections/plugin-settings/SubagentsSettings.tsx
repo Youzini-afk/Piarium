@@ -12,7 +12,8 @@ import {
   PluginStringListField,
 } from './PluginConfigFields';
 import { PluginDraftFooter, PluginRuntimeNote, ScopeSelector } from './PluginSettingsPanelShared';
-import { readJsonPath } from './plugin-config-model';
+import { readJsonPath, setJsonPath } from './plugin-config-model';
+import { SubagentsAgentOverrides } from './SubagentsAgentOverrides';
 import {
   subagentsRuntimeDraftIssue,
   subagentsSettingsDraftIssue,
@@ -62,6 +63,8 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
         return t('settings.piarium.pluginSettings.subagents.validation.required', { field: issue.field });
       case 'invalid-number':
         return t('settings.piarium.pluginSettings.subagents.validation.invalidNumber', { field: issue.field });
+      case 'invalid-value':
+        return t('settings.piarium.pluginSettings.subagents.validation.invalidValue', { field: issue.field });
       case 'soft-exceeds-hard':
         return t('settings.piarium.pluginSettings.subagents.validation.softExceedsHard', { field: issue.field });
     }
@@ -84,6 +87,31 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
   const waitToolDraft = typeof waitToolValue === 'boolean'
     ? { ...runtime.draft, waitTool: { enabled: waitToolValue } }
     : runtime.draft;
+  const proactiveValue = readJsonPath(runtime.draft, ['proactiveSkillSubagents']);
+  const proactiveDraft = proactiveValue === false
+    ? setJsonPath(runtime.draft, ['proactiveSkillSubagents'], { enabled: false })
+    : runtime.draft;
+  const proactiveFields = {
+    ...runtimeFields,
+    draft: proactiveDraft,
+    onRemove: (path: readonly string[]) => {
+      if (proactiveValue === false && path[0] === 'proactiveSkillSubagents') {
+        runtime.removeValue(['proactiveSkillSubagents']);
+        return;
+      }
+      runtime.removeValue(path);
+    },
+    onSet: (path: readonly string[], value: Parameters<typeof runtime.setValue>[1]) => {
+      if (proactiveValue === false && path[0] === 'proactiveSkillSubagents') {
+        runtime.setValue(
+          ['proactiveSkillSubagents'],
+          setJsonPath({ enabled: false }, path.slice(1), value),
+        );
+        return;
+      }
+      runtime.setValue(path, value);
+    },
+  };
   const pluginDefault = t('settings.piarium.pluginSettings.field.pluginDefault');
   const unlimited = t('settings.piarium.pluginSettings.subagents.value.unlimited');
   const off = t('settings.piarium.pluginSettings.subagents.value.off');
@@ -133,6 +161,12 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           <PluginBooleanField {...settingsFields} path={['modelScope', 'enforce']} label="modelScope.enforce" defaultValue={false} />
           <PluginStringListField {...settingsFields} path={['modelScope', 'allow']} label="modelScope.allow" placeholder="provider/*" />
         </SettingsControlGroup>
+
+        <SubagentsAgentOverrides
+          {...settingsFields}
+          runtimeTarget={runtimeTarget}
+          targetKey={`${targetKey}:${scope}`}
+        />
 
         <SettingsControlGroup
           className={SUBGROUP_CLASS}
@@ -333,6 +367,34 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
           <PluginOptionalNumberField {...runtimeFields} path={['control', 'activeNoticeAfterTurns']} label="control.activeNoticeAfterTurns" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
           <PluginOptionalNumberField {...runtimeFields} path={['control', 'activeNoticeAfterTokens']} label="control.activeNoticeAfterTokens" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
           <PluginNumberField {...runtimeFields} path={['control', 'failedToolAttemptsBeforeAttention']} label="control.failedToolAttemptsBeforeAttention" defaultValue={3} min={1} />
+          <PluginStringListField
+            {...runtimeFields}
+            path={['control', 'notifyOn']}
+            label="control.notifyOn"
+            placeholder={'active_long_running\nneeds_attention'}
+            defaultValue={['active_long_running', 'needs_attention']}
+            emptyArrayOnClear
+          />
+          <PluginStringListField
+            {...runtimeFields}
+            path={['control', 'notifyChannels']}
+            label="control.notifyChannels"
+            placeholder={'event\nasync\nintercom'}
+            defaultValue={['event', 'async', 'intercom']}
+            emptyArrayOnClear
+          />
+        </SettingsControlGroup>
+
+        <SettingsControlGroup
+          className={SUBGROUP_CLASS}
+          title={t('settings.piarium.pluginSettings.subagents.runtime.proactiveSkills')}
+          description={t('settings.piarium.pluginSettings.subagents.runtime.proactiveSkillsDescription')}
+          contentClassName="space-y-4"
+        >
+          <PluginOptionalBooleanField {...proactiveFields} path={['proactiveSkillSubagents', 'enabled']} label="proactiveSkillSubagents.enabled" />
+          <PluginNumberField {...proactiveFields} path={['proactiveSkillSubagents', 'minReferences']} label="proactiveSkillSubagents.minReferences" defaultValue={2} min={1} />
+          <PluginNumberField {...proactiveFields} path={['proactiveSkillSubagents', 'maxRecommendations']} label="proactiveSkillSubagents.maxRecommendations" defaultValue={3} min={1} max={5} />
+          <PluginStringField {...proactiveFields} path={['proactiveSkillSubagents', 'preferredAgent']} label="proactiveSkillSubagents.preferredAgent" defaultValue="reviewer" placeholder="reviewer" />
         </SettingsControlGroup>
 
         <SettingsControlGroup

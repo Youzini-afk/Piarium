@@ -85,7 +85,7 @@ that can accidentally become a second configuration system.
 | Retired surface | Useful capability clue | Piarium disposition |
 | --- | --- | --- |
 | Magic Context | Compression thresholds, memory/search, embeddings, SQLite, internal agents, fallbacks, and Dreamer schedules | Implemented in the current schema-driven Magic Context adapter with separate user/project documents and Advanced JSONC. |
-| Magic Context | Runtime status, diagnostics, memory inspection, recompression, wrap-up, dream, and embedding actions | Current registered `ctx-*` commands are integrated as provider-owned session operations, including focused cost/maintenance confirmation and persisted public result entries. Private database inspection and cancellable embedding control still wait for explicit public contracts. |
+| Magic Context | Runtime status, diagnostics, memory inspection, recompression, wrap-up, dream, augmentation, and embedding actions | Current registered `ctx-*` commands are integrated as provider-owned session operations, including focused cost/maintenance confirmation and persisted public result entries. Private database inspection still waits for an explicit public contract. |
 | Magic Context | OpenCode plugin registration, OpenCode TUI sidebar, and Oh My OpenAgent hook-conflict diagnostics | Rejected as OpenCode-only behavior. Pi package health is derived from Pi package/runtime contracts instead. |
 | OpenAgent | Agent/category model routing, fallback chains, hook toggles, team/background task, Tmux, skills, MCP, and experimental settings | Rejected as a generic Piarium schema because these were fields of the unrelated Oh My OpenAgent OpenCode plugin. A future Pi package receives its own adapter only from its current native schema. |
 | OpenAgent | Discovering agents, showing defaults/source, and invoking lifecycle actions | Implemented by the provider-owned Agents catalog. Provider configuration remains higher priority than generic catalog presentation. |
@@ -139,6 +139,15 @@ Target settings sections:
 5. Agent overrides: provider-owned per-agent overrides without flattening them into the generic
    Agents model.
 6. Advanced: the full native JSON documents with scope and conflict information.
+
+The current settings adapter also discovers the live `pi-subagents` catalog by provider id and uses
+the descriptor's runtime `name`—never Piarium's opaque descriptor id—as the `agentOverrides` key.
+It supports every currently parsed scalar/list override, preserves arbitrary future agent names,
+and leaves `toolBudget` plus unknown fields in Advanced. `false` is rendered as the plugin's
+“clear resolved value” sentinel, which is distinct from an absent override and, for list fields,
+from an explicit empty array. Runtime configuration includes the current control notification
+event/channel lists and proactive skill-delegation settings. The one-value watchdog delivery and
+late-warning enums remain in Advanced until the plugin exposes an actual user choice.
 
 Agents consumes every provider action currently advertised by the extension: create, edit/inspect,
 update, delete, eject, enable, disable, and reset. It does not stop at displaying action badges.
@@ -197,14 +206,14 @@ flattening them into scalar controls.
 
 Implemented session-operations slice: when a live session advertises the current command set, the
 adapter opens the plugin-owned status dialog, flushes pending context, queries embedding status,
-and invokes wrap-up, recompression, session upgrade, or a selected Dreamer task. Wrap-up, upgrade,
-and Dreamer receive focused explanations of model cost/state effects. Recompression deliberately
-keeps Magic Context's native two-invocation, 60-second confirmation instead of trying to infer its
-armed state from output prose. The adapter renders the newest persisted public `ctx-status` entry
-from the current Pi branch with the same renderer used by chat. It never reads SQLite or copies
-status into Piarium storage. `/ctx-aug` remains a prompt command in chat because it submits a real
-user turn; embedding start/pause remains on the native command surface until the package exposes a
-cancellable action contract that does not serialize pause behind the active start request.
+starts or pauses embedding, submits Sidekick augmentation, and invokes wrap-up, full or ranged
+recompression, session upgrade, or a selected Dreamer task. Augmentation is labelled as a real new
+user turn rather than a preview. Wrap-up, upgrade, and Dreamer receive focused explanations of
+model cost/state effects. Full and ranged recompression deliberately keep Magic Context's native
+two-invocation, 60-second confirmation instead of trying to infer its armed state from output
+prose. The adapter renders the newest persisted public `ctx-status` entry from the current Pi
+branch with the same renderer used by chat. It never reads SQLite or copies status into Piarium
+storage.
 
 Acceptance:
 
@@ -273,12 +282,14 @@ custom agent directory is used.
 
 Implemented session-operations slice: the adapter discovers the live session's registered command
 catalog, opens `/websearch` with an optional native comma-separated query list, invokes the
-plugin-owned Gemini Web account diagnostic, and opens the plugin's persisted-result browser. The
-`/curator` command is intentionally represented by the authoritative `workflow` configuration
-control instead of adding a second stateful toggle that can race a loaded draft. Command discovery
-proves only that an operation is loaded; provider health, search activity, and richer Curator state
-remain unreported until the extension publishes a versioned runtime contract. The plugin continues
-to own every dialog, follow-up message, browser server, stored result, and delete action.
+plugin-owned Gemini Web account diagnostic, opens the plugin's persisted-result browser, and calls
+the public `/curator on|off|summary-review` modes. Those runtime actions intentionally remain
+separate from the saved `workflow` draft: the plugin owns persistence and immediate session
+effects, while the settings form remains a revision-safe view of `web-search.json`. Command
+discovery proves only that an operation is loaded; provider health, search activity, and richer
+Curator state remain unreported until the extension publishes a versioned runtime contract. The
+plugin continues to own every dialog, follow-up message, browser server, stored result, and delete
+action.
 
 Secrets are not surfaced as ordinary text fields. The advanced editor preserves native credential
 source references. A remote Curator bind explains plain-HTTP/token-in-URL exposure and highlights

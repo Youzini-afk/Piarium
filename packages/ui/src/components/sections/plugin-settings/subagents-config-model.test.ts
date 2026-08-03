@@ -19,6 +19,39 @@ describe('subagents config model', () => {
     });
   });
 
+  test('accepts the current pi-subagents override contract and rejects malformed known fields', () => {
+    expect(subagentsSettingsDraftIssue({
+      agentOverrides: {
+        reviewer: {
+          acceptanceRole: false,
+          completionGuard: true,
+          defaultContext: 'fork',
+          extensions: false,
+          fallbackModels: ['anthropic/claude-sonnet-4-5'],
+          inheritProjectContext: true,
+          model: 'openai/gpt-5.2',
+          systemPromptMode: 'append',
+          thinking: false,
+          toolBudget: { hard: 20, soft: 10 },
+          tools: [],
+          unknownFutureField: { preserved: true },
+        },
+      },
+    })).toBeNull();
+    expect(subagentsSettingsDraftIssue({
+      agentOverrides: { reviewer: { fallbackModels: 'not-an-array' } },
+    })).toEqual({
+      code: 'invalid-value',
+      field: 'agentOverrides.reviewer.fallbackModels',
+    });
+    expect(subagentsSettingsDraftIssue({
+      agentOverrides: { reviewer: { defaultContext: 'ambient' } },
+    })).toEqual({
+      code: 'invalid-value',
+      field: 'agentOverrides.reviewer.defaultContext',
+    });
+  });
+
   test('requires complete turn and tool budget objects', () => {
     expect(subagentsRuntimeDraftIssue({ turnBudget: { graceTurns: 1 } })).toEqual({
       code: 'required',
