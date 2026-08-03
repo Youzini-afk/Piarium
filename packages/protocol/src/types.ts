@@ -1,6 +1,9 @@
 import type { PiSessionFeatureState } from "./session-features.js";
 
-export const PIARIUM_PROTOCOL_VERSION = 14 as const;
+// Piarium is pre-release and all product surfaces ship in lockstep. Breaking
+// development changes replace this single contract instead of accumulating
+// compatibility versions that no released client needs.
+export const PIARIUM_PROTOCOL_VERSION = 1 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 

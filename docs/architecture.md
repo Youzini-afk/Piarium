@@ -39,11 +39,11 @@ execution into an untrusted renderer.
 ```text
 OpenChamber-derived React renderer
     |
-    | authenticated Piarium v11 WebSocket/postMessage surface protocol
+    | authenticated Piarium v1 WebSocket/postMessage surface protocol
     v
 OpenChamber-derived Electron/web shell + Piarium broker
     |
-    | Piarium protocol v11 over a private child-process IPC pipe
+    | Piarium protocol v1 over a private child-process IPC pipe
     v
 Pi session worker (Node >=22.19)
     |- Pi SDK session runtime
@@ -89,7 +89,7 @@ successful Pi host handshake. The surface shows the negotiated Pi, host, Node, a
 versions; it does not probe OpenCode health, ask for an OpenCode binary, or run an installation
 script. Remote host selection remains a separate retained transport choice.
 
-Protocol v7 does not forward Pi SDK objects verbatim. The host projects the append-only session
+Protocol v1 does not forward Pi SDK objects verbatim. The host projects the append-only session
 tree, messages, tool calls/results, streaming updates, compaction, retry state, model metadata, and
 provider authentication interactions into Piarium-owned discriminated DTOs. Provider response IDs,
 thinking/text signatures, callback functions, `AbortSignal`, and credential objects remain inside
@@ -160,7 +160,7 @@ no implicit pagination or truncation. The leaf and every entry's
 contains the complete append-only tree. Streaming `agent.event` messages contain one canonical
 message plus a compact typed delta instead of duplicating Pi's mutable `partial` object.
 
-Protocol v7 also exposes native `session.header`, `session.summary`, `session.tree`,
+Protocol v1 also exposes native `session.header`, `session.summary`, `session.tree`,
 `session.entry`, `session.stats`, `session.rename`, `session.archive`, `session.unarchive`,
 `session.delete`, and `thinking.select` operations. It adds surface-owned project trust responses,
 the full extension UI request/state bridge, locked global/project JSON changes for arbitrary
@@ -170,8 +170,9 @@ Runtime snapshots carry Pi's actual streaming,
 compaction, retry, steering, follow-up, queue, model, and thinking state. Archive state is broker-owned
 atomic Piarium metadata; renames remain native append-only Pi session-info entries.
 
-An initial handshake negotiates protocol version and capabilities. UI disables unavailable
-actions instead of guessing from runtime versions.
+An initial handshake requires the single Piarium v1 contract and reports capabilities. During
+pre-release development every product surface changes in lockstep; no historical Piarium ABI is
+accepted. UI disables unavailable actions instead of guessing from runtime versions.
 
 ## 6. Data ownership
 
@@ -213,7 +214,7 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
 - **Magic Context:** plugin-owned user/project JSONC configuration and status rendered through its
   native Pi component/custom entries; future memory, compartment, historian/dreamer/sidekick, and
   diagnostic views continue to read its public plugin/database contracts rather than copied state.
-- **pi-mcp-adapter:** protocol v11 carries the adapter's public `pi-mcp-adapter/status/v1`
+- **pi-mcp-adapter:** protocol v1 carries the adapter's public `pi-mcp-adapter/status/v1`
   snapshot. Settings, the desktop header, and mobile surfaces invoke the adapter's public commands,
   manage the normal Pi package, and edit all six adapter-owned JSON/JSONC sources in their documented
   precedence order. Piarium has no parallel MCP store, generated OpenCode configuration draft, or

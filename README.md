@@ -16,7 +16,7 @@ desktop broker, and plugin-backed conversation/workspace recovery bridge are imp
 The complete OpenChamber-derived product shell is now imported and builds from this repository.
 Its Electron lifecycle owns the Pi worker broker directly, and an authenticated Pi-native
 WebSocket surface plus browser client now carries that broker across desktop/web/mobile and the
-encrypted relay. Protocol v7 now exposes Pi's complete branch graph, tree/header/entry/summary/stats,
+encrypted relay. Protocol v1 exposes Pi's complete branch graph, tree/header/entry/summary/stats,
 real streaming/compaction/queue state, native rename/archive/restore/delete, model and thinking
 selection, provider-owned authentication, and recovery-provider capabilities as Piarium DTOs without
 leaking SDK-only callbacks or Pi credential objects. It also carries explicit project-trust responses,

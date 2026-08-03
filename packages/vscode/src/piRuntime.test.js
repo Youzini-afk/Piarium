@@ -1,6 +1,7 @@
 import {
   describe, expect, mock, test,
 } from 'bun:test';
+import { PIARIUM_PROTOCOL_VERSION } from '@piarium/protocol';
 
 mock.module('vscode', () => ({
   Disposable: class Disposable {
@@ -34,7 +35,7 @@ const handshake = {
     settings: true,
   },
   hostVersion: '0.1.0',
-  protocolVersion: 11,
+  protocolVersion: PIARIUM_PROTOCOL_VERSION,
   runtime: {
     agentDir: 'C:/agent',
     nodePath: 'C:/node.exe',
