@@ -17,8 +17,8 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-const PiSettingsView = lazyWithChunkRecovery(() => import('@/components/views/PiSettingsView').then((module) => ({
-  default: module.PiSettingsView,
+const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then((module) => ({
+  default: module.SettingsView,
 })));
 
 type VSCodePanelType = 'chat' | 'agentManager' | 'settings';
@@ -85,7 +85,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
             <div className="h-full bg-background text-foreground">
               <PiInteractionHost />
               <React.Suspense fallback={null}>
-                <PiSettingsView
+                <SettingsView
                   isWindowed
                   onClose={() => {
                     void apis.vscode?.executeCommand('piarium.closeSettingsPanel');

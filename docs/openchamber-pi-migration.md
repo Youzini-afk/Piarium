@@ -64,7 +64,8 @@ replacements land.
 
 ## Pi-native session features
 
-Protocol version 12 owns Goal, Assist, and pinned-context state as `PiSessionFeatureState`. The Pi
+Protocol version 13 owns Goal, Assist, pinned-context state, and parent-session creation as Piarium's
+native runtime ABI. Goal, Assist, and pinned-context state use `PiSessionFeatureState`. The Pi
 host persists each change as a versioned, append-only custom entry in the session JSONL and reads
 the newest state visible from the active branch. Feature state is therefore branch-aware, travels
 with the Pi session, and does not depend on OpenCode metadata, sidecar goal files, or projected

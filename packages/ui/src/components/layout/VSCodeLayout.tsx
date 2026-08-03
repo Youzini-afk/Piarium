@@ -14,8 +14,8 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
 
-const PiSettingsView = lazyWithChunkRecovery(() => import('@/components/views/PiSettingsView').then((module) => ({
-  default: module.PiSettingsView,
+const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then((module) => ({
+  default: module.SettingsView,
 })));
 
 const EXPANDED_LAYOUT_THRESHOLD = 960;
@@ -247,7 +247,7 @@ export const VSCodeLayout: React.FC = () => {
         </ErrorBoundary>
       ) : currentView === 'settings' ? (
         <React.Suspense fallback={null}>
-          <PiSettingsView
+          <SettingsView
             forceMobile={width > 0 && width < SETTINGS_MOBILE_THRESHOLD}
             onClose={() => setCurrentView(viewBeforeSettings.current)}
           />
