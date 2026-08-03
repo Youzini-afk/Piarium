@@ -67,22 +67,22 @@ device token of a server sees the same badge.
 
 ## Modes
 
-- **Relay (default):** server has no Apple key; `OPENCHAMBER_PUSH_RELAY_URL` defaults to
+- **Relay (default):** server has no Apple key; `PIARIUM_PUSH_RELAY_URL` defaults to
   `https://api.openchamber.dev/v1/push/send` (register URL is derived as `…/register-token`).
-- **Direct (fallback):** set `OPENCHAMBER_PUSH_RELAY_DISABLED=true` + `OPENCHAMBER_APNS_KEY_ID/
+- **Direct (fallback):** set `PIARIUM_PUSH_RELAY_DISABLED=true` + `PIARIUM_APNS_KEY_ID/
   TEAM_ID/P8` to sign+send from the server itself (HTTP/2 + ES256 JWT); no relay binding needed.
 
 ## Config
 
 Server (`apns-runtime.js`):
-- `OPENCHAMBER_PUSH_RELAY_URL` (default the public relay), `OPENCHAMBER_APNS_ENVIRONMENT`
+- `PIARIUM_PUSH_RELAY_URL` (default the public relay), `PIARIUM_APNS_ENVIRONMENT`
   (optional override forcing every send to `sandbox` or `production`; normally unset — each
   token is delivered to the environment it registered with: the iOS shell reads the
   `aps-environment` entitlement from the embedded provisioning profile and reports it at
   registration, so Xcode dev builds go to sandbox and TestFlight/App Store to production).
   The signing keypair is auto-generated — nothing to set.
-- Direct fallback: `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8`
-  (or `_P8_PATH`), `OPENCHAMBER_APNS_BUNDLE_ID`, `OPENCHAMBER_PUSH_RELAY_DISABLED=true`.
+- Direct fallback: `PIARIUM_APNS_KEY_ID`, `PIARIUM_APNS_TEAM_ID`, `PIARIUM_APNS_P8`
+  (or `_P8_PATH`), `PIARIUM_APNS_BUNDLE_ID`, `PIARIUM_PUSH_RELAY_DISABLED=true`.
 
 Relay (Cloudflare Worker secrets via `wrangler secret put` / GitHub Actions): `APNS_P8`,
 `APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The `push_tokens`

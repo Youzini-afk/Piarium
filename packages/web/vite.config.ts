@@ -8,8 +8,8 @@ import { themeStoragePlugin } from '../../vite-theme-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
-const lowMemoryBuild = process.env.OPENCHAMBER_LOW_MEMORY_BUILD === '1';
+const pwaDevEnabled = process.env.PIARIUM_DISABLE_PWA_DEV !== '1';
+const lowMemoryBuild = process.env.PIARIUM_LOW_MEMORY_BUILD === '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
@@ -24,7 +24,7 @@ const themeJsonHmrPlugin = () => ({
     try {
       server.ws.send({
         type: 'custom',
-        event: 'openchamber:theme-updated',
+        event: 'piarium:theme-updated',
         data: JSON.parse(readFileSync(file, 'utf-8')),
       });
       // Theme JSON is applied by the runtime event listener. Returning no
@@ -109,15 +109,15 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/auth': {
-        target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
+        target: `http://127.0.0.1:${process.env.PIARIUM_PORT || 3001}`,
         changeOrigin: true,
       },
       '/health': {
-        target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
+        target: `http://127.0.0.1:${process.env.PIARIUM_PORT || 3001}`,
         changeOrigin: true,
       },
       '/api': {
-        target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
+        target: `http://127.0.0.1:${process.env.PIARIUM_PORT || 3001}`,
         changeOrigin: true,
         ws: true,
       },

@@ -4,7 +4,7 @@
 <dict>
 	<!-- APNs environment for the build's provisioning profile. `development` matches a
 	     dev/side-load build; switch to `production` for TestFlight/App Store (and set the
-	     relay/server OPENCHAMBER_APNS_ENVIRONMENT to match). -->
+	     relay/server PIARIUM_APNS_ENVIRONMENT to match). -->
 	<key>aps-environment</key>
 	<string>development</string>
 	<!-- Shared container so the home-screen / lock-screen / Control Center widgets can read

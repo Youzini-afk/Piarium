@@ -30,7 +30,7 @@ to `openchamber-website` so it re-syncs and redeploys the docs. This fires on
 
 Required secret in this repo:
 
-- `OPENCHAMBER_WEBSITE_REPO_TOKEN` — a token with `contents: write` (classic
+- `PIARIUM_WEBSITE_REPO_TOKEN` — a token with `contents: write` (classic
   `repo` scope, or fine-grained with Contents: read & write) on
   `openchamber/openchamber-website`. **Without it the dispatch step is skipped**
   (it logs "not set" and exits cleanly), so the site will never auto-update.
@@ -50,5 +50,5 @@ Payload includes:
 `openchamber-website`'s `deploy-docs.yml` listens for this event
 (`repository_dispatch: types: [docs_source_updated]`), checks out
 `openchamber` at `source_ref`, runs `docs:sync`, builds `apps/docs`, and deploys
-to Cloudflare Pages. That repo needs its own secrets: `OPENCHAMBER_REPO_TOKEN`
+to Cloudflare Pages. That repo needs its own secrets: `PIARIUM_REPO_TOKEN`
 (read access to this repo), `CLOUDFLARE_API_TOKEN`, and `CLOUDFLARE_ACCOUNT_ID`.

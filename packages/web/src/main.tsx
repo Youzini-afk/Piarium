@@ -16,7 +16,7 @@ import { detectHostedSurface } from './hostedSurface';
 declare global {
   interface Window {
     __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs;
-    __OPENCHAMBER_SURFACE__?: HostedSurface;
+    __PIARIUM_SURFACE__?: HostedSurface;
   }
 }
 
@@ -36,7 +36,7 @@ const hostedSurface = detectHostedSurface({
   isCoarsePointer: isCoarsePointer(),
   mobileLayoutPreference: getStoredMobileLayoutPreference(),
 });
-window.__OPENCHAMBER_SURFACE__ = hostedSurface;
+window.__PIARIUM_SURFACE__ = hostedSurface;
 
 type PrerenderingDocument = Document & {
   prerendering?: boolean;
@@ -123,8 +123,8 @@ const start = async (): Promise<void> => {
 void start();
 
 if (import.meta.hot) {
-  import.meta.hot.on('openchamber:theme-updated', (theme: unknown) => {
-    window.dispatchEvent(new CustomEvent('openchamber:theme-hmr', { detail: theme }));
+  import.meta.hot.on('piarium:theme-updated', (theme: unknown) => {
+    window.dispatchEvent(new CustomEvent('piarium:theme-hmr', { detail: theme }));
   });
 }
 

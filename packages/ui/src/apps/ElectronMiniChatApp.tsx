@@ -15,7 +15,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
 
-const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
+const MINI_CHAT_PRESENCE_CHANNEL = 'piarium:mini-chat-presence';
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -105,8 +105,8 @@ const MiniChatBootstrap: React.FC<{
           onUnavailable(true);
         });
     };
-    window.addEventListener('openchamber:open-session', onOpenSession);
-    return () => window.removeEventListener('openchamber:open-session', onOpenSession);
+    window.addEventListener('piarium:open-session', onOpenSession);
+    return () => window.removeEventListener('piarium:open-session', onOpenSession);
   }, [onReady, onUnavailable, openSession, setDirectory]);
 
   React.useEffect(() => {

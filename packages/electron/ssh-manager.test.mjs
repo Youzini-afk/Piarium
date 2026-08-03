@@ -82,7 +82,7 @@ describe('ElectronSshManager', () => {
   });
 
   test('creates a PowerShell-backed askpass helper on Windows', async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-askpass-test-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ssh-askpass-test-'));
     tempDirs.push(tempDir);
     const manager = new ElectronSshManager({
       settingsFilePath: path.join(tempDir, 'settings.json'),
@@ -96,7 +96,7 @@ describe('ElectronSshManager', () => {
     expect(path.basename(result.askpassPath)).toBe('askpass.cmd');
     expect(result.cleanupPaths.map((filePath) => path.basename(filePath))).toEqual(['askpass.cmd', 'askpass.ps1']);
     expect(await fsp.readFile(path.join(tempDir, 'askpass.cmd'), 'utf8')).toContain('WindowsPowerShell');
-    expect(await fsp.readFile(path.join(tempDir, 'askpass.ps1'), 'utf8')).toContain('OPENCHAMBER_SSH_ASKPASS_VALUE');
+    expect(await fsp.readFile(path.join(tempDir, 'askpass.ps1'), 'utf8')).toContain('PIARIUM_SSH_ASKPASS_VALUE');
   });
 
   test('runs each Windows port forward as an independent hidden SSH process', async () => {
@@ -133,7 +133,7 @@ describe('ElectronSshManager', () => {
       expect(call.args).toContain('-N');
       expect(call.options.windowsHide).toBe(true);
       expect(call.options.env.SSH_ASKPASS).toBe('C:\\Piarium\\askpass.cmd');
-      expect(call.options.env.OPENCHAMBER_SSH_ASKPASS_VALUE).toBe('secret-value');
+      expect(call.options.env.PIARIUM_SSH_ASKPASS_VALUE).toBe('secret-value');
     }
     expect(calls[0].args).toContain('-L');
     expect(calls[1].args).toContain('-D');
@@ -197,7 +197,7 @@ describe('ElectronSshManager', () => {
       children: new Set(),
     });
     manager.sessions.set('ssh-1', {
-      instance: { remoteOpenchamber: { mode: 'external', keepRunning: true } },
+      instance: { remotePiarium: { mode: 'external', keepRunning: true } },
       parsed,
       controlPath: 'C:\\Temp\\unused.sock',
       askpassCleanupPaths: [],
@@ -269,7 +269,7 @@ describe('ElectronSshManager', () => {
       res.writeHead(404).end();
     });
     const localUrl = await listen(server);
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-manager-test-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ssh-manager-test-'));
     tempDirs.push(tempDir);
     const settingsFilePath = path.join(tempDir, 'settings.json');
     const manager = new ElectronSshManager({

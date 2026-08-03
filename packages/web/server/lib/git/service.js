@@ -5,6 +5,7 @@ import os from 'os';
 import * as childProcess from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
+import { resolvePiariumDataDir } from '../platform/data-paths.js';
 
 const fsp = fs.promises;
 const require = createRequire(import.meta.url);
@@ -204,7 +205,7 @@ const resolveGitBinary = () => {
     return resolvedGitBinary;
   }
 
-  const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
+  const explicit = [process.env.GIT_BINARY, process.env.PIARIUM_GIT_BINARY]
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
     .filter(Boolean);
   for (const candidate of explicit) {
@@ -1183,9 +1184,9 @@ export async function computeIntegratePlan(input = {}) {
 }
 
 const createIntegrateTempWorktree = async (repoRoot, targetBranch) => {
-  const tmpParent = path.join(os.homedir(), '.config', 'openchamber', 'tmp');
+  const tmpParent = path.join(resolvePiariumDataDir(process), 'tmp');
   await fsp.mkdir(tmpParent, { recursive: true });
-  const tmpDir = await fsp.mkdtemp(path.join(tmpParent, 'oc-integrate-'));
+  const tmpDir = await fsp.mkdtemp(path.join(tmpParent, 'piarium-integrate-'));
   try {
     await runGitCommandOrThrow(repoRoot, ['worktree', 'add', '--force', tmpDir, targetBranch], 'Failed to create temp worktree');
     return tmpDir;

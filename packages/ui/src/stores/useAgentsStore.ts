@@ -652,7 +652,7 @@ const notifyRealtimePipelineReconnect = () => {
     return;
   }
 
-  window.dispatchEvent(new Event("openchamber:system-resume"));
+  window.dispatchEvent(new Event("piarium:system-resume"));
 };
 
 const normalizeRefreshScopes = (scopes?: ConfigChangeScope[]): ConfigChangeScope[] => {

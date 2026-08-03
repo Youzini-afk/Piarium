@@ -7,6 +7,6 @@ export const updateWindowInitScript = (browserWindow, initScript) => {
     return false;
   }
 
-  browserWindow.__ocInitScript = initScript;
+  browserWindow.__piariumInitScript = initScript;
   return true;
 };

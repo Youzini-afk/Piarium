@@ -9,39 +9,39 @@ OpenChamber читає ці змінні під час запуску. Для st
 
 ## Сервер OpenChamber
 
-### `OPENCHAMBER_HOST`
+### `PIARIUM_HOST`
 
 Адреса, на якій слухає web-сервер OpenChamber. Використовуйте `0.0.0.0`, щоб відкрити доступ з інших машин.
 
-### `OPENCHAMBER_UI_PASSWORD`
+### `PIARIUM_UI_PASSWORD`
 
 Пароль для browser UI. Використовуйте його для доступу не лише з localhost, тунелів або reverse proxy.
 
-### `OPENCHAMBER_API_ONLY`
+### `PIARIUM_API_ONLY`
 
 Запускає OpenChamber у headless mode, якщо встановлено `true` або `1`. API routes залишаються доступними для desktop і mobile clients, але browser UI не віддається.
 
-### `OPENCHAMBER_DATA_DIR`
+### `PIARIUM_DATA_DIR`
 
 Перевизначає директорію даних OpenChamber. Типово це `~/.config/openchamber`.
 
-### `OPENCHAMBER_COMPRESS_API`
+### `PIARIUM_COMPRESS_API`
 
 Керує стисненням API-відповідей. `true` або `1` вмикає, `false` або `0` вимикає.
 
-### `OPENCHAMBER_SKIP_API_COMPRESSION`
+### `PIARIUM_SKIP_API_COMPRESSION`
 
-Вимикає стиснення API-відповідей, якщо встановлено `true` або `1`. Має пріоритет над `OPENCHAMBER_COMPRESS_API`.
+Вимикає стиснення API-відповідей, якщо встановлено `true` або `1`. Має пріоритет над `PIARIUM_COMPRESS_API`.
 
-### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+### `PIARIUM_VERBOSE_REQUEST_LOGS`
 
 Вмикає детальні HTTP request logs, якщо встановлено `true` або `1`.
 
-### `OPENCHAMBER_UPDATE_API_URL`
+### `PIARIUM_UPDATE_API_URL`
 
 Перевизначає endpoint для перевірки оновлень. Більшості користувачів це не потрібно.
 
-### `OPENCHAMBER_PACKAGE_MANAGER`
+### `PIARIUM_PACKAGE_MANAGER`
 
 Примусово задає package manager для оновлень, якщо auto-detection помилився.
 
@@ -59,7 +59,7 @@ OpenChamber читає ці змінні під час запуску. Для st
 
 Не дає OpenChamber запускати власний OpenCode server, якщо встановлено `true`.
 
-### `OPENCHAMBER_OPENCODE_HOSTNAME`
+### `PIARIUM_OPENCODE_HOSTNAME`
 
 Hostname для OpenCode server, яким керує OpenChamber. Типово `127.0.0.1`.
 
@@ -83,7 +83,7 @@ Hostname для OpenCode server, яким керує OpenChamber. Типово `
 
 Вибирає WSL distro для інтеграції OpenCode на Windows.
 
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+### `PIARIUM_OPENCODE_WSL_DISTRO`
 
 OpenChamber-specific alias для вибору WSL distro. `OPENCODE_WSL_DISTRO` має пріоритет, якщо задані обидві змінні.
 
@@ -93,19 +93,19 @@ Secret для підпису UI auth tokens. Для постійних service d
 
 ## Terminal і Git
 
-### `OPENCHAMBER_TERMINAL_SHELL`
+### `PIARIUM_TERMINAL_SHELL`
 
 Shell executable для terminal sessions в OpenChamber.
 
-### `OPENCHAMBER_GIT_BINARY`
+### `PIARIUM_GIT_BINARY`
 
 Git executable для Git-функцій OpenChamber.
 
 ### `GIT_BINARY`
 
-Альтернативний override для Git executable. Для OpenChamber-specific налаштувань краще використовуйте `OPENCHAMBER_GIT_BINARY`.
+Альтернативний override для Git executable. Для OpenChamber-specific налаштувань краще використовуйте `PIARIUM_GIT_BINARY`.
 
-### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+### `PIARIUM_GIT_READ_CACHE_TTL_MS`
 
 TTL у мілісекундах для cached Git-backed file reads. Встановіть `0`, щоб вимкнути cache під час debugging.
 
@@ -115,7 +115,7 @@ TTL у мілісекундах для cached Git-backed file reads. Встан�
 
 API key для voice-функцій OpenChamber, які викликають OpenAI-compatible services.
 
-### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
 Дозволяє remote OpenAI-compatible base URLs для voice-функцій, якщо встановлено `true` або `1`.
 

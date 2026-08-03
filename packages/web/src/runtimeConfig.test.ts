@@ -59,11 +59,11 @@ afterAll(() => {
 describe('readRuntimeBootstrapConfig', () => {
   test('reads the runtime injected into the current window', () => {
     const current = makeWindow();
-    current.__OPENCHAMBER_API_BASE_URL__ = ' https://remote.example.com ';
-    current.__OPENCHAMBER_CLIENT_TOKEN__ = ' remote-token ';
-    current.__OPENCHAMBER_LOCAL_ORIGIN__ = ' http://127.0.0.1:3000 ';
-    current.__OPENCHAMBER_RUNTIME_HEADERS__ = { 'x-openchamber-relay': 'relay-value' };
-    current.__OPENCHAMBER_RELAY_HOST_ID__ = ' remote-host ';
+    current.__PIARIUM_API_BASE_URL__ = ' https://remote.example.com ';
+    current.__PIARIUM_CLIENT_TOKEN__ = ' remote-token ';
+    current.__PIARIUM_LOCAL_ORIGIN__ = ' http://127.0.0.1:3000 ';
+    current.__PIARIUM_RUNTIME_HEADERS__ = { 'x-openchamber-relay': 'relay-value' };
+    current.__PIARIUM_RELAY_HOST_ID__ = ' remote-host ';
     installWindow(current);
 
     expect(readRuntimeBootstrapConfig()).toEqual({
@@ -77,8 +77,8 @@ describe('readRuntimeBootstrapConfig', () => {
 
   test('does not read runtime credentials directly from a parent window', () => {
     const parent = makeWindow();
-    parent.__OPENCHAMBER_API_BASE_URL__ = 'https://remote.example.com';
-    parent.__OPENCHAMBER_CLIENT_TOKEN__ = 'remote-token';
+    parent.__PIARIUM_API_BASE_URL__ = 'https://remote.example.com';
+    parent.__PIARIUM_CLIENT_TOKEN__ = 'remote-token';
     const child = makeWindow('?ocPanel=session-chat&sessionId=ses_child');
     child.parent = parent;
     installWindow(child);

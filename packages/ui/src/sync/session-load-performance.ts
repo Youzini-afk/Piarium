@@ -59,7 +59,7 @@ type SessionLoadPerformanceState = {
 
 declare global {
   interface Window {
-    __openchamberSessionLoadPerformance?: SessionLoadPerformanceState
+    __piariumSessionLoadPerformance?: SessionLoadPerformanceState
   }
 }
 
@@ -95,7 +95,7 @@ export function startSessionLoadPerformanceEvent(input: Omit<SessionLoadPerforma
     details?: Partial<Pick<SessionLoadPerformanceEvent, "retryCount" | "recordCount">>,
   ) => {
     if (typeof window === "undefined" || !ALLOWED_OUTCOMES.has(outcome)) return
-    const state = window.__openchamberSessionLoadPerformance ?? { events: [] }
+    const state = window.__piariumSessionLoadPerformance ?? { events: [] }
     const queuedMs = nonNegativeNumber(input.queuedMs)
     const requestLimit = nonNegativeInteger(input.requestLimit)
     const retryCount = nonNegativeInteger(details?.retryCount ?? input.retryCount)
@@ -113,7 +113,7 @@ export function startSessionLoadPerformanceEvent(input: Omit<SessionLoadPerforma
       at: Date.now(),
     })
     if (state.events.length > MAX_EVENTS) state.events.splice(0, state.events.length - MAX_EVENTS)
-    window.__openchamberSessionLoadPerformance = state
+    window.__piariumSessionLoadPerformance = state
   }
 }
 

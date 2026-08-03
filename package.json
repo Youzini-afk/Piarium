@@ -53,7 +53,7 @@
     "start:web": "bun run --cwd packages/web start",
     "pack:web": "bun pm pack --cwd packages/web",
     "electron:dev": "node ./packages/electron/scripts/electron-dev.mjs",
-    "electron:dev:bundled": "OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1 node ./packages/electron/scripts/electron-dev.mjs",
+    "electron:dev:bundled": "PIARIUM_ELECTRON_USE_BUNDLED_UI=1 node ./packages/electron/scripts/electron-dev.mjs",
     "electron:build": "bun run --cwd packages/electron package",
     "electron:build:win": "bun run --cwd packages/electron package:win:x64",
     "mobile:build": "bun run --cwd packages/mobile build",

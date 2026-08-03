@@ -2402,9 +2402,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, [canEdit, textViewMode]);
 
-  const MD_VIEWER_MODE_KEY = 'openchamber:files:md-viewer-mode';
-  const HTML_VIEWER_MODE_KEY = 'openchamber:files:html-viewer-mode';
-  const JSON_VIEWER_MODE_KEY = 'openchamber:files:json-viewer-mode';
+  const MD_VIEWER_MODE_KEY = 'piarium:files:md-viewer-mode';
+  const HTML_VIEWER_MODE_KEY = 'piarium:files:html-viewer-mode';
+  const JSON_VIEWER_MODE_KEY = 'piarium:files:json-viewer-mode';
 
   React.useEffect(() => {
     const selectedPath = selectedFile?.path;
@@ -2638,9 +2638,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       applyDefaultFileViewerMode(enabled);
     };
 
-    window.addEventListener('openchamber:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
+    window.addEventListener('piarium:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
     return () => {
-      window.removeEventListener('openchamber:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
+      window.removeEventListener('piarium:file-viewer-preview-mode-changed', handleFileViewerModeChanged);
     };
   }, [openPaths]);
 

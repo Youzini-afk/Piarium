@@ -16,7 +16,7 @@ test('prefers APPIMAGE path for Linux autostart Exec', () => {
   assert.equal(
     resolveLinuxLaunchExecutable({
       env: { APPIMAGE: '/home/user/Piarium.AppImage' },
-      execPath: '/tmp/.mount_OpenChXXXX/openchamber',
+      execPath: '/tmp/.mount_Piarium/piarium',
     }),
     '/home/user/Piarium.AppImage',
   );
@@ -24,18 +24,20 @@ test('prefers APPIMAGE path for Linux autostart Exec', () => {
 
 test('builds a background autostart desktop entry', () => {
   const entry = buildLinuxAutostartDesktopEntry({
-    executable: '/home/user/Open Chamber.AppImage',
+    executable: '/home/user/Piarium Desktop.AppImage',
     backgroundArg: '--background',
   });
   assert.match(entry, /Type=Application/);
-  assert.match(entry, /Exec="\/home\/user\/Open Chamber\.AppImage" --background/);
+  assert.match(entry, /Exec="\/home\/user\/Piarium Desktop\.AppImage" --background/);
+  assert.match(entry, /StartupWMClass=piarium/);
   assert.match(entry, /X-GNOME-Autostart-enabled=true/);
 });
 
 test('writes and removes the XDG autostart file', async () => {
-  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-autostart-'));
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-autostart-'));
   const env = { XDG_CONFIG_HOME: path.join(homeDir, 'config') };
   const filePath = resolveLinuxAutostartFilePath({ env, homeDir });
+  assert.equal(path.basename(filePath), 'piarium.desktop');
 
   try {
     assert.equal(await readLinuxAutostartEnabled({ env, homeDir }), false);

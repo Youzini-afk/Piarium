@@ -16,7 +16,7 @@ const MAX_LOG_LINES_PER_INSTANCE = 1200;
 const MONITOR_INITIAL_POLL_MS = 2000;
 const MONITOR_STEADY_POLL_MS = 10000;
 const MONITOR_STABILIZE_TICKS = 5;
-const SSH_STATUS_EVENT = 'openchamber:ssh-instance-status';
+const SSH_STATUS_EVENT = 'piarium:ssh-instance-status';
 const MAX_PROCESS_ERROR_CHARS = 2000;
 const MAX_PROCESS_ERROR_CAPTURE_CHARS = MAX_PROCESS_ERROR_CHARS * 2;
 const childProcessDiagnostics = new WeakMap();
@@ -229,9 +229,9 @@ const buildSshArgs = (parsed, preDestinationArgs = [], remoteCommand = null) => 
 const askpassScriptContent = () => `#!/bin/bash
 PROMPT="$1"
 
-if [[ -n "$OPENCHAMBER_SSH_ASKPASS_VALUE" ]]; then
+if [[ -n "$PIARIUM_SSH_ASKPASS_VALUE" ]]; then
   if [[ "$PROMPT" == *"assword"* || "$PROMPT" == *"passphrase"* ]]; then
-    printf '%s\\n' "$OPENCHAMBER_SSH_ASKPASS_VALUE"
+    printf '%s\\n' "$PIARIUM_SSH_ASKPASS_VALUE"
     exit 0
   fi
 fi
@@ -274,7 +274,7 @@ const writeAskpassScript = async (scriptPath) => {
   await fsp.chmod(scriptPath, 0o700);
 };
 
-const windowsAskpassScriptContent = () => `$value = [Environment]::GetEnvironmentVariable('OPENCHAMBER_SSH_ASKPASS_VALUE')
+const windowsAskpassScriptContent = () => `$value = [Environment]::GetEnvironmentVariable('PIARIUM_SSH_ASKPASS_VALUE')
 if ($null -ne $value) {
   [Console]::Out.WriteLine($value)
 }
@@ -412,7 +412,7 @@ export class ElectronSshManager {
       SSH_ASKPASS_REQUIRE: 'force',
       SSH_ASKPASS: auth.askpassPath,
       DISPLAY: '1',
-      ...(auth.sshPassword ? { OPENCHAMBER_SSH_ASKPASS_VALUE: auth.sshPassword.trim() } : {}),
+      ...(auth.sshPassword ? { PIARIUM_SSH_ASKPASS_VALUE: auth.sshPassword.trim() } : {}),
     };
   }
 
@@ -800,14 +800,14 @@ export class ElectronSshManager {
       connectionTimeoutSec: Number.isFinite(instance?.connectionTimeoutSec) && Number(instance.connectionTimeoutSec) > 0
         ? Number(instance.connectionTimeoutSec)
         : DEFAULT_CONNECTION_TIMEOUT_SEC,
-      remoteOpenchamber: {
-        mode: instance?.remoteOpenchamber?.mode === 'external' ? 'external' : 'managed',
-        keepRunning: instance?.remoteOpenchamber?.keepRunning !== false,
-        ...(Number.isFinite(instance?.remoteOpenchamber?.preferredPort) ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
-        installMethod: ['npm', 'bun', 'download_release', 'upload_bundle'].includes(instance?.remoteOpenchamber?.installMethod)
-          ? instance.remoteOpenchamber.installMethod
+      remotePiarium: {
+        mode: instance?.remotePiarium?.mode === 'external' ? 'external' : 'managed',
+        keepRunning: instance?.remotePiarium?.keepRunning !== false,
+        ...(Number.isFinite(instance?.remotePiarium?.preferredPort) ? { preferredPort: Number(instance.remotePiarium.preferredPort) } : {}),
+        installMethod: ['npm', 'bun', 'download_release', 'upload_bundle'].includes(instance?.remotePiarium?.installMethod)
+          ? instance.remotePiarium.installMethod
           : 'bun',
-        uploadBundleOverSsh: Boolean(instance?.remoteOpenchamber?.uploadBundleOverSsh),
+        uploadBundleOverSsh: Boolean(instance?.remotePiarium?.uploadBundleOverSsh),
       },
       localForward: {
         bindHost: sanitizeBindHost(instance?.localForward?.bindHost),
@@ -815,7 +815,7 @@ export class ElectronSshManager {
       },
       auth: {
         ...(this.sanitizeStoredSecret(instance?.auth?.sshPassword) ? { sshPassword: this.sanitizeStoredSecret(instance.auth.sshPassword) } : {}),
-        ...(this.sanitizeStoredSecret(instance?.auth?.openchamberPassword) ? { openchamberPassword: this.sanitizeStoredSecret(instance.auth.openchamberPassword) } : {}),
+        ...(this.sanitizeStoredSecret(instance?.auth?.piariumPassword) ? { piariumPassword: this.sanitizeStoredSecret(instance.auth.piariumPassword) } : {}),
       },
       portForwards,
     };
@@ -842,8 +842,8 @@ export class ElectronSshManager {
     await writeJsonRoot(this.settingsFilePath, root);
   }
 
-  async issueClientToken(localUrl, openchamberPassword) {
-    const password = typeof openchamberPassword === 'string' ? openchamberPassword.trim() : '';
+  async issueClientToken(localUrl, piariumPassword) {
+    const password = typeof piariumPassword === 'string' ? piariumPassword.trim() : '';
     if (!password) return '';
 
     const loginResponse = await fetch(new URL('/auth/session', `${localUrl}/`).toString(), {
@@ -977,7 +977,7 @@ export class ElectronSshManager {
   }
 
   configuredPiariumPassword(instance) {
-    const secret = instance?.auth?.openchamberPassword;
+    const secret = instance?.auth?.piariumPassword;
     return secret?.enabled && typeof secret.value === 'string' && secret.value.trim() ? secret.value.trim() : null;
   }
 
@@ -992,7 +992,7 @@ export class ElectronSshManager {
 
   async currentRemotePiariumVersion(parsed, controlPath) {
     try {
-      const output = await this.runRemoteCommand(parsed, controlPath, 'openchamber --version 2>/dev/null || true');
+      const output = await this.runRemoteCommand(parsed, controlPath, 'piarium --version 2>/dev/null || true');
       return parseVersionToken(output);
     } catch {
       return null;
@@ -1031,9 +1031,9 @@ export class ElectronSshManager {
     throw lastError || new Error('Failed to install Piarium on remote host');
   }
 
-  async probeRemoteSystemInfo(parsed, controlPath, port, openchamberPassword) {
-    const authPayload = openchamberPassword ? JSON.stringify({ password: openchamberPassword }) : '{}';
-    const authEnabled = openchamberPassword ? '1' : '0';
+  async probeRemoteSystemInfo(parsed, controlPath, port, piariumPassword) {
+    const authPayload = piariumPassword ? JSON.stringify({ password: piariumPassword }) : '{}';
+    const authEnabled = piariumPassword ? '1' : '0';
     const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
     const output = await this.runRemoteCommand(parsed, controlPath, script);
     const lines = output.split(/\r?\n/);
@@ -1044,7 +1044,7 @@ export class ElectronSshManager {
 
     if (isLivenessHttpStatus(infoStatus)) {
       if (isAuthHttpStatus(infoStatus)) {
-        if (openchamberPassword && authStatus !== 200) {
+        if (piariumPassword && authStatus !== 200) {
           throw new Error(`Remote Piarium requires UI authentication and configured password was rejected (auth status ${authStatus})`);
         }
         if (isLivenessHttpStatus(healthStatus)) return {};
@@ -1063,9 +1063,9 @@ export class ElectronSshManager {
     }
   }
 
-  async remoteServerRunning(parsed, controlPath, port, openchamberPassword) {
+  async remoteServerRunning(parsed, controlPath, port, piariumPassword) {
     try {
-      await this.probeRemoteSystemInfo(parsed, controlPath, port, openchamberPassword);
+      await this.probeRemoteSystemInfo(parsed, controlPath, port, piariumPassword);
       return true;
     } catch {
       return false;
@@ -1073,12 +1073,12 @@ export class ElectronSshManager {
   }
 
   async startRemoteServerManaged(parsed, controlPath, instance, desiredPort) {
-    let envPrefix = 'OPENCHAMBER_RUNTIME=ssh-remote';
+    let envPrefix = 'PIARIUM_RUNTIME=ssh-remote';
     const secret = this.configuredPiariumPassword(instance);
     if (secret) {
-      envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
+      envPrefix += ` PIARIUM_UI_PASSWORD=${shellQuote(secret)}`;
     }
-    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} openchamber serve --hostname 127.0.0.1 --port ${desiredPort}`);
+    const output = await this.runRemoteCommand(parsed, controlPath, `${envPrefix} piarium serve --host 127.0.0.1 --port ${desiredPort}`);
     const port = output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
     return port || desiredPort;
   }
@@ -1136,11 +1136,11 @@ export class ElectronSshManager {
   }
 
   async ensureRemoteServer(instance, parsed, controlPath) {
-    if (instance.remoteOpenchamber.mode === 'external') {
-      if (!instance.remoteOpenchamber.preferredPort) {
+    if (instance.remotePiarium.mode === 'external') {
+      if (!instance.remotePiarium.preferredPort) {
         throw new Error('External mode requires a preferred remote Piarium port');
       }
-      const port = instance.remoteOpenchamber.preferredPort;
+      const port = instance.remotePiarium.preferredPort;
       this.setStatus(instance.id, 'server_detecting', 'Probing external Piarium server', null, null, port, false, 0, false);
       await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredPiariumPassword(instance));
       return { remotePort: port, startedByUs: false };
@@ -1150,21 +1150,21 @@ export class ElectronSshManager {
     const installedVersion = await this.currentRemotePiariumVersion(parsed, controlPath);
     if (!installedVersion) {
       this.setStatus(instance.id, 'installing', 'Installing Piarium on remote host');
-      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
+      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remotePiarium.installMethod);
     } else if (installedVersion !== this.appVersion) {
       this.setStatus(instance.id, 'updating', `Updating remote Piarium from ${installedVersion} to ${this.appVersion}`);
-      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
+      await this.installPiariumManaged(parsed, controlPath, this.appVersion, instance.remotePiarium.installMethod);
     }
 
     this.setStatus(instance.id, 'server_detecting', 'Detecting managed Piarium server');
-    let remotePort = instance.remoteOpenchamber.preferredPort || null;
+    let remotePort = instance.remotePiarium.preferredPort || null;
     let startedByUs = false;
     if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredPiariumPassword(instance)))) {
       remotePort = null;
     }
     if (!remotePort) {
       this.setStatus(instance.id, 'server_starting', 'Starting managed Piarium server');
-      const desiredPort = instance.remoteOpenchamber.preferredPort || randomPortCandidate(instance.id);
+      const desiredPort = instance.remotePiarium.preferredPort || randomPortCandidate(instance.id);
       remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort);
       startedByUs = true;
     }
@@ -1185,7 +1185,7 @@ export class ElectronSshManager {
     this.sessions.delete(id);
 
     if (session) {
-      if (session.startedByUs && session.remotePort && session.instance.remoteOpenchamber.mode === 'managed' && !session.instance.remoteOpenchamber.keepRunning) {
+      if (session.startedByUs && session.remotePort && session.instance.remotePiarium.mode === 'managed' && !session.instance.remotePiarium.keepRunning) {
         await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort);
       }
       await this.stopControlMasterBestEffort(session.parsed, session.controlPath);

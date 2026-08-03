@@ -46,10 +46,10 @@
 
 ## Auth storage and config
 
-- Auth storage: `~/.config/openchamber/github-auth.json`
+- Auth storage: the platform Piarium data directory (`~/.config/piarium/github-auth.json` on Linux)
 - Writes are atomic and file mode is `0o600`.
-- Client ID resolution order: `OPENCHAMBER_GITHUB_CLIENT_ID` -> `settings.json` -> default.
-- Scope resolution order: `OPENCHAMBER_GITHUB_SCOPES` -> `settings.json` -> default.
+- Client ID resolution order: `PIARIUM_GITHUB_CLIENT_ID` -> `settings.json` -> default.
+- Scope resolution order: `PIARIUM_GITHUB_SCOPES` -> `settings.json` -> default.
 - Account id resolution order: explicit `accountId` -> user login -> user id -> token prefix.
 
 ## PR integration overview

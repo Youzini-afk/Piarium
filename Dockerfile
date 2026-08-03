@@ -22,7 +22,7 @@ RUN bun install --frozen-lockfile --ignore-scripts \
 FROM deps AS builder
 WORKDIR /app
 COPY . .
-RUN OPENCHAMBER_LOW_MEMORY_BUILD=1 bun run build:web
+RUN PIARIUM_LOW_MEMORY_BUILD=1 bun run build:web
 
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
 WORKDIR /home/openchamber

@@ -56,8 +56,8 @@ const copyCurrentSelectionFallback = async (): Promise<boolean> => {
   return document.execCommand('copy');
 };
 
-const MENU_ACTION_EVENT = 'openchamber:menu-action';
-const CHECK_FOR_UPDATES_EVENT = 'openchamber:check-for-updates';
+const MENU_ACTION_EVENT = 'piarium:menu-action';
+const CHECK_FOR_UPDATES_EVENT = 'piarium:check-for-updates';
 
 type DesktopBridgeGlobal = {
   listen?: (
@@ -261,7 +261,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
         }
 
         case 'copy': {
-          const copyEvent = new Event('openchamber:copy', { cancelable: true });
+          const copyEvent = new Event('piarium:copy', { cancelable: true });
           const wasHandled = !window.dispatchEvent(copyEvent);
           if (!wasHandled) {
             void copyCurrentSelectionFallback();
@@ -337,7 +337,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
 
   React.useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
-    const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+    const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
     if (typeof desktop?.listen === 'function') {
       // Electron emits both IPC and an injected DOM event for the same native
       // action. The IPC effect below owns desktop actions so they run once.
@@ -364,14 +364,14 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
 
   React.useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
-    const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
+    const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
     const listen = desktop?.listen;
     if (typeof listen !== 'function') return;
 
     let unlistenMenu: null | (() => void | Promise<void>) = null;
     let unlistenUpdate: null | (() => void | Promise<void>) = null;
 
-    listen('openchamber:menu-action', (evt) => {
+    listen('piarium:menu-action', (evt) => {
       const action = evt?.payload;
       if (typeof action !== 'string') return;
       handleAction(action as MenuAction);
@@ -383,7 +383,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
         // ignore
       });
 
-    listen('openchamber:check-for-updates', () => {
+    listen('piarium:check-for-updates', () => {
       handleCheckForUpdates();
     })
       .then((fn) => {

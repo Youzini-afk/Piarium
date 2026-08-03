@@ -1,7 +1,7 @@
 # Context Obligatory Messages
 
 Messages explicitly pinned by the user are stored under
-`session.metadata.openchamber.context_obligatory_messages` as `{ id, createdAt,
+`session.metadata.piarium.context_obligatory_messages` as `{ id, createdAt,
 role }`. The UI uses a fresh-read metadata merge when pinning or unpinning.
 
 The server runtime listens for OpenCode's dedicated `session.compacted` event.

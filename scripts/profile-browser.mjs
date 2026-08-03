@@ -395,10 +395,10 @@ const main = async () => {
       await wait(5_000)
     }
 
-    await evaluateValue(client, `window.__openchamberSyncPerformance?.reset()`)
-    await evaluateValue(client, `window.__openchamberStreamPerformance?.setEnabled(true)`)
-    await evaluateValue(client, `window.__openchamberStreamPerformance?.reset()`)
-    await evaluateValue(client, `if (window.__openchamberSessionLoadPerformance) window.__openchamberSessionLoadPerformance.events.length = 0`)
+    await evaluateValue(client, `window.__piariumSyncPerformance?.reset()`)
+    await evaluateValue(client, `window.__piariumStreamPerformance?.setEnabled(true)`)
+    await evaluateValue(client, `window.__piariumStreamPerformance?.reset()`)
+    await evaluateValue(client, `if (window.__piariumSessionLoadPerformance) window.__piariumSessionLoadPerformance.events.length = 0`)
     const records = new Map()
     const traceEvents = []
     const startedAt = new Date().toISOString()
@@ -456,11 +456,11 @@ const main = async () => {
     await wait(Math.max(0, options.duration * 1000 - (Date.now() - recordingStartedAt)))
     const afterMetrics = metricMap((await client.send("Performance.getMetrics")).metrics)
     const afterHeap = await client.send("Runtime.getHeapUsage")
-    const syncCounters = await evaluateValue(client, `window.__openchamberSyncPerformance?.getSnapshot() ?? null`)
-    const streamPerformance = await evaluateValue(client, `window.__openchamberStreamPerformance?.getSnapshot() ?? null`)
+    const syncCounters = await evaluateValue(client, `window.__piariumSyncPerformance?.getSnapshot() ?? null`)
+    const streamPerformance = await evaluateValue(client, `window.__piariumStreamPerformance?.getSnapshot() ?? null`)
     const sessionLoadPerformance = await evaluateValue(
       client,
-      `(${projectSessionLoadPerformance.toString()})(window.__openchamberSessionLoadPerformance?.events ?? [], ${JSON.stringify(recordingStartedAt)})`,
+      `(${projectSessionLoadPerformance.toString()})(window.__piariumSessionLoadPerformance?.events ?? [], ${JSON.stringify(recordingStartedAt)})`,
     )
     const traceCompleteEvent = client.once("Tracing.tracingComplete", 120_000)
     let traceComplete = true

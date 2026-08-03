@@ -34,7 +34,7 @@ describe('cloud Docker toolbelt', () => {
   it('keeps the app image thin and based on the prebuilt runtime base image', () => {
     expect(appDockerfile).toContain('ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/openchamber-runtime-base:main');
     expect(appDockerfile).toContain('FROM ${RUNTIME_BASE_IMAGE} AS runtime');
-    expect(appDockerfile).toContain('OPENCHAMBER_LOW_MEMORY_BUILD=1 bun run build:web');
+    expect(appDockerfile).toContain('PIARIUM_LOW_MEMORY_BUILD=1 bun run build:web');
     expect(appDockerfile).toContain('COPY --from=builder /app/packages/web/dist ./packages/web/dist');
     expect(appDockerfile).toContain('ENTRYPOINT ["sh", "/home/openchamber/openchamber-entrypoint.sh"]');
     expect(appDockerfile).not.toContain('apt-get install');
@@ -112,14 +112,14 @@ describe('cloud Docker toolbelt', () => {
   it('preinstalls JavaScript validation fallback dependencies for cloud workspaces', () => {
     expect(runtimeBaseDockerfile).toContain('ARG NODE_TYPES_VERSION=24.12.4');
     expect(runtimeBaseDockerfile).toContain('ARG VITEST_VERSION=4.1.6');
-    expect(runtimeBaseDockerfile).toContain('OPENCHAMBER_VALIDATION_NODE_MODULES=/home/openchamber/.openchamber-validation/node_modules');
+    expect(runtimeBaseDockerfile).toContain('PIARIUM_VALIDATION_NODE_MODULES=/home/openchamber/.openchamber-validation/node_modules');
     expect(runtimeBaseDockerfile).toContain('npm install --prefix /home/openchamber/.openchamber-validation --no-save @types/node@${NODE_TYPES_VERSION} vitest@${VITEST_VERSION}');
     expect(runtimeBaseDockerfile).toContain('vitest --version');
     expect(runtimeBaseDockerfile).toContain('require.resolve(\'@types/node/package.json\')');
-    expect(dockerEntrypoint).toContain('OPENCHAMBER_WORKSPACE_ROOT="${OPENCHAMBER_WORKSPACE_ROOT:-${HOME}/workspaces}"');
-    expect(dockerEntrypoint).toContain('WORKSPACE_NODE_MODULES="${OPENCHAMBER_WORKSPACE_ROOT}/node_modules"');
-    expect(dockerEntrypoint).toContain('ln -s "${OPENCHAMBER_VALIDATION_NODE_MODULES}/@types/node"');
-    expect(dockerEntrypoint).toContain('ln -s "${OPENCHAMBER_VALIDATION_NODE_MODULES}/.bin/vitest"');
+    expect(dockerEntrypoint).toContain('PIARIUM_WORKSPACE_ROOT="${PIARIUM_WORKSPACE_ROOT:-${HOME}/workspaces}"');
+    expect(dockerEntrypoint).toContain('WORKSPACE_NODE_MODULES="${PIARIUM_WORKSPACE_ROOT}/node_modules"');
+    expect(dockerEntrypoint).toContain('ln -s "${PIARIUM_VALIDATION_NODE_MODULES}/@types/node"');
+    expect(dockerEntrypoint).toContain('ln -s "${PIARIUM_VALIDATION_NODE_MODULES}/.bin/vitest"');
   });
 
   it('pins the bundled OpenCode CLI version in the runtime base image', () => {
@@ -135,8 +135,8 @@ describe('cloud Docker toolbelt', () => {
     expect(runtimeBaseDockerfile).toContain('/usr/bin/rootlesskit /usr/local/bin/rootlesskit');
     expect(aptInstallPackages.has('slirp4netns')).toBe(true);
     expect(aptInstallPackages.has('uidmap')).toBe(true);
-    expect(runtimeBaseDockerfile).toContain("echo 'openchamber:100000:65536' >> /etc/subuid");
-    expect(runtimeBaseDockerfile).toContain("echo 'openchamber:100000:65536' >> /etc/subgid");
+    expect(runtimeBaseDockerfile).toContain("echo 'piarium:100000:65536' >> /etc/subuid");
+    expect(runtimeBaseDockerfile).toContain("echo 'piarium:100000:65536' >> /etc/subgid");
     expect(runtimeBaseDockerfile).toContain('COPY --chmod=0755 scripts/docker-build-only-wrapper.sh /usr/local/bin/docker');
     expect(runtimeBaseDockerfile).toContain('docker --version && buildctl --version');
     expect(runtimeBaseDockerfile).not.toContain('/var/run/docker.sock');

@@ -274,7 +274,7 @@ describe("createEventPipeline", () => {
     const pipeline = createEventPipeline({
       sdk: createSdk([
         {
-          type: "openchamber:session-status",
+          type: "piarium:session-status",
           properties: {
             sessionID: "ses_1",
             status: "idle",

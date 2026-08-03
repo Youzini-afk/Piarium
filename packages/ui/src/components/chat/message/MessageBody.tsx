@@ -1520,7 +1520,7 @@ const AssistantMessageBody = React.memo(({
                     toast.error(t('chat.messageBody.toast.savePlanFailed'));
                     return;
                 }
-                window.dispatchEvent(new CustomEvent('openchamber:project-plan-saved', {
+                window.dispatchEvent(new CustomEvent('piarium:project-plan-saved', {
                     detail: { projectId: currentProjectRef.id },
                 }));
                 setIsPlanDialogOpen(false);

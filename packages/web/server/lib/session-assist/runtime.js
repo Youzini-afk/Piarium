@@ -1,7 +1,7 @@
 // Session assist: after a session goes idle and stays quiet, generate a short
 // recap of the agent's last reply plus one suggested user follow-up with the
 // small model, and store both on the session's metadata
-// (metadata.openchamber.assist). Clients decide visibility from
+// (metadata.piarium.assist). Clients decide visibility from
 // assist.forMessageID — a new message makes the payload stale everywhere
 // without any extra writes.
 //
@@ -9,22 +9,17 @@
 // server is running ever generate anything. No backfill, no session scans.
 
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import { resolvePiariumDataDir } from '../platform/data-paths.js';
 
-const OPENCHAMBER_SETTINGS_FILE = path.join(
-  process.env.OPENCHAMBER_DATA_DIR
-    ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-    : path.join(os.homedir(), '.config', 'openchamber'),
-  'settings.json',
-);
+const PIARIUM_SETTINGS_FILE = path.join(resolvePiariumDataDir(process), 'settings.json');
 
 // The Chat settings are hard generation switches (default on): when both are
 // off, no small-model calls and no metadata writes happen at all. Existing
 // payloads stay untouched — clients keep showing them and dismissal still works.
 const getSessionAssistTargets = () => {
   try {
-    const raw = fs.readFileSync(OPENCHAMBER_SETTINGS_FILE, 'utf8');
+    const raw = fs.readFileSync(PIARIUM_SETTINGS_FILE, 'utf8');
     const settings = JSON.parse(raw);
     return {
       recap: settings?.sessionRecapEnabled !== false,
@@ -316,8 +311,8 @@ export const createSessionAssistRuntime = ({
     const currentMetadata = freshSession?.metadata && typeof freshSession.metadata === 'object'
       ? freshSession.metadata
       : (session.metadata && typeof session.metadata === 'object' ? session.metadata : {});
-    const currentNamespace = currentMetadata.openchamber && typeof currentMetadata.openchamber === 'object'
-      ? currentMetadata.openchamber
+    const currentNamespace = currentMetadata.piarium && typeof currentMetadata.piarium === 'object'
+      ? currentMetadata.piarium
       : {};
 
     console.log(`[session-assist] generated for ${sessionId} via ${generated.providerID}/${generated.modelID}`);
@@ -327,7 +322,7 @@ export const createSessionAssistRuntime = ({
       body: {
         metadata: {
           ...currentMetadata,
-          openchamber: {
+          piarium: {
             ...currentNamespace,
             assist: {
               recap,

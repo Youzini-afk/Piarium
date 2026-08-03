@@ -9,39 +9,39 @@ OpenChamber는 시작할 때 이 변수들을 읽습니다. 시작 서비스는 
 
 ## OpenChamber 서버
 
-### `OPENCHAMBER_HOST`
+### `PIARIUM_HOST`
 
 OpenChamber 웹 서버가 바인딩할 주소입니다. 다른 컴퓨터에서 접속해야 하면 `0.0.0.0`을 사용하세요.
 
-### `OPENCHAMBER_UI_PASSWORD`
+### `PIARIUM_UI_PASSWORD`
 
 브라우저 UI 비밀번호입니다. localhost 밖으로 바인딩하거나 터널, 리버스 프록시를 사용할 때 설정하세요.
 
-### `OPENCHAMBER_API_ONLY`
+### `PIARIUM_API_ONLY`
 
 `true` 또는 `1`이면 OpenChamber를 headless 모드로 시작합니다. 데스크톱과 모바일 클라이언트용 API route는 계속 사용할 수 있지만 브라우저 UI는 제공하지 않습니다.
 
-### `OPENCHAMBER_DATA_DIR`
+### `PIARIUM_DATA_DIR`
 
 OpenChamber 데이터 디렉터리를 바꿉니다. 기본값은 `~/.config/openchamber`입니다.
 
-### `OPENCHAMBER_COMPRESS_API`
+### `PIARIUM_COMPRESS_API`
 
 API 응답 압축을 제어합니다. `true` 또는 `1`은 켜고, `false` 또는 `0`은 끕니다.
 
-### `OPENCHAMBER_SKIP_API_COMPRESSION`
+### `PIARIUM_SKIP_API_COMPRESSION`
 
-`true` 또는 `1`이면 API 응답 압축을 끕니다. `OPENCHAMBER_COMPRESS_API`보다 우선합니다.
+`true` 또는 `1`이면 API 응답 압축을 끕니다. `PIARIUM_COMPRESS_API`보다 우선합니다.
 
-### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+### `PIARIUM_VERBOSE_REQUEST_LOGS`
 
 `true` 또는 `1`이면 자세한 HTTP request logs를 켭니다.
 
-### `OPENCHAMBER_UPDATE_API_URL`
+### `PIARIUM_UPDATE_API_URL`
 
 업데이트 확인 API endpoint를 바꿉니다. 대부분의 사용자는 설정하지 않아도 됩니다.
 
-### `OPENCHAMBER_PACKAGE_MANAGER`
+### `PIARIUM_PACKAGE_MANAGER`
 
 자동 감지가 틀렸을 때 업데이트에 사용할 package manager를 강제로 지정합니다.
 
@@ -59,7 +59,7 @@ OpenCode server 포트를 설정합니다. managed OpenCode에서는 이 포트�
 
 `true`이면 OpenChamber가 자체 OpenCode server를 시작하지 않습니다.
 
-### `OPENCHAMBER_OPENCODE_HOSTNAME`
+### `PIARIUM_OPENCODE_HOSTNAME`
 
 OpenChamber가 관리하는 OpenCode server의 bind hostname입니다. 기본값은 `127.0.0.1`입니다.
 
@@ -83,7 +83,7 @@ managed OpenCode server의 사용자 지정 데이터 디렉터리입니다.
 
 Windows에서 OpenCode 연동에 사용할 WSL distro를 선택합니다.
 
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+### `PIARIUM_OPENCODE_WSL_DISTRO`
 
 WSL distro를 선택하는 OpenChamber 전용 alias입니다. 둘 다 설정하면 `OPENCODE_WSL_DISTRO`가 우선합니다.
 
@@ -93,19 +93,19 @@ UI auth tokens 서명에 사용하는 secret입니다. 지속 실행 서비스�
 
 ## Terminal 및 Git
 
-### `OPENCHAMBER_TERMINAL_SHELL`
+### `PIARIUM_TERMINAL_SHELL`
 
 OpenChamber terminal sessions에서 사용할 shell executable입니다.
 
-### `OPENCHAMBER_GIT_BINARY`
+### `PIARIUM_GIT_BINARY`
 
 OpenChamber Git 기능에서 사용할 Git executable입니다.
 
 ### `GIT_BINARY`
 
-Git executable의 대체 override입니다. OpenChamber 전용 설정에는 `OPENCHAMBER_GIT_BINARY`를 권장합니다.
+Git executable의 대체 override입니다. OpenChamber 전용 설정에는 `PIARIUM_GIT_BINARY`를 권장합니다.
 
-### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+### `PIARIUM_GIT_READ_CACHE_TTL_MS`
 
 Git-backed file reads cache의 TTL이며 단위는 밀리초입니다. 디버깅 중 cache를 끄려면 `0`으로 설정하세요.
 
@@ -115,7 +115,7 @@ Git-backed file reads cache의 TTL이며 단위는 밀리초입니다. 디버깅
 
 OpenAI-compatible services를 호출하는 OpenChamber 음성 기능에 사용하는 API key입니다.
 
-### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
 `true` 또는 `1`이면 음성 기능에서 원격 OpenAI-compatible base URLs를 허용합니다.
 

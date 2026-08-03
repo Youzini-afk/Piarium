@@ -9,7 +9,7 @@ const getBearerToken = (req) => {
 
 const resolveServerUrl = (req, explicitOrigin) => {
   const configured = normalizeString(explicitOrigin)
-    || normalizeString(process.env.OPENCHAMBER_PUBLIC_ORIGIN);
+    || normalizeString(process.env.PIARIUM_PUBLIC_ORIGIN);
   if (configured) return configured.replace(/\/$/, '');
 
   const proto = normalizeString(req.headers['x-forwarded-proto']).split(',')[0] || (req.secure ? 'https' : 'http');

@@ -169,8 +169,8 @@ interface TunnelDependencyInstallInfo {
 const getProviderDependencyName = (provider: string): string => (provider === 'ngrok' ? 'ngrok' : 'cloudflared');
 
 const getClientInstallPlatform = (): string => {
-  if (typeof window !== 'undefined' && typeof window.__OPENCHAMBER_PLATFORM__ === 'string') {
-    const platform = window.__OPENCHAMBER_PLATFORM__;
+  if (typeof window !== 'undefined' && typeof window.__PIARIUM_PLATFORM__ === 'string') {
+    const platform = window.__PIARIUM_PLATFORM__;
     if (platform === 'win32' || platform === 'darwin' || platform === 'linux') {
       return platform;
     }

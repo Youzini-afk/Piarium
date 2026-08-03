@@ -166,9 +166,9 @@ const MOBILE_LAYOUT_OPTIONS: Array<{ value: MobileLayoutPreference; labelKey: st
 ];
 
 type PwaInstallNameWindow = Window & {
-    __OPENCHAMBER_SET_PWA_INSTALL_NAME__?: (value: string) => string;
-    __OPENCHAMBER_SET_PWA_ORIENTATION__?: (value: 'system' | 'portrait' | 'landscape') => 'system' | 'portrait' | 'landscape';
-    __OPENCHAMBER_UPDATE_PWA_MANIFEST__?: () => void;
+    __PIARIUM_SET_PWA_INSTALL_NAME__?: (value: string) => string;
+    __PIARIUM_SET_PWA_ORIENTATION__?: (value: 'system' | 'portrait' | 'landscape') => 'system' | 'portrait' | 'landscape';
+    __PIARIUM_UPDATE_PWA_MANIFEST__?: () => void;
 };
 
 const normalizePwaOrientation = (value: unknown): 'system' | 'portrait' | 'landscape' => {
@@ -430,10 +430,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
             && canUseElectronDesktopIPC()
             && isDesktopLocalOriginActive()
             && typeof window !== 'undefined'
-            && window.__OPENCHAMBER_ELECTRON__?.macVibrancySupported === true,
+            && window.__PIARIUM_ELECTRON__?.macVibrancySupported === true,
         [],
     );
-    const macVibrancyEnabled = typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
+    const macVibrancyEnabled = typeof window !== 'undefined' && window.__PIARIUM_ELECTRON__?.macVibrancy === true;
     const [vibrancyChecked, setVibrancyChecked] = React.useState(macVibrancyEnabled);
     const [vibrancyRestarting, setVibrancyRestarting] = React.useState(false);
 
@@ -442,7 +442,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     // toggle is offered only where it actually has an effect. No relaunch needed.
     const dockBadgeSupported = React.useMemo(
         () => isDesktopShell() && typeof window !== 'undefined'
-            && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin',
+            && (window as unknown as { __PIARIUM_PLATFORM__?: string }).__PIARIUM_PLATFORM__ === 'darwin',
         [],
     );
     const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
@@ -591,7 +591,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const handleFileViewerPreviewChange = React.useCallback((enabled: boolean) => {
         setSettingsDefaultFileViewerPreview(enabled);
         void updateDesktopSettings({ defaultFileViewerPreview: enabled });
-        window.dispatchEvent(new CustomEvent('openchamber:file-viewer-preview-mode-changed', { detail: { enabled } }));
+        window.dispatchEvent(new CustomEvent('piarium:file-viewer-preview-mode-changed', { detail: { enabled } }));
     }, [setSettingsDefaultFileViewerPreview]);
 
     const handleShowExpandedBashToolsChange = React.useCallback((enabled: boolean) => {
@@ -785,14 +785,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
         await updateDesktopSettings({ pwaAppName: persistedValue });
 
-        if (typeof win.__OPENCHAMBER_SET_PWA_INSTALL_NAME__ === 'function') {
-            const resolved = win.__OPENCHAMBER_SET_PWA_INSTALL_NAME__(persistedValue);
+        if (typeof win.__PIARIUM_SET_PWA_INSTALL_NAME__ === 'function') {
+            const resolved = win.__PIARIUM_SET_PWA_INSTALL_NAME__(persistedValue);
             setPwaInstallName(resolved);
             return;
         }
 
         setPwaInstallName(persistedValue || DEFAULT_PWA_INSTALL_NAME);
-        win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
+        win.__PIARIUM_UPDATE_PWA_MANIFEST__?.();
     }, []);
 
     const applyPwaOrientation = React.useCallback(async (value: 'system' | 'portrait' | 'landscape') => {
@@ -805,14 +805,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
         await updateDesktopSettings({ pwaOrientation: normalized });
 
-        if (typeof win.__OPENCHAMBER_SET_PWA_ORIENTATION__ === 'function') {
-            const resolved = win.__OPENCHAMBER_SET_PWA_ORIENTATION__(normalized);
+        if (typeof win.__PIARIUM_SET_PWA_ORIENTATION__ === 'function') {
+            const resolved = win.__PIARIUM_SET_PWA_ORIENTATION__(normalized);
             setPwaOrientation(resolved);
             return;
         }
 
         setPwaOrientation(normalized);
-        win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
+        win.__PIARIUM_UPDATE_PWA_MANIFEST__?.();
     }, []);
 
     React.useEffect(() => {

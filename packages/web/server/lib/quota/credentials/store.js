@@ -1,13 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { resolvePiariumDataDir } from '../../platform/data-paths.js';
 
 const MANAGED_QUOTA_PROVIDERS = new Set(['opencode-go', 'ollama-cloud', 'cursor']);
 
 const credentialsDirectory = () => path.join(
-  process.env.OPENCHAMBER_DATA_DIR
-    ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-    : path.join(os.homedir(), '.config', 'openchamber'),
+  resolvePiariumDataDir(process),
   'quota',
 );
 

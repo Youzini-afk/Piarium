@@ -264,7 +264,7 @@ export class NotificationListener {
   #handleSseData(raw) {
     try {
       const parsed = JSON.parse(raw);
-      if (parsed?.type !== 'openchamber:notification') return;
+      if (parsed?.type !== 'piarium:notification') return;
       const props = parsed.properties;
       if (!props) return;
       this.#onNotification({

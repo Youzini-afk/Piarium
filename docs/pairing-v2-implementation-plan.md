@@ -11,7 +11,7 @@ Included:
 - Trusted-device token issuance through the existing remote client auth runtime.
 - Backward-compatible remote client metadata extension.
 - Password/passkey issuance metadata alignment.
-- Shared v2 `openchamber://connect` payload helpers.
+- Shared v2 `piarium://connect` payload helpers.
 
 Not included:
 
@@ -53,7 +53,7 @@ Pairing redeem
 Deep link stays:
 
 ```text
-openchamber://connect
+piarium://connect
 ```
 
 Versions:
@@ -82,7 +82,7 @@ sweepExpiredSessions
 Store file:
 
 ```text
-OPENCHAMBER_DATA_DIR/client-pairing-sessions.json
+PIARIUM_DATA_DIR/client-pairing-sessions.json
 ```
 
 Suggested store shape:
@@ -219,7 +219,7 @@ Add:
 
 ```js
 const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(
-  OPENCHAMBER_DATA_DIR,
+  PIARIUM_DATA_DIR,
   'client-pairing-sessions.json',
 );
 ```
@@ -327,7 +327,7 @@ Note:
 
 ```text
 This route does not render QR.
-UI can later encode the returned data into openchamber://connect?v=2&p=...
+UI can later encode the returned data into piarium://connect?v=2&p=...
 ```
 
 #### Route: `DELETE /api/client-auth/pairing/sessions/:id`
@@ -504,7 +504,7 @@ Extend existing connect payload helpers.
 Keep current v1 behavior:
 
 ```text
-openchamber://connect?v=1&server=...&token=...&label=...
+piarium://connect?v=1&server=...&token=...&label=...
 ```
 
 Add v2 payload types and helpers.
@@ -546,7 +546,7 @@ parsePairingConnectionPayload(value: string): PairingConnectionPayloadV2 | null
 Use deep link format:
 
 ```text
-openchamber://connect?v=2&p=<base64url-json>
+piarium://connect?v=2&p=<base64url-json>
 ```
 
 Validation:
@@ -630,7 +630,7 @@ Extend existing connect deep-link handling.
 Current v1 behavior:
 
 ```text
-openchamber://connect?v=1&server=...&token=...
+piarium://connect?v=1&server=...&token=...
 ```
 
 Keep it.
@@ -638,7 +638,7 @@ Keep it.
 Add v2 branch:
 
 ```text
-openchamber://connect?v=2&p=...
+piarium://connect?v=2&p=...
 ```
 
 Behavior:
@@ -810,7 +810,7 @@ Keep v1 helpers unchanged.
 Add v2 payload type.
 Add encode v2 helper.
 Add parse v2 helper.
-Use openchamber://connect?v=2&p=<base64url-json>.
+Use piarium://connect?v=2&p=<base64url-json>.
 Validate candidates.
 Reject malformed/expired/oversized payloads.
 ```
@@ -918,7 +918,7 @@ Token migration to OS keychain on desktop
 Must remain true:
 
 ```text
-Existing v1 openchamber://connect links keep working.
+Existing v1 piarium://connect links keep working.
 Existing password login with issueClientToken keeps working.
 Existing passkey issueClientToken keeps working.
 Existing remote-clients.json keeps loading.

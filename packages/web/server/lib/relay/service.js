@@ -40,7 +40,7 @@ const normalizeRelayUrl = (value) => {
 // stored setting entirely, so the host connection, the pairing offer, and the
 // status all point at it — clients then inherit it from the offer automatically.
 const envRelayUrlOverride = () => {
-  const raw = process.env.OPENCHAMBER_RELAY_URL;
+  const raw = process.env.PIARIUM_RELAY_URL;
   if (typeof raw !== 'string' || !raw.trim() || !isValidRelayUrl(raw)) return null;
   return raw.trim();
 };
@@ -88,7 +88,7 @@ export const createRelayService = ({
     return {
       enabled: stored?.enabled === true,
       relayUrl: override ?? normalizeRelayUrl(stored?.relayUrl),
-      // True when the endpoint is pinned by OPENCHAMBER_RELAY_URL (a self-hosted
+      // True when the endpoint is pinned by PIARIUM_RELAY_URL (a self-hosted
       // relay); the stored setting is ignored while it is set.
       relayUrlLocked: override !== null,
     };

@@ -102,7 +102,7 @@ describe("refreshAfterOpenCodeRestart", () => {
         delayMs: 0,
       })
 
-      expect(dispatchedEvents).toContain("openchamber:system-resume")
+      expect(dispatchedEvents).toContain("piarium:system-resume")
       expect(loadProviderDirectories).toEqual(["/test/project"])
     } finally {
       Object.defineProperty(globalThis, "window", {

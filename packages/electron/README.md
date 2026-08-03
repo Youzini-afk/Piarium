@@ -12,7 +12,7 @@ Desktop starts the Piarium web server in the same Electron main process. There i
 
 Same-origin session-chat iframes complete an authenticated parent-frame handshake before creating their SDK client. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own transport and rebinds its SDK before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
-The preload bridge exposes desktop-only APIs to the web UI through `window.__OPENCHAMBER_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
+The preload bridge exposes desktop-only APIs to the web UI through `window.__PIARIUM_DESKTOP__`. Privileged commands are checked in `main.mjs`, not only in the UI.
 
 ## Main Files
 
@@ -104,7 +104,7 @@ The `release-desktop-smoke.yml` workflow can build Windows artifacts on demand. 
 
 Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 
-Linux AppImages must be built natively. Set `OPENCHAMBER_TARGET_ARCH=x64` or `OPENCHAMBER_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the native Electron rebuild and Electron Builder architecture. Linux identity is stable across architectures: executable `piarium`, desktop file `piarium.desktop`, icon `piarium`, and `StartupWMClass=piarium`.
+Linux AppImages must be built natively. Set `PIARIUM_TARGET_ARCH=x64` or `PIARIUM_TARGET_ARCH=arm64` when packaging; the build rejects a target that does not match the Linux host. The same target selects the native Electron rebuild and Electron Builder architecture. Linux identity is stable across architectures: executable `piarium`, desktop file `piarium.desktop`, icon `piarium`, and `StartupWMClass=piarium`.
 
 After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. The verifier extracts the final AppImage and checks its ELF architecture, desktop identity, Electron executable, and all packaged native `.node` modules.
 
@@ -130,16 +130,16 @@ require a separate Node installation at runtime.
 
 | Variable | Use |
 |----------|-----|
-| `OPENCHAMBER_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
-| `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
-| `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local Piarium server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery |
-| `OPENCHAMBER_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
-| `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
-| `OPENCHAMBER_RUNTIME=desktop` | Set by Electron before starting the web server |
-| `OPENCHAMBER_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
-| `OPENCHAMBER_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
-| `OPENCHAMBER_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
-| `OPENCHAMBER_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
+| `PIARIUM_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
+| `PIARIUM_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
+| `PIARIUM_SKIP_LOCAL_SERVER=1` | Skips the in-process local Piarium server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery |
+| `PIARIUM_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
+| `PIARIUM_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
+| `PIARIUM_RUNTIME=desktop` | Set by Electron before starting the web server |
+| `PIARIUM_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
+| `PIARIUM_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
+| `PIARIUM_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
+| `PIARIUM_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
 
 ## Native Features Owned Here
 
@@ -161,7 +161,7 @@ Renderer code should call the desktop bridge exposed by `preload.mjs`. Do not im
 Add new native capabilities in this order:
 
 1. Add or update the `preload.mjs` bridge only if a new renderer-facing shape is needed.
-2. Add the real command handling in `main.mjs` under `openchamber:invoke`.
+2. Add the real command handling in `main.mjs` under `piarium:invoke`.
 3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities.
 4. Keep shared UI runtime contracts in `packages/ui` and server/runtime APIs in `packages/web` when the behavior is not inherently native.
 

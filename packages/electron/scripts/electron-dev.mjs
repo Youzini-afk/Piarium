@@ -8,8 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
-const preferredHmrUiPort = Number(process.env.OPENCHAMBER_HMR_UI_PORT || '5173');
-const preferredHmrApiPort = Number(process.env.OPENCHAMBER_HMR_API_PORT || '3901');
+const preferredHmrUiPort = Number(process.env.PIARIUM_HMR_UI_PORT || '5173');
+const preferredHmrApiPort = Number(process.env.PIARIUM_HMR_API_PORT || '3901');
 
 const quoteWindowsCommandArg = (value) => `"${String(value).replace(/"/g, '""')}"`;
 
@@ -37,7 +37,7 @@ function spawnProcess(command, args, options = {}) {
 
   return spawn(spawnCommand, spawnArgs, {
     cwd: repoRoot,
-    env: { ...process.env, OPENCHAMBER_ELECTRON_DEV: '1' },
+    env: { ...process.env, PIARIUM_ELECTRON_DEV: '1' },
     stdio: 'inherit',
     detached: process.platform !== 'win32',
     windowsVerbatimArguments: isWindowsCommandScript,
@@ -49,7 +49,7 @@ function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
-      env: { ...process.env, OPENCHAMBER_ELECTRON_DEV: '1' },
+      env: { ...process.env, PIARIUM_ELECTRON_DEV: '1' },
       stdio: 'inherit',
       ...options,
     });
@@ -181,7 +181,7 @@ async function main() {
   console.log('[electron:dev] building Pi runtime worker and broker...');
   await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
 
-  const useBundledUi = process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1';
+  const useBundledUi = process.env.PIARIUM_ELECTRON_USE_BUNDLED_UI === '1';
   let devServer = null;
   let hmrApiPort = '';
   let hmrUiPort = '';
@@ -194,10 +194,10 @@ async function main() {
     devServer = spawnProcess('node', ['./scripts/dev-web-hmr.mjs'], {
       env: {
         ...process.env,
-        OPENCHAMBER_ELECTRON_DEV: '1',
-        OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
-        OPENCHAMBER_HMR_API_PORT: hmrApiPort,
-        OPENCHAMBER_DISABLE_PWA_DEV: '1',
+        PIARIUM_ELECTRON_DEV: '1',
+        PIARIUM_HMR_UI_PORT: hmrUiPort,
+        PIARIUM_HMR_API_PORT: hmrApiPort,
+        PIARIUM_DISABLE_PWA_DEV: '1',
       },
     });
   }
@@ -206,11 +206,11 @@ async function main() {
     cwd: electronDir,
     env: {
       ...process.env,
-      OPENCHAMBER_ELECTRON_DEV: '1',
-      ...(useBundledUi ? { OPENCHAMBER_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
-      OPENCHAMBER_HMR_UI_PORT: hmrUiPort,
-      OPENCHAMBER_HMR_API_PORT: hmrApiPort,
-      OPENCHAMBER_DISABLE_PWA_DEV: '1',
+      PIARIUM_ELECTRON_DEV: '1',
+      ...(useBundledUi ? { PIARIUM_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
+      PIARIUM_HMR_UI_PORT: hmrUiPort,
+      PIARIUM_HMR_API_PORT: hmrApiPort,
+      PIARIUM_DISABLE_PWA_DEV: '1',
     },
   });
 

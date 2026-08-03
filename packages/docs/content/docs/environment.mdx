@@ -9,39 +9,39 @@ OpenChamber reads these environment variables at startup. For startup services, 
 
 ## OpenChamber server
 
-### `OPENCHAMBER_HOST`
+### `PIARIUM_HOST`
 
 Bind address for the OpenChamber web server. Use `0.0.0.0` to allow access from other machines.
 
-### `OPENCHAMBER_UI_PASSWORD`
+### `PIARIUM_UI_PASSWORD`
 
 Password for the browser UI. Use this when binding outside localhost, using tunnels, or running behind a reverse proxy.
 
-### `OPENCHAMBER_API_ONLY`
+### `PIARIUM_API_ONLY`
 
 Starts OpenChamber in headless mode when set to `true` or `1`. API routes stay available for desktop and mobile clients, but the browser UI is not served.
 
-### `OPENCHAMBER_DATA_DIR`
+### `PIARIUM_DATA_DIR`
 
 Overrides the OpenChamber data directory. The default is `~/.config/openchamber`.
 
-### `OPENCHAMBER_COMPRESS_API`
+### `PIARIUM_COMPRESS_API`
 
 Controls API response compression. Use `true` or `1` to force it on, `false` or `0` to force it off.
 
-### `OPENCHAMBER_SKIP_API_COMPRESSION`
+### `PIARIUM_SKIP_API_COMPRESSION`
 
-Disables API response compression when set to `true` or `1`. This takes precedence over `OPENCHAMBER_COMPRESS_API`.
+Disables API response compression when set to `true` or `1`. This takes precedence over `PIARIUM_COMPRESS_API`.
 
-### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+### `PIARIUM_VERBOSE_REQUEST_LOGS`
 
 Enables verbose HTTP request logs when set to `true` or `1`.
 
-### `OPENCHAMBER_UPDATE_API_URL`
+### `PIARIUM_UPDATE_API_URL`
 
 Overrides the update-check API endpoint. Most users should leave this unset.
 
-### `OPENCHAMBER_PACKAGE_MANAGER`
+### `PIARIUM_PACKAGE_MANAGER`
 
 Forces the package manager used by update operations when auto-detection is wrong.
 
@@ -59,7 +59,7 @@ Sets the OpenCode server port. With managed OpenCode this requests the managed p
 
 Prevents OpenChamber from starting its own OpenCode server when set to `true`.
 
-### `OPENCHAMBER_OPENCODE_HOSTNAME`
+### `PIARIUM_OPENCODE_HOSTNAME`
 
 Bind hostname for the OpenCode server managed by OpenChamber. The default is `127.0.0.1`.
 
@@ -83,7 +83,7 @@ Custom data directory for the managed OpenCode server.
 
 Selects the WSL distro used for OpenCode integration on Windows.
 
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+### `PIARIUM_OPENCODE_WSL_DISTRO`
 
 OpenChamber-specific alias for selecting the WSL distro. `OPENCODE_WSL_DISTRO` takes precedence when both are set.
 
@@ -93,19 +93,19 @@ Secret used to sign UI authentication tokens. Use a long random value for persis
 
 ## Terminal and Git
 
-### `OPENCHAMBER_TERMINAL_SHELL`
+### `PIARIUM_TERMINAL_SHELL`
 
 Shell executable used for OpenChamber terminal sessions.
 
-### `OPENCHAMBER_GIT_BINARY`
+### `PIARIUM_GIT_BINARY`
 
 Git executable used by OpenChamber Git features.
 
 ### `GIT_BINARY`
 
-Alternative Git executable override. Prefer `OPENCHAMBER_GIT_BINARY` for OpenChamber-specific configuration.
+Alternative Git executable override. Prefer `PIARIUM_GIT_BINARY` for OpenChamber-specific configuration.
 
-### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+### `PIARIUM_GIT_READ_CACHE_TTL_MS`
 
 Time-to-live, in milliseconds, for cached Git-backed file reads. Set `0` to disable this cache while debugging.
 
@@ -115,7 +115,7 @@ Time-to-live, in milliseconds, for cached Git-backed file reads. Set `0` to disa
 
 API key used by OpenChamber voice features that call OpenAI-compatible services.
 
-### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
 Allows remote OpenAI-compatible base URLs for voice features when set to `true` or `1`.
 

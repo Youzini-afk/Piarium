@@ -39,12 +39,12 @@ type TraySnapshot = {
 
 const isTrayPlatform = (): boolean => {
   if (typeof window === 'undefined') return false;
-  const platform = (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__;
+  const platform = (window as unknown as { __PIARIUM_PLATFORM__?: string }).__PIARIUM_PLATFORM__;
   return platform === 'darwin' || platform === 'win32' || platform === 'linux';
 };
 
 const isTrayEnabled = (): boolean => (
-  typeof window !== 'undefined' && window.__OPENCHAMBER_ELECTRON__?.trayEnabled !== false
+  typeof window !== 'undefined' && window.__PIARIUM_ELECTRON__?.trayEnabled !== false
 );
 
 const buildUsage = (): TrayUsage => {
@@ -81,7 +81,7 @@ const buildUsage = (): TrayUsage => {
 const resolveInstanceName = async (): Promise<string> => {
   try {
     if (isDesktopLocalOriginActive()) return 'Local Piarium';
-    const localOrigin = (window as unknown as { __OPENCHAMBER_LOCAL_ORIGIN__?: string }).__OPENCHAMBER_LOCAL_ORIGIN__
+    const localOrigin = (window as unknown as { __PIARIUM_LOCAL_ORIGIN__?: string }).__PIARIUM_LOCAL_ORIGIN__
       || window.location.origin;
     const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
     if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) return 'Local Piarium';

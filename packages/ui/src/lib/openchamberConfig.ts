@@ -89,15 +89,15 @@ export interface OpenChamberProjectContextData extends OpenChamberProjectNotesTo
   plans: OpenChamberProjectPlanFileLink[];
 }
 
-export const OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH = 3000;
-export const OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
-const OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH = 80;
-const OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;
-const OPENCHAMBER_PROJECT_ACTION_OPEN_URL_MAX_LENGTH = 2000;
-const OPENCHAMBER_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH = 300;
-const OPENCHAMBER_PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
+export const PIARIUM_PROJECT_NOTES_MAX_LENGTH = 3000;
+export const PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
+const PIARIUM_PROJECT_ACTION_NAME_MAX_LENGTH = 80;
+const PIARIUM_PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;
+const PIARIUM_PROJECT_ACTION_OPEN_URL_MAX_LENGTH = 2000;
+const PIARIUM_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH = 300;
+const PIARIUM_PROJECT_PLAN_TITLE_MAX_LENGTH = 160;
 
-const OPENCHAMBER_ACTION_PLATFORM_SET = new Set<OpenChamberProjectActionPlatform>(['macos', 'linux', 'windows']);
+const PIARIUM_ACTION_PLATFORM_SET = new Set<OpenChamberProjectActionPlatform>(['macos', 'linux', 'windows']);
 
 const normalize = (value: string): string => {
   if (!value) return '';
@@ -275,7 +275,7 @@ const sanitizeProjectNotes = (value: unknown): string => {
   if (typeof value !== 'string') {
     return '';
   }
-  return trimToMaxLength(value, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH);
+  return trimToMaxLength(value, PIARIUM_PROJECT_NOTES_MAX_LENGTH);
 };
 
 const sanitizeProjectTodoItems = (value: unknown): OpenChamberProjectTodoItem[] => {
@@ -298,7 +298,7 @@ const sanitizeProjectTodoItems = (value: unknown): OpenChamberProjectTodoItem[] 
 
     const id = typeof record.id === 'string' ? record.id.trim() : '';
     const textRaw = typeof record.text === 'string' ? record.text : '';
-    const text = trimToMaxLength(textRaw.trim(), OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH);
+    const text = trimToMaxLength(textRaw.trim(), PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH);
     if (!id || !text) {
       continue;
     }
@@ -370,7 +370,7 @@ const sanitizeProjectActionPlatforms = (value: unknown): OpenChamberProjectActio
       continue;
     }
     const normalized = entry.trim().toLowerCase() as OpenChamberProjectActionPlatform;
-    if (!OPENCHAMBER_ACTION_PLATFORM_SET.has(normalized) || seen.has(normalized)) {
+    if (!PIARIUM_ACTION_PLATFORM_SET.has(normalized) || seen.has(normalized)) {
       continue;
     }
     seen.add(normalized);
@@ -405,8 +405,8 @@ const sanitizeProjectActions = (value: unknown): OpenChamberProjectAction[] => {
     };
 
     const id = typeof record.id === 'string' ? record.id.trim() : '';
-    const name = trimToMaxLength(typeof record.name === 'string' ? record.name.trim() : '', OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH);
-    const command = trimToMaxLength(typeof record.command === 'string' ? record.command.trim() : '', OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH);
+    const name = trimToMaxLength(typeof record.name === 'string' ? record.name.trim() : '', PIARIUM_PROJECT_ACTION_NAME_MAX_LENGTH);
+    const command = trimToMaxLength(typeof record.command === 'string' ? record.command.trim() : '', PIARIUM_PROJECT_ACTION_COMMAND_MAX_LENGTH);
 
     if (!id || !name || !command || seenIds.has(id)) {
       continue;
@@ -417,13 +417,13 @@ const sanitizeProjectActions = (value: unknown): OpenChamberProjectAction[] => {
     const platforms = sanitizeProjectActionPlatforms(record.platforms);
     const autoOpenUrl = record.autoOpenUrl === true;
     const openUrlRaw = typeof record.openUrl === 'string' ? record.openUrl.trim() : '';
-    const openUrl = trimToMaxLength(openUrlRaw, OPENCHAMBER_PROJECT_ACTION_OPEN_URL_MAX_LENGTH);
+    const openUrl = trimToMaxLength(openUrlRaw, PIARIUM_PROJECT_ACTION_OPEN_URL_MAX_LENGTH);
     const desktopOpenSshForwardRaw = typeof record.desktopOpenSshForward === 'string'
       ? record.desktopOpenSshForward.trim()
       : '';
     const desktopOpenSshForward = trimToMaxLength(
       desktopOpenSshForwardRaw,
-      OPENCHAMBER_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH
+      PIARIUM_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH
     );
 
     sanitized.push({
@@ -493,7 +493,7 @@ const slugifyPlanTitle = (value: string): string => {
 };
 
 const sanitizePlanTitle = (value: string): string => {
-  return trimToMaxLength(value.trim(), OPENCHAMBER_PROJECT_PLAN_TITLE_MAX_LENGTH);
+  return trimToMaxLength(value.trim(), PIARIUM_PROJECT_PLAN_TITLE_MAX_LENGTH);
 };
 
 const createProjectPlanId = (): string => {

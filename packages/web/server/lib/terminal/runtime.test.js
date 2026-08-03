@@ -99,8 +99,8 @@ describe('terminal runtime', () => {
   };
 
   it('rejects regular files as terminal working directories', async () => {
-    const previousWorkspaceRoot = process.env.OPENCHAMBER_WORKSPACE_ROOT;
-    const previousWorkspaceLockdown = process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN;
+    const previousWorkspaceRoot = process.env.PIARIUM_WORKSPACE_ROOT;
+    const previousWorkspaceLockdown = process.env.PIARIUM_WORKSPACE_LOCKDOWN;
     const workspaceRoot = '/tmp/openchamber-terminal-test-root';
     const regularFilePath = path.join(workspaceRoot, 'not-a-directory');
     const postRoutes = new Map();
@@ -127,8 +127,8 @@ describe('terminal runtime', () => {
     });
 
     try {
-      process.env.OPENCHAMBER_WORKSPACE_ROOT = workspaceRoot;
-      process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN = 'true';
+      process.env.PIARIUM_WORKSPACE_ROOT = workspaceRoot;
+      process.env.PIARIUM_WORKSPACE_LOCKDOWN = 'true';
       const createRoute = postRoutes.get('/api/terminal/create');
       const res = createResponse();
 
@@ -138,22 +138,22 @@ describe('terminal runtime', () => {
       expect(res.body?.error).toContain('Invalid working directory');
     } finally {
       if (previousWorkspaceRoot === undefined) {
-        delete process.env.OPENCHAMBER_WORKSPACE_ROOT;
+        delete process.env.PIARIUM_WORKSPACE_ROOT;
       } else {
-        process.env.OPENCHAMBER_WORKSPACE_ROOT = previousWorkspaceRoot;
+        process.env.PIARIUM_WORKSPACE_ROOT = previousWorkspaceRoot;
       }
       if (previousWorkspaceLockdown === undefined) {
-        delete process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN;
+        delete process.env.PIARIUM_WORKSPACE_LOCKDOWN;
       } else {
-        process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
+        process.env.PIARIUM_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
       }
       await runtime.shutdown();
     }
   });
 
   it('rejects terminal working directories outside workspace lockdown', async () => {
-    const previousWorkspaceRoot = process.env.OPENCHAMBER_WORKSPACE_ROOT;
-    const previousWorkspaceLockdown = process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN;
+    const previousWorkspaceRoot = process.env.PIARIUM_WORKSPACE_ROOT;
+    const previousWorkspaceLockdown = process.env.PIARIUM_WORKSPACE_LOCKDOWN;
     const workspaceRoot = '/tmp/openchamber-terminal-test-root';
     const postRoutes = new Map();
     const app = {
@@ -181,8 +181,8 @@ describe('terminal runtime', () => {
     });
 
     try {
-      process.env.OPENCHAMBER_WORKSPACE_ROOT = workspaceRoot;
-      process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN = 'true';
+      process.env.PIARIUM_WORKSPACE_ROOT = workspaceRoot;
+      process.env.PIARIUM_WORKSPACE_LOCKDOWN = 'true';
       const createRoute = postRoutes.get('/api/terminal/create');
       const res = createResponse();
 
@@ -192,22 +192,22 @@ describe('terminal runtime', () => {
       expect(res.body?.error).toContain('Path is outside workspace');
     } finally {
       if (previousWorkspaceRoot === undefined) {
-        delete process.env.OPENCHAMBER_WORKSPACE_ROOT;
+        delete process.env.PIARIUM_WORKSPACE_ROOT;
       } else {
-        process.env.OPENCHAMBER_WORKSPACE_ROOT = previousWorkspaceRoot;
+        process.env.PIARIUM_WORKSPACE_ROOT = previousWorkspaceRoot;
       }
       if (previousWorkspaceLockdown === undefined) {
-        delete process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN;
+        delete process.env.PIARIUM_WORKSPACE_LOCKDOWN;
       } else {
-        process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
+        process.env.PIARIUM_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
       }
       await runtime.shutdown();
     }
   });
 
   it('resolves workspace-relative paths for create and restart while enforcing lockdown', async () => {
-    const previousWorkspaceRoot = process.env.OPENCHAMBER_WORKSPACE_ROOT;
-    const previousWorkspaceLockdown = process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN;
+    const previousWorkspaceRoot = process.env.PIARIUM_WORKSPACE_ROOT;
+    const previousWorkspaceLockdown = process.env.PIARIUM_WORKSPACE_LOCKDOWN;
     const workspaceRoot = path.resolve('/tmp/openchamber-terminal-workspace');
     const harness = createHarness({
       fs: {
@@ -220,8 +220,8 @@ describe('terminal runtime', () => {
     });
 
     try {
-      process.env.OPENCHAMBER_WORKSPACE_ROOT = workspaceRoot;
-      process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN = 'true';
+      process.env.PIARIUM_WORKSPACE_ROOT = workspaceRoot;
+      process.env.PIARIUM_WORKSPACE_LOCKDOWN = 'true';
 
       const created = createResponse();
       await harness.routes.post.get('/api/terminal/create')({
@@ -248,10 +248,10 @@ describe('terminal runtime', () => {
       expect(harness.processes).toHaveLength(2);
       expect(harness.processes[1].killed).toBe(false);
     } finally {
-      if (previousWorkspaceRoot === undefined) delete process.env.OPENCHAMBER_WORKSPACE_ROOT;
-      else process.env.OPENCHAMBER_WORKSPACE_ROOT = previousWorkspaceRoot;
-      if (previousWorkspaceLockdown === undefined) delete process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN;
-      else process.env.OPENCHAMBER_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
+      if (previousWorkspaceRoot === undefined) delete process.env.PIARIUM_WORKSPACE_ROOT;
+      else process.env.PIARIUM_WORKSPACE_ROOT = previousWorkspaceRoot;
+      if (previousWorkspaceLockdown === undefined) delete process.env.PIARIUM_WORKSPACE_LOCKDOWN;
+      else process.env.PIARIUM_WORKSPACE_LOCKDOWN = previousWorkspaceLockdown;
       await harness.runtime.shutdown();
     }
   });

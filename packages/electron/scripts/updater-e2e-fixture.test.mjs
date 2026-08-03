@@ -8,7 +8,7 @@ import { createFixtureServer, stageUpdaterFixture } from './updater-e2e-fixture.
 import { parseUpdateManifest, verifyUpdateManifest } from './verify-update-manifest.mjs';
 
 test('stages architecture-specific generic updater fixtures with valid metadata', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-updater-fixture-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-updater-fixture-'));
   try {
     const source = path.join(root, 'Piarium-1.15.1-linux-arm64.AppImage');
     const directory = path.join(root, 'feed');
@@ -37,7 +37,7 @@ test('stages architecture-specific generic updater fixtures with valid metadata'
 });
 
 test('serves only staged fixture files over loopback', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-updater-server-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-updater-server-'));
   const artifact = path.join(root, 'Piarium.AppImage');
   fs.writeFileSync(artifact, 'fixture');
   const { server, url } = await createFixtureServer({ directory: root });

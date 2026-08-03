@@ -197,7 +197,7 @@ const dispatchSettingsSynced = (settings: DesktopSettings): void => {
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<DesktopSettings>('openchamber:settings-synced', { detail: settings }));
+  window.dispatchEvent(new CustomEvent<DesktopSettings>('piarium:settings-synced', { detail: settings }));
 };
 
 type SettingsSaveState = 'idle' | 'saving' | 'error';
@@ -242,7 +242,7 @@ const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void =>
   if (typeof window === 'undefined') {
     return;
   }
-  window.dispatchEvent(new CustomEvent<'saving' | 'saved' | 'error'>('openchamber:settings-save-state', { detail: state }));
+  window.dispatchEvent(new CustomEvent<'saving' | 'saved' | 'error'>('piarium:settings-save-state', { detail: state }));
 };
 
 type PersistApi = {
@@ -1773,7 +1773,7 @@ export const syncDesktopSettings = async (): Promise<void> => {
     // `autoSaveEnabled` is new to the settings backend. Until the server has a
     // value, materialize would invent the client default (true) and overwrite a
     // deliberate legacy "off" preference migrated from
-    // `openchamber:files:auto-save-enabled`. Prefer the hydrated store value and
+    // `piarium:files:auto-save-enabled`. Prefer the hydrated store value and
     // seed the backend once so later omitted→default authority is correct.
     const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
     const authoritativeSettings = materializeAuthoritativeUiSettings(settings);

@@ -1,12 +1,12 @@
 # Session Goal
 
 Server-side control loop that keeps a session working toward a user-defined
-objective stored under `metadata.openchamber.goal`, with the small model as
+objective stored under `metadata.piarium.goal`, with the small model as
 an independent progress auditor. Built on OpenChamber's backend-driven
 architecture (session-assist is the structural template): the loop lives in
 the web server and survives UI disconnects.
 
-## Goal payload (`metadata.openchamber.goal`)
+## Goal payload (`metadata.piarium.goal`)
 
 ```
 {
@@ -46,7 +46,7 @@ session and drops the write when the stored goal id no longer matches.
 ## File-backed objectives
 
 The objective TEXT lives in `<data-dir>/goals/<sessionId>.md` (data dir =
-`OPENCHAMBER_DATA_DIR` or `~/.config/openchamber`), keyed by the SESSION ID:
+`PIARIUM_DATA_DIR` or `~/.config/openchamber`), keyed by the SESSION ID:
 sessions are globally unique and carry one goal at a time, so the mapping is
 deterministic and a new goal simply overwrites the file. Metadata carries
 only `objectiveFile: true` — never a path — so user-writable metadata cannot
@@ -177,7 +177,7 @@ sees only that final turn, so the report is its evidence.
 
 Scheduled tasks can run as goals: `execution.goalEnabled` (+ optional
 `execution.goalTokenBudget`) on a task makes the scheduled-tasks runtime
-stamp `metadata.openchamber.goal` onto the fresh session (objective = the
+stamp `metadata.piarium.goal` onto the fresh session (objective = the
 expanded task prompt, or the argument-expanded command template for a slash
 command) and attach the goal-mode intro part to normal prompts.
 The loop here picks it up from session events like any other goal.

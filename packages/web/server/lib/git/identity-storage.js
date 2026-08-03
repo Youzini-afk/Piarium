@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { resolvePiariumDataDir } from '../platform/data-paths.js';
 
-const STORAGE_DIR = path.join(os.homedir(), '.config', 'openchamber');
+const STORAGE_DIR = resolvePiariumDataDir(process);
 const STORAGE_FILE = path.join(STORAGE_DIR, 'git-identities.json');
 
 function ensureStorageDir() {

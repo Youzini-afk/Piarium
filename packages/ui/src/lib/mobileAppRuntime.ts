@@ -2,7 +2,7 @@ import React from 'react';
 
 export const isMobileAppRuntime = (): boolean => {
   if (typeof window === 'undefined') return false;
-  return Boolean((window as unknown as { __OPENCHAMBER_MOBILE_APP__?: unknown }).__OPENCHAMBER_MOBILE_APP__);
+  return Boolean((window as unknown as { __PIARIUM_MOBILE_APP__?: unknown }).__PIARIUM_MOBILE_APP__);
 };
 
 export const useMobileAppViewport = (enabled: boolean): void => {

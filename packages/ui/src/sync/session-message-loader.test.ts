@@ -381,7 +381,7 @@ describe("SessionMessageLoader", () => {
     try {
       await loader.ensure(target)
 
-      const events = diagnosticWindow.__openchamberSessionLoadPerformance?.events ?? []
+      const events = diagnosticWindow.__piariumSessionLoadPerformance?.events ?? []
       const initialEvent = events.find((event) => event.operation === "session-messages.initial")
       const pageEvents = events.filter((event) => event.operation === "session-messages.page")
       expect(calls).toBe(3)
@@ -427,12 +427,12 @@ describe("session load performance diagnostics", () => {
       })
       finishVisible("complete")
 
-      expect(diagnosticWindow.__openchamberSessionLoadPerformance?.events).toHaveLength(1)
-      const event = diagnosticWindow.__openchamberSessionLoadPerformance?.events[0]
+      expect(diagnosticWindow.__piariumSessionLoadPerformance?.events).toHaveLength(1)
+      const event = diagnosticWindow.__piariumSessionLoadPerformance?.events[0]
       expect(event?.operation).toBe("session-messages.visible")
       expect(event?.caller).toBe("selected-session")
       expect(event?.recordCount).toBe(30)
-      expect(JSON.stringify(diagnosticWindow.__openchamberSessionLoadPerformance)).not.toContain("secret")
+      expect(JSON.stringify(diagnosticWindow.__piariumSessionLoadPerformance)).not.toContain("secret")
     } finally {
       if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
       else Reflect.deleteProperty(globalThis, "window")

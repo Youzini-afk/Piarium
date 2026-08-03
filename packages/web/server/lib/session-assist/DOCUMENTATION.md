@@ -3,7 +3,7 @@
 Server-side watcher that generates a short recap of the agent's last reply
 and one suggested user follow-up with the small model
 (`lib/small-model`), storing both on the session's metadata under
-`metadata.openchamber.assist`.
+`metadata.piarium.assist`.
 
 ## Flow
 

@@ -34,12 +34,13 @@ import {
 } from './linux-autostart.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { mintOutsideFileGrant } from '@piarium/web/server/lib/fs/routes.js';
+import { resolvePiariumDataDir } from '@piarium/web/server/lib/platform/data-paths.js';
 
 const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
+const isDev = process.env.PIARIUM_ELECTRON_DEV === '1' || !app.isPackaged;
 const electronStartupStartedAt = performance.now();
 
 const DEEP_LINK_PROTOCOL = 'piarium';
@@ -94,7 +95,7 @@ app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 // Lift Chromium's ~6-connections-per-host cap for the loopback backend. The
 // packaged renderer is cross-origin (piarium-ui:// → http://127.0.0.1), so
 // every API call also needs a CORS preflight; during startup a few slow
-// OpenCode-proxied requests otherwise hold the whole pool and every other
+// Pi runtime requests otherwise hold the whole pool and every other
 // request — including opening the first session — queues for seconds behind
 // them. Loopback has no per-host connection cost that the cap protects.
 app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
@@ -129,7 +130,7 @@ log.transports.console.level = isDev ? 'debug' : 'warn';
 // The in-process web server runs in this same Node process and uses plain
 // `console.log/warn/error`. Without piping console through electron-log,
 // that output never lands in ~/Library/Logs/Piarium/main.log and we
-// can't diagnose issues (e.g. OpenCode lifecycle, SSE disconnects) after
+// can't diagnose issues (e.g. Pi runtime lifecycle, SSE disconnects) after
 // the fact. Route all console calls through electron-log so server-side
 // diagnostics are persisted.
 Object.assign(console, log.functions);
@@ -147,7 +148,7 @@ const ELECTRON_STARTUP_PERF_PHASES = new Set([
 ]);
 const ELECTRON_STARTUP_DOCUMENT_CLASSES = new Set(['splash', 'application']);
 const recordElectronStartupPerformance = (phase, details = {}) => {
-  const enabled = STARTUP_PERF_ENABLED_VALUES.has(String(process.env.OPENCHAMBER_STARTUP_PERF ?? '').toLowerCase());
+  const enabled = STARTUP_PERF_ENABLED_VALUES.has(String(process.env.PIARIUM_STARTUP_PERF ?? '').toLowerCase());
   if (!enabled || !ELECTRON_STARTUP_PERF_PHASES.has(phase)) return;
   const event = {
     phase,
@@ -418,7 +419,7 @@ const shouldHideMainWindowToTray = (browserWindow) => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
   if (!browserWindow || browserWindow.isDestroyed()) return false;
-  if (browserWindow.__ocMiniChat === true) return false;
+  if (browserWindow.__piariumMiniChat === true) return false;
   return readSettingsRoot().desktopMinimizeToTrayEnabled === true;
 };
 
@@ -548,8 +549,8 @@ const performConfirmedQuit = async () => {
 
 // Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
 // terminal close) bypass the normal app-quit flow — which would orphan the
-// in-process web server's managed OpenCode child. Run the same background
-// teardown the quit path uses (which kills the sidecar), then exit. The startup
+// in-process web server's Pi runtime. Run the same background teardown the
+// quit path uses, then exit. The startup
 // reaper remains the backstop for an unhandled hard crash (SIGKILL).
 let hardStopInProgress = false;
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
@@ -662,12 +663,7 @@ const refreshQuitRiskFlags = async () => {
   }
 };
 
-const settingsFilePath = () => {
-  if (typeof process.env.OPENCHAMBER_DATA_DIR === 'string' && process.env.OPENCHAMBER_DATA_DIR.trim()) {
-    return path.join(process.env.OPENCHAMBER_DATA_DIR.trim(), 'settings.json');
-  }
-  return path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
-};
+const settingsFilePath = () => path.join(resolvePiariumDataDir(process), 'settings.json');
 
 const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
@@ -1252,8 +1248,8 @@ const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 const shouldUsePackagedUi = () => {
-  if (process.env.OPENCHAMBER_ELECTRON_LOAD_SERVER_UI === '1') return false;
-  if (process.env.OPENCHAMBER_ELECTRON_USE_BUNDLED_UI === '1') return true;
+  if (process.env.PIARIUM_ELECTRON_LOAD_SERVER_UI === '1') return false;
+  if (process.env.PIARIUM_ELECTRON_USE_BUNDLED_UI === '1') return true;
   return app.isPackaged;
 };
 const packagedUiOrigin = () => `${UI_PROTOCOL}://app`;
@@ -1262,7 +1258,7 @@ const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${pa
 const injectRuntimeConfigIntoHtml = (html) => {
   const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
   const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  const initScript = `<script>if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__OPENCHAMBER_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}</script>`;
+  const initScript = `<script>if(window.__PIARIUM_LOCAL_ORIGIN__===undefined){window.__PIARIUM_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__PIARIUM_API_BASE_URL__===undefined){window.__PIARIUM_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__PIARIUM_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__PIARIUM_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}</script>`;
   if (html.includes('<head>')) return html.replace('<head>', `<head>${initScript}`);
   if (html.includes('</head>')) return html.replace('</head>', `${initScript}</head>`);
   return `${initScript}${html}`;
@@ -1411,7 +1407,7 @@ const maybeShowNativeNotification = (rawInput) => {
   notification.on('click', () => {
     focusForegroundWindow();
     if (sessionId) {
-      emitToAllWindows('openchamber:open-session', { sessionId, directory });
+      emitToAllWindows('piarium:open-session', { sessionId, directory });
     }
     release();
   });
@@ -1513,8 +1509,8 @@ const loadShellEnv = () => {
 // Merge the user's login-shell env (PATH, etc.) into this process before we
 import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/lib/platform/path-utils.js';
 
-// import/start the server in-process. The server and its children (opencode
-// CLI, git, etc.) inherit process.env directly now — there is no sidecar
+// import/start the server in-process. The server and its children (Pi host,
+// git, etc.) inherit process.env directly now — there is no sidecar
 // subprocess to hand a custom env to.
 const inheritUserShellEnv = () => {
   const shellEnv = loadShellEnv();
@@ -1540,7 +1536,7 @@ const inheritUserShellEnv = () => {
 
 const shouldSkipLocalServer = () => {
   inheritUserShellEnv();
-  return process.env.OPENCHAMBER_SKIP_LOCAL_SERVER === '1';
+  return process.env.PIARIUM_SKIP_LOCAL_SERVER === '1';
 };
 
 const spawnLocalServer = async () => {
@@ -1578,26 +1574,26 @@ const spawnLocalServer = async () => {
     chosenPort = await pickUnusedPort(bindHost);
   }
 
-  // The server module reads ENV_DESKTOP_NOTIFY / OPENCHAMBER_DIST_DIR /
-  // OPENCHAMBER_RUNTIME at import time (top-level const), so these must be
+  // The server module reads PIARIUM_DESKTOP_NOTIFY / PIARIUM_DIST_DIR /
+  // PIARIUM_RUNTIME at import time (top-level const), so these must be
   // set before the first import. After this point, the same env is used by
   // both the Electron main and the server running inside it.
-  process.env.OPENCHAMBER_HOST = bindHost;
-  process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
+  process.env.PIARIUM_HOST = bindHost;
+  process.env.PIARIUM_DESKTOP_LAN_ACCESS_ACTIVE = effectiveLanAccessEnabled ? 'true' : 'false';
   if (lanAccessBlockedByMissingPassword) {
-    process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
+    process.env.PIARIUM_DESKTOP_LAN_ACCESS_BLOCKED_REASON = 'missing-password';
   } else {
-    delete process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
+    delete process.env.PIARIUM_DESKTOP_LAN_ACCESS_BLOCKED_REASON;
   }
-  process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
-  process.env.OPENCHAMBER_RUNTIME = 'desktop';
-  process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
+  process.env.PIARIUM_DIST_DIR = resolveWebDistDir();
+  process.env.PIARIUM_RUNTIME = 'desktop';
+  process.env.PIARIUM_DESKTOP_NOTIFY = 'true';
   if (desktopUiPassword) {
-    process.env.OPENCHAMBER_UI_PASSWORD = desktopUiPassword;
+    process.env.PIARIUM_UI_PASSWORD = desktopUiPassword;
   } else {
-    delete process.env.OPENCHAMBER_UI_PASSWORD;
+    delete process.env.PIARIUM_UI_PASSWORD;
   }
-  process.env.OPENCHAMBER_SKIP_API_COMPRESSION = process.env.OPENCHAMBER_SKIP_API_COMPRESSION || 'true';
+  process.env.PIARIUM_SKIP_API_COMPRESSION = process.env.PIARIUM_SKIP_API_COMPRESSION || 'true';
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
@@ -1674,7 +1670,7 @@ const buildInitScript = (localOrigin, bootOutcome, apiBaseUrl = '', clientToken 
   const outcome = JSON.stringify(bootOutcome ?? null);
   return [
     '(function(){',
-    `try{var __oc_local=${local};var __oc_api=${apiBase};var __oc_headers=${headers};var __oc_packaged=${packagedOrigin};var __oc_origin=window.location&&window.location.origin||'';var __oc_is_packaged=__oc_origin===__oc_packaged;var __oc_is_local=__oc_local&&__oc_origin===new URL(__oc_local).origin;window.__OPENCHAMBER_MACOS_MAJOR__=${macVersion};window.__OPENCHAMBER_LOCAL_ORIGIN__=__oc_local;window.__OPENCHAMBER_API_BASE_URL__=__oc_api;if(__oc_is_local||__oc_is_packaged){window.__PIARIUM_HOME__=${home};window.__OPENCHAMBER_RUNTIME_HEADERS__=__oc_headers;}if((__oc_is_local||__oc_is_packaged)&&${token}){window.__OPENCHAMBER_CLIENT_TOKEN__=${token};}var __oc_bo=${outcome};if(__oc_bo){window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__=__oc_bo;}}catch(_e){}`,
+    `try{var __piarium_local=${local};var __piarium_api=${apiBase};var __piarium_headers=${headers};var __piarium_packaged=${packagedOrigin};var __piarium_origin=window.location&&window.location.origin||'';var __piarium_is_packaged=__piarium_origin===__piarium_packaged;var __piarium_is_local=__piarium_local&&__piarium_origin===new URL(__piarium_local).origin;window.__PIARIUM_MACOS_MAJOR__=${macVersion};window.__PIARIUM_LOCAL_ORIGIN__=__piarium_local;window.__PIARIUM_API_BASE_URL__=__piarium_api;if(__piarium_is_local||__piarium_is_packaged){window.__PIARIUM_HOME__=${home};window.__PIARIUM_RUNTIME_HEADERS__=__piarium_headers;}if((__piarium_is_local||__piarium_is_packaged)&&${token}){window.__PIARIUM_CLIENT_TOKEN__=${token};}var __piarium_bo=${outcome};if(__piarium_bo){window.__PIARIUM_DESKTOP_BOOT_OUTCOME__=__piarium_bo;}}catch(_e){}`,
     '}())',
   ].join('');
 };
@@ -1837,12 +1833,12 @@ const isBenignNavigationAbort = (error) => {
 const navigateWindow = async (browserWindow, url, { allowAbort = false } = {}) => {
   const navigationStartedAt = performance.now();
   const documentClass = classifyStartupDocument(url);
-  if (browserWindow.__ocLabel === 'main') {
+  if (browserWindow.__piariumLabel === 'main') {
     recordElectronStartupPerformance('electron.navigation.start', { documentClass });
   }
   try {
     await browserWindow.loadURL(url);
-    if (browserWindow.__ocLabel === 'main') {
+    if (browserWindow.__piariumLabel === 'main') {
       recordElectronStartupPerformance('electron.navigation.ready', {
         documentClass,
         durationMs: performance.now() - navigationStartedAt,
@@ -1938,7 +1934,7 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
 
 const emitToWindow = (browserWindow, event, detail) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
-  browserWindow.webContents.send('openchamber:emit', { event, detail });
+  browserWindow.webContents.send('piarium:emit', { event, detail });
 };
 
 const emitToAllWindows = (event, detail) => {
@@ -1963,7 +1959,7 @@ const applyMacVibrancy = (browserWindow) => {
 
 const setMacVibrancyReady = (browserWindow, ready) => {
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
-  emitToWindow(browserWindow, 'openchamber:vibrancy-ready', { ready });
+  emitToWindow(browserWindow, 'piarium:vibrancy-ready', { ready });
 };
 
 const scheduleMacVibrancyReady = (browserWindow, delayMs = 160) => {
@@ -2242,7 +2238,7 @@ const dispatchDeepLink = (link) => {
     return;
   }
   if (link.type === 'session' && link.value) {
-    emitToAllWindows('openchamber:open-session', { sessionId: link.value, directory: link.directory || '' });
+    emitToAllWindows('piarium:open-session', { sessionId: link.value, directory: link.directory || '' });
     return;
   }
   if (link.type === 'host' && link.value) {
@@ -2306,14 +2302,14 @@ const getMenuTargetWindow = () => {
 
 const dispatchMenuAction = (action) => {
   const target = getMenuTargetWindow();
-  emitToWindow(target, 'openchamber:menu-action', action);
-  dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
+  emitToWindow(target, 'piarium:menu-action', action);
+  dispatchDomEventToWindow(target, 'piarium:menu-action', action);
 };
 
 const dispatchCheckForUpdates = () => {
-  emitToAllWindows('openchamber:check-for-updates');
+  emitToAllWindows('piarium:check-for-updates');
   for (const browserWindow of BrowserWindow.getAllWindows()) {
-    dispatchDomEventToWindow(browserWindow, 'openchamber:check-for-updates');
+    dispatchDomEventToWindow(browserWindow, 'piarium:check-for-updates');
   }
 };
 
@@ -2366,7 +2362,7 @@ const getWindowIconPath = () => {
 
 const canUseTitleBarOverlay = (browserWindow) => (
   process.platform === 'win32' &&
-  Boolean(browserWindow?.__ocTitleBarOverlayEnabled) &&
+  Boolean(browserWindow?.__piariumTitleBarOverlayEnabled) &&
   typeof browserWindow.setTitleBarOverlay === 'function' &&
   !browserWindow.isDestroyed()
 );
@@ -2415,16 +2411,16 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
-        `--openchamber-local-origin=${desktopLocalOrigin}`,
-        `--openchamber-api-base-url=${desktopApiBaseUrl}`,
-        `--openchamber-client-token=${desktopClientToken}`,
-        `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
-        `--openchamber-home=${desktopHome}`,
-        `--openchamber-macos-major=${desktopMacosMajor}`,
-        `--openchamber-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
-        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
-        `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
-        `--openchamber-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
+        `--piarium-local-origin=${desktopLocalOrigin}`,
+        `--piarium-api-base-url=${desktopApiBaseUrl}`,
+        `--piarium-client-token=${desktopClientToken}`,
+        `--piarium-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
+        `--piarium-home=${desktopHome}`,
+        `--piarium-macos-major=${desktopMacosMajor}`,
+        `--piarium-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
+        `--piarium-tray-enabled=${trayEnabled ? '1' : '0'}`,
+        `--piarium-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
+        `--piarium-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
@@ -2439,10 +2435,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   };
 
   const browserWindow = new BrowserWindow(options);
-  browserWindow.__ocLabel = label || nextWindowLabel();
-  browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
-  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
-  browserWindow.__ocTitleBarOverlayEnabled = titleBarOverlayEnabled;
+  browserWindow.__piariumLabel = label || nextWindowLabel();
+  browserWindow.__piariumRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
+  browserWindow.__piariumInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__piariumTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
   if (useSaved && saved.maximized) {
     browserWindow.maximize();
@@ -2489,16 +2485,16 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
 
   browserWindow.on('resize', () => {
     if (process.platform === 'darwin') {
-      emitToWindow(browserWindow, 'openchamber:window-resized');
+      emitToWindow(browserWindow, 'piarium:window-resized');
     }
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('maximize', () => {
-    emitToWindow(browserWindow, 'openchamber:window-maximized-changed', { maximized: true });
+    emitToWindow(browserWindow, 'piarium:window-maximized-changed', { maximized: true });
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('unmaximize', () => {
-    emitToWindow(browserWindow, 'openchamber:window-maximized-changed', { maximized: false });
+    emitToWindow(browserWindow, 'piarium:window-maximized-changed', { maximized: false });
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('move', () => {
@@ -2614,19 +2610,19 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   });
 
   browserWindow.webContents.on('dom-ready', () => {
-    if (browserWindow.__ocLabel === 'main') {
+    if (browserWindow.__piariumLabel === 'main') {
       recordElectronStartupPerformance('electron.renderer.dom-ready', {
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
     }
-    const initScript = browserWindow.__ocInitScript;
+    const initScript = browserWindow.__piariumInitScript;
     if (initScript) {
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
   });
 
   browserWindow.webContents.on('did-finish-load', () => {
-    if (browserWindow.__ocLabel === 'main') {
+    if (browserWindow.__piariumLabel === 'main') {
       recordElectronStartupPerformance('electron.renderer.loaded', {
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
@@ -2643,7 +2639,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   });
 
   browserWindow.once('ready-to-show', () => {
-    if (browserWindow.__ocLabel === 'main') {
+    if (browserWindow.__piariumLabel === 'main') {
       recordElectronStartupPerformance('electron.window.ready-to-show', {
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
@@ -2689,7 +2685,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 
   const mainWindow = state.mainWindow;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.__ocRuntimeConfig = rendererRuntimeConfig;
+    mainWindow.__piariumRuntimeConfig = rendererRuntimeConfig;
     await navigateWindow(mainWindow, url, { allowAbort: true });
     mainWindow.show();
     mainWindow.focus();
@@ -2780,7 +2776,7 @@ const getWindowRuntimeConfig = (browserWindow) => {
     requestHeaders: state.requestHeaders || {},
   };
   if (!browserWindow || browserWindow.isDestroyed()) return fallback;
-  const config = browserWindow.__ocRuntimeConfig;
+  const config = browserWindow.__piariumRuntimeConfig;
   return {
     apiBaseUrl: typeof config?.apiBaseUrl === 'string' ? config.apiBaseUrl : fallback.apiBaseUrl,
     clientToken: typeof config?.clientToken === 'string' ? config.clientToken : fallback.clientToken,
@@ -2835,13 +2831,13 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
-        `--openchamber-local-origin=${desktopLocalOrigin}`,
-        `--openchamber-api-base-url=${desktopApiBaseUrl}`,
-        `--openchamber-client-token=${desktopClientToken}`,
-        `--openchamber-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
-        `--openchamber-home=${desktopHome}`,
-        `--openchamber-macos-major=${desktopMacosMajor}`,
-        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
+        `--piarium-local-origin=${desktopLocalOrigin}`,
+        `--piarium-api-base-url=${desktopApiBaseUrl}`,
+        `--piarium-client-token=${desktopClientToken}`,
+        `--piarium-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
+        `--piarium-home=${desktopHome}`,
+        `--piarium-macos-major=${desktopMacosMajor}`,
+        `--piarium-tray-enabled=${trayEnabled ? '1' : '0'}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
@@ -2850,22 +2846,22 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
       sandbox: false,
     },
   });
-  browserWindow.__ocLabel = nextWindowLabel();
-  browserWindow.__ocRuntimeConfig = effectiveRuntimeConfig;
-  browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
-  browserWindow.__ocMiniChat = true;
-  browserWindow.__ocMiniChatSessionId = sessionWindowKey;
-  browserWindow.__ocPinned = false;
+  browserWindow.__piariumLabel = nextWindowLabel();
+  browserWindow.__piariumRuntimeConfig = effectiveRuntimeConfig;
+  browserWindow.__piariumInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
+  browserWindow.__piariumMiniChat = true;
+  browserWindow.__piariumMiniChatSessionId = sessionWindowKey;
+  browserWindow.__piariumPinned = false;
 
   if (sessionWindowKey) {
     state.miniChatWindowsBySession.set(sessionWindowKey, browserWindow);
   }
 
   browserWindow.on('closed', () => {
-    if (browserWindow.__ocMiniChatSessionId) {
-      const existing = state.miniChatWindowsBySession.get(browserWindow.__ocMiniChatSessionId);
+    if (browserWindow.__piariumMiniChatSessionId) {
+      const existing = state.miniChatWindowsBySession.get(browserWindow.__piariumMiniChatSessionId);
       if (existing?.id === browserWindow.id) {
-        state.miniChatWindowsBySession.delete(browserWindow.__ocMiniChatSessionId);
+        state.miniChatWindowsBySession.delete(browserWindow.__piariumMiniChatSessionId);
       }
     }
   });
@@ -2906,7 +2902,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     void shell.openExternal(url).catch(() => {});
   });
   browserWindow.webContents.on('dom-ready', () => {
-    const initScript = browserWindow.__ocInitScript;
+    const initScript = browserWindow.__piariumInitScript;
     if (initScript) {
       void browserWindow.webContents.executeJavaScript(initScript).catch(() => {});
     }
@@ -2920,11 +2916,11 @@ const setMiniChatPinned = (browserWindow, pinned) => {
   if (!browserWindow || browserWindow.isDestroyed()) {
     throw new Error('Window is not available');
   }
-  if (browserWindow.__ocMiniChat !== true) {
+  if (browserWindow.__piariumMiniChat !== true) {
     throw new Error('Pinning is only available for Mini Chat windows');
   }
   const nextPinned = pinned === true;
-  browserWindow.__ocPinned = nextPinned;
+  browserWindow.__piariumPinned = nextPinned;
   if (nextPinned) {
     browserWindow.setAlwaysOnTop(true, 'floating');
   } else {
@@ -2952,8 +2948,8 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
 };
 
 const resolveInitialUrl = async () => {
-  const hmrApiPort = process.env.OPENCHAMBER_HMR_API_PORT || '3901';
-  const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
+  const hmrApiPort = process.env.PIARIUM_HMR_API_PORT || '3901';
+  const hmrUiPort = process.env.PIARIUM_HMR_UI_PORT || '5173';
   const hmrApiUrl = `http://127.0.0.1:${hmrApiPort}`;
   const hmrUiUrl = `http://127.0.0.1:${hmrUiPort}`;
   const usePackagedUi = shouldUsePackagedUi();
@@ -2987,7 +2983,7 @@ const resolveInitialUrl = async () => {
   let requestHeaders = {};
   let remoteProbe = null;
 
-  const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
+  const envTarget = normalizeHostUrl(process.env.PIARIUM_SERVER_URL || '');
   const config = readDesktopHostsConfig();
   if (envTarget) {
     apiBaseUrl = envTarget;
@@ -3023,7 +3019,7 @@ const resolveInitialUrl = async () => {
   }
   if (!initialUrl) {
     throw new Error(
-      'OPENCHAMBER_SKIP_LOCAL_SERVER=1 requires bundled UI, a running desktop HMR UI, or a reachable remote instance.',
+      'PIARIUM_SKIP_LOCAL_SERVER=1 requires bundled UI, a running desktop HMR UI, or a reachable remote instance.',
     );
   }
 
@@ -3089,10 +3085,10 @@ const setupTrayAndListener = (bootOutcome) => {
 
   // Resolve password: try host-level password from hosts config, then fall
   // back to any UI password stored in settings (desktopHosts entries don't
-  // currently persist passwords, but the app may set OPENCHAMBER_UI_PASSWORD).
+  // currently persist passwords, but the app may set PIARIUM_UI_PASSWORD).
   const password = host?.password
     || readSettingsRoot()?.uiPassword
-    || process.env.OPENCHAMBER_UI_PASSWORD
+    || process.env.PIARIUM_UI_PASSWORD
     || '';
   const clientToken = host?.clientToken
     || resolveStoredClientTokenForUrl(serverUrl, config)
@@ -3137,8 +3133,8 @@ const setupAutoUpdater = () => {
   autoUpdater.disableWebInstaller = false;
   autoUpdater.logger = log;
 
-  const testBuild = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
-    && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
+  const testBuild = typeof __PIARIUM_UPDATER_E2E_BUILD__ !== 'undefined'
+    && __PIARIUM_UPDATER_E2E_BUILD__ === true;
   const feed = resolveUpdaterFeed({ testBuild });
   const updaterChannel = feed.provider === 'github'
     ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
@@ -3157,7 +3153,7 @@ const setupAutoUpdater = () => {
     const total = Number(progress.total || 0);
     const transferred = Number(progress.transferred || 0);
     setTaskbarProgress(total > 0 ? Math.max(0, Math.min(1, transferred / total)) : 0.01);
-    emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
+    emitToAllWindows('piarium:update-progress', mapUpdaterProgressEvent({
       event: 'Progress',
       data: {
         chunkLength: Math.max(0, Math.round(progress.bytesPerSecond || 0)),
@@ -3240,7 +3236,7 @@ const isAppBundleInstalled = async (appName) => Boolean(await resolveAppBundlePa
 const iconToDataUrl = async (iconPath, appName) => {
   if (!iconPath || !(await pathExists(iconPath))) return null;
   const safeName = String(appName || 'app').replace(/[^a-z0-9]/gi, '_');
-  const tempPath = path.join(os.tmpdir(), `openchamber-icon-${safeName}-${Date.now()}.png`);
+  const tempPath = path.join(os.tmpdir(), `piarium-icon-${safeName}-${Date.now()}.png`);
   try {
     await execFileAsync('sips', ['-s', 'format', 'png', '-Z', '32', iconPath, '--out', tempPath], { stdio: 'ignore' });
   } catch {
@@ -3971,7 +3967,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!underHome && !underTmp) {
         throw new Error('File is outside the allowed workspace');
       }
-      const DENIED_SEGMENTS = ['.ssh', '.aws', '.gnupg', '.gpg', '.config/gh', '.config/openchamber/credentials'];
+      const DENIED_SEGMENTS = ['.ssh', '.aws', '.gnupg', '.gpg', '.config/gh', '.config/piarium/credentials'];
       const relFromHome = underHome ? filePath.slice(home.length + 1) : '';
       const relNormalized = relFromHome.split(path.sep).join('/');
       if (DENIED_SEGMENTS.some((segment) => relNormalized === segment || relNormalized.startsWith(`${segment}/`))) {
@@ -4218,7 +4214,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
-        emitToAllWindows('openchamber:installed-apps-updated', apps);
+        emitToAllWindows('piarium:installed-apps-updated', apps);
       };
       if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
         return { apps: [], hasCache: false, isCacheStale: false, supported: false };
@@ -4239,7 +4235,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const nextConfigInput = args.input || args.config || {};
       await writeDesktopHostsConfig(nextConfigInput);
       const updatedConfig = readDesktopHostsConfig();
-      const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
+      const envTarget = normalizeHostUrl(process.env.PIARIUM_SERVER_URL || '');
       if (Object.prototype.hasOwnProperty.call(nextConfigInput, 'localClientToken') && isLocalRuntimeUrl(state.apiBaseUrl || state.sidecarUrl || state.localOrigin || '')) {
         state.clientToken = readDesktopLocalClientToken();
       }
@@ -4354,7 +4350,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         throw new Error('No pending update');
       }
       setTaskbarProgress(0.01);
-      emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
+      emitToAllWindows('piarium:update-progress', mapUpdaterProgressEvent({
         event: 'Started',
         data: {
           contentLength: null,
@@ -4384,7 +4380,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
             Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
           });
         }
-        emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
+        emitToAllWindows('piarium:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
         }));
@@ -4538,7 +4534,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return setMiniChatPinned(browserWindow, args.pinned === true);
 
     case 'desktop_get_window_pinned':
-      return { pinned: Boolean(browserWindow?.__ocPinned) };
+      return { pinned: Boolean(browserWindow?.__piariumPinned) };
 
     case 'desktop_focus_main_window': {
       const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
@@ -4561,9 +4557,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       state.mainWindow.show();
       state.mainWindow.focus();
       if (sessionId) {
-        emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
+        emitToWindow(state.mainWindow, 'piarium:open-session', { sessionId, directory });
       } else if (mode === 'draft') {
-        emitToWindow(state.mainWindow, 'openchamber:open-draft-session', { directory, projectId });
+        emitToWindow(state.mainWindow, 'piarium:open-draft-session', { directory, projectId });
       }
       return { focused: true };
     }
@@ -4906,7 +4902,7 @@ const isLocalSender = (webContents) => {
     if (url.protocol === `${UI_PROTOCOL}:` && url.hostname === 'app') return true;
     // Electron dev renders from Vite while the local API is served on a
     // separate port. This exact loopback HMR origin is trusted only in dev.
-    if (isDev && url.origin === `http://127.0.0.1:${process.env.OPENCHAMBER_HMR_UI_PORT || '5173'}`) return true;
+    if (isDev && url.origin === `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}`) return true;
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (state.localOrigin) {
       try {
@@ -4947,7 +4943,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_capture_page_rect',
 ]);
 
-ipcMain.handle('openchamber:invoke', async (event, command, args) => {
+ipcMain.handle('piarium:invoke', async (event, command, args) => {
   if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
     log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
@@ -4956,7 +4952,7 @@ ipcMain.handle('openchamber:invoke', async (event, command, args) => {
   return handleInvoke(browserWindow, command, args);
 });
 
-ipcMain.handle('openchamber:dialog:open', async (event, options) => {
+ipcMain.handle('piarium:dialog:open', async (event, options) => {
   // Native file dialogs expose absolute local paths; never grant to remote.
   if (!isLocalSender(event.sender)) {
     log.warn(`[ipc] rejected dialog:open from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
@@ -5005,7 +5001,7 @@ ipcMain.handle('openchamber:dialog:open', async (event, options) => {
   return result.filePaths[0] || null;
 });
 
-ipcMain.handle('openchamber:file:grant-existing', async (event, filePath) => {
+ipcMain.handle('piarium:file:grant-existing', async (event, filePath) => {
   if (!isLocalSender(event.sender)) {
     log.warn(`[ipc] rejected file:grant-existing from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
@@ -5144,7 +5140,7 @@ const focusMainWindowWithSession = async (sessionId, directory) => {
         pendingDeepLinks.push({ type: 'session', value: sessionId, directory: directory || '' });
         return;
       }
-      emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory: directory || '' });
+      emitToWindow(state.mainWindow, 'piarium:open-session', { sessionId, directory: directory || '' });
     }
     return;
   }
@@ -5161,7 +5157,7 @@ const emitTrayActionWhenReady = async (action) => {
     pendingTrayActions.push(action);
     return false;
   }
-  emitToWindow(target, 'openchamber:tray-action', action);
+  emitToWindow(target, 'piarium:tray-action', action);
   return true;
 };
 
@@ -5218,7 +5214,7 @@ const dispatchTrayAction = async (action) => {
       pendingTrayActions.push(action);
       return;
     }
-    emitToWindow(target, 'openchamber:open-draft-session', { directory: '', projectId: '' });
+    emitToWindow(target, 'piarium:open-draft-session', { directory: '', projectId: '' });
   }
   // show-main-window: revealing the window above is the whole action.
 };
@@ -5365,7 +5361,7 @@ app.whenReady().then(async () => {
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     setupTrayAndListener(bootOutcome);
     powerMonitor.on('resume', () => {
-      emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
+      emitToAllWindows('piarium:system-resume', { timestamp: Date.now() });
     });
     log.info('[electron] started in background without window');
     return;
@@ -5391,7 +5387,7 @@ app.whenReady().then(async () => {
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.
   powerMonitor.on('resume', () => {
-    emitToAllWindows('openchamber:system-resume', { timestamp: Date.now() });
+    emitToAllWindows('piarium:system-resume', { timestamp: Date.now() });
   });
 }).catch(async (error) => {
   log.error('[electron] startup failed:', error);

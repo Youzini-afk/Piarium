@@ -94,7 +94,7 @@ const toNavigationUrl = (rawUrl: string): string => {
 
 const getLocalOrigin = (): string => {
   if (typeof window === 'undefined') return '';
-  return window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+  return window.__PIARIUM_LOCAL_ORIGIN__ || window.location.origin;
 };
 
 const getLocalClientToken = async (): Promise<string> => {

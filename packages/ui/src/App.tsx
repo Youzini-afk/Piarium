@@ -167,7 +167,7 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     markStartupTrace('App:mounted');
     if (startupTraceEnabled()) {
-      console.info('[startup-trace] enabled. Run console.table(window.__OPENCHAMBER_STARTUP_TRACE__) after startup.');
+      console.info('[startup-trace] enabled. Run console.table(window.__PIARIUM_STARTUP_TRACE__) after startup.');
     }
   }, []);
 
@@ -355,7 +355,7 @@ function App({ apis }: AppProps) {
       }
 
       const data = event.data as { type?: unknown; payload?: EmbeddedVisibilityPayload };
-      if (data?.type !== 'openchamber:embedded-visibility') {
+      if (data?.type !== 'piarium:embedded-visibility') {
         return;
       }
 
@@ -363,16 +363,16 @@ function App({ apis }: AppProps) {
     };
 
     const scopedWindow = window as unknown as {
-      __openchamberSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
+      __piariumSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
     };
 
-    scopedWindow.__openchamberSetEmbeddedVisibility = applyVisibility;
+    scopedWindow.__piariumSetEmbeddedVisibility = applyVisibility;
     window.addEventListener('message', handleMessage);
 
     return () => {
       window.removeEventListener('message', handleMessage);
-      if (scopedWindow.__openchamberSetEmbeddedVisibility === applyVisibility) {
-        delete scopedWindow.__openchamberSetEmbeddedVisibility;
+      if (scopedWindow.__piariumSetEmbeddedVisibility === applyVisibility) {
+        delete scopedWindow.__piariumSetEmbeddedVisibility;
       }
     };
   }, [embeddedSessionChat]);
@@ -429,8 +429,8 @@ function App({ apis }: AppProps) {
       });
     };
 
-    window.addEventListener('openchamber:open-session', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
+    window.addEventListener('piarium:open-session', handler as EventListener);
+    return () => window.removeEventListener('piarium:open-session', handler as EventListener);
   }, [embeddedSessionChat]);
 
   // Native tray/menu "new session" requests carry optional project and cwd
@@ -453,8 +453,8 @@ function App({ apis }: AppProps) {
       });
     };
 
-    window.addEventListener('openchamber:open-draft-session', handler as EventListener);
-    return () => window.removeEventListener('openchamber:open-draft-session', handler as EventListener);
+    window.addEventListener('piarium:open-draft-session', handler as EventListener);
+    return () => window.removeEventListener('piarium:open-draft-session', handler as EventListener);
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
@@ -462,8 +462,8 @@ function App({ apis }: AppProps) {
     if (!runtimeReady || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
-    (window as unknown as { __openchamberAppReady?: boolean }).__openchamberAppReady = true;
-    window.dispatchEvent(new Event('openchamber:app-ready'));
+    (window as unknown as { __piariumAppReady?: boolean }).__piariumAppReady = true;
+    window.dispatchEvent(new Event('piarium:app-ready'));
   }, [runtimeReady, isSwitchingDirectory]);
 
   // useEventStream replaced by SyncProvider + SyncBridge
@@ -483,7 +483,7 @@ function App({ apis }: AppProps) {
   useTraySync({ enabled: !embeddedSessionChat });
 
   // Poll for the injected boot outcome until it becomes available (desktop only).
-  // The Rust backend sets window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ once the
+  // The Rust backend sets window.__PIARIUM_DESKTOP_BOOT_OUTCOME__ once the
   // sidecar reaches a stable state. We poll with exponential backoff to handle
   // potential race conditions during startup and config writes.
   React.useEffect(() => {

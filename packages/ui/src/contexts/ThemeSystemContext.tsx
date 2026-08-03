@@ -229,8 +229,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       });
     };
 
-    window.addEventListener('openchamber:theme-hmr', handleThemeHmr);
-    return () => window.removeEventListener('openchamber:theme-hmr', handleThemeHmr);
+    window.addEventListener('piarium:theme-hmr', handleThemeHmr);
+    return () => window.removeEventListener('piarium:theme-hmr', handleThemeHmr);
   }, []);
 
   const getThemeByIdFromAvailable = useCallback(
@@ -348,7 +348,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
     const hasMacVibrancy = document.documentElement.hasAttribute('data-oc-vibrancy')
-      || window.__OPENCHAMBER_ELECTRON__?.macVibrancy === true;
+      || window.__PIARIUM_ELECTRON__?.macVibrancy === true;
     const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
 
     document.body.style.backgroundColor = chromeColor;
@@ -546,18 +546,18 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     }
 
     const scopedWindow = window as unknown as {
-      __openchamberApplyThemeSync?: (payload: ThemeSyncPayload) => void;
+      __piariumApplyThemeSync?: (payload: ThemeSyncPayload) => void;
     };
 
-    scopedWindow.__openchamberApplyThemeSync = applyIncomingThemeSync;
+    scopedWindow.__piariumApplyThemeSync = applyIncomingThemeSync;
 
     if (receivesParentThemeSync && window.parent !== window) {
-      window.parent.postMessage({ type: 'openchamber:theme-sync-request' }, window.location.origin);
+      window.parent.postMessage({ type: 'piarium:theme-sync-request' }, window.location.origin);
     }
 
     return () => {
-      if (scopedWindow.__openchamberApplyThemeSync === applyIncomingThemeSync) {
-        delete scopedWindow.__openchamberApplyThemeSync;
+      if (scopedWindow.__piariumApplyThemeSync === applyIncomingThemeSync) {
+        delete scopedWindow.__piariumApplyThemeSync;
       }
     };
   }, [applyIncomingThemeSync, receivesParentThemeSync]);
@@ -577,7 +577,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         payload?: ThemeSyncPayload;
       };
 
-      if (data?.type !== 'openchamber:theme-sync' || !data.payload) {
+      if (data?.type !== 'piarium:theme-sync' || !data.payload) {
         return;
       }
 
@@ -666,8 +666,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       });
     };
 
-    window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
-    return () => window.removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    window.addEventListener('piarium:settings-synced', handleSettingsSynced);
+    return () => window.removeEventListener('piarium:settings-synced', handleSettingsSynced);
   }, [receivesParentThemeSync]);
 
   const setTheme = useCallback(

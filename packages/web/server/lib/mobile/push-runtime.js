@@ -15,7 +15,7 @@ export const createMobilePushRuntime = (deps) => {
     fetchImpl = fetch,
     deviceStore,
     expoPushEndpoint = EXPO_PUSH_ENDPOINT,
-    expoAccessToken = process.env.EXPO_ACCESS_TOKEN || process.env.OPENCHAMBER_EXPO_ACCESS_TOKEN || '',
+    expoAccessToken = process.env.EXPO_ACCESS_TOKEN || process.env.PIARIUM_EXPO_ACCESS_TOKEN || '',
   } = deps;
 
   const sendExpoMessages = async (messages) => {

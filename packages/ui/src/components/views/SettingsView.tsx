@@ -220,15 +220,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, []);
   const isMac = React.useMemo(() => {
     return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin';
+      && (window as unknown as { __PIARIUM_PLATFORM__?: string }).__PIARIUM_PLATFORM__ === 'darwin';
   }, []);
   const isWindows = React.useMemo(() => {
     return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'win32';
+      && (window as unknown as { __PIARIUM_PLATFORM__?: string }).__PIARIUM_PLATFORM__ === 'win32';
   }, []);
   const isLinux = React.useMemo(() => {
     return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'linux';
+      && (window as unknown as { __PIARIUM_PLATFORM__?: string }).__PIARIUM_PLATFORM__ === 'linux';
   }, []);
   const isWindowsArm64 = React.useMemo(() => isWindowsArm64Platform(), []);
 

@@ -9,39 +9,39 @@ OpenChamber は起動時にこれらの環境変数を読み取ります。ス�
 
 ## OpenChamber サーバー
 
-### `OPENCHAMBER_HOST`
+### `PIARIUM_HOST`
 
 OpenChamber Web サーバーのバインドアドレスです。他のマシンからアクセスできるようにするには `0.0.0.0` を使います。
 
-### `OPENCHAMBER_UI_PASSWORD`
+### `PIARIUM_UI_PASSWORD`
 
 ブラウザ UI のパスワードです。localhost 以外にバインドする場合、トンネルを使う場合、またはリバースプロキシの背後で実行する場合に使います。
 
-### `OPENCHAMBER_API_ONLY`
+### `PIARIUM_API_ONLY`
 
 `true` または `1` に設定すると、OpenChamber をヘッドレスモードで起動します。デスクトップおよびモバイルクライアント向けの API ルートは利用できますが、ブラウザ UI は配信されません。
 
-### `OPENCHAMBER_DATA_DIR`
+### `PIARIUM_DATA_DIR`
 
 OpenChamber のデータディレクトリを上書きします。デフォルトは `~/.config/openchamber` です。
 
-### `OPENCHAMBER_COMPRESS_API`
+### `PIARIUM_COMPRESS_API`
 
 API レスポンス圧縮を制御します。`true` または `1` で強制的に有効化し、`false` または `0` で強制的に無効化します。
 
-### `OPENCHAMBER_SKIP_API_COMPRESSION`
+### `PIARIUM_SKIP_API_COMPRESSION`
 
-`true` または `1` に設定すると API レスポンス圧縮を無効化します。これは `OPENCHAMBER_COMPRESS_API` より優先されます。
+`true` または `1` に設定すると API レスポンス圧縮を無効化します。これは `PIARIUM_COMPRESS_API` より優先されます。
 
-### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+### `PIARIUM_VERBOSE_REQUEST_LOGS`
 
 `true` または `1` に設定すると詳細な HTTP リクエストログを有効にします。
 
-### `OPENCHAMBER_UPDATE_API_URL`
+### `PIARIUM_UPDATE_API_URL`
 
 更新確認 API エンドポイントを上書きします。ほとんどのユーザーは未設定のままでかまいません。
 
-### `OPENCHAMBER_PACKAGE_MANAGER`
+### `PIARIUM_PACKAGE_MANAGER`
 
 自動検出が間違っている場合に、更新操作で使うパッケージマネージャーを強制します。
 
@@ -59,7 +59,7 @@ OpenCode サーバーのポートを設定します。管理対象 OpenCode で�
 
 `true` に設定すると、OpenChamber が独自の OpenCode サーバーを起動しません。
 
-### `OPENCHAMBER_OPENCODE_HOSTNAME`
+### `PIARIUM_OPENCODE_HOSTNAME`
 
 OpenChamber が管理する OpenCode サーバーのバインドホスト名です。デフォルトは `127.0.0.1` です。
 
@@ -83,7 +83,7 @@ OpenChamber が実行する `opencode` 実行ファイルへのパスです。
 
 Windows 上の OpenCode 連携に使う WSL ディストリビューションを選びます。
 
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
+### `PIARIUM_OPENCODE_WSL_DISTRO`
 
 WSL ディストリビューション選択用の OpenChamber 固有エイリアスです。両方が設定されている場合は `OPENCODE_WSL_DISTRO` が優先されます。
 
@@ -93,19 +93,19 @@ UI 認証トークンの署名に使うシークレットです。永続的な�
 
 ## ターミナルと Git
 
-### `OPENCHAMBER_TERMINAL_SHELL`
+### `PIARIUM_TERMINAL_SHELL`
 
 OpenChamber のターミナルセッションで使うシェル実行ファイルです。
 
-### `OPENCHAMBER_GIT_BINARY`
+### `PIARIUM_GIT_BINARY`
 
 OpenChamber の Git 機能で使う Git 実行ファイルです。
 
 ### `GIT_BINARY`
 
-代替の Git 実行ファイル上書きです。OpenChamber 固有の設定には `OPENCHAMBER_GIT_BINARY` を推奨します。
+代替の Git 実行ファイル上書きです。OpenChamber 固有の設定には `PIARIUM_GIT_BINARY` を推奨します。
 
-### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+### `PIARIUM_GIT_READ_CACHE_TTL_MS`
 
 Git に基づくファイル読み取りキャッシュの有効期間（ミリ秒）です。デバッグ中にこのキャッシュを無効化するには `0` を設定します。
 
@@ -115,7 +115,7 @@ Git に基づくファイル読み取りキャッシュの有効期間（ミリ�
 
 OpenAI 互換サービスを呼び出す OpenChamber の音声機能で使う API キーです。
 
-### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
 `true` または `1` に設定すると、音声機能でリモートの OpenAI 互換 base URL を許可します。
 

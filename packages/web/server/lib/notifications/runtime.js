@@ -494,7 +494,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       });
       if (!response.ok) return false;
       const session = await response.json().catch(() => null);
-      const goal = session?.metadata?.openchamber?.goal;
+      const goal = session?.metadata?.piarium?.goal;
       return Boolean(goal && typeof goal === 'object' && goal.status === 'active');
     } catch {
       return false;

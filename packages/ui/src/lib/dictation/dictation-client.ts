@@ -448,7 +448,7 @@ export class DictationClient {
 export const dictationClient = new DictationClient();
 
 if (typeof window !== 'undefined') {
-    window.addEventListener('openchamber:runtime-endpoint-changed', () => {
+    window.addEventListener('piarium:runtime-endpoint-changed', () => {
         // Drop the socket so the next dictation reconnects to the new runtime.
         dictationClient.cancelAllForRuntimeSwitch();
     });

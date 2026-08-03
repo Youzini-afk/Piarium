@@ -12,7 +12,7 @@ describe('GitHub terminal auth routes', () => {
     const installTerminalGitHubAuth = vi.fn(() => ({
       success: true,
       ghConfigPath: '/home/openchamber/.config/gh/hosts.yml',
-      helperPath: '/home/openchamber/.config/openchamber/bin/git-credential-openchamber-github.cjs',
+      helperPath: '/home/openchamber/.config/piarium/bin/git-credential-piarium-github.cjs',
       gitCredentialHelperConfigured: true,
       gitCredentialHelperError: '',
       gitCredentialHelper: '!"/helper"',
@@ -21,7 +21,7 @@ describe('GitHub terminal auth routes', () => {
     registerGitHubRoutes(app, {
       getGitHubLibraries: async () => ({
         getGitHubAuth: () => auth,
-        GITHUB_AUTH_FILE: '/home/openchamber/.config/openchamber/github-auth.json',
+        GITHUB_AUTH_FILE: '/home/openchamber/.config/piarium/github-auth.json',
       }),
       installTerminalGitHubAuth,
     });
@@ -33,13 +33,13 @@ describe('GitHub terminal auth routes', () => {
 
     expect(installTerminalGitHubAuth).toHaveBeenCalledWith({
       auth,
-      authFilePath: '/home/openchamber/.config/openchamber/github-auth.json',
+      authFilePath: '/home/openchamber/.config/piarium/github-auth.json',
       configureGit: false,
     });
     expect(response.body).toEqual({
       success: true,
       ghConfigPath: '/home/openchamber/.config/gh/hosts.yml',
-      helperPath: '/home/openchamber/.config/openchamber/bin/git-credential-openchamber-github.cjs',
+      helperPath: '/home/openchamber/.config/piarium/bin/git-credential-piarium-github.cjs',
       gitCredentialHelperConfigured: true,
       gitCredentialHelperError: '',
     });

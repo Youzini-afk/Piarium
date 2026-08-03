@@ -99,9 +99,9 @@ RUN set -eux; \
 RUN (id -u bun >/dev/null 2>&1 && userdel bun || true) \
   && groupadd -g 1000 openchamber \
   && useradd -u 1000 -g 1000 -m -s /bin/bash openchamber \
-  && echo 'openchamber:100000:65536' >> /etc/subuid \
-  && echo 'openchamber:100000:65536' >> /etc/subgid \
-  && chown -R openchamber:openchamber /home/openchamber
+  && echo 'piarium:100000:65536' >> /etc/subuid \
+  && echo 'piarium:100000:65536' >> /etc/subgid \
+  && chown -R piarium:openchamber /home/openchamber
 
 USER openchamber
 
@@ -109,9 +109,9 @@ ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
 ENV GOPATH=/home/openchamber/go
 ENV CARGO_HOME=/home/openchamber/.cargo
 ENV RUSTUP_HOME=/home/openchamber/.rustup
-ENV OPENCHAMBER_VALIDATION_NODE_MODULES=/home/openchamber/.openchamber-validation/node_modules
-ENV NODE_PATH=${OPENCHAMBER_VALIDATION_NODE_MODULES}
-ENV PATH=/home/openchamber/node_modules/.bin:${OPENCHAMBER_VALIDATION_NODE_MODULES}/.bin:${NPM_CONFIG_PREFIX}/bin:${GOPATH}/bin:${CARGO_HOME}/bin:${PATH}
+ENV PIARIUM_VALIDATION_NODE_MODULES=/home/openchamber/.openchamber-validation/node_modules
+ENV NODE_PATH=${PIARIUM_VALIDATION_NODE_MODULES}
+ENV PATH=/home/openchamber/node_modules/.bin:${PIARIUM_VALIDATION_NODE_MODULES}/.bin:${NPM_CONFIG_PREFIX}/bin:${GOPATH}/bin:${CARGO_HOME}/bin:${PATH}
 
 RUN mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh /home/openchamber/go /home/openchamber/.cargo /home/openchamber/.rustup /home/openchamber/.openchamber-validation && \
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
