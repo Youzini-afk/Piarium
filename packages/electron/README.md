@@ -66,7 +66,8 @@ That runs, in order:
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
 2. `prepare:pi-runtime` to compile the Pi host and runtime broker.
 3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
-4. `rebuild:native` to rebuild native modules for Electron.
+4. `rebuild:native` to rebuild `better-sqlite3` for Electron and verify the published Windows
+   `node-pty` prebuild by loading it and starting a PTY under Electron's Node ABI.
 5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the rebuilt `better-sqlite3` binary that Electron Builder's Bun dependency collector otherwise omits.
 
 Build output goes to `packages/electron/dist`.
@@ -81,11 +82,18 @@ bun run electron:build:win
 
 This is equivalent to running `bun run --cwd packages/electron package:win:x64` and produces `packages/electron/dist/*.exe`, `*.blockmap`, and `latest.yml`.
 
+After packaging, verify the unpacked application, bundled Pi worker, health endpoint, and a real
+`node-pty` terminal create/close cycle without installing it:
+
+```bash
+bun run electron:smoke:win
+```
+
 ## Platform Notes
 
 macOS packaging needs Xcode/build tools for notarized builds and icon asset compilation.
 
-Windows packaging uses `electron-builder` with the NSIS target. For reliable native module rebuilds and NSIS installer creation, run Windows builds on a Windows runner or host. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
+Windows packaging uses `electron-builder` with the NSIS target. For reliable native module rebuilds and NSIS installer creation, run Windows builds on a Windows runner or host. The default x64 path uses `node-pty`'s published N-API prebuild and therefore does not require Visual Studio's optional Spectre libraries; set `PIARIUM_REBUILD_NODE_PTY_FROM_SOURCE=1` only when intentionally testing its C++ source build. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
 
 ### Code Signing
 
@@ -124,7 +132,9 @@ The macOS menu bar item is enabled by default and can be disabled in General set
 
 Packaged Desktop builds include the compiled Pi host and broker. Electron starts the host with its
 own executable in Node mode, so Piarium does not download or bundle an OpenCode CLI and does not
-require a separate Node installation at runtime.
+require a separate Node installation at runtime. Production `node_modules` are unpacked as one
+coherent dependency tree because the ordinary Node worker cannot resolve modules from Electron's
+`app.asar`; keeping only a hand-maintained package subset would break whenever Pi adds a dependency.
 
 ## Common Env Vars
 
@@ -137,6 +147,7 @@ require a separate Node installation at runtime.
 | `PIARIUM_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
 | `PIARIUM_RUNTIME=desktop` | Set by Electron before starting the web server |
 | `PIARIUM_TARGET_ARCH` | Explicit desktop package architecture (`x64` or `arm64`); Linux requires it to match the native host |
+| `PIARIUM_REBUILD_NODE_PTY_FROM_SOURCE=1` | Opts Windows packaging into the `node-pty` C++ source build instead of its verified published prebuild |
 | `PIARIUM_DESKTOP_NOTIFY=true` | Enables desktop notification flow in the web server |
 | `PIARIUM_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
 | `PIARIUM_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
@@ -176,7 +187,7 @@ Development builds use a separate user data directory named `Piarium Dev`, so de
 - Keep desktop-specific code in this package. Pi runtime behavior belongs in the host/broker packages.
 - Use hidden Windows process launches for background helpers. Avoid visible console flashes.
 - Keep `@piarium/web`, `bun-pty`, `node-pty`, and native modules external in `bundle-main.mjs`; bundling them can break Electron startup.
-- Rebuild native modules after dependency or Electron version changes.
+- Rebuild `better-sqlite3` and re-run the Electron-backed `node-pty` prebuild check after dependency or Electron version changes.
 - Test both HMR dev mode and bundled UI mode when changing startup, preload, routing, or packaged asset behavior.
 
 ## Quick Checks

@@ -277,6 +277,11 @@ an integration smoke test without exposing credentials.
 - Implemented: Electron's Node mode directly hosts the compiled Pi worker/broker; no separate Node
   download is required. Windows product/installer identity and GitHub updater metadata now target
   `Youzini-afk/Piarium`.
+- Implemented: the Windows x64 pipeline produces the unsigned NSIS installer, blockmap, and
+  `latest.yml`. Packaging rebuilds `better-sqlite3`, verifies the published `node-pty` N-API
+  prebuild by starting a PTY under Electron 41, and unpacks one coherent production dependency tree
+  for the ordinary Node Pi worker. A clean-profile unpacked-app smoke reaches Pi host protocol v1,
+  Pi 0.83.0, the local health endpoint, and a create/close terminal session.
 - Git/Git Bash/npm/Pi discovery and guided repair.
 - NSIS installer, upgrade/uninstall behavior, logs, crash recovery, and update metadata.
 - Packaged-app smoke tests and artifact checks.

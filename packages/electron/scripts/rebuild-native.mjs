@@ -131,6 +131,42 @@ const ensureWindowsNodeAddonApiForNodePty = async (rebuildRootPath) => {
   };
 };
 
+const verifyWindowsNodePtyPrebuild = () => {
+  if (process.platform !== 'win32') return;
+
+  const nodePtyDir = path.dirname(require.resolve('node-pty/package.json'));
+  const prebuildDir = path.join(nodePtyDir, 'prebuilds', `win32-${targetArchitecture.electronBuilder}`);
+  for (const file of ['conpty.node', 'conpty_console_list.node']) {
+    const candidate = path.join(prebuildDir, file);
+    if (!existsSync(candidate)) {
+      throw new Error(`node-pty Windows prebuild is missing ${candidate}`);
+    }
+  }
+
+  const electronExecutable = require('electron');
+  const verificationScript = `
+const pty = require('node-pty');
+const child = pty.spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'exit 0'], {
+  cols: 80,
+  rows: 24,
+  cwd: process.cwd(),
+  env: process.env,
+});
+const timer = setTimeout(() => process.exit(9), 10_000);
+child.onExit(({ exitCode }) => {
+  clearTimeout(timer);
+  process.exit(exitCode);
+});
+`;
+  execFileSync(electronExecutable, ['-e', verificationScript], {
+    cwd: repoRoot,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'inherit',
+    timeout: 15_000,
+  });
+  console.log(`[electron] verified node-pty win32-${targetArchitecture.electronBuilder} prebuild against Electron ${electronVersion}`);
+};
+
 console.log(`[electron] rebuilding native modules against Electron ${electronVersion}...`);
 
 await rebuild({
@@ -146,25 +182,32 @@ if (!existsSync(betterSqliteBinary)) {
   throw new Error(`better-sqlite3 rebuild did not produce ${betterSqliteBinary}`);
 }
 
-// Rebuild against the hoisted root node_modules (bun workspace layout).
-// force=true re-links regardless of cached state; prebuild-install lookup is
-// bypassed by @electron/rebuild in favor of direct node-gyp builds.
-const rebuildPath = createWindowsRebuildPath(repoRoot);
-let cleanupNodeAddonApi = async () => {};
-try {
-  cleanupNodeAddonApi = await ensureWindowsNodeAddonApiForNodePty(rebuildPath.buildPath);
-  await rebuild({
-    buildPath: rebuildPath.buildPath,
-    electronVersion,
-    force: true,
-    arch: targetArchitecture.electronBuilder,
-    onlyModules: ['node-pty', 'bun-pty'],
-  });
-} finally {
+// node-pty publishes N-API Windows binaries and validates them in its own
+// install script. Loading and spawning through Electron is a stronger check
+// than rebuilding those same sources on every packager machine, which would
+// additionally require Visual Studio's optional Spectre libraries. Keep a
+// source-build escape hatch for node-pty contributors and non-Windows targets.
+const rebuildWindowsNodePtyFromSource = process.env.PIARIUM_REBUILD_NODE_PTY_FROM_SOURCE === '1';
+if (process.platform === 'win32' && !rebuildWindowsNodePtyFromSource) {
+  verifyWindowsNodePtyPrebuild();
+} else {
+  const rebuildPath = createWindowsRebuildPath(repoRoot);
+  let cleanupNodeAddonApi = async () => {};
   try {
-    await cleanupNodeAddonApi();
+    cleanupNodeAddonApi = await ensureWindowsNodeAddonApiForNodePty(rebuildPath.buildPath);
+    await rebuild({
+      buildPath: rebuildPath.buildPath,
+      electronVersion,
+      force: true,
+      arch: targetArchitecture.electronBuilder,
+      onlyModules: ['node-pty'],
+    });
   } finally {
-    rebuildPath.cleanup();
+    try {
+      await cleanupNodeAddonApi();
+    } finally {
+      rebuildPath.cleanup();
+    }
   }
 }
 

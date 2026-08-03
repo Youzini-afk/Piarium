@@ -56,6 +56,7 @@
     "electron:dev:bundled": "PIARIUM_ELECTRON_USE_BUNDLED_UI=1 node ./packages/electron/scripts/electron-dev.mjs",
     "electron:build": "bun run --cwd packages/electron package",
     "electron:build:win": "bun run --cwd packages/electron package:win:x64",
+    "electron:smoke:win": "bun run --cwd packages/electron smoke:win:unpacked",
     "mobile:build": "bun run --cwd packages/mobile build",
     "mobile:sync": "bun run --cwd packages/mobile sync",
     "mobile:add:ios": "bun run --cwd packages/mobile add:ios",
