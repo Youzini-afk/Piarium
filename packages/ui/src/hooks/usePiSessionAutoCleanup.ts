@@ -17,7 +17,7 @@ export interface BuildPiCleanupCandidatesOptions {
   cutoffDays: number;
   keepRecent?: number;
   now?: number;
-  sessions: SessionSummary[];
+  sessions: readonly SessionSummary[];
 }
 
 export const buildPiCleanupCandidates = ({

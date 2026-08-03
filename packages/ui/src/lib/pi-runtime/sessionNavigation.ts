@@ -60,7 +60,7 @@ export const resolvePiSessionCreationCwd = (
 };
 
 export const resolveRelativePiSession = (
-  sessions: SessionSummary[],
+  sessions: readonly SessionSummary[],
   currentSessionId: string | null,
   offset: number,
 ): SessionSummary | null => {

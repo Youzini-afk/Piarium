@@ -167,12 +167,37 @@ const sortSummaries = (summaries: SessionSummary[]): SessionSummary[] => (
   [...summaries].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 );
 
-export const selectActivePiSessions = (state: PiSessionStoreState): SessionSummary[] => (
-  state.summaries.filter((summary) => summary.archivedAt === undefined)
+type PiSessionCatalogPartitions = {
+  active: readonly SessionSummary[];
+  archived: readonly SessionSummary[];
+};
+
+// Zustand 5 requires selector outputs to keep the same identity while their
+// source snapshot is unchanged. The readonly contract protects that cache.
+const catalogPartitionsBySummaries = new WeakMap<SessionSummary[], PiSessionCatalogPartitions>();
+
+const partitionPiSessionCatalog = (summaries: SessionSummary[]): PiSessionCatalogPartitions => {
+  const cached = catalogPartitionsBySummaries.get(summaries);
+  if (cached) return cached;
+
+  const partitions = {
+    active: [] as SessionSummary[],
+    archived: [] as SessionSummary[],
+  };
+  for (const summary of summaries) {
+    if (summary.archivedAt === undefined) partitions.active.push(summary);
+    else partitions.archived.push(summary);
+  }
+  catalogPartitionsBySummaries.set(summaries, partitions);
+  return partitions;
+};
+
+export const selectActivePiSessions = (state: PiSessionStoreState): readonly SessionSummary[] => (
+  partitionPiSessionCatalog(state.summaries).active
 );
 
-export const selectArchivedPiSessions = (state: PiSessionStoreState): SessionSummary[] => (
-  state.summaries.filter((summary) => summary.archivedAt !== undefined)
+export const selectArchivedPiSessions = (state: PiSessionStoreState): readonly SessionSummary[] => (
+  partitionPiSessionCatalog(state.summaries).archived
 );
 
 export const selectCurrentPiSession = (

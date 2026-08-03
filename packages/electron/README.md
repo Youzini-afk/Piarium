@@ -82,12 +82,17 @@ bun run electron:build:win
 
 This is equivalent to running `bun run --cwd packages/electron package:win:x64` and produces `packages/electron/dist/*.exe`, `*.blockmap`, and `latest.yml`.
 
-After packaging, verify the unpacked application, bundled Pi worker, health endpoint, and a real
-`node-pty` terminal create/close cycle without installing it:
+After packaging, verify the unpacked application, bundled Pi worker, health endpoint, renderer
+app-ready signal/error boundary, and a real `node-pty` terminal create/close cycle without
+installing it:
 
 ```bash
 bun run electron:smoke:win
 ```
+
+Set `PIARIUM_SMOKE_PROFILE_SOURCE` to a packaged Piarium user-data directory to seed the isolated
+smoke profile with Piarium settings plus Chromium Local/Session Storage. The source profile is never
+launched or modified.
 
 ## Platform Notes
 

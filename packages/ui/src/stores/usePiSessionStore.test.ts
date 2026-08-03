@@ -284,6 +284,34 @@ describe('Pi session store', () => {
     ]);
   });
 
+  test('keeps derived catalog selector references stable until summaries change', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') {
+        return [
+          summary('active', '2026-08-02T00:00:00.000Z'),
+          summary('archived', '2026-08-01T00:00:00.000Z', '2026-08-03T00:00:00.000Z'),
+        ];
+      }
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+
+    const active = selectActivePiSessions(store.getState());
+    const archived = selectArchivedPiSessions(store.getState());
+    expect(selectActivePiSessions(store.getState())).toBe(active);
+    expect(selectArchivedPiSessions(store.getState())).toBe(archived);
+
+    store.setState({ catalogLoading: true });
+    expect(selectActivePiSessions(store.getState())).toBe(active);
+    expect(selectArchivedPiSessions(store.getState())).toBe(archived);
+
+    store.setState({ summaries: [...store.getState().summaries] });
+    expect(selectActivePiSessions(store.getState())).not.toBe(active);
+    expect(selectArchivedPiSessions(store.getState())).not.toBe(archived);
+  });
+
   test('opens a Pi session, reads the complete branch, and consumes routed events', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method, params) => {

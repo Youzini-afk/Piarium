@@ -86,7 +86,7 @@ const createsParentCycle = (
 };
 
 export const buildPiSessionForest = (
-  input: SessionSummary[],
+  input: readonly SessionSummary[],
   isPinned: PiSessionPinnedPredicate = () => false,
 ): PiSessionNode[] => {
   const sessions = new Map<string, SessionSummary>();

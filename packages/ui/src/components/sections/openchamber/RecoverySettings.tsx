@@ -2,6 +2,7 @@ import React from 'react';
 import type {
   PackageDescriptor,
   RecoveryPreference,
+  RecoveryProviderDescriptor,
   RuntimeContextTarget,
 } from '@piarium/protocol';
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,8 @@ const RECOVERY_INTEGRATIONS: RecoveryIntegration[] = [
   },
 ];
 
+const EMPTY_RECOVERY_PROVIDERS: RecoveryProviderDescriptor[] = [];
+
 export const RecoverySettings: React.FC = () => {
   const { t } = useI18n();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -85,8 +88,8 @@ export const RecoverySettings: React.FC = () => {
     currentSessionId ? { sessionId: currentSessionId } : { cwd: currentDirectory }
   ), [currentDirectory, currentSessionId]);
   const discoveredProviders = usePiSessionStore((state) => {
-    if (state.currentSessionId === null) return [];
-    return state.records[state.currentSessionId]?.recoveryStatus?.providers ?? [];
+    if (state.currentSessionId === null) return EMPTY_RECOVERY_PROVIDERS;
+    return state.records[state.currentSessionId]?.recoveryStatus?.providers ?? EMPTY_RECOVERY_PROVIDERS;
   });
   const refreshGenerationRef = React.useRef(0);
 

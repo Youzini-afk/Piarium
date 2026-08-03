@@ -19,10 +19,155 @@ if (!existsSync(appPath)) {
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const DEVTOOLS_REQUEST_TIMEOUT_MS = 5_000;
+
+const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) => {
+  const socket = new WebSocket(webSocketDebuggerUrl);
+  const pending = new Map();
+  let nextId = 1;
+  const connectionTimer = setTimeout(() => {
+    socket.close();
+    reject(new Error('Timed out connecting to the packaged renderer.'));
+  }, DEVTOOLS_REQUEST_TIMEOUT_MS);
+  const rejectConnection = () => {
+    clearTimeout(connectionTimer);
+    reject(new Error('Unable to connect to the packaged renderer.'));
+  };
+
+  socket.addEventListener('error', rejectConnection, { once: true });
+  socket.addEventListener('open', () => {
+    clearTimeout(connectionTimer);
+    socket.removeEventListener('error', rejectConnection);
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data));
+      if (typeof message.id !== 'number') return;
+      const request = pending.get(message.id);
+      if (!request) return;
+      pending.delete(message.id);
+      if (message.error) request.reject(new Error(message.error.message ?? JSON.stringify(message.error)));
+      else request.resolve(message.result);
+    });
+    socket.addEventListener('close', () => {
+      for (const request of pending.values()) request.reject(new Error('Packaged renderer disconnected.'));
+      pending.clear();
+    });
+
+    resolve({
+      close: () => socket.close(),
+      evaluate: (expression) => new Promise((evaluateResolve, evaluateReject) => {
+        const id = nextId;
+        nextId += 1;
+        const requestTimer = setTimeout(() => {
+          pending.delete(id);
+          evaluateReject(new Error('Timed out evaluating the packaged renderer.'));
+        }, DEVTOOLS_REQUEST_TIMEOUT_MS);
+        pending.set(id, {
+          reject: (error) => {
+            clearTimeout(requestTimer);
+            evaluateReject(error);
+          },
+          resolve: (value) => {
+            clearTimeout(requestTimer);
+            evaluateResolve(value);
+          },
+        });
+        try {
+          socket.send(JSON.stringify({
+            id,
+            method: 'Runtime.evaluate',
+            params: { awaitPromise: true, expression, returnByValue: true },
+          }));
+        } catch (error) {
+          pending.delete(id);
+          clearTimeout(requestTimer);
+          evaluateReject(error);
+        }
+      }),
+    });
+  }, { once: true });
+});
+
+const waitForRenderer = async (userDataDir) => {
+  const activePortPath = path.join(userDataDir, 'DevToolsActivePort');
+  let debugPort;
+  for (let attempt = 0; attempt < 80 && debugPort === undefined; attempt += 1) {
+    await delay(250);
+    const activePort = await fsp.readFile(activePortPath, 'utf8').catch(() => '');
+    const candidate = Number(activePort.split(/\r?\n/, 1)[0]);
+    if (Number.isInteger(candidate) && candidate > 0 && candidate <= 65_535) debugPort = candidate;
+  }
+  if (debugPort === undefined) throw new Error('Packaged renderer did not publish its DevTools port.');
+
+  let target;
+  for (let attempt = 0; attempt < 80 && target === undefined; attempt += 1) {
+    await delay(250);
+    const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`, {
+      signal: AbortSignal.timeout(2_000),
+    }).then((response) => response.json()).catch(() => []);
+    target = targets.find((candidate) => (
+      candidate?.type === 'page'
+      && typeof candidate.url === 'string'
+      && candidate.url.startsWith('piarium-ui://app')
+      && typeof candidate.webSocketDebuggerUrl === 'string'
+    ));
+  }
+  if (!target) throw new Error('Packaged renderer did not expose a DevTools target.');
+
+  const devTools = await connectDevTools(target.webSocketDebuggerUrl);
+  try {
+    let lastState;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const evaluation = await devTools.evaluate(`(() => ({
+        bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
+        href: window.location.href,
+        ready: window.__piariumAppReady === true,
+      }))()`);
+      if (evaluation?.exceptionDetails) {
+        throw new Error(`Packaged renderer evaluation failed: ${evaluation.exceptionDetails.text}`);
+      }
+      lastState = evaluation?.result?.value;
+      if (lastState?.ready === true) return lastState;
+      if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
+        throw new Error(`Packaged renderer entered its error boundary.\n${lastState.bodyText}`);
+      }
+      await delay(250);
+    }
+    throw new Error(`Packaged renderer did not become app-ready.\n${JSON.stringify(lastState, null, 2)}`);
+  } finally {
+    devTools.close();
+  }
+};
+
+const profileSource = process.env.PIARIUM_SMOKE_PROFILE_SOURCE?.trim();
+const profileSourcePath = profileSource ? path.resolve(profileSource) : null;
+if (profileSourcePath && !existsSync(profileSourcePath)) {
+  throw new Error(`Missing smoke profile source at ${profileSourcePath}`);
+}
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-win-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
+try {
+  if (profileSourcePath) {
+    await fsp.mkdir(userDataDir, { recursive: true });
+    for (const entry of ['Local State', 'Local Storage', 'Preferences', 'Session Storage', 'settings.json']) {
+      const source = path.join(profileSourcePath, entry);
+      if (!existsSync(source)) continue;
+      const destination = path.join(userDataDir, entry);
+      const stat = await fsp.stat(source);
+      if (stat.isDirectory()) await fsp.cp(source, destination, { recursive: true });
+      else await fsp.copyFile(source, destination);
+    }
+  }
+} catch (error) {
+  await fsp.rm(smokeRoot, { recursive: true, force: true });
+  throw error;
+}
 const logPath = path.join(userDataDir, 'logs', 'main.log');
-const child = spawn(appPath, [`--user-data-dir=${userDataDir}`], {
+const child = spawn(appPath, [
+  `--user-data-dir=${userDataDir}`,
+  '--remote-debugging-port=0',
+  '--remote-debugging-address=127.0.0.1',
+  '--remote-allow-origins=*',
+], {
   cwd: electronDir,
   stdio: 'ignore',
   windowsHide: true,
@@ -76,6 +221,7 @@ try {
   const closed = await closeResponse.json();
   if (closed?.success !== true) throw new Error(`Packaged terminal close returned ${JSON.stringify(closed)}`);
 
+  const renderer = await waitForRenderer(userDataDir);
   const log = await readLog();
   if (!log.includes('[pi-runtime] ready')) throw new Error(`Pi runtime readiness was not logged.\n${log}`);
   const piVersion = log.match(/piVersion: '([^']+)'/)?.[1] ?? 'unknown';
@@ -83,6 +229,8 @@ try {
     appPath,
     health: 'ok',
     piVersion,
+    profile: profileSource ? 'seeded' : 'clean',
+    renderer: renderer.ready === true ? 'app-ready' : 'not-ready',
     terminal: 'create-close-ok',
   }, null, 2));
 } finally {
