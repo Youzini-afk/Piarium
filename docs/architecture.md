@@ -230,7 +230,8 @@ work without a Piarium-specific adapter.
 
 The page boundaries, native authorities, risk treatment, and adapter acceptance criteria are
 defined in [plugin-gui-design.md](plugin-gui-design.md). The imported Magic Context, OpenAgent, and
-Agent Orchestration screens are reference material only and do not define the new interaction model.
+Agent Orchestration screens have been retired; their capability disposition remains documented
+there rather than leaving an OpenCode compatibility surface in production code.
 
 ## 8. Recovery model
 

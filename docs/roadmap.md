@@ -173,6 +173,11 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   configured sources from missing local installations, expose resolved/structured-entry state, explain Pi's
   cross-scope update semantics, and route configuration to the matching specialized or Advanced
   plugin surface.
+- Implemented: retire the unreachable OpenCode-era Magic Context, OpenAgent, and Agent
+  Orchestration pages after recording their capability disposition. Their private `/api/*`
+  stores, stale schema normalizers, layout assertions, and dedicated translations are removed;
+  Pi-native provider catalogs, plugin adapters, resource pages, and still-live chat dependencies
+  remain intact.
 - Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
   reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
   config sources. Desktop header and mobile controls now consume that same snapshot/command path;

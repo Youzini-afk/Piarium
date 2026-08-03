@@ -23,13 +23,4 @@ describe('model selector compact layout', () => {
     expect(source).toContain('opacity-0');
   });
 
-  test('settings compact model editors wrap instead of overlapping the manual input', () => {
-    const openAgentSource = readFileSync(resolve(testDir, '../openagent/OpenAgentPage.tsx'), 'utf8');
-    const magicContextSource = readFileSync(resolve(testDir, '../magic-context/MagicContextPage.tsx'), 'utf8');
-
-    expect(openAgentSource).toContain('flex-wrap');
-    expect(magicContextSource).toContain('flex-wrap');
-    expect(openAgentSource).toContain('min-w-[120px] max-w-[210px] flex-1');
-    expect(magicContextSource).toContain('min-w-[120px] max-w-[260px] flex-1');
-  });
 });

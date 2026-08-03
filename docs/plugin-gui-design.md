@@ -8,7 +8,7 @@ Last updated: 2026-08-03
 
 Piarium gives frequently used Pi packages a first-class graphical experience without becoming a
 second package runtime or configuration authority. This document fixes the page boundaries,
-provider ownership, and acceptance criteria before the imported OpenChamber pages are retired.
+provider ownership, and acceptance criteria used to retire the imported OpenChamber pages.
 
 The old Magic Context, OpenAgent, and Agent Orchestration pages are historical capability clues.
 They are not interaction or data-model templates: they predate the current packages, omit current
@@ -71,6 +71,26 @@ The current catalog surfaces follow those boundaries directly:
 - Agents displays provider/source/package/invocation facts and calls only provider-advertised
   actions. A missing model is labelled as a provider default or unreported value, never guessed to
   be an inherited common setting.
+
+### 3.1 Retired-page capability disposition
+
+The removed screens are represented here by capability, rather than kept as dormant source code
+that can accidentally become a second configuration system.
+
+| Retired surface | Useful capability clue | Piarium disposition |
+| --- | --- | --- |
+| Magic Context | Compression thresholds, memory/search, embeddings, SQLite, internal agents, fallbacks, and Dreamer schedules | Implemented in the current schema-driven Magic Context adapter with separate user/project documents and Advanced JSONC. |
+| Magic Context | Runtime status, diagnostics, memory inspection, recompression, wrap-up, dream, and embedding actions | Deferred until the package exposes a stable public status/action contract; Piarium will not inspect its private database or infer success from files. |
+| Magic Context | OpenCode plugin registration, OpenCode TUI sidebar, and Oh My OpenAgent hook-conflict diagnostics | Rejected as OpenCode-only behavior. Pi package health is derived from Pi package/runtime contracts instead. |
+| OpenAgent | Agent/category model routing, fallback chains, hook toggles, team/background task, Tmux, skills, MCP, and experimental settings | Rejected as a generic Piarium schema because these were fields of the unrelated Oh My OpenAgent OpenCode plugin. A future Pi package receives its own adapter only from its current native schema. |
+| OpenAgent | Discovering agents, showing defaults/source, and invoking lifecycle actions | Implemented by the provider-owned Agents catalog. Provider configuration remains higher priority than generic catalog presentation. |
+| Agent Orchestration | Switching among native OpenCode, oh-my-opencode-slim, and oh-my-openagent modes | Rejected. Piarium has one Pi runtime and does not retain an OpenCode orchestration-mode compatibility layer. |
+| Agent Orchestration | Provider discovery, presets, model policy, fallback, runtime limits, and feature controls | Discovery/actions live in Agents; settings belong to the contributing Pi package adapter or its native JSON/JSONC document. No shared form fabricates unsupported fields. |
+
+The cleanup removes only the unreachable OpenCode pages, their private HTTP stores, their schema
+normalizers, and tests/translations that existed solely for those pages. It deliberately retains
+the Pi-native Agents provider registry, Plugin Settings adapters, Prompts and Skills resource
+pages, generic extension UI bridge, and any chat store that still has a live consumer.
 
 ## 4. Shared adapter shell
 
@@ -264,7 +284,8 @@ Acceptance:
 5. Web Access advanced routing/security and public runtime status when available.
 6. MCP provenance improvements without replacing its native panel.
 7. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
-   capability parity is documented and tested.
+   capability parity or an explicit rejection is documented and tested. This retirement is now
+   complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
 
 Each step is independently type-checked, linted, tested, committed, and pushed. File deletion occurs
 only after its capability has a Pi-native home or is explicitly rejected as obsolete.
