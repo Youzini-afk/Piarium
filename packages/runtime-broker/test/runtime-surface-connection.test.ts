@@ -18,6 +18,7 @@ const handshakeResult = {
   capabilities: {
     agentProviders: true,
     extensionUi: true,
+    fleet: true,
     models: true,
     packages: true,
     recovery: true,

@@ -8,6 +8,7 @@ import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { FleetPage } from '@/components/sections/fleet';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { PromptsSidebar } from '@/components/sections/prompts/PromptsSidebar';
 import { PromptsPage } from '@/components/sections/prompts/PromptsPage';
@@ -87,6 +88,7 @@ const pageOrder: SettingsPageSlug[] = [
   // Pi runtime
   'providers',
   'agents',
+  'fleet',
   'commands',
   'prompts',
   'skills',
@@ -155,6 +157,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'cloud';
     case 'agents':
       return 'robot-2';
+    case 'fleet':
+      return 'pulse';
     case 'commands':
       return 'command';
     case 'prompts':
@@ -313,6 +317,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.providers.title');
       case 'agents':
         return t('settings.page.agents.title');
+      case 'fleet':
+        return t('settings.page.fleet.title');
       case 'commands':
         return t('settings.page.commands.title');
       case 'prompts':
@@ -550,6 +556,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProvidersPage />;
       case 'agents':
         return <AgentsPage />;
+      case 'fleet':
+        return <FleetPage />;
       case 'commands':
         return <CommandsPage />;
       case 'prompts':

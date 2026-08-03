@@ -480,10 +480,16 @@ export const AgentsPage: React.FC = () => {
         title={t('settings.page.agents.title')}
         description={t('settings.piarium.agents.description')}
         headerEnd={(
-          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-            <Icon name="refresh" className={cn('size-4', loading && 'animate-spin')} />
-            {t('settings.piarium.agents.actions.refresh')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSettingsPage('fleet')}>
+              <Icon name="pulse" className="size-4" />
+              {t('settings.page.fleet.title')}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+              <Icon name="refresh" className={cn('size-4', loading && 'animate-spin')} />
+              {t('settings.piarium.agents.actions.refresh')}
+            </Button>
+          </div>
         )}
       >
       <SettingsSection

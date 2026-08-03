@@ -649,6 +649,11 @@ async function dispatchRuntimeRequestUnchecked(
       return { accepted };
     }
 
+    case "fleet.status": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "fleet.status", { sessionId });
+    }
+
     case "recovery.status": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, method, { sessionId });

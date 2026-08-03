@@ -14,6 +14,7 @@ describe('settings metadata', () => {
 
     expect(slugs).toContain('providers');
     expect(slugs).toContain('agents');
+    expect(slugs).toContain('fleet');
     expect(slugs).toContain('commands');
     expect(slugs).toContain('prompts');
     expect(slugs).toContain('skills');
@@ -22,6 +23,7 @@ describe('settings metadata', () => {
     expect(slugs).toContain('plugin-settings');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'providers')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'agents')?.group).toBe('pi');
+    expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'fleet')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'commands')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'prompts')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'skills')?.group).toBe('pi');

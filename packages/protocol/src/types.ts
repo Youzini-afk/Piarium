@@ -30,6 +30,7 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export interface HostCapabilities {
   agentProviders: boolean;
   extensionUi: boolean;
+  fleet: boolean;
   models: boolean;
   packages: boolean;
   providerConfiguration: boolean;
@@ -272,6 +273,40 @@ export interface PiAgentProviderActionResult {
   message: string;
   providerId: string;
   success: boolean;
+}
+
+export type PiFleetProviderState = "active" | "degraded" | "incompatible" | "unavailable";
+
+export interface PiFleetProviderSnapshot {
+  bridgeVersion?: number;
+  id: string;
+  issue?: string;
+  label: string;
+  source?: string;
+  state: PiFleetProviderState;
+}
+
+export interface PiFleetEntry {
+  agent: string;
+  effort?: string;
+  goal?: string;
+  key: string;
+  model?: string;
+  providerId: string;
+  role?: string;
+  startedAt: number;
+  tokens: {
+    input: number;
+    output: number;
+    total: number;
+  };
+}
+
+export interface PiFleetSnapshot {
+  entries: PiFleetEntry[];
+  omitted: number;
+  providers: PiFleetProviderSnapshot[];
+  totalActive: number;
 }
 
 export type RecoveryMode = "conversation" | "files" | "both";

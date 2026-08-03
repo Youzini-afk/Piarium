@@ -32,6 +32,7 @@ const host = new SessionHost({
 try {
   const snapshot = await host.create(workspace);
   const commands = host.listCommands(snapshot.sessionId);
+  const fleet = await host.fleetStatus(snapshot.sessionId);
   const failures = events.filter(
     (entry) =>
       entry.event === "host.error" || (entry.event === "host.log" && entry.data?.level === "error"),
@@ -45,6 +46,7 @@ try {
         commands: commands.map((command) => command.name),
         entry: extensionPath,
         eventCount: events.length,
+        fleet,
         name: basename(extensionPath),
         sessionId: snapshot.sessionId,
       },

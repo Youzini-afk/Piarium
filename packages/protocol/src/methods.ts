@@ -15,6 +15,7 @@ import type {
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
+  PiFleetSnapshot,
   PiResourceCatalogSnapshot,
   PiResourceDocumentSnapshot,
   PiResourceKind,
@@ -109,6 +110,10 @@ export interface HostMethodMap {
   "extension.ui.respond": {
     params: ExtensionUiResponse;
     result: { accepted: boolean };
+  };
+  "fleet.status": {
+    params: { sessionId: string };
+    result: PiFleetSnapshot;
   };
   "host.handshake": {
     params: HostHandshakeParams;

@@ -35,6 +35,7 @@ test('VS Code webview bridge dispatches Runtime frames and routed events', async
       capabilities: {
         agentProviders: true,
         extensionUi: true,
+        fleet: true,
         models: true,
         packages: true,
         providerConfiguration: true,

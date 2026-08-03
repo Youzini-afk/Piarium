@@ -147,6 +147,16 @@ Fleet is a separate live-work surface. It projects task state, steps, workflow g
 relationships, timing, artifacts, and errors from the stable public contract. It provides only
 advertised controls such as steer, append, interrupt, stop, resume, and checkpoint decisions.
 
+Implemented Fleet slice: the dedicated Fleet page consumes `subagents:rpc:v1` only after the
+extension advertises `fleetStatus: { version: 1 }`. It renders the bounded, current-session public
+entries with agent/role, caller-facing goal, model, effort, elapsed time, and token totals. The host
+revalidates that DTO and deliberately drops the RPC's text, tool details, run IDs, async paths, and
+other private status data before crossing the renderer boundary. The native Fleet inspector, stop
+selector, and doctor remain available through the plugin's registered commands. The public Fleet
+DTO intentionally withholds actionable run IDs, so Piarium does not attach guessed per-entry
+controls; those land only when a provider advertises stable action targets. Recent/completed task
+projection and richer workflow graphs remain a later public-contract slice.
+
 Acceptance:
 
 - settings round-trip unknown keys at both scopes;

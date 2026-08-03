@@ -38,6 +38,7 @@ export const PIARIUM_HOST_VERSION = "0.1.0";
 const HOST_CAPABILITIES: HostCapabilities = {
   agentProviders: true,
   extensionUi: true,
+  fleet: true,
   models: true,
   packages: true,
   providerConfiguration: true,
@@ -430,6 +431,8 @@ export class HostController {
           readString(params, "sessionId"),
           readString(params, "command"),
         );
+      case "fleet.status":
+        return this.#sessionHost.fleetStatus(readString(params, "sessionId"));
       case "model.list":
         return this.#sessionHost.listModels();
       case "model.select":

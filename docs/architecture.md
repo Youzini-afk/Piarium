@@ -210,7 +210,9 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
 ### 7.2 First-class adapters
 
 - **pi-subagents:** task tree and controls from its event bus; lifecycle artifacts for restart and
-  cross-process reconciliation.
+  cross-process reconciliation. The first native Fleet surface consumes its public in-process RPC
+  `fleetStatus/v1` projection; private run identifiers and artifact paths remain host-side, while
+  the plugin's own inspector/stop/doctor commands retain their validation and selectors.
 - **Magic Context:** plugin-owned user/project JSONC configuration and status rendered through its
   native Pi component/custom entries; future memory, compartment, historian/dreamer/sidekick, and
   diagnostic views continue to read its public plugin/database contracts rather than copied state.

@@ -165,7 +165,13 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   rendering inert badges. Provider-level creation and model-resolution actions, structured agent
   and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused
   destructive confirmation, project-trust gating, result reporting, and catalog refresh all route
-  through the plugin-owned management tool. Fleet projection remains the next subagents slice.
+  through the plugin-owned management tool.
+- Implemented: a separate Fleet page now consumes pi-subagents' public `subagents:rpc:v1`
+  `fleetStatus` projection for active foreground/background children. Piarium validates and
+  projects only the opaque display key, role/agent, goal, model/effort, timing, and token counts;
+  private run IDs, paths, and raw status details never cross to the renderer. The plugin-owned
+  inspector, stop selector, and doctor stay command-backed. Per-task controls wait for stable
+  provider-advertised action targets instead of inferring identifiers from private artifacts.
 - Implemented: Agents, Commands, Prompts, Skills, Pi Packages, and Plugin Settings now observe one
   ownership model. Agents exposes provider-owned source/package/invocation facts without inventing
   a universal override schema; Commands is a read-only live catalog with native source provenance;

@@ -20,6 +20,7 @@ type DirectRuntimeMethod =
   | "agent.prompt"
   | "agent.steer"
   | "command.execute"
+  | "fleet.status"
   | "recovery.checkpoint.create"
   | "recovery.navigate"
   | "recovery.repair"
@@ -156,6 +157,7 @@ export const RUNTIME_METHODS = [
   "config.text.get",
   "config.text.update",
   "extension.ui.respond",
+  "fleet.status",
   "host.handshake",
   "model.list",
   "model.select",

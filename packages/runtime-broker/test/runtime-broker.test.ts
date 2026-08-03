@@ -274,6 +274,12 @@ test("broker owns catalog and per-session Pi workers", async () => {
     });
     assert.ok(recoveryStatus.modes.includes("conversation"));
     assert.ok(recoveryStatus.providers.some((provider) => provider.id === "pi-native"));
+    const fleetStatus = await dispatchRuntimeRequest(broker, "fleet.status", {
+      sessionId: created.sessionId,
+    });
+    assert.deepEqual(fleetStatus.entries, []);
+    assert.equal(fleetStatus.providers[0]?.id, "pi-subagents");
+    assert.equal(fleetStatus.providers[0]?.state, "unavailable");
     const models = await dispatchRuntimeRequest(broker, "model.list", {
       sessionId: created.sessionId,
     });

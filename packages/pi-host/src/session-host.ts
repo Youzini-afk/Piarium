@@ -36,6 +36,7 @@ import type {
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
+  PiFleetSnapshot,
   PiResourceCatalogSnapshot,
   PiResourceDescriptor,
   PiResourceDiagnostic,
@@ -73,12 +74,17 @@ import {
   createAgentProviderBridgeExtension,
 } from "./agent-providers/bridge.js";
 import { AgentProviderRegistry } from "./agent-providers/registry.js";
+import { findPiSubagentsTool } from "./agent-providers/pi-subagents-provider.js";
 import { ConfigTextFileEditor } from "./config-text-file-editor.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
+import {
+  createPiSubagentsFleetBridgeExtension,
+  PiSubagentsFleetBridge,
+} from "./pi-subagents-fleet-bridge.js";
 import { ProviderAuthBridge } from "./provider-auth-bridge.js";
 import { ProviderConfigurationManager } from "./provider-configuration.js";
 import { RevisionedTextFileEditor } from "./revisioned-text-file-editor.js";
@@ -420,6 +426,7 @@ export class SessionHost {
   readonly ui: ExtensionUiBridge;
   readonly auth: ProviderAuthBridge;
   #agentProviders: AgentProviderBridge | undefined;
+  #fleet: PiSubagentsFleetBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
   #recovery: RecoveryPluginAdapter | undefined;
   #unsubscribe: (() => void) | undefined;
@@ -912,6 +919,43 @@ export class SessionHost {
     input: JsonValue | undefined,
   ): Promise<PiAgentProviderActionResult> {
     return this.#agentProviderRegistry().action(providerId, action, agentId, input);
+  }
+
+  async fleetStatus(sessionId: string): Promise<PiFleetSnapshot> {
+    this.assertSession(sessionId);
+    const snapshot = await this.fleet.status(sessionId);
+    const provider = snapshot.providers.find((entry) => entry.id === "pi-subagents");
+    if (provider?.state !== "unavailable") return snapshot;
+
+    const extensions = this.session.resourceLoader.getExtensions();
+    const loadError = extensions.errors.find(
+      (entry) => entry.path.toLowerCase().includes("pi-subagents"),
+    );
+    if (loadError) {
+      return {
+        ...snapshot,
+        providers: snapshot.providers.map((entry) => entry.id === "pi-subagents"
+          ? {
+              ...entry,
+              issue: loadError.error,
+              state: "degraded" as const,
+            }
+          : entry),
+      };
+    }
+    if (findPiSubagentsTool(this.session)) {
+      return {
+        ...snapshot,
+        providers: snapshot.providers.map((entry) => entry.id === "pi-subagents"
+          ? {
+              ...entry,
+              issue: "The loaded pi-subagents version does not expose fleetStatus v1",
+              state: "incompatible" as const,
+            }
+          : entry),
+      };
+    }
+    return snapshot;
   }
 
   async listResources(kind: PiResourceKind): Promise<PiResourceCatalogSnapshot> {
@@ -1894,6 +1938,8 @@ export class SessionHost {
       this.#recovery = recovery;
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
+      const fleet = new PiSubagentsFleetBridge();
+      this.#fleet = fleet;
       const services = await createAgentSessionServices({
         agentDir,
         cwd,
@@ -1908,6 +1954,11 @@ export class SessionHost {
               factory: createExtensionStateBridgeExtension(this.#emit),
               hidden: true,
               name: "piarium-extension-state-bridge",
+            },
+            {
+              factory: createPiSubagentsFleetBridgeExtension(fleet),
+              hidden: true,
+              name: "piarium-subagents-fleet-bridge",
             },
             {
               factory: createAgentProviderBridgeExtension(agentProviders),
@@ -2069,7 +2120,13 @@ export class SessionHost {
     this.#runtime = undefined;
     if (runtime) await runtime.dispose();
     this.#agentProviders = undefined;
+    this.#fleet = undefined;
     this.#recovery = undefined;
+  }
+
+  get fleet(): PiSubagentsFleetBridge {
+    if (!this.#fleet) throw new HostError("fleet_unavailable", "Subagent Fleet is unavailable");
+    return this.#fleet;
   }
 
   get recovery(): RecoveryPluginAdapter {

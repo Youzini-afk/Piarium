@@ -35,6 +35,7 @@ class HandshakeSocket implements RuntimeWebSocket {
           capabilities: {
             agentProviders: true,
             extensionUi: true,
+            fleet: true,
             models: true,
             packages: true,
             providerConfiguration: true,
@@ -72,6 +73,7 @@ class HandshakeTransport implements RuntimeTransport {
       capabilities: {
         agentProviders: true,
         extensionUi: true,
+        fleet: true,
         models: true,
         packages: true,
         providerConfiguration: true,

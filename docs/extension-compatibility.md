@@ -33,6 +33,9 @@ plugin ownership intact:
 - recovery discovers the current workspace-history and pi-wtf command/tree capabilities, delegates
   operations to them, and accepts richer capabilities through recovery bridge v1 without reading
   either plugin's private state;
+- Fleet handshakes with pi-subagents' public `subagents:rpc:v1`, requires its advertised
+  `fleetStatus: { version: 1 }`, and projects only the bounded public display entries. The local
+  `0.38.0` smoke returned an active provider through this real RPC path;
 - MCP consumes `pi-mcp-adapter/status/v1`, invokes the adapter's commands, and edits its native config
   sources without taking over merging, transports, OAuth, or the credential store;
 - Web Access uses its native `web-search.json` while search/fetch tools, widgets, and custom entries
