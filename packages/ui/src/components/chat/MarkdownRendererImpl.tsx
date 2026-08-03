@@ -1,7 +1,6 @@
 import React from 'react';
 import morphdom from 'morphdom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
-import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -41,7 +40,12 @@ import {
   type ParsedFileReference,
 } from './fileReferenceParser';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
+
+type ContentChangeReason = 'text' | 'structural' | 'permission' | 'animation';
+
+interface MarkdownPartIdentity {
+  id?: string;
+}
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -130,7 +134,7 @@ export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
 interface MarkdownRendererProps {
   content: string;
-  part?: Part;
+  part?: MarkdownPartIdentity;
   messageId: string;
   isAnimated?: boolean;
   skipFadeIn?: boolean;
