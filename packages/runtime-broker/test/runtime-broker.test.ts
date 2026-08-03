@@ -25,7 +25,10 @@ test("broker owns catalog and per-session Pi workers", async () => {
     `export default function extension(pi: any) {
       pi.registerCommand("broker-seed", {
         description: "Create a deterministic broker integration entry",
-        handler: async () => pi.appendEntry("piarium.broker.smoke", { ready: true }),
+        handler: async () => pi.appendEntry("piarium.broker.smoke", {
+          agentDir: process.env.PI_CODING_AGENT_DIR,
+          ready: true,
+        }),
       });
     }\n`,
   );
@@ -44,7 +47,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
         throw new Error("observer failure must not block trust resolution");
       }
     },
-    environment: { HOME: homeDir },
+    environment: { HOME: homeDir, PI_CODING_AGENT_DIR: join(root, "wrong-agent") },
     execArgv: ["--import", "tsx"],
     hostEntry: HOST_ENTRY,
     promptForProjectTrust: async () => ({ remember: false, trusted: true }),
@@ -330,6 +333,20 @@ test("broker owns catalog and per-session Pi workers", async () => {
           !Array.isArray(entry) &&
           entry.type === "custom" &&
           entry.customType === "piarium.broker.smoke",
+      ),
+    );
+    assert.ok(
+      entries.entries.some(
+        (entry) =>
+          typeof entry === "object" &&
+          entry !== null &&
+          !Array.isArray(entry) &&
+          entry.type === "custom" &&
+          entry.customType === "piarium.broker.smoke" &&
+          typeof entry.data === "object" &&
+          entry.data !== null &&
+          !Array.isArray(entry.data) &&
+          entry.data.agentDir === agentDir,
       ),
     );
 

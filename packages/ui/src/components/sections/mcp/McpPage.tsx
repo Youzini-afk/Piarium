@@ -36,6 +36,7 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import {
   MCP_ADAPTER_STATUS_CHANNEL,
+  mcpServerCommandArgument,
   parseMcpAdapterStatus,
   type McpAdapterServerSnapshot,
   type McpAdapterServerStatus,
@@ -95,8 +96,6 @@ const statusTone = (status: McpAdapterServerStatus): string => {
   if (status === 'needs-auth') return 'text-[var(--status-warning)] bg-[var(--status-warning)]/10';
   return 'text-muted-foreground bg-muted';
 };
-
-const safeCommandArgument = (value: string): string => value.replace(/[\r\n]+/g, ' ').trim();
 
 const McpConfigEditor: React.FC<{ runtimeTarget: RuntimeContextTarget }> = ({ runtimeTarget }) => {
   const { t } = useI18n();
@@ -275,7 +274,8 @@ const ServerCard: React.FC<{
 }> = ({ busy, onCommand, server }) => {
   const { t } = useI18n();
   const actionBusy = busy?.endsWith(`:${server.name}`) === true;
-  const argument = safeCommandArgument(server.name);
+  const argument = mcpServerCommandArgument(server.name);
+  const commandUnsupported = argument === null;
   return (
     <div className="rounded-lg border border-border/60 px-3 py-3">
       <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
@@ -305,7 +305,7 @@ const ServerCard: React.FC<{
               type="button"
               variant="outline"
               size="xs"
-              disabled={actionBusy}
+              disabled={actionBusy || commandUnsupported}
               onClick={() => onCommand('reconnect', server.name, `/mcp reconnect ${argument}`)}
               className="!font-normal"
             >
@@ -316,7 +316,7 @@ const ServerCard: React.FC<{
             <Button
               type="button"
               size="xs"
-              disabled={actionBusy}
+              disabled={actionBusy || commandUnsupported}
               onClick={() => onCommand('authorize', server.name, `/mcp-auth ${argument}`)}
               className="!font-normal"
             >
@@ -328,7 +328,7 @@ const ServerCard: React.FC<{
               type="button"
               variant="ghost"
               size="xs"
-              disabled={actionBusy}
+              disabled={actionBusy || commandUnsupported}
               onClick={() => onCommand('logout', server.name, `/mcp logout ${argument}`)}
               className="!font-normal text-muted-foreground"
             >
@@ -339,7 +339,7 @@ const ServerCard: React.FC<{
             type="button"
             variant="ghost"
             size="xs"
-            disabled={actionBusy}
+            disabled={actionBusy || commandUnsupported}
             onClick={() => onCommand(
               server.disabled ? 'enable' : 'disable',
               server.name,
@@ -354,6 +354,11 @@ const ServerCard: React.FC<{
           </Button>
         </div>
       </div>
+      {commandUnsupported ? (
+        <p className="mt-2 typography-micro text-[var(--status-warning)]">
+          {t('settings.piarium.mcp.runtime.commandNameUnsupported')}
+        </p>
+      ) : null}
     </div>
   );
 };

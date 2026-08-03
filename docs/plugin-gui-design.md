@@ -166,6 +166,12 @@ when exposed; it does not reproduce merge, OAuth, transport, or credential logic
 Changing a server URL must not silently carry inherited credentials to the new origin. Host-config
 discovery stays explicit and defaults off. OpenCode config is never an authoritative source.
 
+The current public `status/v1` snapshot intentionally does not expose config provenance, transport,
+or failure text, so Piarium does not reverse-engineer an effective configuration from the six raw
+files. Server actions remain command-backed; names containing whitespace are shown but their
+per-server buttons stay disabled because the adapter's current command parser has no quoting
+contract. The extension panel remains available for those servers.
+
 Acceptance:
 
 - all status and actions use public adapter contracts;
@@ -190,6 +196,17 @@ Target sections:
 4. Provider options: provider-specific non-secret settings.
 5. Security and advanced: SSRF policy, remote Curator warnings, credential-source syntax, shortcuts,
    and the full native JSON document.
+
+Implemented configuration slice: the first-class adapter now models automatic, named, concurrent,
+all-provider, and typed ordered-fallback routing without presenting `provider` and
+`searchProvider` as independent choices. It covers current public tool names, every documented
+credential source, provider endpoints/models, Curator bind modes, Chromium-cookie opt-in,
+shortcuts, GitHub/video/PDF behavior, domain policy, and SSRF exceptions while preserving unknown
+native keys. Piarium propagates its selected Pi agent directory through
+`PI_CODING_AGENT_DIR`, so the file edited by the GUI is the file loaded by extensions even when a
+custom agent directory is used. Live availability, activity, Google-account diagnostics, and
+Curator actions remain owned by registered commands/widgets until the extension publishes a
+versioned runtime contract.
 
 Secrets are not surfaced as ordinary text fields. The advanced editor preserves native credential
 source references. A remote Curator bind explains plain-HTTP/token-in-URL exposure and highlights

@@ -1,4 +1,7 @@
+import { settingsDict as englishSettingsDict } from './en.settings';
+
 export const settingsDict = {
+  ...englishSettingsDict,
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go ダッシュボードを接続して、ローリング、週間、月間のクォータを表示します。',
   'settings.providers.page.openCodeGo.workspaceId': 'ワークスペース ID',

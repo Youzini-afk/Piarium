@@ -40,6 +40,10 @@ function optionKey(value: boolean | string): string {
   return typeof value === 'boolean' ? `boolean:${String(value)}` : `string:${value}`;
 }
 
+function fieldAriaLabel(label: React.ReactNode, path: readonly string[]): string {
+  return typeof label === 'string' ? label : path.join('.');
+}
+
 const DefaultAction: React.FC<{
   disabled?: boolean;
   explicit: boolean;
@@ -110,6 +114,7 @@ export const PluginStringField: React.FC<StringFieldProps> = ({
     <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
       <Input
         type={inputType}
+        aria-label={fieldAriaLabel(label, path)}
         value={value}
         disabled={disabled}
         autoComplete={autoComplete}
@@ -148,7 +153,7 @@ export const PluginBooleanField: React.FC<BooleanFieldProps> = ({
         checked={checked}
         disabled={disabled}
         onCheckedChange={(next) => field.set(Boolean(next))}
-        aria-label={typeof label === 'string' ? label : undefined}
+        aria-label={fieldAriaLabel(label, path)}
       />
       <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
     </SettingsFieldRow>
@@ -178,7 +183,11 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
           else field.set(next === optionKey(true));
         }}
       >
-        <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+        <SelectTrigger
+          size="settings"
+          className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+          aria-label={fieldAriaLabel(label, path)}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -218,6 +227,7 @@ export const PluginNumberField: React.FC<NumberFieldProps> = ({
   return (
     <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
       <NumberInput
+        aria-label={fieldAriaLabel(label, path)}
         value={value}
         fallbackValue={defaultValue}
         disabled={disabled}
@@ -269,6 +279,7 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
   return (
     <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
       <NumberInput
+        aria-label={fieldAriaLabel(label, path)}
         value={value}
         fallbackValue={fallbackValue ?? (typeof defaultValue === 'number' ? defaultValue : undefined)}
         disabled={disabled}
@@ -325,7 +336,11 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
           if (option) field.set(option.value);
         }}
       >
-        <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+        <SelectTrigger
+          size="settings"
+          className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+          aria-label={fieldAriaLabel(label, path)}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -373,7 +388,11 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
           if (option) field.set(option.value);
         }}
       >
-        <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+        <SelectTrigger
+          size="settings"
+          className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+          aria-label={fieldAriaLabel(label, path)}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -420,6 +439,7 @@ export const PluginTextareaField: React.FC<TextareaFieldProps> = ({
       controlClassName="w-full max-w-lg items-start"
     >
       <Textarea
+        aria-label={fieldAriaLabel(label, path)}
         value={value}
         disabled={disabled}
         placeholder={placeholder}
@@ -465,6 +485,7 @@ export const PluginStringListField: React.FC<StringListFieldProps> = ({
       controlClassName="w-full max-w-lg items-start"
     >
       <Textarea
+        aria-label={fieldAriaLabel(label, path)}
         value={value.join('\n')}
         disabled={disabled}
         placeholder={placeholder}

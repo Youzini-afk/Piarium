@@ -132,6 +132,9 @@ export class PiHostClient {
         ...process.env,
         ...this.#options.environment,
         ELECTRON_RUN_AS_NODE: "1",
+        ...(this.#options.agentDir === undefined
+          ? {}
+          : { PI_CODING_AGENT_DIR: this.#options.agentDir }),
       },
       serialization: "json",
       stdio: ["ignore", "pipe", "pipe", "ipc"],

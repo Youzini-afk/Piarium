@@ -172,9 +172,15 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   the old OpenCode MCP stores, draft editor, and OAuth callback route are removed. Tools/resources/results
   already use the generic Pi tool projection; richer MCP Apps rendering remains dependent on an
   explicit public webview contract from the adapter.
-- Implemented: direct editing of `pi-web-access`'s native `web-search.json`; its search/fetch tools,
-  activity widgets, and custom entries use the generic extension projection. Optional Curator
-  embedding remains dependent on a public embedding contract from the extension.
+- Implemented: the first-class `pi-web-access` adapter now edits its native `web-search.json`
+  through focused routing, provider/credential, Curator/browser, content, and security areas. It
+  models the plugin's current single/concurrent/all/ordered-fallback semantics, every documented
+  credential source and provider endpoint, public tool names, remote bind risks, Chromium-cookie
+  opt-in, GitHub/video/PDF behavior, domain policy, and SSRF exceptions without dropping unknown
+  fields. Custom Pi agent directories are propagated through `PI_CODING_AGENT_DIR`, keeping the
+  GUI and extension on the same file. Search/fetch tools, activity widgets, and custom entries use
+  the generic extension projection; richer live health/actions still require a public versioned
+  contract from the extension.
 
 Acceptance: each adapter has an unavailable/degraded state, version compatibility diagnostics, and
 an integration smoke test without exposing credentials.

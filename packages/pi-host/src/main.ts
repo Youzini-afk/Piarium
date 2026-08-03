@@ -42,6 +42,7 @@ function redirectConsoleToStderr(): void {
 async function run(): Promise<void> {
   const args = parseArguments(process.argv.slice(2));
   if (args.forceStdio) redirectConsoleToStderr();
+  if (args.agentDir !== undefined) process.env.PI_CODING_AGENT_DIR = args.agentDir;
   const controller = new HostController({
     ...(args.agentDir === undefined ? {} : { agentDir: args.agentDir }),
     ...(args.projectTrustOverride === undefined

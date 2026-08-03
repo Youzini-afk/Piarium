@@ -76,6 +76,7 @@ interface DraftState {
   projectTrusted: boolean;
   saving: boolean;
   source: JsonObject;
+  targetKey: string | null;
 }
 
 const initialState = (): DraftState => ({
@@ -87,6 +88,7 @@ const initialState = (): DraftState => ({
   projectTrusted: false,
   saving: false,
   source: {},
+  targetKey: null,
 });
 
 const errorMessage = (error: unknown): string => (
@@ -96,22 +98,30 @@ const errorMessage = (error: unknown): string => (
 const useDraftActions = (
   state: DraftState,
   setState: React.Dispatch<React.SetStateAction<DraftState>>,
-) => ({
-  dirty: !jsonObjectsEqual(state.source, state.draft),
-  draft: state.draft,
-  error: state.error,
-  loaded: state.loaded,
-  loading: state.loading,
-  path: state.path,
-  projectTrusted: state.projectTrusted,
-  removeValue: (path: readonly string[]) => {
-    setState((current) => ({ ...current, draft: removeJsonPath(current.draft, path) }));
-  },
-  saving: state.saving,
-  setValue: (path: readonly string[], value: JsonValue) => {
-    setState((current) => ({ ...current, draft: setJsonPath(current.draft, path, value) }));
-  },
-});
+  targetKey: string,
+) => {
+  const active = state.targetKey === targetKey;
+  return {
+    dirty: active && !jsonObjectsEqual(state.source, state.draft),
+    draft: active ? state.draft : {},
+    error: active ? state.error : null,
+    loaded: active && state.loaded,
+    loading: active ? state.loading : true,
+    path: active ? state.path : '',
+    projectTrusted: active && state.projectTrusted,
+    removeValue: (path: readonly string[]) => {
+      setState((current) => current.targetKey === targetKey
+        ? { ...current, draft: removeJsonPath(current.draft, path) }
+        : current);
+    },
+    saving: active && state.saving,
+    setValue: (path: readonly string[], value: JsonValue) => {
+      setState((current) => current.targetKey === targetKey
+        ? { ...current, draft: setJsonPath(current.draft, path, value) }
+        : current);
+    },
+  };
+};
 
 export const useSettingsObjectDraft = ({
   property,
@@ -129,7 +139,9 @@ export const useSettingsObjectDraft = ({
     const generation = ++generationRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
-    setState((current) => ({ ...current, error: null, loading: true }));
+    setState((current) => current.targetKey === actionTargetKey
+      ? { ...current, error: null, loading: true }
+      : { ...initialState(), loading: true, targetKey: actionTargetKey });
     try {
       const snapshot = await getPiSettings(runtimeTarget);
       if (
@@ -147,6 +159,7 @@ export const useSettingsObjectDraft = ({
         projectTrusted: snapshot.projectTrusted,
         saving: false,
         source: document,
+        targetKey: actionTargetKey,
       });
     } catch (error) {
       if (
@@ -154,12 +167,11 @@ export const useSettingsObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      setState((current) => ({
-        ...current,
+      setState({
+        ...initialState(),
         error: errorMessage(error),
-        loaded: false,
-        loading: false,
-      }));
+        targetKey: actionTargetKey,
+      });
     }
   }, [property, runtimeTarget, scope, targetKey]);
 
@@ -169,7 +181,12 @@ export const useSettingsObjectDraft = ({
   }, [reload]);
 
   const save = React.useCallback(async () => {
-    if (state.saving || jsonObjectsEqual(state.source, state.draft)) return;
+    if (
+      state.targetKey !== targetKey
+      || targetKey !== targetKeyRef.current
+      || state.saving
+      || jsonObjectsEqual(state.source, state.draft)
+    ) return;
     const generation = generationRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
@@ -205,9 +222,9 @@ export const useSettingsObjectDraft = ({
       setState((current) => ({ ...current, error: message, saving: false }));
       toast.error(t('settings.common.status.saveFailed'), { description: message });
     }
-  }, [property, runtimeTarget, scope, state.draft, state.saving, state.source, t, targetKey]);
+  }, [property, runtimeTarget, scope, state.draft, state.saving, state.source, state.targetKey, t, targetKey]);
 
-  return { ...useDraftActions(state, setState), reload, save };
+  return { ...useDraftActions(state, setState, targetKey), reload, save };
 };
 
 export const useConfigDocumentObjectDraft = ({
@@ -226,7 +243,9 @@ export const useConfigDocumentObjectDraft = ({
     const generation = ++generationRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
-    setState((current) => ({ ...current, error: null, loading: true }));
+    setState((current) => current.targetKey === actionTargetKey
+      ? { ...current, error: null, loading: true }
+      : { ...initialState(), loading: true, targetKey: actionTargetKey });
     try {
       const snapshot = await getPiConfigDocument(runtimeTarget, scope, path);
       if (
@@ -243,6 +262,7 @@ export const useConfigDocumentObjectDraft = ({
         projectTrusted: snapshot.projectTrusted,
         saving: false,
         source: snapshot.document,
+        targetKey: actionTargetKey,
       });
     } catch (error) {
       if (
@@ -250,7 +270,11 @@ export const useConfigDocumentObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      setState((current) => ({ ...current, error: errorMessage(error), loaded: false, loading: false }));
+      setState({
+        ...initialState(),
+        error: errorMessage(error),
+        targetKey: actionTargetKey,
+      });
     }
   }, [path, runtimeTarget, scope, targetKey]);
 
@@ -260,7 +284,12 @@ export const useConfigDocumentObjectDraft = ({
   }, [reload]);
 
   const save = React.useCallback(async () => {
-    if (state.saving || jsonObjectsEqual(state.source, state.draft)) return;
+    if (
+      state.targetKey !== targetKey
+      || targetKey !== targetKeyRef.current
+      || state.saving
+      || jsonObjectsEqual(state.source, state.draft)
+    ) return;
     const generation = generationRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
@@ -286,6 +315,7 @@ export const useConfigDocumentObjectDraft = ({
         projectTrusted: snapshot.projectTrusted,
         saving: false,
         source: snapshot.document,
+        targetKey: actionTargetKey,
       });
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
@@ -298,9 +328,9 @@ export const useConfigDocumentObjectDraft = ({
       setState((current) => ({ ...current, error: message, saving: false }));
       toast.error(t('settings.common.status.saveFailed'), { description: message });
     }
-  }, [path, runtimeTarget, scope, state.draft, state.saving, state.source, t, targetKey]);
+  }, [path, runtimeTarget, scope, state.draft, state.saving, state.source, state.targetKey, t, targetKey]);
 
-  return { ...useDraftActions(state, setState), reload, save };
+  return { ...useDraftActions(state, setState, targetKey), reload, save };
 };
 
 const parseTextObject = (content: string, format: PiConfigTextFormat): JsonObject => {
@@ -355,7 +385,9 @@ export const useTextObjectDraft = ({
     const generation = ++generationRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
-    setState((current) => ({ ...current, error: null, loading: true }));
+    setState((current) => current.targetKey === actionTargetKey
+      ? { ...current, error: null, loading: true }
+      : { ...initialState(), loading: true, targetKey: actionTargetKey });
     try {
       const nextSnapshot = await loadTextDocument(runtimeTarget, { format, paths, root });
       const document = parseTextObject(nextSnapshot.content, format);
@@ -376,6 +408,7 @@ export const useTextObjectDraft = ({
         projectTrusted: nextSnapshot.projectTrusted,
         saving: false,
         source: document,
+        targetKey: actionTargetKey,
       });
     } catch (error) {
       if (
@@ -383,7 +416,11 @@ export const useTextObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      setState((current) => ({ ...current, error: errorMessage(error), loaded: false, loading: false }));
+      setState({
+        ...initialState(),
+        error: errorMessage(error),
+        targetKey: actionTargetKey,
+      });
     }
   }, [format, paths, root, runtimeTarget, targetKey]);
 
@@ -396,21 +433,29 @@ export const useTextObjectDraft = ({
   }, [reload]);
 
   const setValue = React.useCallback((path: readonly string[], value: JsonValue) => {
+    if (state.targetKey !== targetKey || targetKey !== targetKeyRef.current) return;
     const next = updateJsoncPath(contentRef.current, path, value);
     contentRef.current = next;
     setContent(next);
     setState((current) => ({ ...current, draft: parseTextObject(next, format) }));
-  }, [format]);
+  }, [format, state.targetKey, targetKey]);
 
   const removeValue = React.useCallback((path: readonly string[]) => {
+    if (state.targetKey !== targetKey || targetKey !== targetKeyRef.current) return;
     const next = removeJsoncPath(contentRef.current, path);
     contentRef.current = next;
     setContent(next);
     setState((current) => ({ ...current, draft: parseTextObject(next, format) }));
-  }, [format]);
+  }, [format, state.targetKey, targetKey]);
 
   const save = React.useCallback(async () => {
-    if (state.saving || jsonObjectsEqual(state.source, state.draft) || !snapshot) return;
+    if (
+      state.targetKey !== targetKey
+      || targetKey !== targetKeyRef.current
+      || state.saving
+      || jsonObjectsEqual(state.source, state.draft)
+      || !snapshot
+    ) return;
     const generation = generationRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
@@ -442,6 +487,7 @@ export const useTextObjectDraft = ({
         projectTrusted: nextSnapshot.projectTrusted,
         saving: false,
         source: document,
+        targetKey: actionTargetKey,
       });
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
@@ -454,20 +500,21 @@ export const useTextObjectDraft = ({
       setState((current) => ({ ...current, error: message, saving: false }));
       toast.error(t('settings.common.status.saveFailed'), { description: message });
     }
-  }, [content, format, runtimeTarget, snapshot, state.draft, state.saving, state.source, t, targetKey]);
+  }, [content, format, runtimeTarget, snapshot, state.draft, state.saving, state.source, state.targetKey, t, targetKey]);
 
+  const active = state.targetKey === targetKey;
   return {
-    dirty: !jsonObjectsEqual(state.source, state.draft),
-    draft: state.draft,
-    error: state.error,
-    loaded: state.loaded,
-    loading: state.loading,
-    path: state.path,
-    projectTrusted: state.projectTrusted,
+    dirty: active && !jsonObjectsEqual(state.source, state.draft),
+    draft: active ? state.draft : {},
+    error: active ? state.error : null,
+    loaded: active && state.loaded,
+    loading: active ? state.loading : true,
+    path: active ? state.path : '',
+    projectTrusted: active && state.projectTrusted,
     reload,
     removeValue,
     save,
-    saving: state.saving,
+    saving: active && state.saving,
     setValue,
   };
 };

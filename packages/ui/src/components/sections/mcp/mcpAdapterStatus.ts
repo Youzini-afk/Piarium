@@ -45,6 +45,12 @@ const isNumber = (value: JsonValue | undefined): value is number => (
   typeof value === 'number' && Number.isFinite(value)
 );
 
+/** Adapter commands currently split arguments on whitespace and do not support quoting. */
+export function mcpServerCommandArgument(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed && !/\s/.test(trimmed) ? trimmed : null;
+}
+
 export function parseMcpAdapterStatus(value: JsonValue | undefined): McpAdapterStatusSnapshot | null {
   if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.servers)) return null;
   if (
