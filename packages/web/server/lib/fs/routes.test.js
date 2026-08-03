@@ -200,6 +200,23 @@ const registerMkdir = (fsPromises) => {
   return getRoute('POST', '/api/fs/mkdir');
 };
 
+const registerList = (fsPromises, spawn = vi.fn()) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises,
+    spawn,
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory: async () => ({ directory: '/repo' }),
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    piariumUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/list');
+};
+
 const callExec = async (handler, body) => {
   const res = createMockResponse();
   await handler({ body }, res);
@@ -229,6 +246,59 @@ const callMkdir = async (handler, body) => {
   await handler({ body }, res);
   return res;
 };
+
+const callList = async (handler, query) => {
+  const res = createMockResponse();
+  await handler({ query }, res);
+  return res;
+};
+
+describe('fs list', () => {
+  it('returns directories, files, and resolved directory symlinks', async () => {
+    const dirent = (name, type) => ({
+      name,
+      isDirectory: () => type === 'directory',
+      isFile: () => type === 'file',
+      isSymbolicLink: () => type === 'symlink',
+    });
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => targetPath),
+      stat: vi.fn(async () => ({ isDirectory: () => true })),
+      readdir: vi.fn(async () => [
+        dirent('src', 'directory'),
+        dirent('README.md', 'file'),
+        dirent('linked-package', 'symlink'),
+      ]),
+    };
+    const handler = registerList(fsPromises);
+
+    const res = await callList(handler, { path: '/repo' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      path: '/repo',
+      entries: [
+        { name: 'src', path: '/repo/src', isDirectory: true, isFile: false, isSymbolicLink: false },
+        { name: 'README.md', path: '/repo/README.md', isDirectory: false, isFile: true, isSymbolicLink: false },
+        { name: 'linked-package', path: '/repo/linked-package', isDirectory: true, isFile: false, isSymbolicLink: true },
+      ],
+    });
+  });
+
+  it('returns the normal missing-directory error for every path', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const handler = registerList({
+      realpath: vi.fn(async () => { throw missing; }),
+      stat: vi.fn(),
+      readdir: vi.fn(),
+    });
+
+    const res = await callList(handler, { path: '/repo/.opencode/plans' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual({ error: 'Directory not found' });
+  });
+});
 
 describe('fs write', () => {
   it('does not rewrite a file when content is unchanged', async () => {

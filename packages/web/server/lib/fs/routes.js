@@ -1298,12 +1298,6 @@ export const registerFsRoutes = (app, dependencies) => {
     const respectGitignore = req.query.respectGitignore === 'true';
     let resolvedPath = '';
 
-    const isPlansDirectory = (value) => {
-      if (!value || typeof value !== 'string') return false;
-      const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-      return normalized.endsWith('/.opencode/plans') || normalized.endsWith('.opencode/plans');
-    };
-
     try {
       resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
 
@@ -1398,14 +1392,10 @@ export const registerFsRoutes = (app, dependencies) => {
     } catch (error) {
       const err = error;
       const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
-      const isPlansPath = code === 'ENOENT' && (isPlansDirectory(resolvedPath) || isPlansDirectory(rawPath));
       if (code !== 'ENOENT') {
         console.error('Failed to list directory:', error);
       }
       if (code === 'ENOENT') {
-        if (isPlansPath) {
-          return res.json({ path: resolvedPath || rawPath, entries: [] });
-        }
         return res.status(404).json({ error: 'Directory not found' });
       }
       if (code === 'EACCES') {

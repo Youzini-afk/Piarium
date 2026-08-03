@@ -25,6 +25,31 @@ const urls: RuntimeUrlResolver = {
 };
 
 describe('createWebFilesAPI', () => {
+  it('lists directories through the Piarium files endpoint', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      path: '/current-workspace',
+      entries: [
+        { name: 'src', path: '/current-workspace/src', isDirectory: true },
+        { name: 'README.md', path: '/current-workspace/README.md', isDirectory: false },
+      ],
+    }));
+
+    await expect(api.listDirectory('/current-workspace', { respectGitignore: true })).resolves.toEqual({
+      directory: '/current-workspace',
+      entries: [
+        { name: 'src', path: '/current-workspace/src', isDirectory: true },
+        { name: 'README.md', path: '/current-workspace/README.md', isDirectory: false },
+      ],
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/list', {
+      query: new URLSearchParams({ path: '/current-workspace', respectGitignore: 'true' }),
+      headers: { 'x-piarium-directory': '/current-workspace' },
+    });
+  });
+
   it('uses per-call workspace directory for stat and read requests', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });

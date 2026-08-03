@@ -132,6 +132,9 @@ retained before engine surgery begins.
   canonical Piarium path-based project ID plus `piarium/<name>` default branches. Worktree setup
   no longer writes `.git/opencode`, OpenCode project JSON, or `opencode.db`; Git itself is the
   authoritative registry and the Piarium UI passes the configured setup command explicitly.
+- Implemented: both reachable file trees now use the required cross-runtime `FilesAPI` directly;
+  the unreachable OpenCode directory-list fallback and the server's `.opencode/plans` missing-path
+  exception were removed. Web list mapping and the server directory-list contract are tested.
 - Preserve local/remote authentication, workspace containment, audit, reconnect, materialization,
   queue, parent/child session, revert, fork, and archive behavior.
 
