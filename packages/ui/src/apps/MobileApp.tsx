@@ -4,8 +4,9 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
+import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
-import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
@@ -26,12 +27,12 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRouter } from '@/hooks/useRouter';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import { opencodeClient } from '@/lib/opencode/client';
 import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
 import { useOrientation } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
-import { resolveProjectForDirectory, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { resolveProjectForDirectory } from '@/lib/projectResolution';
+import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -48,15 +49,11 @@ import { useGitStatus, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { listProjectWorktrees, worktreeMapsEqual } from '@/lib/worktrees/worktreeManager';
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
-import { useSelectionStore } from '@/sync/selection-store';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { SyncProvider, useSession, useSessionMessages } from '@/sync/sync-context';
 
-import { OpenCodeSyncAppEffects } from './AppEffects';
+import { PiAppEffects } from './PiAppEffects';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
@@ -66,7 +63,7 @@ import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppCo
 import { autoConnectLastInstance, connectionDisplayUrl, getAutoConnectTargetLabel, isActiveRuntimeConnection, reprobeActiveConnection, useMobileConnection } from './mobileConnections';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
-import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
+import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
@@ -632,16 +629,6 @@ const useNativeAndroidBackButton = (onBack: () => boolean): void => {
 
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
-
-const getNumericLimit = (limit: unknown, key: 'context' | 'output'): number | undefined => {
-  if (!limit || typeof limit !== 'object') return undefined;
-  const value = (limit as Partial<Record<'context' | 'output', unknown>>)[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-};
-
-const getTokenCount = (value: unknown): number => (
-  typeof value === 'number' && Number.isFinite(value) ? value : 0
-);
 
 const formatTokens = (value: number): string => {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -1692,40 +1679,28 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
   open,
   onOpenChange,
   currentSessionId,
-  effectiveDirectory,
   gitDirectory,
-  isNewSessionDraftOpen,
   primaryLabel,
   secondaryLabel,
 }: {
   open: boolean;
   onOpenChange: (open: boolean | ((open: boolean) => boolean)) => void;
   currentSessionId: string | null;
-  effectiveDirectory: string | null;
   gitDirectory: string | null;
-  isNewSessionDraftOpen: boolean;
   primaryLabel: string;
   secondaryLabel: string;
 }) {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const metadataTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const activeSessionMessages = useSessionMessages(currentSessionId ?? '', effectiveDirectory || undefined);
+  const currentRecord = usePiSessionStore((state) => (
+    currentSessionId === null ? undefined : state.records[currentSessionId]
+  ));
+  const refreshStats = usePiSessionStore((state) => state.refreshStats);
   const isGitRepo = useIsGitRepo(gitDirectory);
   const gitStatus = useGitStatus(gitDirectory);
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
-  const providers = useConfigStore((state) => state.providers);
-  const currentProviderId = useConfigStore((state) => state.currentProviderId);
-  const currentModelId = useConfigStore((state) => state.currentModelId);
-  const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
-  useConfigStore((state) => state.modelsMetadata.size);
-  const savedSessionModel = useSelectionStore(
-    React.useCallback(
-      (state) => (currentSessionId ? state.sessionModelSelections.get(currentSessionId) ?? null : null),
-      [currentSessionId],
-    ),
-  );
   const quotaResults = useQuotaStore((state) => state.results);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
@@ -1759,6 +1734,11 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
   }, [dropdownProviderIds]);
 
   React.useEffect(() => {
+    if (!currentSessionId || currentRecord?.snapshot?.busy) return;
+    void refreshStats(currentSessionId).catch(() => undefined);
+  }, [currentRecord?.snapshot?.busy, currentRecord?.snapshot?.leafId, currentSessionId, refreshStats]);
+
+  React.useEffect(() => {
     if (!open || isQuotaLoading) return;
     const missingEnabledProvider = dropdownProviderIds.some((providerId) => (
       !quotaResults.some((result) => result.providerId === providerId)
@@ -1767,59 +1747,12 @@ const MobileSessionMetadataButton = React.memo(function MobileSessionMetadataBut
     void fetchAllQuotas();
   }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults]);
 
-  const latestMessageModel = React.useMemo(() => {
-    for (let i = activeSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = activeSessionMessages[i] as typeof activeSessionMessages[number] & {
-        model?: { providerID?: string; modelID?: string };
-      };
-      if (message.role !== 'user') continue;
-      const providerID = typeof message.model?.providerID === 'string' && message.model.providerID.trim().length > 0
-        ? message.model.providerID
-        : undefined;
-      const modelID = typeof message.model?.modelID === 'string' && message.model.modelID.trim().length > 0
-        ? message.model.modelID
-        : undefined;
-      if (providerID && modelID) return { providerID, modelID };
-    }
-    return null;
-  }, [activeSessionMessages]);
-
-  const modelRef = latestMessageModel
-    ?? (savedSessionModel ? { providerID: savedSessionModel.providerId, modelID: savedSessionModel.modelId } : null)
-    ?? (currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null);
-  const provider = modelRef ? providers.find((entry) => entry.id === modelRef.providerID) : undefined;
-  const liveModel = provider?.models.find((model) => model.id === modelRef?.modelID);
-  const metadata = modelRef ? getModelMetadata(modelRef.providerID, modelRef.modelID) : undefined;
-  const contextLimit = getNumericLimit((liveModel as { limit?: unknown } | undefined)?.limit, 'context')
-    ?? metadata?.limit?.context
-    ?? 0;
-  const totalTokens = React.useMemo(() => {
-    for (let i = activeSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = activeSessionMessages[i] as typeof activeSessionMessages[number] & {
-        tokens?: {
-          input?: unknown;
-          output?: unknown;
-          reasoning?: unknown;
-          cache?: { read?: unknown; write?: unknown };
-        };
-      };
-      if (message.role !== 'assistant' || !message.tokens) continue;
-      const total = getTokenCount(message.tokens.input)
-        + getTokenCount(message.tokens.output)
-        + getTokenCount(message.tokens.reasoning)
-        + getTokenCount(message.tokens.cache?.read)
-        + getTokenCount(message.tokens.cache?.write);
-      if (total > 0) return total;
-    }
-    return 0;
-  }, [activeSessionMessages]);
-
-  const contextPercentage =
-    !isNewSessionDraftOpen && totalTokens > 0 && contextLimit > 0
-      ? Math.min((totalTokens / contextLimit) * 100, 999)
-      : null;
+  const contextUsage = piSessionContextUsage(currentRecord?.stats, currentRecord?.snapshot);
+  const contextPercentage = contextUsage && contextUsage.totalTokens > 0 && contextUsage.contextLimit > 0
+    ? Math.min(contextUsage.percentage, 999)
+    : null;
   const contextTokens = contextPercentage !== null
-    ? `${formatTokens(totalTokens)}/${formatTokens(contextLimit)}`
+    ? `${formatTokens(contextUsage!.totalTokens)}/${formatTokens(contextUsage!.contextLimit)}`
     : null;
   const contextColorClass =
     contextPercentage === null
@@ -1943,31 +1876,28 @@ const MobileHeader: React.FC<{
   const { t } = useI18n();
   const [metadataOpen, setMetadataOpen] = React.useState(false);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionDirectory = useSessionUIStore(
-    React.useCallback((state) => (currentSessionId ? state.getDirectoryForSession(currentSessionId) : null), [currentSessionId]),
-  );
-  const effectiveDirectory = currentSessionDirectory || currentDirectory;
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const currentSnapshot = usePiSessionStore((state) => (
+    state.currentSessionId === null ? undefined : state.records[state.currentSessionId]?.snapshot
+  ));
+  const currentSummary = usePiSessionStore((state) => (
+    state.currentSessionId === null
+      ? undefined
+      : state.summaries.find((summary) => summary.id === state.currentSessionId)
+  ));
+  const effectiveDirectory = currentSnapshot?.cwd || currentSummary?.cwd || currentDirectory;
   const gitDirectory = normalizePath(effectiveDirectory) || null;
   const projects = useProjectsStore((state) => state.projects);
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
-  const currentWorktreeMetadata = useSessionUIStore(
-    React.useCallback((state) => (currentSessionId ? state.worktreeMetadata.get(currentSessionId) ?? null : null), [currentSessionId]),
-  );
-  const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
-  const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
 
   const projectLabel = React.useMemo(() => {
     const directory = normalizePath(effectiveDirectory);
     if (!directory) return t('mobile.header.noProject');
-    const metadataProject = currentWorktreeMetadata?.projectDirectory
-      ? resolveProjectForDirectory(projects, currentWorktreeMetadata.projectDirectory)
-      : null;
-    const project = metadataProject ?? resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
+    const project = resolveProjectForDirectory(projects, directory);
     return getProjectDisplayLabel(project, directory) || t('mobile.header.noProject');
-  }, [availableWorktreesByProject, currentWorktreeMetadata?.projectDirectory, effectiveDirectory, projects, t]);
+  }, [effectiveDirectory, projects, t]);
 
-  const sessionTitle = currentSession?.title?.trim();
+  const sessionTitle = currentSnapshot?.name?.trim()
+    || (currentSummary ? piSessionTitle(currentSummary, t('mobile.sessions.untitled')) : '');
   const primaryLabel = sessionTitle || (currentSessionId ? t('mobile.sessions.untitled') : projectLabel);
   const secondaryLabel = currentSessionId ? projectLabel : '';
 
@@ -2006,9 +1936,7 @@ const MobileHeader: React.FC<{
             open={metadataOpen}
             onOpenChange={setMetadataOpen}
             currentSessionId={currentSessionId}
-            effectiveDirectory={effectiveDirectory}
             gitDirectory={gitDirectory}
-            isNewSessionDraftOpen={isNewSessionDraftOpen}
             primaryLabel={primaryLabel}
             secondaryLabel={secondaryLabel}
           />
@@ -2219,7 +2147,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const chatMainRef = React.useRef<HTMLElement>(null);
   const chatAnimRef = React.useRef<HTMLDivElement>(null);
   const swipeDirectionRef = React.useRef<'prev' | 'next' | null>(null);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   // Record the swipe direction; the animation itself runs in the layout effect below, once the
   // new session's content has committed — running it inline in the swipe callback raced the
   // re-render and dropped the animation on roughly every other switch.
@@ -2243,7 +2170,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       ],
       { duration: 300, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
     );
-  }, [currentSessionId]);
+  }, [currentPiSessionId]);
 
   const handleNativeBack = React.useCallback(() => {
     if (overflowOpen) {
@@ -2700,13 +2627,11 @@ export function MobileApp({ apis }: MobileAppProps) {
   const agentsCount = useConfigStore((state) => state.agents.length);
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const error = useSessionUIStore((state) => state.error);
-  const clearError = useSessionUIStore((state) => state.clearError);
+  const piCatalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
+  const loadPiCatalog = usePiSessionStore((state) => state.loadCatalog);
   const setIsMobile = useUIStore((state) => state.setIsMobile);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
-  const projects = useProjectsStore((state) => state.projects);
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [showConnectionRecovery, setShowConnectionRecovery] = React.useState(false);
@@ -2717,10 +2642,6 @@ export function MobileApp({ apis }: MobileAppProps) {
   // The instance the splash says we are connecting to. Read once on mount —
   // auto-connect targets the most-recent saved connection from the same list.
   const autoConnectLabel = React.useMemo(() => getAutoConnectTargetLabel(), []);
-  // Bumped to force a re-render (and thus a fresh `sdk` prop for SyncProvider)
-  // after a same-device transport swap — reconnects the sync layer in place with
-  // no remount. The value itself is unused; only the re-render matters.
-  const [, bumpTransportSwitch] = React.useReducer((count: number) => count + 1, 0);
   const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
   const lastNativeResumeSyncEventAtRef = React.useRef(0);
   const nativeResumeValidationSeqRef = React.useRef(0);
@@ -2828,26 +2749,16 @@ export function MobileApp({ apis }: MobileAppProps) {
   }, [apis]);
 
   // Switching instances (or disconnecting) only changes the runtime endpoint; the
-  // stores still hold the previous instance's data. Mirror the web App.tsx reset
-  // sequence so the UI fully re-bootstraps against the new server instead of going
-  // stale. The SyncProvider is keyed by runtimeEndpointEpoch so it remounts too.
+  // Cross-instance changes reset instance-owned stores. Same-device LAN/relay
+  // swaps keep the shell mounted while the Pi runtime connection rebinds itself.
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
-      // A LAN⇄relay swap for the SAME device keeps the runtime key stable. Treat
-      // that as a transport-only change: rebind the sync layer to the new
-      // transport but keep the user's session/connection state — no reconnecting
-      // screen, no bounce back to the draft. Only a real instance switch (key
-      // change) does the full reset.
+      // A LAN⇄relay swap for the same device keeps project/UI state while the
+      // endpoint-aware Pi store drops its transport and reloads the catalog.
       const sameDevice = Boolean(detail.runtimeKey) && detail.runtimeKey === detail.previousRuntimeKey;
       if (sameDevice) {
-        // Transport-only swap for the same device: rebind the SDK to the new
-        // transport and force a re-render so SyncProvider receives the new `sdk`
-        // prop. Its event-pipeline + bootstrap effects (keyed on `sdk`) then
-        // reconnect over the new transport WITHOUT remounting — so the message
-        // pagination refs, the open session, and the whole view are preserved.
-        // No key bump, no flash, no bounce to the draft.
-        reconnectAppForTransportSwitch();
-        bumpTransportSwitch();
+        setRuntimeEndpointEpoch((epoch) => epoch + 1);
+        setConnectionEpoch((epoch) => epoch + 1);
         return;
       }
       resetAppForRuntimeEndpointChange(detail);
@@ -2896,15 +2807,17 @@ export function MobileApp({ apis }: MobileAppProps) {
   }, [connectionEpoch, initializeApp, isNativeMobileApp]);
 
   React.useEffect(() => {
+    if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
+    void loadPiCatalog().catch((catalogError) => {
+      console.warn('[Piarium] failed to load the mobile Pi session catalog:', catalogError);
+    });
+  }, [isNativeMobileApp, loadPiCatalog, runtimeEndpointEpoch]);
+
+  React.useEffect(() => {
     if (!isConnected) return;
     if (providersCount === 0) void loadProviders({ source: 'mobileApp:recovery' });
     if (agentsCount === 0) void loadAgents({ source: 'mobileApp:recovery' });
   }, [agentsCount, isConnected, loadAgents, loadProviders, providersCount]);
-
-  React.useEffect(() => {
-    if (!isConnected) return;
-    opencodeClient.setDirectory(currentDirectory);
-  }, [currentDirectory, isConnected]);
 
   // Gated on isConnected (and re-run on reconnect/instance switch): probing the
   // GitHub auth status before the runtime is reachable cached a "not connected"
@@ -2913,61 +2826,6 @@ export function MobileApp({ apis }: MobileAppProps) {
     if (!isConnected) return;
     void refreshGitHubAuthStatus(apis.github, { force: true });
   }, [apis.github, isConnected, refreshGitHubAuthStatus]);
-
-  // Discover all worktrees for every known project so the draft session's
-  // worktree/branch dropdown can list every available branch — not only the
-  // current one. Mirrors ElectronMiniChatApp + desktop SessionSidebar.
-  // Gated on isConnected: running before the runtime is reachable made every
-  // per-project probe fail silently, leaving the map empty until some later
-  // projects-store update happened to re-run this effect (the "switch projects
-  // back and forth to see worktrees" bug).
-  React.useEffect(() => {
-    if (!isConnected || projects.length === 0) return;
-    let cancelled = false;
-
-    const run = async () => {
-      const worktreesByProject = new Map(useSessionUIStore.getState().availableWorktreesByProject);
-
-      await Promise.all(
-        projects.map(async (project) => {
-          const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
-          if (!projectPath) return;
-          try {
-            const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
-            const isGitRepo =
-              cachedIsGitRepo ?? (await import('@/lib/gitApi').then((m) => m.checkIsGitRepository(projectPath)));
-            if (!isGitRepo) return;
-            const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-            if (cancelled) return;
-            worktreesByProject.set(projectPath, worktrees);
-          } catch {
-            // Worktree discovery is best-effort per project: a failed probe keeps
-            // that project's previously known (persisted) worktrees instead of
-            // wiping the whole map.
-          }
-        }),
-      );
-
-      if (cancelled) return;
-
-      const allWorktrees = Array.from(worktreesByProject.values()).flat();
-
-      // Skip update if nothing changed — see worktreeMapsEqual JSDoc.
-      const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
-      if (!worktreeMapsEqual(worktreesByProject, currentByProject)) {
-        useSessionUIStore.setState({
-          availableWorktrees: allWorktrees,
-          availableWorktreesByProject: worktreesByProject,
-        });
-      }
-    };
-
-    void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isConnected, projects]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -2987,12 +2845,6 @@ export function MobileApp({ apis }: MobileAppProps) {
       cancelled = true;
     };
   }, [setPlanModeEnabled]);
-
-  React.useEffect(() => {
-    if (!error) return;
-    const timeout = window.setTimeout(() => clearError(), 5000);
-    return () => window.clearTimeout(timeout);
-  }, [clearError, error]);
 
   React.useEffect(() => {
     // Native: only while an instance is selected and reconnecting. Browser: the
@@ -3022,7 +2874,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   // scheme (widgets, Live Activities, external links). Registered unconditionally so a
   // cold-launch tap/open isn't lost on the connect/splash screen; intents stash until
   // the app is ready (connected + initialized) and shell handlers are registered.
-  useDeepLinkSource({ ready: isNativeMobileApp && isConnected && isInitialized });
+  useDeepLinkSource({ ready: isNativeMobileApp && isConnected && isInitialized && piCatalogLoaded });
   const fontsReady = useFontsReady();
 
   // `isConnected` is a LIVE flag that flips false on every transient SSE/WS drop and
@@ -3125,23 +2977,21 @@ export function MobileApp({ apis }: MobileAppProps) {
 
   return (
     <ErrorBoundary>
-      <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-        <RuntimeAPIProvider apis={apis}>
-          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-            <div className="h-full bg-background text-foreground">
-              <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
-              <OpenCodeUpdateToast />
-              <MobileAppUpdateToast />
-              <MobileShell onActiveConnectionDeleted={() => {
-                switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
-                setConnectionEpoch((value) => value + 1);
-              }} />
-              <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
-              {isInitialized ? <ConfigUpdateOverlay /> : null}
-            </div>
-          </TooltipProvider>
-        </RuntimeAPIProvider>
-      </SyncProvider>
+      <RuntimeAPIProvider apis={apis}>
+        <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+          <div className="h-full bg-background text-foreground">
+            <PiAppEffects backgroundWorkEnabled={isInitialized} />
+            <PiInteractionHost />
+            <MobileAppUpdateToast />
+            <MobileShell onActiveConnectionDeleted={() => {
+              switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+              setConnectionEpoch((value) => value + 1);
+            }} />
+            <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
+            {isInitialized ? <ConfigUpdateOverlay /> : null}
+          </div>
+        </TooltipProvider>
+      </RuntimeAPIProvider>
     </ErrorBoundary>
   );
 }

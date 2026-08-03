@@ -11,7 +11,6 @@ import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-// useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useMenuActions } from '@/hooks/useMenuActions';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useRouter } from '@/hooks/useRouter';
@@ -19,7 +18,6 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
@@ -31,13 +29,9 @@ import {
   type DesktopBootView,
 } from '@/lib/desktopBoot';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { opencodeClient } from '@/lib/opencode/client';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { SyncProvider } from '@/sync/sync-context';
-import { useSync } from '@/sync/use-sync';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -50,11 +44,10 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { isMobileAppRuntime, useMobileAppViewport } from '@/lib/mobileAppRuntime';
-import { OpenCodeSyncAppEffects } from '@/apps/AppEffects';
 import { PiAppEffects } from '@/apps/PiAppEffects';
+import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
-import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import { useWideChatLayoutClass } from '@/hooks/useWideChatLayoutClass';
 import {
@@ -113,10 +106,10 @@ const EmbeddedSessionChatContent: React.FC<{
   embeddedBackgroundWorkEnabled: boolean;
 }> = ({ embeddedSessionChat, embeddedBackgroundWorkEnabled }) => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const sync = useSync();
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const bootstrapKeyRef = React.useRef<string | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [retryGeneration, retry] = React.useReducer((value: number) => value + 1, 0);
 
   const expectedDirectory = normalizeEmbeddedSessionDirectory(embeddedSessionChat.directory);
 
@@ -131,16 +124,25 @@ const EmbeddedSessionChatContent: React.FC<{
       return;
     }
 
-    bootstrapKeyRef.current = bootstrapKey;
-    setCurrentSession(embeddedSessionChat.sessionId, embeddedSessionChat.directory);
-    void sync.ensureSessionRenderable(embeddedSessionChat.sessionId, true);
+    let cancelled = false;
+    setLoadError(null);
+    void openPiSessionFromNavigation({
+      directory: embeddedSessionChat.directory,
+      sessionId: embeddedSessionChat.sessionId,
+    }).then(() => {
+      if (!cancelled) bootstrapKeyRef.current = bootstrapKey;
+    }).catch((error) => {
+      if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [
     currentSessionId,
     embeddedSessionChat.directory,
     embeddedSessionChat.sessionId,
     expectedDirectory,
-    setCurrentSession,
-    sync,
+    retryGeneration,
   ]);
 
   const isSessionReady = isEmbeddedSessionChatReady({
@@ -150,13 +152,23 @@ const EmbeddedSessionChatContent: React.FC<{
   });
 
   if (!isSessionReady) {
+    if (loadError) {
+      return (
+        <div className="flex h-full items-center justify-center px-6 text-center">
+          <div className="max-w-md space-y-3">
+            <p className="typography-body text-destructive">{loadError}</p>
+            <Button type="button" variant="outline" onClick={retry}>Retry</Button>
+          </div>
+        </div>
+      );
+    }
     return null;
   }
 
   return (
     <>
-      <OpenCodeSyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-      <OpenCodeUpdateToast />
+      <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+      <PiInteractionHost />
       <ChatView readOnly={embeddedSessionChat.readOnly} autoOpenDraft={false} />
       <Toaster />
     </>
@@ -171,9 +183,6 @@ function App({ apis }: AppProps) {
     }
   }, []);
 
-  const initializeLegacyApp = useConfigStore((s) => s.initializeApp);
-  const legacyIsInitialized = useConfigStore((s) => s.isInitialized);
-  const legacyIsConnected = useConfigStore((s) => s.isConnected);
   const piCatalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
   const piCatalogLoading = usePiSessionStore((state) => state.catalogLoading);
   const piRuntimeError = usePiSessionStore((state) => state.lastError);
@@ -220,13 +229,12 @@ function App({ apis }: AppProps) {
   }, []);
 
   React.useEffect(() => {
-    if (embeddedSessionChat) return;
     const state = usePiSessionStore.getState();
     if (state.catalogLoaded || state.catalogLoading) return;
     void state.loadCatalog().catch((catalogError) => {
       console.warn('[Piarium] failed to load the Pi session catalog:', catalogError);
     });
-  }, [embeddedSessionChat, runtimeEndpointEpoch]);
+  }, [runtimeEndpointEpoch]);
 
   useWideChatLayoutClass(wideChatLayoutEnabled);
 
@@ -247,7 +255,7 @@ function App({ apis }: AppProps) {
 
   const bootOutcomeKnown = bootInjectionStatus === 'valid';
   const bootViewIsMain = bootView?.screen === 'main';
-  const runtimeReady = embeddedSessionChat ? legacyIsInitialized : piCatalogLoaded;
+  const runtimeReady = piCatalogLoaded;
 
   // Splash dismissal: use the authoritative loading gate from desktopBoot.
   // Desktop shells strictly require a valid boot outcome before dismissing.
@@ -307,37 +315,6 @@ function App({ apis }: AppProps) {
 
     return () => clearTimeout(fallbackTimer);
   }, [isDesktopRuntime, runtimeReady]);
-
-  React.useEffect(() => {
-    // The Pi main application never initializes the legacy OpenCode config store.
-    // Keep the old bootstrap confined to the explicitly isolated embedded route.
-    if (!embeddedSessionChat || isVSCodeRuntime) {
-      return;
-    }
-    void initializeLegacyApp();
-  }, [embeddedSessionChat, initializeLegacyApp, isVSCodeRuntime]);
-
-  React.useEffect(() => {
-    if (!embeddedSessionChat) {
-      return;
-    }
-
-    if (isSwitchingDirectory) {
-      return;
-    }
-
-    // VS Code runtime loads sessions via VSCodeLayout bootstrap to avoid startup races.
-    if (isVSCodeRuntime) {
-      return;
-    }
-
-    if (!legacyIsConnected) {
-      return;
-    }
-    opencodeClient.setDirectory(currentDirectory);
-
-    // Session loading is handled by the sync system's bootstrap — no manual loadSessions needed.
-  }, [currentDirectory, embeddedSessionChat, isSwitchingDirectory, legacyIsConnected, isVSCodeRuntime]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -465,8 +442,6 @@ function App({ apis }: AppProps) {
     (window as unknown as { __piariumAppReady?: boolean }).__piariumAppReady = true;
     window.dispatchEvent(new Event('piarium:app-ready'));
   }, [runtimeReady, isSwitchingDirectory]);
-
-  // useEventStream replaced by SyncProvider + SyncBridge
 
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
@@ -606,18 +581,16 @@ function App({ apis }: AppProps) {
   if (embeddedSessionChat) {
     return (
       <ErrorBoundary>
-        <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-          <RuntimeAPIProvider apis={apis}>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full text-foreground bg-background">
-                <EmbeddedSessionChatContent
-                  embeddedSessionChat={embeddedSessionChat}
-                  embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
-                />
-              </div>
-            </TooltipProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
+        <RuntimeAPIProvider apis={apis}>
+          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+            <div className="h-full text-foreground bg-background">
+              <EmbeddedSessionChatContent
+                embeddedSessionChat={embeddedSessionChat}
+                embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled}
+              />
+            </div>
+          </TooltipProvider>
+        </RuntimeAPIProvider>
       </ErrorBoundary>
     );
   }
@@ -633,8 +606,6 @@ function App({ apis }: AppProps) {
     );
   }
 
-  // The main Pi surface is independent from the isolated OpenCode sync tree
-  // retained above for embedded legacy sessions.
   const isBootShell = !piCatalogLoaded && !isDesktopRuntime;
 
   return (

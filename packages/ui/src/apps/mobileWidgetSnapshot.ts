@@ -1,12 +1,12 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { SessionSummary } from '@piarium/protocol';
 
+import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
 import type { ProjectEntry } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
-import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useNotificationStore } from '@/sync/notification-store';
-import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 /**
@@ -39,9 +39,6 @@ export interface MobileWidgetSnapshot {
 
 const RECENT_LIMIT = 6;
 
-const parentIdOf = (session: Session): string | null =>
-  (session as Session & { parentID?: string | null }).parentID ?? null;
-
 const basename = (path: string): string => {
   const trimmed = path.replace(/\/+$/, '');
   return trimmed.slice(trimmed.lastIndexOf('/') + 1) || trimmed;
@@ -71,18 +68,17 @@ const projectLabelForDirectory = (directory: string | null, projects: ProjectEnt
 };
 
 export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
-  const sessions = useGlobalSessionsStore.getState().activeSessions;
+  const sessions = selectActivePiSessions(usePiSessionStore.getState());
   const unseenBySession = useNotificationStore.getState().index.session.unseenCount;
   const notifyOnSubtasks = useUIStore.getState().notifyOnSubtasks;
   const projects = useProjectsStore.getState().projects;
   const pinnedSessionIds = useSessionPinnedStore.getState().ids;
-  const sessionOrderRanks = useSessionOrderingStore.getState().rankById;
 
   let attentionCount = 0;
-  const topLevel: Array<{ session: Session; unread: boolean; project: string }> = [];
+  const topLevel: Array<{ session: SessionSummary; unread: boolean; project: string }> = [];
 
   for (const session of sessions) {
-    const isSubtask = parentIdOf(session) !== null;
+    const isSubtask = session.parentId !== undefined;
     const unseenCount = unseenBySession[session.id] ?? 0;
     const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
     if (needsAttention) {
@@ -92,15 +88,19 @@ export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
       topLevel.push({
         session,
         unread: needsAttention,
-        project: projectLabelForDirectory(resolveGlobalSessionDirectory(session), projects),
+        project: projectLabelForDirectory(normalizeProjectPath(session.cwd), projects),
       });
     }
   }
 
-  topLevel.sort((a, b) => compareSessionsByLifecycleOrder(a.session, b.session, pinnedSessionIds, sessionOrderRanks));
+  topLevel.sort((left, right) => comparePiSessions(
+    left.session,
+    right.session,
+    (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
+  ));
   const recentSessions = topLevel
     .slice(0, RECENT_LIMIT)
-    .map(({ session, unread, project }) => ({ id: session.id, title: session.title ?? '', unread, project }));
+    .map(({ session, unread, project }) => ({ id: session.id, title: piSessionTitle(session, ''), unread, project }));
 
   return { runtimeKey: getRuntimeKey(), attentionCount, recentSessions };
 };

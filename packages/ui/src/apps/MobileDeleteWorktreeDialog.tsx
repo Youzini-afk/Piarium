@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2/client';
+import type { SessionSummary } from '@piarium/protocol';
 
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -9,9 +9,7 @@ import { cn } from '@/lib/utils';
 import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions } from '@/sync/sync-context';
+import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type MobileDeleteWorktreeDialogProps = {
@@ -25,10 +23,7 @@ type MobileDeleteWorktreeDialogProps = {
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
-const getSessionDirectory = (session: Session): string => {
-  const record = session as Session & { directory?: string | null; project?: { worktree?: string | null } | null };
-  return normalizePath(record.directory ?? record.project?.worktree ?? null);
-};
+const getSessionDirectory = (session: SessionSummary): string => normalizePath(session.cwd);
 
 /**
  * Mobile worktree-deletion confirmation. Built directly on the shared
@@ -45,9 +40,8 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   onDeleted,
 }) => {
   const { t } = useI18n();
-  const liveSessions = useAllLiveSessions();
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
+  const activeSessions = usePiSessionStore(selectActivePiSessions);
+  const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const [deleteLocalBranch, setDeleteLocalBranch] = React.useState(false);
@@ -61,13 +55,9 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   // Sessions attached to this worktree — archived (not deleted) on removal,
   // matching the desktop behavior.
   const linkedSessions = React.useMemo(() => {
-    if (!worktreePath) return [] as Session[];
-    const merged = new Map<string, Session>();
-    for (const session of [...globalActiveSessions, ...liveSessions]) {
-      if (getSessionDirectory(session) === worktreePath) merged.set(session.id, session);
-    }
-    return Array.from(merged.values());
-  }, [globalActiveSessions, liveSessions, worktreePath]);
+    if (!worktreePath) return [] as SessionSummary[];
+    return activeSessions.filter((session) => getSessionDirectory(session) === worktreePath);
+  }, [activeSessions, worktreePath]);
 
   React.useEffect(() => {
     if (!open) {
@@ -124,7 +114,13 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     setIsProcessing(true);
     try {
       if (linkedSessions.length > 0) {
-        const { archivedIds, failedIds } = await archiveSessions(linkedSessions.map((session) => session.id));
+        const results = await Promise.allSettled(linkedSessions.map((session) => archiveSession(session.id)));
+        const archivedIds = results.flatMap((result, index) => (
+          result.status === 'fulfilled' ? [linkedSessions[index]!.id] : []
+        ));
+        const failedIds = results.flatMap((result, index) => (
+          result.status === 'rejected' ? [linkedSessions[index]!.id] : []
+        ));
         if (failedIds.length > 0) {
           if (archivedIds.length > 0) {
             toast.success(

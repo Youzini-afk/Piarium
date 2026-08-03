@@ -73,14 +73,14 @@ const sessionState = (sessionId: string): AppRouteState => ({
 
 describe('updateBrowserURL embedded-session-chat guard', () => {
   test('is a no-op in the embedded session-chat iframe (mirrors isVSCodeContext)', () => {
-    // The embedded iframe's URL identity (ocPanel/sessionId/directory/
-    // readOnly) must never be rewritten. updateBrowserURL rebuilds the
-    // query string from scratch using only session/tab/settings/file —
-    // which would strip ocPanel and break isEmbeddedSessionChat().
+    // The embedded iframe's Piarium URL identity must never be rewritten.
+    // updateBrowserURL rebuilds the
+    // query string from scratch, which would strip piPanel and break
+    // isEmbeddedSessionChat().
     // The guard prevents this, exactly like isVSCodeContext() does for
     // VS Code webviews.
     const history = installWindow(
-      'http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_child&directory=%2Frepo&readOnly=1',
+      'http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_child&piDirectory=%2Frepo&piReadOnly=1',
     );
 
     updateBrowserURL(sessionState('ses_grandchild'), { replace: true, force: true });
@@ -109,7 +109,7 @@ describe('isEmbeddedSessionChat caching', () => {
     // We need a fresh module cache for this test. Since the cache is
     // module-level, we test the invariant: once true, always true.
     installWindow(
-      'http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_child&directory=%2Frepo&readOnly=1',
+      'http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_child&piDirectory=%2Frepo&piReadOnly=1',
     );
 
     // First read: caches true.

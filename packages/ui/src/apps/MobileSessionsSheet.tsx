@@ -13,7 +13,7 @@ import {
   RiFolderAddLine,
   RiSearchLine,
 } from '@remixicon/react';
-import type { Session } from '@opencode-ai/sdk/v2/client';
+import type { SessionSummary } from '@piarium/protocol';
 import {
   DndContext,
   type DragEndEvent,
@@ -45,20 +45,15 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/pro
 import { cn } from '@/lib/utils';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
+import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
-import {
-  EMPTY_SESSION_ORDER_RANKS,
-  orderSessionsByLifecycleScopes,
-  useSessionOrderingStore,
-} from '@/sync/session-ordering';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { createPiSessionFromNavigation, openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
 
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
@@ -95,7 +90,7 @@ type WorktreeBucket = {
   /** Underlying worktree metadata, null when this bucket represents the project root. */
   worktree: WorktreeMetadata | null;
   /** Sessions matched into this bucket, sorted by recency desc. */
-  sessions: Session[];
+  sessions: SessionSummary[];
 };
 
 type ProjectNode = {
@@ -115,19 +110,12 @@ const WORKTREE_SESSION_INDENT = 52;
 // Extra left padding applied to each nested subsession level.
 const CHILD_INDENT_STEP = 18;
 
-const getParentId = (session: Session): string | null =>
-  (session as Session & { parentID?: string | null }).parentID ?? null;
+const getParentId = (session: SessionSummary): string | null => session.parentId ?? null;
 
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
 
-const getSessionDirectory = (session: Session): string => {
-  const sessionWithDirectory = session as Session & {
-    directory?: string | null;
-    project?: { worktree?: string | null } | null;
-  };
-  return normalizePath(sessionWithDirectory.directory ?? sessionWithDirectory.project?.worktree ?? null);
-};
+const getSessionDirectory = (session: SessionSummary): string => normalizePath(session.cwd);
 
 const getProjectLabel = (path: string): string => {
   const normalized = normalizePath(path);
@@ -136,9 +124,8 @@ const getProjectLabel = (path: string): string => {
   return segments[segments.length - 1]?.replace(/[-_]/g, ' ') || normalized;
 };
 
-const getSessionTimestamp = (session: Session): number => {
-  const raw = session.time?.updated ?? session.time?.created;
-  const value = typeof raw === 'number' ? raw : Number(raw);
+const getSessionTimestamp = (session: SessionSummary): number => {
+  const value = Date.parse(session.updatedAt || session.createdAt);
   return Number.isFinite(value) && value > 0 ? value : 0;
 };
 
@@ -179,9 +166,9 @@ const findExactProjectMatch = (projects: ProjectMeta[], directory: string): Proj
   return projects.find((project) => projectMatchesExactDirectory(project, normalizedDirectory)) ?? null;
 };
 
-const sessionMatchesQuery = (session: Session, projectLabel: string, query: string): boolean => {
+const sessionMatchesQuery = (session: SessionSummary, projectLabel: string, query: string): boolean => {
   if (!query) return true;
-  const haystack = `${session.title ?? ''} ${session.id} ${getSessionDirectory(session)} ${projectLabel}`.toLowerCase();
+  const haystack = `${session.name ?? ''} ${session.firstMessage} ${session.allMessagesText} ${session.id} ${getSessionDirectory(session)} ${projectLabel}`.toLowerCase();
   return haystack.includes(query);
 };
 
@@ -272,7 +259,7 @@ const NewWorktreeIconButton: React.FC<{
 };
 
 const SessionRow: React.FC<{
-  session: Session;
+  session: SessionSummary;
   active: boolean;
   indent: number;
   /** When provided, shown as a small second-line subtitle below the title (e.g. "Project · branch"). */
@@ -302,7 +289,7 @@ const SessionRow: React.FC<{
 }) => {
   const { t } = useI18n();
   const time = formatRelativeShort(getSessionTimestamp(session));
-  const title = session.title?.trim() || t('mobile.sessions.untitled');
+  const title = piSessionTitle(session, t('mobile.sessions.untitled'));
   return (
     <div
       className={cn(
@@ -525,23 +512,17 @@ const SortableProjectRow: React.FC<{
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'sheet' }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
-  const liveSessions = useAllLiveSessions();
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const sessions = usePiSessionStore(selectActivePiSessions);
+  const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
+  const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
+  const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
     (state) => open || variant === 'sidebar' ? state.ids : EMPTY_PINNED_SESSION_IDS,
-    [open, variant],
-  ));
-  const sessionOrderRanks = useSessionOrderingStore(React.useCallback(
-    (state) => open || variant === 'sidebar' ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
     [open, variant],
   ));
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
-  const archiveSession = useSessionUIStore((state) => state.archiveSession);
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
@@ -581,10 +562,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       setConfirmingArchiveSessionId(null);
       return;
     }
-    void refreshGlobalSessions(liveSessions);
-    // intentionally only on open transition — live overlay handles updates after that
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    void loadCatalog().catch(() => undefined);
+  }, [loadCatalog, open]);
 
   React.useEffect(() => {
     if (!editingOrder) setConfirmingDeleteId(null);
@@ -642,24 +621,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     [gitProjectPaths, projects, worktreeOrderByProject, worktreesByProject],
   );
 
-  /**
-   * Global sessions cover all directories — even unbootstrapped ones — so the tree shows
-   * accurate counts even when a worktree's live store hasn't been hydrated yet. Live
-   * sessions overlay for fresher data on the active directory.
-   */
-  const sessions = React.useMemo(() => {
-    const liveById = new Map(liveSessions.map((session) => [session.id, session]));
-    const merged = globalActiveSessions.map((session) => {
-      const liveSession = liveById.get(session.id);
-      return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
-    });
-    const seenIds = new Set(merged.map((session) => session.id));
-    for (const session of liveSessions) {
-      if (!seenIds.has(session.id)) merged.push(session);
-    }
-    return merged;
-  }, [globalActiveSessions, liveSessions]);
-
   const normalizedQuery = query.trim().toLowerCase();
 
   const projectNodes = React.useMemo<ProjectNode[]>(() => {
@@ -707,7 +668,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
     for (const node of nodes) {
       for (const bucket of node.buckets) {
-        bucket.sessions = orderSessionsByLifecycleScopes(bucket.sessions, pinnedSessionIds, sessionOrderRanks);
+        bucket.sessions = [...bucket.sessions].sort((left, right) => comparePiSessions(
+          left,
+          right,
+          (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
+        ));
         for (const session of bucket.sessions) {
           if (!getParentId(session)) node.totalSessions += 1;
         }
@@ -715,7 +680,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
+  }, [activeProjectId, pinnedSessionIds, projectsMeta, sessions]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -775,7 +740,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     // Group children by parent within this bucket, and treat sessions whose parent
     // is not in this bucket as top-level so nothing is hidden.
     const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
-    const childrenByParent = new Map<string, Session[]>();
+    const childrenByParent = new Map<string, SessionSummary[]>();
     for (const candidate of bucket.sessions) {
       const parentId = getParentId(candidate);
       if (parentId && idsInBucket.has(parentId)) {
@@ -794,7 +759,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const remaining = roots.length - visibleRoots.length;
     const canShowFewer = roots.length > SESSIONS_PER_BUCKET && remaining === 0;
 
-    const renderNode = (session: Session, rowIndent: number): React.ReactNode => {
+    const renderNode = (session: SessionSummary, rowIndent: number): React.ReactNode => {
       const children = childrenByParent.get(session.id) ?? [];
       const hasChildren = children.length > 0;
       const expanded = Boolean(expandedParents[session.id]);
@@ -844,15 +809,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     resetBucketVisibleCount(`${projectId}::${bucketKey}`);
   };
 
-  const handleSelectSession = (session: Session) => {
+  const handleSelectSession = (session: SessionSummary) => {
     const directory = getSessionDirectory(session) || null;
     // Switching session switches the working directory (handled by
     // setCurrentSession) — also move the active project so the rest of the app
     // and the active highlight follow the selected session, not just the draft.
     const project = findExactProjectMatch(projectsMeta, directory ?? '');
     if (project) setActiveProjectIdOnly(project.id);
-    void setCurrentSession(session.id, directory);
-    onOpenChange(false);
+    void openPiSessionFromNavigation({ directory, sessionId: session.id })
+      .then(() => onOpenChange(false))
+      .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
 
   // Two-step archive: first tap arms the confirm on that row, second confirms.
@@ -861,16 +827,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     setConfirmingArchiveSessionId((current) => (current === sessionId ? null : sessionId));
   };
 
-  const handleConfirmArchive = async (session: Session) => {
+  const handleConfirmArchive = async (session: SessionSummary) => {
     setConfirmingArchiveSessionId(null);
-    const ok = await archiveSession(session.id);
-    if (ok) toast.success(t('sessions.sidebar.session.archive.success'));
-    else toast.error(t('sessions.sidebar.session.archive.error'));
+    try {
+      await archiveSession(session.id);
+      toast.success(t('sessions.sidebar.session.archive.success'));
+    } catch {
+      toast.error(t('sessions.sidebar.session.archive.error'));
+    }
   };
 
   const handleStartNewChat = () => {
-    openNewSessionDraft();
-    onOpenChange(false);
+    void createPiSessionFromNavigation()
+      .then(() => onOpenChange(false))
+      .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
 
   const handleNewWorktree = (projectId: string) => {
@@ -906,7 +876,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   /** Short "Project · branch" string shown under the session title in search results. */
   const buildSessionContextLabel = React.useCallback(
-    (session: Session): string => {
+    (session: SessionSummary): string => {
       const directory = getSessionDirectory(session);
       const project = findExactProjectMatch(projectsMeta, directory);
       if (!project) return getProjectLabel(directory) || directory;
@@ -938,17 +908,17 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   // Flat lists used only by the dedicated search-results view.
   const searchSessionMatches = React.useMemo(() => {
-    if (!normalizedQuery) return [] as Session[];
-    return orderSessionsByLifecycleScopes(
-      sessions.filter((session) => {
+    if (!normalizedQuery) return [] as SessionSummary[];
+    return sessions.filter((session) => {
         const directory = getSessionDirectory(session);
         const project = findExactProjectMatch(projectsMeta, directory);
         return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
-      }),
-      pinnedSessionIds,
-      sessionOrderRanks,
-    );
-  }, [normalizedQuery, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessions]);
+      }).sort((left, right) => comparePiSessions(
+        left,
+        right,
+        (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
+      ));
+  }, [normalizedQuery, pinnedSessionIds, projectsMeta, sessions]);
 
   const searchProjectMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Array<ProjectMeta & { sessionCount: number }>;
@@ -1291,14 +1261,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             if (!value) setWorktreeDialogProjectId(null);
           }}
           onWorktreeCreated={(worktreePath, options) => {
-            if (options?.sessionId) void setCurrentSession(options.sessionId, worktreePath);
-            else
-              openNewSessionDraft({
-                selectedProjectId: worktreeDialogProjectId,
-                directoryOverride: worktreePath,
-                preserveDirectoryOverride: true,
-              });
-            onOpenChange(false);
+            const navigation = options?.sessionId
+              ? openPiSessionFromNavigation({ directory: worktreePath, sessionId: options.sessionId })
+              : createPiSessionFromNavigation({ directory: worktreePath, projectId: worktreeDialogProjectId });
+            void navigation
+              .then(() => onOpenChange(false))
+              .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
           }}
         />
         <MobileProjectEditSurface

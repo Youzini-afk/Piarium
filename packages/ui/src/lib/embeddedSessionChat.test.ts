@@ -14,17 +14,17 @@ describe('embedded session chat URL helpers', () => {
       directory: '/tmp/project',
       readOnly: true,
       basePath: '/app',
-      origin: 'https://openchamber.test',
+      origin: 'https://piarium.test',
     });
 
-    expect(url).toBe('https://openchamber.test/app?surface=desktop&ocPanel=session-chat&ocSessionId=child-123&ocReadOnly=1&ocDirectory=%2Ftmp%2Fproject');
+    expect(url).toBe('https://piarium.test/app?surface=desktop&piPanel=session-chat&piSessionId=child-123&piReadOnly=1&piDirectory=%2Ftmp%2Fproject');
     expect(url).not.toContain('sessionId=');
     expect(url).not.toContain('directory=');
     expect(url).not.toContain('readOnly=');
   });
 
-  test('parses embedded session chat config from namespaced ocPanel URL params', () => {
-    const config = readEmbeddedSessionChatConfigFromSearch('?ocPanel=session-chat&ocSessionId=child-123&ocDirectory=%2Ftmp%2Fproject&ocReadOnly=1');
+  test('parses Piarium-owned embedded session chat params', () => {
+    const config = readEmbeddedSessionChatConfigFromSearch('?piPanel=session-chat&piSessionId=child-123&piDirectory=%2Ftmp%2Fproject&piReadOnly=1');
 
     expect(config).toEqual({
       sessionId: 'child-123',
@@ -33,18 +33,13 @@ describe('embedded session chat URL helpers', () => {
     });
   });
 
-  test('parses legacy embedded session chat params for existing tabs', () => {
+  test('does not retain an OpenCode-shaped compatibility route', () => {
     const config = readEmbeddedSessionChatConfigFromSearch('?ocPanel=session-chat&sessionId=child-123&directory=%2Ftmp%2Fproject&readOnly=1');
-
-    expect(config).toEqual({
-      sessionId: 'child-123',
-      directory: '/tmp/project',
-      readOnly: true,
-    });
+    expect(config).toBeNull();
   });
 
   test('does not let generic session URL cleanup consume embedded session chat params', () => {
-    const params = new URLSearchParams('?ocPanel=session-chat&ocSessionId=child-123&ocDirectory=%2Ftmp%2Fproject&ocReadOnly=1');
+    const params = new URLSearchParams('?piPanel=session-chat&piSessionId=child-123&piDirectory=%2Ftmp%2Fproject&piReadOnly=1');
 
     expect(shouldConsumeSessionUrlParams(params)).toBe(false);
   });

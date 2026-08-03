@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { isCapacitorApp } from '@/lib/platform';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { createPiSessionFromNavigation, openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { useUIStore } from '@/stores/useUIStore';
 
 import { buildDeepLink, parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
@@ -15,7 +15,7 @@ import { buildDeepLink, parseDeepLink, type DeepLinkIntent, type SessionsFilter,
  *
  * Intents that arrive before the app is ready (cold launch from a tap/widget) or before their
  * handler is registered are stashed in a module-level holder that survives the connect flow
- * and SyncProvider remount, then applied as soon as the app becomes ready / the handler
+ * and runtime reconnect, then applied as soon as the app becomes ready / the handler
  * appears. Only the most recent intent is kept (newest wins) — a burst of taps shouldn't queue.
  */
 
@@ -37,21 +37,18 @@ let pending: DeepLinkIntent | null = null;
 const execute = (intent: DeepLinkIntent): boolean => {
   switch (intent.type) {
     case 'session':
-      void useSessionUIStore.getState().setCurrentSession(intent.sessionId, intent.directory ?? null);
+      void openPiSessionFromNavigation({
+        directory: intent.directory ?? null,
+        sessionId: intent.sessionId,
+      }).catch((error) => console.warn('[Piarium] failed to open deep-linked Pi session:', error));
       return true;
 
-    case 'new-session': {
-      const store = useSessionUIStore.getState();
-      store.openNewSessionDraft();
-      if (intent.directory || intent.projectId) {
-        store.setNewSessionDraftTarget({
-          directoryOverride: intent.directory ?? null,
-          projectId: intent.projectId ?? null,
-          selectedProjectId: intent.projectId ?? null,
-        });
-      }
+    case 'new-session':
+      void createPiSessionFromNavigation({
+        directory: intent.directory ?? null,
+        projectId: intent.projectId ?? null,
+      }).catch((error) => console.warn('[Piarium] failed to create deep-linked Pi session:', error));
       return true;
-    }
 
     case 'sessions':
       if (!handlers.openSessions) return false;

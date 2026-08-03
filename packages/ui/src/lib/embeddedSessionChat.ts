@@ -4,7 +4,7 @@ export type EmbeddedSessionChatConfig = {
   readOnly: boolean;
 };
 
-const EMBEDDED_SESSION_CHAT_PANEL = 'session-chat';
+export const PIARIUM_EMBEDDED_SESSION_CHAT_PANEL = 'session-chat';
 
 export const normalizeEmbeddedSessionDirectory = (value: string | null | undefined): string => {
   if (!value) return '';
@@ -25,30 +25,30 @@ export const buildEmbeddedSessionChatURL = ({
   const resolvedPath = basePath ?? (typeof window === 'undefined' ? '/' : window.location.pathname);
   const url = new URL(resolvedPath, resolvedOrigin);
   url.searchParams.set('surface', 'desktop');
-  url.searchParams.set('ocPanel', EMBEDDED_SESSION_CHAT_PANEL);
-  url.searchParams.set('ocSessionId', sessionId);
+  url.searchParams.set('piPanel', PIARIUM_EMBEDDED_SESSION_CHAT_PANEL);
+  url.searchParams.set('piSessionId', sessionId);
   if (readOnly) {
-    url.searchParams.set('ocReadOnly', '1');
+    url.searchParams.set('piReadOnly', '1');
   }
   if (directory && directory.trim().length > 0) {
-    url.searchParams.set('ocDirectory', directory.trim());
+    url.searchParams.set('piDirectory', directory.trim());
   }
   url.hash = '';
   return url.toString();
 };
 
 export const readEmbeddedSessionChatConfigFromParams = (params: URLSearchParams): EmbeddedSessionChatConfig | null => {
-  if (params.get('ocPanel') !== EMBEDDED_SESSION_CHAT_PANEL) {
+  if (params.get('piPanel') !== PIARIUM_EMBEDDED_SESSION_CHAT_PANEL) {
     return null;
   }
 
-  const sessionIdRaw = params.get('ocSessionId') ?? params.get('sessionId');
+  const sessionIdRaw = params.get('piSessionId');
   const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
   if (!sessionId) {
     return null;
   }
 
-  const directoryRaw = params.get('ocDirectory') ?? params.get('directory');
+  const directoryRaw = params.get('piDirectory');
   const directory = typeof directoryRaw === 'string' && directoryRaw.trim().length > 0
     ? directoryRaw.trim()
     : null;
@@ -56,10 +56,7 @@ export const readEmbeddedSessionChatConfigFromParams = (params: URLSearchParams)
   return {
     sessionId,
     directory,
-    readOnly: params.get('ocReadOnly') === '1'
-      || params.get('ocReadOnly') === 'true'
-      || params.get('readOnly') === '1'
-      || params.get('readOnly') === 'true',
+    readOnly: params.get('piReadOnly') === '1' || params.get('piReadOnly') === 'true',
   };
 };
 
@@ -76,7 +73,7 @@ export const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | nul
 };
 
 export const shouldConsumeSessionUrlParams = (params: URLSearchParams): boolean => {
-  if (params.get('ocPanel') === EMBEDDED_SESSION_CHAT_PANEL) {
+  if (params.get('piPanel') === PIARIUM_EMBEDDED_SESSION_CHAT_PANEL) {
     return false;
   }
 

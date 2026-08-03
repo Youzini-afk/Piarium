@@ -79,7 +79,7 @@ describe('readRuntimeBootstrapConfig', () => {
     const parent = makeWindow();
     parent.__PIARIUM_API_BASE_URL__ = 'https://remote.example.com';
     parent.__PIARIUM_CLIENT_TOKEN__ = 'remote-token';
-    const child = makeWindow('?ocPanel=session-chat&sessionId=ses_child');
+    const child = makeWindow('?piPanel=session-chat&piSessionId=ses_child');
     child.parent = parent;
     installWindow(child);
 

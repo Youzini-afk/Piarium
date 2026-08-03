@@ -40,20 +40,14 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSelectionStore } from '@/sync/selection-store';
-import * as sessionActions from '@/sync/session-actions';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { useContextStore } from '@/stores/contextStore';
-import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { validateWorktreeCreate, createWorktree, listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
-import { modelSupportsVariant } from '@/lib/modelVariants';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import {
   LAST_WORKTREE_SOURCE_BRANCH_KEY,
@@ -73,6 +67,7 @@ import type {
   GitHubPullRequestSummary,
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import type { WorktreeMetadata } from '@/types/worktree';
 import { useI18n } from '@/lib/i18n';
 
 type Mode = 'new-branch' | 'existing-branch';
@@ -277,13 +272,29 @@ export function NewWorktreeDialog({
       .sort();
   }, [branches]);
 
-  // Get existing worktrees for the current project to avoid conflicts
-  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  // Resolve existing worktrees directly from the project service; session state
+  // must not own Git worktree discovery.
+  const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
+  React.useEffect(() => {
+    if (!open || !projectRef) {
+      setAvailableWorktrees([]);
+      return;
+    }
+    let cancelled = false;
+    void listProjectWorktrees(projectRef)
+      .then((worktrees) => {
+        if (!cancelled) setAvailableWorktrees(worktrees);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableWorktrees([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectRef]);
   const existingWorktreeNames = React.useMemo(() => {
-    if (!projectDirectory) return new Set<string>();
-    const worktrees = availableWorktreesByProject.get(projectDirectory) ?? [];
-    return new Set(worktrees.map(wt => wt.name));
-  }, [availableWorktreesByProject, projectDirectory]);
+    return new Set(availableWorktrees.map((worktree) => worktree.name));
+  }, [availableWorktrees]);
 
   // Generate a unique slug that doesn't conflict with existing worktrees
   const generateUniqueSlug = React.useCallback((maxAttempts = 10): string => {
@@ -437,98 +448,6 @@ export function NewWorktreeDialog({
   const [isCreating, setIsCreating] = React.useState(false);
   const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
 
-  const resolveDefaultAgentName = React.useCallback((): string | undefined => {
-    const configState = useConfigStore.getState();
-    const visibleAgents = configState.getVisibleAgents();
-
-    if (configState.settingsDefaultAgent) {
-      const settingsAgent = visibleAgents.find((a) => a.name === configState.settingsDefaultAgent);
-      if (settingsAgent) {
-        return settingsAgent.name;
-      }
-    }
-
-    return visibleAgents.find((agent) => agent.name === 'build')?.name || visibleAgents[0]?.name;
-  }, []);
-
-  const resolveDefaultModelSelection = React.useCallback((): { providerID: string; modelID: string } | null => {
-    const configState = useConfigStore.getState();
-    const settingsDefaultModel = configState.settingsDefaultModel;
-    if (!settingsDefaultModel) return null;
-
-    const parsed = parseModelIdentifier(settingsDefaultModel);
-    if (!parsed) return null;
-    const { providerId: providerID, modelId: modelID } = parsed;
-
-    const modelMetadata = configState.getModelMetadata(providerID, modelID);
-    if (!modelMetadata) return null;
-    return { providerID, modelID };
-  }, []);
-
-  const resolveDefaultVariant = React.useCallback((providerID: string, modelID: string): string | undefined => {
-    const configState = useConfigStore.getState();
-    const settingsDefaultVariant = configState.settingsDefaultVariant;
-    const currentVariant = configState.currentProviderId === providerID && configState.currentModelId === modelID
-      ? configState.currentVariant
-      : undefined;
-
-    const provider = configState.providers.find((p) => p.id === providerID);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelID);
-    if (settingsDefaultVariant && modelSupportsVariant(model, settingsDefaultVariant)) return settingsDefaultVariant;
-    if (currentVariant && modelSupportsVariant(model, currentVariant)) return currentVariant;
-    return undefined;
-  }, []);
-
-  const applySessionModelAndAgentDefaults = React.useCallback((args: {
-    sessionId: string;
-    providerID: string;
-    modelID: string;
-    agentName?: string;
-    variant?: string;
-  }) => {
-    const configState = useConfigStore.getState();
-
-    try {
-      useContextStore.getState().saveSessionModelSelection(args.sessionId, args.providerID, args.modelID);
-    } catch {
-      // ignore
-    }
-
-    if (!args.agentName) {
-      return;
-    }
-
-    try {
-      configState.setAgent(args.agentName);
-    } catch {
-      // ignore
-    }
-    try {
-      useContextStore.getState().saveSessionAgentSelection(args.sessionId, args.agentName);
-    } catch {
-      // ignore
-    }
-    try {
-      useContextStore.getState().saveAgentModelForSession(args.sessionId, args.agentName, args.providerID, args.modelID);
-    } catch {
-      // ignore
-    }
-    if (args.variant !== undefined) {
-      try {
-        configState.setCurrentVariant(args.variant);
-      } catch {
-        // ignore
-      }
-      try {
-        useContextStore
-          .getState()
-          .saveAgentModelVariantForSession(args.sessionId, args.agentName, args.providerID, args.modelID, args.variant);
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
-
   const sendLinkedContextMessage = React.useCallback(async (args: {
     sessionId: string;
     directory: string;
@@ -539,28 +458,6 @@ export function NewWorktreeDialog({
     if (!projectDirectory || !github) {
       return;
     }
-
-    const configState = useConfigStore.getState();
-    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
-    const defaultModel = resolveDefaultModelSelection();
-    const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
-    const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
-    const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
-
-    if (!providerID || !modelID) {
-      toast.error(t('session.newWorktree.error.noModelSelected'));
-      return;
-    }
-
-    const variant = resolveDefaultVariant(providerID, modelID);
-
-    applySessionModelAndAgentDefaults({
-      sessionId: args.sessionId,
-      providerID,
-      modelID,
-      agentName,
-      variant,
-    });
 
     if (args.issue) {
       if (!github.issueGet || !github.issueComments) {
@@ -587,21 +484,13 @@ export function NewWorktreeDialog({
         comments: commentsRes.comments ?? [],
       });
 
-      await useSessionUIStore.getState().sendMessage(
+      const accepted = await usePiSessionStore.getState().prompt(
+        args.sessionId,
         visiblePromptText,
-        providerID,
-        modelID,
-        agentName,
         undefined,
-        undefined,
-        [
-          { text: instructionsText, synthetic: true },
-          { text: contextText, synthetic: true },
-        ],
-        variant,
-        undefined,
-        { sessionId: args.sessionId },
+        `${instructionsText}\n\n${contextText}`,
       );
+      if (!accepted) throw new Error('Pi rejected the linked issue prompt');
 
       toast.success(t('session.newWorktree.toast.sessionFromIssue'));
       return;
@@ -627,33 +516,17 @@ export function NewWorktreeDialog({
       const instructionsText = await renderMagicPrompt('github.pr.review.instructions');
       const contextText = buildPullRequestContextText(prContext);
 
-      await useSessionUIStore.getState().sendMessage(
+      const accepted = await usePiSessionStore.getState().prompt(
+        args.sessionId,
         visiblePromptText,
-        providerID,
-        modelID,
-        agentName,
         undefined,
-        undefined,
-        [
-          { text: instructionsText, synthetic: true },
-          { text: contextText, synthetic: true },
-        ],
-        variant,
-        undefined,
-        { sessionId: args.sessionId },
+        `${instructionsText}\n\n${contextText}`,
       );
+      if (!accepted) throw new Error('Pi rejected the linked pull request prompt');
 
       toast.success(t('session.newWorktree.toast.sessionFromPr'));
     }
-  }, [
-    github,
-    projectDirectory,
-    applySessionModelAndAgentDefaults,
-    resolveDefaultAgentName,
-    resolveDefaultModelSelection,
-    resolveDefaultVariant,
-    t,
-  ]);
+  }, [github, projectDirectory, t]);
 
   // Get current state based on mode
   const currentState = mode === 'new-branch' ? newBranchState : existingBranchState;
@@ -953,25 +826,11 @@ export function NewWorktreeDialog({
             ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
             : t('session.newWorktree.newSessionTitle');
 
-        const session = await sessionActions.createSession(sessionTitle, metadata.path, null);
-        if (!session?.id) {
-          throw new Error('Failed to create session');
-        }
-
-        createdSessionId = session.id;
-        useSessionUIStore.getState().setSessionDirectory(session.id, metadata.path);
-        useSessionUIStore.getState().setWorktreeMetadata(session.id, metadata);
+        const session = await usePiSessionStore.getState().createSession(metadata.path, sessionTitle);
+        createdSessionId = session.sessionId;
         onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
         onOpenChange(false);
         setIsCreating(false);
-
-        void sessionActions.updateSessionTitle(session.id, sessionTitle).catch(() => undefined);
-
-        try {
-          useSessionUIStore.getState().initializeNewOpenChamberSession(session.id, useConfigStore.getState().agents);
-        } catch {
-          // ignore
-        }
       } else {
         onOpenChange(false);
         setIsCreating(false);

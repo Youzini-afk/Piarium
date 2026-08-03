@@ -91,3 +91,18 @@ Piarium therefore does not add an automatic approval policy for unrelated extens
 UIs. Individual tools and packages keep their own explicit safety and confirmation behavior; if a
 future Pi permission contract is introduced, it must be integrated as a Pi-native capability with
 an independently reviewable policy.
+
+## Mobile and embedded session surfaces
+
+The dedicated mobile application and the context-panel iframe now mount the same `PiChatView`, Pi
+interaction host, and endpoint-aware session store as the primary desktop surface. Neither root
+creates an OpenCode `SyncProvider`. Mobile session grouping, parent/child expansion, search, pin
+ordering, create/open/archive, edge-swipe navigation, deep links, widget snapshots, and worktree
+deletion all operate on `SessionSummary` and Pi runtime methods. The worktree creation flow creates
+Pi sessions directly and submits linked GitHub issue or pull-request context through Pi's native
+prompt/instructions contract.
+
+The iframe URL ABI is Piarium-owned: `piPanel`, `piSessionId`, `piDirectory`, and `piReadOnly`.
+Legacy `ocPanel`/OpenCode-shaped aliases are deliberately not accepted. The parent still supplies
+the authenticated runtime bootstrap through the same-origin message handshake, while the child
+opens the target Pi session directly and keeps in-panel navigation stable.

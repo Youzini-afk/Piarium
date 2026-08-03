@@ -64,7 +64,7 @@ describe('embedded session chat URL', () => {
     });
 
     const url = new URL(src);
-    expect(url.searchParams.get('ocPanel')).toBe('session-chat');
+    expect(url.searchParams.get('piPanel')).toBe('session-chat');
     expect(url.searchParams.get('surface')).toBe('desktop');
     expect(url.searchParams.get('themeMode')).toBe('system');
     expect(url.searchParams.get('themeVariant')).toBe('dark');
@@ -140,14 +140,14 @@ describe('embedded session chat URL', () => {
     const readOnly = getOrCreateEmbeddedSessionChatURL(cache, 'tab-1', 'ses_1', '/repo', true, theme);
 
     expect(readOnly).not.toBe(writable);
-    expect(new URL(writable).searchParams.get('readOnly')).toBeNull();
-    expect(new URL(readOnly).searchParams.get('readOnly')).toBe('1');
+    expect(new URL(writable).searchParams.get('piReadOnly')).toBeNull();
+    expect(new URL(readOnly).searchParams.get('piReadOnly')).toBe('1');
   });
 });
 
 describe('isEmbeddedSessionChat', () => {
   test('is true only for the session-chat panel search param', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_1');
+    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_1');
     resetEmbeddedSessionChatCache();
     expect(isEmbeddedSessionChat()).toBe(true);
 
@@ -165,7 +165,7 @@ describe('isEmbeddedSessionChat', () => {
     // global — it never changes. The embedded iframe's identity is equally
     // fixed at mount (the parent builds the src); caching the first read
     // makes detection just as stable, surviving any URL rewrite.
-    installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_1');
+    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_1');
     resetEmbeddedSessionChatCache();
 
     // First read: caches true.
@@ -183,7 +183,7 @@ describe('isEmbeddedSessionChat', () => {
 
 describe('getEmbeddedSessionChatOriginSessionId', () => {
   test('returns the URL sessionId when embedded', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=ses_child&directory=%2Frepo');
+    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_child&piDirectory=%2Frepo');
     resetEmbeddedSessionChatCache();
     expect(getEmbeddedSessionChatOriginSessionId()).toBe('ses_child');
   });
@@ -199,13 +199,13 @@ describe('getEmbeddedSessionChatOriginSessionId', () => {
   });
 
   test('returns null when embedded URL is missing sessionId param', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&directory=%2Frepo');
+    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piDirectory=%2Frepo');
     resetEmbeddedSessionChatCache();
     expect(getEmbeddedSessionChatOriginSessionId()).toBeNull();
   });
 
   test('trims whitespace', () => {
-    installWindowLocation('http://127.0.0.1:5173/app?ocPanel=session-chat&sessionId=%20%20ses_child%20%20');
+    installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=%20%20ses_child%20%20');
     resetEmbeddedSessionChatCache();
     expect(getEmbeddedSessionChatOriginSessionId()).toBe('ses_child');
   });
@@ -263,7 +263,7 @@ describe('embedded runtime bootstrap handshake', () => {
         });
       },
     };
-    const url = new URL('piarium-ui://app/index.html?ocPanel=session-chat&sessionId=ses_1');
+    const url = new URL('piarium-ui://app/index.html?piPanel=session-chat&piSessionId=ses_1');
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {
@@ -312,7 +312,7 @@ describe('embedded runtime bootstrap handshake', () => {
     let timeoutCleared = false;
     let retryCleared = false;
     const parent = { postMessage() {} };
-    const url = new URL('piarium-ui://app/index.html?ocPanel=session-chat&sessionId=ses_1');
+    const url = new URL('piarium-ui://app/index.html?piPanel=session-chat&piSessionId=ses_1');
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {

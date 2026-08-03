@@ -1,10 +1,10 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { SessionSummary } from '@piarium/protocol';
 
-import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { comparePiSessions } from '@/components/pi-session/sessionPresentation';
+import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { selectActivePiSessions, usePiSessionStore } from '@/stores/usePiSessionStore';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 
 /**
  * Native-feeling edge swipe to switch sessions in the mobile chat: start a horizontal swipe
@@ -27,29 +27,28 @@ const EDGE_ZONE = 32; // px from a side where the swipe must begin
 const MIN_DISTANCE = 64; // px of horizontal travel required to commit a switch
 const MAX_OFF_AXIS_RATIO = 0.7; // |dy| must stay below |dx| * this (keep it horizontal)
 
-const parentIdOf = (session: Session): string | null =>
-  (session as Session & { parentID?: string | null }).parentID ?? null;
-
 /** Top-level sessions across all projects in shared display order. */
-const orderedTopLevelSessions = (): Session[] => {
+const orderedTopLevelSessions = (): SessionSummary[] => {
   const pinnedSessionIds = useSessionPinnedStore.getState().ids;
-  const sessionOrderRanks = useSessionOrderingStore.getState().rankById;
-  return useGlobalSessionsStore
-    .getState()
-    .activeSessions.filter((session) => parentIdOf(session) === null)
+  return selectActivePiSessions(usePiSessionStore.getState())
+    .filter((session) => session.parentId === undefined)
     .slice()
-    .sort((a, b) => compareSessionsByLifecycleOrder(a, b, pinnedSessionIds, sessionOrderRanks));
+    .sort((left, right) => comparePiSessions(
+      left,
+      right,
+      (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
+    ));
 };
 
 /**
  * Switch to the session `step` positions away from the current one (clamped — no wrap).
  * Returns true if a switch actually happened.
  */
-const switchByStep = (step: number): boolean => {
+const switchByStep = async (step: number): Promise<boolean> => {
   const ordered = orderedTopLevelSessions();
   if (ordered.length < 2) return false;
 
-  const currentId = useSessionUIStore.getState().currentSessionId;
+  const currentId = usePiSessionStore.getState().currentSessionId;
   const index = ordered.findIndex((session) => session.id === currentId);
   if (index < 0) return false;
 
@@ -57,7 +56,7 @@ const switchByStep = (step: number): boolean => {
   if (targetIndex < 0 || targetIndex >= ordered.length) return false;
 
   const target = ordered[targetIndex];
-  useSessionUIStore.getState().setCurrentSession(target.id, resolveGlobalSessionDirectory(target));
+  await openPiSessionFromNavigation({ directory: target.cwd, sessionId: target.id });
   return true;
 };
 
@@ -113,9 +112,9 @@ export const useEdgeSwipeSessionSwitch = (
       if (!fromLeftEdge && dx >= 0) return;
 
       const step = fromLeftEdge ? -1 : 1;
-      if (switchByStep(step)) {
-        onSwitchRef.current?.(step < 0 ? 'prev' : 'next');
-      }
+      void switchByStep(step).then((switched) => {
+        if (switched) onSwitchRef.current?.(step < 0 ? 'prev' : 'next');
+      }).catch(() => undefined);
     };
 
     element.addEventListener('touchstart', onTouchStart, { passive: true });

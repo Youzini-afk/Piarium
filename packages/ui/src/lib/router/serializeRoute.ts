@@ -113,7 +113,7 @@ export function updateBrowserURL(
   }
 
   // Both VS Code webviews and embedded session-chat iframes carry session
-  // identity outside the route params (`__VSCODE_CONFIG__` / `?ocPanel=…`).
+  // identity outside the route params (`__VSCODE_CONFIG__` / `?piPanel=…`).
   // Rebuilding the URL here would strip those params, so skip entirely.
   if (isVSCodeContext() || isEmbeddedSessionChat()) {
     return;

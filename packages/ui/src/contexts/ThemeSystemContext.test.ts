@@ -36,7 +36,7 @@ afterAll(() => {
 
 describe('ThemeSystemProvider embedded bootstrap', () => {
   test('uses parent effective variant for embedded system theme before iframe matchMedia', () => {
-    installWindow('?ocPanel=session-chat&themeMode=system&themeVariant=dark', false);
+    installWindow('?piPanel=session-chat&themeMode=system&themeVariant=dark', false);
     resetEmbeddedSessionChatCache();
 
     expect(getInitialSystemPreference()).toBe(true);
@@ -52,14 +52,14 @@ describe('ThemeSystemProvider embedded bootstrap', () => {
         variant: 'dark' as const,
       },
     };
-    installWindow('?ocPanel=session-chat', false, customTheme);
+    installWindow('?piPanel=session-chat', false, customTheme);
     resetEmbeddedSessionChatCache();
 
     expect(readEmbeddedThemeBootstrap()).toBe(customTheme);
   });
 
   test('rejects an invalid parent theme bootstrap', () => {
-    installWindow('?ocPanel=session-chat', false, { metadata: { id: 'invalid' } });
+    installWindow('?piPanel=session-chat', false, { metadata: { id: 'invalid' } });
     resetEmbeddedSessionChatCache();
 
     expect(readEmbeddedThemeBootstrap()).toBeNull();
