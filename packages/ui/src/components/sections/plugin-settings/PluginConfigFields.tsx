@@ -36,6 +36,10 @@ interface BaseFieldProps {
   path: readonly string[];
 }
 
+function optionKey(value: boolean | string): string {
+  return typeof value === 'boolean' ? `boolean:${String(value)}` : `string:${value}`;
+}
+
 const DefaultAction: React.FC<{
   disabled?: boolean;
   explicit: boolean;
@@ -145,6 +149,42 @@ export const PluginBooleanField: React.FC<BooleanFieldProps> = ({
   );
 };
 
+export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
+  description,
+  disabled,
+  draft,
+  label,
+  onRemove,
+  onSet,
+  path,
+}) => {
+  const { t } = useI18n();
+  const field = useField({ draft, onRemove, onSet, path });
+  const current = validBoolean(field.raw);
+  const value = current === undefined ? 'default' : optionKey(current);
+  return (
+    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+      <Select
+        value={value}
+        disabled={disabled}
+        onValueChange={(next) => {
+          if (next === 'default') field.remove();
+          else field.set(next === optionKey(true));
+        }}
+      >
+        <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
+          <SelectItem value={optionKey(true)}>{t('settings.piarium.pluginSettings.field.enabled')}</SelectItem>
+          <SelectItem value={optionKey(false)}>{t('settings.piarium.pluginSettings.field.disabled')}</SelectItem>
+        </SelectContent>
+      </Select>
+    </SettingsFieldRow>
+  );
+};
+
 interface NumberFieldProps extends BaseFieldProps {
   defaultValue: number;
   max?: number;
@@ -187,6 +227,63 @@ export const PluginNumberField: React.FC<NumberFieldProps> = ({
   );
 };
 
+interface OptionalNumberFieldProps extends BaseFieldProps {
+  defaultValue?: number | null | string;
+  emptyLabel?: string;
+  emptyValue?: null | string;
+  fallbackValue?: number;
+  max?: number;
+  min?: number;
+  step?: number;
+  unit?: React.ReactNode;
+}
+
+export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
+  defaultValue,
+  description,
+  disabled,
+  draft,
+  emptyLabel,
+  emptyValue,
+  fallbackValue,
+  label,
+  max,
+  min,
+  onRemove,
+  onSet,
+  path,
+  step,
+  unit,
+}) => {
+  const field = useField({ draft, onRemove, onSet, path });
+  const explicitNumber = validFiniteNumber(field.raw);
+  const value = explicitNumber ?? (!field.explicit && typeof defaultValue === 'number'
+    ? defaultValue
+    : undefined);
+  return (
+    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+      <NumberInput
+        value={value}
+        fallbackValue={fallbackValue ?? (typeof defaultValue === 'number' ? defaultValue : undefined)}
+        disabled={disabled}
+        min={min}
+        max={max}
+        step={step}
+        emptyLabel={emptyLabel}
+        placeholder={emptyLabel}
+        onClear={() => {
+          if (emptyValue === undefined) field.remove();
+          else field.set(emptyValue);
+        }}
+        onValueChange={field.set}
+        containerClassName="w-36"
+      />
+      {unit ? <span className="typography-meta text-muted-foreground">{unit}</span> : null}
+      <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
+    </SettingsFieldRow>
+  );
+};
+
 interface SelectOption {
   label: React.ReactNode;
   value: boolean | string;
@@ -196,10 +293,6 @@ interface SelectFieldProps extends BaseFieldProps {
   defaultValue: boolean | string;
   options: readonly SelectOption[];
 }
-
-const optionKey = (value: boolean | string): string => (
-  typeof value === 'boolean' ? `boolean:${String(value)}` : `string:${value}`
-);
 
 export const PluginSelectField: React.FC<SelectFieldProps> = ({
   defaultValue,
@@ -244,6 +337,7 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
 
 interface StringListFieldProps extends BaseFieldProps {
   defaultValue?: readonly string[];
+  emptyArrayOnClear?: boolean;
   placeholder?: string;
 }
 
@@ -252,6 +346,7 @@ export const PluginStringListField: React.FC<StringListFieldProps> = ({
   description,
   disabled,
   draft,
+  emptyArrayOnClear = false,
   label,
   onRemove,
   onSet,
@@ -278,7 +373,10 @@ export const PluginStringListField: React.FC<StringListFieldProps> = ({
             .split(/\r?\n/)
             .map((entry) => entry.trim())
             .filter(Boolean);
-          if (next.length === 0) field.remove();
+          if (next.length === 0) {
+            if (emptyArrayOnClear) field.set([]);
+            else field.remove();
+          }
           else field.set(next);
         }}
         className="min-h-20 min-w-0 flex-1 font-mono"

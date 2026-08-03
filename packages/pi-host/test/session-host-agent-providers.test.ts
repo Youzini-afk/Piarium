@@ -183,6 +183,29 @@ export default function (pi: any) {
       );
       assert.equal(updated.success, true);
       assert.match(updated.message, /Applied update/);
+      const createdProjectAgent = await host.runAgentProviderAction(
+        "pi-subagents",
+        "create-agent",
+        undefined,
+        {
+          config: JSON.stringify({
+            description: "Project-scoped role",
+            name: "project-role",
+            scope: "user",
+          }),
+          scope: "project",
+        },
+      );
+      assert.equal(createdProjectAgent.success, true);
+      await assert.rejects(
+        host.runAgentProviderAction(
+          "pi-subagents",
+          "create-workflow",
+          undefined,
+          { config: { description: "Missing steps", name: "broken-workflow" }, scope: "user" },
+        ),
+        (error: unknown) => error instanceof HostError && error.code === "invalid_params",
+      );
       const actions = (await readFile(actionLog, "utf8"))
         .trim()
         .split(/\r?\n/)
@@ -193,6 +216,16 @@ export default function (pi: any) {
             action.action === "update"
             && action.agent === "custom"
             && action.agentScope === "user",
+        ),
+      );
+      assert.ok(
+        actions.some(
+          (action) =>
+            action.action === "create"
+            && action.agentScope === "project"
+            && typeof action.config === "object"
+            && action.config !== null
+            && (action.config as Record<string, unknown>).scope === "project",
         ),
       );
       await assert.rejects(

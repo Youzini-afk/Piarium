@@ -97,6 +97,35 @@ function optionalScope(record: Record<string, JsonValue>): "user" | "project" | 
   return value;
 }
 
+function createConfigForScope(
+  value: JsonValue,
+  scope: "user" | "project",
+  kind: "agent" | "workflow",
+): Record<string, JsonValue> {
+  let parsed: JsonValue = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value) as JsonValue;
+    } catch {
+      throw new HostError("invalid_params", "input.config must be an object or a JSON object string");
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new HostError("invalid_params", "input.config must be an object or a JSON object string");
+  }
+  const config: Record<string, JsonValue> = {
+    ...(parsed as Record<string, JsonValue>),
+    scope,
+  };
+  if (kind === "workflow" && (!Array.isArray(config.steps) || config.steps.length === 0)) {
+    throw new HostError("invalid_params", "input.config.steps is required for create-workflow");
+  }
+  if (kind === "agent" && config.steps !== undefined) {
+    throw new HostError("invalid_params", "input.config.steps is only valid for create-workflow");
+  }
+  return config;
+}
+
 function toolResultText(result: unknown): { message: string; success: boolean } {
   if (typeof result !== "object" || result === null) {
     return { message: "pi-subagents returned an invalid result", success: false };
@@ -368,7 +397,14 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
       const result = await this.#execute({
         action: "create",
         agentScope: scope,
-        config: record.config,
+        // pi-subagents currently chooses the create destination from config.scope,
+        // while agentScope controls discovery and other mutations. Keep the
+        // trusted top-level Piarium scope authoritative in both channels.
+        config: createConfigForScope(
+          record.config,
+          scope,
+          action === "create-workflow" ? "workflow" : "agent",
+        ),
       });
       if (result.success) await this.#context.session.reload();
       return this.#result(action, undefined, result);
