@@ -6,6 +6,7 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiPackageScope,
   PiAgentCatalogSnapshot,
   PiAgentProviderActionResult,
   PiConfigDocumentSnapshot,
@@ -222,7 +223,7 @@ export interface HostMethodMap {
     result: RecoveryOperationResult;
   };
   "package.install": {
-    params: { source: string };
+    params: { scope: PiPackageScope; source: string };
     result: PackageDescriptor;
   };
   "package.list": {
@@ -230,7 +231,7 @@ export interface HostMethodMap {
     result: PackageDescriptor[];
   };
   "package.remove": {
-    params: { source: string };
+    params: { scope: PiPackageScope; source: string };
     result: { removed: boolean };
   };
   "package.update": {

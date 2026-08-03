@@ -1,6 +1,6 @@
 import type { PiSessionFeatureState } from "./session-features.js";
 
-export const PIARIUM_PROTOCOL_VERSION = 13 as const;
+export const PIARIUM_PROTOCOL_VERSION = 14 as const;
 
 export type ProtocolVersion = typeof PIARIUM_PROTOCOL_VERSION;
 
@@ -106,9 +106,12 @@ export type ProviderAuthType = "api_key" | "oauth";
 export interface PackageDescriptor {
   enabled: boolean;
   name: string;
+  scope: PiPackageScope;
   source: string;
   version?: string;
 }
+
+export type PiPackageScope = "global" | "project";
 
 export type PiResourceKind = "prompt" | "skill";
 

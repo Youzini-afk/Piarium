@@ -1,8 +1,15 @@
 import React from 'react';
-import type { PackageDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type { PackageDescriptor, PiPackageScope, RuntimeContextTarget } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { toast } from '@/components/ui';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
@@ -10,6 +17,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   findPiPackage,
+  isPiPackageUpdatable,
   installPiPackage,
   listPiPackages,
   piPackageNameFromSource,
@@ -122,8 +130,10 @@ export const PluginsPage: React.FC = () => {
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [customSource, setCustomSource] = React.useState('');
+  const [installScope, setInstallScope] = React.useState<PiPackageScope>('global');
   const [busyAction, setBusyAction] = React.useState<{
     action: PackageAction;
+    scope?: PiPackageScope;
     source?: string;
   } | null>(null);
   const refreshGenerationRef = React.useRef(0);
@@ -142,7 +152,9 @@ export const PluginsPage: React.FC = () => {
         || runtimeKey !== getRuntimeKey()
       ) return;
       setPackages([...next].sort((left, right) => (
-        left.name.localeCompare(right.name) || left.source.localeCompare(right.source)
+        left.scope.localeCompare(right.scope)
+        || left.name.localeCompare(right.name)
+        || left.source.localeCompare(right.source)
       )));
       setLoaded(true);
     } catch (error) {
@@ -171,16 +183,17 @@ export const PluginsPage: React.FC = () => {
   const runPackageAction = React.useCallback(async (
     action: PackageAction,
     source?: string,
+    scope: PiPackageScope = installScope,
   ) => {
     if (action !== 'update-all' && !source) return;
     const actionTargetKey = targetKey;
     const runtimeKey = getRuntimeKey();
-    setBusyAction(source ? { action, source } : { action });
+    setBusyAction(source ? { action, scope, source } : { action });
     try {
       if (action === 'install') {
-        await installPiPackage(runtimeTarget, source!);
+        await installPiPackage(runtimeTarget, source!, scope);
       } else if (action === 'remove') {
-        const result = await removePiPackage(runtimeTarget, source!);
+        const result = await removePiPackage(runtimeTarget, source!, scope);
         if (!result.removed) throw new Error(`Pi package is not configured: ${source}`);
       } else if (action === 'update') {
         await updatePiPackages(runtimeTarget, source!);
@@ -199,16 +212,21 @@ export const PluginsPage: React.FC = () => {
     } finally {
       setBusyAction(null);
     }
-  }, [refresh, runtimeTarget, t, targetKey]);
+  }, [installScope, refresh, runtimeTarget, t, targetKey]);
 
   const normalizedCustomSource = customSource.trim();
   const customPackage = normalizedCustomSource
-    ? packages.find((candidate) => candidate.source === normalizedCustomSource)
-      ?? findPiPackage(packages, piPackageNameFromSource(normalizedCustomSource))
+    ? packages.find((candidate) => (
+      candidate.scope === installScope && candidate.source === normalizedCustomSource
+    ))
+      ?? findPiPackage(packages, piPackageNameFromSource(normalizedCustomSource), installScope)
     : undefined;
   const missingRecommended = RECOMMENDED_PACKAGES.filter((item) => (
-    findPiPackage(packages, item.name) === undefined
+    findPiPackage(packages, item.name, installScope) === undefined
   ));
+  const customPackageUpdatable = customPackage
+    ? isPiPackageUpdatable(customPackage.source)
+    : false;
   const isBusy = busyAction !== null;
 
   return (
@@ -229,6 +247,15 @@ export const PluginsPage: React.FC = () => {
             {t('settings.piarium.plugins.ownership')}
           </p>
           <div className="flex shrink-0 items-center gap-2">
+            <Select value={installScope} onValueChange={(value) => setInstallScope(value as PiPackageScope)}>
+              <SelectTrigger className="h-7 w-36 typography-micro" aria-label="Package install scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="global">User packages</SelectItem>
+                <SelectItem value="project">Project packages</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               type="button"
               variant="outline"
@@ -260,15 +287,20 @@ export const PluginsPage: React.FC = () => {
         ) : null}
 
         {packages.map((entry) => {
-          const action = busyAction?.source === entry.source ? busyAction.action : null;
+          const action = busyAction?.source === entry.source && busyAction.scope === entry.scope
+            ? busyAction.action
+            : null;
           return (
-            <div key={entry.source} className="rounded-lg border border-border/60 px-3 py-3">
+            <div key={`${entry.scope}:${entry.source}`} className="rounded-lg border border-border/60 px-3 py-3">
               <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <Icon name="plug-2" className="size-4 text-[var(--status-success)]" />
                     <span className="typography-ui-label text-foreground">{entry.name}</span>
                     <PackageStatus configured />
+                    <span className="rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
+                      {entry.scope === 'project' ? 'project' : 'user'}
+                    </span>
                     {entry.version ? (
                       <span className="typography-micro text-muted-foreground">v{entry.version}</span>
                     ) : null}
@@ -276,22 +308,26 @@ export const PluginsPage: React.FC = () => {
                   <p className="break-all font-mono typography-micro text-muted-foreground">{entry.source}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    disabled={isBusy}
-                    onClick={() => void runPackageAction('update', entry.source)}
-                    className="!font-normal"
-                  >
-                    {packageActionLabel(action, 'update', t)}
-                  </Button>
+                  {isPiPackageUpdatable(entry.source) ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={isBusy}
+                      onClick={() => void runPackageAction('update', entry.source, entry.scope)}
+                      className="!font-normal"
+                    >
+                      {packageActionLabel(action, 'update', t)}
+                    </Button>
+                  ) : (
+                    <span className="px-1.5 typography-micro text-muted-foreground">Local source</span>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
                     size="xs"
                     disabled={isBusy}
-                    onClick={() => void runPackageAction('remove', entry.source)}
+                    onClick={() => void runPackageAction('remove', entry.source, entry.scope)}
                     className="!font-normal text-muted-foreground"
                   >
                     {packageActionLabel(action, 'remove', t)}
@@ -316,9 +352,11 @@ export const PluginsPage: React.FC = () => {
         description={t('settings.piarium.plugins.recommended.description')}
       >
         {RECOMMENDED_PACKAGES.map((item) => {
-          const configured = findPiPackage(packages, item.name);
+          const configured = findPiPackage(packages, item.name, installScope);
           const source = configured?.source ?? item.source;
-          const action = busyAction?.source === source ? busyAction.action : null;
+          const action = busyAction?.source === source && busyAction.scope === installScope
+            ? busyAction.action
+            : null;
           return (
             <div key={item.name} className="rounded-lg border border-border/60 px-3 py-3">
               <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
@@ -340,7 +378,7 @@ export const PluginsPage: React.FC = () => {
                     variant="outline"
                     size="xs"
                     disabled={isBusy}
-                    onClick={() => void runPackageAction('install', item.source)}
+                    onClick={() => void runPackageAction('install', item.source, installScope)}
                     className="!font-normal"
                   >
                     {packageActionLabel(action, 'install', t)}
@@ -367,9 +405,11 @@ export const PluginsPage: React.FC = () => {
           onSubmit={(event) => {
             event.preventDefault();
             if (!normalizedCustomSource) return;
+            if (customPackage && !customPackageUpdatable) return;
             void runPackageAction(
               customPackage ? 'update' : 'install',
               customPackage?.source ?? normalizedCustomSource,
+              installScope,
             );
           }}
         >
@@ -385,16 +425,19 @@ export const PluginsPage: React.FC = () => {
             type="submit"
             variant="outline"
             size="sm"
-            disabled={!normalizedCustomSource || isBusy}
+            disabled={!normalizedCustomSource || isBusy || (customPackage !== undefined && !customPackageUpdatable)}
             className="shrink-0 !font-normal"
           >
-            {packageActionLabel(
-              busyAction?.source === (customPackage?.source ?? normalizedCustomSource)
-                ? busyAction.action
-                : null,
-              customPackage ? 'update' : 'install',
-              t,
-            )}
+            {customPackage && !customPackageUpdatable
+              ? 'Configured local package'
+              : packageActionLabel(
+                busyAction?.source === (customPackage?.source ?? normalizedCustomSource)
+                  && busyAction.scope === installScope
+                  ? busyAction.action
+                  : null,
+                customPackage ? 'update' : 'install',
+                t,
+              )}
           </Button>
         </form>
       </SettingsSection>

@@ -1,4 +1,4 @@
-import type { PackageDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type { PackageDescriptor, PiPackageScope, RuntimeContextTarget } from '@piarium/protocol';
 import { getPiRuntimeConnection } from './client';
 
 export const piPackageNameFromSource = (source: string): string => {
@@ -21,11 +21,20 @@ export const piPackageNameFromSource = (source: string): string => {
   return versionIndex > 0 ? basename.slice(0, versionIndex) : basename;
 };
 
+export const isPiPackageUpdatable = (source: string): boolean => {
+  const trimmed = source.trim();
+  return trimmed.startsWith('npm:')
+    || /^git@/i.test(trimmed)
+    || /^(?:git|https?|ssh):\/\//i.test(trimmed);
+};
+
 export const findPiPackage = (
   packages: PackageDescriptor[],
   name: string,
+  scope?: PiPackageScope,
 ): PackageDescriptor | undefined => packages.find((candidate) => (
-  candidate.name === name || piPackageNameFromSource(candidate.source) === name
+  (scope === undefined || candidate.scope === scope)
+  && (candidate.name === name || piPackageNameFromSource(candidate.source) === name)
 ));
 
 export const listPiPackages = async (target: RuntimeContextTarget) => {
@@ -33,9 +42,13 @@ export const listPiPackages = async (target: RuntimeContextTarget) => {
   return client.request('package.list', target);
 };
 
-export const installPiPackage = async (target: RuntimeContextTarget, source: string) => {
+export const installPiPackage = async (
+  target: RuntimeContextTarget,
+  source: string,
+  scope: PiPackageScope,
+) => {
   const { client } = await getPiRuntimeConnection();
-  return client.request('package.install', { ...target, source });
+  return client.request('package.install', { ...target, scope, source });
 };
 
 export const updatePiPackages = async (target: RuntimeContextTarget, source?: string) => {
@@ -46,7 +59,11 @@ export const updatePiPackages = async (target: RuntimeContextTarget, source?: st
   });
 };
 
-export const removePiPackage = async (target: RuntimeContextTarget, source: string) => {
+export const removePiPackage = async (
+  target: RuntimeContextTarget,
+  source: string,
+  scope: PiPackageScope,
+) => {
   const { client } = await getPiRuntimeConnection();
-  return client.request('package.remove', { ...target, source });
+  return client.request('package.remove', { ...target, scope, source });
 };

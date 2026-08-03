@@ -64,8 +64,9 @@ replacements land.
 
 ## Pi-native session features
 
-Protocol version 13 owns Goal, Assist, pinned-context state, and parent-session creation as Piarium's
-native runtime ABI. Goal, Assist, and pinned-context state use `PiSessionFeatureState`. The Pi
+Protocol version 14 owns Goal, Assist, pinned-context state, parent-session creation, and scoped Pi
+package lifecycle operations as Piarium's native runtime ABI. Goal, Assist, and pinned-context state use
+`PiSessionFeatureState`. The Pi
 host persists each change as a versioned, append-only custom entry in the session JSONL and reads
 the newest state visible from the active branch. Feature state is therefore branch-aware, travels
 with the Pi session, and does not depend on OpenCode metadata, sidecar goal files, or projected
@@ -109,6 +110,12 @@ therefore read-only discovery and explanation, while invocation stays in chat. P
 are managed through Pi's resource loader and their native roots. Piarium preserves loader ownership,
 collision diagnostics, read-only package resources, complete skill directories, and project trust
 instead of restoring the former OpenCode command/skill stores.
+
+Pi Packages delegates install, update, removal, source normalization, and session reload to Pi's
+native package manager. The UI exposes both user and project scopes, reports the installed manifest
+version when available, and keeps local working copies linked instead of copying them. Local sources
+are not presented as remotely updatable; their removal uses Pi's resolved package path so a
+project-relative entry is removed from the same settings scope that created it.
 
 ## Mobile and embedded session surfaces
 

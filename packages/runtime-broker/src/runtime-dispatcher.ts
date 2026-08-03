@@ -561,6 +561,7 @@ async function dispatchRuntimeRequestUnchecked(
     case "package.install":
     case "package.remove": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), method, {
+        scope: requireEnum(input, "scope", ["global", "project"] as const),
         source: requireString(input, "source"),
       });
     }

@@ -22,6 +22,7 @@ import {
   type RecoveryMode,
   type PiResourceKind,
   type PiResourceScope,
+  type PiPackageScope,
   type RuntimeDescriptor,
   THINKING_LEVELS,
   type ThinkingLevel,
@@ -104,6 +105,14 @@ function readResourceScope(record: Record<string, unknown>): PiResourceScope {
   const scope = readString(record, "scope");
   if (scope !== "user" && scope !== "project") {
     throw new HostError("invalid_params", "scope must be user or project");
+  }
+  return scope;
+}
+
+function readPackageScope(record: Record<string, unknown>): PiPackageScope {
+  const scope = readString(record, "scope");
+  if (scope !== "global" && scope !== "project") {
+    throw new HostError("invalid_params", "scope must be global or project");
   }
   return scope;
 }
@@ -625,9 +634,17 @@ export class HostController {
       case "package.list":
         return this.#sessionHost.listPackages();
       case "package.install":
-        return this.#sessionHost.installPackage(readString(params, "source"));
+        return this.#sessionHost.installPackage(
+          readString(params, "source"),
+          readPackageScope(params),
+        );
       case "package.remove":
-        return { removed: await this.#sessionHost.removePackage(readString(params, "source")) };
+        return {
+          removed: await this.#sessionHost.removePackage(
+            readString(params, "source"),
+            readPackageScope(params),
+          ),
+        };
       case "package.update":
         return this.#sessionHost.updatePackages(optionalString(params, "source"));
       case "extension.ui.respond": {

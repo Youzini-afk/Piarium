@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
+import { readFileSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -27,6 +27,7 @@ import type {
   JsonValue,
   ModelDescriptor,
   PackageDescriptor,
+  PiPackageScope,
   PiAgentCatalogSnapshot,
   PiAgentProviderActionResult,
   PiConfigDocumentSnapshot,
@@ -230,7 +231,22 @@ function packageNameFromSource(source: string): string {
     return version === -1 ? value : value.slice(0, version);
   }
   if (/^[A-Za-z0-9_.-]+(?:@[^@]+)?$/.test(value)) return value.split("@")[0] ?? value;
-  return value;
+  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
+  return normalized.slice(normalized.lastIndexOf("/") + 1).replace(/\.git$/i, "") || value;
+}
+
+function packageVersionFromPath(installedPath: string | undefined): string | undefined {
+  if (!installedPath) return undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(join(installedPath, "package.json"), "utf8")) as {
+      version?: unknown;
+    };
+    return typeof manifest.version === "string" && manifest.version.trim().length > 0
+      ? manifest.version
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isMissingPathError(error: unknown): boolean {
@@ -1365,24 +1381,47 @@ export class SessionHost {
 
   listPackages(): PackageDescriptor[] {
     const manager = this.#packageManager();
-    return manager.listConfiguredPackages().map((entry) => ({
-      enabled: true,
-      name: packageNameFromSource(entry.source),
-      source: entry.source,
-    }));
+    return manager.listConfiguredPackages().map((entry) => {
+      const version = packageVersionFromPath(entry.installedPath);
+      return {
+        enabled: true,
+        name: packageNameFromSource(entry.source),
+        scope: entry.scope === "project" ? "project" : "global",
+        source: entry.source,
+        ...(version === undefined ? {} : { version }),
+      };
+    });
   }
 
-  async installPackage(source: string): Promise<PackageDescriptor> {
+  async installPackage(source: string, scope: PiPackageScope): Promise<PackageDescriptor> {
     const manager = this.#packageManager();
-    await manager.installAndPersist(source);
+    await manager.installAndPersist(source, { local: scope === "project" });
     await this.runtime.services.settingsManager.flush();
     await this.session.reload();
-    return { enabled: true, name: packageNameFromSource(source), source };
+    return this.listPackages().find((entry) => (
+      entry.scope === scope
+      && (entry.source === source || entry.name === packageNameFromSource(source))
+    )) ?? {
+      enabled: true,
+      name: packageNameFromSource(source),
+      scope,
+      source,
+    };
   }
 
-  async removePackage(source: string): Promise<boolean> {
+  async removePackage(source: string, scope: PiPackageScope): Promise<boolean> {
     const manager = this.#packageManager();
-    const removed = await manager.removeAndPersist(source);
+    const local = scope === "project";
+    const configured = manager.listConfiguredPackages().find((entry) => (
+      entry.scope === (local ? "project" : "user") && entry.source === source
+    ));
+    let removed = await manager.removeAndPersist(source, { local });
+    if (!removed && configured?.installedPath) {
+      // Pi stores local project packages relative to `.pi`, while its public
+      // removal matcher resolves input relative to the workspace. Retry with
+      // the already-resolved path so the exact configured entry is removed.
+      removed = manager.removeSourceFromSettings(configured.installedPath, { local });
+    }
     await this.runtime.services.settingsManager.flush();
     await this.session.reload();
     return removed;
