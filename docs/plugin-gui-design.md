@@ -269,9 +269,16 @@ credential source, provider endpoints/models, Curator bind modes, Chromium-cooki
 shortcuts, GitHub/video/PDF behavior, domain policy, and SSRF exceptions while preserving unknown
 native keys. Piarium propagates its selected Pi agent directory through
 `PI_CODING_AGENT_DIR`, so the file edited by the GUI is the file loaded by extensions even when a
-custom agent directory is used. Live availability, activity, Google-account diagnostics, and
-Curator actions remain owned by registered commands/widgets until the extension publishes a
-versioned runtime contract.
+custom agent directory is used.
+
+Implemented session-operations slice: the adapter discovers the live session's registered command
+catalog, opens `/websearch` with an optional native comma-separated query list, invokes the
+plugin-owned Gemini Web account diagnostic, and opens the plugin's persisted-result browser. The
+`/curator` command is intentionally represented by the authoritative `workflow` configuration
+control instead of adding a second stateful toggle that can race a loaded draft. Command discovery
+proves only that an operation is loaded; provider health, search activity, and richer Curator state
+remain unreported until the extension publishes a versioned runtime contract. The plugin continues
+to own every dialog, follow-up message, browser server, stored result, and delete action.
 
 Secrets are not surfaced as ordinary text fields. The advanced editor preserves native credential
 source references. A remote Curator bind explains plain-HTTP/token-in-URL exposure and highlights

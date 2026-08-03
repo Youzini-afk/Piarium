@@ -2,7 +2,7 @@
 
 Status: Pi host, plugin recovery bridge, runtime broker, and Electron worker lifecycle implemented; product engine migration in progress
 
-Last updated: 2026-08-02
+Last updated: 2026-08-03
 
 ## 1. Context
 
@@ -223,9 +223,11 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
   precedence order. Piarium has no parallel MCP store, generated OpenCode configuration draft, or
   OAuth callback route; the adapter owns merging, host imports, transports, OAuth/keyring data, and
   connection state.
-- **pi-web-access:** Piarium edits the extension's agent-level `web-search.json`; provider routing,
-  credentials, SSRF policy, search/fetch tools, activity widgets, and optional Curator server remain
-  extension-owned.
+- **pi-web-access:** Piarium edits the extension's agent-level `web-search.json` and discovers its
+  current registered commands in the active session. The GUI can open the native Curator, invoke
+  Gemini Web account diagnostics, and browse the plugin's stored results, while provider routing,
+  credentials, SSRF policy, health/activity state, search/fetch tools, dialogs, follow-up messages,
+  persisted results, and the optional Curator server remain extension-owned.
 
 PiDeck-installed local extensions are not product dependencies. Local working trees and other Pi
 package sources remain installable directly, and the generic UI bridge allows unknown packages to

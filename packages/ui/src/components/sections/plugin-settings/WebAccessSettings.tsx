@@ -41,6 +41,7 @@ import {
   type WebAccessPanel,
   type WebAccessRoutingMode,
 } from './web-access-config-model';
+import { WebAccessRuntimePanel } from './WebAccessRuntimePanel';
 
 interface WebAccessSettingsProps {
   runtimeTarget: RuntimeContextTarget;
@@ -588,6 +589,9 @@ export const WebAccessSettings: React.FC<WebAccessSettingsProps> = ({ runtimeTar
   return (
     <div className="space-y-7">
       <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.runtimeNote')}</PluginRuntimeNote>
+
+      <WebAccessRuntimePanel runtimeTarget={runtimeTarget} />
+
       <div className="space-y-3 rounded-lg border border-border/60 px-4 py-4">
         <div className="space-y-1">
           <h3 className="typography-settings-group-title text-foreground">

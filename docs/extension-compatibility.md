@@ -1,6 +1,6 @@
 # Maintained extension compatibility
 
-Last verified: 2026-08-02
+Last verified: 2026-08-03
 
 Piarium Phase 1 loads extensions through Pi `0.83.0` and its generic `ExtensionUIContext` bridge.
 The smoke test creates an isolated agent directory and disposable workspace, loads one extension,
@@ -41,8 +41,10 @@ plugin ownership intact:
   no private database is inspected;
 - MCP consumes `pi-mcp-adapter/status/v1`, invokes the adapter's commands, and edits its native config
   sources without taking over merging, transports, OAuth, or the credential store;
-- Web Access uses its native `web-search.json` while search/fetch tools, widgets, and custom entries
-  travel through the generic Pi extension bridge.
+- Web Access uses its native `web-search.json`; its current command catalog drives the Curator,
+  Gemini Web account, and stored-result session actions, while search/fetch tools, plugin dialogs,
+  widgets, and custom entries travel through the generic Pi extension bridge. Command discovery is
+  not presented as provider health.
 
 Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
 verification.

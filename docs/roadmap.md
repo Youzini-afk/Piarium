@@ -204,9 +204,12 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   credential source and provider endpoint, public tool names, remote bind risks, Chromium-cookie
   opt-in, GitHub/video/PDF behavior, domain policy, and SSRF exceptions without dropping unknown
   fields. Custom Pi agent directories are propagated through `PI_CODING_AGENT_DIR`, keeping the
-  GUI and extension on the same file. Search/fetch tools, activity widgets, and custom entries use
-  the generic extension projection; richer live health/actions still require a public versioned
-  contract from the extension.
+  GUI and extension on the same file. The live-session panel now discovers the registered command
+  catalog, opens the native Search Curator with optional initial queries, invokes Gemini Web account
+  diagnostics, and opens the plugin-owned stored-result selector. The GUI maps `/curator` to the
+  authoritative workflow field instead of introducing a competing toggle. Search/fetch tools,
+  widgets, dialogs, and custom entries use the generic extension projection; provider health and
+  activity still require a public versioned contract from the extension.
 
 Acceptance: each adapter has an unavailable/degraded state, version compatibility diagnostics, and
 an integration smoke test without exposing credentials.
