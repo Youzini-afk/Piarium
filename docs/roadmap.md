@@ -134,10 +134,14 @@ retained before engine surgery begins.
 - Implemented: sync, lifecycle, provider, scheduling, control, and notification flows now use the
   Pi host/broker contracts. The OpenCode child lifecycle, proxy, watcher, downloaded CLI, provider
   persistence, and obsolete UI code are no longer part of the production graph.
-- Implemented: the cloud runtime base no longer installs or probes an OpenCode CLI, the container
-  entrypoint no longer creates OpenCode configuration or installs oh-my-opencode, Compose no longer
-  mounts or advertises OpenCode state, and remote deployment no longer discovers an OpenCode
-  binary. The unreachable managed OpenCode system-prompt injector and its tests were removed.
+- Implemented: cloud delivery now builds one canonical production workspace containing Web,
+  protocol, runtime broker, and the bundled Pi host. The application image installs native
+  dependencies on its target architecture and runs on a Piarium-owned multi-architecture runtime
+  base with the fork's complete development toolbelt. CI publishes digest-linked base/application
+  images and performs a real bundled-host health smoke. Compose uses Piarium-owned paths and state.
+  SSH deployment verifies a content-addressed archive, installs into an immutable release, switches
+  `current` atomically, waits for a ready bundled Pi runtime, and automatically restores the last
+  healthy release on failure. No cloud path installs, configures, or probes an OpenCode runtime.
 - Implemented: About now reads the server's real `piariumVersion`, links to the Piarium repository,
   and no longer probes or displays a nonexistent OpenCode upgrade endpoint. The unreachable
   OpenCode upgrade toast, its persisted preferences, and its Web settings API shim were removed;

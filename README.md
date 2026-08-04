@@ -36,7 +36,9 @@ The product base is the maintainer's OpenChamber fork at commit `f551150e5`. Tha
 into this repository and is being directly refactored from OpenCode to Pi; the source fork remains read-only.
 Custom providers, remote/cloud access, workspace tools, settings, session UX, and multi-surface
 support remain product requirements. See [the migration contract](docs/openchamber-pi-migration.md)
-and [the roadmap](docs/roadmap.md).
+and [the roadmap](docs/roadmap.md). Piarium's canonical four-package cloud runtime, multi-architecture
+container images, persistent paths, and atomic SSH deployment/rollback flow are documented in
+[Cloud deployment](docs/cloud-deployment.md).
 
 ## Product principles
 
