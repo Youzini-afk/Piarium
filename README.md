@@ -1,3 +1,5 @@
+English | [简体中文](README.zh-CN.md)
+
 # Piarium
 
 [![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)

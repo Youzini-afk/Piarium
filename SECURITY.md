@@ -1,3 +1,5 @@
+English | [简体中文](SECURITY.zh-CN.md)
+
 # Piarium security policy
 
 Piarium handles source code, terminal access, Git and SSH operations, model-provider credentials,

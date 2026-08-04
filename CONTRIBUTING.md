@@ -1,3 +1,5 @@
+English | [简体中文](CONTRIBUTING.zh-CN.md)
+
 # Contributing to Piarium
 
 Thank you for helping improve Piarium. Contributions are welcome across the Pi runtime boundary,
@@ -7,6 +9,14 @@ platform support.
 This guide describes the public contribution workflow. [AGENTS.md](AGENTS.md), the nearest package
 README, and owning architecture documents contain the detailed repository rules for implementation
 work.
+
+## Documentation languages
+
+The root README, contribution guide, and security policy are published in English and Simplified
+Chinese as peer public documents. Keep factual behavior, commands, security guidance, and links
+synchronized across both languages in the same change when applicable. Every localized root document
+must begin with a language switcher so readers never need to return to the repository index to change
+language.
 
 ## Before you begin
 
