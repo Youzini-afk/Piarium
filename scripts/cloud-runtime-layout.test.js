@@ -88,6 +88,21 @@ describe('Piarium cloud runtime layout', () => {
     expect(builderSource).toContain('pruneNonRuntimeFiles');
   });
 
+  it('builds every compiled browser dependency before the Web bundle', () => {
+    const builderSource = fs.readFileSync(
+      path.join(repoRoot, 'scripts', 'build-cloud-runtime.mjs'),
+      'utf8',
+    );
+    const buildFunction = builderSource.slice(builderSource.indexOf('const buildSourcePackages'));
+    const brokerBuild = buildFunction.indexOf("'packages/runtime-broker'");
+    const clientBuild = buildFunction.indexOf("'packages/runtime-client'");
+    const webBuild = buildFunction.indexOf("'packages/web'");
+
+    expect(brokerBuild).toBeGreaterThanOrEqual(0);
+    expect(clientBuild).toBeGreaterThan(brokerBuild);
+    expect(webBuild).toBeGreaterThan(clientBuild);
+  });
+
   it('contains the complete private Pi runtime dependency closure', () => {
     const packageNames = new Set(CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => (
       readJson(path.join(repoRoot, 'packages', directory, 'package.json')).name

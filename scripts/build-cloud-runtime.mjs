@@ -297,6 +297,10 @@ const buildSourcePackages = ({ json }) => {
     json,
     label: 'Pi runtime build',
   });
+  run('bun', ['run', '--cwd', 'packages/runtime-client', 'build'], {
+    json,
+    label: 'Pi runtime client build',
+  });
   run('bun', ['run', '--cwd', 'packages/web', 'build'], {
     env: { PIARIUM_LOW_MEMORY_BUILD: '1' },
     json,
