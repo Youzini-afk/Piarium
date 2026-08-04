@@ -2,6 +2,7 @@ import React from 'react';
 import type { SessionSummary } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -326,6 +327,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const togglePinned = useSessionPinnedStore((state) => state.toggle);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
+  const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const [query, setQuery] = React.useState('');
   const [showArchived, setShowArchived] = React.useState(false);
@@ -393,6 +395,11 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
       toast.error(error instanceof Error ? error.message : String(error));
     }
   }, [activeProjectId, mobileVariant, setSessionSwitcherOpen]);
+
+  const handleOpenSettings = React.useCallback(() => {
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    setSettingsDialogOpen(true);
+  }, [mobileVariant, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
   const handleOpenMiniChat = React.useCallback((session: SessionSummary) => {
     void invokeDesktop('desktop_open_session_mini_chat_window', {
@@ -642,6 +649,20 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               </section>
             ))
           )}
+        </div>
+
+        <div className="shrink-0 border-t border-border/60 px-2.5 py-2 pb-[max(0.5rem,var(--oc-safe-area-bottom-visual,0px))]">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleOpenSettings}
+            className="w-full justify-start font-normal normal-case text-muted-foreground"
+            aria-label={t('sessions.sidebar.footer.actions.settings')}
+          >
+            <Icon name="settings-3" className="size-4" />
+            <span className="truncate">{t('sessions.sidebar.footer.actions.settings')}</span>
+          </Button>
         </div>
       </div>
 

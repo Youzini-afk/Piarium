@@ -9,13 +9,13 @@ const mainLayoutSource = readFileSync(
     'utf-8',
 );
 const sessionSidebarSource = readFileSync(
-    join(__dirname, '..', '..', 'session', 'SessionSidebar.tsx'),
+    join(__dirname, '..', '..', 'pi-session', 'PiSessionSidebar.tsx'),
     'utf-8',
 );
 
-describe('MainLayout mobile SessionSidebar mount (issue #1695 regression guard)', () => {
-    test('mobile SessionSidebar is not conditionally mounted on mobileLeftDrawerVisible', () => {
-        const mobileSidebarIndex = mainLayoutSource.indexOf('<SessionSidebar mobileVariant');
+describe('MainLayout mobile PiSessionSidebar mount (issue #1695 regression guard)', () => {
+    test('mobile PiSessionSidebar is not conditionally mounted on mobileLeftDrawerVisible', () => {
+        const mobileSidebarIndex = mainLayoutSource.indexOf('<PiSessionSidebar mobileVariant');
         expect(mobileSidebarIndex).toBeGreaterThan(-1);
 
         const windowStart = Math.max(0, mobileSidebarIndex - 400);
@@ -27,8 +27,8 @@ describe('MainLayout mobile SessionSidebar mount (issue #1695 regression guard)'
         expect(mainLayoutSource.slice(mobileSidebarIndex, mobileSidebarIndex + 120)).toContain('isVisible={mobileLeftDrawerVisible}');
     });
 
-    test('desktop SessionSidebar is rendered inside Sidebar without drawer-visibility gating', () => {
-        const desktopSidebarIndex = mainLayoutSource.indexOf('<SessionSidebar isVisible={isSidebarOpen} />');
+    test('desktop PiSessionSidebar is rendered inside Sidebar without drawer-visibility gating', () => {
+        const desktopSidebarIndex = mainLayoutSource.indexOf('<PiSessionSidebar isVisible={isSidebarOpen} />');
         expect(desktopSidebarIndex).toBeGreaterThan(-1);
 
         const windowStart = Math.max(0, desktopSidebarIndex - 300);
@@ -38,11 +38,14 @@ describe('MainLayout mobile SessionSidebar mount (issue #1695 regression guard)'
         expect(/mobileLeftDrawerVisible\s*&&/.test(precedingWindow)).toBe(false);
     });
 
-    test('hidden sidebars disable render-only subscriptions and effects', () => {
-        expect(sessionSidebarSource).toContain('useGitAllBranches(isVisible)');
-        expect(sessionSidebarSource).toContain('useGitRepoStatusMap(isVisible ? normalizedProjectPaths : EMPTY_STRING_ARRAY)');
-        expect(sessionSidebarSource).toContain('enabled: isVisible,\n    isSessionSearchOpen');
-        expect(sessionSidebarSource).toContain('enabled: isVisible && stickyZoneHeaders,\n    isDesktopShellRuntime');
-        expect(sessionSidebarSource).toContain('(state) => isVisible ? [...state.statusById.keys()].sort() : EMPTY_STRING_ARRAY');
+    test('the Pi sidebar exposes the shared settings surface from its fixed footer', () => {
+        const scrollRegionIndex = sessionSidebarSource.indexOf('min-h-0 flex-1 overflow-y-auto');
+        const footerIndex = sessionSidebarSource.indexOf('shrink-0 border-t border-border/60');
+
+        expect(scrollRegionIndex).toBeGreaterThan(-1);
+        expect(footerIndex).toBeGreaterThan(scrollRegionIndex);
+        expect(sessionSidebarSource).toContain("t('sessions.sidebar.footer.actions.settings')");
+        expect(sessionSidebarSource).toContain('if (mobileVariant) setSessionSwitcherOpen(false);');
+        expect(sessionSidebarSource).toContain('setSettingsDialogOpen(true);');
     });
 });
