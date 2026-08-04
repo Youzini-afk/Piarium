@@ -11,6 +11,7 @@ import {
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { normalizePath } from '@/lib/pathNormalization';
+import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
@@ -92,12 +93,10 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
   const records = usePiSessionStore((state) => state.records);
   const openSession = usePiSessionStore((state) => state.openSession);
-  const createSession = usePiSessionStore((state) => state.createSession);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const untitled = t('sessions.sidebar.session.untitled');
@@ -131,17 +130,12 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   }, [activeProjectId, openSession, projects, setActiveMainTab, setActiveProjectIdOnly, setDirectory]);
 
   const create = React.useCallback(async () => {
-    const project = projects.find((candidate) => candidate.id === activeProjectId);
-    const cwd = project?.path || currentDirectory;
-    if (!cwd) return;
     try {
-      setDirectory(cwd, { showOverlay: false });
-      await createSession(cwd);
-      setActiveMainTab('chat');
+      await startPiSessionDraftFromNavigation({ projectId: activeProjectId });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [activeProjectId, createSession, currentDirectory, projects, setActiveMainTab, setDirectory]);
+  }, [activeProjectId]);
 
   return (
     <DropdownMenu>

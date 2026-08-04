@@ -1,7 +1,10 @@
 import React from 'react';
 
 import { isCapacitorApp } from '@/lib/platform';
-import { createPiSessionFromNavigation, openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import {
+  openPiSessionFromNavigation,
+  startPiSessionDraftFromNavigation,
+} from '@/lib/pi-runtime/sessionNavigation';
 import { useUIStore } from '@/stores/useUIStore';
 
 import { buildDeepLink, parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
@@ -44,10 +47,10 @@ const execute = (intent: DeepLinkIntent): boolean => {
       return true;
 
     case 'new-session':
-      void createPiSessionFromNavigation({
+      void startPiSessionDraftFromNavigation({
         directory: intent.directory ?? null,
         projectId: intent.projectId ?? null,
-      }).catch((error) => console.warn('[Piarium] failed to create deep-linked Pi session:', error));
+      }).catch((error) => console.warn('[Piarium] failed to start deep-linked Pi session draft:', error));
       return true;
 
     case 'sessions':

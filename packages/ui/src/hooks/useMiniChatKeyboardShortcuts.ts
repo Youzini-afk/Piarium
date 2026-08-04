@@ -7,6 +7,7 @@ import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 export const useMiniChatKeyboardShortcuts = () => {
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -38,9 +39,12 @@ export const useMiniChatKeyboardShortcuts = () => {
         const cwd = currentDirectory || activeProject?.path || '';
         if (!cwd) return;
         event.preventDefault();
-        void usePiSessionStore.getState().createSession(cwd)
+        void startPiSessionDraftFromNavigation({
+          directory: cwd,
+          projectId: activeProject?.id ?? null,
+        })
           .then(() => focusChatInput())
-          .catch((error) => console.warn('[mini-chat-shortcuts] failed to create Pi session', error));
+          .catch((error) => console.warn('[mini-chat-shortcuts] failed to start Pi session draft', error));
         return;
       }
 

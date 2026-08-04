@@ -23,6 +23,7 @@ import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
 import { normalizePath } from '@/lib/pathNormalization';
+import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn, formatDirectoryName } from '@/lib/utils';
@@ -311,7 +312,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const lastError = usePiSessionStore((state) => state.lastError);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
-  const createSession = usePiSessionStore((state) => state.createSession);
   const openSession = usePiSessionStore((state) => state.openSession);
   const renameSession = usePiSessionStore((state) => state.renameSession);
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
@@ -321,7 +321,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const togglePinned = useSessionPinnedStore((state) => state.toggle);
@@ -387,19 +386,13 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   }, [mobileVariant, openSession, selectProjectForPath, setActiveMainTab, setDirectory, setSessionSwitcherOpen]);
 
   const handleCreate = React.useCallback(async () => {
-    const activeProject = projects.find((project) => project.id === activeProjectId);
-    const cwd = activeProject?.path || currentDirectory;
-    if (!cwd) return;
     try {
-      setDirectory(cwd, { showOverlay: false });
-      await createSession(cwd);
-      setActiveMainTab('chat');
+      await startPiSessionDraftFromNavigation({ projectId: activeProjectId });
       if (mobileVariant) setSessionSwitcherOpen(false);
     } catch (error) {
-      console.error('Failed to create Pi session:', error);
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [activeProjectId, createSession, currentDirectory, mobileVariant, projects, setActiveMainTab, setDirectory, setSessionSwitcherOpen]);
+  }, [activeProjectId, mobileVariant, setSessionSwitcherOpen]);
 
   const handleOpenMiniChat = React.useCallback((session: SessionSummary) => {
     void invokeDesktop('desktop_open_session_mini_chat_window', {

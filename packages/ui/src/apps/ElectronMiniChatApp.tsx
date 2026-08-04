@@ -14,6 +14,7 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
+import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'piarium:mini-chat-presence';
 
@@ -53,7 +54,6 @@ const MiniChatBootstrap: React.FC<{
   const projects = useProjectsStore((state) => state.projects);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
-  const createSession = usePiSessionStore((state) => state.createSession);
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
   const openSession = usePiSessionStore((state) => state.openSession);
   const bootstrappedRef = React.useRef(false);
@@ -76,7 +76,10 @@ const MiniChatBootstrap: React.FC<{
             ...(cwd ? { cwd } : {}),
           });
         } else if (cwd) {
-          await createSession(cwd);
+          await startPiSessionDraftFromNavigation({
+            directory: cwd,
+            projectId: config.projectId,
+          });
         }
         if (cwd) await loadCatalog(cwd).catch(() => undefined);
         onUnavailable(false);
@@ -88,7 +91,7 @@ const MiniChatBootstrap: React.FC<{
       }
     };
     void bootstrap();
-  }, [config, createSession, currentDirectory, loadCatalog, onReady, onUnavailable, openSession, projects, setActiveProjectIdOnly, setDirectory]);
+  }, [config, currentDirectory, loadCatalog, onReady, onUnavailable, openSession, projects, setActiveProjectIdOnly, setDirectory]);
 
   React.useEffect(() => {
     const onOpenSession = (event: Event) => {

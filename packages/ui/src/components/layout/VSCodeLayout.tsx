@@ -13,6 +13,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
+import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then((module) => ({
   default: module.SettingsView,
@@ -178,18 +179,16 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
     try {
-      setDirectory(cwd, { showOverlay: false });
-      await createSession(cwd);
+      await startPiSessionDraftFromNavigation({ directory: cwd });
       setCurrentView('chat');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [createSession, resolveCwd, setDirectory]);
+  }, [resolveCwd]);
 
   React.useEffect(() => {
     if (currentSessionId) setCurrentView('chat');
-    else if (viewMode === 'sidebar' && currentView === 'chat') setCurrentView('sessions');
-  }, [currentSessionId, currentView, viewMode]);
+  }, [currentSessionId]);
 
   React.useEffect(() => {
     if (viewMode !== 'editor' || bootstrappedEditor.current) return;
@@ -204,6 +203,8 @@ export const VSCodeLayout: React.FC = () => {
         const cwd = resolveCwd();
         if (!cwd) throw new Error('Open a workspace folder before creating a Pi session.');
         setDirectory(cwd, { showOverlay: false });
+        // Editor bootstrap intentionally keeps its historical immediate-create
+        // behavior so the editor always has a real session to attach to.
         await createSession(cwd);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : String(error));

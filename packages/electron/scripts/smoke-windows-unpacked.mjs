@@ -20,6 +20,14 @@ if (!existsSync(appPath)) {
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const DEVTOOLS_REQUEST_TIMEOUT_MS = 5_000;
+const LAYOUT_TOLERANCE_PX = 1;
+const MAX_COMPOSER_FRAME_WIDTH_PX = 48 * 16;
+
+const assertNear = (actual, expected, label) => {
+  if (!Number.isFinite(actual) || Math.abs(actual - expected) > LAYOUT_TOLERANCE_PX) {
+    throw new Error(`${label} expected ${expected}px, received ${actual}px.`);
+  }
+};
 
 const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) => {
   const socket = new WebSocket(webSocketDebuggerUrl);
@@ -117,20 +125,51 @@ const waitForRenderer = async (userDataDir) => {
   try {
     let lastState;
     for (let attempt = 0; attempt < 80; attempt += 1) {
-      const evaluation = await devTools.evaluate(`(() => ({
-        bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
-        href: window.location.href,
-        ready: window.__piariumAppReady === true,
-      }))()`);
+      const evaluation = await devTools.evaluate(`(() => {
+        const readElement = (selector) => {
+          const element = document.querySelector(selector);
+          if (!(element instanceof HTMLElement)) return null;
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return {
+            bottom: rect.bottom,
+            height: rect.height,
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            width: rect.width,
+            borderTopWidth: Number.parseFloat(style.borderTopWidth) || 0,
+          };
+        };
+        return {
+          bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
+          href: window.location.href,
+          layout: {
+            closeControl: readElement('[data-window-control="close"]'),
+            composerFrame: readElement('[data-pi-composer-input-frame="true"]'),
+            composerShell: readElement('[data-pi-composer-shell="true"]'),
+            innerHeight: window.innerHeight,
+            innerWidth: window.innerWidth,
+            pendingDraft: document.querySelector('[data-pi-pending-draft="true"]') !== null,
+          },
+          ready: window.__piariumAppReady === true,
+        };
+      })()`);
       if (evaluation?.exceptionDetails) {
         throw new Error(`Packaged renderer evaluation failed: ${evaluation.exceptionDetails.text}`);
       }
       lastState = evaluation?.result?.value;
-      if (lastState?.ready === true) return lastState;
+      if (lastState?.ready === true) {
+        const layoutReady = lastState.layout?.closeControl && lastState.layout?.composerShell && lastState.layout?.composerFrame;
+        if (layoutReady) return lastState;
+      }
       if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
         throw new Error(`Packaged renderer entered its error boundary.\n${lastState.bodyText}`);
       }
       await delay(250);
+    }
+    if (lastState?.ready === true) {
+      throw new Error(`Packaged renderer became ready without the expected window and composer layout.\n${JSON.stringify(lastState, null, 2)}`);
     }
     throw new Error(`Packaged renderer did not become app-ready.\n${JSON.stringify(lastState, null, 2)}`);
   } finally {
@@ -222,12 +261,38 @@ try {
   if (closed?.success !== true) throw new Error(`Packaged terminal close returned ${JSON.stringify(closed)}`);
 
   const renderer = await waitForRenderer(userDataDir);
+  const layout = renderer.layout;
+  if (!layout || !Number.isFinite(layout.innerWidth) || !Number.isFinite(layout.innerHeight)) {
+    throw new Error(`Packaged renderer did not report viewport geometry: ${JSON.stringify(layout)}`);
+  }
+  if (!layout.closeControl) {
+    throw new Error('Packaged renderer did not expose the Windows close control.');
+  }
+  const closeControlIsRight = layout.closeControl.left >= layout.innerWidth / 2;
+  if (!profileSourcePath && !closeControlIsRight) {
+    throw new Error(`Clean profile placed the Windows close control on the unexpected side: ${JSON.stringify(layout.closeControl)}`);
+  }
+  if (closeControlIsRight) {
+    assertNear(layout.closeControl.right, layout.innerWidth, 'Right-side close control edge');
+  }
+  if (!layout.composerShell || !layout.composerFrame) {
+    throw new Error(`Packaged renderer reported incomplete composer geometry: ${JSON.stringify(layout)}`);
+  }
+  if (!profileSourcePath && layout.pendingDraft !== true) {
+    throw new Error('Clean packaged renderer did not open the pending Pi draft welcome state.');
+  }
+  assertNear(layout.composerShell.bottom, layout.innerHeight, 'Composer shell bottom edge');
+  assertNear(layout.composerShell.borderTopWidth, 0, 'Composer shell top border');
+  if (layout.composerFrame.width > MAX_COMPOSER_FRAME_WIDTH_PX + LAYOUT_TOLERANCE_PX) {
+    throw new Error(`Composer frame is wider than the fork-derived 48rem column: ${layout.composerFrame.width}px.`);
+  }
   const log = await readLog();
   if (!log.includes('[pi-runtime] ready')) throw new Error(`Pi runtime readiness was not logged.\n${log}`);
   const piVersion = log.match(/piVersion: '([^']+)'/)?.[1] ?? 'unknown';
   console.log(JSON.stringify({
     appPath,
     health: 'ok',
+    layout,
     piVersion,
     profile: profileSource ? 'seeded' : 'clean',
     renderer: renderer.ready === true ? 'app-ready' : 'not-ready',

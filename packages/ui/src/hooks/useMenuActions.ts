@@ -8,8 +8,8 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import { canChooseDesktopWorkspace, switchDesktopWorkspaceFromPicker } from '@/lib/desktopWorkspace';
 import {
-  createPiSessionFromNavigation,
   navigateRelativePiSession,
+  startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 
@@ -188,7 +188,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
           break;
 
         case 'new-session':
-          void createPiSessionFromNavigation().catch((error) => {
+          void startPiSessionDraftFromNavigation().catch((error) => {
             toast.error('Failed to create Pi session', {
               description: error instanceof Error ? error.message : String(error),
             });

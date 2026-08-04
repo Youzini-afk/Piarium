@@ -52,7 +52,11 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { createPiSessionFromNavigation, openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import {
+  createPiSessionFromNavigation,
+  openPiSessionFromNavigation,
+  startPiSessionDraftFromNavigation,
+} from '@/lib/pi-runtime/sessionNavigation';
 import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
 
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
@@ -838,7 +842,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   };
 
   const handleStartNewChat = () => {
-    void createPiSessionFromNavigation()
+    void startPiSessionDraftFromNavigation()
       .then(() => onOpenChange(false))
       .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };

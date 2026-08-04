@@ -32,16 +32,18 @@ import { PiActiveEditorContextSuggestion } from './PiActiveEditorContextSuggesti
 import { PiGoalButton } from './PiGoalControls';
 
 interface PiComposerProps {
+  cwd: string;
   draft: string;
   followUpBehavior: FollowUpBehavior;
   images: ImageAttachment[];
-  onAbort(): Promise<void> | void;
+  onAbort?(): Promise<void> | void;
   onChangeDraft(value: string): void;
   onChangeImages(value: ImageAttachment[]): void;
   onSend(): Promise<void> | void;
   onSendText(value: string): Promise<void> | void;
   sending: boolean;
-  snapshot: SessionSnapshot;
+  sessionId?: string | null;
+  snapshot?: SessionSnapshot;
 }
 
 const attachmentUrl = (attachment: ImageAttachment): string => (
@@ -79,6 +81,7 @@ type PiComposerAutocomplete = {
 } | null;
 
 export const PiComposer: React.FC<PiComposerProps> = ({
+  cwd,
   draft,
   followUpBehavior,
   images,
@@ -88,6 +91,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   onSend,
   onSendText,
   sending,
+  sessionId,
   snapshot,
 }) => {
   const { t } = useI18n();
@@ -101,8 +105,10 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
-  const busy = projectPiSessionActivity(snapshot).isWorking;
-  const inlineDraftKey = getInlineCommentDraftKey(getRuntimeKey(), snapshot.cwd, snapshot.sessionId);
+  const busy = snapshot ? projectPiSessionActivity(snapshot).isWorking : false;
+  const inlineDraftKey = snapshot && sessionId
+    ? getInlineCommentDraftKey(getRuntimeKey(), cwd, sessionId)
+    : null;
   const inlineDraftCount = useInlineCommentDraftStore((state) => (
     inlineDraftKey ? state.drafts[inlineDraftKey]?.length ?? 0 : 0
   ));
@@ -134,7 +140,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     }
   }, [images, onChangeImages, t]);
 
-  const queue = [...snapshot.steering, ...snapshot.followUp];
+  const queue = snapshot ? [...snapshot.steering, ...snapshot.followUp] : [];
 
   const insertTranscript = React.useCallback((text: string) => {
     const next = [draft.trimEnd(), text.trim()]
@@ -204,10 +210,10 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
   return (
     <div className={cn(
-      'shrink-0 border-t border-border bg-background px-3 pb-[max(0.75rem,var(--oc-safe-area-bottom,0px))] pt-3 sm:px-5',
+      'bottom-safe-area oc-mobile-composer shrink-0 bg-background pb-4',
       isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
-    )}>
-      <div className={cn('mx-auto w-full max-w-4xl', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>
+    )} data-pi-composer-shell="true">
+      <div className={cn('chat-input-column', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>
         {queue.length > 0 && (
           <details className="mb-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
             <summary className="cursor-pointer select-none typography-meta text-muted-foreground">
@@ -232,7 +238,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                   type="button"
                   onClick={() => onChangeImages(images.filter((_, candidate) => candidate !== index))}
                   className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-background/90 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover/image:opacity-100 focus:opacity-100"
-                  aria-label="Remove image"
+                  aria-label={t('chat.fileAttachment.actions.removeImage')}
                 >
                   <Icon name="close" className="size-3.5" />
                 </button>
@@ -241,13 +247,14 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           </div>
         )}
 
-        <PiActiveEditorContextSuggestion snapshot={snapshot} />
+        {snapshot ? <PiActiveEditorContextSuggestion snapshot={snapshot} /> : null}
 
         <div
           className={cn(
-            'relative rounded-xl border border-border bg-muted/15 transition-colors focus-within:border-primary/50',
+            'relative rounded-xl border border-border/70 bg-[var(--surface-elevated)] transition-colors focus-within:border-primary/50',
             sending && 'opacity-80',
           )}
+          data-pi-composer-input-frame="true"
           onDragOver={(event) => {
             if ([...event.dataTransfer.items].some((item) => item.kind === 'file')) event.preventDefault();
           }}
@@ -310,8 +317,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             <CommandAutocomplete
               ref={commandRef}
               additionalCommands={PIARIUM_COMMANDS}
-              cwd={snapshot.cwd}
-              sessionId={snapshot.sessionId}
+              cwd={cwd}
+              sessionId={sessionId}
               searchQuery={autocomplete.query}
               onCommandSelect={handleCommandSelect}
               onClose={() => setAutocomplete(null)}
@@ -321,8 +328,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           {autocomplete?.kind === 'skill' ? (
             <SkillAutocomplete
               ref={skillRef}
-              cwd={snapshot.cwd}
-              sessionId={snapshot.sessionId}
+              cwd={cwd}
+              sessionId={sessionId}
               searchQuery={autocomplete.query}
               onSkillSelect={handleSkillSelect}
               onClose={() => setAutocomplete(null)}
@@ -371,13 +378,17 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                     type="button"
                     onClick={toggleExpandedInput}
                     className={footerIconButtonClass}
-                    aria-label={isExpandedInput ? 'Exit expanded editor' : 'Expand editor'}
+                    aria-label={isExpandedInput
+                      ? t('filesView.editor.exitFullscreen')
+                      : t('filesView.editor.fullscreen')}
                   >
                     <Icon name={isExpandedInput ? 'fullscreen-exit' : 'fullscreen'} className="size-4" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {isExpandedInput ? 'Exit expanded editor' : 'Expand editor'}
+                  {isExpandedInput
+                    ? t('filesView.editor.exitFullscreen')
+                    : t('filesView.editor.fullscreen')}
                 </TooltipContent>
               </Tooltip>
               <ComposerDictation
@@ -391,21 +402,23 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 radius="0.75rem"
                 sendIconSizeClass="size-4"
               />
-              <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} />
+              {snapshot ? <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} /> : null}
               {inlineDraftCount > 0 && (
                 <span className="truncate px-1 typography-micro text-muted-foreground">
-                  {inlineDraftCount} attached context
+                  {t('chat.piComposer.attachedContext', { count: inlineDraftCount })}
                 </span>
               )}
               {busy && (
                 <span className="truncate px-1 typography-micro text-muted-foreground">
-                  {followUpBehavior === 'queue' ? 'Queue follow-up' : 'Steer current run'}
+                  {followUpBehavior === 'queue'
+                    ? t('chat.piComposer.queueFollowUp')
+                    : t('chat.piComposer.steerCurrentRun')}
                 </span>
               )}
             </div>
 
             <div className="flex shrink-0 items-center gap-1.5">
-              {busy && (
+              {busy && onAbort && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button

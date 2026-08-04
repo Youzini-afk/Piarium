@@ -14,8 +14,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
@@ -23,7 +24,9 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import {
   EMPTY_PI_DRAFT,
   piDraftKey,
+  piPendingDraftKey,
   readPiDraft,
+  readPiPendingDraft,
   type PiDraftState,
   usePiDraftStore,
 } from '@/stores/usePiDraftStore';
@@ -55,8 +58,24 @@ interface PiChatViewProps {
   showHeader?: boolean;
 }
 
+const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
+
+const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
+  if (!projectLabel) return title;
+  const projectIndex = title.indexOf(DRAFT_PROJECT_MARKER);
+  if (projectIndex === -1) return title;
+  return (
+    <>
+      {title.slice(0, projectIndex)}
+      <span className="font-medium">{projectLabel}</span>
+      {title.slice(projectIndex + DRAFT_PROJECT_MARKER.length)}
+    </>
+  );
+};
+
 export const PiChatView: React.FC<PiChatViewProps> = ({
   active = true,
+  autoOpenDraft = true,
   readOnly = false,
   showHeader = true,
 }) => {
@@ -72,6 +91,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   ));
   const openingSessionId = usePiSessionStore((state) => state.openingSessionId);
   const lastError = usePiSessionStore((state) => state.lastError);
+  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const createSession = usePiSessionStore((state) => state.createSession);
   const prompt = usePiSessionStore((state) => state.prompt);
   const steer = usePiSessionStore((state) => state.steer);
@@ -98,12 +118,21 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
   ));
-  const currentDraftKey = currentSessionId === null ? null : piDraftKey(currentSessionId);
+  const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
+  const pendingCwd = currentDirectory || activeProject?.path || '';
+  const pendingDraftOpen = currentSessionId === null && autoOpenDraft && !readOnly && Boolean(pendingCwd);
+  const currentDraftKey = currentSessionId === null
+    ? pendingDraftOpen && pendingCwd
+      ? piPendingDraftKey(pendingCwd, runtimeKey)
+      : null
+    : piDraftKey(currentSessionId, runtimeKey);
   const draft = usePiDraftStore((state) => (
     currentDraftKey === null ? EMPTY_PI_DRAFT : state.drafts[currentDraftKey] ?? EMPTY_PI_DRAFT
   ));
   const setPiDraft = usePiDraftStore((state) => state.setDraft);
+  const setPendingPiDraft = usePiDraftStore((state) => state.setPendingDraft);
   const clearPiDraft = usePiDraftStore((state) => state.clear);
+  const transferPendingPiDraft = usePiDraftStore((state) => state.transferPendingDraft);
   const [sending, setSending] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
@@ -112,8 +141,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const untitled = t('sessions.sidebar.session.untitled');
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
-    setPiDraft(sessionId, update);
-  }, [setPiDraft]);
+    setPiDraft(sessionId, update, runtimeKey);
+  }, [runtimeKey, setPiDraft]);
+  const updatePendingDraft = React.useCallback((update: Partial<PiDraftState>) => {
+    if (!pendingCwd) return;
+    setPendingPiDraft(pendingCwd, update, runtimeKey);
+  }, [pendingCwd, runtimeKey, setPendingPiDraft]);
 
   React.useEffect(() => {
     if (!currentSessionId || !extensionUi?.editorText) return;
@@ -138,7 +171,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     }
   }, [activeProjectId, createSession, currentDirectory, projects, setDirectory]);
 
-  const sendDraft = React.useCallback(async (sessionId: string, currentDraft: PiDraftState) => {
+  const sendDraft = React.useCallback(async (
+    sessionId: string,
+    currentDraft: PiDraftState,
+    draftRuntimeKey = runtimeKey,
+  ) => {
     const snapshot = usePiSessionStore.getState().records[sessionId]?.snapshot;
     if (!snapshot || sending) return;
     const inlineDraftTarget = { directory: snapshot.cwd, sessionKey: sessionId };
@@ -192,7 +229,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         accepted = await prompt(sessionId, promptText, currentDraft.images, instructions);
       }
       if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
-      clearPiDraft(sessionId);
+      clearPiDraft(sessionId, draftRuntimeKey);
     } catch (error) {
       if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
       if (startedGoalId) {
@@ -206,29 +243,61 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     } finally {
       setSending(false);
     }
-  }, [clearPiDraft, followUp, followUpBehavior, mutateFeatures, prompt, sending, steer, t]);
+  }, [clearPiDraft, followUp, followUpBehavior, mutateFeatures, prompt, runtimeKey, sending, steer, t]);
 
   const handleSend = React.useCallback(async () => {
     if (!currentSessionId) return;
-    await sendDraft(currentSessionId, readPiDraft(currentSessionId));
-  }, [currentSessionId, sendDraft]);
+    await sendDraft(currentSessionId, readPiDraft(currentSessionId, runtimeKey), runtimeKey);
+  }, [currentSessionId, runtimeKey, sendDraft]);
 
   const handleDictationSend = React.useCallback(async (transcript: string) => {
     if (!currentSessionId) return;
-    const currentDraft = readPiDraft(currentSessionId);
+    const currentDraft = readPiDraft(currentSessionId, runtimeKey);
     const text = [currentDraft.text.trimEnd(), transcript.trim()]
       .filter((value) => value.length > 0)
       .join('\n');
-    await sendDraft(currentSessionId, { ...currentDraft, text });
-  }, [currentSessionId, sendDraft]);
+    const nextDraft = { ...currentDraft, text };
+    setPiDraft(currentSessionId, { text }, runtimeKey);
+    await sendDraft(currentSessionId, nextDraft, runtimeKey);
+  }, [currentSessionId, runtimeKey, sendDraft, setPiDraft]);
 
-  const handleStarterSubmit = React.useCallback(async (starter: ResolvedStarter) => {
-    if (!currentSessionId) return;
-    const currentDraft = readPiDraft(currentSessionId);
-    const nextDraft = { ...currentDraft, text: starter.submitText };
-    updateDraft(currentSessionId, { text: starter.submitText });
-    await sendDraft(currentSessionId, nextDraft);
-  }, [currentSessionId, sendDraft, updateDraft]);
+  const submitPendingDraft = React.useCallback(async () => {
+    if (!pendingCwd || creating || sending) return;
+    const draftRuntimeKey = runtimeKey;
+    const pendingDraft = readPiPendingDraft(pendingCwd, draftRuntimeKey);
+    if (!pendingDraft.text.trim() && pendingDraft.images.length === 0) return;
+    setCreating(true);
+    try {
+      setDirectory(pendingCwd, { showOverlay: false });
+      const snapshot = await createSession(pendingCwd);
+      const transferredDraft = transferPendingPiDraft(
+        pendingCwd,
+        snapshot.sessionId,
+        draftRuntimeKey,
+      );
+      await sendDraft(snapshot.sessionId, transferredDraft, draftRuntimeKey);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCreating(false);
+    }
+  }, [createSession, creating, pendingCwd, runtimeKey, sendDraft, sending, setDirectory, transferPendingPiDraft]);
+
+  const handlePendingDictationSend = React.useCallback(async (transcript: string) => {
+    if (!pendingCwd) return;
+    const currentDraft = readPiPendingDraft(pendingCwd, runtimeKey);
+    const text = [currentDraft.text.trimEnd(), transcript.trim()]
+      .filter((value) => value.length > 0)
+      .join('\n');
+    setPendingPiDraft(pendingCwd, { text }, runtimeKey);
+    await submitPendingDraft();
+  }, [pendingCwd, runtimeKey, setPendingPiDraft, submitPendingDraft]);
+
+  const handlePendingStarterSubmit = React.useCallback(async (starter: ResolvedStarter) => {
+    if (!pendingCwd) return;
+    setPendingPiDraft(pendingCwd, { text: starter.submitText }, runtimeKey);
+    await submitPendingDraft();
+  }, [pendingCwd, runtimeKey, setPendingPiDraft, submitPendingDraft]);
 
   const runRecovery = React.useCallback(async (
     entry: PiSessionMessageEntry,
@@ -289,6 +358,51 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const pinnedEntryIds = React.useMemo(() => new Set(
     currentRecord?.snapshot?.features.pinnedContext.map((entry) => entry.entryId) ?? [],
   ), [currentRecord?.snapshot?.features.pinnedContext]);
+
+  if (pendingDraftOpen) {
+    const projectLabel = activeProject
+      ? activeProject.label?.trim() || formatDirectoryName(activeProject.path, null)
+      : formatDirectoryName(pendingCwd, null);
+    const draftTitle = projectLabel
+      ? t('chat.emptyState.draftTitleWithProject', { project: DRAFT_PROJECT_MARKER })
+      : t('chat.emptyState.draftTitle');
+    return (
+      <TooltipProvider>
+        <div
+          className={cn(
+            'flex h-full min-h-0 flex-col bg-background',
+            !active && 'pointer-events-none',
+          )}
+          data-pi-pending-draft="true"
+          data-pi-draft-cwd={pendingCwd}
+        >
+          <div className="oc-draft-center flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+            <h1 className="text-balance text-3xl font-normal tracking-tight text-foreground">
+              {renderDraftTitle(draftTitle, projectLabel)}
+            </h1>
+            <DraftPresetChips
+              className="oc-draft-starters mt-8 max-w-md"
+              cwd={pendingCwd}
+              sessionId={null}
+              onSubmit={(starter) => { void handlePendingStarterSubmit(starter); }}
+            />
+          </div>
+          <PiComposer
+            cwd={pendingCwd}
+            draft={draft.text}
+            images={draft.images}
+            followUpBehavior={followUpBehavior}
+            sending={creating || sending}
+            sessionId={null}
+            onChangeDraft={(text) => updatePendingDraft({ text })}
+            onChangeImages={(images) => updatePendingDraft({ images })}
+            onSendText={handlePendingDictationSend}
+            onSend={submitPendingDraft}
+          />
+        </div>
+      </TooltipProvider>
+    );
+  }
 
   if (currentSessionId === null) {
     return (
@@ -364,17 +478,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 
         {entries.length === 0 && !currentRecord.liveAssistant ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-            <div className="max-w-3xl">
-              <Icon name="sparkling" className="mx-auto size-7 text-primary" />
-              <p className="mt-3 typography-ui-label text-muted-foreground">
-                {t('chat.chatInput.placeholder.chat')}
+            <div className="max-w-md">
+              <PiariumLogo width={140} height={140} className="mx-auto size-[140px] opacity-20" />
+              <p className="mt-4 typography-ui-label text-muted-foreground">
+                {t('chat.emptyState.startNewChat')}
               </p>
-              <DraftPresetChips
-                className="mt-5"
-                cwd={snapshot.cwd}
-                sessionId={snapshot.sessionId}
-                onSubmit={(starter) => { void handleStarterSubmit(starter); }}
-              />
             </div>
           </div>
         ) : (
@@ -408,10 +516,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 
         {!readOnly && (
           <PiComposer
+            cwd={snapshot.cwd}
             draft={draft.text}
             images={draft.images}
             followUpBehavior={followUpBehavior}
-            sending={sending}
+            sending={creating || sending}
+            sessionId={snapshot.sessionId}
             snapshot={snapshot}
             onAbort={async () => { await abort(currentSessionId); }}
             onChangeDraft={(text) => updateDraft(currentSessionId, { text })}

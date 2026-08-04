@@ -8,7 +8,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { hasOpenDropdown } from './keyboard-shortcut-dom';
 import { toast } from '@/components/ui';
-import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
@@ -283,7 +283,7 @@ export const useKeyboardShortcuts = () => {
         e.preventDefault();
         const creation = matchedWorktreeShortcut
           ? createPiWorktreeSession()
-          : createPiSessionFromNavigation();
+          : startPiSessionDraftFromNavigation();
         void creation.catch((error) => {
           toast.error(
             matchedWorktreeShortcut

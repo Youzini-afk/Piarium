@@ -125,6 +125,28 @@ export const createPiSessionFromNavigation = async (
   return snapshot;
 };
 
+/**
+ * Open the Pi-native pending draft for a regular "new session" navigation.
+ *
+ * This deliberately does not call `session.create`; the first send from
+ * `PiChatView` owns creation so an abandoned draft never becomes a session.
+ */
+export const startPiSessionDraftFromNavigation = async (
+  target: PiSessionCreateTarget = {},
+): Promise<void> => {
+  const projectsState = useProjectsStore.getState();
+  const cwd = resolvePiSessionCreationCwd(
+    target,
+    projectsState.projects,
+    projectsState.activeProjectId,
+    useDirectoryStore.getState().currentDirectory,
+  );
+  if (!cwd) throw new Error('A working directory is required to create a Pi session');
+
+  applyPiSessionLocation(cwd, target.projectId);
+  usePiSessionStore.getState().setCurrentSession(null);
+};
+
 export const navigateRelativePiSession = async (offset: number): Promise<SessionSnapshot | null> => {
   let state = usePiSessionStore.getState();
   if (!state.catalogLoaded) {

@@ -52,8 +52,8 @@ import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import { useWideChatLayoutClass } from '@/hooks/useWideChatLayoutClass';
 import {
-  createPiSessionFromNavigation,
   openPiSessionFromNavigation,
+  startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
 import { toast } from '@/components/ui';
 
@@ -414,7 +414,7 @@ function App({ apis }: AppProps) {
   }, [embeddedSessionChat]);
 
   // Native tray/menu "new session" requests carry optional project and cwd
-  // hints; Pi creates the session immediately instead of opening a legacy draft.
+  // hints and open the Pi pending draft. Creation is deferred until first send.
   React.useEffect(() => {
     if (embeddedSessionChat || typeof window === 'undefined') return;
 
@@ -426,7 +426,7 @@ function App({ apis }: AppProps) {
       const projectId = typeof detail?.projectId === 'string' && detail.projectId.trim().length > 0
         ? detail.projectId.trim()
         : null;
-      void createPiSessionFromNavigation({ directory, projectId }).catch((createError) => {
+      void startPiSessionDraftFromNavigation({ directory, projectId }).catch((createError) => {
         toast.error('Failed to create Pi session', {
           description: createError instanceof Error ? createError.message : String(createError),
         });

@@ -43,8 +43,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
 import {
-  createPiSessionFromNavigation,
   openPiSessionFromNavigation,
+  startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 
@@ -177,7 +177,7 @@ export const CommandPalette: React.FC = () => {
         searchText: t('commandPalette.item.newSession'),
         onSelect: run(async () => {
           try {
-            await createPiSessionFromNavigation();
+            await startPiSessionDraftFromNavigation();
           } catch (error) {
             toast.error('Failed to create Pi session', {
               description: error instanceof Error ? error.message : String(error),
@@ -477,7 +477,7 @@ export const CommandPalette: React.FC = () => {
   const handleOpenProject = React.useCallback(
     (projectId: string, projectPath: string) => {
       close();
-      void createPiSessionFromNavigation({
+      void startPiSessionDraftFromNavigation({
         directory: projectPath,
         projectId,
       }).catch((error) => {

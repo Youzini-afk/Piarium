@@ -51,6 +51,7 @@ const TrafficLightButton: React.FC<TrafficLightButtonProps> = ({ action, isMaxim
   return (
     <button
       type="button"
+      data-window-control={action}
       onClick={() => onActivate(action)}
       title={label}
       aria-label={label}
@@ -142,7 +143,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
       <div
         className={cn(
           'app-region-no-drag group/wctl flex h-8 shrink-0 items-center',
-          isLeft ? 'mr-1' : 'ml-1',
+          isLeft ? 'mr-1' : 'ml-1 -mr-3',
         )}
         aria-label={t('header.windowControls.groupAria')}
       >
@@ -157,14 +158,15 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   // icon cluster (app menu / sidebar / project actions) and avoids negative
   // margins so TitlebarLeftControls publishes an accurate reserved width —
   // otherwise the project-actions chevron overlaps the session title. Right
-  // side keeps a taller h-12 Windows-style hit target.
+  // side keeps a taller h-12 Windows-style hit target and cancels Header's
+  // pr-3 edge padding so the close hit area reaches the window boundary.
   const buttonClassName = cn(
     'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
     isLeft ? 'h-8 w-8 rounded-md' : 'h-12 w-11',
   );
   const containerClassName = isLeft
     ? 'app-region-no-drag mr-1 flex h-8 shrink-0 items-center'
-    : 'app-region-no-drag ml-1 flex h-12 shrink-0 items-center';
+    : 'app-region-no-drag ml-1 -mr-3 flex h-12 shrink-0 items-center';
 
   const renderControl = (action: DesktopWindowControlAction) => {
     if (action === 'minimize') {
@@ -172,6 +174,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
         <button
           key="minimize"
           type="button"
+          data-window-control="minimize"
           className={buttonClassName}
           onClick={() => { void invokeDesktop('desktop_minimize_current_window'); }}
           title={t('header.windowControls.minimize')}
@@ -187,6 +190,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
         <button
           key="maximize"
           type="button"
+          data-window-control="maximize"
           className={buttonClassName}
           onClick={() => {
             void invokeDesktop<{ maximized?: boolean }>('desktop_toggle_current_window_maximized')
@@ -205,6 +209,7 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
       <button
         key="close"
         type="button"
+        data-window-control="close"
         className={cn(buttonClassName, 'hover:bg-status-error hover:text-status-error-foreground')}
         onClick={() => { void invokeDesktop('desktop_close_current_window'); }}
         title={t('header.windowControls.close')}
