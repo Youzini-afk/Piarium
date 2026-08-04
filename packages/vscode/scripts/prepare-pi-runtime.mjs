@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { copyFile, cp, mkdir, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
@@ -20,8 +20,11 @@ await Promise.all([
 ]);
 
 const findNpmCli = () => {
-  const direct = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-  if (existsSync(direct)) return direct;
+  const executableDirectory = path.dirname(process.execPath);
+  const candidates = new Set([
+    path.join(executableDirectory, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.resolve(executableDirectory, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ]);
   const command = process.platform === 'win32' ? 'where.exe' : 'which';
   const result = spawnSync(command, [process.platform === 'win32' ? 'npm.cmd' : 'npm'], {
     encoding: 'utf8',
@@ -30,11 +33,22 @@ const findNpmCli = () => {
   });
   if (result.status === 0) {
     for (const entry of result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
-      const candidate = path.join(path.dirname(entry), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-      if (existsSync(candidate)) return candidate;
+      try {
+        const resolvedEntry = realpathSync(entry);
+        if (path.basename(resolvedEntry).toLowerCase() === 'npm-cli.js') {
+          return resolvedEntry;
+        }
+      } catch {
+        // Keep checking standard layouts when the command shim cannot be resolved.
+      }
+      candidates.add(path.join(path.dirname(entry), 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+      candidates.add(path.resolve(path.dirname(entry), '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'));
     }
   }
-  throw new Error('npm CLI was not found next to Node.js; install a current Node.js distribution with npm');
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error('npm CLI could not be resolved from the Node.js installation or PATH');
 };
 
 const npmCli = findNpmCli();
