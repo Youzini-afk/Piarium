@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * OpenChamber local development helper.
+ * Piarium local development helper.
  *
  * This script owns the interactive `bun run oc-dev` menu and the equivalent
  * non-interactive commands for common local workflows: web deploys, mobile
@@ -9,7 +9,7 @@
  * Personal or machine-specific options are intentionally kept out of git.
  * The only supported user config is:
  *
- *   ~/.config/openchamber/oc-dev.json
+ *   ~/.config/piarium/oc-dev.json
  *
  * See `scripts/oc-dev.config.example.json` for the shape. The config can set
  * local device/app preferences such as `ios.deviceName`, `ios.useXcodeBeta`,
@@ -22,21 +22,25 @@
  * prompts for safety.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cancel, intro, isCancel, log, outro, select, text } from '@clack/prompts';
+import { installCloudRuntimeDependencies } from './build-cloud-runtime.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
-const configPath = path.join(os.homedir(), '.config', 'openchamber', 'oc-dev.json');
+const configPath = path.join(os.homedir(), '.config', 'piarium', 'oc-dev.json');
 
 const GLOBAL_PORT = '2606';
 const TESTING_PORT = '1202';
-const TESTING_DIR = 'testing-dev';
 const REMOTE_RUNTIME_ENV = 'PATH=$HOME/.local/bin:$HOME/.bun/bin:$PATH';
+const localRuntimeRoot = process.platform === 'win32'
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Piarium', 'DevRuntimes')
+  : path.join(os.homedir(), '.local', 'share', 'piarium', 'dev-runtimes');
+const localRuntimeCache = path.join(localRuntimeRoot, '.bun-cache');
 
 const isTty = Boolean(process.stdout.isTTY) && Boolean(process.stdin.isTTY);
 const isMac = process.platform === 'darwin';
@@ -47,8 +51,8 @@ function printHelp() {
   node scripts/oc-dev.mjs [action] [options]
 
 Actions:
-  build-deploy-web                 Build web package and deploy
-  remote-deploy-web                Deploy to configured remote target
+  build-deploy-web                 Build and deploy a local cloud runtime
+  remote-deploy-web                Atomically deploy to a configured remote target
   start-web-dev                    Start web development loop
   start-mobile-dev                 Start mobile app with dev server live reload
   mobile-tools                     Mobile build/sync/deploy helper menu
@@ -60,9 +64,9 @@ Actions:
 
 Options:
   -a, --action <action>
-  --deployment-mode <global|testing>
+  --deployment-mode <local|testing>
   --remote-id <id>                 Remote deployment id from ${configPath}
-  --target <test-api|test-ui>      Compatibility alias for remote deployment selection
+  --target <test-api|test-ui>      Select a remote deployment by surface
   --web-mode <hmr|hmr-react-scan|hmr-lan|full>
   --mobile-mode <ios-sim-local|ios-sim-lan|android-local|android-lan>
   --mobile-task <task>
@@ -160,6 +164,10 @@ function run(command, args, options = {}) {
     shell: options.shell || false,
   });
   if (result.status !== 0 && !options.allowFail) {
+    if (options.capture) {
+      if (result.stdout) process.stderr.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+    }
     throw new Error(`${options.label || [command, ...args].join(' ')} failed`);
   }
   return result.stdout?.trim() || '';
@@ -270,49 +278,178 @@ function latestFileByExtensions(directory, extensions) {
     .sort((left, right) => right.mtimeMs - left.mtimeMs)[0]?.filePath || '';
 }
 
-function resetDirectory(directory) {
-  mkdirSync(directory, { recursive: true });
-  for (const entry of ['package.json', 'package-lock.json', 'pnpm-lock.yaml', 'bun.lockb']) {
-    rmSync(path.join(directory, entry), { force: true });
-  }
-  rmSync(path.join(directory, 'node_modules'), { recursive: true, force: true });
-}
-
-function installedWebCli(directory) {
-  const cliPath = path.join(directory, 'node_modules', '@piarium', 'web', 'bin', 'cli.js');
+function installedRuntimeCli(directory) {
+  const cliPath = path.join(directory, 'packages', 'web', 'bin', 'cli.js');
   return existsSync(cliPath) ? cliPath : '';
 }
 
-function installedGlobalWebCli() {
-  const bunInstall = process.env.BUN_INSTALL || path.join(os.homedir(), '.bun');
-  return installedWebCli(path.join(bunInstall, 'install', 'global'));
-}
-
 function stopInstalledInstance(directory, port) {
-  const cliPath = installedWebCli(directory);
+  const cliPath = installedRuntimeCli(directory);
   if (!cliPath) return;
   run('node', [cliPath, 'stop', '--port', port], { cwd: directory, allowFail: true, label: `stop instance on ${port}` });
 }
 
 function startInstalledInstance(directory, port) {
-  const cliPath = installedWebCli(directory);
+  const cliPath = installedRuntimeCli(directory);
   if (!cliPath) throw new Error(`Piarium CLI was not installed in ${directory}`);
-  run('node', [cliPath, '--port', port], {
+  run('node', [cliPath, 'serve', '--port', port, '--host', process.env.PIARIUM_HOST || '127.0.0.1'], {
     cwd: directory,
     env: {
-      PIARIUM_UI_PASSWORD: process.env.PIARIUM_PASSWORD || '',
-      PIARIUM_HOST: '0.0.0.0',
+      PIARIUM_UI_PASSWORD: process.env.PIARIUM_UI_PASSWORD || '',
+      PIARIUM_HOST: process.env.PIARIUM_HOST || '127.0.0.1',
     },
     label: `start instance on ${port}`,
   });
 }
 
-function packageWeb() {
-  step('Building web bundle', () => run('bun', ['run', '--cwd', 'packages/web', 'build']));
-  const packOutput = step('Creating web package archive', () => run('npm', ['pack', '--pack-destination', repoRoot], { cwd: path.join(repoRoot, 'packages/web'), capture: true }));
-  const packageName = packOutput.split('\n').find((line) => line.trim().endsWith('.tgz'))?.trim();
-  if (!packageName) throw new Error('Archive creation failed: npm pack did not print a .tgz file.');
-  return path.join(repoRoot, packageName);
+function installedRuntimeVersion(directory) {
+  try {
+    const metadataPath = path.join(directory, 'cloud-runtime.json');
+    const metadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
+    return typeof metadata.version === 'string' ? metadata.version : '';
+  } catch {
+    return '';
+  }
+}
+
+function waitForInstalledInstance(directory, port, expectedVersion) {
+  const bindHost = process.env.PIARIUM_HOST || '127.0.0.1';
+  const probeHost = bindHost === '0.0.0.0'
+    ? '127.0.0.1'
+    : bindHost === '::'
+      ? '::1'
+      : bindHost;
+  const urlHost = probeHost.includes(':') ? `[${probeHost.replace(/^\[|\]$/g, '')}]` : probeHost;
+  run('node', [
+    '--input-type=module',
+    '-e',
+    `
+      const deadline = Date.now() + 45_000;
+      let lastError = 'no response';
+      while (Date.now() < deadline) {
+        try {
+          const response = await fetch(process.env.PIARIUM_LOCAL_HEALTH_URL, { signal: AbortSignal.timeout(2_000) });
+          const body = await response.json();
+          if (response.ok && body.status === 'ok' && body.piariumVersion === process.env.PIARIUM_EXPECTED_VERSION && body.piRuntime?.ready === true && body.piRuntime?.source === 'bundled') process.exit(0);
+          lastError = \`status=\${response.status} body=\${JSON.stringify(body)}\`;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      console.error(\`Piarium local health check timed out: \${lastError}\`);
+      process.exit(1);
+    `,
+  ], {
+    cwd: directory,
+    env: {
+      PIARIUM_LOCAL_HEALTH_URL: `http://${urlHost}:${port}/health`,
+      PIARIUM_EXPECTED_VERSION: expectedVersion,
+    },
+    label: `wait for Piarium ${expectedVersion} on ${port}`,
+  });
+}
+
+function parseCloudRuntimeMetadata(output) {
+  const line = output.split('\n').map((entry) => entry.trim()).filter(Boolean).at(-1);
+  if (!line) throw new Error('Cloud runtime builder did not return metadata.');
+  try {
+    return JSON.parse(line);
+  } catch (error) {
+    throw new Error(`Cloud runtime builder returned invalid metadata: ${error.message}`);
+  }
+}
+
+function buildCloudRuntime({ outputDir, archivePath, install = false }) {
+  const args = [
+    'scripts/build-cloud-runtime.mjs',
+    '--output', outputDir,
+    '--cache-dir', localRuntimeCache,
+    '--json',
+  ];
+  if (archivePath) args.push('--archive', archivePath);
+  else args.push('--no-archive');
+  if (install) args.push('--install');
+  const output = run('node', args, { capture: true, label: 'build Piarium cloud runtime' });
+  return parseCloudRuntimeMetadata(output);
+}
+
+function packageCloudRuntime() {
+  const outputDir = path.join(repoRoot, 'artifacts', 'cloud-runtime');
+  const archivePath = path.join(repoRoot, 'artifacts', 'piarium-cloud-runtime.tgz');
+  const metadata = step('Building Piarium cloud runtime archive', () => buildCloudRuntime({
+    outputDir,
+    archivePath,
+  }));
+  if (!metadata.archivePath || !metadata.archiveSha256) {
+    throw new Error('Cloud runtime archive metadata is incomplete.');
+  }
+  return metadata;
+}
+
+function deployLocalRuntime(targetDirectory, port) {
+  const stagingDirectory = `${targetDirectory}.staging-${process.pid}`;
+  const previousDirectory = `${targetDirectory}.previous`;
+  rmSync(stagingDirectory, { recursive: true, force: true });
+  let metadata;
+  try {
+    metadata = step('Building Piarium runtime tree', () => buildCloudRuntime({
+      outputDir: stagingDirectory,
+    }));
+  } catch (error) {
+    rmSync(stagingDirectory, { recursive: true, force: true });
+    throw error;
+  }
+
+  let previousMoved = false;
+  let previousStopped = false;
+  let candidateActivated = false;
+  try {
+    rmSync(previousDirectory, { recursive: true, force: true });
+    if (existsSync(targetDirectory)) {
+      stopInstalledInstance(targetDirectory, port);
+      previousStopped = true;
+      renameSync(targetDirectory, previousDirectory);
+      previousMoved = true;
+    }
+    renameSync(stagingDirectory, targetDirectory);
+    candidateActivated = true;
+    step('Installing target-platform Piarium dependencies', () => installCloudRuntimeDependencies(
+      targetDirectory,
+      { cacheDir: localRuntimeCache },
+    ));
+    startInstalledInstance(targetDirectory, port);
+    waitForInstalledInstance(targetDirectory, port, metadata.version);
+  } catch (error) {
+    let rollbackError;
+    if (candidateActivated) {
+      stopInstalledInstance(targetDirectory, port);
+      rmSync(targetDirectory, { recursive: true, force: true });
+    }
+    if (previousMoved && existsSync(previousDirectory)) {
+      renameSync(previousDirectory, targetDirectory);
+      try {
+        startInstalledInstance(targetDirectory, port);
+        waitForInstalledInstance(targetDirectory, port, installedRuntimeVersion(targetDirectory));
+      } catch (restartError) {
+        rollbackError = restartError;
+      }
+    } else if (previousStopped && existsSync(targetDirectory)) {
+      try {
+        startInstalledInstance(targetDirectory, port);
+        waitForInstalledInstance(targetDirectory, port, installedRuntimeVersion(targetDirectory));
+      } catch (restartError) {
+        rollbackError = restartError;
+      }
+    }
+    rmSync(stagingDirectory, { recursive: true, force: true });
+    if (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'Piarium candidate failed and the previous local runtime could not be restored.');
+    }
+    throw error;
+  }
+
+  log.success(`Piarium ${metadata.version} local runtime ready on port ${port}`);
 }
 
 async function selectRemoteDeployment(config, options) {
@@ -344,62 +481,69 @@ async function selectRemoteDeployment(config, options) {
 
 async function deployWeb(options, config) {
   const deploymentMode = (await chooseValue(options.deploymentMode, [
-    { value: 'global', label: 'Global' },
+    { value: 'local', label: 'Local runtime' },
     { value: 'testing', label: 'Testing' },
   ], 'Select installation mode')).toLowerCase();
 
-  if (!['global', 'testing'].includes(deploymentMode)) {
-    throw new Error('Invalid deployment mode. Use global or testing. Use remote-deploy-web for configured remote deployments.');
+  if (!['local', 'testing'].includes(deploymentMode)) {
+    throw new Error('Invalid deployment mode. Use local or testing. Use remote-deploy-web for configured remote deployments.');
   }
 
-  const packageFile = packageWeb();
-
   if (deploymentMode === 'testing') {
-    const testingDir = path.join(os.homedir(), TESTING_DIR);
-    step(`Stopping testing instance on ${TESTING_PORT}`, () => stopInstalledInstance(testingDir, TESTING_PORT));
-    step('Preparing testing install directory', () => {
-      resetDirectory(testingDir);
-      run('bun', ['init', '-y'], { cwd: testingDir });
-    });
-    step('Installing testing package', () => run('bun', ['add', packageFile], { cwd: testingDir }));
-    step(`Starting testing instance on ${TESTING_PORT}`, () => startInstalledInstance(testingDir, TESTING_PORT));
+    deployLocalRuntime(path.join(localRuntimeRoot, 'testing'), TESTING_PORT);
     return;
   }
 
-  step(`Stopping global instance on ${GLOBAL_PORT}`, () => run('piarium', ['stop', '--port', GLOBAL_PORT], { allowFail: true, label: `stop global instance on ${GLOBAL_PORT}` }));
-  step('Removing old global package', () => {
-    run('bun', ['remove', '-g', '@piarium/web'], { allowFail: true, label: 'remove @piarium/web' });
-  });
-  step('Installing package globally', () => run('bun', ['add', '-g', packageFile]));
-  step(`Starting global instance on ${GLOBAL_PORT}`, () => {
-    const cliPath = installedGlobalWebCli();
-    if (!cliPath) throw new Error('Global Piarium CLI was not installed by bun add -g');
-    run('node', [cliPath, '--port', GLOBAL_PORT], { env: { PIARIUM_UI_PASSWORD: process.env.PIARIUM_PASSWORD || '', PIARIUM_HOST: '0.0.0.0' } });
-  });
+  deployLocalRuntime(path.join(localRuntimeRoot, 'local'), GLOBAL_PORT);
 }
 
 async function deployRemoteWeb(options, config) {
   const remote = await selectRemoteDeployment(config, options);
-  const packageFile = packageWeb();
+  const metadata = packageCloudRuntime();
   const host = remote.host;
-  const dir = remote.dir;
+  const dir = String(remote.dir || '').trim().replaceAll('\\', '/').replace(/^\.\//, '');
   const port = String(remote.port);
-  const apiOnly = remote.apiOnly ? 'true' : 'false';
-  const packageBase = path.basename(packageFile);
+  const bindHost = String(remote.bindHost || '0.0.0.0');
+  const archiveBase = `piarium-cloud-runtime-${metadata.archiveSha256.slice(0, 16)}.tgz`;
+  const deployScriptBase = 'deploy-cloud-runtime.sh';
+  const releaseId = `${metadata.version}-${metadata.archiveSha256.slice(0, 16)}`;
 
   if (!host || !dir || !port) throw new Error(`Remote deployment ${remote.id} must define host, dir, and port.`);
+  if (!/^[A-Za-z0-9._/-]+$/.test(dir) || dir.startsWith('/') || dir.split('/').includes('..')) {
+    throw new Error(`Remote deployment ${remote.id} has an unsafe relative dir: ${dir}`);
+  }
+  if (String(host).startsWith('-') || /\s/.test(String(host))) {
+    throw new Error(`Remote deployment ${remote.id} has an invalid SSH host: ${host}`);
+  }
+  if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+    throw new Error(`Remote deployment ${remote.id} has an invalid port: ${port}`);
+  }
 
-  step('Preparing remote directories', () => run('ssh', [host, `mkdir -p ~/${dir}/releases`]));
-  step(`Stopping remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; ${REMOTE_RUNTIME_ENV}; cd ~/${dir} 2>/dev/null || exit 0; PORT=${quote(port)}; TMPDIR=$(node -p "require('os').tmpdir()" 2>/dev/null || echo /tmp); PIDFILE="$TMPDIR/openchamber-${port}.pid"; INSTANCEFILE="$TMPDIR/openchamber-${port}.json"; if [ -f ./node_modules/@piarium/web/bin/cli.js ]; then bun ./node_modules/@piarium/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || node ./node_modules/@piarium/web/bin/cli.js stop --port "$PORT" >/dev/null 2>&1 || true; fi; if command -v lsof >/dev/null 2>&1; then lsof -ti :"$PORT" | xargs -r kill >/dev/null 2>&1 || true; sleep 0.5; lsof -ti :"$PORT" | xargs -r kill -9 >/dev/null 2>&1 || true; fi; rm -f "$PIDFILE" "$INSTANCEFILE"`], { label: 'stop remote instance' }));
-  step('Copying package to remote', () => {
-    run('ssh', [host, `mkdir -p ~/${dir}/releases && rm -f ~/${dir}/releases/*.tgz`]);
-    run('scp', ['-q', packageFile, `${host}:~/${dir}/releases/${packageBase}`]);
+  step('Preparing remote Piarium incoming directory', () => run('ssh', [
+    host,
+    `mkdir -p "$HOME/${dir}/incoming"`,
+  ]));
+  step('Uploading immutable Piarium cloud runtime', () => {
+    run('scp', ['-q', metadata.archivePath, `${host}:~/${dir}/incoming/${archiveBase}`]);
+    run('scp', ['-q', path.join(repoRoot, 'scripts', 'deploy-cloud-runtime.sh'), `${host}:~/${dir}/incoming/${deployScriptBase}`]);
   });
-  step('Resetting remote install state', () => run('ssh', [host, `cd ~/${dir} && rm -f package.json package-lock.json pnpm-lock.yaml bun.lockb && rm -rf node_modules`]));
-  step('Preparing remote package manifest', () => run('ssh', [host, `cd ~/${dir} && ${REMOTE_RUNTIME_ENV}; npm init -y >/dev/null 2>&1`]));
-  step('Installing remote package', () => run('ssh', [host, `cd ~/${dir} && ${REMOTE_RUNTIME_ENV}; npm install ./releases/${packageBase}`]));
-  step(`Starting remote instance on ${host}:${port}`, () => run('ssh', [host, `set -e; cd ~/${dir}; ${REMOTE_RUNTIME_ENV}; PASSWORD_VALUE=$(grep '^export PIARIUM_UI_PASSWORD=' ~/.bashrc 2>/dev/null | sed -E 's/.*=["“]?([^"”]+)["”]?/\\1/' || true); if [ -n "$PASSWORD_VALUE" ]; then export PIARIUM_UI_PASSWORD="$PASSWORD_VALUE"; fi; if [ ${quote(apiOnly)} = 'true' ]; then export PIARIUM_API_ONLY=true; fi; PIARIUM_HOST=0.0.0.0 node ./node_modules/@piarium/web/bin/cli.js --port ${quote(port)} >/dev/null 2>&1; sleep 0.5; if command -v lsof >/dev/null 2>&1; then lsof -ti :${quote(port)} >/dev/null 2>&1 || exit 1; fi`]));
-  log.success(`Remote deployment ready: ${host}:${port}`);
+
+  const deployArgs = [
+    `${REMOTE_RUNTIME_ENV}; bash "$HOME/${dir}/incoming/${deployScriptBase}"`,
+    '--root', quote(dir),
+    '--archive', quote(`incoming/${archiveBase}`),
+    '--sha256', quote(metadata.archiveSha256),
+    '--release-id', quote(releaseId),
+    '--port', quote(port),
+    '--bind-host', quote(bindHost),
+  ];
+  if (remote.dataDir) deployArgs.push('--data-dir', quote(remote.dataDir));
+  if (remote.envFile) deployArgs.push('--env-file', quote(remote.envFile));
+  if (remote.healthTimeoutSeconds) deployArgs.push('--health-timeout', quote(remote.healthTimeoutSeconds));
+  if (remote.apiOnly) deployArgs.push('--api-only');
+
+  step(`Deploying Piarium ${metadata.version} to ${host}:${port}`, () => run('ssh', [host, deployArgs.join(' ')]));
+  log.success(`Remote Piarium ${metadata.version} is healthy: ${host}:${port}`);
 }
 
 async function startWebDev(options) {

@@ -2487,7 +2487,7 @@ export const dict = {
   'updateDialog.changelog.title': 'Nouveautés',
   'updateDialog.status.updating': 'Mise à jour...',
   'updateDialog.error.updateFailed': 'La mise à jour a échoué',
-  'updateDialog.error.takingLonger': 'La mise à jour prend plus de temps que prévu. Attendez un peu et actualisez, ou exécutez : openchamber update',
+  'updateDialog.error.takingLonger': 'La mise à jour prend plus de temps que prévu. Attendez un peu et actualisez, ou exécutez : piarium update',
   'mobileUpdate.toast.available.title': 'Mise à jour Piarium disponible',
   'mobileUpdate.toast.available.description': 'La version {version} est prête pour Android.',
   'mobileUpdate.toast.actions.download': 'Télécharger',

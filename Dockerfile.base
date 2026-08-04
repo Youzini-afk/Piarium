@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM oven/bun:1.3.6 AS runtime-base
-WORKDIR /home/openchamber
+FROM oven/bun:1.3.14 AS runtime-base
+WORKDIR /home/piarium/app
 
 ARG TARGETARCH
 ARG GO_VERSION=1.26.3
@@ -93,37 +93,41 @@ RUN set -eux; \
   && rg --version \
   && rm -rf /root/.npm /var/lib/apt/lists/* /tmp/githubcli-archive-keyring.gpg /tmp/go*.tar.gz /tmp/node-*.tar.xz
 
-# Replace the base image's 'bun' user (UID 1000) with the runtime user so
-# mounted volumes with 1000:1000 ownership work correctly.
+# Replace the base image's 'bun' identity (UID/GID 1000) with Piarium so
+# mounted volumes retain predictable ownership on every supported platform.
 RUN (id -u bun >/dev/null 2>&1 && userdel bun || true) \
-  && groupadd -g 1000 openchamber \
-  && useradd -u 1000 -g 1000 -m -s /bin/bash openchamber \
-  && echo 'openchamber:100000:65536' >> /etc/subuid \
-  && echo 'openchamber:100000:65536' >> /etc/subgid \
-  && chown -R openchamber:openchamber /home/openchamber
+  && (getent group bun >/dev/null 2>&1 && groupdel bun || true) \
+  && groupadd -g 1000 piarium \
+  && useradd -u 1000 -g 1000 -m -s /bin/bash piarium \
+  && echo 'piarium:100000:65536' >> /etc/subuid \
+  && echo 'piarium:100000:65536' >> /etc/subgid \
+  && mkdir -p /home/piarium/app \
+  && chown -R piarium:piarium /home/piarium
 
-USER openchamber
+USER piarium
 
-ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
-ENV GOPATH=/home/openchamber/go
-ENV CARGO_HOME=/home/openchamber/.cargo
-ENV RUSTUP_HOME=/home/openchamber/.rustup
-ENV PIARIUM_VALIDATION_NODE_MODULES=/home/openchamber/.openchamber-validation/node_modules
+ENV HOME=/home/piarium
+ENV NPM_CONFIG_PREFIX=/home/piarium/.npm-global
+ENV GOPATH=/home/piarium/go
+ENV CARGO_HOME=/home/piarium/.cargo
+ENV RUSTUP_HOME=/home/piarium/.rustup
+ENV PIARIUM_VALIDATION_NODE_MODULES=/home/piarium/.piarium-validation/node_modules
 ENV NODE_PATH=${PIARIUM_VALIDATION_NODE_MODULES}
-ENV PATH=/home/openchamber/node_modules/.bin:${PIARIUM_VALIDATION_NODE_MODULES}/.bin:${NPM_CONFIG_PREFIX}/bin:${GOPATH}/bin:${CARGO_HOME}/bin:${PATH}
+ENV PATH=/home/piarium/app/node_modules/.bin:${PIARIUM_VALIDATION_NODE_MODULES}/.bin:${NPM_CONFIG_PREFIX}/bin:${GOPATH}/bin:${CARGO_HOME}/bin:${PATH}
 
-RUN mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh /home/openchamber/go /home/openchamber/.cargo /home/openchamber/.rustup /home/openchamber/.openchamber-validation && \
+RUN mkdir -p /home/piarium/.local /home/piarium/.config/piarium /home/piarium/.ssh /home/piarium/workspaces /home/piarium/go /home/piarium/.cargo /home/piarium/.rustup /home/piarium/.piarium-validation && \
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
   rustup component add rust-analyzer rustfmt && \
   rustc --version && cargo --version && \
   go install golang.org/x/tools/gopls@${GOPLS_VERSION} && \
-  npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global && \
-  npm install --prefix /home/openchamber/.openchamber-validation --no-save @types/node@${NODE_TYPES_VERSION} vitest@${VITEST_VERSION} && \
+  npm config set prefix /home/piarium/.npm-global && mkdir -p /home/piarium/.npm-global && \
+  npm install --prefix /home/piarium/.piarium-validation --no-save @types/node@${NODE_TYPES_VERSION} vitest@${VITEST_VERSION} && \
   npm install -g pnpm tsx typescript typescript-language-server yarn && \
   rust-analyzer --version && rustfmt --version && gopls version && tsc --version && typescript-language-server --version && vitest --version && node -e "require.resolve('@types/node/package.json')" && pnpm --version && yarn --version && \
   docker --version && buildctl --version
 
 # cloudflared 2026.3.0 - update digest explicitly when upgrading
 COPY --from=cloudflare/cloudflared@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0 /usr/local/bin/cloudflared /usr/local/bin/cloudflared
+RUN cloudflared --version
 
 ENV NODE_ENV=production

@@ -2882,7 +2882,7 @@ export const dict: Record<I18nKey, string> = {
   "updateDialog.actions.openMobileUpdate": "Abrir atualização",
   "updateDialog.status.updating": "Atualizando...",
   "updateDialog.error.updateFailed": "Não foi possível atualizar",
-  "updateDialog.error.takingLonger": "A atualização está demorando mais do que o esperado. Aguarde um pouco e atualize, ou execute: openchamber update",
+  "updateDialog.error.takingLonger": "A atualização está demorando mais do que o esperado. Aguarde um pouco e atualize, ou execute: piarium update",
   "mobileUpdate.toast.available.title": "Atualização do Piarium disponível",
   "mobileUpdate.toast.available.description": "A versão {version} está pronta para Android.",
   "mobileUpdate.toast.actions.download": "Baixar",

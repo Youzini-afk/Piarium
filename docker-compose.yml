@@ -1,34 +1,37 @@
 services:
   piarium:
-    # Use the prebuilt image for faster startup:
-    # image: ghcr.io/youzini-afk/piarium:latest
-    # Or keep the local build path below for development/custom images.
+    image: ${PIARIUM_IMAGE:-ghcr.io/youzini-afk/piarium:latest}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # Build Dockerfile.base locally first and change this to
-        # openchamber-runtime-base:local for fully local app image builds.
-        RUNTIME_BASE_IMAGE: ghcr.io/youzini-afk/openchamber-runtime-base:main
+        # Build Dockerfile.base as piarium-runtime-base:local and override this
+        # variable when a completely local image chain is preferred.
+        RUNTIME_BASE_IMAGE: ${PIARIUM_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/piarium-runtime-base:main}
     container_name: piarium
+    init: true
+    user: "1000:1000"
     ports:
       - "3000:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./data/piarium:/home/openchamber/.config/openchamber
-      - ./data/ssh:/home/openchamber/.ssh
-      - ./workspaces:/home/openchamber/workspaces
+      - ./data/piarium:/home/piarium/.config/piarium
+      - ./data/ssh:/home/piarium/.ssh
+      - ./data/cloudflared:/home/piarium/.cloudflared
+      - ./workspaces:/home/piarium/workspaces
     environment:
-      PIARIUM_WORKSPACE_ROOT: /home/openchamber/workspaces
-      # Docker binds Piarium to 0.0.0.0 for port mapping, so UI auth is required.
-      # Set this before starting, for example:
-      #   PIARIUM_UI_PASSWORD="$(openssl rand -base64 24)" docker compose up -d
+      HOME: /home/piarium
+      PIARIUM_DATA_DIR: /home/piarium/.config/piarium
+      PIARIUM_WORKSPACE_ROOT: /home/piarium/workspaces
+      PIARIUM_HOST: ${PIARIUM_HOST:-0.0.0.0}
+      # Port publishing makes UI authentication mandatory. Generate a value,
+      # for example: PIARIUM_UI_PASSWORD="$(openssl rand -base64 24)" docker compose up -d
       PIARIUM_UI_PASSWORD: ${PIARIUM_UI_PASSWORD:?Set PIARIUM_UI_PASSWORD before exposing Piarium through Docker}
-    # PIARIUM_HOST: 0.0.0.0  # Bind address (default in Docker entrypoint: 0.0.0.0)
-    # PIARIUM_TUNNEL_PROVIDER: cloudflare
-    # PIARIUM_TUNNEL_MODE: quick  # quick | managed-remote | managed-local
-    # PIARIUM_TUNNEL_HOSTNAME: app.example.com  # required for managed-remote
-    # PIARIUM_TUNNEL_TOKEN: your_cloudflare_token  # required for managed-remote
-    # PIARIUM_TUNNEL_CONFIG: /home/openchamber/.cloudflared/config.yml  # optional for managed-local
+      # Tunnel values stay runtime-only and are never Docker build arguments.
+      PIARIUM_TUNNEL_PROVIDER: ${PIARIUM_TUNNEL_PROVIDER:-}
+      PIARIUM_TUNNEL_MODE: ${PIARIUM_TUNNEL_MODE:-}
+      PIARIUM_TUNNEL_HOSTNAME: ${PIARIUM_TUNNEL_HOSTNAME:-}
+      PIARIUM_TUNNEL_TOKEN: ${PIARIUM_TUNNEL_TOKEN:-}
+      PIARIUM_TUNNEL_CONFIG: ${PIARIUM_TUNNEL_CONFIG:-/home/piarium/.cloudflared/config.yml}
     restart: unless-stopped

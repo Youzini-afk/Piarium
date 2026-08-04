@@ -5,7 +5,7 @@ PROGRAM_NAME="docker"
 
 print_build_only_notice() {
   cat >&2 <<'EOF'
-OpenChamber Docker build-only mode is active.
+Piarium Docker build-only mode is active.
 This container does not expose a Docker daemon or host Docker socket.
 Supported: docker build / docker buildx build (daemonless BuildKit).
 Rejected: docker run, docker compose, docker ps, docker exec, docker pull/push, and daemon control commands.
@@ -14,7 +14,7 @@ EOF
 
 print_version() {
   cat <<'EOF'
-Docker build-only compatibility wrapper for OpenChamber
+Docker build-only compatibility wrapper for Piarium
 Backend: daemonless BuildKit (no Docker daemon, no /var/run/docker.sock)
 EOF
   if command -v buildctl >/dev/null 2>&1; then
@@ -55,7 +55,7 @@ EOF
 reject_command() {
   local command_name="${1:-unknown}"
   cat >&2 <<EOF
-Docker command '${command_name}' is disabled in this OpenChamber container.
+Docker command '${command_name}' is disabled in this Piarium container.
 
 Reason: this is a shared-host safe build-only environment. The host Docker daemon
 and /var/run/docker.sock are intentionally unavailable.
@@ -315,14 +315,14 @@ run_build() {
     buildctl_args+=("--output" "type=cacheonly")
   fi
 
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/openchamber-buildkit-${UID}}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/piarium-buildkit-${UID}}"
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
 
   export BUILDKITD_FLAGS="${BUILDKITD_FLAGS:---oci-worker-no-process-sandbox --oci-worker-snapshotter=native}"
   # Keep the default compatible with restricted Docker build/runtime environments
   # that disallow rootlesskit's user namespace setup. buildctl-daemonless.sh will
-  # start buildkitd directly as the non-root openchamber user when ROOTLESSKIT is
+  # start buildkitd directly as the non-root piarium user when ROOTLESSKIT is
   # empty. Operators who know their runtime supports rootlesskit can override this
   # env var, for example:
   #   ROOTLESSKIT='rootlesskit --net=slirp4netns --copy-up=/etc --disable-host-loopback'

@@ -56,8 +56,6 @@ export type DesktopSettings = {
   splashFgDark?: string;
   lastDirectory?: string;
   homeDirectory?: string;
-  // Optional absolute path to `opencode` binary.
-  opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
   desktopMinimizeToTrayEnabled?: boolean;
@@ -203,7 +201,7 @@ export type DesktopSettings = {
   // Opt-in to automatic update checks and update notification UI (default: false)
   autoUpdateChecksEnabled?: boolean;
 
-  // Global behavior prompt — synced to ~/.config/opencode/AGENTS.md
+  // Piarium-owned global behavior prompt.
   globalBehaviorPrompt?: string;
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';

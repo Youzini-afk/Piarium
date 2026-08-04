@@ -40,7 +40,7 @@ interface UpdateStore extends UpdateState {
 
 type ClientRuntime = 'desktop' | 'web' | 'vscode' | 'mobile';
 
-const CLIENT_INSTALL_ID_KEY = 'openchamber.update-install-id';
+const CLIENT_INSTALL_ID_KEY = 'piarium.update-install-id';
 
 function getClientInstallId(): string | undefined {
   if (typeof window === 'undefined' || typeof crypto.randomUUID !== 'function') return undefined;

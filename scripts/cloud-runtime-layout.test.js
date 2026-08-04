@@ -1,0 +1,157 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  CLOUD_RUNTIME_PACKAGE_DIRS,
+  CLOUD_RUNTIME_SCHEMA_VERSION,
+  verifyCloudRuntimeLayout,
+  verifyCloudRuntimeIdentity,
+} from './build-cloud-runtime.mjs';
+
+const repoRoot = path.resolve(import.meta.dirname, '..');
+const temporaryDirectories = [];
+
+const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
+const writeJson = (filePath, value) => {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+};
+
+const createFixture = () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-cloud-runtime-'));
+  temporaryDirectories.push(root);
+  writeJson(path.join(root, 'package.json'), {
+    name: 'piarium-cloud-runtime',
+    workspaces: ['packages/*'],
+  });
+  writeJson(path.join(root, 'cloud-runtime.json'), {
+    schemaVersion: CLOUD_RUNTIME_SCHEMA_VERSION,
+  });
+  fs.writeFileSync(path.join(root, 'bun.lock'), '{}\n');
+
+  const manifests = {
+    protocol: { name: '@piarium/protocol', dependencies: {} },
+    'pi-host': { name: '@piarium/pi-host', dependencies: { '@piarium/protocol': '0.1.0' } },
+    'runtime-broker': {
+      name: '@piarium/runtime-broker',
+      dependencies: {
+        '@piarium/pi-host': '0.1.0',
+        '@piarium/protocol': '0.1.0',
+      },
+    },
+    web: {
+      name: '@piarium/web',
+      dependencies: {
+        '@piarium/protocol': 'workspace:*',
+        '@piarium/runtime-broker': 'workspace:*',
+      },
+    },
+  };
+
+  for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
+    const packageRoot = path.join(root, 'packages', directory);
+    writeJson(path.join(packageRoot, 'package.json'), manifests[directory]);
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    if (directory === 'web') {
+      fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
+      fs.mkdirSync(path.join(packageRoot, 'server'), { recursive: true });
+    }
+  }
+  return root;
+};
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe('Piarium cloud runtime layout', () => {
+  it('keeps a committed production lock for reproducible image and SSH installs', () => {
+    const lockPath = path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock');
+    expect(fs.existsSync(lockPath)).toBe(true);
+    const lockText = fs.readFileSync(lockPath, 'utf8');
+    expect(lockText).toContain('"name": "piarium-cloud-runtime"');
+    expect(lockText).toContain('"packages/runtime-broker"');
+    expect(lockText).toContain('"packages/pi-host"');
+    expect(lockText).toContain('"packages/protocol"');
+    expect(lockText).toContain('"packages/web"');
+
+    const builderSource = fs.readFileSync(
+      path.join(repoRoot, 'scripts', 'build-cloud-runtime.mjs'),
+      'utf8',
+    );
+    expect(builderSource).toContain("'cloud-runtime.bun.lock'");
+    expect(builderSource).toContain("['--frozen-lockfile']");
+    expect(builderSource).toContain("case '--update-lock'");
+    expect(builderSource).toContain('pruneNonRuntimeFiles');
+  });
+
+  it('contains the complete private Pi runtime dependency closure', () => {
+    const packageNames = new Set(CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => (
+      readJson(path.join(repoRoot, 'packages', directory, 'package.json')).name
+    )));
+
+    expect(CLOUD_RUNTIME_PACKAGE_DIRS).toEqual([
+      'protocol',
+      'pi-host',
+      'runtime-broker',
+      'web',
+    ]);
+    for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
+      const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
+      for (const dependencyName of Object.keys(manifest.dependencies || {})) {
+        if (dependencyName.startsWith('@piarium/')) {
+          expect(packageNames.has(dependencyName), `${manifest.name} -> ${dependencyName}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('accepts the canonical four-package tree', () => {
+    const fixture = createFixture();
+    expect(verifyCloudRuntimeLayout(fixture)).toMatchObject({
+      schemaVersion: CLOUD_RUNTIME_SCHEMA_VERSION,
+    });
+  });
+
+  it('rejects workspace dependencies that are not shipped in the runtime', () => {
+    const fixture = createFixture();
+    const webManifestPath = path.join(fixture, 'packages', 'web', 'package.json');
+    const webManifest = readJson(webManifestPath);
+    webManifest.dependencies['@piarium/missing-runtime'] = 'workspace:*';
+    writeJson(webManifestPath, webManifest);
+
+    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
+      'depends on missing workspace @piarium/missing-runtime',
+    );
+  });
+
+  it('requires compiled package outputs and a production lockfile', () => {
+    const fixture = createFixture();
+    fs.rmSync(path.join(fixture, 'packages', 'pi-host', 'dist'), { recursive: true, force: true });
+    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
+      'Missing runtime package entry: packages/pi-host/dist',
+    );
+
+    const secondFixture = createFixture();
+    fs.rmSync(path.join(secondFixture, 'bun.lock'));
+    expect(() => verifyCloudRuntimeLayout(secondFixture)).toThrow(
+      'Cloud runtime bun.lock is missing',
+    );
+  });
+
+  it('rejects retired update services and commands from the staged production artifact', () => {
+    const fixture = createFixture();
+    const serverEntry = path.join(fixture, 'packages', 'web', 'server', 'package-manager.js');
+    fs.writeFileSync(serverEntry, "export const updateUrl = 'https://api.openchamber.dev/v1/update/check';\n");
+
+    expect(() => verifyCloudRuntimeIdentity(fixture)).toThrow(
+      'Cloud runtime contains retired update identity',
+    );
+    expect(() => verifyCloudRuntimeLayout(fixture)).toThrow(
+      'Cloud runtime contains retired update identity',
+    );
+  });
+});

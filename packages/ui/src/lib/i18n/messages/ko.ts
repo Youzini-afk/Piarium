@@ -2734,7 +2734,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.actions.openMobileUpdate': '업데이트 열기',
   'updateDialog.status.updating': '업데이트 중…',
   'updateDialog.error.updateFailed': '업데이트 실패',
-  'updateDialog.error.takingLonger': '업데이트가 예상보다 오래 걸립니다. 잠시 기다린 뒤 새로고침하거나 `openchamber update`를 실행하세요.',
+  'updateDialog.error.takingLonger': '업데이트가 예상보다 오래 걸립니다. 잠시 기다린 뒤 새로고침하거나 `piarium update`를 실행하세요.',
   'mobileUpdate.toast.available.title': 'Piarium 업데이트 사용 가능',
   'mobileUpdate.toast.available.description': 'Android용 버전 {version}이 준비되었습니다.',
   'mobileUpdate.toast.actions.download': '다운로드',

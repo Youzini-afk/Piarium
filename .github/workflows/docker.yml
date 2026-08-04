@@ -1,0 +1,423 @@
+name: Docker Images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+    paths:
+      - Dockerfile
+      - Dockerfile.base
+      - docker-compose.yml
+      - .dockerignore
+      - bun.lock
+      - package.json
+      - bun-patches/**
+      - patches/**
+      - fix-deprecation.js
+      - packages/**
+      - scripts/build-cloud-runtime.mjs
+      - scripts/cloud-runtime.bun.lock
+      - scripts/docker-build-only-wrapper.sh
+      - scripts/docker-entrypoint.sh
+      - scripts/repair-pi-shrinkwrap.mjs
+      - .github/workflows/docker.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - Dockerfile.base
+      - docker-compose.yml
+      - .dockerignore
+      - bun.lock
+      - package.json
+      - bun-patches/**
+      - patches/**
+      - fix-deprecation.js
+      - packages/**
+      - scripts/build-cloud-runtime.mjs
+      - scripts/cloud-runtime.bun.lock
+      - scripts/docker-build-only-wrapper.sh
+      - scripts/docker-entrypoint.sh
+      - scripts/repair-pi-shrinkwrap.mjs
+      - .github/workflows/docker.yml
+  workflow_dispatch:
+    inputs:
+      runtime_base_image:
+        description: Optional prebuilt Piarium runtime base image override
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: piarium-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # Image references are deliberately lowercase instead of inheriting account casing.
+  APP_IMAGE_NAME: youzini-afk/piarium
+  BASE_IMAGE_NAME: youzini-afk/piarium-runtime-base
+
+jobs:
+  quality-gate:
+    name: Verify Piarium runtime before image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - run: bun audit
+      - run: bun run type-check
+      - run: bun run lint
+      - run: bun run check:pi
+      - run: bun run --cwd packages/web test
+      - run: bun run test:cloud
+      - run: bun run build
+      - run: bun run build:cloud-runtime -- --skip-build --no-archive --output artifacts/cloud-runtime-docker-gate
+
+  verify-pr-image:
+    name: Build and smoke PR image
+    runs-on: ubuntu-latest
+    needs: [quality-gate]
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start an isolated local registry
+        run: docker run --detach --name piarium-pr-registry --publish 127.0.0.1:5000:5000 registry:2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+
+      - name: Build PR runtime base into the local registry
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.base
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: localhost:5000/piarium-runtime-base:pr-${{ github.sha }}
+          cache-from: type=gha,scope=piarium-pr-runtime-base
+          cache-to: type=gha,scope=piarium-pr-runtime-base,mode=max
+
+      - name: Build the coupled PR app image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: piarium:pr-${{ github.sha }}
+          build-args: |
+            RUNTIME_BASE_IMAGE=localhost:5000/piarium-runtime-base:pr-${{ github.sha }}
+            PIARIUM_SOURCE_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=piarium-pr-app
+          cache-to: type=gha,scope=piarium-pr-app,mode=max
+
+      - name: Smoke the PR image
+        shell: bash
+        env:
+          IMAGE_REF: piarium:pr-${{ github.sha }}
+          EXPECTED_RELEASE_ID: image-${{ github.sha }}
+        run: |
+          cleanup() {
+            docker logs piarium-pr-smoke 2>/dev/null || true
+            docker rm --force piarium-pr-smoke 2>/dev/null || true
+            docker rm --force piarium-pr-registry 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          docker run --detach \
+            --name piarium-pr-smoke \
+            --env PIARIUM_UI_PASSWORD=piarium-ci-smoke-only \
+            --publish 127.0.0.1:3000:3000 \
+            "$IMAGE_REF"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then break; fi
+            if ! docker inspect --format '{{.State.Running}}' piarium-pr-smoke | grep -qx true; then
+              echo "Piarium PR container exited before becoming healthy." >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "Piarium PR /health did not become ready." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:3000/health \
+            | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
+          docker exec piarium-pr-smoke node --input-type=module -e "import { statSync } from 'node:fs'; import { createRequire } from 'node:module'; import { pathToFileURL } from 'node:url'; const brokerPackage = new URL('./packages/web/node_modules/@piarium/runtime-broker/package.json', import.meta.url); const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const entry = broker.resolveBundledPiHostEntry(); if (!statSync(entry).isFile()) throw new Error('Pi host entry missing'); const require = createRequire(brokerPackage); const host = await import(pathToFileURL(require.resolve('@piarium/pi-host')).href); if (typeof host.HostController !== 'function') throw new Error('Pi host module failed to load');"
+
+  build-runtime-base:
+    name: Build runtime base candidate
+    runs-on: ubuntu-latest
+    needs: [quality-gate]
+    if: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.runtime_base_image == '') }}
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract runtime base labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}
+
+      - name: Build and push immutable runtime base candidate
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.base
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=piarium-runtime-base
+          cache-to: type=gha,scope=piarium-runtime-base,mode=max
+
+  build-app:
+    name: Build Piarium app candidate
+    runs-on: ubuntu-latest
+    needs: [quality-gate, build-runtime-base]
+    if: ${{ always() && github.event_name != 'pull_request' && needs.quality-gate.result == 'success' && (needs.build-runtime-base.result == 'success' || needs.build-runtime-base.result == 'skipped') }}
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract app labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}
+
+      - name: Resolve immutable runtime base
+        id: runtime-base
+        shell: bash
+        env:
+          BASE_OVERRIDE: ${{ inputs.runtime_base_image || '' }}
+          BASE_DIGEST: ${{ needs.build-runtime-base.outputs.digest }}
+        run: |
+          if [ -n "$BASE_OVERRIDE" ]; then
+            resolved_digest=$(docker buildx imagetools inspect "$BASE_OVERRIDE" | awk '/^Digest:/ {print $2; exit}')
+            if [[ ! "$resolved_digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "Unable to resolve the runtime base override to an immutable manifest digest: $BASE_OVERRIDE" >&2
+              exit 1
+            fi
+            base_repository="${BASE_OVERRIDE%@*}"
+            base_leaf="${base_repository##*/}"
+            if [[ "$base_leaf" == *:* ]]; then
+              base_repository="${base_repository%:*}"
+            fi
+            echo "image=${base_repository}@${resolved_digest}" >> "$GITHUB_OUTPUT"
+          elif [ -n "$BASE_DIGEST" ]; then
+            echo "image=${REGISTRY}/${BASE_IMAGE_NAME}@${BASE_DIGEST}" >> "$GITHUB_OUTPUT"
+          else
+            echo "A runtime base override or freshly built digest is required." >&2
+            exit 1
+          fi
+
+      - name: Build and push immutable Piarium app candidate
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: true
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            RUNTIME_BASE_IMAGE=${{ steps.runtime-base.outputs.image }}
+            PIARIUM_SOURCE_REVISION=${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=piarium-app
+          cache-to: type=gha,scope=piarium-app,mode=max
+
+  smoke-amd64:
+    name: Smoke immutable amd64 candidate
+    runs-on: ubuntu-latest
+    needs: [build-app]
+    permissions:
+      packages: read
+    env:
+      IMAGE_REF: ghcr.io/youzini-afk/piarium@${{ needs.build-app.outputs.digest }}
+      EXPECTED_RELEASE_ID: image-${{ github.sha }}
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull immutable candidate
+        run: docker pull --platform linux/amd64 "$IMAGE_REF"
+
+      - name: Verify health and bundled Pi runtime
+        shell: bash
+        run: |
+          cleanup() {
+            docker logs piarium-smoke 2>/dev/null || true
+            docker rm --force piarium-smoke 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name piarium-smoke \
+            --platform linux/amd64 \
+            --env PIARIUM_UI_PASSWORD=piarium-ci-smoke-only \
+            --publish 127.0.0.1:3000:3000 \
+            "$IMAGE_REF"
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/health >/dev/null; then
+              break
+            fi
+            if ! docker inspect --format '{{.State.Running}}' piarium-smoke | grep -qx true; then
+              echo "Piarium container exited before becoming healthy." >&2
+              exit 1
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "Piarium /health did not become ready." >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl --fail --silent --show-error http://127.0.0.1:3000/health \
+            | node -e "let body='';process.stdin.on('data',(chunk)=>body+=chunk);process.stdin.on('end',()=>{const health=JSON.parse(body);if(health.releaseId!==process.env.EXPECTED_RELEASE_ID)throw new Error(JSON.stringify(health));});"
+
+          docker exec piarium-smoke node --input-type=module -e "import { statSync } from 'node:fs'; import { createRequire } from 'node:module'; import { pathToFileURL } from 'node:url'; const brokerPackage = new URL('./packages/web/node_modules/@piarium/runtime-broker/package.json', import.meta.url); const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); if (typeof broker.resolveBundledPiHostEntry !== 'function') throw new Error('runtime broker export missing'); const entry = broker.resolveBundledPiHostEntry(); if (!statSync(entry).isFile()) throw new Error('Pi host entry missing'); const require = createRequire(brokerPackage); const host = await import(pathToFileURL(require.resolve('@piarium/pi-host')).href); if (typeof host.HostController !== 'function') throw new Error('Pi host module failed to load'); console.log(entry);"
+
+  promote:
+    name: Promote verified image tags
+    runs-on: ubuntu-latest
+    needs: [build-runtime-base, build-app, smoke-amd64]
+    if: ${{ always() && needs.build-app.result == 'success' && needs.smoke-amd64.result == 'success' && (needs.build-runtime-base.result == 'success' || needs.build-runtime-base.result == 'skipped') }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve verified app tags
+        id: app-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=short,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Resolve verified runtime base tags
+        id: base-meta
+        if: ${{ needs.build-runtime-base.outputs.digest != '' }}
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=short,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Promote the verified app digest
+        shell: bash
+        env:
+          DIGEST: ${{ needs.build-app.outputs.digest }}
+          TARGET_TAGS: ${{ steps.app-meta.outputs.tags }}
+        run: |
+          args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then args+=(--tag "$tag"); fi
+          done <<< "$TARGET_TAGS"
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No app tags were resolved for ${GITHUB_REF}." >&2
+            exit 1
+          fi
+          docker buildx imagetools create "${args[@]}" "${REGISTRY}/${APP_IMAGE_NAME}@${DIGEST}"
+
+      - name: Promote the verified runtime base digest
+        if: ${{ needs.build-runtime-base.outputs.digest != '' }}
+        shell: bash
+        env:
+          DIGEST: ${{ needs.build-runtime-base.outputs.digest }}
+          TARGET_TAGS: ${{ steps.base-meta.outputs.tags }}
+        run: |
+          args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then args+=(--tag "$tag"); fi
+          done <<< "$TARGET_TAGS"
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "No runtime base tags were resolved for ${GITHUB_REF}." >&2
+            exit 1
+          fi
+          docker buildx imagetools create "${args[@]}" "${REGISTRY}/${BASE_IMAGE_NAME}@${DIGEST}"

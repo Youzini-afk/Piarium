@@ -1,44 +1,57 @@
 # syntax=docker/dockerfile:1
-ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/openchamber-runtime-base:main
+ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-base:main
 
-FROM oven/bun:1.3.14 AS base
+FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder
 WORKDIR /app
+ARG PIARIUM_SOURCE_REVISION
 
-FROM base AS deps
-WORKDIR /app
+# Keep dependency installation cacheable while still presenting every Bun
+# workspace manifest required by the frozen monorepo lockfile.
 COPY package.json bun.lock ./
 COPY bun-patches ./bun-patches
 COPY patches ./patches
 COPY fix-deprecation.js ./
-COPY packages/ui/package.json ./packages/ui/
-COPY packages/web/package.json ./packages/web/
-COPY packages/electron/package.json ./packages/electron/
-COPY packages/mobile/package.json ./packages/mobile/
-COPY packages/vscode/package.json ./packages/vscode/
+COPY scripts/repair-pi-shrinkwrap.mjs ./scripts/repair-pi-shrinkwrap.mjs
+COPY packages/electron/package.json ./packages/electron/package.json
+COPY packages/mobile/package.json ./packages/mobile/package.json
+COPY packages/pi-host/package.json ./packages/pi-host/package.json
+COPY packages/protocol/package.json ./packages/protocol/package.json
+COPY packages/runtime-broker/package.json ./packages/runtime-broker/package.json
+COPY packages/runtime-client/package.json ./packages/runtime-client/package.json
+COPY packages/ui/package.json ./packages/ui/package.json
+COPY packages/vscode/package.json ./packages/vscode/package.json
+COPY packages/vscode/runtime/package.json ./packages/vscode/runtime/package.json
+COPY packages/web/package.json ./packages/web/package.json
 RUN bun install --frozen-lockfile --ignore-scripts \
   && node ./fix-deprecation.js \
-  && node ./node_modules/patch-package/index.js
+  && node ./node_modules/patch-package/index.js \
+  && node ./scripts/repair-pi-shrinkwrap.mjs
 
-FROM deps AS builder
-WORKDIR /app
 COPY . .
-RUN PIARIUM_LOW_MEMORY_BUILD=1 bun run build:web
+RUN PIARIUM_SOURCE_REVISION="${PIARIUM_SOURCE_REVISION}" \
+  bun run build:cloud-runtime -- --output /app/artifacts/cloud-runtime --no-archive
 
+# This stage runs on TARGETPLATFORM. Installing the canonical runtime tree here
+# ensures native production dependencies match the image architecture instead
+# of the builder architecture.
 FROM ${RUNTIME_BASE_IMAGE} AS runtime
-WORKDIR /home/openchamber
+WORKDIR /home/piarium/app
 
-ENV NODE_ENV=production
+ENV HOME=/home/piarium \
+  NODE_ENV=production \
+  PIARIUM_DATA_DIR=/home/piarium/.config/piarium \
+  PIARIUM_WORKSPACE_ROOT=/home/piarium/workspaces
 
-COPY scripts/docker-entrypoint.sh /home/openchamber/openchamber-entrypoint.sh
+COPY --from=builder --chown=piarium:piarium /app/artifacts/cloud-runtime/ ./
+RUN --mount=type=cache,target=/home/piarium/.cache/bun,uid=1000,gid=1000 \
+  bun install --production --frozen-lockfile --cache-dir=/home/piarium/.cache/bun \
+  && node --input-type=module -e "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); if (typeof broker.resolveBundledPiHostEntry !== 'function') throw new Error('Piarium runtime broker is missing resolveBundledPiHostEntry'); const entry = broker.resolveBundledPiHostEntry(); if (typeof entry !== 'string' || entry.length === 0) throw new Error('Piarium host entry did not resolve'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); const pty = require('node-pty'); if (typeof pty.spawn !== 'function') throw new Error('node-pty is unavailable'); require.resolve('sherpa-onnx-node');"
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/web/node_modules ./packages/web/node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/packages/web/package.json ./packages/web/package.json
-COPY --from=builder /app/packages/web/bin ./packages/web/bin
-COPY --from=builder /app/packages/web/server ./packages/web/server
-COPY --from=builder /app/packages/web/dist ./packages/web/dist
+COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/piarium-entrypoint
 
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
+  CMD curl --fail --silent --show-error http://127.0.0.1:3000/health || exit 1
 
-ENTRYPOINT ["sh", "/home/openchamber/openchamber-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/piarium-entrypoint"]
+CMD ["node", "packages/web/bin/cli.js", "serve", "--foreground"]

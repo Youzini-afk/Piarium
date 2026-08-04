@@ -12,8 +12,8 @@ const PACKAGE_NAME = '@piarium/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Piarium/main/CHANGELOG.md';
-const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
-const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
+const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Piarium/releases';
+const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Youzini-afk/Piarium/releases';
 let cachedDetectedPm = null;
 let spawnSyncOverride = null;
 
@@ -31,7 +31,7 @@ export function setPackageManagerSpawnSyncForTest(fn) {
 function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
 }
-const UPDATE_CHECK_URL = process.env.PIARIUM_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
+const getUpdateCheckUrl = () => process.env.PIARIUM_UPDATE_API_URL?.trim() || null;
 
 function getPiariumConfigDir() {
   return resolvePiariumDataDir(process);
@@ -106,7 +106,7 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
     const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/v${version}`, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'openchamber-update-check',
+        'User-Agent': 'piarium-update-check',
       },
       signal: AbortSignal.timeout(10000),
     });
@@ -120,7 +120,7 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
         && typeof asset.browser_download_url === 'string'
       ))
       : [];
-    const canonicalAsset = apkAssets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name));
+    const canonicalAsset = apkAssets.find((asset) => /^Piarium-.+-android\.apk$/i.test(asset.name));
     return (canonicalAsset || apkAssets[0])?.browser_download_url;
   } catch {
     return undefined;
@@ -128,6 +128,8 @@ async function resolveAndroidApkUrl(version, candidateUrl) {
 }
 
 async function checkForUpdatesFromApi(currentVersion, options = {}) {
+  const updateCheckUrl = getUpdateCheckUrl();
+  if (!updateCheckUrl) return null;
   try {
     const appType = normalizeAppType(options.appType);
     const hostPlatform = mapPlatform(process.platform);
@@ -148,7 +150,7 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       reportUsage,
     };
 
-    const response = await fetch(UPDATE_CHECK_URL, {
+    const response = await fetch(updateCheckUrl, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -351,7 +353,7 @@ function getGlobalNodeModulesRoots(pm) {
 function getOwnedPackagePathsFromGlobalBins(pm) {
   const packagePaths = [];
   for (const binDir of getGlobalBinDirs(pm)) {
-    const binaryName = process.platform === 'win32' ? 'openchamber.cmd' : 'openchamber';
+    const binaryName = process.platform === 'win32' ? 'piarium.cmd' : 'piarium';
     const binaryPath = path.join(binDir, binaryName);
     if (!fs.existsSync(binaryPath)) continue;
 
@@ -652,7 +654,7 @@ function isPackageInstalledWith(pm) {
     });
 
     if (result.status !== 0) return false;
-    return result.stdout.includes(PACKAGE_NAME) || result.stdout.includes('openchamber');
+    return result.stdout.includes(PACKAGE_NAME) || result.stdout.includes('piarium');
   } catch {
     return false;
   }
@@ -792,7 +794,7 @@ export async function checkForUpdates(options = {}) {
       return {
         ...remote,
         packageManager: pm,
-        updateCommand: 'openchamber update',
+        updateCommand: 'piarium update',
       };
     }
   }
@@ -826,7 +828,7 @@ export async function checkForUpdates(options = {}) {
     downloadUrl,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
-    updateCommand: 'openchamber update',
+    updateCommand: 'piarium update',
   };
 }
 

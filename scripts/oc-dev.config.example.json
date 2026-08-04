@@ -13,7 +13,11 @@
       "label": "example API-only",
       "host": "example-host",
       "port": 3002,
-      "dir": "testing-dev",
+      "dir": ".local/share/piarium/deployments/example-api",
+      "bindHost": "0.0.0.0",
+      "dataDir": "~/.config/piarium/example-api",
+      "envFile": "~/.config/piarium/example-api.env",
+      "healthTimeoutSeconds": 60,
       "apiOnly": true
     },
     {
@@ -21,7 +25,11 @@
       "label": "example with UI",
       "host": "example-host",
       "port": 3002,
-      "dir": "testing-dev",
+      "dir": ".local/share/piarium/deployments/example-ui",
+      "bindHost": "0.0.0.0",
+      "dataDir": "~/.config/piarium/example-ui",
+      "envFile": "~/.config/piarium/example-ui.env",
+      "healthTimeoutSeconds": 60,
       "apiOnly": false
     }
   ]

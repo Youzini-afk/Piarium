@@ -176,13 +176,6 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
-    // Absolute path to the opencode CLI binary (optional override).
-    // Accept empty-string to clear (we persist an empty string sentinel so the running
-    // process can reliably drop a previously applied OPENCODE_BINARY override).
-    if (typeof candidate.opencodeBinary === 'string') {
-      const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
-      result.opencodeBinary = normalized;
-    }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }
@@ -792,7 +785,7 @@ export const createSettingsHelpers = (dependencies) => {
       result.reportUsage = candidate.reportUsage;
     }
 
-    // Global behavior prompt — synced to ~/.config/opencode/AGENTS.md
+    // Piarium-owned global behavior prompt.
     if (typeof candidate.globalBehaviorPrompt === 'string') {
       const value = candidate.globalBehaviorPrompt;
       if (value.length <= 1024 * 1024) {

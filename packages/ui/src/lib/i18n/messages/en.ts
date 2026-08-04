@@ -2733,7 +2733,7 @@ export const dict = {
   'updateDialog.actions.openMobileUpdate': 'Open update',
   'updateDialog.status.updating': 'Updating...',
   'updateDialog.error.updateFailed': 'Update failed',
-  'updateDialog.error.takingLonger': 'Update is taking longer than expected. Wait a bit and refresh, or run: openchamber update',
+  'updateDialog.error.takingLonger': 'Update is taking longer than expected. Wait a bit and refresh, or run: piarium update',
   'mobileUpdate.toast.available.title': 'Piarium update available',
   'mobileUpdate.toast.available.description': 'Version {version} is ready for Android.',
   'mobileUpdate.toast.actions.download': 'Download',

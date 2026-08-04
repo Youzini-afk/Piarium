@@ -2732,7 +2732,7 @@ export const dict: Record<I18nKey, string> = {
   'updateDialog.actions.openMobileUpdate': '更新を開く',
   'updateDialog.status.updating': '更新中...',
   'updateDialog.error.updateFailed': '更新に失敗しました',
-  'updateDialog.error.takingLonger': '更新に予想以上に時間がかかっています。しばらく待ってから更新するか、次を実行: openchamber update',
+  'updateDialog.error.takingLonger': '更新に予想以上に時間がかかっています。しばらく待ってから更新するか、次を実行: piarium update',
   'mobileUpdate.toast.available.title': 'Piariumの更新があります',
   'mobileUpdate.toast.available.description': 'バージョン{version}をAndroidで利用できます。',
   'mobileUpdate.toast.actions.download': 'ダウンロード',

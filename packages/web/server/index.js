@@ -625,6 +625,9 @@ async function main(options = {}) {
     gracefulShutdown,
     getHealthSnapshot: () => ({
       apiOnly,
+      ...(process.env.PIARIUM_RELEASE_ID?.trim()
+        ? { releaseId: process.env.PIARIUM_RELEASE_ID.trim() }
+        : {}),
       piRuntime: {
         ready: Boolean(piRuntimeHandshake),
         capabilities: piRuntimeHandshake?.capabilities ?? null,
