@@ -36,7 +36,6 @@ import {
   ensureTunnelProfilesMigrated,
   getInstanceFilePath,
   getPidFilePath,
-  isProcessRunning,
   isPiariumCmdline,
   isPiariumProcessRunning,
   parseArgs,
@@ -1313,7 +1312,7 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
 
         expect(fs.existsSync(pidFile)).toBe(false);
         expect(fs.existsSync(instanceFile)).toBe(false);
-        expect(isProcessRunning(child.pid)).toBe(false);
+        expect(await waitForTcpPort(port, 500)).toBe(false);
       } finally {
         child.kill('SIGKILL');
       }
