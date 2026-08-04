@@ -53,4 +53,5 @@ configuration and must not be placed in package archives or build arguments.
 
 ## License
 
-MIT
+[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Incorporated permissive
+material retains the notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

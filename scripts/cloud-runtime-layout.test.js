@@ -23,12 +23,15 @@ const createFixture = () => {
   temporaryDirectories.push(root);
   writeJson(path.join(root, 'package.json'), {
     name: 'piarium-cloud-runtime',
+    license: 'AGPL-3.0-only',
     workspaces: ['packages/*'],
   });
   writeJson(path.join(root, 'cloud-runtime.json'), {
     schemaVersion: CLOUD_RUNTIME_SCHEMA_VERSION,
   });
   fs.writeFileSync(path.join(root, 'bun.lock'), '{}\n');
+  fs.writeFileSync(path.join(root, 'LICENSE'), 'GNU AFFERO GENERAL PUBLIC LICENSE\n');
+  fs.writeFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), '# Third-party notices\n');
 
   const manifests = {
     protocol: { name: '@piarium/protocol', dependencies: {} },
@@ -154,6 +157,23 @@ describe('Piarium cloud runtime layout', () => {
     fs.rmSync(path.join(secondFixture, 'bun.lock'));
     expect(() => verifyCloudRuntimeLayout(secondFixture)).toThrow(
       'Cloud runtime bun.lock is missing',
+    );
+  });
+
+  it('requires the AGPL metadata and legal notices in deployable artifacts', () => {
+    const missingLicense = createFixture();
+    fs.rmSync(path.join(missingLicense, 'LICENSE'));
+    expect(() => verifyCloudRuntimeLayout(missingLicense)).toThrow(
+      'Cloud runtime legal file is missing: LICENSE',
+    );
+
+    const wrongSpdx = createFixture();
+    const manifestPath = path.join(wrongSpdx, 'package.json');
+    const manifest = readJson(manifestPath);
+    manifest.license = 'MIT';
+    writeJson(manifestPath, manifest);
+    expect(() => verifyCloudRuntimeLayout(wrongSpdx)).toThrow(
+      'Unexpected cloud runtime license: MIT',
     );
   });
 

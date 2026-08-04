@@ -16,6 +16,7 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 
 const GITHUB_URL = 'https://github.com/Youzini-afk/Piarium';
+const LICENSE_URL = `${GITHUB_URL}/blob/main/LICENSE`;
 
 const MIN_CHECKING_DURATION = 800; // ms
 
@@ -152,6 +153,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               <Icon name="github-fill" className="size-5" />
               <span>GitHub</span>
             </a>
+            <a
+              href={LICENSE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Icon name="scales-3" className="size-5" />
+              <span>AGPL-3.0</span>
+            </a>
           </div>
         </div>
 
@@ -231,6 +241,15 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           >
             <Icon name="github-fill" className="h-4 w-4" />
             <span>GitHub</span>
+          </a>
+          <a
+            href={LICENSE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
+          >
+            <Icon name="scales-3" className="h-4 w-4" />
+            <span>AGPL-3.0</span>
           </a>
 
         </div>

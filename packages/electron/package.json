@@ -1,6 +1,7 @@
 {
   "name": "@piarium/electron",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "description": "Piarium desktop runtime",
   "author": "Youzini-afk and Piarium contributors",
@@ -78,6 +79,14 @@
       {
         "from": "resources/icons/tray",
         "to": "icons/tray"
+      },
+      {
+        "from": "../../LICENSE",
+        "to": "legal/LICENSE"
+      },
+      {
+        "from": "../../THIRD_PARTY_NOTICES.md",
+        "to": "legal/THIRD_PARTY_NOTICES.md"
       }
     ],
     "afterPack": "scripts/after-pack.cjs",

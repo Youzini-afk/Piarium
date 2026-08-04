@@ -1,6 +1,7 @@
 {
   "name": "@piarium/web",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -115,6 +116,8 @@
     "server",
     "bin",
     "public",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "package.json",
     "README.md"
   ]

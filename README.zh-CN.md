@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 **一个 Pi 原生的编程智能体工作空间：以本地和桌面体验为中心，同时覆盖 Web、编辑器与移动端。**
 
@@ -188,5 +188,10 @@ CI 会在 Windows 和 Ubuntu 上分别运行。云端/运行时输入发生变�
 Piarium 是维护者 OpenChamber fork 的直接 Pi 原生重构。该 fork 是产品和 UI 的来源，不是运行时
 依赖：随着 Pi 原生实现成为权威，过时的 OpenCode 进程、客户端、Schema 和兼容路径会被删除。
 
-Piarium 使用 [MIT License](LICENSE) 发布。导入的 MIT 代码保留原始许可证声明。Pi 和第三方 Pi 包
-是独立项目，并分别遵循它们自己的许可证。
+Piarium 作为组合后的完整作品，按照
+[GNU Affero General Public License v3.0](LICENSE)（`AGPL-3.0-only`）发布。通过网络向用户提供
+修改版时，必须按照许可证要求向这些用户提供对应源码。
+
+导入的宽松许可证代码仍保留其原始声明；保留这些声明不代表 Piarium 整体仍可按 MIT License 使用。
+详情见[第三方声明](THIRD_PARTY_NOTICES.md)。Pi 和第三方 Pi 包是独立项目，并分别遵循它们自己的
+许可证。

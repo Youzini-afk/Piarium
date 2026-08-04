@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 **A Pi-native workspace for coding agents, built for local work and usable across desktop, web,
 editors, and mobile clients.**
@@ -202,6 +202,11 @@ Piarium is a direct Pi-native refactor of the maintainer's OpenChamber fork. Tha
 product and UI lineage, not a runtime dependency: obsolete OpenCode processes, clients, schemas,
 and compatibility paths are removed as their Pi-native replacements become authoritative.
 
-Piarium is distributed under the [MIT License](LICENSE). Imported MIT material retains its original
-license notice. Pi and third-party Pi packages are independent projects distributed under their own
-licenses.
+Piarium as a combined work is distributed under the
+[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Modified versions offered to
+users over a network must make their corresponding source available as required by the license.
+
+Imported permissively licensed material remains under its original notices; retaining those notices
+does not make Piarium as a whole available under the MIT License. See
+[Third-party notices](THIRD_PARTY_NOTICES.md). Pi and third-party Pi packages are independent
+projects distributed under their own licenses.

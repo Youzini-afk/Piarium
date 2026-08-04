@@ -20,7 +20,7 @@
     "cli"
   ],
   "author": "Youzini-afk and OpenChamber contributors",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "node ./scripts/dev-web-hmr.mjs",
     "oc-dev": "node scripts/oc-dev.mjs",

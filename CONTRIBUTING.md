@@ -238,4 +238,5 @@ You can also help by:
 ## License
 
 By submitting a contribution, you agree that it may be distributed under Piarium's
-[MIT License](LICENSE) and that imported third-party material retains its required attribution.
+[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`) and that imported third-party
+material retains the notices required by [Third-party notices](THIRD_PARTY_NOTICES.md).

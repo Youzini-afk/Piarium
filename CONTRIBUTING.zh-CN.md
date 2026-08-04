@@ -214,5 +214,6 @@ Pull Request 应使审查者无需重走你的调查过程，就能验证结果�
 
 ## 许可证
 
-提交贡献即表示你同意相关内容可以按照 Piarium 的 [MIT License](LICENSE) 分发；导入的第三方内容
-仍应保留其要求的署名和许可证声明。
+提交贡献即表示你同意相关内容可以按照 Piarium 的
+[GNU Affero General Public License v3.0](LICENSE)（`AGPL-3.0-only`）分发；导入的第三方内容仍应
+保留[第三方声明](THIRD_PARTY_NOTICES.md)所要求的署名和许可证文本。

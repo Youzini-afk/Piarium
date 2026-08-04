@@ -1,6 +1,7 @@
 {
   "name": "@piarium/pi-host",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
   "description": "Isolated Node host for Piarium's Pi SDK runtime.",

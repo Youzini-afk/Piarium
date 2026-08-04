@@ -141,6 +141,7 @@ const createRuntimeRootPackage = (rootPackage) => ({
   private: true,
   type: 'module',
   description: 'Self-contained Piarium cloud runtime workspace.',
+  license: rootPackage.license,
   packageManager: rootPackage.packageManager,
   engines: {
     node: '>=22.19.0',
@@ -192,6 +193,11 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   const runtimeManifestPath = path.join(outputDir, 'cloud-runtime.json');
   if (!existsSync(rootManifestPath)) throw new Error('Cloud runtime package.json is missing.');
   if (!existsSync(runtimeManifestPath)) throw new Error('Cloud runtime manifest is missing.');
+  for (const legalFile of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+    if (!existsSync(path.join(outputDir, legalFile))) {
+      throw new Error(`Cloud runtime legal file is missing: ${legalFile}.`);
+    }
+  }
   if (requireLock && !existsSync(path.join(outputDir, 'bun.lock'))) {
     throw new Error('Cloud runtime bun.lock is missing.');
   }
@@ -203,6 +209,9 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   }
   if (rootManifest.name !== 'piarium-cloud-runtime') {
     throw new Error(`Unexpected cloud runtime package name: ${rootManifest.name}`);
+  }
+  if (rootManifest.license !== 'AGPL-3.0-only') {
+    throw new Error(`Unexpected cloud runtime license: ${rootManifest.license || '(missing)'}`);
   }
   if (
     !Array.isArray(rootManifest.workspaces)
@@ -316,6 +325,12 @@ const stageRuntimeTree = (outputDir) => {
   writeFileSync(
     path.join(outputDir, 'package.json'),
     `${JSON.stringify(createRuntimeRootPackage(rootPackage), null, 2)}\n`,
+  );
+  copyEntry(path.join(repoRoot, 'LICENSE'), path.join(outputDir, 'LICENSE'), true);
+  copyEntry(
+    path.join(repoRoot, 'THIRD_PARTY_NOTICES.md'),
+    path.join(outputDir, 'THIRD_PARTY_NOTICES.md'),
+    true,
   );
 
   for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {

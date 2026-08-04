@@ -9,6 +9,8 @@ import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
+const LICENSE_URL = 'https://github.com/Youzini-afk/Piarium/blob/main/LICENSE';
+
 interface AboutDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -91,6 +93,15 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               >
                 <Icon name="github-fill" className="h-4 w-4" />
                 <span>GitHub</span>
+              </a>
+              <a
+                href={LICENSE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Icon name="scales-3" className="h-4 w-4" />
+                <span>AGPL-3.0</span>
               </a>
             </div>
           </div>
