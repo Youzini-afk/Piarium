@@ -42,16 +42,24 @@ describe('Piarium remote cloud deployment', () => {
     expect(developmentHelper).toContain('waitForInstalledInstance(targetDirectory, port, metadata.version)');
   });
 
-  it('arms rollback before stopping the active runtime or switching current', () => {
+  it('switches the current link before stopping the active runtime and tracks rollback state', () => {
     const rollbackTrap = deployScript.indexOf('trap rollback ERR');
     const rollbackArmed = deployScript.indexOf('ROLLBACK_REQUIRED="true"', rollbackTrap);
-    const stopPrevious = deployScript.indexOf('stop_runtime "$PREVIOUS_TARGET"', rollbackArmed);
-    const switchCurrent = deployScript.indexOf('atomic_link "$RELEASE_DIR" "${ROOT}/current"', stopPrevious);
+    const switchCurrent = deployScript.indexOf('atomic_link "$RELEASE_DIR" "${ROOT}/current"', rollbackArmed);
+    const linkSwitched = deployScript.indexOf('CURRENT_LINK_SWITCHED="true"', switchCurrent);
+    const stopPrevious = deployScript.indexOf('stop_runtime "$PREVIOUS_TARGET"', linkSwitched);
+    const previousStopped = deployScript.indexOf('PREVIOUS_RUNTIME_STOPPED="true"', stopPrevious);
+    const candidateAttempted = deployScript.indexOf('CANDIDATE_START_ATTEMPTED="true"', previousStopped);
 
     expect(rollbackTrap).toBeGreaterThanOrEqual(0);
     expect(rollbackArmed).toBeGreaterThan(rollbackTrap);
-    expect(stopPrevious).toBeGreaterThan(rollbackArmed);
-    expect(switchCurrent).toBeGreaterThan(stopPrevious);
+    expect(switchCurrent).toBeGreaterThan(rollbackArmed);
+    expect(linkSwitched).toBeGreaterThan(switchCurrent);
+    expect(stopPrevious).toBeGreaterThan(linkSwitched);
+    expect(previousStopped).toBeGreaterThan(stopPrevious);
+    expect(candidateAttempted).toBeGreaterThan(previousStopped);
+    expect(deployScript).toContain('if [[ "$CANDIDATE_START_ATTEMPTED" = "true" ]]');
+    expect(deployScript).toContain('if [[ "$PREVIOUS_RUNTIME_STOPPED" = "true" ]]');
     expect(deployScript).toContain('start_runtime "$PREVIOUS_TARGET"');
   });
 

@@ -363,7 +363,10 @@ atomic_link() {
   local temporary_link="${ROOT}/.$(basename "$link_path").${RELEASE_ID}.$$"
   rm -f "$temporary_link"
   ln -s "$target" "$temporary_link"
-  mv -Tf "$temporary_link" "$link_path"
+  if ! mv -Tf "$temporary_link" "$link_path"; then
+    rm -f "$temporary_link"
+    return 1
+  fi
 }
 
 current_target() {
@@ -459,17 +462,23 @@ rollback() {
   set +e
   if [[ "$ROLLBACK_REQUIRED" = "true" ]]; then
     echo "New Piarium release failed; rolling back." >&2
-    stop_runtime "$RELEASE_DIR"
+    if [[ "$CANDIDATE_START_ATTEMPTED" = "true" ]]; then
+      stop_runtime "$RELEASE_DIR"
+    fi
     if [[ -n "$PREVIOUS_TARGET" && -d "$PREVIOUS_TARGET" ]]; then
-      if ! atomic_link "$PREVIOUS_TARGET" "${ROOT}/current"; then
-        echo "warning: failed to restore the current release link; restarting the previous runtime directly" >&2
+      if [[ "$CURRENT_LINK_SWITCHED" = "true" ]]; then
+        if ! atomic_link "$PREVIOUS_TARGET" "${ROOT}/current"; then
+          echo "warning: failed to restore the current release link; restarting the previous runtime directly" >&2
+        fi
       fi
-      if ! start_runtime "$PREVIOUS_TARGET"; then
-        echo "warning: failed to restart the previous Piarium runtime" >&2
-      elif [[ -n "$PREVIOUS_VERSION" ]] && ! wait_for_health "$PREVIOUS_VERSION" "$(basename "$PREVIOUS_TARGET")"; then
-        echo "warning: the previous Piarium runtime did not become healthy during rollback" >&2
+      if [[ "$PREVIOUS_RUNTIME_STOPPED" = "true" ]]; then
+        if ! start_runtime "$PREVIOUS_TARGET"; then
+          echo "warning: failed to restart the previous Piarium runtime" >&2
+        elif [[ -n "$PREVIOUS_VERSION" ]] && ! wait_for_health "$PREVIOUS_VERSION" "$(basename "$PREVIOUS_TARGET")"; then
+          echo "warning: the previous Piarium runtime did not become healthy during rollback" >&2
+        fi
       fi
-    else
+    elif [[ "$CURRENT_LINK_SWITCHED" = "true" ]]; then
       rm -f "${ROOT}/current"
     fi
   fi
@@ -489,17 +498,23 @@ if [[ "$PREVIOUS_TARGET" = "$RELEASE_DIR" ]] && wait_for_health "$EXPECTED_VERSI
 fi
 
 ROLLBACK_REQUIRED="false"
+CURRENT_LINK_SWITCHED="false"
+PREVIOUS_RUNTIME_STOPPED="false"
+CANDIDATE_START_ATTEMPTED="false"
 trap rollback ERR
 ROLLBACK_REQUIRED="true"
 
+atomic_link "$RELEASE_DIR" "${ROOT}/current"
+CURRENT_LINK_SWITCHED="true"
+
 if [[ -n "$PREVIOUS_TARGET" ]]; then
   stop_runtime "$PREVIOUS_TARGET"
+  PREVIOUS_RUNTIME_STOPPED="true"
 else
   stop_runtime "$RELEASE_DIR"
 fi
 
-atomic_link "$RELEASE_DIR" "${ROOT}/current"
-
+CANDIDATE_START_ATTEMPTED="true"
 start_runtime "$RELEASE_DIR"
 wait_for_health "$EXPECTED_VERSION" "$RELEASE_ID"
 ROLLBACK_REQUIRED="false"

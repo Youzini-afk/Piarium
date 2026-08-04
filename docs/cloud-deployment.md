@@ -153,12 +153,13 @@ previous -> ... last healthy release
 cache/bun/      reusable target-platform dependency cache
 ```
 
-The deploy helper builds and verifies the candidate before stopping the active process. It then
-switches `current`, starts the candidate, and polls `/health` for the expected Piarium version and a
-ready bundled Pi runtime. If startup or health validation fails, it stops the candidate, restores
-`current` to the previous release, restarts it, and verifies the rollback. Releases are not pruned
-automatically; the operator retains the full rollback history until deliberately removing old,
-inactive directories.
+The deploy helper builds and verifies the candidate while the active process keeps serving. It
+atomically switches `current` before stopping that process, so a link-switch failure leaves the
+active runtime untouched. After the switch it stops the old runtime, starts the candidate, and polls
+`/health` for the expected Piarium version and a ready bundled Pi runtime. If startup or health
+validation fails, it stops the candidate, restores `current` to the previous release, restarts it,
+and verifies the rollback. Releases are not pruned automatically; the operator retains the full
+rollback history until deliberately removing old, inactive directories.
 
 A root-level atomic deployment lock serializes concurrent updates. Every release id is permanently
 bound to the uploaded archive's complete SHA-256 digest, so retrying the same archive is idempotent
