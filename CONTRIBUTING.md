@@ -1,257 +1,231 @@
-# Contributing to OpenChamber
+# Contributing to Piarium
 
-## Getting Started
+Thank you for helping improve Piarium. Contributions are welcome across the Pi runtime boundary,
+desktop and remote surfaces, extension integrations, documentation, testing, accessibility, and
+platform support.
 
-```bash
-git clone https://github.com/openchamber/openchamber.git
-cd openchamber
-bun install
-```
+This guide describes the public contribution workflow. [AGENTS.md](AGENTS.md), the nearest package
+README, and owning architecture documents contain the detailed repository rules for implementation
+work.
 
-## Dev Scripts
+## Before you begin
 
-Run commands from the project root unless a section says otherwise.
+- Use [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) for reproducible bugs, feature
+  proposals, and focused technical discussions.
+- Send vulnerabilities through the private process in [SECURITY.md](SECURITY.md). Do not publish
+  exploit details in an issue, discussion, pull request, log, or screenshot.
+- Search existing issues and pull requests before starting a duplicate change.
+- For a large product or architecture change, describe the user outcome and affected boundaries
+  before investing in a full implementation. A prototype is welcome when it makes the trade-offs
+  easier to evaluate.
 
-### Web
+## Project principles that affect contributions
 
-| Script | Description | Ports |
-|--------|-------------|-------|
-| `bun run dev` | Default web HMR dev flow. | auto-selected dev ports |
-| `bun run dev:web:full` | Build watcher + Express server. No HMR — manual refresh after changes. | `3001` (server + static) |
-| `bun run dev:web:hmr` | Vite dev server + Express API. **Open the Vite URL for HMR**, not the backend. | `5180` (Vite HMR), `3902` (API) |
-| `bun run start:web` | Start the packaged web server. | `3000` by default |
+Piarium is not a generic wrapper around several coding-agent CLIs. It has one Pi-native domain and
+one current pre-release runtime contract.
 
-Both are configurable via env vars: `PIARIUM_PORT`, `PIARIUM_HMR_UI_PORT`, `PIARIUM_HMR_API_PORT`.
+1. **Keep Pi authoritative.** Pi owns sessions, models, authentication, settings, packages, and the
+   extension runtime. Project a JSON-safe Piarium contract; do not clone Pi state into a parallel
+   application schema.
+2. **Preserve plugin ownership.** Integrate extensions through public commands, events, settings,
+   and capability bridges. Do not parse private databases or duplicate plugin migrations merely to
+   build a GUI.
+3. **Avoid compatibility sediment.** During pre-1.0 development, all product surfaces move together.
+   Remove obsolete OpenCode and superseded Piarium paths once the replacement is accepted; do not
+   accumulate protocol v13/v14-style shims without a real persisted-data or external-client need.
+4. **Preserve behavior deliberately.** The maintainer's OpenChamber fork is read-only reference
+   material. Keep its valuable workspace, provider, cloud, remote, session, and security behavior
+   unless the Pi-native replacement is demonstrably equivalent or the product decision explicitly
+   changes it.
+5. **Enforce privilege at the trusted boundary.** Renderers and remote clients cannot authorize
+   themselves. Validate filesystem, process, network, project-trust, and credential operations in
+   the host that owns the capability.
+6. **Do not add arbitrary product limits.** Avoid silent truncation, model-count caps, short timeouts,
+   or hidden concurrency ceilings. Operational budgets should be explicit deployment opt-ins with
+   visible failure semantics.
+7. **Keep failures truthful.** An authoritative failure is not a successful empty response. Make
+   cancellation, partial failure, cleanup, retry, rollback, and unavailable capabilities visible.
 
-### Desktop (Electron)
+Read [Architecture](docs/architecture.md), [Plugin GUI design](docs/plugin-gui-design.md),
+[Recovery](docs/recovery.md), and [Security model](docs/security.md) when those boundaries apply.
 
-```bash
-bun run electron:dev          # HMR web UI + Electron shell
-bun run electron:dev:bundled  # Electron shell using built web assets
-bun run electron:build        # Package desktop app for the current platform
-```
+## Development setup
 
-Desktop supports macOS, Windows, and Linux. The build output is written to `packages/electron/dist`.
+### Requirements
 
-macOS builds create `dmg` and `zip` files. You need Xcode/build tools for notarized packaging and icon asset work.
+- Node.js 22.19 or newer; Node.js 24 is the CI and supported development baseline
+- Bun 1.3.14
+- Git
+- Git for Windows and Git Bash for Pi shell tools on Windows
 
-Windows builds create an NSIS installer. If signing env vars are not set, the build script makes an unsigned installer.
-
-Linux builds produce an AppImage for the native x64 or arm64 host.
-
-For desktop-specific details, see [`packages/electron/README.md`](./packages/electron/README.md).
-
-### VS Code Extension
-
-```bash
-bun run vscode:dev      # Watch mode + Extension Development Host
-bun run vscode:build    # Build extension + webview
-bun run vscode:package  # Create a local .vsix package
-```
-
-`bun run vscode:dev` opens an Extension Development Host automatically. You can override the editor or workspace with `PIARIUM_VSCODE_BIN` and `PIARIUM_VSCODE_DEV_WORKSPACE`.
-
-Example: `PIARIUM_VSCODE_BIN=cursor bun run vscode:dev`.
-
-### Shared UI (`packages/ui`)
-
-No standalone app server. This is a source-level library used by Web, Desktop, and VS Code.
-
-Useful package commands:
-
-```bash
-bun run build:ui
-bun run type-check:ui
-bun run lint:ui
-```
-
-## Build And Package Commands
-
-| Command | What it does |
-|---------|--------------|
-| `bun run build` | Build all workspaces |
-| `bun run build:web` | Build only `packages/web` |
-| `bun run build:ui` | Build only `packages/ui` |
-| `bun run build:electron` | Run Electron package build script without full packaging |
-| `bun run electron:build` | Build packaged desktop app for the current OS |
-| `bun run vscode:build` | Build the VS Code extension |
-| `bun run vscode:package` | Package the VS Code extension as `.vsix` |
-| `bun run pack:web` | Create a package archive for `@piarium/web` |
-
-## Platform Build Notes
-
-You usually build desktop installers on the target platform.
-
-macOS:
+### Clone and install
 
 ```bash
-bun run electron:build
-bun run release:test:intel
-bun run release:test:arm
+git clone https://github.com/Youzini-afk/Piarium.git
+cd Piarium
+bun install --frozen-lockfile
+bun run check:pi
 ```
 
-Windows:
+`bun.lock` is authoritative. Do not switch package managers or regenerate the lockfile unless the
+dependency change requires it. Review lifecycle-script changes carefully; Piarium intentionally
+allowlists only required install scripts.
+
+## Common development surfaces
+
+Run commands from the repository root unless noted otherwise.
+
+| Goal | Command |
+| --- | --- |
+| Web UI with HMR and trusted API | `bun run dev` |
+| Web build watcher plus server | `bun run dev:web:full` |
+| Desktop with Web HMR | `bun run electron:dev` |
+| Desktop using built assets | `bun run electron:dev:bundled` |
+| Package desktop for the current OS | `bun run electron:build` |
+| Package Windows x64 NSIS installer | `bun run electron:build:win` |
+| Smoke an unpacked Windows build | `bun run electron:smoke:win` |
+| VS Code Extension Development Host | `bun run vscode:dev` |
+| Build or package VS Code | `bun run vscode:build` / `bun run vscode:package` |
+| Build mobile assets | `bun run mobile:build` |
+| Build canonical cloud runtime | `bun run build:cloud-runtime` |
+| Validate documentation site | `bun run docs:validate` |
+
+The shared UI is a source library rather than a standalone app. Exercise UI behavior through Web,
+Desktop, or VS Code so the runtime context is real.
+
+## Choosing the owning package
+
+| Area | Primary owner |
+| --- | --- |
+| Shared components, stores, settings, chat, and plugin GUI | `packages/ui` |
+| Browser/remote server, HTTP APIs, WebSocket transport, cloud CLI | `packages/web` |
+| Windows/macOS/Linux shell, preload/IPC, SSH, updater, packaging | `packages/electron` |
+| VS Code host, editor context, webview transport | `packages/vscode` |
+| Capacitor native shell | `packages/mobile` |
+| JSON-safe wire contract and validation | `packages/protocol` |
+| Browser/editor runtime client | `packages/runtime-client` |
+| Worker ownership, routing, lifecycle, and shutdown | `packages/runtime-broker` |
+| Pi SDK, sessions, packages, extensions, and trusted host operations | `packages/pi-host` |
+
+Shared API changes often cross several packages, but one layer must remain authoritative. Do not
+work around a missing contract with an unrelated local store or a renderer-only privilege check.
+
+## Implementing a change
+
+1. Identify the authoritative data source, trusted execution boundary, affected product surfaces,
+   and failure behavior.
+2. Read `AGENTS.md`, the nearest package README or `DOCUMENTATION.md`, and every matching project
+   skill before editing imported product code.
+3. Keep the change focused. Include directly required cleanup and tests, but separate unrelated
+   refactors that make review harder.
+4. Add or update the narrowest regression test that proves the behavior at its owning boundary.
+5. Exercise every runtime surface whose contract changed. Type-checking a shared type is not proof
+   that Desktop, Web, relay, VS Code, or mobile behavior works.
+6. Update user, contributor, architecture, security, or operational documentation in the same
+   change when its contract changed.
+
+When changing a versioned or persisted shape, prefer one clear migration into the current shape.
+Retain old readers only when real user data or independently deployed clients require them, and
+document the removal condition.
+
+## Validation
+
+### Broad baseline
+
+Run the broad checks for code, dependency, export, or build changes:
 
 ```bash
-bun run electron:build
+bun run type-check
+bun run lint
+bun run check:pi
+bun run build
 ```
 
-Linux x64 and arm64 AppImages are packaged natively on the matching host architecture. Use Bun for dependency installation and packaging orchestration:
+Run these when the affected boundary applies:
 
-```bash
-PIARIUM_TARGET_ARCH=x64 bun run electron:build
-# On an arm64 host:
-PIARIUM_TARGET_ARCH=arm64 bun run electron:build
+| Change | Additional evidence |
+| --- | --- |
+| Pi host, protocol, broker, or runtime client | `bun run test:pi:dist` |
+| Web server or transport | `bun run --cwd packages/web test` |
+| Cloud runtime, Docker, or SSH deployment | `bun run test:cloud` and a canonical runtime build |
+| Electron lifecycle, architecture, or updater | `bun run --cwd packages/electron test:architecture` and/or `test:updater` |
+| Windows packaging or native modules | `bun run electron:build:win` followed by `bun run electron:smoke:win` |
+| VS Code runtime | `bun run --cwd packages/vscode verify:pi-runtime` plus the relevant build/package command |
+| Imports, exports, or deletion | `bun run dead-code` and a production build of each affected surface |
+| Documentation site | `bun run docs:validate` and manual checking of changed local links |
 
-bun run --cwd packages/electron verify:linux-appimage
+CI repeats the main quality gates on Windows and Ubuntu. Cloud/runtime changes also build and smoke
+candidate containers before any installable tags are promoted.
+
+If a required check cannot run on your host, say exactly what was not tested and why. Do not turn an
+untested platform assumption into a claim of support.
+
+### User-visible changes
+
+Provide evidence at the current pull request HEAD:
+
+- screenshots for meaningful static before/after states;
+- a short recording for motion, focus, drag-and-drop, gestures, or multi-step interactions;
+- narrow and wide layouts for responsive shared UI;
+- light and dark themes when colors or surfaces changed;
+- relevant loading, empty, disabled, error, long-content, and high-contrast states;
+- before/after measurements for performance, memory, CPU, startup, or rendering claims.
+
+If there is no user-visible change, state why.
+
+## Code and security style
+
+- Use strict TypeScript and avoid `any` unless the boundary is genuinely dynamic and validated.
+- Prefer small discriminated contracts, early returns, and explicit state transitions over nested
+  conditionals or implicit fallbacks.
+- Keep React components functional and use the established theme and typography tokens in
+  `packages/ui` for both light and dark modes.
+- Keep Electron preload APIs explicit and typed. Do not add a generic channel escape hatch or import
+  Electron into shared renderer code.
+- Never execute Pi extensions in a renderer.
+- Never log credentials, authorization or pairing data, prompt bodies, file contents, provider
+  responses containing user data, or complete environment values.
+- Use path containment based on canonical filesystem boundaries, not string prefixes alone.
+- Use locks and atomic replace for shared configuration or metadata writes; make concurrent edits
+  and crash recovery testable.
+- Preserve user changes and unrelated work in a dirty tree. Do not use destructive Git cleanup as a
+  convenience.
+
+## Commits and pull requests
+
+Use short, imperative commit subjects with a conventional type prefix when it helps, for example:
+
+```text
+feat: add Pi package capability diagnostics
+fix: preserve session cwd across worktrees
+docs: explain cloud rollback guarantees
 ```
 
-The final AppImage verifier checks desktop identity and the architecture of Electron and packaged native modules.
+A pull request should let a reviewer verify the result without reconstructing your investigation.
+Include:
 
-## Before Submitting
+- the user or maintainer problem and resulting behavior;
+- non-goals when nearby scope could be ambiguous;
+- affected packages, runtimes, persisted formats, external contracts, and trust boundaries;
+- exact automated and manual checks, including their results;
+- meaningful risk, failure, cleanup, rollback, compatibility, and security considerations;
+- current visual or empirical evidence when applicable;
+- anything you could not verify.
 
-```bash
-bun run type-check   # Must pass
-bun run lint         # Must pass
-bun run build        # Must succeed
-```
+Keep the branch up to date without rewriting other contributors' work. Resolve conflicts by
+re-evaluating behavior and ownership, not by mechanically choosing one side of the diff.
 
-For docs-only changes, validation may be enough:
+## Non-code contributions
 
-```bash
-bun run docs:validate
-```
+You can also help by:
 
-## Code Style
+- reporting a reproducible bug or confusing workflow;
+- testing on another operating system, browser, architecture, or display size;
+- improving setup, deployment, accessibility, localization, or troubleshooting documentation;
+- verifying a maintained Pi extension update and recording compatibility evidence;
+- proposing a clearer Pi-native interaction or plugin configuration surface.
 
-- Functional React components only
-- TypeScript strict mode — no `any` without justification
-- Use existing theme colors/typography from `packages/ui/src/lib/theme/` — don't add new ones
-- Components must support light and dark themes
-- Prefer early returns and `if/else`/`switch` over nested ternaries
-- Tailwind v4 for styling; typography via `packages/ui/src/lib/typography.ts`
+## License
 
-## Pull Requests
-
-Pull requests are review handoffs, not just diffs. A reviewer must be able to
-understand the intended behavior, assess the risk, and verify the result
-without reconstructing the contributor's work.
-
-Before opening a pull request:
-
-1. Read [`AGENTS.md`](./AGENTS.md), every project skill matching the character
-   of the change, and the nearest package README and module `DOCUMENTATION.md`.
-2. Keep the change focused. Separate unrelated cleanup or refactors.
-3. Run the validation required by the applicable project guidance, not only
-   the broad commands above.
-4. Complete the pull request template with concrete, current evidence.
-
-### Pull Request Contract
-
-Every pull request must explain:
-
-- **Intent:** the user or maintainer problem being solved and the resulting
-  behavior.
-- **Non-goals:** nearby behavior intentionally left unchanged when the scope
-  could otherwise be ambiguous.
-- **Affected surfaces:** packages, runtimes, persisted/external contracts, and
-  user-visible states affected by the change.
-- **Repository guidance:** the skills and owning documentation that were
-  applicable, why they applied, and how the implementation satisfies their
-  important constraints.
-- **Validation:** exact automated and manual checks performed, their result,
-  and anything that was not verified. A command name without a result is not
-  evidence.
-- **Risk and failure behavior:** meaningful failure, rollback, cleanup,
-  compatibility, security, performance, or cross-runtime considerations.
-
-Do not claim a runtime, platform, relay path, performance characteristic, or
-interaction is correct based only on type-checking or linting. If required
-validation could not be performed, state that explicitly and explain why.
-
-### Visual Evidence
-
-User-visible changes require evidence that lets a reviewer compare the
-behavior before and after the change. Attach screenshots for static states and
-a short recording for motion, gestures, drag-and-drop, focus, or multi-step
-interactions.
-
-Claims about performance, memory, CPU, rendering, startup, or similar empirical
-behavior require relevant before and after measurements.
-
-Choose evidence based on the affected behavior:
-
-- Include before and after states. If a meaningful before state cannot be
-  captured, explain why.
-- Include narrow/mobile and desktop states when shared or responsive UI is
-  affected.
-- Include light and dark states when colors, styling, surfaces, or visual
-  states change.
-- Include relevant loading, empty, error, disabled, long-content, or
-  high-contrast states when the change affects them.
-- For Settings changes, show the relevant narrow and wide settings pane states.
-
-Evidence must represent the current pull request HEAD. After implementation
-changes that can affect the demonstrated behavior, refresh the evidence or
-state why it remains valid. If there is genuinely no user-visible change, say
-so and provide a concrete reason; deleting the evidence section is not an
-exemption.
-
-### Review Enforcement
-
-The automated reviewer performs one unified review of correctness, repository
-guidance compliance, pull request quality, and evidence. It independently
-determines which project skills apply from the character of the current diff,
-reads those skills and their required references, and checks the implementation
-against them.
-
-The reviewer records the exact HEAD it inspected and returns one verdict:
-
-- `PASS`: no blocking correctness, compliance, or evidence issue was found.
-- `NEEDS_EVIDENCE`: no correctness, repository-guidance, or contribution-contract
-  blocker was found, but a required screenshot, interaction recording, or
-  empirical measurement is missing, stale, contradictory, or inadequate.
-- `BLOCKED`: a concrete correctness, security, repository-rule, or contribution
-  contract violation must be fixed.
-- `HUMAN_REVIEW_REQUIRED`: the change affects review policy or another boundary
-  that automation must not approve on its own.
-
-The workflow exposes the current state as exactly one readiness label:
-`review:pending`, `review:ready`, `review:needs-evidence`, `review:blocked`,
-`review:human-required`, or `review:automation-failed`. A new review removes
-the previous readiness label before it starts, and only `review:ready` means
-the pull request is ready to enter the maintainer review queue. Draft pull
-requests have no readiness label.
-
-AI review verdicts are advisory and never fail the pull request check. Readiness
-is communicated only through the `review:*` label and immutable review comment.
-The `automation` job fails only when the workflow itself cannot complete or
-verify a trustworthy result, in which case it applies `review:automation-failed`.
-
-Each completed review creates a new comment tied to its reviewed HEAD so the
-conversation remains chronological. Previous review comments are not rewritten.
-
-## Project Structure
-
-```
-packages/
-  ui/        Shared React components, hooks, stores, and theme system
-  web/       Web server (Express) + frontend (Vite) + CLI
-  electron/  Electron desktop shell
-  vscode/    VS Code extension (extension host + webview)
-```
-
-See [AGENTS.md](./AGENTS.md) for detailed architecture reference.
-
-## Not a developer?
-
-You can still help:
-
-- Report bugs or UX issues — even "this felt confusing" is valuable feedback
-- Test on different devices, browsers, or OS versions
-- Suggest features or improvements via issues
-- Help others in Discord
-
-## Questions?
-
-Open an [issue](https://github.com/openchamber/openchamber/issues) or ask in [Discord](https://discord.gg/ZYRSdnwwKA).
+By submitting a contribution, you agree that it may be distributed under Piarium's
+[MIT License](LICENSE) and that imported third-party material retains its required attribution.
