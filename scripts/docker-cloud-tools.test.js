@@ -247,7 +247,8 @@ describe('Piarium container publication', () => {
     expect(dockerWorkflow).toContain('curl --fail --silent --show-error http://127.0.0.1:3000/health');
     expect(dockerWorkflow).toContain("import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js')");
     expect(dockerWorkflow).toContain('broker.resolveBundledPiHostEntry()');
-    expect(dockerWorkflow).toContain("require.resolve('@piarium/pi-host')");
+    expect(dockerWorkflow).toContain("new URL('./index.js', pathToFileURL(entry))");
+    expect(dockerWorkflow).not.toContain("require.resolve('@piarium/pi-host')");
     expect(dockerWorkflow).toContain('EXPECTED_RELEASE_ID: image-${{ github.sha }}');
     expect(dockerWorkflow).toContain('health.releaseId!==process.env.EXPECTED_RELEASE_ID');
     expect(dockerWorkflow.indexOf('smoke-amd64:')).toBeLessThan(dockerWorkflow.indexOf('promote:'));
