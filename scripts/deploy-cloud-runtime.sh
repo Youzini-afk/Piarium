@@ -457,7 +457,8 @@ NODE
 }
 
 rollback() {
-  local status=$?
+  local observed_status=$?
+  local status="${1:-$observed_status}"
   trap - ERR
   set +e
   if [[ "$ROLLBACK_REQUIRED" = "true" ]]; then
@@ -504,7 +505,9 @@ CANDIDATE_START_ATTEMPTED="false"
 trap rollback ERR
 ROLLBACK_REQUIRED="true"
 
-atomic_link "$RELEASE_DIR" "${ROOT}/current"
+if ! atomic_link "$RELEASE_DIR" "${ROOT}/current"; then
+  rollback 1
+fi
 CURRENT_LINK_SWITCHED="true"
 
 if [[ -n "$PREVIOUS_TARGET" ]]; then
@@ -515,8 +518,12 @@ else
 fi
 
 CANDIDATE_START_ATTEMPTED="true"
-start_runtime "$RELEASE_DIR"
-wait_for_health "$EXPECTED_VERSION" "$RELEASE_ID"
+if ! start_runtime "$RELEASE_DIR"; then
+  rollback 1
+fi
+if ! wait_for_health "$EXPECTED_VERSION" "$RELEASE_ID"; then
+  rollback 1
+fi
 ROLLBACK_REQUIRED="false"
 trap - ERR
 

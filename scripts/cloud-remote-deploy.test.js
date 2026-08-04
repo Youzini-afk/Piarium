@@ -60,6 +60,10 @@ describe('Piarium remote cloud deployment', () => {
     expect(candidateAttempted).toBeGreaterThan(previousStopped);
     expect(deployScript).toContain('if [[ "$CANDIDATE_START_ATTEMPTED" = "true" ]]');
     expect(deployScript).toContain('if [[ "$PREVIOUS_RUNTIME_STOPPED" = "true" ]]');
+    expect(deployScript).toContain('if ! atomic_link "$RELEASE_DIR" "${ROOT}/current"; then');
+    expect(deployScript).toContain('if ! start_runtime "$RELEASE_DIR"; then');
+    expect(deployScript).toContain('if ! wait_for_health "$EXPECTED_VERSION" "$RELEASE_ID"; then');
+    expect(deployScript).toContain('rollback 1');
     expect(deployScript).toContain('start_runtime "$PREVIOUS_TARGET"');
   });
 
