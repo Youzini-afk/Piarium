@@ -13,7 +13,7 @@ const nestedPackageRoot = join(
   "brace-expansion",
 );
 const checkOnly = process.argv.includes("--check");
-const minimumVersion = [5, 0, 8];
+const minimumVersion = [5, 0, 9];
 
 async function readVersion(packageRoot) {
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));

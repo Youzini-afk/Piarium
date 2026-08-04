@@ -97,7 +97,7 @@
     "release:test:arm": "./scripts/test-release-build.sh aarch64"
   },
   "dependencies": {
-    "brace-expansion": "5.0.8",
+    "brace-expansion": "5.0.9",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-css": "^6.3.1",

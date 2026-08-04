@@ -2,7 +2,7 @@
 
 Status: Pi host, desktop boundary, and recovery controls in place; OpenChamber migration review active
 
-Last updated: 2026-08-02
+Last updated: 2026-08-04
 
 ## Protected assets
 
@@ -76,11 +76,16 @@ deleting the security boundary that module currently enforces.
 
 ## Temporary upstream dependency repair
 
-Pi `0.83.0` publishes an npm shrinkwrap that pins `brace-expansion` `5.0.7`, even when the
-application-level override requests the patched `5.0.8`. Piarium keeps `5.0.8` as a direct,
+Pi `0.83.0` publishes an npm shrinkwrap that pins `brace-expansion` `5.0.8`, even when the
+application-level override requests the patched `5.0.9`. Piarium keeps `5.0.9` as a direct,
 locked dependency and repairs that one nested installation in `postinstall`. `security:check`
-fails closed if the resolved Pi copy is still below `5.0.8`. Remove this narrowly scoped repair
-after Pi publishes a dependency tree containing `brace-expansion >=5.0.8`.
+fails closed if the resolved Pi copy is still below `5.0.9`. Remove this narrowly scoped repair
+after Pi publishes a dependency tree containing `brace-expansion >=5.0.9`.
+
+The VS Code host runtime also replaces Pi's shrinkwrapped `undici` `8.5.0` with the locked
+`8.10.0` release after its isolated `npm ci`. Its package smoke test fails closed below `8.9.0`,
+the first release outside the affected 8.x advisory range. Remove this repair when Pi's published
+runtime no longer restores an affected copy.
 
 The root `allowScripts` policy pins approval to esbuild `0.28.1`, whose postinstall validates its
 platform binary. The no-op Google GenAI preinstall and protobufjs postinstall are explicitly denied;

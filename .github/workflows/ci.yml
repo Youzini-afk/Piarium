@@ -28,6 +28,11 @@ jobs:
       - run: bun run type-check
       - run: bun run lint
       - run: bun run check:pi
+      - if: runner.os == 'Linux'
+        name: Audit and smoke isolated VS Code Pi runtime
+        run: |
+          npm audit --omit=dev --package-lock-only --prefix packages/vscode/runtime
+          bun run --cwd packages/vscode verify:pi-runtime
       - run: bun run --cwd packages/web test
       - run: bun run test:cloud
       - run: bun run build

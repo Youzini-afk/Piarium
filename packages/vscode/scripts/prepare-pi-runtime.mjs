@@ -62,19 +62,25 @@ runNpm([
   '--no-fund',
 ]);
 
-// Pi publishes a shrinkwrap that currently pins an older brace-expansion copy.
-// Replace that nested copy with Piarium's locked safe version after npm ci.
-const safeBraceExpansion = path.join(runtimeRoot, 'node_modules', 'brace-expansion');
-const nestedBraceExpansion = path.join(
-  runtimeRoot,
-  'node_modules',
-  '@earendil-works',
-  'pi-coding-agent',
-  'node_modules',
-  'brace-expansion',
-);
-await rm(nestedBraceExpansion, { force: true, recursive: true });
-await cp(safeBraceExpansion, nestedBraceExpansion, { recursive: true });
+// Pi publishes a shrinkwrap that pins vulnerable transitive copies. Replace each
+// nested copy with Piarium's locked safe version after npm ci.
+const replacePiDependency = async (packageName) => {
+  const safePackage = path.join(runtimeRoot, 'node_modules', packageName);
+  const nestedPackage = path.join(
+    runtimeRoot,
+    'node_modules',
+    '@earendil-works',
+    'pi-coding-agent',
+    'node_modules',
+    packageName,
+  );
+  await rm(nestedPackage, { force: true, recursive: true });
+  await cp(safePackage, nestedPackage, { recursive: true });
+};
+await Promise.all([
+  replacePiDependency('brace-expansion'),
+  replacePiDependency('undici'),
+]);
 
 const copyWorkspacePackage = async (name, sourceRoot) => {
   const targetRoot = path.join(runtimeRoot, 'node_modules', '@piarium', name);

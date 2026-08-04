@@ -17,27 +17,40 @@ const hostEntry = path.join(
 );
 await access(hostEntry);
 
-const braceExpansionManifest = JSON.parse(await readFile(path.join(
-  packageRoot,
-  'dist',
-  'pi-runtime',
-  'node_modules',
-  '@earendil-works',
-  'pi-coding-agent',
-  'node_modules',
-  'brace-expansion',
-  'package.json',
-), 'utf8'));
-const braceVersion = String(braceExpansionManifest.version || '0.0.0')
-  .split('-', 1)[0]
-  .split('.')
-  .map((part) => Number.parseInt(part, 10));
-if (
-  (braceVersion[0] ?? 0) < 5
-  || ((braceVersion[0] ?? 0) === 5 && (braceVersion[1] ?? 0) === 0 && (braceVersion[2] ?? 0) < 8)
-) {
-  throw new Error(`Unsafe staged brace-expansion version ${braceExpansionManifest.version}`);
-}
+const assertPiDependencyVersion = async (packageName, minimum) => {
+  const manifest = JSON.parse(await readFile(path.join(
+    packageRoot,
+    'dist',
+    'pi-runtime',
+    'node_modules',
+    '@earendil-works',
+    'pi-coding-agent',
+    'node_modules',
+    packageName,
+    'package.json',
+  ), 'utf8'));
+  const actual = String(manifest.version || '0.0.0')
+    .split('-', 1)[0]
+    .split('.')
+    .map((part) => Number.parseInt(part, 10));
+  let safe = true;
+  for (let index = 0; index < minimum.length; index += 1) {
+    const value = actual[index] ?? 0;
+    if (value > minimum[index]) break;
+    if (value < minimum[index]) {
+      safe = false;
+      break;
+    }
+  }
+  if (!safe) {
+    throw new Error(`Unsafe staged ${packageName} version ${manifest.version}`);
+  }
+};
+
+await Promise.all([
+  assertPiDependencyVersion('brace-expansion', [5, 0, 9]),
+  assertPiDependencyVersion('undici', [8, 9, 0]),
+]);
 
 const client = new PiHostClient({
   handshake: {
