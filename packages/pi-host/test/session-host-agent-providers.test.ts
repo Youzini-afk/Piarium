@@ -23,7 +23,9 @@ describe("SessionHost agent providers", () => {
     const home = join(root, "home");
     const actionLog = join(root, "subagent-actions.jsonl");
     const previousHome = process.env.HOME;
+    const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
     process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = join(home, ".config");
     await mkdir(join(agentDir, "extensions"), { recursive: true });
     await mkdir(join(home, ".config", "cortexkit"), { recursive: true });
     await mkdir(join(cwd, ".cortexkit"), { recursive: true });
@@ -236,6 +238,8 @@ export default function (pi: any) {
       await host.dispose();
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
+      if (previousXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
       await rm(root, { force: true, recursive: true });
     }
   });

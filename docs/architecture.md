@@ -2,7 +2,7 @@
 
 Status: Pi-native engine cutover complete; plugin product surfaces and Windows release in progress
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 ## 1. Context
 
@@ -276,6 +276,12 @@ right sidebar/settings. Provider notifications and dirty-workspace safeguards re
 Project-local Pi resources, MCP commands, and credential command sources can execute code. Project
 trust is therefore a host gate, not a decorative preference. The UI shows source, command, cwd,
 environment key names, and capability changes before activation.
+
+Workspace containment treats the configured root's `realpath` as the canonical boundary. The
+configured spelling may be a symlink, junction, or Windows 8.3 alias and therefore does not need to
+be textually nested inside its canonical spelling. Requested paths still pass lexical traversal
+checks first, and every existing target or nearest existing parent must resolve inside that one
+canonical root before it can be read or written.
 
 See [security.md](security.md) for the threat model and release gates.
 

@@ -76,4 +76,25 @@ describe('workspace path safety', () => {
 
     expect(result.absolutePath).toBe(path.join(workspaceRoot, 'project', 'src', 'new.txt'));
   });
+
+  it('accepts a workspace root whose canonical path uses a different filesystem alias', async () => {
+    const { resolveWorkspacePath } = await loadPathSafetyModule();
+    const aliases = new Map([
+      ['/short/workspace', '/canonical/workspace'],
+      ['/short/workspace/note.txt', '/canonical/workspace/note.txt'],
+    ]);
+    const fsPromises = {
+      realpath: async (targetPath) => aliases.get(targetPath) ?? targetPath,
+    };
+
+    const result = await resolveWorkspacePath('note.txt', {
+      root: '/short/workspace',
+      fsPromises,
+      pathModule: path.posix,
+    });
+
+    expect(result.rootPath).toBe('/short/workspace');
+    expect(result.rootRealPath).toBe('/canonical/workspace');
+    expect(result.realPath).toBe('/canonical/workspace/note.txt');
+  });
 });

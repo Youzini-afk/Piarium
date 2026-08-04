@@ -32,6 +32,11 @@ import {
 const tempDirs = [];
 const normalizeEol = (value) => value.replace(/\r\n/g, '\n');
 const normalizeGitPath = (value) => value.replace(/\\/g, '/');
+const canonicalGitPath = (value) => normalizeGitPath(
+  typeof fs.realpathSync.native === 'function'
+    ? fs.realpathSync.native(value)
+    : fs.realpathSync(value),
+);
 
 /** Create a temp dir and register it for afterEach cleanup. */
 const createTempDir = () => {
@@ -350,7 +355,7 @@ describe('worktree root resolution', () => {
     runGit(repo, ['init', '-b', 'main']);
     fs.mkdirSync(subdirectory, { recursive: true });
 
-    await expect(resolveWorktreeTopLevel(subdirectory)).resolves.toEqual({ root: normalizeGitPath(fs.realpathSync(repo)) });
+    await expect(resolveWorktreeTopLevel(subdirectory)).resolves.toEqual({ root: canonicalGitPath(repo) });
   });
 
   it('resolves the primary worktree root from a linked worktree', async () => {
@@ -367,7 +372,7 @@ describe('worktree root resolution', () => {
     fs.rmSync(worktree, { recursive: true, force: true });
     runGit(repo, ['worktree', 'add', '-b', 'feature/test', worktree, 'HEAD']);
 
-    await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: normalizeGitPath(fs.realpathSync(repo)) });
+    await expect(resolvePrimaryWorktreeRoot(worktree)).resolves.toEqual({ root: canonicalGitPath(repo) });
   });
 });
 
@@ -411,7 +416,7 @@ describe('createWorktree', () => {
       expect(created.path).toBe(path.join(
         dataHome,
         'worktrees',
-        createProjectIdFromPath(repo),
+        createProjectIdFromPath(canonicalGitPath(repo)),
         'native-default',
       ));
       await expect.poll(
@@ -466,7 +471,7 @@ describe('createWorktree', () => {
       expect(created.path).toBe(path.join(
         dataHome,
         'worktrees',
-        createProjectIdFromPath(repo),
+        createProjectIdFromPath(canonicalGitPath(repo)),
         'bootstrap-phases',
       ));
       expect(fs.existsSync(path.join(repo, '.git', 'opencode'))).toBe(false);
@@ -598,11 +603,11 @@ describe('createWorktree', () => {
       fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
       runGit(repo, ['add', 'README.md']);
       runGit(repo, ['commit', '-m', 'Initial commit']);
-      const projectId = createProjectIdFromPath(repo);
+      const projectId = createProjectIdFromPath(canonicalGitPath(repo));
 
       fs.rmSync(worktree, { recursive: true, force: true });
       runGit(repo, ['worktree', 'add', '-b', 'feature/in-use', worktree, 'HEAD']);
-      const canonicalWorktree = fs.realpathSync(worktree);
+      const canonicalWorktree = canonicalGitPath(worktree);
 
       await expect(createWorktree(repo, {
         mode: 'existing',
@@ -610,7 +615,7 @@ describe('createWorktree', () => {
         branchName: 'feature/in-use',
         worktreeName: 'feature-in-use',
         returnAfterDirectoryCreated: true,
-      })).rejects.toThrow(`Branch is already checked out in ${normalizeGitPath(canonicalWorktree)}`);
+      })).rejects.toThrow(`Branch is already checked out in ${canonicalWorktree}`);
 
       const candidateDirectory = path.join(dataHome, 'worktrees', projectId, 'feature-in-use');
       expect(fs.existsSync(candidateDirectory)).toBe(false);

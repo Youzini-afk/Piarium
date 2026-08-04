@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -114,7 +114,10 @@ describe("discoverPiRuntimes", () => {
       env[pathEntry?.[0] ?? "Path"] = `${bin};${join(systemRoot, "System32")};${systemRoot}`;
       const candidates = await discoverPiRuntimes({ env, platform: "win32" });
       assert.equal(candidates[1]?.available, true);
-      assert.equal(candidates[1]?.command, join(bin, "pi.cmd"));
+      assert.equal(
+        await realpath(candidates[1]?.command ?? ""),
+        await realpath(join(bin, "pi.cmd")),
+      );
       assert.equal(candidates[1]?.version, "0.82.1");
     } finally {
       await rm(root, { force: true, recursive: true });

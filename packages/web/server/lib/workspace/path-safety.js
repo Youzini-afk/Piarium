@@ -109,9 +109,6 @@ export const resolveWorkspacePath = async (relativePathValue, options) => {
 
   const rootPath = pathModule.resolve(root);
   const rootRealPath = await realpathOrResolved(rootPath, fsPromises, pathModule);
-  if (!isPathWithinRoot(rootRealPath, rootPath, pathModule) && !isPathWithinRoot(rootPath, rootRealPath, pathModule)) {
-    throw new WorkspacePathError('Workspace root could not be resolved', 500);
-  }
 
   const relativePath = normalizeWorkspaceRelativePath(relativePathValue);
   const absolutePath = relativePath
