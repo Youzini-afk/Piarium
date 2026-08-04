@@ -128,8 +128,16 @@ function isPiariumCmdline(cmdline) {
     return false;
   }
   const normalized = cmdline.toLowerCase().replace(/\\/g, '/');
-  return normalized.includes('/@piarium/web/')
-    || normalized.includes('/piarium/packages/web/');
+  if (normalized.includes('/@piarium/web/')) {
+    return true;
+  }
+  return [
+    '/packages/web/bin/cli.js',
+    '/packages/web/server/index.js',
+  ].some((entry) => {
+    const entryIndex = normalized.indexOf(entry);
+    return entryIndex >= 0 && normalized.lastIndexOf('/piarium/', entryIndex) >= 0;
+  });
 }
 
 // Liveness + identity — "is the Piarium instance recorded in a pid file

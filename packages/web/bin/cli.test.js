@@ -170,6 +170,15 @@ async function waitForTcpPort(port, timeoutMs = 3000) {
   return false;
 }
 
+async function waitForTcpPortClosed(port, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await waitForTcpPort(port, 100))) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !(await waitForTcpPort(port, 100));
+}
+
 function spawnPiariumLikeIdleProcess() {
   return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'piarium-idle'], { stdio: 'ignore' });
 }
@@ -185,7 +194,17 @@ function spawnPiariumLikeHungServer(port) {
     server.listen(${port}, '127.0.0.1');
     setInterval(() => {}, 1000);
   `;
-  return spawn(process.execPath, ['-e', script, 'piarium-hung-server'], { stdio: 'ignore' });
+  const releaseEntry = path.join(
+    os.tmpdir(),
+    'piarium',
+    'releases',
+    'test-release',
+    'packages',
+    'web',
+    'server',
+    'index.js',
+  );
+  return spawn(process.execPath, ['-e', script, releaseEntry], { stdio: 'ignore' });
 }
 
 describe('cli args', () => {
@@ -951,11 +970,14 @@ describe('isPiariumCmdline', () => {
     expect(isPiariumCmdline('node /x/@piarium/web/bin/cli.js serve')).toBe(true);
     expect(isPiariumCmdline('node /x/@piarium/web/server/index.js --port 9090')).toBe(true);
     expect(isPiariumCmdline('bun /home/u/projects/Piarium/packages/web/server/index.js --port 3001')).toBe(true);
+    expect(isPiariumCmdline('node /home/u/.local/share/piarium/releases/r1/packages/web/server/index.js')).toBe(true);
+    expect(isPiariumCmdline('node C:\\Users\\u\\AppData\\Local\\Piarium\\runtimes\\testing\\packages\\web\\bin\\cli.js')).toBe(true);
   });
 
   it('rejects recycled and unrelated processes (issue #1721)', () => {
     expect(isPiariumCmdline('node /home/herjarsa/npm-global/bin/agentmemory')).toBe(false);
     expect(isPiariumCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
+    expect(isPiariumCmdline('node /tmp/unrelated/packages/web/server/index.js')).toBe(false);
     expect(isPiariumCmdline('')).toBe(false);
     expect(isPiariumCmdline(null)).toBe(false);
   });
@@ -1312,12 +1334,12 @@ describe('lifecycle commands with unmanaged explicit ports', () => {
 
         expect(fs.existsSync(pidFile)).toBe(false);
         expect(fs.existsSync(instanceFile)).toBe(false);
-        expect(await waitForTcpPort(port, 500)).toBe(false);
+        expect(await waitForTcpPortClosed(port)).toBe(true);
       } finally {
         child.kill('SIGKILL');
       }
     });
-  });
+  }, 12_000);
 
   it('plain stop ignores a stale CLI registry entry that resolves to desktop runtime', async () => {
     await withTempPiariumDataDir(async () => {
