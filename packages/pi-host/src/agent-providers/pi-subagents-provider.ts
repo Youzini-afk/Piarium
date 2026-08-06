@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import {
   type AgentSession,
   type RegisteredTool,
@@ -64,7 +65,6 @@ interface ParsedListEntry {
 }
 
 interface ParsedAgentDetail {
-  aliases?: string[];
   description: string;
   fallbackModels?: string[];
   model?: string;
@@ -81,6 +81,212 @@ interface ParsedChainDetail {
   packageName?: string;
   path?: string;
   source: PiAgentSourceScope;
+}
+
+function foldFrontmatterBlock(block: string): string {
+  let folded = "";
+  let hasContent = false;
+  let previousIndented = false;
+  let blankLines = 0;
+  for (const line of block.split("\n")) {
+    const current = line.trimEnd();
+    if (!current.trim()) {
+      if (hasContent) blankLines += 1;
+      continue;
+    }
+    const indented = current.length > current.trimStart().length;
+    if (hasContent) {
+      folded += blankLines > 0
+        ? "\n".repeat(blankLines + (previousIndented || indented ? 1 : 0))
+        : previousIndented || indented ? "\n" : " ";
+    }
+    folded += current;
+    hasContent = true;
+    previousIndented = indented;
+    blankLines = 0;
+  }
+  return folded.trim();
+}
+
+function parseFrontmatter(content: string): {
+  body: string;
+  frontmatter: Record<string, string>;
+} {
+  const normalized = content.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---")) return { body: normalized, frontmatter: {} };
+  const end = normalized.indexOf("\n---", 3);
+  if (end < 0) return { body: normalized, frontmatter: {} };
+  const frontmatter: Record<string, string> = {};
+  const lines = normalized.slice(4, end).split("\n");
+  let key: string | undefined;
+  let block: string[] | undefined;
+  let indent = 0;
+  let folded = false;
+  const flush = () => {
+    if (key === undefined || block === undefined) return;
+    const raw = block.join("\n");
+    const prefix = raw.match(/^[ \t]+(?=\S)/m)?.[0] ?? "";
+    const stripped = prefix
+      ? raw.split("\n").map((line) => line.startsWith(prefix) ? line.slice(prefix.length) : line).join("\n").replace(/^\n/, "")
+      : raw;
+    frontmatter[key] = folded ? foldFrontmatterBlock(stripped) : stripped;
+    key = undefined;
+    block = undefined;
+    folded = false;
+  };
+  for (const line of lines) {
+    const currentIndent = line.search(/\S|$/);
+    const trimmed = line.trim();
+    if (key !== undefined && block !== undefined && (currentIndent > indent || (folded && !trimmed))) {
+      block.push(line);
+      continue;
+    }
+    flush();
+    const match = /^([\w-]+):\s*(.*)$/.exec(line);
+    if (!match?.[1]) continue;
+    const raw = (match[2] ?? "").trim();
+    const quoted = (raw.startsWith('"') && raw.endsWith('"'))
+      || (raw.startsWith("'") && raw.endsWith("'"));
+    const value = quoted ? raw.slice(1, -1) : raw;
+    const isFolded = !quoted && (raw === ">" || raw === ">-");
+    if (!value || isFolded) {
+      key = match[1];
+      block = [];
+      indent = currentIndent;
+      folded = isFolded;
+    } else {
+      frontmatter[match[1]] = value;
+    }
+  }
+  flush();
+  return {
+    body: normalized.slice(end + 4).trim(),
+    frontmatter,
+  };
+}
+
+function parseCsv(value: string): string[] {
+  return [...new Set(value.split(",").map((entry) => entry.trim()).filter(Boolean))];
+}
+
+function normalizedFrontmatterConfig(
+  frontmatter: Record<string, string>,
+): Record<string, JsonValue> {
+  const config: Record<string, JsonValue> = { ...frontmatter };
+  if (frontmatter.defaultReads !== undefined) {
+    config.reads = frontmatter.defaultReads;
+    delete config.defaultReads;
+  }
+  if (frontmatter.defaultProgress !== undefined) {
+    config.progress = frontmatter.defaultProgress === "true";
+    delete config.defaultProgress;
+  }
+  for (const key of ["fallbackModels", "skillPath"] as const) {
+    if (frontmatter[key] !== undefined) config[key] = parseCsv(frontmatter[key]);
+  }
+  for (const key of [
+    "async",
+    "completionGuard",
+    "inheritProjectContext",
+    "inheritSkills",
+    "interactive",
+  ] as const) {
+    const value = frontmatter[key];
+    if (value === "true") config[key] = true;
+    else if (value === "false") config[key] = false;
+  }
+  for (const key of ["maxSubagentDepth", "timeoutMs"] as const) {
+    const value = frontmatter[key];
+    if (value === undefined) continue;
+    const parsed = Number(value);
+    if (Number.isInteger(parsed)) config[key] = parsed;
+  }
+  for (const key of ["acceptance", "toolBudget", "turnBudget"] as const) {
+    const value = frontmatter[key];
+    if (value === undefined) continue;
+    try {
+      config[key] = JSON.parse(value) as JsonValue;
+    } catch {
+      // Retain the plugin's raw frontmatter value when it is not JSON.
+    }
+  }
+  if (frontmatter.thinking === "false") config.thinking = false;
+  return config;
+}
+
+function parseChainStep(agent: string, section: string): Record<string, JsonValue> {
+  const lines = section.split("\n");
+  const blank = lines.findIndex((line) => !line.trim());
+  const configLines = blank < 0 ? lines : lines.slice(0, blank);
+  const step: Record<string, JsonValue> = {
+    agent,
+    task: (blank < 0 ? "" : lines.slice(blank + 1).join("\n")).trim(),
+  };
+  for (const line of configLines) {
+    const match = /^([\w-]+):\s*(.*)$/.exec(line);
+    if (!match?.[1]) continue;
+    const key = match[1].toLowerCase();
+    const raw = (match[2] ?? "").trim();
+    if (["phase", "label", "as", "outputschema", "outputmode", "model"].includes(key)) {
+      if (raw) {
+        const outputKey = key === "outputschema" ? "outputSchema" : key === "outputmode" ? "outputMode" : key;
+        step[outputKey] = raw;
+      }
+    } else if (key === "output") {
+      step.output = raw === "false" ? false : raw;
+    } else if (key === "reads" || key === "skills") {
+      step[key] = raw === "false" ? false : parseCsv(raw);
+    } else if (key === "progress") {
+      if (raw === "true" || raw === "false") step.progress = raw === "true";
+    } else if (key === "toolbudget") {
+      try {
+        step.toolBudget = JSON.parse(raw) as JsonValue;
+      } catch {
+        step.toolBudget = raw;
+      }
+    } else {
+      // The management API in pi-subagents 0.37.2 rebuilds a whitelist step on
+      // update. Surface unknown native fields to the renderer so it can refuse
+      // a lossy edit instead of silently erasing them from the workflow file.
+      step[match[1]] = raw;
+    }
+  }
+  return step;
+}
+
+function parseMarkdownChain(content: string): Record<string, JsonValue> {
+  const { body, frontmatter } = parseFrontmatter(content);
+  const config = normalizedFrontmatterConfig(frontmatter);
+  const matches = [...body.matchAll(/^##\s+(.+)[^\S\n]*$/gm)];
+  config.steps = matches.map((match, index) => {
+    const start = (match.index ?? 0) + match[0].length + (body[(match.index ?? 0) + match[0].length] === "\n" ? 1 : 0);
+    const end = matches[index + 1]?.index ?? body.length;
+    return parseChainStep((match[1] ?? "").trim(), body.slice(start, end).trimEnd());
+  });
+  return config;
+}
+
+async function readDefinition(
+  kind: ParsedListEntry["kind"],
+  path: string | undefined,
+): Promise<Record<string, JsonValue> | undefined> {
+  if (!path) return undefined;
+  try {
+    const content = await readFile(path, "utf8");
+    if (kind === "workflow" && path.endsWith(".chain.json")) {
+      const parsed = JSON.parse(content) as unknown;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+      const config = { ...(parsed as Record<string, JsonValue>) };
+      if (Array.isArray(config.chain)) config.steps = config.chain;
+      delete config.chain;
+      return config;
+    }
+    if (kind === "workflow") return parseMarkdownChain(content);
+    const { body, frontmatter } = parseFrontmatter(content);
+    return { ...normalizedFrontmatterConfig(frontmatter), systemPrompt: body };
+  } catch {
+    return undefined;
+  }
 }
 
 function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
@@ -194,14 +400,12 @@ function parseAgentDetail(text: string): ParsedAgentDetail | undefined {
   const header = /^Agent:\s+(.+?)\s+\((builtin|package|user|project)\)$/m.exec(text);
   if (!header) return undefined;
   const csv = (label: string) => valueAfterLabel(text, label)?.split(",").map((value) => value.trim()).filter(Boolean);
-  const aliases = csv("Aliases");
   const fallbackModels = csv("Fallback models");
   const model = valueAfterLabel(text, "Model");
   const packageName = valueAfterLabel(text, "Package");
   const path = valueAfterLabel(text, "Path");
   const thinking = valueAfterLabel(text, "Thinking");
   return {
-    ...(aliases?.length ? { aliases } : {}),
     description: valueAfterLabel(text, "Description") ?? "",
     ...(fallbackModels?.length ? { fallbackModels } : {}),
     ...(model ? { model } : {}),
@@ -312,14 +516,24 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
       ...(entry.kind === "workflow" ? { chainName: entry.name } : { agent: entry.name }),
       agentScope: "both",
     })));
+    const definitions = await Promise.all(entries.map((entry, index) => {
+      if (entry.source !== "user" && entry.source !== "project") return undefined;
+      const detailText = detailResults[index]?.message ?? "";
+      const path = entry.kind === "workflow"
+        ? parseChainDetail(detailText)?.path
+        : parseAgentDetail(detailText)?.path;
+      return readDefinition(entry.kind, path);
+    }));
     const agents = entries.map((entry, index): PiAgentDescriptor => {
       const descriptor = descriptorFor(entry, false);
       const detailText = detailResults[index]?.message ?? "";
+      const definition = definitions[index];
       if (entry.kind === "workflow") {
         const detail = parseChainDetail(detailText);
         if (!detail) return descriptor;
         return {
           ...descriptor,
+          ...(definition === undefined ? {} : { definition: { config: definition } }),
           description: detail.description || descriptor.description,
           source: {
             ...(detail.packageName === undefined ? {} : { packageName: detail.packageName }),
@@ -332,7 +546,7 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
       if (!detail) return descriptor;
       return {
         ...descriptor,
-        ...(detail.aliases === undefined ? {} : { aliases: detail.aliases }),
+        ...(definition === undefined ? {} : { definition: { config: definition } }),
         description: detail.description || descriptor.description,
         ...(detail.fallbackModels === undefined ? {} : { fallbackModels: detail.fallbackModels }),
         ...(detail.model === undefined ? {} : { model: detail.model }),
@@ -357,12 +571,15 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
       const detailResult = await this.#execute({ action: "get", agent: name, agentScope: "both" });
       const detail = parseAgentDetail(detailResult.message);
       if (!detail) continue;
+      const definition = detail.source === "user" || detail.source === "project"
+        ? await readDefinition("delegatable", detail.path)
+        : undefined;
       agents.push({
         ...descriptorFor(
           { description: detail.description, kind: "delegatable", name: detail.name, source: detail.source },
           true,
         ),
-        ...(detail.aliases === undefined ? {} : { aliases: detail.aliases }),
+        ...(definition === undefined ? {} : { definition: { config: definition } }),
         ...(detail.fallbackModels === undefined ? {} : { fallbackModels: detail.fallbackModels }),
         ...(detail.model === undefined ? {} : { model: detail.model }),
         source: {

@@ -27,7 +27,12 @@ import {
   setJsonPath,
   type JsonObject,
 } from './plugin-config-model';
-import { PluginDraftFooter, PluginRuntimeNote } from './PluginSettingsPanelShared';
+import { PluginAdvancedDraftEditor } from './PluginAdvancedDraftEditor';
+import {
+  PluginConfigSource,
+  PluginDraftFooter,
+  PluginRuntimeNote,
+} from './PluginSettingsPanelShared';
 import { useTextObjectDraft } from './usePluginConfigDraft';
 import {
   WEB_ACCESS_RESOLVED_PROVIDERS,
@@ -62,7 +67,6 @@ interface PanelProps {
 type ProviderEditor = typeof PROVIDER_EDITORS[number]['id'];
 
 const WEB_ACCESS_PATHS = ['web-search.json'] as const;
-const SUBGROUP_CLASS = 'border-t border-border/60 pt-5';
 
 const PROVIDER_EDITORS = [
   { id: 'openai', label: 'OpenAI / Codex' },
@@ -99,13 +103,20 @@ const CREDENTIAL_KEYS: Partial<Record<ProviderEditor, readonly string[]>> = {
   firecrawl: ['firecrawlApiKey'],
 };
 
-const providerOptions = WEB_ACCESS_RESOLVED_PROVIDERS.map((value) => ({ value, label: value }));
+const providerOptions = WEB_ACCESS_RESOLVED_PROVIDERS.map((value) => ({
+  value,
+  label: PROVIDER_EDITORS.find((option) => option.id === value)?.label ?? value,
+}));
 
-const RoutingPanel: React.FC<PanelProps> = ({ fields }) => {
+const WarningNote: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <p className="typography-meta text-[var(--status-warning)]">{children}</p>
+);
+
+const SearchPanel: React.FC<PanelProps> = ({ fields }) => {
   const { t } = useI18n();
   const mode = webAccessRoutingMode(fields.draft);
   const providerValue = webAccessProviderValue(fields.draft);
-  const providerPath = webAccessProviderPath(fields.draft);
+  const providerSelectionPath = webAccessProviderPath(fields.draft);
   const singleProvider = typeof providerValue === 'string'
     && (WEB_ACCESS_RESOLVED_PROVIDERS as readonly string[]).includes(providerValue.trim().toLowerCase())
     ? providerValue.trim().toLowerCase()
@@ -119,8 +130,16 @@ const RoutingPanel: React.FC<PanelProps> = ({ fields }) => {
     fields.onRemove(['provider']);
   };
   const setCanonicalProvider = (value: JsonValue) => {
+    // A routing-mode change is an explicit routing edit. Normalize the legacy
+    // aliases only at that point; untouched documents retain their shape.
     clearProviderOverrides();
+    fields.onRemove(['searchRouting']);
     fields.onSet(['provider'], value);
+  };
+  const setSelectedProvider = (value: JsonValue) => {
+    // Changing the provider inside the existing mode is not a routing-mode
+    // change. Keep whichever native provider alias the document already uses.
+    fields.onSet(providerSelectionPath, value);
   };
   const setMode = (next: WebAccessRoutingMode) => {
     if (next === 'auto') {
@@ -150,59 +169,50 @@ const RoutingPanel: React.FC<PanelProps> = ({ fields }) => {
   };
 
   const providerDraft = Array.isArray(providerValue)
-    ? setJsonPath(fields.draft, ['provider'], providerValue)
+    ? setJsonPath(fields.draft, providerSelectionPath, providerValue)
     : fields.draft;
-  const concurrentFields: WebAccessFields = {
-    ...fields,
-    draft: providerDraft,
-    onRemove: (path) => {
-      if (path.length === 1 && path[0] === 'provider') setMode('auto');
-      else fields.onRemove(path);
-    },
-    onSet: (path, value) => {
-      if (path.length === 1 && path[0] === 'provider') setCanonicalProvider(value);
-      else fields.onSet(path, value);
-    },
-  };
+  const concurrentFields: WebAccessFields = { ...fields, draft: providerDraft };
 
   return (
     <div className="space-y-6">
       {(hasSearchProvider && hasProvider) ? (
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.routing.precedence')}</PluginRuntimeNote>
+        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.search.precedence')}</PluginRuntimeNote>
       ) : null}
       {(hasRouting && (hasSearchProvider || hasProvider)) ? (
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.routing.ignored')}</PluginRuntimeNote>
+        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.search.ignored')}</PluginRuntimeNote>
       ) : null}
 
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.webAccess.routing.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.routing.description')}
+        title={t('settings.piarium.pluginSettings.webAccess.search.title')}
+        info={t('settings.piarium.pluginSettings.webAccess.search.description')}
         contentClassName="space-y-4"
       >
         <PluginBooleanField
           {...fields}
           path={['webSearch', 'enabled']}
-          label="webSearch.enabled"
-          description={t('settings.piarium.pluginSettings.webAccess.routing.enabledDescription')}
+          label={t('settings.piarium.pluginSettings.webAccess.search.enabled')}
+          info={t('settings.piarium.pluginSettings.webAccess.search.enabledDescription')}
           defaultValue
         />
         <SettingsFieldRow
-          label={t('settings.piarium.pluginSettings.webAccess.routing.mode')}
-          description={t('settings.piarium.pluginSettings.webAccess.routing.modeDescription')}
+          label={t('settings.piarium.pluginSettings.webAccess.search.routingMode')}
+          info={t('settings.piarium.pluginSettings.webAccess.search.routingModeDescription')}
           controlClassName="w-full max-w-lg"
         >
           <Select value={mode} disabled={fields.disabled} onValueChange={(value) => setMode(value as WebAccessRoutingMode)}>
             <SelectTrigger
               size="settings"
               className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
-              aria-label={t('settings.piarium.pluginSettings.webAccess.routing.mode')}
+              aria-label={t('settings.piarium.pluginSettings.webAccess.search.routingMode')}
             >
-              <SelectValue />
+              <SelectValue>
+                {t(`settings.piarium.pluginSettings.webAccess.search.routingMode.${mode}`)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {(['auto', 'single', 'concurrent', 'all', 'fallback'] as const).map((value) => (
                 <SelectItem key={value} value={value}>
-                  {t(`settings.piarium.pluginSettings.webAccess.routing.mode.${value}`)}
+                  {t(`settings.piarium.pluginSettings.webAccess.search.routingMode.${value}`)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -211,17 +221,19 @@ const RoutingPanel: React.FC<PanelProps> = ({ fields }) => {
 
         {mode === 'single' ? (
           <SettingsFieldRow
-            label={providerPath[0]}
-            description={t('settings.piarium.pluginSettings.webAccess.routing.providerDescription')}
+            label={t('settings.piarium.pluginSettings.webAccess.search.provider')}
+            info={t('settings.piarium.pluginSettings.webAccess.search.providerDescription')}
             controlClassName="w-full max-w-lg"
           >
-            <Select value={singleProvider} disabled={fields.disabled} onValueChange={setCanonicalProvider}>
+            <Select value={singleProvider} disabled={fields.disabled} onValueChange={setSelectedProvider}>
               <SelectTrigger
                 size="settings"
                 className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
-                aria-label={providerPath[0]}
+                aria-label={t('settings.piarium.pluginSettings.webAccess.search.provider')}
               >
-                <SelectValue />
+                <SelectValue>
+                  {providerOptions.find((option) => option.value === singleProvider)?.label ?? singleProvider}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {providerOptions.map((option) => (
@@ -234,9 +246,9 @@ const RoutingPanel: React.FC<PanelProps> = ({ fields }) => {
         {mode === 'concurrent' ? (
           <PluginStringListField
             {...concurrentFields}
-            path={['provider']}
-            label="provider"
-            description={t('settings.piarium.pluginSettings.webAccess.routing.concurrentDescription')}
+            path={providerSelectionPath}
+            label={t('settings.piarium.pluginSettings.webAccess.search.concurrentProviders')}
+            info={t('settings.piarium.pluginSettings.webAccess.search.concurrentProvidersDescription')}
             placeholder="openai"
           />
         ) : null}
@@ -245,15 +257,15 @@ const RoutingPanel: React.FC<PanelProps> = ({ fields }) => {
             <PluginStringListField
               {...fields}
               path={['searchRouting', 'providers']}
-              label="searchRouting.providers"
-              description={t('settings.piarium.pluginSettings.webAccess.routing.fallbackProviders')}
+              label={t('settings.piarium.pluginSettings.webAccess.search.fallbackProviders')}
+              info={t('settings.piarium.pluginSettings.webAccess.search.fallbackProvidersDescription')}
               placeholder="openai"
             />
             <PluginStringListField
               {...fields}
               path={['searchRouting', 'fallbackOn']}
-              label="searchRouting.fallbackOn"
-              description={t('settings.piarium.pluginSettings.webAccess.routing.fallbackKinds')}
+              label={t('settings.piarium.pluginSettings.webAccess.search.fallbackKinds')}
+              info={t('settings.piarium.pluginSettings.webAccess.search.fallbackKindsDescription')}
               placeholder="transient"
             />
           </>
@@ -262,43 +274,42 @@ const RoutingPanel: React.FC<PanelProps> = ({ fields }) => {
         <PluginSelectField
           {...fields}
           path={['workflow']}
-          label="workflow"
+          label={t('settings.piarium.pluginSettings.webAccess.search.workflow')}
+          info={t('settings.piarium.pluginSettings.webAccess.search.workflowDescription')}
           defaultValue="summary-review"
           options={[
-            { value: 'summary-review', label: 'summary-review' },
-            { value: 'auto-summary', label: 'auto-summary' },
-            { value: 'none', label: 'none' },
+            { value: 'summary-review', label: t('settings.piarium.pluginSettings.webAccess.search.workflow.summaryReview') },
+            { value: 'auto-summary', label: t('settings.piarium.pluginSettings.webAccess.search.workflow.autoSummary') },
+            { value: 'none', label: t('settings.piarium.pluginSettings.webAccess.search.workflow.none') },
           ]}
         />
-        <PluginStringField {...fields} path={['summaryModel']} label="summaryModel" placeholder="provider/model" />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.webAccess.tools.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.tools.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginStringField {...fields} path={['toolNames', 'webSearch']} label="toolNames.webSearch" defaultValue="web_search" />
-        <PluginStringField {...fields} path={['toolNames', 'sourceCheck']} label="toolNames.sourceCheck" defaultValue="source_check" />
-        <PluginStringField {...fields} path={['toolNames', 'fetchContent']} label="toolNames.fetchContent" defaultValue="fetch_content" />
-        <PluginStringField {...fields} path={['toolNames', 'getSearchContent']} label="toolNames.getSearchContent" defaultValue="get_search_content" />
+        <PluginStringField
+          {...fields}
+          path={['summaryModel']}
+          label={t('settings.piarium.pluginSettings.webAccess.search.summaryModel')}
+          info={t('settings.piarium.pluginSettings.webAccess.search.summaryModelDescription')}
+          placeholder="provider/model"
+        />
       </SettingsControlGroup>
     </div>
   );
 };
 
-const CredentialField: React.FC<{ configKey: string; fields: WebAccessFields }> = ({ configKey, fields }) => {
+const CredentialField: React.FC<{
+  configKey: string;
+  fields: WebAccessFields;
+  providerLabel: string;
+}> = ({ configKey, fields, providerLabel }) => {
   const { t } = useI18n();
   return (
     <PluginStringField
       {...fields}
       path={[configKey]}
-      label={configKey}
-      description={t('settings.piarium.pluginSettings.webAccess.providers.credentialDescription')}
+      label={t('settings.piarium.pluginSettings.webAccess.providers.credentialSource', { provider: providerLabel })}
+      info={t('settings.piarium.pluginSettings.webAccess.providers.credentialDescription')}
       inputType="password"
       autoComplete="new-password"
-      placeholder="$ENV_NAME | !secret command"
+      placeholder={t('settings.piarium.pluginSettings.webAccess.providers.credentialPlaceholder')}
     />
   );
 };
@@ -306,17 +317,22 @@ const CredentialField: React.FC<{ configKey: string; fields: WebAccessFields }> 
 const ProvidersPanel: React.FC<PanelProps> = ({ fields }) => {
   const { t } = useI18n();
   const [provider, setProvider] = React.useState<ProviderEditor>('openai');
+  const providerLabel = PROVIDER_EDITORS.find((option) => option.id === provider)?.label ?? provider;
   const credentials = CREDENTIAL_KEYS[provider] ?? [];
+  const endpointInfo = t('settings.piarium.pluginSettings.webAccess.providers.endpointDescription');
+  const modelInfo = t('settings.piarium.pluginSettings.webAccess.providers.modelDescription');
+
   return (
     <div className="space-y-6">
-      <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.providers.secretNote')}</PluginRuntimeNote>
+      <WarningNote>{t('settings.piarium.pluginSettings.webAccess.providers.secretNote')}</WarningNote>
       <SettingsControlGroup
         title={t('settings.piarium.pluginSettings.webAccess.providers.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.providers.description')}
+        info={t('settings.piarium.pluginSettings.webAccess.providers.description')}
         contentClassName="space-y-4"
       >
         <SettingsFieldRow
           label={t('settings.piarium.pluginSettings.webAccess.providers.editor')}
+          info={t('settings.piarium.pluginSettings.webAccess.providers.editorDescription')}
           controlClassName="w-full max-w-lg"
         >
           <Select value={provider} disabled={fields.disabled} onValueChange={(value) => setProvider(value as ProviderEditor)}>
@@ -325,7 +341,7 @@ const ProvidersPanel: React.FC<PanelProps> = ({ fields }) => {
               className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
               aria-label={t('settings.piarium.pluginSettings.webAccess.providers.editor')}
             >
-              <SelectValue />
+              <SelectValue>{providerLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {PROVIDER_EDITORS.map((option) => (
@@ -336,58 +352,90 @@ const ProvidersPanel: React.FC<PanelProps> = ({ fields }) => {
         </SettingsFieldRow>
 
         {credentials.map((configKey) => (
-          <CredentialField key={configKey} fields={fields} configKey={configKey} />
+          <CredentialField key={configKey} fields={fields} configKey={configKey} providerLabel={providerLabel} />
         ))}
+        {credentials.length > 0 ? <WarningNote>{t('settings.piarium.pluginSettings.webAccess.providers.credentialCommandWarning')}</WarningNote> : null}
 
         {provider === 'openai' ? (
           <>
-            <PluginStringField {...fields} path={['openaiResponsesUrl']} label="openaiResponsesUrl" inputType="url" placeholder="https://api.openai.com/v1/responses" />
-            <PluginStringField {...fields} path={['openaiSearchModel']} label="openaiSearchModel" placeholder="model-id" />
+            <PluginStringField
+              {...fields}
+              path={['openaiResponsesUrl']}
+              label={t('settings.piarium.pluginSettings.webAccess.providers.endpoint')}
+              info={endpointInfo}
+              inputType="url"
+              placeholder="https://api.openai.com/v1/responses"
+            />
+            <PluginStringField
+              {...fields}
+              path={['openaiSearchModel']}
+              label={t('settings.piarium.pluginSettings.webAccess.providers.model')}
+              info={modelInfo}
+              placeholder="model-id"
+            />
           </>
         ) : null}
         {provider === 'gemini' ? (
           <>
-            <PluginStringField {...fields} path={['geminiBaseUrl']} label="geminiBaseUrl" inputType="url" placeholder="https://generativelanguage.googleapis.com" />
-            <PluginStringField {...fields} path={['searchModel']} label="searchModel" defaultValue="gemini-3.6-flash" />
+            <PluginStringField
+              {...fields}
+              path={['geminiBaseUrl']}
+              label={t('settings.piarium.pluginSettings.webAccess.providers.endpoint')}
+              info={endpointInfo}
+              inputType="url"
+              placeholder="https://generativelanguage.googleapis.com"
+            />
+            <PluginStringField
+              {...fields}
+              path={['searchModel']}
+              label={t('settings.piarium.pluginSettings.webAccess.providers.model')}
+              info={modelInfo}
+              defaultValue="gemini-3.6-flash"
+            />
           </>
         ) : null}
         {provider === 'serpdive' ? (
           <PluginSelectField
             {...fields}
             path={['serpdiveModel']}
-            label="serpdiveModel"
-            description={t('settings.piarium.pluginSettings.webAccess.providers.serpdiveCost')}
+            label={t('settings.piarium.pluginSettings.webAccess.providers.model')}
+            info={t('settings.piarium.pluginSettings.webAccess.providers.serpdiveCost')}
             defaultValue="krill"
             options={[
-              { value: 'krill', label: 'krill · free' },
-              { value: 'mako', label: 'mako · 1 credit' },
-              { value: 'moby', label: 'moby · 1.5 credits' },
+              { value: 'krill', label: t('settings.piarium.pluginSettings.webAccess.providers.serpdive.krill') },
+              { value: 'mako', label: t('settings.piarium.pluginSettings.webAccess.providers.serpdive.mako') },
+              { value: 'moby', label: t('settings.piarium.pluginSettings.webAccess.providers.serpdive.moby') },
             ]}
           />
         ) : null}
         {provider === 'searxng' ? (
-          <PluginStringField {...fields} path={['searxngBaseUrl']} label="searxngBaseUrl" inputType="url" placeholder="https://search.example.com" />
+          <PluginStringField
+            {...fields}
+            path={['searxngBaseUrl']}
+            label={t('settings.piarium.pluginSettings.webAccess.providers.endpoint')}
+            info={endpointInfo}
+            inputType="url"
+            placeholder="https://search.example.com"
+          />
         ) : null}
         {provider === 'firecrawl' ? (
           <>
-            <PluginStringField {...fields} path={['firecrawlBaseUrl']} label="firecrawlBaseUrl" inputType="url" placeholder="https://crawl.example.com" />
-            <PluginSelectField
+            <PluginStringField
               {...fields}
-              path={['firecrawlApiVersion']}
-              label="firecrawlApiVersion"
-              defaultValue="v2"
-              options={[
-                { value: 'v1', label: 'v1' },
-                { value: 'v2', label: 'v2' },
-              ]}
+              path={['firecrawlBaseUrl']}
+              label={t('settings.piarium.pluginSettings.webAccess.providers.endpoint')}
+              info={endpointInfo}
+              inputType="url"
+              placeholder="https://crawl.example.com"
             />
             <PluginBooleanField
               {...fields}
               path={['firecrawlFreshScrape']}
-              label="firecrawlFreshScrape"
-              description={t('settings.piarium.pluginSettings.webAccess.providers.firecrawlRisk')}
+              label={t('settings.piarium.pluginSettings.webAccess.providers.firecrawlFreshScrape')}
+              info={t('settings.piarium.pluginSettings.webAccess.providers.firecrawlFreshScrapeDescription')}
               defaultValue={false}
             />
+            <WarningNote>{t('settings.piarium.pluginSettings.webAccess.providers.firecrawlRisk')}</WarningNote>
           </>
         ) : null}
       </SettingsControlGroup>
@@ -395,7 +443,7 @@ const ProvidersPanel: React.FC<PanelProps> = ({ fields }) => {
   );
 };
 
-const CuratorPanel: React.FC<PanelProps> = ({ fields }) => {
+const BrowserCuratorPanel: React.FC<PanelProps> = ({ fields }) => {
   const { t } = useI18n();
   const mode = webAccessCuratorMode(fields.draft);
   const remoteEnabled = webAccessCuratorRemoteEnabled(fields.draft);
@@ -419,50 +467,81 @@ const CuratorPanel: React.FC<PanelProps> = ({ fields }) => {
 
   return (
     <div className="space-y-6">
-      {ignoredShape ? (
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.curator.ignoredShape')}</PluginRuntimeNote>
-      ) : null}
+      {ignoredShape ? <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.browserCurator.ignoredShape')}</PluginRuntimeNote> : null}
       {remoteEnabled ? (
-        <PluginRuntimeNote>{t(broadBind
+        <WarningNote>{t(broadBind
           ? 'settings.piarium.pluginSettings.webAccess.curator.remoteBroadWarning'
-          : 'settings.piarium.pluginSettings.webAccess.curator.remoteWarning')}</PluginRuntimeNote>
+          : 'settings.piarium.pluginSettings.webAccess.curator.remoteWarning')}</WarningNote>
       ) : null}
 
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.webAccess.curator.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.curator.description')}
+        title={t('settings.piarium.pluginSettings.webAccess.browserCurator.title')}
+        info={t('settings.piarium.pluginSettings.webAccess.browserCurator.description')}
         contentClassName="space-y-4"
       >
+        <PluginBooleanField
+          {...fields}
+          path={['allowBrowserCookies']}
+          label={t('settings.piarium.pluginSettings.webAccess.browserCurator.cookies')}
+          info={t('settings.piarium.pluginSettings.webAccess.browserCurator.cookiesDescription')}
+          defaultValue={false}
+        />
+        <WarningNote>{t('settings.piarium.pluginSettings.webAccess.browserCurator.cookiesWarning')}</WarningNote>
+        <PluginStringField
+          {...fields}
+          path={['chromeProfile']}
+          label={t('settings.piarium.pluginSettings.webAccess.browserCurator.profile')}
+          info={t('settings.piarium.pluginSettings.webAccess.browserCurator.profileDescription')}
+          placeholder="Profile 2"
+        />
+
         <SettingsFieldRow
-          label="curatorRemote"
-          description={t('settings.piarium.pluginSettings.webAccess.curator.remoteDescription')}
+          label={t('settings.piarium.pluginSettings.webAccess.browserCurator.mode')}
+          info={t('settings.piarium.pluginSettings.webAccess.browserCurator.modeDescription')}
           controlClassName="w-full max-w-lg"
         >
           <Select value={mode} disabled={fields.disabled} onValueChange={(value) => setMode(value as WebAccessCuratorMode)}>
             <SelectTrigger
               size="settings"
               className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
-              aria-label="curatorRemote"
+              aria-label={t('settings.piarium.pluginSettings.webAccess.browserCurator.mode')}
             >
-              <SelectValue />
+              <SelectValue>
+                {t(`settings.piarium.pluginSettings.webAccess.browserCurator.mode.${mode}`)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="local">{t('settings.piarium.pluginSettings.webAccess.curator.mode.local')}</SelectItem>
-              <SelectItem value="derived">{t('settings.piarium.pluginSettings.webAccess.curator.mode.derived')}</SelectItem>
-              <SelectItem value="custom">{t('settings.piarium.pluginSettings.webAccess.curator.mode.custom')}</SelectItem>
+              <SelectItem value="local">{t('settings.piarium.pluginSettings.webAccess.browserCurator.mode.local')}</SelectItem>
+              <SelectItem value="derived">{t('settings.piarium.pluginSettings.webAccess.browserCurator.mode.derived')}</SelectItem>
+              <SelectItem value="custom">{t('settings.piarium.pluginSettings.webAccess.browserCurator.mode.custom')}</SelectItem>
             </SelectContent>
           </Select>
         </SettingsFieldRow>
         {mode === 'custom' ? (
           <>
-            <PluginStringField {...fields} path={['curatorRemote', 'host']} label="curatorRemote.host" allowEmpty placeholder="pi.example.net" />
-            <PluginStringField {...fields} path={['curatorRemote', 'bind']} label="curatorRemote.bind" allowEmpty placeholder="100.101.102.103" />
+            <PluginStringField
+              {...fields}
+              path={['curatorRemote', 'host']}
+              label={t('settings.piarium.pluginSettings.webAccess.browserCurator.host')}
+              info={t('settings.piarium.pluginSettings.webAccess.browserCurator.hostDescription')}
+              allowEmpty
+              placeholder="pi.example.net"
+            />
+            <PluginStringField
+              {...fields}
+              path={['curatorRemote', 'bind']}
+              label={t('settings.piarium.pluginSettings.webAccess.browserCurator.bind')}
+              info={t('settings.piarium.pluginSettings.webAccess.browserCurator.bindDescription')}
+              allowEmpty
+              placeholder="100.101.102.103"
+            />
           </>
         ) : null}
         <PluginNumberField
           {...fields}
           path={['curatorTimeoutSeconds']}
-          label="curatorTimeoutSeconds"
+          label={t('settings.piarium.pluginSettings.webAccess.browserCurator.timeout')}
+          info={t('settings.piarium.pluginSettings.webAccess.browserCurator.timeoutDescription')}
           defaultValue={remoteEnabled ? 60 : 20}
           min={1}
           max={600}
@@ -471,35 +550,10 @@ const CuratorPanel: React.FC<PanelProps> = ({ fields }) => {
         <PluginBooleanField
           {...fields}
           path={['autoOpenBrowser']}
-          label="autoOpenBrowser"
+          label={t('settings.piarium.pluginSettings.webAccess.browserCurator.autoOpen')}
+          info={t('settings.piarium.pluginSettings.webAccess.browserCurator.autoOpenDescription')}
           defaultValue={!remoteEnabled}
         />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.webAccess.browser.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.browser.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField
-          {...fields}
-          path={['allowBrowserCookies']}
-          label="allowBrowserCookies"
-          description={t('settings.piarium.pluginSettings.webAccess.browser.cookieWarning')}
-          defaultValue={false}
-        />
-        <PluginStringField {...fields} path={['chromeProfile']} label="chromeProfile" placeholder="Profile 2" />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.webAccess.shortcuts.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.shortcuts.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginStringField {...fields} path={['shortcuts', 'curate']} label="shortcuts.curate" defaultValue="ctrl+shift+s" />
-        <PluginStringField {...fields} path={['shortcuts', 'activity']} label="shortcuts.activity" defaultValue="ctrl+shift+w" />
       </SettingsControlGroup>
     </div>
   );
@@ -510,56 +564,76 @@ const ContentPanel: React.FC<PanelProps> = ({ fields }) => {
   return (
     <div className="space-y-6">
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.webAccess.content.github.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.content.github.description')}
+        title={t('settings.piarium.pluginSettings.webAccess.content.title')}
+        info={t('settings.piarium.pluginSettings.webAccess.content.description')}
         contentClassName="space-y-4"
       >
-        <PluginBooleanField {...fields} path={['githubClone', 'enabled']} label="githubClone.enabled" defaultValue />
-        <PluginNumberField {...fields} path={['githubClone', 'maxRepoSizeMB']} label="githubClone.maxRepoSizeMB" defaultValue={350} unit="MiB" />
-        <PluginNumberField {...fields} path={['githubClone', 'cloneTimeoutSeconds']} label="githubClone.cloneTimeoutSeconds" defaultValue={30} unit="s" />
-        <PluginStringField {...fields} path={['githubClone', 'clonePath']} label="githubClone.clonePath" defaultValue="/tmp/pi-github-repos" />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.webAccess.content.media.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.content.media.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField {...fields} path={['youtube', 'enabled']} label="youtube.enabled" defaultValue />
-        <PluginStringField {...fields} path={['youtube', 'preferredModel']} label="youtube.preferredModel" defaultValue="gemini-3.6-flash" />
-        <PluginBooleanField {...fields} path={['video', 'enabled']} label="video.enabled" defaultValue />
-        <PluginStringField {...fields} path={['video', 'preferredModel']} label="video.preferredModel" defaultValue="gemini-3.6-flash" />
-        <PluginNumberField {...fields} path={['video', 'maxSizeMB']} label="video.maxSizeMB" defaultValue={50} unit="MiB" />
-        <PluginNumberField {...fields} path={['pdf', 'maxSizeMB']} label="pdf.maxSizeMB" defaultValue={20} max={50} unit="MiB" />
+        <PluginBooleanField
+          {...fields}
+          path={['githubClone', 'enabled']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.github')}
+          info={t('settings.piarium.pluginSettings.webAccess.content.githubDescription')}
+          defaultValue
+        />
+        <PluginBooleanField
+          {...fields}
+          path={['youtube', 'enabled']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.youtube')}
+          info={t('settings.piarium.pluginSettings.webAccess.content.youtubeDescription')}
+          defaultValue
+        />
+        <PluginBooleanField
+          {...fields}
+          path={['video', 'enabled']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.video')}
+          info={t('settings.piarium.pluginSettings.webAccess.content.videoDescription')}
+          defaultValue
+        />
+        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.content.pdfNote')}</PluginRuntimeNote>
       </SettingsControlGroup>
     </div>
   );
 };
 
-const SecurityPanel: React.FC<PanelProps> = ({ fields }) => {
+const SafetyPanel: React.FC<PanelProps> = ({ fields }) => {
   const { t } = useI18n();
   return (
     <div className="space-y-6">
-      <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.security.note')}</PluginRuntimeNote>
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.webAccess.security.domains.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.security.domains.description')}
+        title={t('settings.piarium.pluginSettings.webAccess.safety.title')}
+        info={t('settings.piarium.pluginSettings.webAccess.safety.description')}
         contentClassName="space-y-4"
       >
-        <PluginStringListField {...fields} path={['fetchContent', 'domainPolicy', 'allow']} label="fetchContent.domainPolicy.allow" placeholder="example.com" />
-        <PluginStringListField {...fields} path={['fetchContent', 'domainPolicy', 'deny']} label="fetchContent.domainPolicy.deny" placeholder="blocked.example.com" />
+        <PluginStringListField
+          {...fields}
+          path={['fetchContent', 'domainPolicy', 'allow']}
+          label={t('settings.piarium.pluginSettings.webAccess.safety.domainAllow')}
+          info={t('settings.piarium.pluginSettings.webAccess.safety.domainAllowDescription')}
+          placeholder="example.com"
+        />
+        <PluginStringListField
+          {...fields}
+          path={['fetchContent', 'domainPolicy', 'deny']}
+          label={t('settings.piarium.pluginSettings.webAccess.safety.domainDeny')}
+          info={t('settings.piarium.pluginSettings.webAccess.safety.domainDenyDescription')}
+          placeholder="blocked.example.com"
+        />
+        <PluginStringListField
+          {...fields}
+          path={['ssrf', 'allowRanges']}
+          label={t('settings.piarium.pluginSettings.webAccess.safety.ssrfRanges')}
+          info={t('settings.piarium.pluginSettings.webAccess.safety.ssrfRangesDescription')}
+          placeholder="198.18.0.0/15"
+        />
+        <PluginBooleanField
+          {...fields}
+          path={['ssrf', 'trustEnvProxy']}
+          label={t('settings.piarium.pluginSettings.webAccess.safety.proxyTrust')}
+          info={t('settings.piarium.pluginSettings.webAccess.safety.proxyTrustDescription')}
+          defaultValue={false}
+        />
       </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.webAccess.security.ssrf.title')}
-        description={t('settings.piarium.pluginSettings.webAccess.security.ssrf.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginStringListField {...fields} path={['ssrf', 'allowRanges']} label="ssrf.allowRanges" placeholder="198.18.0.0/15" />
-        <PluginBooleanField {...fields} path={['ssrf', 'trustEnvProxy']} label="ssrf.trustEnvProxy" defaultValue={false} />
-      </SettingsControlGroup>
+      <WarningNote>{t('settings.piarium.pluginSettings.webAccess.safety.warning')}</WarningNote>
     </div>
   );
 };
@@ -574,25 +648,37 @@ export const WebAccessSettings: React.FC<WebAccessSettingsProps> = ({ runtimeTar
     runtimeTarget,
     targetKey,
   });
+  const issue = React.useMemo(() => webAccessDraftIssue(controller.draft), [controller.draft]);
   const fields: WebAccessFields = {
-    disabled: !controller.loaded || controller.loading || controller.saving,
+    // Keep structured controls read-only while the raw editor contains invalid
+    // JSON. A semantic validation issue still allows the user to correct the
+    // value through the form; only the Save action is blocked until valid.
+    disabled: !controller.loaded
+      || controller.loading
+      || controller.saving
+      || controller.rawError !== null,
     draft: controller.draft,
     onRemove: controller.removeValue,
     onSet: controller.setValue,
   };
-  const issue = React.useMemo(() => webAccessDraftIssue(controller.draft), [controller.draft]);
+  const panelLabelKeys = {
+    routing: 'settings.piarium.pluginSettings.webAccess.panel.search',
+    providers: 'settings.piarium.pluginSettings.webAccess.panel.providers',
+    curator: 'settings.piarium.pluginSettings.webAccess.panel.browserCurator',
+    content: 'settings.piarium.pluginSettings.webAccess.panel.content',
+    security: 'settings.piarium.pluginSettings.webAccess.panel.safety',
+  } as const;
   const panelOptions = (['routing', 'providers', 'curator', 'content', 'security'] as const).map((value) => ({
     value,
-    label: t(`settings.piarium.pluginSettings.webAccess.panel.${value}`),
+    label: t(panelLabelKeys[value]),
   }));
 
   return (
     <div className="space-y-7">
+      <PluginConfigSource controller={controller} />
       <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.runtimeNote')}</PluginRuntimeNote>
 
-      <WebAccessRuntimePanel runtimeTarget={runtimeTarget} />
-
-      <div className="space-y-3 rounded-lg border border-border/60 px-4 py-4">
+      <div className="space-y-3">
         <div className="space-y-1">
           <h3 className="typography-settings-group-title text-foreground">
             {t('settings.piarium.pluginSettings.webAccess.workspace.title')}
@@ -609,19 +695,24 @@ export const WebAccessSettings: React.FC<WebAccessSettingsProps> = ({ runtimeTar
         />
       </div>
 
-      {panel === 'routing' ? <RoutingPanel fields={fields} /> : null}
+      {panel === 'routing' ? <SearchPanel fields={fields} /> : null}
       {panel === 'providers' ? <ProvidersPanel fields={fields} /> : null}
-      {panel === 'curator' ? <CuratorPanel fields={fields} /> : null}
+      {panel === 'curator' ? <BrowserCuratorPanel fields={fields} /> : null}
       {panel === 'content' ? <ContentPanel fields={fields} /> : null}
-      {panel === 'security' ? <SecurityPanel fields={fields} /> : null}
+      {panel === 'security' ? <SafetyPanel fields={fields} /> : null}
 
+      <PluginAdvancedDraftEditor controller={controller} />
       <PluginDraftFooter
         controller={controller}
         blocked={issue !== null}
         blockedMessage={issue
-          ? t('settings.piarium.pluginSettings.webAccess.validation.invalidValue', { field: issue.field })
+          ? t('settings.piarium.pluginSettings.webAccess.validation.invalidValue', {
+            field: t('settings.piarium.pluginSettings.webAccess.validation.setting'),
+          })
           : undefined}
       />
+
+      <WebAccessRuntimePanel runtimeTarget={runtimeTarget} />
     </div>
   );
 };

@@ -150,7 +150,7 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
         : 'unavailable';
 
   return (
-    <div className="space-y-5 rounded-lg border border-border/60 px-4 py-4">
+    <div className="space-y-5 border-t border-border/60 pt-6">
       <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
         <div className="min-w-0 space-y-1">
           <h3 className="typography-settings-group-title text-foreground">
@@ -425,13 +425,21 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             </label>
             <Select value={dreamTask} onValueChange={setDreamTask} disabled={runningCommand !== null}>
               <SelectTrigger id="magic-dream-task" size="settings" className="w-full max-w-sm">
-                <SelectValue />
+                <SelectValue>
+                  {dreamTask === 'all'
+                    ? t('settings.piarium.pluginSettings.magic.runtime.dreamAll')
+                    : t(`settings.piarium.pluginSettings.magic.ui.task.${dreamTask}` as never)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">
                   {t('settings.piarium.pluginSettings.magic.runtime.dreamAll')}
                 </SelectItem>
-                {DREAM_TASKS.map((task) => <SelectItem key={task} value={task}>{task}</SelectItem>)}
+                {DREAM_TASKS.map((task) => (
+                  <SelectItem key={task} value={task}>
+                    {t(`settings.piarium.pluginSettings.magic.ui.task.${task}` as never)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

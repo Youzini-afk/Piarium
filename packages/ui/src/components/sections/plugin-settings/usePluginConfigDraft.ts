@@ -17,6 +17,8 @@ import {
 } from '@/lib/pi-runtime/config-documents';
 import {
   createPiJsonObjectChanges,
+  formatPiJsonObjectDocument,
+  parsePiJsonObjectDocument,
 } from '@/lib/pi-runtime/json-object-document';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -40,10 +42,13 @@ export interface PluginObjectDraft {
   loading: boolean;
   path: string;
   projectTrusted: boolean;
+  rawContent: string;
+  rawError: string | null;
   removeValue: (path: readonly string[]) => void;
   reload: () => Promise<void>;
   save: () => Promise<void>;
   saving: boolean;
+  setRawContent: (content: string) => void;
   setValue: (path: readonly string[], value: JsonValue) => void;
 }
 
@@ -75,6 +80,8 @@ interface DraftState {
   loading: boolean;
   path: string;
   projectTrusted: boolean;
+  rawContent: string;
+  rawError: string | null;
   saving: boolean;
   source: JsonObject;
   targetKey: string | null;
@@ -87,6 +94,8 @@ const initialState = (): DraftState => ({
   loading: false,
   path: '',
   projectTrusted: false,
+  rawContent: '{}\n',
+  rawError: null,
   saving: false,
   source: {},
   targetKey: null,
@@ -102,6 +111,18 @@ const useDraftActions = (
   targetKey: string,
 ) => {
   const active = state.targetKey === targetKey;
+  const updateDraft = (
+    current: DraftState,
+    updater: (draft: JsonObject) => JsonObject,
+  ): DraftState => {
+    const draft = updater(current.draft);
+    return {
+      ...current,
+      draft,
+      rawContent: formatPiJsonObjectDocument(draft),
+      rawError: null,
+    };
+  };
   return {
     dirty: active && !jsonObjectsEqual(state.source, state.draft),
     draft: active ? state.draft : {},
@@ -110,15 +131,36 @@ const useDraftActions = (
     loading: active ? state.loading : true,
     path: active ? state.path : '',
     projectTrusted: active && state.projectTrusted,
+    rawContent: active ? state.rawContent : '{}\n',
+    rawError: active ? state.rawError : null,
     removeValue: (path: readonly string[]) => {
       setState((current) => current.targetKey === targetKey
-        ? { ...current, draft: removeJsonPath(current.draft, path) }
+        ? updateDraft(current, (draft) => removeJsonPath(draft, path))
         : current);
     },
     saving: active && state.saving,
+    setRawContent: (content: string) => {
+      setState((current) => {
+        if (current.targetKey !== targetKey) return current;
+        try {
+          return {
+            ...current,
+            draft: parsePiJsonObjectDocument(content),
+            rawContent: content,
+            rawError: null,
+          };
+        } catch (error) {
+          return {
+            ...current,
+            rawContent: content,
+            rawError: errorMessage(error),
+          };
+        }
+      });
+    },
     setValue: (path: readonly string[], value: JsonValue) => {
       setState((current) => current.targetKey === targetKey
-        ? { ...current, draft: setJsonPath(current.draft, path, value) }
+        ? updateDraft(current, (draft) => setJsonPath(draft, path, value))
         : current);
     },
   };
@@ -151,6 +193,7 @@ export const useSettingsObjectDraft = ({
         || runtimeKey !== getRuntimeKey()
       ) return;
       const document = asJsonObject(snapshot[scope][property]);
+      const rawContent = formatPiJsonObjectDocument(document);
       setState({
         draft: document,
         error: null,
@@ -158,6 +201,8 @@ export const useSettingsObjectDraft = ({
         loading: false,
         path: `${scope}:settings.json#${property}`,
         projectTrusted: snapshot.projectTrusted,
+        rawContent,
+        rawError: null,
         saving: false,
         source: document,
         targetKey: actionTargetKey,
@@ -186,6 +231,7 @@ export const useSettingsObjectDraft = ({
       state.targetKey !== targetKey
       || targetKey !== targetKeyRef.current
       || state.saving
+      || state.rawError !== null
       || jsonObjectsEqual(state.source, state.draft)
     ) return;
     const generation = generationRef.current;
@@ -203,17 +249,19 @@ export const useSettingsObjectDraft = ({
         || runtimeKey !== getRuntimeKey()
       ) return;
       const document = asJsonObject(snapshot[scope][property]);
+      const rawContent = formatPiJsonObjectDocument(document);
       setState((current) => ({
         ...current,
         draft: document,
         error: null,
         loaded: true,
         projectTrusted: snapshot.projectTrusted,
+        rawContent,
+        rawError: null,
         saving: false,
         source: document,
       }));
       notifyPiRuntimeCatalogChanged('plugin-config');
-      toast.success(t('settings.common.status.saved'));
     } catch (error) {
       if (
         generation !== generationRef.current
@@ -224,7 +272,7 @@ export const useSettingsObjectDraft = ({
       setState((current) => ({ ...current, error: message, saving: false }));
       toast.error(t('settings.common.status.saveFailed'), { description: message });
     }
-  }, [property, runtimeTarget, scope, state.draft, state.saving, state.source, state.targetKey, t, targetKey]);
+  }, [property, runtimeTarget, scope, state.draft, state.rawError, state.saving, state.source, state.targetKey, t, targetKey]);
 
   return { ...useDraftActions(state, setState, targetKey), reload, save };
 };
@@ -262,6 +310,8 @@ export const useConfigDocumentObjectDraft = ({
         loading: false,
         path: `${snapshot.scope}:${snapshot.path}`,
         projectTrusted: snapshot.projectTrusted,
+        rawContent: formatPiJsonObjectDocument(snapshot.document),
+        rawError: null,
         saving: false,
         source: snapshot.document,
         targetKey: actionTargetKey,
@@ -290,6 +340,7 @@ export const useConfigDocumentObjectDraft = ({
       state.targetKey !== targetKey
       || targetKey !== targetKeyRef.current
       || state.saving
+      || state.rawError !== null
       || jsonObjectsEqual(state.source, state.draft)
     ) return;
     const generation = generationRef.current;
@@ -315,12 +366,13 @@ export const useConfigDocumentObjectDraft = ({
         loading: false,
         path: `${snapshot.scope}:${snapshot.path}`,
         projectTrusted: snapshot.projectTrusted,
+        rawContent: formatPiJsonObjectDocument(snapshot.document),
+        rawError: null,
         saving: false,
         source: snapshot.document,
         targetKey: actionTargetKey,
       });
       notifyPiRuntimeCatalogChanged('plugin-config');
-      toast.success(t('settings.common.status.saved'));
     } catch (error) {
       if (
         generation !== generationRef.current
@@ -331,7 +383,7 @@ export const useConfigDocumentObjectDraft = ({
       setState((current) => ({ ...current, error: message, saving: false }));
       toast.error(t('settings.common.status.saveFailed'), { description: message });
     }
-  }, [path, runtimeTarget, scope, state.draft, state.saving, state.source, state.targetKey, t, targetKey]);
+  }, [path, runtimeTarget, scope, state.draft, state.rawError, state.saving, state.source, state.targetKey, t, targetKey]);
 
   return { ...useDraftActions(state, setState, targetKey), reload, save };
 };
@@ -352,6 +404,17 @@ const parseTextObject = (content: string, format: PiConfigTextFormat): JsonObjec
     throw new Error('Configuration root must be an object');
   }
   return value as JsonObject;
+};
+
+export const parsePluginTextObjectDraft = (
+  content: string,
+  format: PiConfigTextFormat,
+): { draft: JsonObject; rawError: string | null } => {
+  try {
+    return { draft: parseTextObject(content, format), rawError: null };
+  } catch (error) {
+    return { draft: {}, rawError: errorMessage(error) };
+  }
 };
 
 const loadTextDocument = async (
@@ -378,6 +441,7 @@ export const useTextObjectDraft = ({
   const { t } = useI18n();
   const [state, setState] = React.useState<DraftState>(initialState);
   const [content, setContent] = React.useState('{}\n');
+  const [rawError, setRawError] = React.useState<string | null>(null);
   const [snapshot, setSnapshot] = React.useState<PiConfigTextDocumentSnapshot | null>(null);
   const contentRef = React.useRef('{}\n');
   const generationRef = React.useRef(0);
@@ -393,24 +457,27 @@ export const useTextObjectDraft = ({
       : { ...initialState(), loading: true, targetKey: actionTargetKey });
     try {
       const nextSnapshot = await loadTextDocument(runtimeTarget, { format, paths, root });
-      const document = parseTextObject(nextSnapshot.content, format);
       if (
         generation !== generationRef.current
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
+      const parsed = parsePluginTextObjectDraft(nextSnapshot.content, format);
       setSnapshot(nextSnapshot);
       contentRef.current = nextSnapshot.content;
       setContent(nextSnapshot.content);
+      setRawError(parsed.rawError);
       setState({
-        draft: document,
+        draft: parsed.draft,
         error: null,
         loaded: true,
         loading: false,
         path: `${nextSnapshot.root}:${nextSnapshot.path}`,
         projectTrusted: nextSnapshot.projectTrusted,
+        rawContent: nextSnapshot.content,
+        rawError: parsed.rawError,
         saving: false,
-        source: document,
+        source: parsed.draft,
         targetKey: actionTargetKey,
       });
     } catch (error) {
@@ -432,6 +499,7 @@ export const useTextObjectDraft = ({
     setSnapshot(null);
     contentRef.current = '{}\n';
     setContent('{}\n');
+    setRawError(null);
     void reload();
   }, [reload]);
 
@@ -440,6 +508,7 @@ export const useTextObjectDraft = ({
     const next = updateJsoncPath(contentRef.current, path, value);
     contentRef.current = next;
     setContent(next);
+    setRawError(null);
     setState((current) => ({ ...current, draft: parseTextObject(next, format) }));
   }, [format, state.targetKey, targetKey]);
 
@@ -448,7 +517,21 @@ export const useTextObjectDraft = ({
     const next = removeJsoncPath(contentRef.current, path);
     contentRef.current = next;
     setContent(next);
+    setRawError(null);
     setState((current) => ({ ...current, draft: parseTextObject(next, format) }));
+  }, [format, state.targetKey, targetKey]);
+
+  const setRawContent = React.useCallback((next: string) => {
+    if (state.targetKey !== targetKey || targetKey !== targetKeyRef.current) return;
+    contentRef.current = next;
+    setContent(next);
+    try {
+      const draft = parseTextObject(next, format);
+      setRawError(null);
+      setState((current) => ({ ...current, draft }));
+    } catch (error) {
+      setRawError(errorMessage(error));
+    }
   }, [format, state.targetKey, targetKey]);
 
   const save = React.useCallback(async () => {
@@ -456,7 +539,8 @@ export const useTextObjectDraft = ({
       state.targetKey !== targetKey
       || targetKey !== targetKeyRef.current
       || state.saving
-      || jsonObjectsEqual(state.source, state.draft)
+      || rawError !== null
+      || content === snapshot?.content
       || !snapshot
     ) return;
     const generation = generationRef.current;
@@ -481,6 +565,7 @@ export const useTextObjectDraft = ({
       setSnapshot(nextSnapshot);
       contentRef.current = nextSnapshot.content;
       setContent(nextSnapshot.content);
+      setRawError(null);
       setState({
         draft: document,
         error: null,
@@ -488,12 +573,13 @@ export const useTextObjectDraft = ({
         loading: false,
         path: `${nextSnapshot.root}:${nextSnapshot.path}`,
         projectTrusted: nextSnapshot.projectTrusted,
+        rawContent: nextSnapshot.content,
+        rawError: null,
         saving: false,
         source: document,
         targetKey: actionTargetKey,
       });
       notifyPiRuntimeCatalogChanged('plugin-config');
-      toast.success(t('settings.common.status.saved'));
     } catch (error) {
       if (
         generation !== generationRef.current
@@ -504,21 +590,24 @@ export const useTextObjectDraft = ({
       setState((current) => ({ ...current, error: message, saving: false }));
       toast.error(t('settings.common.status.saveFailed'), { description: message });
     }
-  }, [content, format, runtimeTarget, snapshot, state.draft, state.saving, state.source, state.targetKey, t, targetKey]);
+  }, [content, format, rawError, runtimeTarget, snapshot, state.saving, state.targetKey, t, targetKey]);
 
   const active = state.targetKey === targetKey;
   return {
-    dirty: active && !jsonObjectsEqual(state.source, state.draft),
+    dirty: active && snapshot !== null && content !== snapshot.content,
     draft: active ? state.draft : {},
     error: active ? state.error : null,
     loaded: active && state.loaded,
     loading: active ? state.loading : true,
     path: active ? state.path : '',
     projectTrusted: active && state.projectTrusted,
+    rawContent: active ? content : '{}\n',
+    rawError: active ? rawError : null,
     reload,
     removeValue,
     save,
     saving: active && state.saving,
+    setRawContent,
     setValue,
   };
 };

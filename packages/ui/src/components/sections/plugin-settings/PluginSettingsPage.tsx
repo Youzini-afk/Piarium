@@ -14,7 +14,18 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsFieldRow,
+  SettingsSection,
+  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
+} from '@/components/sections/shared/SettingsSection';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -116,7 +127,7 @@ const IntegrationStatus: React.FC<{
 }> = ({ installStatus, runtimeStatus }) => {
   const { t } = useI18n();
   return (
-    <div className="mt-auto flex flex-wrap gap-1.5 pt-3">
+    <div className="flex flex-wrap gap-1.5">
       <span className={cn(
         'rounded-full border px-2 py-0.5 typography-micro',
         statusClassName(installStatus),
@@ -154,6 +165,15 @@ export const PluginSettingsPage: React.FC = () => {
   const [navigationTarget] = React.useState(() => consumePluginSettingsTarget());
   const [selected, setSelected] = React.useState<PluginSettingsIntegrationId>(
     navigationTarget?.integrationId ?? 'subagents',
+  );
+  const [visitedIntegrations, setVisitedIntegrations] = React.useState<ReadonlySet<PluginSettingsIntegrationId>>(
+    () => new Set([navigationTarget?.integrationId ?? 'subagents']),
+  );
+  const [customPluginId] = React.useState<string | null>(
+    navigationTarget?.integrationId === null ? navigationTarget.pluginId : null,
+  );
+  const [unknownPluginId, setUnknownPluginId] = React.useState<string | null>(
+    navigationTarget?.integrationId === null ? navigationTarget.pluginId : null,
   );
   const [packages, setPackages] = React.useState<PackageDescriptor[]>([]);
   const [packagesLoaded, setPackagesLoaded] = React.useState(false);
@@ -274,7 +294,10 @@ export const PluginSettingsPage: React.FC = () => {
   ]);
 
   const selectedIntegration = PLUGIN_INTEGRATIONS.find((entry) => entry.id === selected)!;
-  const selectedPackage = findPiPackage(packages, selectedIntegration.packageName);
+  const selectedPackage = findPiPackage(
+    packages,
+    unknownPluginId ?? selectedIntegration.packageName,
+  );
   const selectedInstalled = selectedPackage?.installed === true;
   const refreshStatuses = React.useCallback(async (): Promise<void> => {
     setStatusRefreshing(true);
@@ -289,51 +312,62 @@ export const PluginSettingsPage: React.FC = () => {
     }
   }, [activeSessionId, commandCatalog, loadPackages, loadRuntimeSignals]);
 
-  const renderSelectedSettings = () => {
-    switch (selected) {
-      case 'subagents':
-        return <SubagentsSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />;
-      case 'magic-context':
-        return (
+  // Keep every adapted panel mounted. The compact plugin selector therefore
+  // never discards a draft when users compare or configure another extension.
+  const knownSettings = (
+    <>
+      {visitedIntegrations.has('subagents') ? (
+        <div hidden={selected !== 'subagents'}>
+          <SubagentsSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />
+        </div>
+      ) : null}
+      {visitedIntegrations.has('magic-context') ? (
+        <div hidden={selected !== 'magic-context'}>
           <MagicContextSettings
             initialPanel={navigationTarget?.section === 'agents' ? 'agents' : undefined}
             runtimeTarget={runtimeTarget}
             targetKey={targetKey}
           />
-        );
-      case 'web-access':
-        return <WebAccessSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />;
-      case 'workspace-history':
-        return <WorkspaceHistorySettings runtimeTarget={runtimeTarget} targetKey={targetKey} />;
-      case 'wtf':
-        return <WtfSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />;
-      case 'mcp':
-        return (
-          <div className="space-y-4 rounded-lg border border-border/60 px-4 py-4">
-            <p className="typography-ui text-muted-foreground">
-              {t('settings.piarium.pluginSettings.mcp.description')}
-            </p>
-            <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('mcp')}>
-              {t('settings.piarium.pluginSettings.mcp.open')}
-            </Button>
-          </div>
-        );
-      default:
-        return null;
-    }
-  };
+        </div>
+      ) : null}
+      {visitedIntegrations.has('web-access') ? (
+        <div hidden={selected !== 'web-access'}>
+          <WebAccessSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />
+        </div>
+      ) : null}
+      {visitedIntegrations.has('workspace-history') ? (
+        <div hidden={selected !== 'workspace-history'}>
+          <WorkspaceHistorySettings runtimeTarget={runtimeTarget} targetKey={targetKey} />
+        </div>
+      ) : null}
+      {visitedIntegrations.has('wtf') ? (
+        <div hidden={selected !== 'wtf'}>
+          <WtfSettings runtimeTarget={runtimeTarget} targetKey={targetKey} />
+        </div>
+      ) : null}
+      {visitedIntegrations.has('mcp') ? (
+        <div hidden={selected !== 'mcp'} className="space-y-4">
+          <p className="typography-ui text-muted-foreground">
+            {t('settings.piarium.pluginSettings.mcp.description')}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('mcp')}>
+            {t('settings.piarium.pluginSettings.mcp.open')}
+          </Button>
+        </div>
+      ) : null}
+    </>
+  );
 
   return (
     <SettingsPageLayout
       title={t('settings.page.pluginSettings.title')}
       description={t('settings.piarium.pluginSettings.description')}
-      className="max-w-6xl"
       showSaveStatus={false}
     >
       <SettingsSection
         settingsItem="plugin-settings.integrations"
         title={t('settings.piarium.pluginSettings.integrations.title')}
-        description={t('settings.piarium.pluginSettings.integrations.description')}
+        info={t('settings.piarium.pluginSettings.integrations.description')}
         divider={false}
         headerAction={(
           <Button
@@ -348,49 +382,96 @@ export const PluginSettingsPage: React.FC = () => {
           </Button>
         )}
       >
-        <div className="grid grid-cols-1 gap-2 @xl:grid-cols-2 @4xl:grid-cols-3">
-          {PLUGIN_INTEGRATIONS.map((integration) => {
-            const packageDescriptor = findPiPackage(packages, integration.packageName);
-            const installStatus: PluginInstallStatus = packageError
-              ? 'error'
-              : !packagesLoaded
-              ? 'checking'
-              : packageDescriptor?.installed === true
-                ? 'installed'
-                : packageDescriptor
-                  ? 'configured-missing'
-                  : 'not-configured';
-            const runtimeStatus = pluginRuntimeStatus(integration.id, runtimeSignals);
-            const active = integration.id === selected;
-            return (
-              <button
-                key={integration.id}
-                type="button"
-                onClick={() => setSelected(integration.id)}
-                aria-pressed={active}
-                className={cn(
-                  'flex min-h-28 flex-col rounded-lg border px-3 py-3 text-left transition-colors',
-                  active
-                    ? 'border-primary/50 bg-interactive-selection'
-                    : 'border-border/60 hover:bg-interactive-hover',
-                )}
-              >
-                <div className="flex w-full items-center gap-2">
-                  <Icon name={integration.icon} className="size-4 shrink-0 text-foreground" />
-                  <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
-                    {integration.name}
-                  </span>
-                </div>
-                <p className="mt-2 line-clamp-3 typography-meta text-muted-foreground">
-                  {t(integration.descriptionKey)}
-                </p>
-                <IntegrationStatus
-                  installStatus={installStatus}
-                  runtimeStatus={runtimeStatus}
-                />
-              </button>
-            );
-          })}
+        <SettingsFieldRow
+          label={t('settings.piarium.pluginSettings.integrations.choose')}
+          settingsItem="plugin-settings.integration-picker"
+          controlClassName="w-full max-w-[24rem]"
+        >
+          <Select
+            value={unknownPluginId ? '__unknown__' : selected}
+            onValueChange={(value) => {
+              if (value === '__unknown__') {
+                setUnknownPluginId(customPluginId);
+                setAdvancedOpen(true);
+                return;
+              }
+              const integrationId = value as PluginSettingsIntegrationId;
+              setSelected(integrationId);
+              setVisitedIntegrations((current) => current.has(integrationId)
+                ? current
+                : new Set([...current, integrationId]));
+              setUnknownPluginId(null);
+              setAdvancedOpen(false);
+            }}
+          >
+            <SelectTrigger
+              size="settings"
+              className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+              aria-label={t('settings.piarium.pluginSettings.integrations.choose')}
+            >
+              <SelectValue>{unknownPluginId ?? selectedIntegration.name}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {customPluginId ? (
+                <SelectItem value="__unknown__">{customPluginId}</SelectItem>
+              ) : null}
+              {PLUGIN_INTEGRATIONS.map((integration) => (
+                <SelectItem key={integration.id} value={integration.id}>{integration.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
+
+        <div className="flex flex-col gap-3 border-t border-border/60 pt-4 @xl:flex-row @xl:items-start @xl:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Icon name={unknownPluginId ? 'code-box' : selectedIntegration.icon} className="size-4 shrink-0 text-foreground" />
+              <span className="typography-ui-label text-foreground">{unknownPluginId ?? selectedIntegration.name}</span>
+            </div>
+            <p className="mt-1 max-w-2xl typography-meta text-muted-foreground">
+              {unknownPluginId
+                ? t('settings.piarium.pluginSettings.advanced.unknownPlugin')
+                : t(selectedIntegration.descriptionKey)}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 typography-micro text-muted-foreground">
+              {selectedPackage ? (
+                <>
+                  <span>{selectedPackage.scope === 'project'
+                    ? t('settings.common.scope.project')
+                    : t('settings.common.scope.global')}</span>
+                  {selectedPackage.version ? <span>v{selectedPackage.version}</span> : null}
+                  <code className="break-all">{selectedPackage.source}</code>
+                </>
+              ) : null}
+              <span>
+                {activeSessionId
+                  ? t('settings.piarium.pluginSettings.target.session')
+                  : t('settings.piarium.pluginSettings.target.workspace')}
+              </span>
+              <code className="break-all">{sessionRecord?.snapshot?.cwd ?? currentDirectory}</code>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-start gap-2 @xl:items-end">
+            {unknownPluginId ? null : (
+              <IntegrationStatus
+                installStatus={packageError
+                  ? 'error'
+                  : !packagesLoaded
+                    ? 'checking'
+                    : selectedPackage?.installed === true
+                      ? 'installed'
+                      : selectedPackage
+                        ? 'configured-missing'
+                        : 'not-configured'}
+                runtimeStatus={pluginRuntimeStatus(selectedIntegration.id, runtimeSignals)}
+              />
+            )}
+            {!selectedInstalled && packagesLoaded ? (
+              <Button type="button" variant="outline" size="xs" onClick={() => setSettingsPage('plugins')}>
+                {t('settings.piarium.pluginSettings.actions.openPackages')}
+              </Button>
+            ) : null}
+          </div>
         </div>
         {packageError ? (
           <p className="mt-3 break-words typography-meta text-[var(--status-error)]">{packageError}</p>
@@ -398,32 +479,23 @@ export const PluginSettingsPage: React.FC = () => {
       </SettingsSection>
 
       <SettingsSection
+        className={unknownPluginId ? 'hidden' : undefined}
         settingsItem="plugin-settings.configuration"
         title={selectedIntegration.name}
-        description={t('settings.piarium.pluginSettings.configuration.description')}
-        headerAction={!selectedInstalled && packagesLoaded ? (
-          <Button type="button" variant="outline" size="xs" onClick={() => setSettingsPage('plugins')}>
-            {t('settings.piarium.pluginSettings.actions.openPackages')}
-          </Button>
-        ) : undefined}
+        info={t('settings.piarium.pluginSettings.configuration.description')}
       >
-        {renderSelectedSettings()}
+        {knownSettings}
       </SettingsSection>
 
-      <SettingsSection
+      {customPluginId ? <SettingsSection
+        className={unknownPluginId ? undefined : 'hidden'}
         settingsItem="plugin-settings.advanced"
-        title={t('settings.piarium.pluginSettings.advanced.sectionTitle')}
-        description={t('settings.piarium.pluginSettings.advanced.sectionDescription')}
+        title={customPluginId}
+        info={t('settings.piarium.pluginSettings.advanced.sectionDescription')}
       >
-        {navigationTarget !== null && navigationTarget.integrationId === null ? (
-          <div className="mb-3 rounded-lg border border-border/60 bg-background/50 px-3 py-2.5">
-            <p className="typography-ui-label text-foreground">{navigationTarget.pluginId}</p>
-            <p className="mt-1 typography-meta text-muted-foreground">
-              This plugin owns its configuration. Choose its native JSON or JSONC file below;
-              Piarium will preserve the complete document while editing it.
-            </p>
-          </div>
-        ) : null}
+        <p className="mb-3 typography-meta text-muted-foreground">
+          {t('settings.piarium.pluginSettings.advanced.unknownPlugin')}
+        </p>
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger className="border border-border/60 px-3 py-2.5">
             <span className="typography-ui-label text-foreground">
@@ -434,10 +506,13 @@ export const PluginSettingsPage: React.FC = () => {
             <Icon name={advancedOpen ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 text-muted-foreground" />
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-3">
-            <AdvancedPluginConfigEditor cwd={currentDirectory} sessionId={activeSessionId} />
+            <AdvancedPluginConfigEditor
+              cwd={currentDirectory}
+              sessionId={activeSessionId}
+            />
           </CollapsibleContent>
         </Collapsible>
-      </SettingsSection>
+      </SettingsSection> : null}
     </SettingsPageLayout>
   );
 };

@@ -226,10 +226,16 @@ export interface PiAgentInvocationDescriptor {
   taskSeparator: "space" | "double-dash";
 }
 
+/** Provider-owned definition used to seed that agent's edit/update flow. */
+export interface PiAgentDefinitionDescriptor {
+  config: { [key: string]: JsonValue };
+}
+
 export interface PiAgentDescriptor {
   actions: PiAgentActionDescriptor[];
   aliases?: string[];
   configuration?: PiAgentConfigurationTarget;
+  definition?: PiAgentDefinitionDescriptor;
   description: string;
   fallbackModels?: string[];
   id: string;

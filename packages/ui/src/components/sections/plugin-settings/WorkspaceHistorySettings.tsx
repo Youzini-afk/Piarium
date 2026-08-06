@@ -1,6 +1,9 @@
 import React from 'react';
 import type { PiConfigScope, RuntimeContextTarget } from '@piarium/protocol';
-import { SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsControlGroup,
+  SettingsFieldRow,
+} from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import {
   PluginBooleanField,
@@ -8,7 +11,12 @@ import {
   PluginSelectField,
   PluginStringField,
 } from './PluginConfigFields';
-import { PluginDraftFooter, PluginRuntimeNote, ScopeSelector } from './PluginSettingsPanelShared';
+import { PluginAdvancedDraftEditor } from './PluginAdvancedDraftEditor';
+import {
+  PluginConfigSource,
+  PluginDraftFooter,
+  ScopeSelector,
+} from './PluginSettingsPanelShared';
 import { useSettingsObjectDraft } from './usePluginConfigDraft';
 
 interface WorkspaceHistorySettingsProps {
@@ -22,14 +30,25 @@ export const WorkspaceHistorySettings: React.FC<WorkspaceHistorySettingsProps> =
 }) => {
   const { t } = useI18n();
   const [scope, setScope] = React.useState<PiConfigScope>('global');
-  const controller = useSettingsObjectDraft({
+  const globalController = useSettingsObjectDraft({
     property: 'workspaceHistory',
     runtimeTarget,
-    scope,
-    targetKey,
+    scope: 'global',
+    targetKey: `${targetKey}:global`,
   });
+  const projectController = useSettingsObjectDraft({
+    property: 'workspaceHistory',
+    runtimeTarget,
+    scope: 'project',
+    targetKey: `${targetKey}:project`,
+  });
+  const controller = scope === 'global' ? globalController : projectController;
   const blocked = scope === 'project' && !controller.projectTrusted;
-  const disabled = !controller.loaded || controller.loading || controller.saving || blocked;
+  const disabled = !controller.loaded
+    || controller.loading
+    || controller.saving
+    || controller.rawError !== null
+    || blocked;
   const fieldProps = {
     disabled,
     draft: controller.draft,
@@ -38,15 +57,23 @@ export const WorkspaceHistorySettings: React.FC<WorkspaceHistorySettingsProps> =
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.workspaceHistory.runtimeNote')}</PluginRuntimeNote>
-        <ScopeSelector value={scope} onChange={setScope} disabled={controller.saving} />
-      </div>
+    <div className="space-y-7">
+      <SettingsFieldRow
+        label={t('settings.piarium.pluginSettings.scope.label')}
+        info={t('settings.piarium.pluginSettings.scope.description')}
+        controlClassName="w-full max-w-[24rem]"
+      >
+        <ScopeSelector
+          value={scope}
+          onChange={setScope}
+          disabled={globalController.saving || projectController.saving}
+        />
+      </SettingsFieldRow>
+      <PluginConfigSource controller={controller} />
 
       <SettingsControlGroup
         title={t('settings.piarium.pluginSettings.workspaceHistory.activation.title')}
-        description={t('settings.piarium.pluginSettings.workspaceHistory.activation.description')}
+        info={t('settings.piarium.pluginSettings.workspaceHistory.activation.description')}
         contentClassName="space-y-4"
       >
         <PluginSelectField
@@ -77,23 +104,39 @@ export const WorkspaceHistorySettings: React.FC<WorkspaceHistorySettingsProps> =
           {...fieldProps}
           path={['storageDir']}
           label={t('settings.piarium.pluginSettings.workspaceHistory.storageDir')}
+          description={t('settings.piarium.pluginSettings.workspaceHistory.storageDir.description')}
           placeholder={t('settings.piarium.pluginSettings.workspaceHistory.storageDir.placeholder')}
         />
       </SettingsControlGroup>
 
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.workspaceHistory.limits.title')}
-        description={t('settings.piarium.pluginSettings.workspaceHistory.limits.description')}
+        className="border-t border-border/60 pt-5"
+        title={t('settings.piarium.pluginSettings.workspaceHistory.retention.title')}
+        info={t('settings.piarium.pluginSettings.workspaceHistory.retention.description')}
         contentClassName="space-y-4"
       >
-        <PluginNumberField {...fieldProps} path={['maxSessionsPerWorkspace']} label="maxSessionsPerWorkspace" defaultValue={3} min={1} />
-        <PluginNumberField {...fieldProps} path={['maxWorkspaces']} label="maxWorkspaces" defaultValue={10} min={1} />
-        <PluginNumberField {...fieldProps} path={['maxScanFiles']} label="maxScanFiles" defaultValue={20_000} min={1} step={100} />
-        <PluginNumberField {...fieldProps} path={['maxScanDirs']} label="maxScanDirs" defaultValue={3_000} min={1} step={100} />
-        <PluginNumberField {...fieldProps} path={['maxScanMs']} label="maxScanMs" defaultValue={5_000} min={100} step={100} unit="ms" />
-        <PluginNumberField {...fieldProps} path={['gitTimeoutMs']} label="gitTimeoutMs" defaultValue={60_000} min={100} step={1_000} unit="ms" />
+        <p className="typography-meta text-[var(--status-warning)]">
+          {t('settings.piarium.pluginSettings.workspaceHistory.retention.warning')}
+        </p>
+        <PluginNumberField
+          {...fieldProps}
+          path={['maxSessionsPerWorkspace']}
+          label={t('settings.piarium.pluginSettings.workspaceHistory.retention.sessions')}
+          info={t('settings.piarium.pluginSettings.workspaceHistory.retention.sessions.description')}
+          defaultValue={3}
+          min={1}
+        />
+        <PluginNumberField
+          {...fieldProps}
+          path={['maxWorkspaces']}
+          label={t('settings.piarium.pluginSettings.workspaceHistory.retention.workspaces')}
+          info={t('settings.piarium.pluginSettings.workspaceHistory.retention.workspaces.description')}
+          defaultValue={10}
+          min={1}
+        />
       </SettingsControlGroup>
 
+      <PluginAdvancedDraftEditor controller={controller} blocked={blocked} />
       <PluginDraftFooter controller={controller} blocked={blocked} />
     </div>
   );

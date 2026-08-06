@@ -77,11 +77,15 @@ export const AgentProviderActionDialog: React.FC<AgentProviderActionDialogProps>
         {chooseScope ? (
           <div className="space-y-1.5">
             <label className="typography-settings-field-label text-foreground" htmlFor="agent-action-scope">
-              scope
+              {t('settings.piarium.agents.definition.field.saveLocation')}
             </label>
             <Select value={scope} onValueChange={setScope} disabled={submitting}>
               <SelectTrigger id="agent-action-scope" size="settings" className="w-full">
-                <SelectValue />
+                <SelectValue>
+                  {scope === 'project'
+                    ? t('settings.piarium.agents.scope.project')
+                    : t('settings.piarium.agents.scope.user')}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="user">{t('settings.piarium.agents.scope.user')}</SelectItem>

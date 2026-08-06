@@ -5,6 +5,7 @@ import type {
   PiAgentCatalogSnapshot,
   PiAgentDescriptor,
   PiAgentProviderDescriptor,
+  PiAgentSourceScope,
   PiAgentStatus,
   RuntimeContextTarget,
 } from '@piarium/protocol';
@@ -25,7 +26,7 @@ import {
   runPiAgentProviderAction,
 } from '@/lib/pi-runtime/agent-providers';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { cn } from '@/lib/utils';
 import { AgentProviderActionDialog } from './AgentProviderActionDialog';
@@ -60,12 +61,66 @@ const STATUS_FILTERS: readonly StatusFilter[] = [
   'unavailable',
 ];
 
-function displayEnum(value: string): string {
-  return value
-    .split('-')
-    .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(' ');
+const UNSUPPORTED_VALUE_KEY = 'settings.piarium.pluginSettings.field.unsupportedValue' as const;
+
+const AGENT_KIND_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
+  delegatable: 'settings.piarium.pluginSettings.subagents.kind.delegatable',
+  internal: 'settings.piarium.agents.kind.internal',
+  primary: 'settings.piarium.agents.kind.primary',
+  profile: 'settings.piarium.agents.kind.profile',
+  service: 'settings.piarium.agents.kind.service',
+  workflow: 'settings.piarium.pluginSettings.subagents.kind.workflow',
+};
+
+const AGENT_STATUS_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
+  available: 'settings.piarium.pluginSettings.subagents.status.available',
+  disabled: 'settings.piarium.pluginSettings.subagents.status.disabled',
+  error: 'settings.piarium.pluginSettings.subagents.status.error',
+  unavailable: 'settings.piarium.pluginSettings.subagents.status.unavailable',
+  unconfigured: 'settings.piarium.pluginSettings.subagents.status.unconfigured',
+};
+
+const AGENT_THINKING_LABEL_KEYS: Partial<Record<string, I18nKey>> = {
+  off: 'settings.piarium.pluginSettings.subagents.thinking.off',
+  minimal: 'settings.piarium.pluginSettings.subagents.thinking.minimal',
+  low: 'settings.piarium.pluginSettings.subagents.thinking.low',
+  medium: 'settings.piarium.pluginSettings.subagents.thinking.medium',
+  high: 'settings.piarium.pluginSettings.subagents.thinking.high',
+  xhigh: 'settings.piarium.pluginSettings.subagents.thinking.xhigh',
+  max: 'settings.piarium.pluginSettings.subagents.thinking.max',
+};
+
+const AGENT_SOURCE_SCOPE_LABEL_KEYS: Record<PiAgentSourceScope, I18nKey> = {
+  builtin: 'settings.piarium.pluginSettings.subagents.scope.builtin',
+  package: 'settings.piarium.pluginSettings.subagents.scope.package',
+  project: 'settings.piarium.pluginSettings.subagents.scope.project',
+  runtime: 'settings.piarium.pluginSettings.subagents.scope.runtime',
+  user: 'settings.piarium.pluginSettings.subagents.scope.user',
+};
+
+function displayLocalizedValue(
+  value: string,
+  labels: Partial<Record<string, I18nKey>>,
+  t: (key: I18nKey) => string,
+): string {
+  const key = labels[value];
+  return key ? t(key) : t(UNSUPPORTED_VALUE_KEY);
+}
+
+function displayAgentKind(value: string, t: (key: I18nKey) => string): string {
+  return displayLocalizedValue(value, AGENT_KIND_LABEL_KEYS, t);
+}
+
+function displayAgentStatus(value: string, t: (key: I18nKey) => string): string {
+  return displayLocalizedValue(value, AGENT_STATUS_LABEL_KEYS, t);
+}
+
+function displayAgentThinking(value: string, t: (key: I18nKey) => string): string {
+  return displayLocalizedValue(value, AGENT_THINKING_LABEL_KEYS, t);
+}
+
+function displayAgentSourceScope(value: string, t: (key: I18nKey) => string): string {
+  return displayLocalizedValue(value, AGENT_SOURCE_SCOPE_LABEL_KEYS, t);
 }
 
 function statusTone(status: PiAgentStatus): string {
@@ -157,36 +212,39 @@ const AgentListItem: React.FC<{
   onSelect: () => void;
   providerLabel: string;
   selected: boolean;
-}> = ({ agent, onSelect, providerLabel, selected }) => (
-  <button
-    type="button"
-    aria-pressed={selected}
-    onClick={onSelect}
-    className={cn(
-      'w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
-      selected
-        ? 'border-[var(--primary-base)] bg-[color-mix(in_srgb,var(--primary-base)_8%,transparent)]'
-        : 'border-border/60 bg-[var(--surface-elevated)] hover:bg-interactive-hover',
-    )}
-  >
-    <div className="flex min-w-0 items-start justify-between gap-2">
-      <div className="min-w-0">
-        <div className="truncate typography-ui-label font-medium text-foreground">{agent.name}</div>
-        <div className="mt-0.5 truncate typography-micro text-muted-foreground">
-          {providerLabel} / {displayEnum(agent.kind)}
+}> = ({ agent, onSelect, providerLabel, selected }) => {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cn(
+        'w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
+        selected
+          ? 'border-[var(--primary-base)] bg-[color-mix(in_srgb,var(--primary-base)_8%,transparent)]'
+          : 'border-border/60 bg-[var(--surface-elevated)] hover:bg-interactive-hover',
+      )}
+    >
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate typography-ui-label font-medium text-foreground">{agent.name}</div>
+          <div className="mt-0.5 truncate typography-micro text-muted-foreground">
+            {providerLabel} / {displayAgentKind(agent.kind, t)}
+          </div>
         </div>
+        <AgentBadge className={cn('shrink-0', statusTone(agent.status))}>
+          {displayAgentStatus(agent.status, t)}
+        </AgentBadge>
       </div>
-      <AgentBadge className={cn('shrink-0', statusTone(agent.status))}>
-        {displayEnum(agent.status)}
-      </AgentBadge>
-    </div>
-    {agent.description ? (
-      <p className="mt-2 line-clamp-2 typography-micro text-muted-foreground">
-        {agent.description}
-      </p>
-    ) : null}
-  </button>
-);
+      {agent.description ? (
+        <p className="mt-2 line-clamp-2 typography-micro text-muted-foreground">
+          {agent.description}
+        </p>
+      ) : null}
+    </button>
+  );
+};
 
 export const AgentsPage: React.FC = () => {
   const { t } = useI18n();
@@ -679,7 +737,7 @@ export const AgentsPage: React.FC = () => {
               >
                 {status === 'all'
                   ? t('settings.piarium.agents.filters.allStatuses')
-                  : displayEnum(status)}
+                  : displayAgentStatus(status, t)}
               </Button>
             ))}
           </div>
@@ -714,7 +772,7 @@ export const AgentsPage: React.FC = () => {
                     </div>
                   </div>
                   <AgentBadge className={cn('shrink-0', statusTone(selectedAgent.status))}>
-                    {displayEnum(selectedAgent.status)}
+                    {displayAgentStatus(selectedAgent.status, t)}
                   </AgentBadge>
                 </div>
 
@@ -726,8 +784,8 @@ export const AgentsPage: React.FC = () => {
 
                 <dl className="mt-3 divide-y divide-border/50">
                   <DetailRow label={t('settings.piarium.agents.detail.provider')} value={selectedProvider?.label ?? selectedAgent.providerId} />
-                  <DetailRow label={t('settings.piarium.agents.detail.kind')} value={displayEnum(selectedAgent.kind)} />
-                  <DetailRow label={t('settings.piarium.agents.detail.source')} value={displayEnum(selectedAgent.source.scope)} />
+                  <DetailRow label={t('settings.piarium.agents.detail.kind')} value={displayAgentKind(selectedAgent.kind, t)} />
+                  <DetailRow label={t('settings.piarium.agents.detail.source')} value={displayAgentSourceScope(selectedAgent.source.scope, t)} />
                   {selectedAgent.source.path ? (
                     <DetailRow label={t('settings.piarium.agents.detail.path')} value={<span className="font-mono typography-micro">{selectedAgent.source.path}</span>} />
                   ) : null}
@@ -745,7 +803,7 @@ export const AgentsPage: React.FC = () => {
                     value={selectedAgent.model ?? t('settings.piarium.agents.detail.inherited')}
                   />
                   {selectedAgent.thinking ? (
-                    <DetailRow label={t('settings.piarium.agents.detail.thinking')} value={selectedAgent.thinking} />
+                    <DetailRow label={t('settings.piarium.agents.detail.thinking')} value={displayAgentThinking(selectedAgent.thinking, t)} />
                   ) : null}
                   {selectedAgent.fallbackModels?.length ? (
                     <DetailRow label={t('settings.piarium.agents.detail.fallbacks')} value={selectedAgent.fallbackModels.join(' → ')} />

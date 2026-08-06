@@ -30,10 +30,12 @@ interface BaseFieldProps {
   description?: React.ReactNode;
   disabled?: boolean;
   draft: JsonObject;
+  info?: React.ReactNode;
   label: React.ReactNode;
   onRemove: (path: readonly string[]) => void;
   onSet: (path: readonly string[], value: JsonValue) => void;
   path: readonly string[];
+  settingsItem?: string;
 }
 
 function optionKey(value: boolean | string): string {
@@ -101,17 +103,25 @@ export const PluginStringField: React.FC<StringFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   label,
   onRemove,
   onSet,
   path,
   inputType = 'text',
   placeholder,
+  settingsItem,
 }) => {
   const field = useField({ draft, onRemove, onSet, path });
   const value = typeof field.raw === 'string' ? field.raw : defaultValue;
   return (
-    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      info={info}
+      settingsItem={settingsItem}
+      controlClassName="w-full max-w-[24rem]"
+    >
       <Input
         type={inputType}
         aria-label={fieldAriaLabel(label, path)}
@@ -140,15 +150,23 @@ export const PluginBooleanField: React.FC<BooleanFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   label,
   onRemove,
   onSet,
   path,
+  settingsItem,
 }) => {
   const field = useField({ draft, onRemove, onSet, path });
   const checked = validBoolean(field.raw) ?? defaultValue;
   return (
-    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      info={info}
+      settingsItem={settingsItem}
+      controlClassName="w-full max-w-[24rem]"
+    >
       <Switch
         checked={checked}
         disabled={disabled}
@@ -164,17 +182,30 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   label,
   onRemove,
   onSet,
   path,
+  settingsItem,
 }) => {
   const { t } = useI18n();
   const field = useField({ draft, onRemove, onSet, path });
   const current = validBoolean(field.raw);
   const value = current === undefined ? 'default' : optionKey(current);
+  const selectedLabel = current === undefined
+    ? t('settings.piarium.pluginSettings.field.pluginDefault')
+    : current
+      ? t('settings.piarium.pluginSettings.field.enabled')
+      : t('settings.piarium.pluginSettings.field.disabled');
   return (
-    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      info={info}
+      settingsItem={settingsItem}
+      controlClassName="w-full max-w-[24rem]"
+    >
       <Select
         value={value}
         disabled={disabled}
@@ -188,7 +219,7 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
           className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
           aria-label={fieldAriaLabel(label, path)}
         >
-          <SelectValue />
+          <SelectValue>{selectedLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
@@ -213,6 +244,7 @@ export const PluginNumberField: React.FC<NumberFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   label,
   max,
   min,
@@ -221,11 +253,18 @@ export const PluginNumberField: React.FC<NumberFieldProps> = ({
   path,
   step,
   unit,
+  settingsItem,
 }) => {
   const field = useField({ draft, onRemove, onSet, path });
   const value = validFiniteNumber(field.raw) ?? defaultValue;
   return (
-    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      info={info}
+      settingsItem={settingsItem}
+      controlClassName="w-full max-w-[24rem]"
+    >
       <NumberInput
         aria-label={fieldAriaLabel(label, path)}
         value={value}
@@ -259,6 +298,7 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   emptyLabel,
   emptyValue,
   fallbackValue,
@@ -270,6 +310,7 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
   path,
   step,
   unit,
+  settingsItem,
 }) => {
   const field = useField({ draft, onRemove, onSet, path });
   const explicitNumber = validFiniteNumber(field.raw);
@@ -277,7 +318,13 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
     ? defaultValue
     : undefined);
   return (
-    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      info={info}
+      settingsItem={settingsItem}
+      controlClassName="w-full max-w-[24rem]"
+    >
       <NumberInput
         aria-label={fieldAriaLabel(label, path)}
         value={value}
@@ -316,20 +363,31 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   label,
   onRemove,
   onSet,
   options,
   path,
+  settingsItem,
 }) => {
+  const { t } = useI18n();
   const field = useField({ draft, onRemove, onSet, path });
   const current = typeof field.raw === 'boolean' || typeof field.raw === 'string'
     ? field.raw
     : defaultValue;
+  const selectedOption = options.find((option) => option.value === current);
+  const unsupported = selectedOption === undefined;
   return (
-    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      info={info}
+      settingsItem={settingsItem}
+      controlClassName="w-full max-w-[24rem]"
+    >
       <Select
-        value={optionKey(current)}
+        value={unsupported ? 'unsupported' : optionKey(current)}
         disabled={disabled}
         onValueChange={(key) => {
           const option = options.find((entry) => optionKey(entry.value) === key);
@@ -341,9 +399,16 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
           className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
           aria-label={fieldAriaLabel(label, path)}
         >
-          <SelectValue />
+          <SelectValue>
+            {selectedOption?.label ?? t('settings.piarium.pluginSettings.field.unsupportedValue')}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
+          {unsupported ? (
+            <SelectItem value="unsupported" disabled>
+              {t('settings.piarium.pluginSettings.field.unsupportedValue')}
+            </SelectItem>
+          ) : null}
           {options.map((option) => (
             <SelectItem key={optionKey(option.value)} value={optionKey(option.value)}>
               {option.label}
@@ -364,18 +429,30 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   label,
   onRemove,
   onSet,
   options,
   path,
+  settingsItem,
 }) => {
   const { t } = useI18n();
   const field = useField({ draft, onRemove, onSet, path });
   const current = options.find((option) => option.value === field.raw);
-  const value = current ? optionKey(current.value) : 'default';
+  const unsupported = field.explicit && current === undefined;
+  const value = current ? optionKey(current.value) : unsupported ? 'unsupported' : 'default';
+  const selectedLabel = current?.label ?? t(unsupported
+    ? 'settings.piarium.pluginSettings.field.unsupportedValue'
+    : 'settings.piarium.pluginSettings.field.pluginDefault');
   return (
-    <SettingsFieldRow label={label} description={description} controlClassName="w-full max-w-lg">
+    <SettingsFieldRow
+      label={label}
+      description={description}
+      info={info}
+      settingsItem={settingsItem}
+      controlClassName="w-full max-w-[24rem]"
+    >
       <Select
         value={value}
         disabled={disabled}
@@ -393,9 +470,14 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
           className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
           aria-label={fieldAriaLabel(label, path)}
         >
-          <SelectValue />
+          <SelectValue>{selectedLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent>
+          {unsupported ? (
+            <SelectItem value="unsupported" disabled>
+              {t('settings.piarium.pluginSettings.field.unsupportedValue')}
+            </SelectItem>
+          ) : null}
           <SelectItem value="default">
             {t('settings.piarium.pluginSettings.field.pluginDefault')}
           </SelectItem>
@@ -406,50 +488,6 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
           ))}
         </SelectContent>
       </Select>
-      <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
-    </SettingsFieldRow>
-  );
-};
-
-interface TextareaFieldProps extends BaseFieldProps {
-  allowEmpty?: boolean;
-  defaultValue?: string;
-  placeholder?: string;
-}
-
-export const PluginTextareaField: React.FC<TextareaFieldProps> = ({
-  allowEmpty = false,
-  defaultValue = '',
-  description,
-  disabled,
-  draft,
-  label,
-  onRemove,
-  onSet,
-  path,
-  placeholder,
-}) => {
-  const field = useField({ draft, onRemove, onSet, path });
-  const value = typeof field.raw === 'string' ? field.raw : defaultValue;
-  return (
-    <SettingsFieldRow
-      label={label}
-      description={description}
-      alignEnd={false}
-      controlClassName="w-full max-w-lg items-start"
-    >
-      <Textarea
-        aria-label={fieldAriaLabel(label, path)}
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder}
-        onChange={(event) => {
-          const next = event.target.value;
-          if (!next && !allowEmpty) field.remove();
-          else field.set(next);
-        }}
-        className="min-h-28 min-w-0 flex-1"
-      />
       <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
     </SettingsFieldRow>
   );
@@ -466,12 +504,14 @@ export const PluginStringListField: React.FC<StringListFieldProps> = ({
   description,
   disabled,
   draft,
+  info,
   emptyArrayOnClear = false,
   label,
   onRemove,
   onSet,
   path,
   placeholder,
+  settingsItem,
 }) => {
   const field = useField({ draft, onRemove, onSet, path });
   const value = typeof field.raw === 'string'
@@ -481,8 +521,10 @@ export const PluginStringListField: React.FC<StringListFieldProps> = ({
     <SettingsFieldRow
       label={label}
       description={description}
+      info={info}
+      settingsItem={settingsItem}
       alignEnd={false}
-      controlClassName="w-full max-w-lg items-start"
+      controlClassName="w-full max-w-[24rem] items-start"
     >
       <Textarea
         aria-label={fieldAriaLabel(label, path)}

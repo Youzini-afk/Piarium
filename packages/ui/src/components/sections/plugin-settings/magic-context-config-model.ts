@@ -6,7 +6,17 @@ import {
 } from './plugin-config-model';
 
 export type MagicContextScope = 'user' | 'project';
-export type MagicContextPanel = 'overview' | 'pipeline' | 'memory' | 'embedding' | 'agents' | 'tasks';
+/** User-facing areas. Legacy values remain accepted for deep links from older settings navigation. */
+export type MagicContextPanel =
+  | 'context'
+  | 'memory'
+  | 'models'
+  | 'maintenance'
+  | 'overview'
+  | 'pipeline'
+  | 'embedding'
+  | 'agents'
+  | 'tasks';
 export type MagicContextAgent = 'historian' | 'dreamer' | 'sidekick';
 
 export const MAGIC_CONTEXT_AGENTS: readonly MagicContextAgent[] = [
@@ -16,12 +26,10 @@ export const MAGIC_CONTEXT_AGENTS: readonly MagicContextAgent[] = [
 ];
 
 export const MAGIC_CONTEXT_PANELS: readonly MagicContextPanel[] = [
-  'overview',
-  'pipeline',
+  'context',
   'memory',
-  'embedding',
-  'agents',
-  'tasks',
+  'models',
+  'maintenance',
 ];
 
 export const MAGIC_CONTEXT_THINKING_LEVELS = [

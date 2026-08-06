@@ -73,7 +73,7 @@ export const WebAccessRuntimePanel: React.FC<WebAccessRuntimePanelProps> = ({
   }, [query, runAction]);
 
   return (
-    <div className="space-y-5 rounded-lg border border-border/60 px-4 py-4">
+    <div className="space-y-5 border-t border-border/60 pt-6">
       <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
         <div className="min-w-0 space-y-1">
           <h3 className="typography-settings-group-title text-foreground">

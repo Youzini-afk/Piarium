@@ -1,8 +1,9 @@
 import React from 'react';
 import type { JsonValue, RuntimeContextTarget } from '@piarium/protocol';
 import {
-  SettingsChipGroup,
   SettingsControlGroup,
+  SettingsFieldRow,
+  SettingsChipGroup,
 } from '@/components/sections/shared/SettingsSection';
 import {
   Select,
@@ -12,22 +13,22 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
+import type { I18nKey, I18nParams } from '@/lib/i18n';
 import {
   PluginBooleanField,
   PluginNumberField,
-  PluginOptionalNumberField,
   PluginOptionalSelectField,
   PluginSelectField,
   PluginStringField,
   PluginStringListField,
-  PluginTextareaField,
 } from './PluginConfigFields';
-import { PluginDraftFooter, PluginRuntimeNote } from './PluginSettingsPanelShared';
+import { PluginAdvancedDraftEditor } from './PluginAdvancedDraftEditor';
 import {
-  hasJsonPath,
-  readJsonPath,
-  type JsonObject,
-} from './plugin-config-model';
+  PluginConfigSource,
+  PluginDraftFooter,
+  PluginRuntimeNote,
+} from './PluginSettingsPanelShared';
+import { hasJsonPath, readJsonPath, type JsonObject } from './plugin-config-model';
 import {
   hasObjectValue,
   MAGIC_CONTEXT_AGENTS,
@@ -65,343 +66,124 @@ interface PanelProps {
 
 const MAGIC_USER_PATHS = ['cortexkit/magic-context.jsonc', 'cortexkit/magic-context.json'] as const;
 const MAGIC_PROJECT_PATHS = ['.cortexkit/magic-context.jsonc', '.cortexkit/magic-context.json'] as const;
-const SUBGROUP_CLASS = 'border-t border-border/60 pt-5';
 
-const thinkingOptions = MAGIC_CONTEXT_THINKING_LEVELS.map((value) => ({ value, label: value }));
+/** These keys are intentionally kept in one namespace so locale dictionaries can add them atomically. */
+const magicUi = (
+  t: ReturnType<typeof useI18n>['t'],
+  key: string,
+  params?: I18nParams,
+): string => t(key as I18nKey, params);
 
-const AdvancedValueNotice: React.FC<{ field: string; configured?: boolean }> = ({
-  configured = true,
-  field,
-}) => {
+const thinkingOptions = (t: ReturnType<typeof useI18n>['t']) => MAGIC_CONTEXT_THINKING_LEVELS.map((value) => ({
+  value,
+  label: magicUi(t, `settings.piarium.pluginSettings.magic.ui.thinking.${value}`),
+}));
+
+/** A map must never be rendered as a scalar fallback: doing so would destroy model overrides. */
+const AdvancedMapNotice: React.FC<{ labelKey: string }> = ({ labelKey }) => {
   const { t } = useI18n();
   return (
-    <div className="rounded-lg border border-border/60 bg-background/40 px-3 py-2.5">
-      <p className="font-mono typography-meta text-foreground">{field}</p>
-      <p className="mt-1 typography-meta text-muted-foreground">
-        {t(configured
-          ? 'settings.piarium.pluginSettings.magic.advancedValue.configured'
-          : 'settings.piarium.pluginSettings.magic.advancedValue.available')}
-      </p>
-    </div>
+    <PluginRuntimeNote>
+      <span className="font-medium text-foreground">{magicUi(t, labelKey)}: {magicUi(t, 'settings.piarium.pluginSettings.magic.ui.perModelRules')}</span>{' '}
+      {t('settings.piarium.pluginSettings.magic.advancedValue.configured')}
+    </PluginRuntimeNote>
   );
 };
 
-const OverviewPanel: React.FC<PanelProps> = ({ fields, scope }) => {
-  const { t } = useI18n();
-  return (
-    <div className="space-y-6">
-      <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.magic.core.title')}
-        description={t('settings.piarium.pluginSettings.magic.core.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField {...fields} path={['enabled']} label="enabled" defaultValue />
-        <PluginSelectField
-          {...fields}
-          path={['transform_mode']}
-          label="transform_mode"
-          description={t('settings.piarium.pluginSettings.magic.core.transformDescription')}
-          defaultValue="ts"
-          options={[
-            { value: 'ts', label: 'TypeScript' },
-            { value: 'rust', label: 'Rust / subc' },
-          ]}
-        />
-        {scope === 'user' ? (
-          <PluginStringField
-            {...fields}
-            path={['language']}
-            label="language"
-            description={t('settings.piarium.pluginSettings.magic.core.languageDescription')}
-            placeholder="en | zh | ja | ..."
-          />
-        ) : null}
-        <PluginBooleanField
-          {...fields}
-          path={['temporal_awareness']}
-          label="temporal_awareness"
-          defaultValue
-        />
-        <PluginNumberField
-          {...fields}
-          path={['toast_duration_ms']}
-          label="toast_duration_ms"
-          defaultValue={5000}
-          min={0}
-          max={60000}
-          unit="ms"
-        />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.magic.pi.title')}
-        description={t('settings.piarium.pluginSettings.magic.pi.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField {...fields} path={['todowrite', 'enabled']} label="todowrite.enabled" defaultValue />
-        <PluginBooleanField {...fields} path={['todowrite', 'overlay']} label="todowrite.overlay" defaultValue />
-        <PluginBooleanField
-          {...fields}
-          path={['keep_subagents']}
-          label="keep_subagents"
-          description={t('settings.piarium.pluginSettings.magic.pi.restartRequired')}
-          defaultValue={false}
-        />
-        {scope === 'user' ? (
-          <>
-            <PluginBooleanField
-              {...fields}
-              path={['fail_closed_blocking']}
-              label="fail_closed_blocking"
-              description={t('settings.piarium.pluginSettings.magic.pi.failClosedDescription')}
-              defaultValue
-            />
-            <PluginStringListField
-              {...fields}
-              path={['pi', 'subagent_extensions']}
-              label="pi.subagent_extensions"
-              description={t('settings.piarium.pluginSettings.magic.pi.subagentExtensionsDescription')}
-              placeholder="extension/path.ts"
-              emptyArrayOnClear
-            />
-          </>
-        ) : null}
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.magic.mural.title')}
-        description={t('settings.piarium.pluginSettings.magic.mural.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField
-          {...fields}
-          path={['experimental', 'mural', 'enabled']}
-          label="experimental.mural.enabled"
-          defaultValue={false}
-        />
-        <PluginStringField
-          {...fields}
-          path={['experimental', 'mural', 'model']}
-          label="experimental.mural.model"
-          placeholder="provider/model"
-        />
-      </SettingsControlGroup>
-    </div>
-  );
-};
-
-const PipelinePanel: React.FC<PanelProps> = ({ fields, scope }) => {
+const ContextPanel: React.FC<PanelProps> = ({ fields, scope }) => {
   const { t } = useI18n();
   const cacheTtlIsMap = hasObjectValue(fields.draft, ['cache_ttl']);
   const percentageIsMap = hasObjectValue(fields.draft, ['execute_threshold_percentage']);
   const tokenThresholdsConfigured = hasJsonPath(fields.draft, ['execute_threshold_tokens']);
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       {scope === 'project' ? (
-        <PluginRuntimeNote>
-          {t('settings.piarium.pluginSettings.magic.pipeline.thresholdRaiseOnly')}
-        </PluginRuntimeNote>
+        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.magic.pipeline.thresholdRaiseOnly')}</PluginRuntimeNote>
       ) : null}
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.magic.pipeline.title')}
-        description={t('settings.piarium.pluginSettings.magic.pipeline.description')}
+        title={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.contextBehavior')}
+        info={t('settings.piarium.pluginSettings.magic.core.description')}
         contentClassName="space-y-4"
       >
+        <PluginBooleanField {...fields} path={['enabled']} label={t('settings.piarium.pluginSettings.field.enabled')} defaultValue />
+        <PluginSelectField
+          {...fields}
+          path={['transform_mode']}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.transform')}
+          info={t('settings.piarium.pluginSettings.magic.core.transformDescription')}
+          defaultValue="ts"
+          options={[
+            { value: 'ts', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.transformTypeScript') },
+            { value: 'rust', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.transformRust') },
+          ]}
+        />
+        {scope === 'user' ? (
+          <PluginBooleanField
+            {...fields}
+            path={['fail_closed_blocking']}
+            label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.failClosed')}
+            info={t('settings.piarium.pluginSettings.magic.pi.failClosedDescription')}
+            defaultValue
+          />
+        ) : null}
         {cacheTtlIsMap ? (
-          <AdvancedValueNotice field="cache_ttl" />
+          <AdvancedMapNotice labelKey="settings.piarium.pluginSettings.magic.ui.contextCacheTtl" />
         ) : (
-          <PluginStringField {...fields} path={['cache_ttl']} label="cache_ttl" defaultValue="5m" placeholder="5m" />
+          <PluginStringField {...fields} path={['cache_ttl']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.contextCacheTtl')} defaultValue="5m" placeholder="5m" />
         )}
         {percentageIsMap ? (
-          <AdvancedValueNotice field="execute_threshold_percentage" />
+          <AdvancedMapNotice labelKey="settings.piarium.pluginSettings.magic.ui.executionThreshold" />
         ) : (
           <PluginNumberField
             {...fields}
             path={['execute_threshold_percentage']}
-            label="execute_threshold_percentage"
+            label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.executionThreshold')}
             defaultValue={65}
             min={20}
             max={80}
             unit="%"
           />
         )}
-        <AdvancedValueNotice field="execute_threshold_tokens" configured={tokenThresholdsConfigured} />
-        <PluginNumberField {...fields} path={['protected_tags']} label="protected_tags" defaultValue={20} min={1} max={100} />
-        <PluginNumberField {...fields} path={['clear_reasoning_age']} label="clear_reasoning_age" defaultValue={50} min={10} />
+        {tokenThresholdsConfigured ? (
+          <AdvancedMapNotice labelKey="settings.piarium.pluginSettings.magic.ui.tokenThresholds" />
+        ) : null}
         <PluginNumberField
           {...fields}
           path={['history_budget_percentage']}
-          label="history_budget_percentage"
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.historyBudget')}
+          info={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.historyBudgetInfo')}
           defaultValue={0.15}
           min={0.05}
           max={0.5}
           step={0.01}
         />
-        <PluginNumberField
-          {...fields}
-          path={['historian_timeout_ms']}
-          label="historian_timeout_ms"
-          defaultValue={300000}
-          min={60000}
-          unit="ms"
-        />
       </SettingsControlGroup>
 
       <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.magic.pipeline.triggers')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField
-          {...fields}
-          path={['commit_cluster_trigger', 'enabled']}
-          label="commit_cluster_trigger.enabled"
-          defaultValue
-        />
-        <PluginNumberField
-          {...fields}
-          path={['commit_cluster_trigger', 'min_clusters']}
-          label="commit_cluster_trigger.min_clusters"
-          defaultValue={3}
-          min={1}
-        />
-        <PluginBooleanField
-          {...fields}
-          path={['system_prompt_injection', 'enabled']}
-          label="system_prompt_injection.enabled"
-          defaultValue
-        />
-        <PluginStringListField
-          {...fields}
-          path={['system_prompt_injection', 'skip_signatures']}
-          label="system_prompt_injection.skip_signatures"
-          defaultValue={['<!-- magic-context: skip -->']}
-          placeholder="<!-- magic-context: skip -->"
-        />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.magic.pipeline.compression')}
-        description={t('settings.piarium.pluginSettings.magic.pipeline.compressionDescription')}
+        title={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.safetyCompression')}
+        info={t('settings.piarium.pluginSettings.magic.pipeline.compressionDescription')}
         contentClassName="space-y-4"
       >
         <PluginBooleanField
           {...fields}
           path={['smart_drops']}
-          label="smart_drops"
-          description={t('settings.piarium.pluginSettings.magic.pipeline.smartDropsRestart')}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.smartDrops')}
+          info={t('settings.piarium.pluginSettings.magic.pipeline.smartDropsRestart')}
           defaultValue={false}
         />
         <PluginBooleanField
           {...fields}
           path={['caveman_text_compression', 'enabled']}
-          label="caveman_text_compression.enabled"
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.lossyCompression')}
           defaultValue={false}
         />
-        <PluginNumberField
-          {...fields}
-          path={['caveman_text_compression', 'min_chars']}
-          label="caveman_text_compression.min_chars"
-          defaultValue={500}
-          min={100}
-          max={10000}
-        />
+        <PluginBooleanField {...fields} path={['temporal_awareness']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.temporalAwareness')} defaultValue />
       </SettingsControlGroup>
     </div>
   );
 };
 
-const MemoryPanel: React.FC<PanelProps> = ({ fields }) => {
-  const { t } = useI18n();
-  return (
-    <div className="space-y-6">
-      <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.magic.memory.title')}
-        description={t('settings.piarium.pluginSettings.magic.memory.description')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField {...fields} path={['memory', 'enabled']} label="memory.enabled" defaultValue />
-        <PluginNumberField
-          {...fields}
-          path={['memory', 'injection_budget_tokens']}
-          label="memory.injection_budget_tokens"
-          defaultValue={4000}
-          min={500}
-          max={20000}
-          unit="tokens"
-        />
-        <PluginBooleanField {...fields} path={['memory', 'auto_promote']} label="memory.auto_promote" defaultValue />
-        <PluginNumberField
-          {...fields}
-          path={['memory', 'retrieval_count_promotion_threshold']}
-          label="memory.retrieval_count_promotion_threshold"
-          defaultValue={3}
-          min={1}
-        />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.magic.memory.autoSearch')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField {...fields} path={['memory', 'auto_search', 'enabled']} label="memory.auto_search.enabled" defaultValue />
-        <PluginNumberField
-          {...fields}
-          path={['memory', 'auto_search', 'score_threshold']}
-          label="memory.auto_search.score_threshold"
-          defaultValue={0.6}
-          min={0.3}
-          max={0.95}
-          step={0.05}
-        />
-        <PluginNumberField
-          {...fields}
-          path={['memory', 'auto_search', 'min_prompt_chars']}
-          label="memory.auto_search.min_prompt_chars"
-          defaultValue={20}
-          min={5}
-          max={500}
-        />
-      </SettingsControlGroup>
-
-      <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.magic.memory.gitIndex')}
-        contentClassName="space-y-4"
-      >
-        <PluginBooleanField
-          {...fields}
-          path={['memory', 'git_commit_indexing', 'enabled']}
-          label="memory.git_commit_indexing.enabled"
-          defaultValue={false}
-        />
-        <PluginNumberField
-          {...fields}
-          path={['memory', 'git_commit_indexing', 'since_days']}
-          label="memory.git_commit_indexing.since_days"
-          defaultValue={365}
-          min={7}
-          max={3650}
-          unit="days"
-        />
-        <PluginNumberField
-          {...fields}
-          path={['memory', 'git_commit_indexing', 'max_commits']}
-          label="memory.git_commit_indexing.max_commits"
-          defaultValue={2000}
-          min={100}
-          max={20000}
-        />
-      </SettingsControlGroup>
-    </div>
-  );
-};
-
-const EmbeddingPanel: React.FC<PanelProps> = ({ fields, scope }) => {
+const EmbeddingFields: React.FC<PanelProps> = ({ fields, scope }) => {
   const { t } = useI18n();
   const providerValue = readJsonPath(fields.draft, ['embedding', 'provider']);
   const provider = typeof providerValue === 'string' ? providerValue : 'local';
@@ -410,247 +192,206 @@ const EmbeddingPanel: React.FC<PanelProps> = ({ fields, scope }) => {
   const remoteShape = provider === 'openai-compatible'
     || (provider === 'synapse' && fallback === 'openai-compatible');
   return (
-    <div className="space-y-6">
-      {scope === 'project' ? (
-        <PluginRuntimeNote>
-          {t('settings.piarium.pluginSettings.magic.embedding.projectDescription')}
-        </PluginRuntimeNote>
+    <SettingsControlGroup
+      title={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingProvider')}
+      info={t('settings.piarium.pluginSettings.magic.embedding.description')}
+      contentClassName="space-y-4"
+    >
+      {scope === 'user' ? (
+        <PluginSelectField
+          {...fields}
+          path={['embedding', 'provider']}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.provider')}
+          defaultValue="local"
+          options={[
+            { value: 'local', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.providerLocal') },
+            { value: 'openai-compatible', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.providerOpenAiCompatible') },
+            { value: 'synapse', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.providerSynapse') },
+            { value: 'off', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.providerOff') },
+          ]}
+        />
       ) : null}
-      <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.magic.embedding.title')}
-        description={t('settings.piarium.pluginSettings.magic.embedding.description')}
-        contentClassName="space-y-4"
-      >
-        {scope === 'user' ? (
-          <PluginSelectField
-            {...fields}
-            path={['embedding', 'provider']}
-            label="embedding.provider"
-            defaultValue="local"
-            options={[
-              { value: 'local', label: 'local' },
-              { value: 'openai-compatible', label: 'openai-compatible' },
-              { value: 'synapse', label: 'synapse' },
-              { value: 'off', label: 'off' },
-            ]}
-          />
-        ) : null}
-        {scope === 'user' && provider === 'synapse' ? (
-          <PluginOptionalSelectField
-            {...fields}
-            path={['embedding', 'fallback_provider']}
-            label="embedding.fallback_provider"
-            options={[
-              { value: 'local', label: 'local' },
-              { value: 'openai-compatible', label: 'openai-compatible' },
-              { value: 'off', label: 'off' },
-            ]}
-          />
-        ) : null}
+      {scope === 'user' && provider === 'synapse' ? (
+        <PluginOptionalSelectField
+          {...fields}
+          path={['embedding', 'fallback_provider']}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackProvider')}
+          options={[
+            { value: 'local', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.providerLocal') },
+            { value: 'openai-compatible', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.providerOpenAiCompatible') },
+            { value: 'off', label: magicUi(t, 'settings.piarium.pluginSettings.magic.ui.providerOff') },
+          ]}
+        />
+      ) : null}
+      <PluginStringField {...fields} path={['embedding', 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingModel')} placeholder="embedding-model" />
+      {scope === 'user' && remoteShape ? (
         <PluginStringField
           {...fields}
-          path={['embedding', 'model']}
-          label="embedding.model"
-          defaultValue={scope === 'user' && provider === 'local' ? 'Xenova/all-MiniLM-L6-v2' : ''}
-          placeholder="embedding-model"
+          path={['embedding', 'endpoint']}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingEndpoint')}
+          placeholder="https://example.com/v1/embeddings"
         />
-        {scope === 'user' && remoteShape ? (
-          <PluginStringField
-            {...fields}
-            path={['embedding', 'endpoint']}
-            label="embedding.endpoint"
-            placeholder="https://example.com/v1/embeddings"
-          />
-        ) : null}
-        <PluginStringField
-          {...fields}
-          path={['embedding', 'api_key']}
-          label="embedding.api_key"
-          description={t(scope === 'user'
-            ? 'settings.piarium.pluginSettings.magic.embedding.apiKeyUser'
-            : 'settings.piarium.pluginSettings.magic.embedding.apiKeyProject')}
-          inputType="password"
-          autoComplete="new-password"
-          placeholder={scope === 'user' ? '{env:EMBEDDING_API_KEY}' : 'stored in project JSONC'}
-        />
-      </SettingsControlGroup>
+      ) : null}
+      <PluginStringField
+        {...fields}
+        path={['embedding', 'api_key']}
+        label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingApiKey')}
+        info={t(scope === 'user'
+          ? 'settings.piarium.pluginSettings.magic.embedding.apiKeyUser'
+          : 'settings.piarium.pluginSettings.magic.embedding.apiKeyProject')}
+        inputType="password"
+        autoComplete="new-password"
+        placeholder={scope === 'user' ? '{env:EMBEDDING_API_KEY}' : undefined}
+      />
+    </SettingsControlGroup>
+  );
+};
 
+const MemoryPanel: React.FC<PanelProps> = ({ fields, scope }) => {
+  const { t } = useI18n();
+  return (
+    <div className="space-y-7">
       <SettingsControlGroup
-        className={SUBGROUP_CLASS}
-        title={t('settings.piarium.pluginSettings.magic.embedding.request')}
+        title={t('settings.piarium.pluginSettings.magic.memory.title')}
+        info={t('settings.piarium.pluginSettings.magic.memory.description')}
         contentClassName="space-y-4"
       >
-        <PluginStringField {...fields} path={['embedding', 'input_type']} label="embedding.input_type" placeholder="passage" />
-        <PluginStringField {...fields} path={['embedding', 'query_input_type']} label="embedding.query_input_type" placeholder="query" />
-        <PluginStringField {...fields} path={['embedding', 'truncate']} label="embedding.truncate" placeholder="NONE | START | END" />
-        <PluginOptionalNumberField
+        <PluginBooleanField {...fields} path={['memory', 'enabled']} label={t('settings.piarium.pluginSettings.field.enabled')} defaultValue />
+        <PluginNumberField
           {...fields}
-          path={['embedding', 'max_input_tokens']}
-          label="embedding.max_input_tokens"
-          emptyLabel={t('settings.piarium.pluginSettings.field.pluginDefault')}
-          min={1}
-          fallbackValue={512}
+          path={['memory', 'injection_budget_tokens']}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.memoryBudget')}
+          defaultValue={4000}
+          min={500}
+          max={20000}
           unit="tokens"
         />
+        <PluginBooleanField {...fields} path={['memory', 'auto_search', 'enabled']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.automaticSearch')} defaultValue />
+        <PluginBooleanField {...fields} path={['memory', 'auto_promote']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.automaticPromotion')} defaultValue />
+        <PluginNumberField
+          {...fields}
+          path={['memory', 'retrieval_count_promotion_threshold']}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.promotionEvidenceThreshold')}
+          defaultValue={3}
+          min={1}
+        />
       </SettingsControlGroup>
 
-      {scope === 'user' ? (
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.magic.embedding.storage')}
-          contentClassName="space-y-4"
-        >
-          <PluginNumberField {...fields} path={['sqlite', 'cache_size_mb']} label="sqlite.cache_size_mb" defaultValue={64} min={2} max={2048} unit="MiB" />
-          <PluginNumberField {...fields} path={['sqlite', 'mmap_size_mb']} label="sqlite.mmap_size_mb" defaultValue={0} min={0} max={8192} unit="MiB" />
-          <PluginStringField {...fields} path={['subc', 'connection_file']} label="subc.connection_file" placeholder="~/.config/subc/connection.json" />
-          <PluginBooleanField {...fields} path={['shadow_embedding', 'enabled']} label="shadow_embedding.enabled" defaultValue={false} />
-        </SettingsControlGroup>
-      ) : null}
+      <EmbeddingFields fields={fields} scope={scope} />
+
+      <SettingsControlGroup
+        title={t('settings.piarium.pluginSettings.magic.memory.gitIndex')}
+        info={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.gitIndexingInfo')}
+        contentClassName="space-y-4"
+      >
+        <PluginBooleanField {...fields} path={['memory', 'git_commit_indexing', 'enabled']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.gitIndexing')} defaultValue={false} />
+        <PluginNumberField {...fields} path={['memory', 'git_commit_indexing', 'since_days']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.commitHistoryWindow')} defaultValue={365} min={7} max={3650} unit="days" />
+        <PluginNumberField {...fields} path={['memory', 'git_commit_indexing', 'max_commits']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.maximumCommits')} defaultValue={2000} min={100} max={20000} />
+      </SettingsControlGroup>
     </div>
   );
 };
 
-const AgentsPanel: React.FC<PanelProps> = ({ fields, scope }) => {
+const AgentPanel: React.FC<PanelProps> = ({ fields, scope }) => {
   const { t } = useI18n();
   const [agent, setAgent] = React.useState<MagicContextAgent>('historian');
   const historianProject = scope === 'project' && agent === 'historian';
-  const pluginDefault = t('settings.piarium.pluginSettings.field.pluginDefault');
+  const timeoutPath = agent === 'historian'
+    ? ['historian_timeout_ms']
+    : agent === 'sidekick' ? ['sidekick', 'timeout_ms'] : null;
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       {scope === 'project' ? (
-        <PluginRuntimeNote>
-          {t('settings.piarium.pluginSettings.magic.agents.projectSecurity')}
-        </PluginRuntimeNote>
+        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.magic.agents.projectSecurity')}</PluginRuntimeNote>
       ) : null}
       <SettingsControlGroup
-        title={t('settings.piarium.pluginSettings.magic.agents.title')}
-        description={t(`settings.piarium.pluginSettings.magic.agent.${agent}.description`)}
+        title={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.models')}
+        info={t(`settings.piarium.pluginSettings.magic.agent.${agent}.description`)}
         contentClassName="space-y-4"
       >
-        <div className="flex justify-end">
-          <Select value={agent} disabled={fields.disabled} onValueChange={setAgent}>
-            <SelectTrigger size="settings" className="min-w-56">
-              <SelectValue />
+        <SettingsFieldRow label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.agent')}>
+          <Select value={agent} disabled={fields.disabled} onValueChange={(value) => setAgent(value as MagicContextAgent)}>
+            <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
+              <SelectValue>{magicUi(t, `settings.piarium.pluginSettings.magic.ui.agent.${agent}`)}</SelectValue>
             </SelectTrigger>
             <SelectContent align="end">
-              {MAGIC_CONTEXT_AGENTS.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              {MAGIC_CONTEXT_AGENTS.map((name) => (
+                <SelectItem key={name} value={name}>{magicUi(t, `settings.piarium.pluginSettings.magic.ui.agent.${name}`)}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
-        </div>
-        <PluginBooleanField {...fields} path={[agent, 'disable']} label={`${agent}.disable`} defaultValue={false} />
-        {!historianProject ? (
-          <PluginStringField {...fields} path={[agent, 'model']} label={`${agent}.model`} placeholder="provider/model" />
-        ) : null}
-        {!historianProject ? (
-          <PluginStringListField {...fields} path={[agent, 'fallback_models']} label={`${agent}.fallback_models`} placeholder="provider/model" />
-        ) : null}
-        <PluginOptionalSelectField
+        </SettingsFieldRow>
+        <PluginBooleanField
           {...fields}
-          path={[agent, 'thinking_level']}
-          label={`${agent}.thinking_level`}
-          options={thinkingOptions}
+          path={[agent, 'disable']}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.disabled')}
+          info={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.disabledAgentInfo')}
+          defaultValue={false}
         />
-        <PluginOptionalNumberField {...fields} path={[agent, 'temperature']} label={`${agent}.temperature`} emptyLabel={pluginDefault} min={0} max={2} step={0.1} fallbackValue={0} />
-        <PluginOptionalNumberField {...fields} path={[agent, 'top_p']} label={`${agent}.top_p`} emptyLabel={pluginDefault} min={0} max={1} step={0.05} fallbackValue={1} />
-        <PluginOptionalNumberField {...fields} path={[agent, 'maxTokens']} label={`${agent}.maxTokens`} emptyLabel={pluginDefault} fallbackValue={1} />
-        <PluginOptionalNumberField {...fields} path={[agent, 'maxSteps']} label={`${agent}.maxSteps`} emptyLabel={pluginDefault} fallbackValue={1} />
-        <PluginStringField {...fields} path={[agent, 'description']} label={`${agent}.description`} />
-        <PluginOptionalSelectField
-          {...fields}
-          path={[agent, 'mode']}
-          label={`${agent}.mode`}
-          options={[
-            { value: 'subagent', label: 'subagent' },
-            { value: 'primary', label: 'primary' },
-            { value: 'all', label: 'all' },
-          ]}
-        />
-        <PluginStringField {...fields} path={[agent, 'color']} label={`${agent}.color`} placeholder="#a1b2c3" />
-        {agent === 'historian' ? (
-          <PluginBooleanField {...fields} path={['historian', 'two_pass']} label="historian.two_pass" defaultValue={false} />
+        {!historianProject ? (
+          <PluginStringField {...fields} path={[agent, 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.primaryModel')} placeholder="provider/model" />
         ) : null}
-        {agent === 'dreamer' ? (
-          <PluginBooleanField {...fields} path={['dreamer', 'inject_docs']} label="dreamer.inject_docs" defaultValue />
+        {!historianProject ? (
+          <PluginStringListField {...fields} path={[agent, 'fallback_models']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackModels')} placeholder="provider/model" />
         ) : null}
-        {agent === 'sidekick' ? (
-          <PluginNumberField {...fields} path={['sidekick', 'timeout_ms']} label="sidekick.timeout_ms" defaultValue={30000} unit="ms" />
+        <PluginOptionalSelectField {...fields} path={[agent, 'thinking_level']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.thinkingLevel')} options={thinkingOptions(t)} />
+        {timeoutPath ? (
+          <PluginNumberField
+            {...fields}
+            path={timeoutPath}
+            label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.timeout')}
+            defaultValue={agent === 'sidekick' ? 30000 : 300000}
+            min={agent === 'sidekick' ? 1000 : 60000}
+            unit="ms"
+          />
         ) : null}
       </SettingsControlGroup>
-
-      {scope === 'user' ? (
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.magic.agents.instructions')}
-          description={t('settings.piarium.pluginSettings.magic.agents.instructionsDescription')}
-          contentClassName="space-y-4"
-        >
-          <PluginTextareaField {...fields} path={[agent, 'prompt']} label={`${agent}.prompt`} />
-          {agent === 'sidekick' ? (
-            <PluginTextareaField {...fields} path={['sidekick', 'system_prompt']} label="sidekick.system_prompt" />
-          ) : null}
-          <AdvancedValueNotice field={`${agent}.tools / ${agent}.permission`} configured={(
-            hasJsonPath(fields.draft, [agent, 'tools']) || hasJsonPath(fields.draft, [agent, 'permission'])
-          )} />
-        </SettingsControlGroup>
-      ) : null}
     </div>
   );
 };
 
-const TasksPanel: React.FC<PanelProps> = ({ fields }) => {
+const MaintenancePanel: React.FC<PanelProps> = ({ fields }) => {
   const { t } = useI18n();
   const [task, setTask] = React.useState<MagicContextDreamerTask>('map-memories');
   const defaults = MAGIC_CONTEXT_DREAMER_TASK_DEFAULTS[task];
   const promotionThreshold = 'promotionThreshold' in defaults ? defaults.promotionThreshold : undefined;
   return (
     <SettingsControlGroup
-      title={t('settings.piarium.pluginSettings.magic.tasks.title')}
-      description={t('settings.piarium.pluginSettings.magic.tasks.description')}
+      title={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.maintenanceSchedules')}
+      info={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.maintenanceSchedulesInfo')}
       contentClassName="space-y-4"
     >
-      <div className="flex justify-end">
-        <Select value={task} disabled={fields.disabled} onValueChange={setTask}>
-          <SelectTrigger size="settings" className="min-w-64">
-            <SelectValue />
+      <SettingsFieldRow label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.maintenanceTask')}>
+        <Select value={task} disabled={fields.disabled} onValueChange={(value) => setTask(value as MagicContextDreamerTask)}>
+          <SelectTrigger size="settings" className="w-full min-w-40 max-w-64">
+            <SelectValue>{magicUi(t, `settings.piarium.pluginSettings.magic.ui.task.${task}`)}</SelectValue>
           </SelectTrigger>
           <SelectContent align="end">
             {(Object.keys(MAGIC_CONTEXT_DREAMER_TASK_DEFAULTS) as MagicContextDreamerTask[]).map((name) => (
-              <SelectItem key={name} value={name}>{name}</SelectItem>
+              <SelectItem key={name} value={name}>{magicUi(t, `settings.piarium.pluginSettings.magic.ui.task.${name}`)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </SettingsFieldRow>
       <PluginStringField
         {...fields}
         path={['dreamer', 'tasks', task, 'schedule']}
-        label="schedule"
-        description={t('settings.piarium.pluginSettings.magic.tasks.schedule.description')}
+        label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.schedule')}
+        info={t('settings.piarium.pluginSettings.magic.tasks.schedule.description')}
         defaultValue={defaults.schedule}
         allowEmpty
         placeholder="0 3 * * *"
       />
-      <PluginStringField {...fields} path={['dreamer', 'tasks', task, 'model']} label="model" placeholder="provider/model" />
-      <PluginStringListField {...fields} path={['dreamer', 'tasks', task, 'fallback_models']} label="fallback_models" placeholder="provider/model" />
-      <PluginOptionalSelectField
-        {...fields}
-        path={['dreamer', 'tasks', task, 'thinking_level']}
-        label="thinking_level"
-        options={thinkingOptions}
-      />
-      <PluginNumberField
-        {...fields}
-        path={['dreamer', 'tasks', task, 'timeout_minutes']}
-        label="timeout_minutes"
-        defaultValue={defaults.timeout}
-        min={5}
-        unit="min"
-      />
+      <PluginStringField {...fields} path={['dreamer', 'tasks', task, 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.dreamerModel')} placeholder="provider/model" />
+      <PluginStringListField {...fields} path={['dreamer', 'tasks', task, 'fallback_models']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackModels')} placeholder="provider/model" />
+      <PluginOptionalSelectField {...fields} path={['dreamer', 'tasks', task, 'thinking_level']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.thinkingLevel')} options={thinkingOptions(t)} />
+      <PluginNumberField {...fields} path={['dreamer', 'tasks', task, 'timeout_minutes']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.timeout')} defaultValue={defaults.timeout} min={5} unit="min" />
       {promotionThreshold !== undefined ? (
         <PluginNumberField
           {...fields}
           path={['dreamer', 'tasks', task, 'promotion_threshold']}
-          label="promotion_threshold"
-          description={t('settings.piarium.pluginSettings.magic.tasks.promotionDescription')}
+          label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.promotionThreshold')}
+          info={t('settings.piarium.pluginSettings.magic.tasks.promotionDescription')}
           defaultValue={promotionThreshold}
           min={2}
           max={20}
@@ -660,131 +401,170 @@ const TasksPanel: React.FC<PanelProps> = ({ fields }) => {
   );
 };
 
+const issueFieldLabel = (t: ReturnType<typeof useI18n>['t'], field: string): string => {
+  if (field === 'embedding.endpoint') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingEndpoint');
+  if (field === 'embedding.model') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingModel');
+  if (field === 'language') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.language');
+  if (field.endsWith('.schedule')) return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.schedule');
+  if (field.endsWith('.color')) return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.agentColor');
+  if (field === 'cache_ttl') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.contextCacheTtl');
+  if (field === 'execute_threshold_percentage') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.executionThreshold');
+  if (field === 'execute_threshold_tokens') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.tokenThresholds');
+  if (field.endsWith('.fallback_models')) return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackModels');
+  if (field.endsWith('.thinking_level')) return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.thinkingLevel');
+  if (field.endsWith('.timeout_minutes') || field.endsWith('.timeout_ms')) return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.timeout');
+  if (field === 'embedding.provider') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingProvider');
+  if (field === 'embedding.fallback_provider') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackProvider');
+  if (field === 'embedding.max_input_tokens') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.embeddingInputLimit');
+  if (field === 'subc.connection_file') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.subcConnection');
+  if (field.startsWith('dreamer.tasks.')) return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.maintenanceTaskSetting');
+  if (field.startsWith('historian.') || field.startsWith('dreamer.') || field.startsWith('sidekick.')) return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.agentSetting');
+  return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.configurationValue');
+};
+
 function issueMessage(issue: MagicContextDraftIssue, t: ReturnType<typeof useI18n>['t']): string {
+  const field = issueFieldLabel(t, issue.field);
   switch (issue.code) {
     case 'embedding-required':
-      return t('settings.piarium.pluginSettings.magic.validation.embeddingRequired', { field: issue.field });
+      return t('settings.piarium.pluginSettings.magic.validation.embeddingRequired', { field });
     case 'invalid-color':
-      return t('settings.piarium.pluginSettings.magic.validation.invalidColor', { field: issue.field });
+      return t('settings.piarium.pluginSettings.magic.validation.invalidColor', { field });
     case 'invalid-language':
       return t('settings.piarium.pluginSettings.magic.validation.invalidLanguage');
     case 'invalid-schedule':
-      return t('settings.piarium.pluginSettings.magic.validation.invalidSchedule', { field: issue.field });
+      return t('settings.piarium.pluginSettings.magic.validation.invalidSchedule', { field });
     case 'invalid-value':
-      return t('settings.piarium.pluginSettings.magic.validation.invalidValue', { field: issue.field });
+      return t('settings.piarium.pluginSettings.magic.validation.invalidValue', { field });
     case 'required':
-      return t('settings.piarium.pluginSettings.magic.validation.required', { field: issue.field });
+      return t('settings.piarium.pluginSettings.magic.validation.required', { field });
   }
 }
 
+const ignoredFieldLabel = (t: ReturnType<typeof useI18n>['t'], path: string): string => {
+  const key = ({
+    language: 'language',
+    'pi.subagent_extensions': 'piChildExtensions',
+    'embedding.provider': 'embeddingProvider',
+    'embedding.endpoint': 'embeddingEndpoint',
+    'embedding.fallback_provider': 'fallbackProvider',
+    'historian.model': 'historianModel',
+    'historian.fallback_models': 'historianFallbackModels',
+    'fail_closed_blocking': 'failClosed',
+    auto_update: 'automaticUpdates',
+    sqlite: 'sqliteTuning',
+    subc: 'subcConnection',
+    shadow_embedding: 'shadowEmbedding',
+    'historian.prompt': 'historianInstructions',
+    'historian.permission': 'historianPermissions',
+    'historian.tools': 'historianTools',
+    'historian.system_prompt': 'historianSystemInstructions',
+    'dreamer.prompt': 'dreamerInstructions',
+    'dreamer.permission': 'dreamerPermissions',
+    'dreamer.tools': 'dreamerTools',
+    'dreamer.system_prompt': 'dreamerSystemInstructions',
+    'sidekick.prompt': 'sidekickInstructions',
+    'sidekick.permission': 'sidekickPermissions',
+    'sidekick.tools': 'sidekickTools',
+    'sidekick.system_prompt': 'sidekickSystemInstructions',
+  } as Record<string, string | undefined>)[path];
+  return magicUi(t, `settings.piarium.pluginSettings.magic.ui.ignored.${key ?? 'pluginOwnedField'}`);
+};
+
 export const MagicContextSettings: React.FC<MagicContextSettingsProps> = ({
-  initialPanel = 'overview',
+  initialPanel = 'context',
   runtimeTarget,
   targetKey,
 }) => {
   const { t } = useI18n();
   const [scope, setScope] = React.useState<MagicContextScope>('user');
-  const [panel, setPanel] = React.useState<MagicContextPanel>(initialPanel);
-  const userController = useTextObjectDraft({
-    format: 'jsonc',
-    paths: MAGIC_USER_PATHS,
-    root: 'user-config',
-    runtimeTarget,
-    targetKey,
-  });
-  const projectController = useTextObjectDraft({
-    format: 'jsonc',
-    paths: MAGIC_PROJECT_PATHS,
-    root: 'project',
-    runtimeTarget,
-    targetKey,
-  });
+  const initialArea = initialPanel === 'agents'
+    ? 'models'
+    : initialPanel === 'tasks'
+      ? 'maintenance'
+      : initialPanel === 'overview' || initialPanel === 'pipeline'
+        ? 'context'
+        : initialPanel === 'embedding' ? 'memory' : initialPanel;
+  const [panel, setPanel] = React.useState<MagicContextPanel>(initialArea);
+  const userController = useTextObjectDraft({ format: 'jsonc', paths: MAGIC_USER_PATHS, root: 'user-config', runtimeTarget, targetKey });
+  const projectController = useTextObjectDraft({ format: 'jsonc', paths: MAGIC_PROJECT_PATHS, root: 'project', runtimeTarget, targetKey });
   const controller = scope === 'user' ? userController : projectController;
   const trustBlocked = scope === 'project' && !controller.projectTrusted;
-  const issue = React.useMemo(
-    () => magicContextDraftIssue(controller.draft, scope),
-    [controller.draft, scope],
-  );
+  const issue = React.useMemo(() => magicContextDraftIssue(controller.draft, scope), [controller.draft, scope]);
   const ignoredProjectPaths = React.useMemo(
     () => scope === 'project' ? magicContextProjectIgnoredPaths(controller.draft) : [],
     [controller.draft, scope],
   );
   const fields: MagicFields = {
-    disabled: !controller.loaded || controller.loading || controller.saving || trustBlocked,
+    disabled: !controller.loaded || controller.loading || controller.saving || controller.rawError !== null || trustBlocked,
     draft: controller.draft,
     onRemove: controller.removeValue,
     onSet: controller.setValue,
   };
   const panelOptions = MAGIC_CONTEXT_PANELS.map((value) => ({
     value,
-    label: t(`settings.piarium.pluginSettings.magic.panel.${value}`),
+    label: magicUi(t, `settings.piarium.pluginSettings.magic.ui.area.${value}`),
   }));
 
   return (
     <div className="space-y-7">
       <PluginRuntimeNote>{t('settings.piarium.pluginSettings.magic.runtimeNote')}</PluginRuntimeNote>
 
-      <MagicContextRuntimePanel runtimeTarget={runtimeTarget} />
-
-      <div className="flex flex-col gap-4 rounded-lg border border-border/60 px-4 py-4">
-        <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
-          <div className="space-y-1">
-            <h3 className="typography-settings-group-title text-foreground">
-              {t('settings.piarium.pluginSettings.magic.workspace.title')}
-            </h3>
-            <p className="typography-meta text-muted-foreground">
-              {t('settings.piarium.pluginSettings.magic.workspace.description')}
-            </p>
-          </div>
-          <Select
-            value={scope}
-            disabled={userController.saving || projectController.saving}
-            onValueChange={setScope}
-          >
-            <SelectTrigger size="settings" className="min-w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value="user">
-                {t('settings.piarium.pluginSettings.magic.scope.user')}{userController.dirty ? ' •' : ''}
-              </SelectItem>
-              <SelectItem value="project">
-                {t('settings.common.scope.project')}{projectController.dirty ? ' •' : ''}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <SettingsChipGroup
-          value={panel}
-          options={panelOptions}
-          onChange={setPanel}
-          aria-label={t('settings.piarium.pluginSettings.magic.workspace.navigation')}
-        />
-      </div>
-
-      {scope === 'project' ? (
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.magic.projectBoundary')}</PluginRuntimeNote>
+      <SettingsFieldRow
+        label={t('settings.piarium.pluginSettings.scope.label')}
+        info={t('settings.piarium.pluginSettings.scope.description')}
+        controlClassName="w-full max-w-[24rem]"
+      >
+        <Select value={scope} disabled={userController.saving || projectController.saving} onValueChange={setScope}>
+          <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
+            <SelectValue>
+              {scope === 'user'
+                ? t('settings.piarium.pluginSettings.magic.scope.user')
+                : t('settings.common.scope.project')}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem value="user">{t('settings.piarium.pluginSettings.magic.scope.user')}{userController.dirty ? ' •' : ''}</SelectItem>
+            <SelectItem value="project">{t('settings.common.scope.project')}{projectController.dirty ? ' •' : ''}</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingsFieldRow>
+      <PluginConfigSource controller={controller} />
+      {controller.rawError ? (
+        <PluginRuntimeNote>
+          <span className="text-[var(--status-error)]">
+            {t('settings.piarium.recovery.pluginSettings.invalidJson')}
+          </span>
+        </PluginRuntimeNote>
       ) : null}
+      <SettingsChipGroup
+        value={panel}
+        options={panelOptions}
+        onChange={setPanel}
+        aria-label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.configurationArea')}
+      />
+
+      {scope === 'project' ? <PluginRuntimeNote>{t('settings.piarium.pluginSettings.magic.projectBoundary')}</PluginRuntimeNote> : null}
       {ignoredProjectPaths.length > 0 ? (
         <PluginRuntimeNote>
           {t('settings.piarium.pluginSettings.magic.projectIgnored', {
-            fields: ignoredProjectPaths.join(', '),
+            fields: ignoredProjectPaths.map((path) => ignoredFieldLabel(t, path)).join(', '),
           })}
         </PluginRuntimeNote>
       ) : null}
 
-      {panel === 'overview' ? <OverviewPanel fields={fields} scope={scope} /> : null}
-      {panel === 'pipeline' ? <PipelinePanel fields={fields} scope={scope} /> : null}
+      {panel === 'context' ? <ContextPanel fields={fields} scope={scope} /> : null}
       {panel === 'memory' ? <MemoryPanel fields={fields} scope={scope} /> : null}
-      {panel === 'embedding' ? <EmbeddingPanel fields={fields} scope={scope} /> : null}
-      {panel === 'agents' ? <AgentsPanel fields={fields} scope={scope} /> : null}
-      {panel === 'tasks' ? <TasksPanel fields={fields} scope={scope} /> : null}
+      {panel === 'models' ? <AgentPanel fields={fields} scope={scope} /> : null}
+      {panel === 'maintenance' ? <MaintenancePanel fields={fields} scope={scope} /> : null}
 
+      <PluginAdvancedDraftEditor controller={controller} blocked={trustBlocked} />
       <PluginDraftFooter
         controller={controller}
         blocked={trustBlocked || issue !== null}
         blockedMessage={trustBlocked || !issue ? undefined : issueMessage(issue, t)}
       />
+
+      <MagicContextRuntimePanel runtimeTarget={runtimeTarget} />
     </div>
   );
 };

@@ -1,6 +1,11 @@
 import React from 'react';
-import type { PiConfigScope, RuntimeContextTarget } from '@piarium/protocol';
-import { SettingsChipGroup, SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
+import type { JsonValue, PiConfigScope, RuntimeContextTarget } from '@piarium/protocol';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import {
+  SettingsChipGroup,
+  SettingsControlGroup,
+  SettingsFieldRow,
+} from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
@@ -9,12 +14,23 @@ import {
   PluginNumberField,
   PluginOptionalBooleanField,
   PluginOptionalNumberField,
+  PluginOptionalSelectField,
   PluginSelectField,
-  PluginStringField,
   PluginStringListField,
 } from './PluginConfigFields';
-import { PluginDraftFooter, PluginRuntimeNote, ScopeSelector } from './PluginSettingsPanelShared';
-import { readJsonPath, setJsonPath } from './plugin-config-model';
+import { PluginAdvancedDraftEditor } from './PluginAdvancedDraftEditor';
+import {
+  PluginConfigSource,
+  PluginDraftFooter,
+  PluginRuntimeNote,
+  ScopeSelector,
+} from './PluginSettingsPanelShared';
+import {
+  hasJsonPath,
+  readJsonPath,
+  setJsonPath,
+  type JsonObject,
+} from './plugin-config-model';
 import { SubagentsAgentOverrides } from './SubagentsAgentOverrides';
 import {
   subagentsRuntimeDraftIssue,
@@ -31,63 +47,172 @@ interface SubagentsSettingsProps {
   targetKey: string;
 }
 
+type SubagentsPanel = 'catalog' | 'delegation' | 'review' | 'limits';
+
+interface FieldBindings {
+  disabled: boolean;
+  draft: JsonObject;
+  onRemove: (path: readonly string[]) => void;
+  onSet: (path: readonly string[], value: JsonValue) => void;
+}
+
+const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 const SUBGROUP_CLASS = 'border-t border-border/60 pt-5';
-type SubagentsPanel = 'agents' | 'watchdog' | 'runtime' | 'budgets';
+
+const splitModel = (value: string): { modelId: string; providerId: string } => {
+  const separator = value.indexOf('/');
+  return separator > 0
+    ? { providerId: value.slice(0, separator), modelId: value.slice(separator + 1) }
+    : { providerId: '', modelId: value };
+};
+
+const PluginModelField: React.FC<FieldBindings & {
+  label: string;
+  path: readonly string[];
+  placeholder: string;
+}> = ({ disabled, draft, label, onRemove, onSet, path, placeholder }) => {
+  const { t } = useI18n();
+  const raw = readJsonPath(draft, path);
+  const value = typeof raw === 'string' ? raw : '';
+  const parsed = splitModel(value);
+  const explicit = hasJsonPath(draft, path);
+  return (
+    <SettingsFieldRow label={label} controlClassName="w-full max-w-[24rem]">
+      <div
+        aria-disabled={disabled}
+        className={disabled ? 'pointer-events-none opacity-60' : undefined}
+        inert={disabled ? true : undefined}
+      >
+        <ModelSelector
+          providerId={parsed.providerId}
+          modelId={parsed.modelId}
+          placeholder={placeholder}
+          onChange={(providerId, modelId) => {
+            if (!providerId || !modelId) onRemove(path);
+            else onSet(path, `${providerId}/${modelId}`);
+          }}
+          className="w-full max-w-72 justify-between"
+          dropdownPortalToBody
+        />
+      </div>
+      {explicit ? (
+        <Button type="button" variant="ghost" size="xs" disabled={disabled} onClick={() => onRemove(path)} className="!font-normal text-muted-foreground">
+          {t('settings.piarium.pluginSettings.field.useDefault')}
+        </Button>
+      ) : (
+        <span className="typography-micro text-muted-foreground">{t('settings.piarium.pluginSettings.field.pluginDefault')}</span>
+      )}
+    </SettingsFieldRow>
+  );
+};
 
 export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTarget, targetKey }) => {
   const { t } = useI18n();
+  const tx = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const [scope, setScope] = React.useState<PiConfigScope>('global');
-  const [panel, setPanel] = React.useState<SubagentsPanel>('agents');
-  const settings = useSettingsObjectDraft({
+  const [panel, setPanel] = React.useState<SubagentsPanel>('catalog');
+
+  // Both scope controllers remain mounted so changing scope never discards either draft.
+  const globalSettings = useSettingsObjectDraft({
     property: 'subagents',
     runtimeTarget,
-    scope,
-    targetKey,
+    scope: 'global',
+    targetKey: `${targetKey}:subagents-settings:global`,
   });
+  const projectSettings = useSettingsObjectDraft({
+    property: 'subagents',
+    runtimeTarget,
+    scope: 'project',
+    targetKey: `${targetKey}:subagents-settings:project`,
+  });
+  const settings = scope === 'project' ? projectSettings : globalSettings;
   const runtime = useConfigDocumentObjectDraft({
     path: 'extensions/subagent/config.json',
     runtimeTarget,
     scope: 'global',
-    targetKey,
+    targetKey: `${targetKey}:subagents-runtime:global`,
   });
+
   const settingsTrustBlocked = scope === 'project' && !settings.projectTrusted;
-  const settingsIssue = React.useMemo(
-    () => subagentsSettingsDraftIssue(settings.draft),
-    [settings.draft],
-  );
-  const runtimeIssue = React.useMemo(
-    () => subagentsRuntimeDraftIssue(runtime.draft),
-    [runtime.draft],
-  );
+  const settingsIssue = React.useMemo(() => subagentsSettingsDraftIssue(settings.draft), [settings.draft]);
+  const runtimeIssue = React.useMemo(() => subagentsRuntimeDraftIssue(runtime.draft), [runtime.draft]);
+  const issueFieldLabel = React.useCallback((field: string): string => {
+    const directLabels: Record<string, string> = {
+      'agentOverrides': t('settings.piarium.pluginSettings.subagents.overrides.validationCollection'),
+      'modelScope.allow': t('settings.piarium.pluginSettings.subagents.field.allowedModels'),
+      'toolBudget': t('settings.piarium.pluginSettings.subagents.field.toolBudget'),
+      'toolBudget.hard': t('settings.piarium.pluginSettings.subagents.field.toolHardLimit'),
+      'toolBudget.soft': t('settings.piarium.pluginSettings.subagents.field.toolSoftLimit'),
+      'toolBudget.block': t('settings.piarium.pluginSettings.subagents.field.toolsAfterBudget'),
+      'turnBudget.maxTurns': t('settings.piarium.pluginSettings.subagents.field.turnLimit'),
+      'turnBudget.graceTurns': t('settings.piarium.pluginSettings.subagents.field.turnGrace'),
+      'usageBudget.tokens': t('settings.piarium.pluginSettings.subagents.field.tokenHardLimit'),
+      'usageBudget.tokens.hard': t('settings.piarium.pluginSettings.subagents.field.tokenHardLimit'),
+      'usageBudget.tokens.soft': t('settings.piarium.pluginSettings.subagents.field.tokenSoftLimit'),
+      'usageBudget.costUsd': t('settings.piarium.pluginSettings.subagents.field.costHardLimit'),
+      'usageBudget.costUsd.hard': t('settings.piarium.pluginSettings.subagents.field.costHardLimit'),
+      'usageBudget.costUsd.soft': t('settings.piarium.pluginSettings.subagents.field.costSoftLimit'),
+      'usageBudget.tokens / usageBudget.costUsd': t('settings.piarium.pluginSettings.subagents.limits.hardBudgets'),
+    };
+    const direct = directLabels[field];
+    if (direct) return direct;
+    const overrideMatch = /^agentOverrides\.([^.]+)(?:\.(.+))?$/.exec(field);
+    if (!overrideMatch) return t('settings.piarium.pluginSettings.subagents.overrides.validationCollection');
+    const agent = overrideMatch[1] ?? '';
+    const overrideField = overrideMatch[2] ?? '';
+    const overrideLabels: Record<string, string> = {
+      acceptanceRole: t('settings.piarium.pluginSettings.subagents.field.acceptanceRole'),
+      completionGuard: t('settings.piarium.pluginSettings.subagents.field.completionGuard'),
+      defaultContext: t('settings.piarium.pluginSettings.subagents.field.defaultContext'),
+      disabled: t('settings.piarium.pluginSettings.subagents.field.agentAvailability'),
+      extensions: t('settings.piarium.pluginSettings.subagents.field.extensions'),
+      fallbackModels: t('settings.piarium.pluginSettings.subagents.field.fallbackModels'),
+      inheritProjectContext: t('settings.piarium.pluginSettings.subagents.field.inheritProjectContext'),
+      inheritSkills: t('settings.piarium.pluginSettings.subagents.field.inheritSkills'),
+      model: t('settings.piarium.pluginSettings.subagents.field.primaryModel'),
+      skills: t('settings.piarium.pluginSettings.subagents.field.skills'),
+      subagentOnlyExtensions: t('settings.piarium.pluginSettings.subagents.field.subagentExtensions'),
+      thinking: t('settings.piarium.pluginSettings.subagents.field.thinkingLevel'),
+      toolBudget: t('settings.piarium.pluginSettings.subagents.field.toolBudget'),
+      'toolBudget.block': t('settings.piarium.pluginSettings.subagents.field.toolsAfterBudget'),
+      'toolBudget.hard': t('settings.piarium.pluginSettings.subagents.field.toolBudgetHard'),
+      'toolBudget.soft': t('settings.piarium.pluginSettings.subagents.field.toolBudgetSoft'),
+      tools: t('settings.piarium.pluginSettings.subagents.field.allowedTools'),
+    };
+    return t('settings.piarium.pluginSettings.subagents.overrides.validationField', {
+      agent,
+      field: overrideLabels[overrideField] ?? t('settings.piarium.pluginSettings.subagents.overrides.advancedField'),
+    });
+  }, [t]);
   const issueMessage = React.useCallback((issue: SubagentsDraftIssue): string => {
+    const field = issueFieldLabel(issue.field);
     switch (issue.code) {
       case 'model-scope-allow-required':
         return t('settings.piarium.pluginSettings.subagents.validation.modelScopeAllow');
       case 'required':
-        return t('settings.piarium.pluginSettings.subagents.validation.required', { field: issue.field });
+        return t('settings.piarium.pluginSettings.subagents.validation.required', { field });
       case 'invalid-number':
-        return t('settings.piarium.pluginSettings.subagents.validation.invalidNumber', { field: issue.field });
+        return t('settings.piarium.pluginSettings.subagents.validation.invalidNumber', { field });
       case 'invalid-value':
-        return t('settings.piarium.pluginSettings.subagents.validation.invalidValue', { field: issue.field });
+        return t('settings.piarium.pluginSettings.subagents.validation.invalidValue', { field });
       case 'soft-exceeds-hard':
-        return t('settings.piarium.pluginSettings.subagents.validation.softExceedsHard', { field: issue.field });
+        return t('settings.piarium.pluginSettings.subagents.validation.softExceedsHard', { field });
     }
-  }, [t]);
-  const settingsFields = {
-    disabled: !settings.loaded || settings.loading || settings.saving || settingsTrustBlocked,
+  }, [issueFieldLabel, t]);
+
+  const settingsFields: FieldBindings = {
+    disabled: !settings.loaded || settings.loading || settings.saving || settingsTrustBlocked || settings.rawError !== null,
     draft: settings.draft,
     onRemove: settings.removeValue,
     onSet: settings.setValue,
   };
-  const runtimeFields = {
-    disabled: !runtime.loaded || runtime.loading || runtime.saving,
+  const runtimeFields: FieldBindings = {
+    disabled: !runtime.loaded || runtime.loading || runtime.saving || runtime.rawError !== null,
     draft: runtime.draft,
     onRemove: runtime.removeValue,
     onSet: runtime.setValue,
   };
-  const fleetValue = readJsonPath(runtime.draft, ['fleetView']);
-  const fleetEnabled = typeof fleetValue === 'boolean' ? fleetValue : true;
   const waitToolValue = readJsonPath(runtime.draft, ['waitTool']);
   const waitToolDraft = typeof waitToolValue === 'boolean'
     ? { ...runtime.draft, waitTool: { enabled: waitToolValue } }
@@ -96,372 +221,215 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
   const proactiveDraft = proactiveValue === false
     ? setJsonPath(runtime.draft, ['proactiveSkillSubagents'], { enabled: false })
     : runtime.draft;
-  const proactiveFields = {
+  const proactiveFields: FieldBindings = {
     ...runtimeFields,
     draft: proactiveDraft,
-    onRemove: (path: readonly string[]) => {
-      if (proactiveValue === false && path[0] === 'proactiveSkillSubagents') {
-        runtime.removeValue(['proactiveSkillSubagents']);
-        return;
-      }
-      runtime.removeValue(path);
+    onRemove: (path) => {
+      if (proactiveValue === false && path[0] === 'proactiveSkillSubagents') runtime.removeValue(['proactiveSkillSubagents']);
+      else runtime.removeValue(path);
     },
-    onSet: (path: readonly string[], value: Parameters<typeof runtime.setValue>[1]) => {
+    onSet: (path, value) => {
       if (proactiveValue === false && path[0] === 'proactiveSkillSubagents') {
-        runtime.setValue(
-          ['proactiveSkillSubagents'],
-          setJsonPath({ enabled: false }, path.slice(1), value),
-        );
-        return;
-      }
-      runtime.setValue(path, value);
+        runtime.setValue(['proactiveSkillSubagents'], setJsonPath({ enabled: false }, path.slice(1), value));
+      } else runtime.setValue(path, value);
     },
   };
   const pluginDefault = t('settings.piarium.pluginSettings.field.pluginDefault');
   const unlimited = t('settings.piarium.pluginSettings.subagents.value.unlimited');
-  const off = t('settings.piarium.pluginSettings.subagents.value.off');
   const panelOptions: Array<{ value: SubagentsPanel; label: string }> = [
-    { value: 'agents', label: t('settings.page.agents.title') },
-    { value: 'watchdog', label: t('settings.piarium.pluginSettings.subagents.watchdog.title') },
-    { value: 'runtime', label: t('settings.piarium.pluginSettings.subagents.runtime.title') },
-    { value: 'budgets', label: t('settings.piarium.pluginSettings.subagents.runtime.budgets') },
+    { value: 'catalog', label: tx('settings.piarium.pluginSettings.subagents.panel.catalog') },
+    { value: 'delegation', label: tx('settings.piarium.pluginSettings.subagents.panel.delegation') },
+    { value: 'review', label: tx('settings.piarium.pluginSettings.subagents.panel.review') },
+    { value: 'limits', label: tx('settings.piarium.pluginSettings.subagents.panel.limits') },
   ];
+  const thinkingOptions = THINKING_LEVELS.map((level) => ({
+    value: level,
+    label: tx(`settings.piarium.pluginSettings.subagents.thinking.${level}`),
+  }));
+
+  const settingsHeader = (title: string, description: string) => (
+    <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
+      <div className="space-y-1">
+        <h3 className="typography-settings-group-title text-foreground">{title}</h3>
+        <p className="typography-meta text-muted-foreground">{description}</p>
+      </div>
+      <ScopeSelector value={scope} onChange={setScope} disabled={globalSettings.saving || projectSettings.saving} />
+    </div>
+  );
+
+  const settingsFooter = (
+    <>
+      <PluginAdvancedDraftEditor controller={settings} blocked={settingsTrustBlocked} />
+      <PluginDraftFooter
+        controller={settings}
+        blocked={settingsTrustBlocked || settingsIssue !== null}
+        blockedMessage={settingsTrustBlocked || !settingsIssue ? undefined : issueMessage(settingsIssue)}
+      />
+    </>
+  );
+  const runtimeFooter = (
+    <>
+      <PluginAdvancedDraftEditor controller={runtime} />
+      <PluginDraftFooter
+        controller={runtime}
+        blocked={runtimeIssue !== null}
+        blockedMessage={runtimeIssue ? issueMessage(runtimeIssue) : undefined}
+      />
+    </>
+  );
 
   return (
     <div className="space-y-8">
       <PluginRuntimeNote>{t('settings.piarium.pluginSettings.subagents.runtimeNote')}</PluginRuntimeNote>
-
       <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('agents')}>
-          {t('settings.page.agents.title')}
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('fleet')}>
-          {t('settings.page.fleet.title')}
-        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('agents')}>{t('settings.page.agents.title')}</Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('fleet')}>{t('settings.page.fleet.title')}</Button>
       </div>
+      <SettingsChipGroup value={panel} options={panelOptions} onChange={setPanel} aria-label={tx('settings.piarium.pluginSettings.subagents.panel.aria')} />
 
-      <div className="rounded-lg border border-border/60 px-4 py-3">
-        <SettingsChipGroup
-          value={panel}
-          options={panelOptions}
-          onChange={setPanel}
-          aria-label="pi-subagents"
-        />
-      </div>
-
-      {panel === 'agents' || panel === 'watchdog' ? (
-      <div className="space-y-5 rounded-lg border border-border/60 px-4 py-4">
-        <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
-          <div className="space-y-1">
-            <h3 className="typography-settings-group-title text-foreground">
-              {panel === 'agents'
-                ? t('settings.piarium.pluginSettings.subagents.defaults.title')
-                : t('settings.piarium.pluginSettings.subagents.watchdog.title')}
-            </h3>
-            <p className="typography-meta text-muted-foreground">
-              {panel === 'agents'
-                ? t('settings.piarium.pluginSettings.subagents.defaults.description')
-                : t('settings.piarium.pluginSettings.subagents.watchdog.description')}
-            </p>
-          </div>
-          <ScopeSelector value={scope} onChange={setScope} disabled={settings.saving} />
-        </div>
-
-        {panel === 'agents' ? <>
-        <div className="space-y-4">
-          <PluginStringField {...settingsFields} path={['defaultModel']} label="defaultModel" placeholder="provider/model" />
-          <PluginStringField {...settingsFields} path={['defaultThinking']} label="defaultThinking" placeholder="off | minimal | low | medium | high | xhigh | max" />
-          <PluginStringListField {...settingsFields} path={['defaultExtensions']} label="defaultExtensions" placeholder="extension/path.ts" emptyArrayOnClear />
-          <PluginBooleanField {...settingsFields} path={['disableBuiltins']} label="disableBuiltins" defaultValue={false} />
-          <PluginBooleanField {...settingsFields} path={['disableThinking']} label="disableThinking" defaultValue={false} />
-          {scope === 'project' ? (
-            <PluginSelectField
-              {...settingsFields}
-              path={['projectRootResolution']}
-              label="projectRootResolution"
-              defaultValue="nearest"
-              options={[
-                { value: 'nearest', label: 'nearest' },
-                { value: 'git-root', label: 'git-root' },
-              ]}
-            />
-          ) : null}
-        </div>
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.modelScope.title')}
-          contentClassName="space-y-4"
-        >
-          <PluginBooleanField {...settingsFields} path={['modelScope', 'enforce']} label="modelScope.enforce" defaultValue={false} />
-          <PluginStringListField {...settingsFields} path={['modelScope', 'allow']} label="modelScope.allow" placeholder="provider/*" />
-        </SettingsControlGroup>
-
-        <SubagentsAgentOverrides
-          {...settingsFields}
-          runtimeTarget={runtimeTarget}
-          targetKey={`${targetKey}:${scope}`}
-        />
-        </> : null}
-
-        {panel === 'watchdog' ? <>
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.watchdog.title')}
-          description={t('settings.piarium.pluginSettings.subagents.watchdog.description')}
-          contentClassName="space-y-4"
-        >
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'enabled']} label="watchdog.enabled" defaultValue={false} />
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'showDuringRun']} label="watchdog.showDuringRun" defaultValue={false} />
-        </SettingsControlGroup>
-        </> : null}
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.watchdog.review')}
-          contentClassName="space-y-4"
-        >
-          <PluginOptionalNumberField {...settingsFields} path={['watchdog', 'syncBacklog']} label="watchdog.syncBacklog" defaultValue="off" emptyValue="off" emptyLabel={off} min={1} fallbackValue={1} />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'agentEndTimeoutMs']} label="watchdog.agentEndTimeoutMs" defaultValue={30000} min={1} unit="ms" />
-          <PluginSelectField
+      {panel === 'catalog' ? (
+        <div className="space-y-5">
+          {settingsHeader(
+            tx('settings.piarium.pluginSettings.subagents.panel.catalog'),
+            tx('settings.piarium.pluginSettings.subagents.catalog.panelDescription'),
+          )}
+          <PluginRuntimeNote>
+            {tx(scope === 'project'
+              ? 'settings.piarium.pluginSettings.subagents.authority.projectSettings'
+              : 'settings.piarium.pluginSettings.subagents.authority.userSettings')}
+          </PluginRuntimeNote>
+          <PluginConfigSource controller={settings} />
+          <SubagentsAgentOverrides
             {...settingsFields}
-            path={['watchdog', 'severityThreshold']}
-            label="watchdog.severityThreshold"
-            defaultValue="concern"
-            options={[
-              { value: 'concern', label: 'concern' },
-              { value: 'blocker', label: 'blocker' },
-            ]}
+            runtimeTarget={runtimeTarget}
+            scope={scope === 'project' ? 'project' : 'user'}
+            targetKey={`${targetKey}:catalog`}
           />
-          <PluginOptionalNumberField {...settingsFields} path={['watchdog', 'maxWarnings']} label="watchdog.maxWarnings" defaultValue={null} emptyValue={null} emptyLabel={unlimited} min={0} fallbackValue={0} />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'compactAtPercent']} label="watchdog.compactAtPercent" defaultValue={80} min={50} max={95} unit="%" />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'reviewRetryDelayMs']} label="watchdog.reviewRetryDelayMs" defaultValue={1000} min={1} unit="ms" />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'maxReviewFailures']} label="watchdog.maxReviewFailures" defaultValue={3} min={1} />
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'guidance', 'watchdogMd']} label="watchdog.guidance.watchdogMd" defaultValue />
-          <PluginStringField {...settingsFields} path={['watchdog', 'guidance', 'systemPromptPath']} label="watchdog.guidance.systemPromptPath" placeholder="path/to/watchdog-prompt.md" />
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'autoFollow', 'blockers']} label="watchdog.autoFollow.blockers" defaultValue />
-          <PluginOptionalNumberField {...settingsFields} path={['watchdog', 'autoFollow', 'maxAttempts']} label="watchdog.autoFollow.maxAttempts" defaultValue={3} emptyValue={null} emptyLabel={unlimited} min={1} fallbackValue={1} />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'autoFollow', 'stalemateRepeats']} label="watchdog.autoFollow.stalemateRepeats" defaultValue={3} min={1} />
-        </SettingsControlGroup>
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.watchdog.endpoints')}
-          contentClassName="space-y-4"
-        >
-          <PluginOptionalBooleanField {...settingsFields} path={['watchdog', 'main', 'enabled']} label="watchdog.main.enabled" />
-          <PluginStringField {...settingsFields} path={['watchdog', 'main', 'model']} label="watchdog.main.model" placeholder="provider/model" />
-          <PluginStringField {...settingsFields} path={['watchdog', 'main', 'thinking']} label="watchdog.main.thinking" placeholder="off | low | medium | high | xhigh | max" />
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'children', 'enabled']} label="watchdog.children.enabled" defaultValue={false} />
-          <PluginStringField {...settingsFields} path={['watchdog', 'children', 'model']} label="watchdog.children.model" placeholder="provider/model" />
-          <PluginStringField {...settingsFields} path={['watchdog', 'children', 'thinking']} label="watchdog.children.thinking" placeholder="off | low | medium | high | xhigh | max" />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'children', 'watchdogTailTimeoutMs']} label="watchdog.children.watchdogTailTimeoutMs" defaultValue={120000} min={1} unit="ms" />
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'children', 'autoFollow', 'blockers']} label="watchdog.children.autoFollow.blockers" defaultValue />
-          <PluginOptionalNumberField {...settingsFields} path={['watchdog', 'children', 'autoFollow', 'maxAttempts']} label="watchdog.children.autoFollow.maxAttempts" defaultValue={3} emptyValue={null} emptyLabel={unlimited} min={1} fallbackValue={1} />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'children', 'autoFollow', 'stalemateRepeats']} label="watchdog.children.autoFollow.stalemateRepeats" defaultValue={3} min={1} />
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'asyncCompletion', 'enabled']} label="watchdog.asyncCompletion.enabled" defaultValue={false} />
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'asyncCompletion', 'autoFollowBlockers']} label="watchdog.asyncCompletion.autoFollowBlockers" defaultValue={false} />
-        </SettingsControlGroup>
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.watchdog.lsp')}
-          contentClassName="space-y-4"
-        >
-          <PluginBooleanField {...settingsFields} path={['watchdog', 'lsp', 'enabled']} label="watchdog.lsp.enabled" defaultValue />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'lsp', 'timeoutMs']} label="watchdog.lsp.timeoutMs" defaultValue={3000} min={1} unit="ms" />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'lsp', 'maxFiles']} label="watchdog.lsp.maxFiles" defaultValue={20} min={1} />
-          <PluginNumberField {...settingsFields} path={['watchdog', 'lsp', 'maxDiagnostics']} label="watchdog.lsp.maxDiagnostics" defaultValue={50} min={0} />
-        </SettingsControlGroup>
-
-        <PluginDraftFooter
-          controller={settings}
-          blocked={settingsTrustBlocked || settingsIssue !== null}
-          blockedMessage={settingsTrustBlocked || !settingsIssue ? undefined : issueMessage(settingsIssue)}
-        />
-      </div>
+          {settingsFooter}
+        </div>
       ) : null}
 
-      {panel === 'runtime' || panel === 'budgets' ? (
-      <div className="space-y-5 rounded-lg border border-border/60 px-4 py-4">
-        <div className="space-y-1">
-          <h3 className="typography-settings-group-title text-foreground">
-            {t('settings.piarium.pluginSettings.subagents.runtime.title')}
-          </h3>
-          <p className="typography-meta text-muted-foreground">
-            {t('settings.piarium.pluginSettings.subagents.runtime.description')}
-          </p>
+      {panel === 'delegation' ? (
+        <div className="space-y-6">
+          <div className="space-y-5">
+            {settingsHeader(
+              tx('settings.piarium.pluginSettings.subagents.delegation.defaultsTitle'),
+              tx('settings.piarium.pluginSettings.subagents.delegation.defaultsDescription'),
+            )}
+            <PluginRuntimeNote>
+              {tx(scope === 'project'
+                ? 'settings.piarium.pluginSettings.subagents.authority.projectSettings'
+                : 'settings.piarium.pluginSettings.subagents.authority.userSettings')}
+            </PluginRuntimeNote>
+            <PluginConfigSource controller={settings} />
+            <SettingsControlGroup title={tx('settings.piarium.pluginSettings.subagents.delegation.modelDefaults')} contentClassName="space-y-4">
+              <PluginModelField {...settingsFields} path={['defaultModel']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultModel')} placeholder={tx('settings.piarium.pluginSettings.subagents.value.inheritModel')} />
+              <PluginOptionalSelectField {...settingsFields} path={['defaultThinking']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultThinking')} options={thinkingOptions} />
+              <PluginStringListField {...settingsFields} path={['defaultExtensions']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultExtensions')} placeholder="extension/path.ts" emptyArrayOnClear />
+              <PluginBooleanField {...settingsFields} path={['disableThinking']} label={tx('settings.piarium.pluginSettings.subagents.field.disableThinking')} defaultValue={false} />
+            </SettingsControlGroup>
+            <SettingsControlGroup className={SUBGROUP_CLASS} title={tx('settings.piarium.pluginSettings.subagents.delegation.modelAccess')} description={tx('settings.piarium.pluginSettings.subagents.delegation.modelAccessDescription')} contentClassName="space-y-4">
+              <PluginBooleanField {...settingsFields} path={['disableBuiltins']} label={tx('settings.piarium.pluginSettings.subagents.field.disableBuiltins')} defaultValue={false} />
+              <PluginBooleanField {...settingsFields} path={['modelScope', 'enforce']} label={tx('settings.piarium.pluginSettings.subagents.field.enforceModelAllowlist')} defaultValue={false} />
+              <PluginStringListField {...settingsFields} path={['modelScope', 'allow']} label={tx('settings.piarium.pluginSettings.subagents.field.allowedModels')} placeholder="provider/*" />
+            </SettingsControlGroup>
+            {scope === 'project' ? (
+              <SettingsControlGroup className={SUBGROUP_CLASS} title={tx('settings.piarium.pluginSettings.subagents.delegation.projectContext')} contentClassName="space-y-4">
+                <PluginSelectField {...settingsFields} path={['projectRootResolution']} label={tx('settings.piarium.pluginSettings.subagents.field.projectRoot')} defaultValue="nearest" options={[
+                  { value: 'nearest', label: tx('settings.piarium.pluginSettings.subagents.projectRoot.nearest') },
+                  { value: 'git-root', label: tx('settings.piarium.pluginSettings.subagents.projectRoot.gitRoot') },
+                ]} />
+              </SettingsControlGroup>
+            ) : null}
+            {settingsFooter}
+          </div>
+
+          <div className="space-y-5 border-t border-border/60 pt-6">
+            <div className="space-y-1">
+              <h3 className="typography-settings-group-title text-foreground">{tx('settings.piarium.pluginSettings.subagents.delegation.runtimeTitle')}</h3>
+              <p className="typography-meta text-muted-foreground">{tx('settings.piarium.pluginSettings.subagents.delegation.runtimeDescription')}</p>
+            </div>
+            <PluginRuntimeNote>{tx('settings.piarium.pluginSettings.subagents.authority.globalRuntime')}</PluginRuntimeNote>
+            <PluginConfigSource controller={runtime} />
+            <SettingsControlGroup title={tx('settings.piarium.pluginSettings.subagents.delegation.behavior')} contentClassName="space-y-4">
+              <PluginBooleanField {...runtimeFields} path={['asyncByDefault']} label={tx('settings.piarium.pluginSettings.subagents.field.asyncByDefault')} defaultValue={false} />
+              <PluginBooleanField {...runtimeFields} draft={waitToolDraft} path={['waitTool', 'enabled']} label={tx('settings.piarium.pluginSettings.subagents.field.waitTool')} defaultValue />
+              <PluginBooleanField {...runtimeFields} path={['fleetView']} label={tx('settings.piarium.pluginSettings.subagents.field.fleetView')} defaultValue />
+              <PluginOptionalBooleanField {...proactiveFields} path={['proactiveSkillSubagents', 'enabled']} label={tx('settings.piarium.pluginSettings.subagents.field.proactiveDelegation')} />
+              <PluginNumberField {...runtimeFields} path={['maxSubagentDepth']} label={tx('settings.piarium.pluginSettings.subagents.field.maximumDepth')} defaultValue={2} min={0} />
+              <PluginNumberField {...runtimeFields} path={['globalConcurrencyLimit']} label={tx('settings.piarium.pluginSettings.subagents.field.globalConcurrency')} defaultValue={20} min={1} />
+            </SettingsControlGroup>
+            {runtimeFooter}
+          </div>
         </div>
+      ) : null}
 
-        {panel === 'runtime' ? <>
-        <SettingsControlGroup
-          title={t('settings.piarium.pluginSettings.subagents.runtime.execution')}
-          contentClassName="space-y-4"
-        >
-          <PluginBooleanField {...runtimeFields} path={['asyncByDefault']} label="asyncByDefault" defaultValue={false} />
-          <PluginBooleanField {...runtimeFields} path={['forceTopLevelAsync']} label="forceTopLevelAsync" defaultValue={false} />
-          <PluginBooleanField {...runtimeFields} path={['fleetView']} label="fleetView" defaultValue />
-          <PluginSelectField
-            {...runtimeFields}
-            path={['fleetViewPlacement']}
-            label="fleetViewPlacement"
-            defaultValue="belowEditor"
-            options={[
-              { value: 'aboveEditor', label: 'aboveEditor' },
-              { value: 'belowEditor', label: 'belowEditor' },
-            ]}
-          />
-          <PluginBooleanField {...runtimeFields} path={['asyncWidget']} label="asyncWidget" defaultValue={!fleetEnabled} />
-          <PluginSelectField
-            {...runtimeFields}
-            path={['toolDescriptionMode']}
-            label="toolDescriptionMode"
-            defaultValue="full"
-            options={[
-              { value: 'full', label: 'full' },
-              { value: 'compact', label: 'compact' },
-              { value: 'custom', label: 'custom' },
-            ]}
-          />
-          <PluginBooleanField
-            {...runtimeFields}
-            draft={waitToolDraft}
-            path={['waitTool', 'enabled']}
-            label="waitTool.enabled"
-            defaultValue
-          />
-        </SettingsControlGroup>
-        </> : null}
+      {panel === 'review' ? (
+        <div className="space-y-5">
+          {settingsHeader(
+            tx('settings.piarium.pluginSettings.subagents.review.title'),
+            tx('settings.piarium.pluginSettings.subagents.review.description'),
+          )}
+          <PluginRuntimeNote>
+            {tx(scope === 'project'
+              ? 'settings.piarium.pluginSettings.subagents.authority.projectSettings'
+              : 'settings.piarium.pluginSettings.subagents.authority.userSettings')}
+          </PluginRuntimeNote>
+          <PluginConfigSource controller={settings} />
+          <SettingsControlGroup title={tx('settings.piarium.pluginSettings.subagents.review.watchdog')} contentClassName="space-y-4">
+            <PluginBooleanField {...settingsFields} path={['watchdog', 'enabled']} label={tx('settings.piarium.pluginSettings.subagents.field.watchdogEnabled')} defaultValue={false} />
+            <PluginBooleanField {...settingsFields} path={['watchdog', 'showDuringRun']} label={tx('settings.piarium.pluginSettings.subagents.field.showWatchdog')} defaultValue={false} />
+            <PluginSelectField {...settingsFields} path={['watchdog', 'severityThreshold']} label={tx('settings.piarium.pluginSettings.subagents.field.reviewSeverity')} defaultValue="concern" options={[
+              { value: 'concern', label: tx('settings.piarium.pluginSettings.subagents.severity.concern') },
+              { value: 'blocker', label: tx('settings.piarium.pluginSettings.subagents.severity.blocker') },
+            ]} />
+          </SettingsControlGroup>
+          <SettingsControlGroup className={SUBGROUP_CLASS} title={tx('settings.piarium.pluginSettings.subagents.review.mainAgent')} contentClassName="space-y-4">
+            <PluginOptionalBooleanField {...settingsFields} path={['watchdog', 'main', 'enabled']} label={tx('settings.piarium.pluginSettings.subagents.field.reviewMainAgent')} />
+            <PluginModelField {...settingsFields} path={['watchdog', 'main', 'model']} label={tx('settings.piarium.pluginSettings.subagents.field.reviewMainModel')} placeholder={tx('settings.piarium.pluginSettings.subagents.value.inheritModel')} />
+            <PluginOptionalSelectField {...settingsFields} path={['watchdog', 'main', 'thinking']} label={tx('settings.piarium.pluginSettings.subagents.field.reviewMainThinking')} options={thinkingOptions} />
+            <PluginBooleanField {...settingsFields} path={['watchdog', 'autoFollow', 'blockers']} label={tx('settings.piarium.pluginSettings.subagents.field.followMainBlockers')} defaultValue />
+            <PluginOptionalNumberField {...settingsFields} path={['watchdog', 'autoFollow', 'maxAttempts']} label={tx('settings.piarium.pluginSettings.subagents.field.maximumFollowups')} defaultValue={3} emptyValue={null} emptyLabel={unlimited} min={1} fallbackValue={1} />
+          </SettingsControlGroup>
+          <SettingsControlGroup className={SUBGROUP_CLASS} title={tx('settings.piarium.pluginSettings.subagents.review.childAgents')} contentClassName="space-y-4">
+            <PluginBooleanField {...settingsFields} path={['watchdog', 'children', 'enabled']} label={tx('settings.piarium.pluginSettings.subagents.field.reviewChildAgents')} defaultValue={false} />
+            <PluginModelField {...settingsFields} path={['watchdog', 'children', 'model']} label={tx('settings.piarium.pluginSettings.subagents.field.reviewChildModel')} placeholder={tx('settings.piarium.pluginSettings.subagents.value.inheritModel')} />
+            <PluginOptionalSelectField {...settingsFields} path={['watchdog', 'children', 'thinking']} label={tx('settings.piarium.pluginSettings.subagents.field.reviewChildThinking')} options={thinkingOptions} />
+            <PluginBooleanField {...settingsFields} path={['watchdog', 'children', 'autoFollow', 'blockers']} label={tx('settings.piarium.pluginSettings.subagents.field.followChildBlockers')} defaultValue />
+            <PluginOptionalNumberField {...settingsFields} path={['watchdog', 'children', 'autoFollow', 'maxAttempts']} label={tx('settings.piarium.pluginSettings.subagents.field.maximumChildFollowups')} defaultValue={3} emptyValue={null} emptyLabel={unlimited} min={1} fallbackValue={1} />
+          </SettingsControlGroup>
+          {settingsFooter}
+        </div>
+      ) : null}
 
-        {panel === 'budgets' ? (
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.runtime.limits')}
-          contentClassName="space-y-4"
-        >
-          <PluginNumberField {...runtimeFields} path={['maxSubagentDepth']} label="maxSubagentDepth" defaultValue={2} min={0} />
-          <PluginNumberField {...runtimeFields} path={['maxSubagentSpawnsPerSession']} label="maxSubagentSpawnsPerSession" description={t('settings.piarium.pluginSettings.subagents.unlimitedZero')} defaultValue={0} min={0} />
-          <PluginNumberField {...runtimeFields} path={['globalConcurrencyLimit']} label="globalConcurrencyLimit" defaultValue={20} min={1} />
-          <PluginNumberField {...runtimeFields} path={['parallel', 'maxTasks']} label="parallel.maxTasks" defaultValue={8} min={1} />
-          <PluginNumberField {...runtimeFields} path={['parallel', 'concurrency']} label="parallel.concurrency" defaultValue={4} min={1} />
-          <PluginOptionalNumberField {...runtimeFields} path={['chain', 'dynamicFanout', 'maxItems']} label="chain.dynamicFanout.maxItems" emptyLabel={pluginDefault} min={0} fallbackValue={0} />
-        </SettingsControlGroup>
-        ) : null}
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.runtime.storage')}
-          contentClassName="space-y-4"
-        >
-          <PluginSelectField
-            {...runtimeFields}
-            path={['artifactDir']}
-            label="artifactDir"
-            defaultValue="project"
-            options={[
-              { value: 'project', label: 'project' },
-              { value: 'session', label: 'session' },
-              { value: 'temp', label: 'temp' },
-            ]}
-          />
-          <PluginStringField {...runtimeFields} path={['defaultSessionDir']} label="defaultSessionDir" placeholder="~/.pi/agent/sessions/subagent" />
-          <PluginStringField {...runtimeFields} path={['singleRunOutputBaseDir']} label="singleRunOutputBaseDir" placeholder="~/.pi/subagent-outputs" />
-          <PluginStringField {...runtimeFields} path={['worktreeBaseDir']} label="worktreeBaseDir" placeholder="path/to/worktrees" />
-          <PluginStringField {...runtimeFields} path={['worktreeSetupHook']} label="worktreeSetupHook" placeholder="./scripts/setup-worktree.mjs" />
-          <PluginNumberField {...runtimeFields} path={['worktreeSetupHookTimeoutMs']} label="worktreeSetupHookTimeoutMs" defaultValue={30000} min={1} unit="ms" />
-        </SettingsControlGroup>
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.runtime.coordination')}
-          contentClassName="space-y-4"
-        >
-          <PluginSelectField
-            {...runtimeFields}
-            path={['intercomBridge', 'mode']}
-            label="intercomBridge.mode"
-            defaultValue="always"
-            options={[
-              { value: 'off', label: 'off' },
-              { value: 'fork-only', label: 'fork-only' },
-              { value: 'always', label: 'always' },
-            ]}
-          />
-          <PluginStringField {...runtimeFields} path={['intercomBridge', 'instructionFile']} label="intercomBridge.instructionFile" placeholder="./intercom-bridge.md" />
-          <PluginBooleanField {...runtimeFields} path={['intercomBridge', 'resultDelivery']} label="intercomBridge.resultDelivery" defaultValue />
-          <PluginBooleanField {...runtimeFields} path={['scheduledRuns', 'enabled']} label="scheduledRuns.enabled" defaultValue={false} />
-          <PluginNumberField {...runtimeFields} path={['scheduledRuns', 'maxPending']} label="scheduledRuns.maxPending" defaultValue={20} min={1} />
-          <PluginNumberField {...runtimeFields} path={['scheduledRuns', 'maxLatenessMs']} label="scheduledRuns.maxLatenessMs" defaultValue={300000} min={0} unit="ms" />
-        </SettingsControlGroup>
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.runtime.notifications')}
-          contentClassName="space-y-4"
-        >
-          <PluginBooleanField {...runtimeFields} path={['completionBatch', 'enabled']} label="completionBatch.enabled" defaultValue />
-          <PluginNumberField {...runtimeFields} path={['completionBatch', 'debounceMs']} label="completionBatch.debounceMs" defaultValue={150} min={1} unit="ms" />
-          <PluginNumberField {...runtimeFields} path={['completionBatch', 'maxWaitMs']} label="completionBatch.maxWaitMs" defaultValue={1000} min={1} unit="ms" />
-          <PluginNumberField {...runtimeFields} path={['completionBatch', 'stragglerDebounceMs']} label="completionBatch.stragglerDebounceMs" defaultValue={75} min={1} unit="ms" />
-          <PluginNumberField {...runtimeFields} path={['completionBatch', 'stragglerMaxWaitMs']} label="completionBatch.stragglerMaxWaitMs" defaultValue={400} min={1} unit="ms" />
-          <PluginNumberField {...runtimeFields} path={['completionBatch', 'stragglerWindowMs']} label="completionBatch.stragglerWindowMs" defaultValue={2000} min={1} unit="ms" />
-          <PluginBooleanField {...runtimeFields} path={['control', 'enabled']} label="control.enabled" defaultValue />
-          <PluginNumberField {...runtimeFields} path={['control', 'needsAttentionAfterMs']} label="control.needsAttentionAfterMs" defaultValue={60000} min={1} unit="ms" />
-          <PluginNumberField {...runtimeFields} path={['control', 'activeNoticeAfterMs']} label="control.activeNoticeAfterMs" defaultValue={240000} min={1} unit="ms" />
-          <PluginOptionalNumberField {...runtimeFields} path={['control', 'activeNoticeAfterTurns']} label="control.activeNoticeAfterTurns" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
-          <PluginOptionalNumberField {...runtimeFields} path={['control', 'activeNoticeAfterTokens']} label="control.activeNoticeAfterTokens" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
-          <PluginNumberField {...runtimeFields} path={['control', 'failedToolAttemptsBeforeAttention']} label="control.failedToolAttemptsBeforeAttention" defaultValue={3} min={1} />
-          <PluginStringListField
-            {...runtimeFields}
-            path={['control', 'notifyOn']}
-            label="control.notifyOn"
-            placeholder={'active_long_running\nneeds_attention'}
-            defaultValue={['active_long_running', 'needs_attention']}
-            emptyArrayOnClear
-          />
-          <PluginStringListField
-            {...runtimeFields}
-            path={['control', 'notifyChannels']}
-            label="control.notifyChannels"
-            placeholder={'event\nasync\nintercom'}
-            defaultValue={['event', 'async', 'intercom']}
-            emptyArrayOnClear
-          />
-        </SettingsControlGroup>
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.runtime.proactiveSkills')}
-          description={t('settings.piarium.pluginSettings.subagents.runtime.proactiveSkillsDescription')}
-          contentClassName="space-y-4"
-        >
-          <PluginOptionalBooleanField {...proactiveFields} path={['proactiveSkillSubagents', 'enabled']} label="proactiveSkillSubagents.enabled" />
-          <PluginNumberField {...proactiveFields} path={['proactiveSkillSubagents', 'minReferences']} label="proactiveSkillSubagents.minReferences" defaultValue={2} min={1} />
-          <PluginNumberField {...proactiveFields} path={['proactiveSkillSubagents', 'maxRecommendations']} label="proactiveSkillSubagents.maxRecommendations" defaultValue={3} min={1} max={5} />
-          <PluginStringField {...proactiveFields} path={['proactiveSkillSubagents', 'preferredAgent']} label="proactiveSkillSubagents.preferredAgent" defaultValue="reviewer" placeholder="reviewer" />
-        </SettingsControlGroup>
-
-        <SettingsControlGroup
-          className={SUBGROUP_CLASS}
-          title={t('settings.piarium.pluginSettings.subagents.runtime.budgets')}
-          contentClassName="space-y-4"
-        >
-          <PluginOptionalNumberField {...runtimeFields} path={['turnBudget', 'maxTurns']} label="turnBudget.maxTurns" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
-          <PluginNumberField {...runtimeFields} path={['turnBudget', 'graceTurns']} label="turnBudget.graceTurns" defaultValue={1} min={0} />
-          <PluginOptionalNumberField {...runtimeFields} path={['toolBudget', 'soft']} label="toolBudget.soft" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
-          <PluginOptionalNumberField {...runtimeFields} path={['toolBudget', 'hard']} label="toolBudget.hard" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
-          <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'tokens', 'soft']} label="usageBudget.tokens.soft" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
-          <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'tokens', 'hard']} label="usageBudget.tokens.hard" emptyLabel={pluginDefault} min={1} fallbackValue={1} />
-          <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'costUsd', 'soft']} label="usageBudget.costUsd.soft" emptyLabel={pluginDefault} min={0.000001} step={0.000001} fallbackValue={0.01} unit="USD" />
-          <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'costUsd', 'hard']} label="usageBudget.costUsd.hard" emptyLabel={pluginDefault} min={0.000001} step={0.000001} fallbackValue={0.01} unit="USD" />
-        </SettingsControlGroup>
-
-        <PluginDraftFooter
-          controller={runtime}
-          blocked={runtimeIssue !== null}
-          blockedMessage={runtimeIssue ? issueMessage(runtimeIssue) : undefined}
-        />
-      </div>
+      {panel === 'limits' ? (
+        <div className="space-y-5">
+          <div className="space-y-1">
+            <h3 className="typography-settings-group-title text-foreground">{tx('settings.piarium.pluginSettings.subagents.limits.title')}</h3>
+            <p className="typography-meta text-muted-foreground">{tx('settings.piarium.pluginSettings.subagents.limits.description')}</p>
+          </div>
+          <PluginRuntimeNote>{tx('settings.piarium.pluginSettings.subagents.authority.globalRuntime')}</PluginRuntimeNote>
+          <PluginConfigSource controller={runtime} />
+          <SettingsControlGroup title={tx('settings.piarium.pluginSettings.subagents.limits.capacity')} contentClassName="space-y-4">
+            <PluginNumberField {...runtimeFields} path={['maxSubagentDepth']} label={tx('settings.piarium.pluginSettings.subagents.field.maximumDepth')} defaultValue={2} min={0} />
+            <PluginNumberField {...runtimeFields} path={['maxSubagentSpawnsPerSession']} label={tx('settings.piarium.pluginSettings.subagents.field.maximumSpawns')} description={t('settings.piarium.pluginSettings.subagents.unlimitedZero')} defaultValue={0} min={0} />
+            <PluginNumberField {...runtimeFields} path={['globalConcurrencyLimit']} label={tx('settings.piarium.pluginSettings.subagents.field.globalConcurrency')} defaultValue={20} min={1} />
+            <PluginNumberField {...runtimeFields} path={['parallel', 'maxTasks']} label={tx('settings.piarium.pluginSettings.subagents.field.parallelTaskLimit')} defaultValue={8} min={1} />
+            <PluginNumberField {...runtimeFields} path={['parallel', 'concurrency']} label={tx('settings.piarium.pluginSettings.subagents.field.parallelConcurrency')} defaultValue={4} min={1} />
+            <PluginOptionalNumberField {...runtimeFields} path={['chain', 'dynamicFanout', 'maxItems']} label={tx('settings.piarium.pluginSettings.subagents.field.dynamicFanout')} emptyLabel={pluginDefault} min={0} fallbackValue={0} />
+          </SettingsControlGroup>
+          <SettingsControlGroup className={SUBGROUP_CLASS} title={tx('settings.piarium.pluginSettings.subagents.limits.hardBudgets')} description={tx('settings.piarium.pluginSettings.subagents.limits.hardBudgetsDescription')} contentClassName="space-y-4">
+            <PluginOptionalNumberField {...runtimeFields} path={['turnBudget', 'maxTurns']} label={tx('settings.piarium.pluginSettings.subagents.field.turnLimit')} emptyLabel={pluginDefault} min={1} fallbackValue={1} />
+            <PluginNumberField {...runtimeFields} path={['turnBudget', 'graceTurns']} label={tx('settings.piarium.pluginSettings.subagents.field.turnGrace')} defaultValue={1} min={0} />
+            <PluginOptionalNumberField {...runtimeFields} path={['toolBudget', 'soft']} label={tx('settings.piarium.pluginSettings.subagents.field.toolSoftLimit')} emptyLabel={pluginDefault} min={1} fallbackValue={1} />
+            <PluginOptionalNumberField {...runtimeFields} path={['toolBudget', 'hard']} label={tx('settings.piarium.pluginSettings.subagents.field.toolHardLimit')} emptyLabel={pluginDefault} min={1} fallbackValue={1} />
+            <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'tokens', 'soft']} label={tx('settings.piarium.pluginSettings.subagents.field.tokenSoftLimit')} emptyLabel={pluginDefault} min={1} fallbackValue={1} />
+            <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'tokens', 'hard']} label={tx('settings.piarium.pluginSettings.subagents.field.tokenHardLimit')} emptyLabel={pluginDefault} min={1} fallbackValue={1} />
+            <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'costUsd', 'soft']} label={tx('settings.piarium.pluginSettings.subagents.field.costSoftLimit')} emptyLabel={pluginDefault} min={0.000001} step={0.000001} fallbackValue={0.01} unit="USD" />
+            <PluginOptionalNumberField {...runtimeFields} path={['usageBudget', 'costUsd', 'hard']} label={tx('settings.piarium.pluginSettings.subagents.field.costHardLimit')} emptyLabel={pluginDefault} min={0.000001} step={0.000001} fallbackValue={0.01} unit="USD" />
+          </SettingsControlGroup>
+          {runtimeFooter}
+        </div>
       ) : null}
     </div>
   );

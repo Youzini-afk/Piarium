@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
+import { SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import type { PluginObjectDraft } from './usePluginConfigDraft';
 
 export const ScopeSelector: React.FC<{
@@ -21,7 +22,11 @@ export const ScopeSelector: React.FC<{
   return (
     <Select value={value} disabled={disabled} onValueChange={onChange}>
       <SelectTrigger size="settings" className="min-w-40">
-        <SelectValue />
+        <SelectValue>
+          {value === 'project'
+            ? t('settings.common.scope.project')
+            : t('settings.common.scope.global')}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent align="end">
         <SelectItem value="global">{t('settings.common.scope.global')}</SelectItem>
@@ -39,11 +44,8 @@ export const PluginDraftFooter: React.FC<{
   const { t } = useI18n();
   return (
     <div className="space-y-3 border-t border-border/60 pt-4">
-      <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:justify-between">
-        <p className="min-w-0 break-all font-mono typography-micro text-muted-foreground">
-          {controller.path || t('settings.piarium.pluginSettings.loadingPath')}
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
+      <div className="flex justify-end">
+        <div className="flex items-center gap-2">
           <Button
             type="button"
             variant="ghost"
@@ -53,12 +55,14 @@ export const PluginDraftFooter: React.FC<{
             className="!font-normal gap-1.5"
           >
             <Icon name="refresh" className={controller.loading ? 'size-3.5 animate-spin' : 'size-3.5'} />
-            {t('settings.piarium.recovery.actions.refresh')}
+            {controller.dirty
+              ? t('settings.piarium.pluginSettings.source.discard')
+              : t('settings.piarium.recovery.actions.refresh')}
           </Button>
           <Button
             type="button"
             size="sm"
-            disabled={!controller.loaded || !controller.dirty || controller.loading || controller.saving || blocked}
+            disabled={!controller.loaded || !controller.dirty || controller.loading || controller.saving || controller.rawError !== null || blocked}
             onClick={() => void controller.save()}
           >
             {controller.saving
@@ -79,8 +83,32 @@ export const PluginDraftFooter: React.FC<{
   );
 };
 
+export const PluginConfigSource: React.FC<{
+  controller: PluginObjectDraft;
+}> = ({ controller }) => {
+  const { t } = useI18n();
+  return (
+    <SettingsFieldRow
+      label={t('settings.piarium.pluginSettings.source.label')}
+      info={t('settings.piarium.pluginSettings.source.description')}
+      controlClassName="w-full max-w-[24rem]"
+    >
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <code className="min-w-0 break-all typography-micro text-muted-foreground">
+          {controller.path || t('settings.piarium.pluginSettings.loadingPath')}
+        </code>
+        {controller.dirty ? (
+          <span className="shrink-0 rounded-full border border-[var(--status-warning)]/30 px-2 py-0.5 typography-micro text-[var(--status-warning)]">
+            {t('settings.piarium.pluginSettings.source.unsaved')}
+          </span>
+        ) : null}
+      </div>
+    </SettingsFieldRow>
+  );
+};
+
 export const PluginRuntimeNote: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="flex items-start gap-2 rounded-lg bg-[var(--surface-elevated)] px-3 py-2 typography-meta text-muted-foreground">
+  <div className="flex items-start gap-2 typography-meta text-muted-foreground">
     <Icon name="information" className="mt-0.5 size-4 shrink-0" />
     <p>{children}</p>
   </div>

@@ -2,7 +2,7 @@
 
 Status: implementation contract for Phase 6
 
-Last updated: 2026-08-03
+Last updated: 2026-08-06
 
 ## 1. Purpose
 
@@ -104,8 +104,8 @@ pages, generic extension UI bridge, and the target-keyed Pi runtime catalog used
 Every first-class adapter uses the same frame:
 
 - identity: display name, package source, installed version, configured scope, and active session;
-- health: `unavailable`, `configured`, `active`, `degraded`, or `incompatible`, with the evidence
-  that produced the state;
+- observation: package installation and current-session evidence are separate; `no session`,
+  `not observed`, `available`, and probe failure are not collapsed into a guessed health state;
 - scope: user and project documents are visibly distinct, including precedence and conflicts;
 - changes: dirty state, validation diagnostics, reload requirement, atomic save, and revision
   conflict handling;
@@ -116,6 +116,43 @@ Every first-class adapter uses the same frame:
 
 The shell never writes a default just because a form rendered it. Unchanged native keys remain
 absent, so future plugin defaults and migrations continue to work.
+
+### 4.1 Quick configuration and native-document editing
+
+The default adapter view is a task-oriented quick configuration layer, not a schema dump. A native
+property path may appear as secondary provenance or in the Advanced editor, but it is never the
+primary label of an ordinary control. Controls use user outcomes such as “Default model”, “Search
+strategy”, and “Sessions kept per workspace”. Low-level tuning is not promoted merely because its
+schema is known.
+
+Structured controls and Advanced editing of the same source share one draft, revision, validation
+state, and Save action. An adapter must not load a second raw draft that can overwrite unsaved form
+changes. Text-backed JSONC documents retain comments, trailing commas, formatting outside the
+edited path, and unknown keys. Object-scoped settings retain unknown values through their native
+host update API; the renderer does not claim to preserve comment syntax that API does not expose.
+Invalid raw content disables structured controls while leaving Advanced available for repair.
+Switching plugin, scope, or source keeps an independent mounted draft or requires the current draft
+to be explicitly saved or discarded first.
+
+Every selected adapter shows the package observation separately from its configuration authority:
+the package source/version, active session or workspace target, current native document and scope,
+dirty/invalid state, and the exact evidence for runtime availability. “Not observed” is not reported
+as unhealthy, and an absent key in one layer is “not set in this source”, not a guessed effective
+value.
+
+| Adapter | Quick tasks | Native authority shown in the quick view | Advanced-only by default | Local warnings that remain visible |
+| --- | --- | --- | --- | --- |
+| pi-subagents | Agents and workflows; definition actions; per-scope model/thinking/fallback overrides; delegation; review; limits | Provider actions/Agent Markdown, user/project `settings.json#subagents`, and global runtime `config.json` are three distinct save owners | worktree/storage paths, Intercom, notification batching, detailed LSP/retry tuning, complex prompts and future runtime fields | definition versus override precedence, project trust, hard budgets and destructive provider actions |
+| Magic Context | Context; memory; internal models; maintenance schedules and session operations | Independent user/project JSONC drafts with ignored project keys reported | per-model maps, prompts/permissions, sampling fine-tuning, SQLite/Synapse details and experimental fields | fail-closed behavior, lossy compression, project-ignored keys, model-cost maintenance actions |
+| pi-web-access | Search; providers and credential sources; Browser/Curator; content; safety | Agent-root `web-search.json`; command presence is only loaded-state evidence | custom tool names, provider-specific fine tuning and future fields | executable credential sources, browser-cookie access, remote bind, fresh scraping and SSRF exceptions |
+| pi-mcp-adapter | Runtime servers and actions; selected-source server overrides; behavior and interaction policy | One visibly selected source from the documented six-layer precedence; the dedicated MCP page remains canonical | environment/header/bearer/OAuth material, complex output guards, tracing/filter details and future fields | URL credential reset, sampling auto-approval, socket trust and source-local versus effective state |
+| pi-workspace-history | Protection and retention | Independent user/project `settings.json#workspaceHistory` drafts | scan budgets, Git timeout and future storage-engine tuning | lowering retention deletes old history; changing the storage directory does not migrate old history; home-directory capture |
+| pi-wtf | Command words and the three generated command behaviors | Global `wtf.json`; previews are distinguished from commands currently loaded in a session | future plugin-owned fields | `!` rewrites session history and never restores file or external side effects |
+
+Agent definitions and settings overrides are deliberately not one transaction. A definition action
+may succeed while an unsaved override draft remains, or vice versa; the UI presents and reports
+those operations separately. The same rule applies to immediate plugin commands versus saved
+configuration: session actions never imply that a draft was persisted.
 
 ## 5. Adapter contracts
 
@@ -130,18 +167,36 @@ Authority:
 
 Target settings sections:
 
-1. Overview: installation, active version, provider health, effective scope, and diagnostics.
-2. Defaults: default model, thinking, extension list, model scope, built-in agents, and project-root
-   resolution.
-3. Runtime and limits: asynchronous mode, placement/depth/spawn/concurrency, budgets, wait/control,
-   completion batching, artifact directory, worktrees, scheduled runs, and intercom.
-4. Watchdog: the complete current watchdog schema with native defaults and validation.
-5. Agent overrides: provider-owned per-agent overrides without flattening them into the generic
-   Agents model.
-6. Advanced: the full native JSON documents with scope and conflict information.
+1. Agents & workflows: the real provider catalog, immediate create/edit definition actions, and a
+   visibly separate user/project `agentOverrides` editor.
+2. Delegation: scoped model defaults and allowlist plus separately saved global spawn/wait behavior.
+3. Review: watchdog activation, main/child review models, severity, and blocker follow-up.
+4. Limits: global depth, spawn, concurrency, parallelism, and budget guardrails.
+5. Advanced within each save owner: the complete scoped settings object or global runtime document,
+   sharing the visible form's draft and Save action.
 
-The current settings adapter also discovers the live `pi-subagents` catalog by provider id and uses
+The current settings adapter also discovers agents and workflows from the live `pi-subagents`
+catalog, exposes provider-advertised create/update actions, and uses
 the descriptor's runtime `name`—never Piarium's opaque descriptor id—as the `agentOverrides` key.
+The definition dialog's Advanced JSON is specifically the plugin's management-action config, not a
+raw editor for Agent Markdown or `.chain.md` files. It exposes only top-level fields accepted by the
+installed 0.37.2 management `create`/`update` contract. Unknown native frontmatter remains
+plugin-owned and is not shown as editable JSON; normal updates preserve it through the plugin's
+serializer. Manually adding an unsupported action key is rejected before dispatch instead of being
+silently ignored. Removing a supported advanced key sends that field's plugin-defined clear or
+default value, so a JSON edit cannot degrade into a misleading “no changes” response.
+
+Saved workflow steps expose the complete 0.37.2 management/Markdown contract as task-oriented
+controls: agent and task, phase and label, named output (`as`), output schema path and return mode,
+model, saved output, reads, skills, progress tracking, and tool-call budget. Each supported value can
+be created, loaded, changed, or cleared. Unknown step keys are not offered as editable Advanced JSON
+because the 0.37.2 management parser rebuilds a whitelist step and cannot round-trip them. The host
+still projects such native keys as preservation evidence, and the dialog refuses a lossy workflow
+update rather than erasing them. It applies the same guard to non-string unknown root values in a
+`.chain.json` file, which that version's serializer also cannot retain. Future thinking tokens
+likewise render as an unsupported value and remain unchanged until the user chooses a supported
+level.
+
 It supports the complete current override contract, including a structured three-state
 `toolBudget`, while preserving arbitrary future agent names and unknown future keys. Fields known
 to belong to agent Markdown or an individual run contract are diagnosed instead of being saved to
@@ -199,8 +254,8 @@ Project configuration is not rendered as an identical user form. Keys stripped o
 the package's project override rules are explained and remain user-only. Expensive recompression
 requires a focused confirmation that explains range and model cost; routine operations do not.
 
-Implemented configuration slice: the native settings page now separates Overview, Context pipeline,
-Memory, Embedding and storage, Internal agents, and Dreamer tasks. It keeps independent unsaved
+Implemented configuration slice: the native settings page now separates Context, Memory, Models,
+and Maintenance. It keeps independent unsaved
 user/project drafts, hides fields the real project loader strips, reports ignored fields already
 present in a project document, validates the plugin's numeric five-field cron and embedding
 requirements, and preserves polymorphic per-model maps for Advanced JSONC editing instead of
@@ -239,28 +294,33 @@ Authority:
 - its registered panel, reconnect, authentication, logout, enable, and disable commands;
 - the adapter's OS keyring/OAuth implementation for credentials.
 
-The existing status-first MCP page remains the primary design. It shows servers, tools, resources,
-connection errors, active/configured distinction, and runtime actions. Its configuration section
-edits one of the adapter's six native sources at a time: stable root settings, imports, transports,
+The dedicated MCP page remains canonical and is configuration-first: users choose one native source
+and reach the common server, behavior, and safety controls before any live-session tooling. Runtime
+status and actions follow as a secondary section showing servers, tools, resources, connection
+errors, and active/configured distinction. The configuration section edits one of the adapter's six
+native sources at a time: stable root settings, imports, transports,
 lifecycle, direct-tool policy, filters, and safe per-server flags receive structured controls;
 environment maps, headers, tokens, OAuth details, complex guards, and future fields remain in the
 same revisioned raw JSONC draft. Native setup/panel flows still own discovery and authentication.
 Piarium does not compute an effective merged configuration or reproduce OAuth, transport, or
 credential storage.
 
-Changing an existing server URL clears URL-bound credentials present in that selected source before
-save, matching the adapter's cross-source credential binding instead of carrying old endpoint
-secrets forward. Switching transport clears fields owned by the previous transport while preserving
-unrelated and unknown server fields. Partial server overrides remain valid, so the GUI does not
-require a transport when a lower-precedence source supplies it. Host-config discovery stays
-explicit and defaults off. OpenCode is available only as an explicit compatibility import supported
+Saving a changed existing server URL clears URL-bound credentials present in that selected source,
+matching the adapter's cross-source credential binding instead of carrying old endpoint secrets
+forward. The cleanup happens at the revisioned Save boundary, so temporary typing is reversible and
+restoring the loaded URL preserves its credentials. Switching transport clears fields owned by the
+previous transport while preserving unrelated and unknown server fields. Partial server overrides
+remain valid, so the GUI does not require a transport when a lower-precedence source supplies it.
+Host-config discovery stays explicit and defaults off. Socket configuration keeps a local trust
+warning beside the path. OpenCode is available only as an explicit compatibility import supported
 by the adapter; it is never an authoritative Piarium source.
 
 The current public `status/v1` snapshot intentionally does not expose config provenance, transport,
 or failure text, so Piarium does not reverse-engineer an effective configuration from the six
 source documents. Server actions remain command-backed; names containing whitespace are shown but
 their per-server buttons stay disabled because the adapter's current command parser has no quoting
-contract. The extension panel remains available for those servers.
+contract. A read-only provenance index reports server names present in multiple native sources
+without calculating their merged values. The extension panel remains available for those servers.
 
 Acceptance:
 
@@ -289,10 +349,12 @@ Target sections:
 
 Implemented configuration slice: the first-class adapter now models automatic, named, concurrent,
 all-provider, and typed ordered-fallback routing without presenting `provider` and
-`searchProvider` as independent choices. It covers current public tool names, every documented
-credential source, provider endpoints/models, Curator bind modes, Chromium-cookie opt-in,
-shortcuts, GitHub/video/PDF behavior, domain policy, and SSRF exceptions while preserving unknown
-native keys. Piarium propagates its selected Pi agent directory through
+`searchProvider` as independent choices. Its quick view is organized as Search, Providers &
+credentials, Browser & Curator, Content, and Safety. Stable high-frequency controls include masked
+credential sources, provider endpoints/models, Curator bind modes, Chromium-cookie opt-in,
+GitHub/video feature switches, domain policy, and SSRF exceptions. Tool-name aliases, shortcuts,
+size/time budgets, and provider-specific tuning remain in the same draft's Advanced editor while
+unknown native keys are preserved. Piarium propagates its selected Pi agent directory through
 `PI_CODING_AGENT_DIR`, so the file edited by the GUI is the file loaded by extensions even when a
 custom agent directory is used.
 
@@ -307,8 +369,9 @@ Curator state remain unreported until the extension publishes a versioned runtim
 plugin continues to own every dialog, follow-up message, browser server, stored result, and delete
 action.
 
-Secrets are not surfaced as ordinary text fields. The advanced editor preserves native credential
-source references. A remote Curator bind explains plain-HTTP/token-in-URL exposure and highlights
+Secrets use masked inputs and are never tested, summarized, or reported as provider health. The
+advanced editor preserves native credential source references. A remote Curator bind explains
+plain-HTTP/token-in-URL exposure and highlights
 `0.0.0.0`; it is allowed after an explicit choice rather than prohibited by a product allowlist.
 
 Acceptance:

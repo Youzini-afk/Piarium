@@ -23,10 +23,39 @@ const URL_BOUND_AUTH_FIELDS = ['headers', 'bearerToken', 'bearerTokenEnv'] as co
 
 export const parseMcpConfigObject = (content: string): JsonObject => parseJsoncObject(content);
 
+export const canLeaveMcpConfigSource = (dirty: boolean): boolean => !dirty;
+
+export const mcpSourceBooleanState = (
+  document: JsonObject,
+  path: readonly string[],
+): 'disabled' | 'enabled' | 'not-set' => {
+  const value = readJsonPath(document, path);
+  if (value === true) return 'enabled';
+  if (value === false) return 'disabled';
+  return 'not-set';
+};
+
 export const mcpServerNames = (document: JsonObject): string[] => (
   Object.keys(asJsonObject(readJsonPath(document, ['mcpServers'])))
     .sort((left, right) => left.localeCompare(right))
 );
+
+export const mcpServerSourceConflicts = (
+  sourceServerIndex: Readonly<Record<string, readonly string[]>>,
+  sourceOrder: readonly string[],
+): Array<[serverName: string, sourceIds: string[]]> => {
+  const provenance = new Map<string, string[]>();
+  for (const sourceId of sourceOrder) {
+    for (const serverName of sourceServerIndex[sourceId] ?? []) {
+      const sources = provenance.get(serverName) ?? [];
+      if (!sources.includes(sourceId)) sources.push(sourceId);
+      provenance.set(serverName, sources);
+    }
+  }
+  return [...provenance.entries()]
+    .filter(([, sourceIds]) => sourceIds.length > 1)
+    .sort(([left], [right]) => left.localeCompare(right));
+};
 
 export const mcpServerTransport = (
   document: JsonObject,
@@ -99,17 +128,35 @@ export const updateMcpServerUrl = (
   content: string,
   serverName: string,
   url: string,
-): string => {
-  const document = parseMcpConfigObject(content);
-  const path = ['mcpServers', serverName] as const;
-  const server = asJsonObject(readJsonPath(document, path));
-  const previousUrl = server.url;
-  let next = updateJsoncPath(content, [...path, 'url'], url);
+): string => updateJsoncPath(content, ['mcpServers', serverName, 'url'], url);
 
-  if (typeof previousUrl !== 'string' || previousUrl === url) return next;
-  for (const field of URL_BOUND_AUTH_FIELDS) {
-    next = removeJsoncPath(next, [...path, field]);
+/**
+ * URL-bound credentials are removed only at the save boundary. Editing an URL
+ * is reversible: typing a temporary value and restoring the loaded URL must
+ * not silently delete credentials from the draft.
+ */
+export const prepareMcpConfigForSave = (
+  sourceContent: string,
+  draftContent: string,
+): string => {
+  const source = parseMcpConfigObject(sourceContent);
+  const draft = parseMcpConfigObject(draftContent);
+  const sourceServers = asJsonObject(readJsonPath(source, ['mcpServers']));
+  let next = draftContent;
+
+  for (const serverName of Object.keys(sourceServers)) {
+    const sourceServer = asJsonObject(sourceServers[serverName]);
+    if (typeof sourceServer.url !== 'string') continue;
+    const draftServer = asJsonObject(readJsonPath(draft, ['mcpServers', serverName]));
+    if (draftServer.url === sourceServer.url) continue;
+
+    for (const field of URL_BOUND_AUTH_FIELDS) {
+      next = removeJsoncPath(next, ['mcpServers', serverName, field]);
+    }
+    if (draftServer.oauth !== false) {
+      next = removeJsoncPath(next, ['mcpServers', serverName, 'oauth']);
+    }
   }
-  if (server.oauth !== false) next = removeJsoncPath(next, [...path, 'oauth']);
+
   return next;
 };
