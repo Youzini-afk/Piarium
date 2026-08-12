@@ -16,6 +16,13 @@ destructive commands.
 | pi-mcp-adapter | 2.23.0 + Piarium `62255b3` | Pass | `mcp`, `mcp-auth`; read-only `configCatalog/v1` RPC |
 | pi-web-access | 0.17.1 | Pass | `websearch`, `curator`, `google-account`, `search` |
 | @cortexkit/pi-magic-context | 0.33.0 | Pass | 9 context, dream, and embedding commands |
+| pi-openai-codex-compat | 0.0.7-alpha.0 | Pass | `codex-settings` |
+| pi-observational-memory | 3.0.4 | Pass | `om:status`, `om:view` |
+
+`pi-openai-codex-compat@0.0.7-alpha.0` declares Pi `>=0.84.0 <0.85.0`, while the current Piarium
+runtime is pinned to Pi `0.83.0`. The Phase 1 smoke above proves entry-point loading and command
+registration only; Codex provider transport and remote compaction still require a Pi runtime
+upgrade and dedicated integration verification before Piarium can claim full runtime compatibility.
 
 Run the reusable smoke harness after building Piarium:
 
@@ -48,6 +55,12 @@ plugin ownership intact:
   Gemini Web account, and stored-result session actions, while search/fetch tools, plugin dialogs,
   widgets, and custom entries travel through the generic Pi extension bridge. Command discovery is
   not presented as provider health.
+- OpenAI Codex Compat preserves separate global and trusted-project
+  `openai-codex-compat.json` drafts, including explicit `null` compaction lifecycle state and unknown
+  fields; Piarium does not infer environment overrides or assign cross-plugin compaction ownership;
+- Observational Memory edits only the native user/project `settings.json#observational-memory`
+  object. Threshold, pool, and worker-model validation blocks invalid saves without reading or
+  rewriting the plugin-owned session ledger.
 
 Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
 verification.

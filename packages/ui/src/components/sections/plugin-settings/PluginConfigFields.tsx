@@ -178,7 +178,9 @@ export const PluginBooleanField: React.FC<BooleanFieldProps> = ({
   );
 };
 
-export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
+export const PluginOptionalBooleanField: React.FC<BaseFieldProps & {
+  unsetLabel?: string;
+}> = ({
   description,
   disabled,
   draft,
@@ -188,13 +190,18 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
   onSet,
   path,
   settingsItem,
+  unsetLabel,
 }) => {
   const { t } = useI18n();
   const field = useField({ draft, onRemove, onSet, path });
   const current = validBoolean(field.raw);
-  const value = current === undefined ? 'default' : optionKey(current);
-  const selectedLabel = current === undefined
-    ? t('settings.piarium.pluginSettings.field.pluginDefault')
+  const unsupported = field.explicit && current === undefined;
+  const notSetLabel = unsetLabel ?? t('settings.piarium.pluginSettings.field.pluginDefault');
+  const value = unsupported ? 'unsupported' : current === undefined ? 'default' : optionKey(current);
+  const selectedLabel = unsupported
+    ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+    : current === undefined
+    ? notSetLabel
     : current
       ? t('settings.piarium.pluginSettings.field.enabled')
       : t('settings.piarium.pluginSettings.field.disabled');
@@ -211,7 +218,8 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
         disabled={disabled}
         onValueChange={(next) => {
           if (next === 'default') field.remove();
-          else field.set(next === optionKey(true));
+          else if (next === optionKey(true)) field.set(true);
+          else if (next === optionKey(false)) field.set(false);
         }}
       >
         <SelectTrigger
@@ -222,7 +230,12 @@ export const PluginOptionalBooleanField: React.FC<BaseFieldProps> = ({
           <SelectValue>{selectedLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
+          {unsupported ? (
+            <SelectItem value="unsupported" disabled>
+              {t('settings.piarium.pluginSettings.field.unsupportedValue')}
+            </SelectItem>
+          ) : null}
+          <SelectItem value="default">{notSetLabel}</SelectItem>
           <SelectItem value={optionKey(true)}>{t('settings.piarium.pluginSettings.field.enabled')}</SelectItem>
           <SelectItem value={optionKey(false)}>{t('settings.piarium.pluginSettings.field.disabled')}</SelectItem>
         </SelectContent>
@@ -285,12 +298,15 @@ export const PluginNumberField: React.FC<NumberFieldProps> = ({
 interface OptionalNumberFieldProps extends BaseFieldProps {
   defaultValue?: number | null | string;
   emptyLabel?: string;
+  emptyActionLabel?: React.ReactNode;
   emptyValue?: null | string;
   fallbackValue?: number;
   max?: number;
   min?: number;
   step?: number;
   unit?: React.ReactNode;
+  unsetLabel?: React.ReactNode;
+  preserveTypedPrecision?: boolean;
 }
 
 export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
@@ -300,6 +316,7 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
   draft,
   info,
   emptyLabel,
+  emptyActionLabel,
   emptyValue,
   fallbackValue,
   label,
@@ -311,9 +328,16 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
   step,
   unit,
   settingsItem,
+  unsetLabel,
+  preserveTypedPrecision,
 }) => {
+  const { t } = useI18n();
   const field = useField({ draft, onRemove, onSet, path });
   const explicitNumber = validFiniteNumber(field.raw);
+  const explicitEmpty = field.explicit
+    && emptyValue !== undefined
+    && field.raw === emptyValue;
+  const unsupported = field.explicit && explicitNumber === undefined && !explicitEmpty;
   const value = explicitNumber ?? (!field.explicit && typeof defaultValue === 'number'
     ? defaultValue
     : undefined);
@@ -327,14 +351,24 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
     >
       <NumberInput
         aria-label={fieldAriaLabel(label, path)}
-        value={value}
+        value={unsupported ? undefined : value}
         fallbackValue={fallbackValue ?? (typeof defaultValue === 'number' ? defaultValue : undefined)}
         disabled={disabled}
         min={min}
         max={max}
         step={step}
-        emptyLabel={emptyLabel}
-        placeholder={emptyLabel}
+        inputMode={step !== undefined && !Number.isInteger(step) ? 'decimal' : 'numeric'}
+        preserveTypedPrecision={preserveTypedPrecision}
+        emptyLabel={unsupported
+          ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+          : explicitEmpty
+            ? emptyLabel
+            : undefined}
+        placeholder={unsupported
+          ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+          : field.explicit
+            ? emptyLabel
+            : undefined}
         onClear={() => {
           if (emptyValue === undefined) field.remove();
           else field.set(emptyValue);
@@ -343,7 +377,27 @@ export const PluginOptionalNumberField: React.FC<OptionalNumberFieldProps> = ({
         containerClassName="w-36"
       />
       {unit ? <span className="typography-meta text-muted-foreground">{unit}</span> : null}
-      <DefaultAction disabled={disabled} explicit={field.explicit} onReset={field.remove} />
+      {emptyValue !== undefined && emptyActionLabel && !explicitEmpty ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          disabled={disabled}
+          onClick={() => field.set(emptyValue)}
+          className="shrink-0 !font-normal text-muted-foreground"
+        >
+          {emptyActionLabel}
+        </Button>
+      ) : null}
+      {field.explicit ? (
+        <DefaultAction disabled={disabled} explicit onReset={field.remove} />
+      ) : unsetLabel ? (
+        <span className="shrink-0 typography-micro text-muted-foreground">
+          {unsetLabel}
+        </span>
+      ) : (
+        <DefaultAction explicit={false} onReset={field.remove} />
+      )}
     </SettingsFieldRow>
   );
 };
@@ -423,6 +477,7 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
 
 interface OptionalSelectFieldProps extends BaseFieldProps {
   options: readonly SelectOption[];
+  unsetLabel?: string;
 }
 
 export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
@@ -436,15 +491,17 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
   options,
   path,
   settingsItem,
+  unsetLabel,
 }) => {
   const { t } = useI18n();
   const field = useField({ draft, onRemove, onSet, path });
   const current = options.find((option) => option.value === field.raw);
   const unsupported = field.explicit && current === undefined;
   const value = current ? optionKey(current.value) : unsupported ? 'unsupported' : 'default';
-  const selectedLabel = current?.label ?? t(unsupported
-    ? 'settings.piarium.pluginSettings.field.unsupportedValue'
-    : 'settings.piarium.pluginSettings.field.pluginDefault');
+  const notSetLabel = unsetLabel ?? t('settings.piarium.pluginSettings.field.pluginDefault');
+  const selectedLabel = current?.label ?? (unsupported
+    ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+    : notSetLabel);
   return (
     <SettingsFieldRow
       label={label}
@@ -479,7 +536,7 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
             </SelectItem>
           ) : null}
           <SelectItem value="default">
-            {t('settings.piarium.pluginSettings.field.pluginDefault')}
+            {notSetLabel}
           </SelectItem>
           {options.map((option) => (
             <SelectItem key={optionKey(option.value)} value={optionKey(option.value)}>

@@ -12,6 +12,18 @@ describe('plugin settings navigation', () => {
       integrationId: 'workspace-history',
       pluginId: 'pi-workspace-history',
     });
+
+    requestPluginSettingsTarget('npm:pi-openai-codex-compat@0.0.7-alpha.0');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'openai-codex-compat',
+      pluginId: 'npm:pi-openai-codex-compat@0.0.7-alpha.0',
+    });
+
+    requestPluginSettingsTarget('pi-observational-memory');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'observational-memory',
+      pluginId: 'pi-observational-memory',
+    });
     expect(consumePluginSettingsTarget()).toBeNull();
   });
 

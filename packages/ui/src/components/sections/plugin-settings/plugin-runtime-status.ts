@@ -45,6 +45,14 @@ export function pluginRuntimeStatus(integrationId: PluginSettingsIntegrationId, 
       if (signals.commandsFailed) return 'error';
       if (!signals.commandsChecked) return 'checking';
       return signals.commandNames.has('websearch') ? 'available' : 'not-observed';
+    case 'openai-codex-compat':
+      if (signals.commandsFailed) return 'error';
+      if (!signals.commandsChecked) return 'checking';
+      return signals.commandNames.has('codex-settings') ? 'available' : 'not-observed';
+    case 'observational-memory':
+      if (signals.commandsFailed) return 'error';
+      if (!signals.commandsChecked) return 'checking';
+      return signals.commandNames.has('om:status') ? 'available' : 'not-observed';
     case 'workspace-history':
       return recoveryProviderStatus(signals.recoveryProviders, signals.recoveryChecked, signals.recoveryFailed, 'pi-workspace-history');
     case 'wtf':

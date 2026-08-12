@@ -17,6 +17,8 @@ import {
 } from '@/lib/settings/plugin-settings-navigation';
 import { AdvancedPluginConfigEditor } from './AdvancedPluginConfigEditor';
 import { MagicContextSettings } from './MagicContextSettings';
+import { ObservationalMemorySettings } from './ObservationalMemorySettings';
+import { OpenAICodexCompatSettings } from './OpenAICodexCompatSettings';
 import { SubagentsSettings } from './SubagentsSettings';
 import { WebAccessSettings } from './WebAccessSettings';
 import { WorkspaceHistorySettings } from './WorkspaceHistorySettings';
@@ -40,6 +42,8 @@ const PLUGIN_INTEGRATIONS: readonly PluginIntegration[] = [
   { icon: 'global', id: 'web-access', packageName: 'pi-web-access' },
   { icon: 'history', id: 'workspace-history', packageName: 'pi-workspace-history' },
   { icon: 'arrow-go-back', id: 'wtf', packageName: 'pi-wtf' },
+  { icon: 'code-box', id: 'openai-codex-compat', packageName: 'pi-openai-codex-compat' },
+  { icon: 'brain', id: 'observational-memory', packageName: 'pi-observational-memory' },
 ] as const;
 
 const integrationForPackage = (entry: PackageDescriptor): PluginIntegration | null => {
@@ -127,6 +131,10 @@ export const PluginSettingsPage: React.FC = () => {
                   <WorkspaceHistorySettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
                 ) : integration?.id === 'wtf' ? (
                   <WtfSettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
+                ) : integration?.id === 'openai-codex-compat' ? (
+                  <OpenAICodexCompatSettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
+                ) : integration?.id === 'observational-memory' ? (
+                  <ObservationalMemorySettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
                 ) : (
                   <AdvancedPluginConfigEditor
                     key={`${runtimeTargetKey}:${identity}`}

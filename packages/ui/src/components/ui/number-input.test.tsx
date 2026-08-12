@@ -249,6 +249,7 @@ interface ControlledProps {
   min?: number;
   max?: number;
   step?: number;
+  preserveTypedPrecision?: boolean;
 }
 
 interface ControlledHandle {
@@ -285,6 +286,7 @@ function mountControlled(props: ControlledProps): ControlledHandle {
         min: props.min,
         max: props.max,
         step: props.step,
+        preserveTypedPrecision: props.preserveTypedPrecision,
         onValueChange: (v: number) => recorded.push(v),
       }),
     );
@@ -532,6 +534,24 @@ describe("NumberInput rapid-click stepper", () => {
       // commit from the typed change, none from the blur (suppressed by
       // the `normalized !== value` gate), and one from the stepper.
       expect(handle.recorded).toEqual([110, 115]);
+    });
+  });
+
+  test("preserves typed precision when step only controls the buttons", () => {
+    withHandle({
+      initialValue: 0.68,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      preserveTypedPrecision: true,
+    }, (handle) => {
+      handle.typeInput("0.6789");
+      expect(handle.recorded).toEqual([0.6789]);
+      handle.rerenderWith(lastCommit(handle));
+      handle.blurInput();
+      expect(handle.recorded).toEqual([0.6789]);
+      handle.clickIncrease();
+      expect(Math.abs((handle.recorded.at(-1) ?? 0) - 0.6889)).toBeLessThan(1e-10);
     });
   });
 

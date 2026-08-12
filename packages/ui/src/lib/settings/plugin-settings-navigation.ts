@@ -4,6 +4,8 @@ export type PluginSettingsIntegrationId =
   | 'web-access'
   | 'workspace-history'
   | 'wtf'
+  | 'openai-codex-compat'
+  | 'observational-memory'
   | 'mcp';
 
 export interface PluginSettingsNavigationTarget {
@@ -18,6 +20,8 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-magic-context': 'magic-context',
   'magic-context': 'magic-context',
   'pi-mcp-adapter': 'mcp',
+  'pi-observational-memory': 'observational-memory',
+  'pi-openai-codex-compat': 'openai-codex-compat',
   'pi-subagents': 'subagents',
   'pi-web-access': 'web-access',
   'pi-workspace-history': 'workspace-history',
@@ -34,6 +38,8 @@ export const pluginSettingsIntegrationForPluginId = (
 const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, string>> = {
   'magic-context': '@cortexkit/pi-magic-context',
   'mcp': 'pi-mcp-adapter',
+  'observational-memory': 'pi-observational-memory',
+  'openai-codex-compat': 'pi-openai-codex-compat',
   'subagents': 'pi-subagents',
   'web-access': 'pi-web-access',
   'workspace-history': 'pi-workspace-history',

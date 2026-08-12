@@ -77,6 +77,14 @@ describe('plugin runtime status', () => {
     expect(pluginRuntimeStatus('web-access', signals())).toBe('not-observed');
   });
 
+  test('observes the native commands registered by the Codex and observational memory plugins', () => {
+    const commandNames = new Set(['codex-settings', 'om:status']);
+    expect(pluginRuntimeStatus('openai-codex-compat', signals({ commandNames }))).toBe('available');
+    expect(pluginRuntimeStatus('observational-memory', signals({ commandNames }))).toBe('available');
+    expect(pluginRuntimeStatus('openai-codex-compat', signals())).toBe('not-observed');
+    expect(pluginRuntimeStatus('observational-memory', signals())).toBe('not-observed');
+  });
+
   test('uses active recovery providers and MCP status reports', () => {
     expect(
       pluginRuntimeStatus(

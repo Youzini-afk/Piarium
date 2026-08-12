@@ -16,6 +16,7 @@ interface NumberInputProps
   fallbackValue?: number
   onClear?: () => void
   emptyLabel?: string
+  preserveTypedPrecision?: boolean
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -54,6 +55,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       fallbackValue,
       onClear,
       emptyLabel = '—',
+      preserveTypedPrecision = false,
       ...props
     },
     ref
@@ -127,11 +129,11 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     const commitValue = React.useCallback(
       (rawValue: number) => {
         const clamped = clamp(rawValue, min, max)
-        const normalized = normalizeToStep(clamped, step)
+        const normalized = preserveTypedPrecision ? clamped : normalizeToStep(clamped, step)
         committedValueRef.current = normalized
         onValueChange(normalized)
       },
-      [max, min, onValueChange, step]
+      [max, min, onValueChange, preserveTypedPrecision, step]
     )
 
     const handleChange = React.useCallback(
@@ -169,7 +171,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           setDraft(value == null ? '' : String(value))
         } else {
           const clamped = clamp(parsed, min, max)
-          const normalized = normalizeToStep(clamped, step)
+          const normalized = preserveTypedPrecision ? clamped : normalizeToStep(clamped, step)
           if (normalized !== value) {
             // Route through commitValue so committedValueRef stays in sync with
             // the typed value. Without this, a typed-then-stepper sequence
@@ -185,7 +187,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
 
         onBlur?.(event)
       },
-      [commitValue, draft, max, min, onBlur, onClear, step, value]
+      [commitValue, draft, max, min, onBlur, onClear, preserveTypedPrecision, step, value]
     )
 
     const incrementDisabled = Boolean(disabled || baseValue >= max)

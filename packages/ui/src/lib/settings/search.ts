@@ -698,6 +698,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
       'domain policy',
       'workspace history',
       'pi-wtf',
+      'openai codex compat',
+      'responses lite',
+      'remote compaction',
+      'observational memory',
+      'observations',
+      'reflections',
+      'observation pool',
     ],
   },
   {

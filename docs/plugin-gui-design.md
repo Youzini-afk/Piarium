@@ -148,6 +148,8 @@ value.
 | pi-mcp-adapter | Runtime servers and actions; selected-source server overrides; behavior and interaction policy | One visibly selected source from the documented six-layer precedence; the dedicated MCP page remains canonical | bearer/OAuth details, complex output guards, tracing/filter details and future fields | URL credential reset, sampling auto-approval, socket trust and source-local versus effective state |
 | pi-workspace-history | Protection and retention | Independent user/project `settings.json#workspaceHistory` drafts | scan budgets, Git timeout and future storage-engine tuning | lowering retention deletes old history; changing the storage directory does not migrate old history; home-directory capture |
 | pi-wtf | Command words and the three generated command behaviors | Global `wtf.json`; previews are distinguished from commands currently loaded in a session | future plugin-owned fields | `!` rewrites session history and never restores file or external side effects |
+| pi-openai-codex-compat | Codex request, reasoning, remote-compaction and tool options | Independent global `openai-codex-compat.json` and trusted project `.pi/openai-codex-compat.json` drafts | unknown future plugin fields | absent keys stay unset; environment overrides remain plugin-owned |
+| pi-observational-memory | Observation, reflection, compaction, pool and worker settings | Independent user/project `settings.json#observational-memory` drafts | unknown future plugin fields | invalid thresholds and incomplete worker models block save without rewriting the draft |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
 may succeed while an unsaved override draft remains, or vice versa; the UI presents and reports
@@ -155,6 +157,14 @@ those operations separately. The same rule applies to immediate plugin commands 
 configuration: session actions never imply that a draft was persisted.
 
 ## 5. Adapter contracts
+
+### 5.0 Context and memory package boundaries
+
+`pi-openai-codex-compat` and `pi-observational-memory` are adapted only through their current native
+configuration authorities. Piarium does not assign compaction ownership, infer cross-plugin
+priority, or add coexistence policy in this phase. `context-mode` remains available through the
+generic installed-package editor because it does not expose one canonical user configuration
+document suitable for a dedicated form. `pi-memory` is not a maintained adapter target.
 
 ### 5.1 pi-subagents
 
