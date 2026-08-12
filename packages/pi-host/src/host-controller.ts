@@ -435,6 +435,8 @@ export class HostController {
         return this.#sessionHost.fleetStatus(readString(params, "sessionId"));
       case "model.list":
         return this.#sessionHost.listModels();
+      case "mcp.config.snapshot":
+        return this.#sessionHost.mcpConfigSnapshot();
       case "model.select":
         return this.#sessionHost.selectModel(
           readString(params, "sessionId"),

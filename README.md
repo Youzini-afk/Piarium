@@ -51,7 +51,7 @@ advance independently.
 | `@cortexkit/pi-magic-context` | Native user/project JSONC configuration, registered commands, status, and public entries |
 | `pi-workspace-history` | Combined conversation/workspace restore, undo, redo, and named checkpoints |
 | `pi-wtf` | Prompt repair actions and extension-owned `wtf.json` configuration |
-| `pi-mcp-adapter` | Public status, native commands, and all adapter-owned configuration sources |
+| `pi-mcp-adapter` | Adapter-owned effective server catalog, public status/actions, and revisioned native-source editing |
 | `pi-web-access` | Native `web-search.json`, Curator and account actions, and stored-result navigation |
 
 See [maintained extension compatibility](docs/extension-compatibility.md) for the currently verified

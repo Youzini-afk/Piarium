@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readJsonPath } from '@/components/sections/plugin-settings/plugin-config-model';
 import {
   canLeaveMcpConfigSource,
+  mcpSourceBoundSnapshot,
   mcpServerNames,
   mcpServerSourceConflicts,
   mcpServerTransport,
@@ -43,6 +44,12 @@ describe('MCP native config editing', () => {
   test('blocks leaving a source until its dirty draft is saved or discarded', () => {
     expect(canLeaveMcpConfigSource(false)).toBe(true);
     expect(canLeaveMcpConfigSource(true)).toBe(false);
+  });
+
+  test('never reuses a revision from another native source after its load fails', () => {
+    const sourceASnapshot = { path: '.pi/mcp.json', revision: 'source-a' };
+    expect(mcpSourceBoundSnapshot(sourceASnapshot, 'project:pi', 'project:pi')).toBe(sourceASnapshot);
+    expect(mcpSourceBoundSnapshot(sourceASnapshot, 'project:pi', 'project:shared')).toBeNull();
   });
 
   test('reports duplicate server definitions by source without computing merged values', () => {

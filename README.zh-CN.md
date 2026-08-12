@@ -46,7 +46,7 @@ Piarium 不会 fork 这些扩展，也不会复制它们的私有状态。集成
 | `@cortexkit/pi-magic-context` | 原生用户/项目 JSONC 配置、已注册命令、状态和公开条目 |
 | `pi-workspace-history` | 对话与工作区联合恢复、撤销、重做和命名检查点 |
 | `pi-wtf` | 提示词修复操作和插件自有的 `wtf.json` 配置 |
-| `pi-mcp-adapter` | 公开状态、原生命令和适配器自有的全部配置来源 |
+| `pi-mcp-adapter` | 插件计算的有效服务目录、公开状态与操作，以及带版本校验的原生配置来源编辑 |
 | `pi-web-access` | 原生 `web-search.json`、Curator 与账号操作、已保存结果导航 |
 
 当前验证过的版本和具体证据见[扩展兼容性记录](docs/extension-compatibility.md)。

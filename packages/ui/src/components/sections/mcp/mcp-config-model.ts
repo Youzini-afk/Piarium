@@ -25,6 +25,15 @@ export const parseMcpConfigObject = (content: string): JsonObject => parseJsoncO
 
 export const canLeaveMcpConfigSource = (dirty: boolean): boolean => !dirty;
 
+/** A revision is authoritative only for the native source that produced it. */
+export const mcpSourceBoundSnapshot = <Snapshot>(
+  snapshot: Snapshot | null,
+  snapshotSourceKey: string | null,
+  currentSourceKey: string,
+): Snapshot | null => (
+  snapshot !== null && snapshotSourceKey === currentSourceKey ? snapshot : null
+);
+
 export const mcpSourceBooleanState = (
   document: JsonObject,
   path: readonly string[],

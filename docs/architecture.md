@@ -202,7 +202,7 @@ accepted. UI disables unavailable actions instead of guessing from runtime versi
 | Prompt repair | `pi-wtf` | Invoke the plugin's registered command capabilities and preserve its configuration |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |
-| MCP | `pi-mcp-adapter` config/status events | Project its public `status/v1` snapshot, invoke its commands, and edit each native source without reproducing merge or credential logic |
+| MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 
 ## 7. Extension architecture
@@ -233,12 +233,14 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
   operations, native Pi status component, and persisted public custom entries. Memory,
   compartment, historian/dreamer/sidekick, and diagnostic views read only future public
   plugin/database contracts rather than copied or privately inspected state.
-- **pi-mcp-adapter:** protocol v1 carries the adapter's public `pi-mcp-adapter/status/v1`
-  snapshot. Settings, the desktop header, and mobile surfaces invoke the adapter's public commands,
-  manage the normal Pi package, and edit all six adapter-owned JSON/JSONC sources in their documented
-  precedence order. Piarium has no parallel MCP store, generated OpenCode configuration draft, or
-  OAuth callback route; the adapter owns merging, host imports, transports, OAuth/keyring data, and
-  connection state.
+- **pi-mcp-adapter:** protocol v1 carries the adapter's public `pi-mcp-adapter/status/v1` runtime
+  snapshot and its read-only `configCatalog/v1` RPC projection. The latter is the adapter-computed,
+  deduplicated effective server list plus direct native-source membership; it excludes arguments,
+  environment, headers, tokens, OAuth data, and URL query/user information. Settings, desktop, and
+  mobile surfaces manage the normal Pi package, select an effective server in the left pane, and
+  edit one of the adapter-owned JSON/JSONC sources through revision-checked native document APIs.
+  Piarium has no parallel MCP store, generated OpenCode configuration draft, or OAuth callback
+  route; the adapter owns merging, host imports, transports, OAuth/keyring data, and connection state.
 - **pi-web-access:** Piarium edits the extension's agent-level `web-search.json` and discovers its
   current registered commands in the active session. The GUI can open the native Curator, invoke
   Gemini Web account diagnostics, and browse the plugin's stored results, while provider routing,

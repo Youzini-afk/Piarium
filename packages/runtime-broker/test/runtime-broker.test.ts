@@ -93,6 +93,11 @@ test("broker owns catalog and per-session Pi workers", async () => {
     });
     assert.equal(agentCatalog.projectTrusted, true);
     assert.deepEqual(agentCatalog.providers, []);
+    const mcpConfig = await dispatchRuntimeRequest(broker, "mcp.config.snapshot", {
+      cwd: workspace,
+    });
+    assert.equal(mcpConfig.provider.state, "unavailable");
+    assert.equal(mcpConfig.catalog, undefined);
     const updatedSettings = await dispatchRuntimeRequest(broker, "settings.update", {
       cwd: workspace,
       remove: [],

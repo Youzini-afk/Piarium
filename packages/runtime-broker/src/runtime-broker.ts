@@ -72,6 +72,7 @@ export type PiCatalogMethod =
   | "config.text.get"
   | "config.text.update"
   | "model.list"
+  | "mcp.config.snapshot"
   | "package.install"
   | "package.list"
   | "package.remove"

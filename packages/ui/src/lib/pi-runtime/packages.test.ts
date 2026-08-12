@@ -11,6 +11,7 @@ describe('Pi package identity', () => {
   test('recognizes local Windows and file URL working copies', () => {
     expect(piPackageNameFromSource('D:\\project\\opencr\\pi-wtf')).toBe('pi-wtf');
     expect(piPackageNameFromSource('file:///D:/project/opencr/pi-workspace-history.git')).toBe('pi-workspace-history');
+    expect(piPackageNameFromSource('https://github.com/Youzini-afk/pi-mcp-adapter.git')).toBe('pi-mcp-adapter');
   });
 
   test('only offers updates for package-manager-owned sources', () => {

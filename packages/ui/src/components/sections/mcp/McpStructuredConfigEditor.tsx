@@ -1,5 +1,6 @@
 import React from 'react';
 import type { JsonValue } from '@piarium/protocol';
+import { Icon } from '@/components/icon/Icon';
 import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SettingsControlGroup,
@@ -25,7 +26,6 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/lib/i18n';
 import {
-  mcpServerNames,
   mcpServerTransport,
   mcpSourceBooleanState,
   parseMcpConfigObject,
@@ -39,7 +39,10 @@ import {
 interface McpStructuredConfigEditorProps {
   content: string;
   disabled: boolean;
+  mode: 'new' | 'server' | 'settings';
   onChange: (content: string) => void;
+  onCreatedServerNameChange?: (name: string | null) => void;
+  serverName?: string;
 }
 
 interface SourceFieldProps {
@@ -252,6 +255,106 @@ const SourceStringListField: React.FC<SourceFieldProps & {
   );
 };
 
+const SourceKeyValueField: React.FC<SourceFieldProps & {
+  addLabel: string;
+  keyPlaceholder: string;
+  valuePlaceholder: string;
+}> = ({
+  addLabel,
+  disabled,
+  document,
+  keyPlaceholder,
+  label,
+  onRemove,
+  onSet,
+  path,
+  valuePlaceholder,
+}) => {
+  const value = asJsonObject(readJsonPath(document, path));
+  const entries = Object.entries(value).filter((entry): entry is [string, string] => (
+    typeof entry[1] === 'string'
+  ));
+  const [key, setKey] = React.useState('');
+  const [entryValue, setEntryValue] = React.useState('');
+  const [revealed, setRevealed] = React.useState<ReadonlySet<string>>(() => new Set());
+  const add = (): void => {
+    const nextKey = key.trim();
+    if (!nextKey) return;
+    onSet([...path, nextKey], entryValue);
+    setKey('');
+    setEntryValue('');
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="typography-ui-label text-foreground">{label}</div>
+      {entries.map(([entryKey, value]) => (
+        <div key={entryKey} className="flex min-w-0 items-center gap-2">
+          <Input value={entryKey} readOnly className="min-w-0 flex-1 font-mono" />
+          <div className="relative min-w-0 flex-[1.5]">
+            <Input
+              value={value}
+              type={revealed.has(entryKey) ? 'text' : 'password'}
+              disabled={disabled}
+              onChange={(event) => onSet([...path, entryKey], event.target.value)}
+              className="w-full pr-9 font-mono"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => setRevealed((current) => {
+                const next = new Set(current);
+                if (next.has(entryKey)) next.delete(entryKey);
+                else next.add(entryKey);
+                return next;
+              })}
+              className="absolute right-0 top-0 size-9 text-muted-foreground"
+            >
+              <Icon name={revealed.has(entryKey) ? 'eye-off' : 'eye'} className="size-4" />
+            </Button>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={disabled}
+            onClick={() => onRemove([...path, entryKey])}
+            className="size-8 shrink-0 text-muted-foreground"
+          >
+            ×
+          </Button>
+        </div>
+      ))}
+      <div className="flex min-w-0 items-center gap-2">
+        <Input
+          value={key}
+          disabled={disabled}
+          placeholder={keyPlaceholder}
+          onChange={(event) => setKey(event.target.value)}
+          className="min-w-0 flex-1 font-mono"
+        />
+        <Input
+          value={entryValue}
+          type="password"
+          disabled={disabled}
+          placeholder={valuePlaceholder}
+          onChange={(event) => setEntryValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            add();
+          }}
+          className="min-w-0 flex-[1.5] font-mono"
+        />
+        <Button type="button" variant="outline" size="sm" disabled={disabled || !key.trim()} onClick={add}>
+          {addLabel}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 const SourceOptionalNumberField: React.FC<SourceFieldProps & {
   min?: number;
   unit?: React.ReactNode;
@@ -290,19 +393,36 @@ const SourceOptionalNumberField: React.FC<SourceFieldProps & {
 export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps> = ({
   content,
   disabled,
+  mode,
   onChange,
+  onCreatedServerNameChange,
+  serverName,
 }) => {
   const { t } = useI18n();
   const text = (key: string): string => t(key as never);
   const document = React.useMemo(() => parseMcpConfigObject(content), [content]);
-  const names = React.useMemo(() => mcpServerNames(document), [document]);
   const [newServerName, setNewServerName] = React.useState('');
-  const [selectedName, setSelectedName] = React.useState('');
+  const [createdServerName, setCreatedServerName] = React.useState('');
+  const selectedName = mode === 'server' && serverName
+    ? serverName
+    : mode === 'new'
+      ? createdServerName
+      : '';
 
   React.useEffect(() => {
-    if (selectedName && names.includes(selectedName)) return;
-    setSelectedName(names[0] ?? '');
-  }, [names, selectedName]);
+    if (mode === 'new') return;
+    setNewServerName('');
+    setCreatedServerName('');
+    onCreatedServerNameChange?.(null);
+  }, [mode, onCreatedServerNameChange]);
+
+  React.useEffect(() => {
+    if (mode !== 'new' || !createdServerName) return;
+    const servers = asJsonObject(readJsonPath(document, ['mcpServers']));
+    if (Object.prototype.hasOwnProperty.call(servers, createdServerName)) return;
+    setCreatedServerName('');
+    onCreatedServerNameChange?.(null);
+  }, [createdServerName, document, mode, onCreatedServerNameChange]);
 
   const setValue = React.useCallback((path: readonly string[], value: JsonValue) => {
     onChange(setMcpConfigValue(content, path, value));
@@ -322,23 +442,34 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
     ? mcpServerTransport(document, selectedName)
     : 'unconfigured';
   const outputGuard = readJsonPath(document, ['settings', 'outputGuard']);
+  const sampling = readJsonPath(document, ['settings', 'sampling']);
+  const samplingAutoApprove = readJsonPath(document, ['settings', 'samplingAutoApprove']);
+  const newServerExists = Boolean(
+    newServerName.trim()
+    && Object.prototype.hasOwnProperty.call(
+      asJsonObject(readJsonPath(document, ['mcpServers'])),
+      newServerName.trim(),
+    )
+  );
 
   const addServer = (): void => {
     const name = newServerName.trim();
     if (!name) return;
     const servers = asJsonObject(readJsonPath(document, ['mcpServers']));
-    if (!Object.prototype.hasOwnProperty.call(servers, name)) {
-      onChange(setMcpConfigValue(content, ['mcpServers', name], {}));
-    }
-    setSelectedName(name);
+    if (Object.prototype.hasOwnProperty.call(servers, name)) return;
+    onChange(setMcpConfigValue(content, ['mcpServers', name], {}));
+    setCreatedServerName(name);
+    onCreatedServerNameChange?.(name);
     setNewServerName('');
   };
 
   const removeServer = (): void => {
     if (!selectedName) return;
-    const remaining = names.filter((name) => name !== selectedName);
     onChange(removeMcpConfigValue(content, serverPath));
-    setSelectedName(remaining[0] ?? '');
+    if (mode === 'new') {
+      setCreatedServerName('');
+      onCreatedServerNameChange?.(null);
+    }
   };
 
   const selectTransport = (next: McpServerTransportMode): void => {
@@ -355,47 +486,9 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
 
   return (
     <div className="space-y-5">
-      <div className="space-y-1">
-        <h3 className="typography-settings-group-title text-foreground">
-          {text('settings.piarium.mcp.structured.title')}
-        </h3>
-        <p className="typography-meta text-muted-foreground">
-          {text('settings.piarium.mcp.structured.description')}
-        </p>
-      </div>
-
-      <SettingsControlGroup
-        title={text('settings.piarium.mcp.structured.servers.title')}
-        description={text('settings.piarium.mcp.structured.servers.description')}
-        contentClassName="space-y-5"
-      >
-        <SettingsFieldRow
-          label={text('settings.piarium.mcp.structured.editServer')}
-          info={text('settings.piarium.mcp.structured.editServer.info')}
-        >
-          <Select
-            value={selectedName}
-            disabled={disabled || names.length === 0}
-            onValueChange={setSelectedName}
-          >
-            <SelectTrigger
-              size="settings"
-              className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
-              aria-label={text('settings.piarium.mcp.structured.editServer')}
-            >
-              <SelectValue placeholder={text('settings.piarium.mcp.structured.noServers')} />
-            </SelectTrigger>
-            <SelectContent>
-              {names.map((name) => (
-                <SelectItem key={name} value={name}>{name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsFieldRow>
-
-        <SettingsFieldRow
+      {mode !== 'settings' ? <SettingsControlGroup contentClassName="space-y-5">
+        {mode === 'new' ? <SettingsFieldRow
           label={text('settings.piarium.mcp.structured.serverName')}
-          info={text('settings.piarium.mcp.structured.addServer.info')}
         >
           <Input
             value={newServerName}
@@ -414,21 +507,18 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
             type="button"
             variant="outline"
             size="sm"
-            disabled={disabled || !newServerName.trim()}
+            disabled={disabled || !newServerName.trim() || newServerExists}
             onClick={addServer}
           >
             {text('settings.piarium.mcp.structured.addServer')}
           </Button>
-        </SettingsFieldRow>
+        </SettingsFieldRow> : null}
 
         {selectedName ? (
           <div className="space-y-5 border-t border-border/60 pt-5">
             <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 space-y-0.5">
+              <div className="min-w-0">
                 <code className="block truncate typography-ui-label text-foreground">{selectedName}</code>
-                <p className="typography-micro text-muted-foreground">
-                  {text('settings.piarium.mcp.structured.selectedSourceOverride')}
-                </p>
               </div>
               <Button
                 type="button"
@@ -438,13 +528,12 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 onClick={removeServer}
                 className="shrink-0 !font-normal text-[var(--status-error)]"
               >
-                {text('settings.piarium.recovery.actions.remove')}
+                {text('settings.common.actions.delete')}
               </Button>
             </div>
 
             <SettingsFieldRow
               label={text('settings.piarium.mcp.structured.transport')}
-              description={text('settings.piarium.mcp.structured.transport.info')}
             >
               <Select value={transport} disabled={disabled} onValueChange={selectTransport}>
                 <SelectTrigger
@@ -499,6 +588,14 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                   label={text('settings.piarium.mcp.structured.server.workingDirectory')}
                   placeholder="path/to/working-directory"
                 />
+                <SourceKeyValueField
+                  {...sourceFields}
+                  path={[...serverPath, 'env']}
+                  label={text('settings.piarium.mcp.structured.server.environment')}
+                  keyPlaceholder="API_KEY"
+                  valuePlaceholder="value"
+                  addLabel={text('settings.piarium.mcp.structured.add')}
+                />
               </div>
             ) : null}
 
@@ -506,7 +603,6 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
               <div className="space-y-4 border-t border-border/60 pt-4">
                 <SettingsFieldRow
                   label={text('settings.piarium.mcp.structured.server.url')}
-                  description={text('settings.piarium.mcp.structured.urlCredentialReset')}
                   controlClassName="w-full max-w-lg"
                 >
                   <Input
@@ -522,12 +618,25 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                   {...sourceFields}
                   path={[...serverPath, 'auth']}
                   label={text('settings.piarium.mcp.structured.server.authentication')}
-                  info={text('settings.piarium.mcp.structured.server.authentication.info')}
                   options={[
                     { value: 'oauth', label: text('settings.piarium.mcp.structured.server.authentication.oauth') },
                     { value: 'bearer', label: text('settings.piarium.mcp.structured.server.authentication.bearer') },
                     { value: false, label: text('settings.piarium.mcp.structured.server.authentication.none') },
                   ]}
+                />
+                <SourceStringField
+                  {...sourceFields}
+                  path={[...serverPath, 'bearerTokenEnv']}
+                  label={text('settings.piarium.mcp.structured.server.bearerTokenEnv')}
+                  placeholder="MCP_TOKEN"
+                />
+                <SourceKeyValueField
+                  {...sourceFields}
+                  path={[...serverPath, 'headers']}
+                  label={text('settings.piarium.mcp.structured.server.headers')}
+                  keyPlaceholder="Authorization"
+                  valuePlaceholder="Bearer …"
+                  addLabel={text('settings.piarium.mcp.structured.add')}
                 />
               </div>
             ) : null}
@@ -565,45 +674,36 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
                 {...sourceFields}
                 path={[...serverPath, 'exposeResources']}
                 label={text('settings.piarium.mcp.structured.server.exposeResources')}
-                info={text('settings.piarium.mcp.structured.server.exposeResources.info')}
               />
               <SourceOptionalBooleanField
                 {...sourceFields}
                 path={[...serverPath, 'disabled']}
                 label={text('settings.piarium.mcp.structured.server.disabled')}
-                info={text('settings.piarium.mcp.structured.server.disabled.info')}
               />
             </div>
-
-            <p className="typography-meta text-muted-foreground">
-              {text('settings.piarium.mcp.structured.advancedFields')}
-            </p>
           </div>
         ) : (
           <p className="typography-meta text-muted-foreground">
             {text('settings.piarium.mcp.structured.noServers')}
           </p>
         )}
-      </SettingsControlGroup>
+      </SettingsControlGroup> : null}
 
-      <SettingsControlGroup
+      {mode === 'settings' ? <SettingsControlGroup
         className={SUBGROUP_CLASS}
         title={text('settings.piarium.mcp.structured.behavior.title')}
-        description={text('settings.piarium.mcp.structured.behavior.description')}
         contentClassName="space-y-4"
       >
         <SourceStringListField
           {...sourceFields}
           path={['imports']}
           label={text('settings.piarium.mcp.structured.behavior.imports')}
-          info={text('settings.piarium.mcp.structured.behavior.imports.info')}
           placeholder={'cursor\nclaude-code\nclaude-desktop\ncodex\nopencode\nwindsurf\nvscode'}
         />
         <SourceOptionalSelectField
           {...sourceFields}
           path={['settings', 'toolPrefix']}
           label={text('settings.piarium.mcp.structured.behavior.toolPrefix')}
-          info={text('settings.piarium.mcp.structured.behavior.toolPrefix.info')}
           options={[
             { value: 'server', label: text('settings.piarium.mcp.structured.behavior.toolPrefix.server') },
             { value: 'short', label: text('settings.piarium.mcp.structured.behavior.toolPrefix.short') },
@@ -615,13 +715,11 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
           {...sourceFields}
           path={['settings', 'showStatusIcon']}
           label={text('settings.piarium.mcp.structured.behavior.statusIcon')}
-          info={text('settings.piarium.mcp.structured.behavior.statusIcon.info')}
         />
         <SourceOptionalSelectField
           {...sourceFields}
           path={['settings', 'mcpFooterStatus']}
           label={text('settings.piarium.mcp.structured.behavior.footerStatus')}
-          info={text('settings.piarium.mcp.structured.behavior.footerStatus.info')}
           options={[
             { value: 'full', label: text('settings.piarium.mcp.structured.behavior.footerStatus.full') },
             { value: 'compact', label: text('settings.piarium.mcp.structured.behavior.footerStatus.compact') },
@@ -642,40 +740,37 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
           min={0}
           unit={text('settings.piarium.mcp.structured.unit.milliseconds')}
         />
-      </SettingsControlGroup>
+      </SettingsControlGroup> : null}
 
-      <SettingsControlGroup
+      {mode === 'settings' ? <SettingsControlGroup
         className={SUBGROUP_CLASS}
         title={text('settings.piarium.mcp.structured.interaction.title')}
-        description={text('settings.piarium.mcp.structured.interaction.description')}
         contentClassName="space-y-4"
       >
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'autoAuth']}
           label={text('settings.piarium.mcp.structured.interaction.autoAuth')}
-          info={text('settings.piarium.mcp.structured.interaction.autoAuth.info')}
         />
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'sampling']}
           label={text('settings.piarium.mcp.structured.interaction.sampling')}
-          info={text('settings.piarium.mcp.structured.interaction.sampling.info')}
         />
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'samplingAutoApprove']}
           label={text('settings.piarium.mcp.structured.interaction.samplingAutoApprove')}
-          info={text('settings.piarium.mcp.structured.interaction.samplingAutoApprove.info')}
         />
-        <p className="typography-meta text-[var(--status-warning)]">
-          {text('settings.piarium.mcp.structured.interaction.samplingAutoApprove.warning')}
-        </p>
+        {sampling === true && samplingAutoApprove === true ? (
+          <p className="typography-meta text-[var(--status-warning)]">
+            {text('settings.piarium.mcp.structured.interaction.samplingAutoApprove.warning')}
+          </p>
+        ) : null}
         <SourceOptionalBooleanField
           {...sourceFields}
           path={['settings', 'elicitation']}
           label={text('settings.piarium.mcp.structured.interaction.elicitation')}
-          info={text('settings.piarium.mcp.structured.interaction.elicitation.info')}
         />
         {typeof outputGuard === 'object' && outputGuard !== null && !Array.isArray(outputGuard) ? (
           <p className="typography-meta text-muted-foreground">
@@ -686,13 +781,9 @@ export const McpStructuredConfigEditor: React.FC<McpStructuredConfigEditorProps>
             {...sourceFields}
             path={['settings', 'outputGuard']}
             label={text('settings.piarium.mcp.structured.interaction.outputGuard')}
-            info={text('settings.piarium.mcp.structured.interaction.outputGuard.info')}
           />
         )}
-        <p className="typography-meta text-muted-foreground">
-          {text('settings.piarium.mcp.structured.rawAdvancedFields')}
-        </p>
-      </SettingsControlGroup>
+      </SettingsControlGroup> : null}
     </div>
   );
 };

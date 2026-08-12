@@ -53,6 +53,7 @@ type SessionScopedRuntimeMethod =
   | "config.text.get"
   | "config.text.update"
   | "model.list"
+  | "mcp.config.snapshot"
   | "package.install"
   | "package.list"
   | "package.remove"
@@ -81,6 +82,7 @@ type SessionScopedMethodMap = {
   [M in SessionScopedRuntimeMethod]: {
     params: M extends
       | "model.list"
+      | "mcp.config.snapshot"
       | "agentProvider.list"
       | "package.list"
       | "provider.list"
@@ -160,6 +162,7 @@ export const RUNTIME_METHODS = [
   "fleet.status",
   "host.handshake",
   "model.list",
+  "mcp.config.snapshot",
   "model.select",
   "thinking.select",
   "package.install",

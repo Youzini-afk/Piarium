@@ -114,12 +114,23 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
 
   React.useEffect(() => {
     if (!selection) return;
-    if (snapshotTargetKeyRef.current !== runtimeTargetKey || !dirtyRef.current) {
+    // A runtime target change invalidates both the authority and revision behind
+    // the draft. Never retain an old-workspace draft under a new save target.
+    if (snapshotTargetKeyRef.current !== runtimeTargetKey) {
+      generationRef.current += 1;
+      mutationRevisionRef.current += 1;
       setSnapshot(null);
       snapshotTargetKeyRef.current = null;
       setDraft('{}\n');
+      setLoadError(null);
       void load();
+      return;
     }
+    if (dirtyRef.current) return;
+    setSnapshot(null);
+    snapshotTargetKeyRef.current = null;
+    setDraft('{}\n');
+    void load();
   }, [load, runtimeTargetKey, selection]);
 
   const parsed = React.useMemo(() => {

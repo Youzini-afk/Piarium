@@ -3,6 +3,7 @@ export * from "./codec.js";
 export * from "./envelopes.js";
 export * from "./events.js";
 export * from "./methods.js";
+export * from "./mcp.js";
 export * from "./provider.js";
 export * from "./runtime.js";
 export * from "./session.js";

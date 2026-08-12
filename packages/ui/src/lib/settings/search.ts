@@ -17,7 +17,7 @@ export interface SettingsSearchResult extends SettingsSearchItem {
   pageTitle: string;
 }
 
-interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
@@ -614,12 +614,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.skills.catalog.title',
     descriptionKey: 'settings.piarium.skills.description',
     keywords: ['skill', 'skill.md', 'markdown', 'user', 'project', 'package', 'copy'],
-  },
-  {
-    id: 'mcp.package',
-    page: 'mcp',
-    titleKey: 'settings.piarium.mcp.package.title',
-    keywords: ['install', 'update', 'adapter', 'package'],
   },
   {
     id: 'mcp.runtime',

@@ -33,6 +33,7 @@ try {
   const snapshot = await host.create(workspace);
   const commands = host.listCommands(snapshot.sessionId);
   const fleet = await host.fleetStatus(snapshot.sessionId);
+  const mcpConfig = await host.mcpConfigSnapshot();
   const failures = events.filter(
     (entry) =>
       entry.event === "host.error" || (entry.event === "host.log" && entry.data?.level === "error"),
@@ -47,6 +48,7 @@ try {
         entry: extensionPath,
         eventCount: events.length,
         fleet,
+        ...(mcpConfig.provider.state === "unavailable" ? {} : { mcpConfig }),
         name: basename(extensionPath),
         sessionId: snapshot.sessionId,
       },

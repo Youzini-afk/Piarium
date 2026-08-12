@@ -36,6 +36,7 @@ export interface SettingsRuntimeContext {
   isWeb: boolean;
   isDesktop: boolean;
   isMobile: boolean;
+  mcpInstalled: boolean;
 }
 
 export interface SettingsPageMeta {
@@ -133,8 +134,9 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'mcp',
     title: 'MCP',
     group: 'pi',
-    kind: 'single',
+    kind: 'split',
     keywords: ['mcp', 'model context protocol', 'pi-mcp-adapter', 'servers', 'tools', 'resources', 'oauth', 'remote', 'stdio'],
+    isAvailable: (ctx) => ctx.mcpInstalled,
   },
   {
     slug: 'plugins',

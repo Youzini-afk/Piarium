@@ -51,7 +51,7 @@ const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
   },
   {
     name: 'pi-mcp-adapter',
-    source: 'npm:pi-mcp-adapter',
+    source: 'https://github.com/Youzini-afk/pi-mcp-adapter.git',
     descriptionKey: 'settings.piarium.plugins.package.mcp',
   },
   {

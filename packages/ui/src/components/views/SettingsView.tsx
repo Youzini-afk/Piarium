@@ -7,6 +7,7 @@ import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { McpPage } from '@/components/sections/mcp/McpPage';
+import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
@@ -52,6 +53,11 @@ import {
   type SettingsPageMeta,
 } from '@/lib/settings/metadata';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
+import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
+import {
+  refreshMcpSettingsAvailability,
+  useMcpSettingsAvailabilityState,
+} from '@/lib/settings/mcp-availability';
 
 // UI Kit: fixed settings navigation width
 const SETTINGS_NAV_WIDTH = 256;
@@ -106,10 +112,14 @@ const NAV_GROUP_ORDER = ['general', 'projects', 'pi', 'content'] as const;
 const SNIPPETS_SETTINGS_ICON = { icon: 'chat-thread' } as const;
 const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';
 
-function buildRuntimeContext(isDesktop: boolean, isMobile: boolean): SettingsRuntimeContext {
+function buildRuntimeContext(
+  isDesktop: boolean,
+  isMobile: boolean,
+  mcpInstalled: boolean,
+): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop, isMobile };
+  return { isVSCode, isWeb, isDesktop, isMobile, mcpInstalled };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -195,6 +205,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const { t } = useI18n();
   const deviceInfo = useDeviceInfo();
   const isMobile = forceMobile ?? deviceInfo.isMobile;
+  const { runtimeTarget, targetKey: mcpTargetKey } = useResourceRuntimeTarget();
+  const mcpAvailability = useMcpSettingsAvailabilityState();
+  const mcpInstalled = mcpAvailability.targetKey === mcpTargetKey
+    && mcpAvailability.installed === true;
+
+  React.useEffect(() => {
+    void refreshMcpSettingsAvailability(runtimeTarget, mcpTargetKey);
+  }, [mcpTargetKey, runtimeTarget]);
 
   const settingsPageRaw = useUIStore((state) => state.settingsPage);
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
@@ -243,7 +261,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   // keep platform check available for future window chrome tweaks
 
-  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp, isMobile), [isDesktopApp, isMobile]);
+  const runtimeCtx = React.useMemo(
+    () => buildRuntimeContext(isDesktopApp, isMobile, mcpInstalled),
+    [isDesktopApp, isMobile, mcpInstalled],
+  );
+
+  React.useEffect(() => {
+    if (
+      settingsSlug === 'mcp'
+      && mcpAvailability.targetKey === mcpTargetKey
+      && mcpAvailability.installed === false
+    ) {
+      setSettingsPage('plugins');
+    }
+  }, [mcpAvailability.installed, mcpAvailability.targetKey, mcpTargetKey, setSettingsPage, settingsSlug]);
 
   const visiblePages = React.useMemo(() => {
     const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
@@ -529,6 +560,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <PromptsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills':
         return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
+      case 'mcp':
+        return <McpSidebar onItemSelect={opts.onItemSelect} />;
       case 'usage':
         return <UsageSidebar onItemSelect={opts.onItemSelect} />;
       case 'magic-prompts':

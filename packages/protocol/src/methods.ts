@@ -32,6 +32,7 @@ import type {
   SessionSummary,
   ThinkingLevel,
 } from "./types.js";
+import type { PiMcpConfigSnapshot } from "./mcp.js";
 import type { ProviderAuthResponse, ProviderDescriptor } from "./auth.js";
 import type {
   ProviderConfigDeleteScope,
@@ -130,6 +131,10 @@ export interface HostMethodMap {
   "model.select": {
     params: { modelId: string; provider: string; sessionId: string };
     result: SessionSnapshot;
+  };
+  "mcp.config.snapshot": {
+    params: Record<string, never>;
+    result: PiMcpConfigSnapshot;
   };
   "thinking.select": {
     params: { level: ThinkingLevel; sessionId: string };

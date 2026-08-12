@@ -249,16 +249,18 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
 - Implemented: remove the unreachable OpenCode agent CRUD sidebar and generic permission-map
   editor. Pi provider actions and plugin-native configuration remain authoritative for agent
   definitions, model policy, and permissions.
-- Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` server snapshots,
-  reconnect/auth/logout/enable/disable command orchestration, and direct editing of all six native
-  config sources. Desktop header and mobile controls now consume that same snapshot/command path;
-  the old OpenCode MCP stores, draft editor, and OAuth callback route are removed. Tools/resources/results
-  already use the generic Pi tool projection; richer MCP Apps rendering remains dependent on an
-  explicit public webview contract from the adapter. Each native source now also has a structured,
-  comment-preserving editor for current root settings, imports, server transports/lifecycle,
-  direct-tool policy, filters, and safe flags. Partial overrides stay valid, advanced credentials
-  remain in raw JSONC, transport changes remove obsolete fields, and URL changes clear local
-  URL-bound credentials rather than carrying them to another endpoint.
+- Implemented: Pi-native `pi-mcp-adapter` package management, public `status/v1` runtime snapshots,
+  reconnect/auth/logout/enable/disable command orchestration, and the plugin-owned read-only
+  `configCatalog/v1` effective server projection. MCP settings appear only for an installed adapter;
+  the split page lists each effective server once on the left and edits an explicit revisioned native
+  source on the right. Piarium never merges the six sources in the renderer, and the catalog excludes
+  arguments, environment, headers, tokens, OAuth, and URL credential material. Desktop header and
+  mobile controls consume the same public status/command path; the old OpenCode MCP stores, draft
+  editor, and OAuth callback route are removed. Each native source keeps a structured,
+  comment-preserving editor plus its complete raw JSON/JSONC draft. Partial overrides stay valid,
+  transport changes remove obsolete fields, and URL changes clear local URL-bound credentials rather
+  than carrying them to another endpoint. Tools/resources/results already use the generic Pi tool
+  projection; richer MCP Apps rendering remains dependent on an explicit public webview contract.
 - Implemented: the first-class `pi-web-access` adapter now edits its native `web-search.json`
   through focused routing, provider/credential, Curator/browser, content, and security areas. It
   models the plugin's current single/concurrent/all/ordered-fallback semantics, every documented

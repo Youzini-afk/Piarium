@@ -2,7 +2,7 @@
 
 Status: implementation contract for Phase 6
 
-Last updated: 2026-08-06
+Last updated: 2026-08-12
 
 ## 1. Purpose
 
@@ -145,7 +145,7 @@ value.
 | pi-subagents | Agents and workflows; definition actions; per-scope model/thinking/fallback overrides; delegation; review; limits | Provider actions/Agent Markdown, user/project `settings.json#subagents`, and global runtime `config.json` are three distinct save owners | worktree/storage paths, Intercom, notification batching, detailed LSP/retry tuning, complex prompts and future runtime fields | definition versus override precedence, project trust, hard budgets and destructive provider actions |
 | Magic Context | Context; memory; internal models; maintenance schedules and session operations | Independent user/project JSONC drafts with ignored project keys reported | per-model maps, prompts/permissions, sampling fine-tuning, SQLite/Synapse details and experimental fields | fail-closed behavior, lossy compression, project-ignored keys, model-cost maintenance actions |
 | pi-web-access | Search; providers and credential sources; Browser/Curator; content; safety | Agent-root `web-search.json`; command presence is only loaded-state evidence | custom tool names, provider-specific fine tuning and future fields | executable credential sources, browser-cookie access, remote bind, fresh scraping and SSRF exceptions |
-| pi-mcp-adapter | Runtime servers and actions; selected-source server overrides; behavior and interaction policy | One visibly selected source from the documented six-layer precedence; the dedicated MCP page remains canonical | environment/header/bearer/OAuth material, complex output guards, tracing/filter details and future fields | URL credential reset, sampling auto-approval, socket trust and source-local versus effective state |
+| pi-mcp-adapter | Runtime servers and actions; selected-source server overrides; behavior and interaction policy | One visibly selected source from the documented six-layer precedence; the dedicated MCP page remains canonical | bearer/OAuth details, complex output guards, tracing/filter details and future fields | URL credential reset, sampling auto-approval, socket trust and source-local versus effective state |
 | pi-workspace-history | Protection and retention | Independent user/project `settings.json#workspaceHistory` drafts | scan budgets, Git timeout and future storage-engine tuning | lowering retention deletes old history; changing the storage directory does not migrate old history; home-directory capture |
 | pi-wtf | Command words and the three generated command behaviors | Global `wtf.json`; previews are distinguished from commands currently loaded in a session | future plugin-owned fields | `!` rewrites session history and never restores file or external side effects |
 
@@ -294,16 +294,21 @@ Authority:
 - its registered panel, reconnect, authentication, logout, enable, and disable commands;
 - the adapter's OS keyring/OAuth implementation for credentials.
 
-The dedicated MCP page remains canonical and is configuration-first: users choose one native source
-and reach the common server, behavior, and safety controls before any live-session tooling. Runtime
-status and actions follow as a secondary section showing servers, tools, resources, connection
-errors, and active/configured distinction. The configuration section edits one of the adapter's six
-native sources at a time: stable root settings, imports, transports,
-lifecycle, direct-tool policy, filters, and safe per-server flags receive structured controls;
-environment maps, headers, tokens, OAuth details, complex guards, and future fields remain in the
-same revisioned raw JSONC draft. Native setup/panel flows still own discovery and authentication.
-Piarium does not compute an effective merged configuration or reproduce OAuth, transport, or
-credential storage.
+The dedicated MCP page is visible only while `package.list` reports an installed
+`pi-mcp-adapter`. Its split view uses the adapter's read-only `configCatalog/v1` RPC as the left-hand
+catalog: one row per deduplicated effective server, with runtime state joined by server name. The
+right pane shows the selected server, its runtime actions, and the highest-precedence native source
+that directly defines it. New-server and adapter-settings actions choose an explicit native source;
+source-local edits still use the revisioned `config.text` contract and preserve the raw JSON/JSONC
+draft. Piarium never folds the six files in the renderer.
+
+The public catalog contains only server identity, disabled state, transport kind and sanitized
+command/URL/socket display data, plus direct native-source membership. It does not expose arguments,
+environment, headers, bearer material, OAuth data, URL user information, query strings, or
+fragments. Imported or programmatic effective servers may therefore have no editable source. The
+adapter remains the sole owner of merge order, imports, URL credential binding, and effective
+transport selection. Piarium edits one selected native document and re-reads the adapter-owned
+catalog after save.
 
 Saving a changed existing server URL clears URL-bound credentials present in that selected source,
 matching the adapter's cross-source credential binding instead of carrying old endpoint secrets
@@ -315,18 +320,18 @@ Host-config discovery stays explicit and defaults off. Socket configuration keep
 warning beside the path. OpenCode is available only as an explicit compatibility import supported
 by the adapter; it is never an authoritative Piarium source.
 
-The current public `status/v1` snapshot intentionally does not expose config provenance, transport,
-or failure text, so Piarium does not reverse-engineer an effective configuration from the six
-source documents. Server actions remain command-backed; names containing whitespace are shown but
-their per-server buttons stay disabled because the adapter's current command parser has no quoting
-contract. A read-only provenance index reports server names present in multiple native sources
-without calculating their merged values. The extension panel remains available for those servers.
+The public `status/v1` snapshot remains the runtime authority and does not expose config provenance
+or failure text. The separate `configCatalog/v1` projection supplies effective identity and direct
+source membership, computed inside the adapter with the same loader used at runtime. Server actions
+remain command-backed; names containing whitespace are shown but their per-server buttons stay
+disabled because the adapter's current command parser has no quoting contract. The extension panel
+remains available for those servers.
 
 Acceptance:
 
 - all status and actions use public adapter contracts;
-- credentials never cross into renderer state or logs;
-- source conflicts are visible without Piarium computing a parallel effective configuration;
+- the effective catalog and runtime snapshots never add credential material to renderer state or logs;
+- each effective server appears once and native source selection never requires a renderer-side merge;
 - absent status support yields configuration-only/degraded UI.
 
 ### 5.4 pi-web-access

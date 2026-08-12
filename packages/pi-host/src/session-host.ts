@@ -37,6 +37,7 @@ import type {
   PiConfigTextFormat,
   PiConfigTextRoot,
   PiFleetSnapshot,
+  PiMcpConfigSnapshot,
   PiResourceCatalogSnapshot,
   PiResourceDescriptor,
   PiResourceDiagnostic,
@@ -85,6 +86,10 @@ import {
   createPiSubagentsFleetBridgeExtension,
   PiSubagentsFleetBridge,
 } from "./pi-subagents-fleet-bridge.js";
+import {
+  createPiMcpConfigBridgeExtension,
+  PiMcpConfigBridge,
+} from "./pi-mcp-config-bridge.js";
 import { ProviderAuthBridge } from "./provider-auth-bridge.js";
 import { ProviderConfigurationManager } from "./provider-configuration.js";
 import { RevisionedTextFileEditor } from "./revisioned-text-file-editor.js";
@@ -427,6 +432,7 @@ export class SessionHost {
   readonly auth: ProviderAuthBridge;
   #agentProviders: AgentProviderBridge | undefined;
   #fleet: PiSubagentsFleetBridge | undefined;
+  #mcpConfig: PiMcpConfigBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
   #recovery: RecoveryPluginAdapter | undefined;
   #unsubscribe: (() => void) | undefined;
@@ -956,6 +962,10 @@ export class SessionHost {
       };
     }
     return snapshot;
+  }
+
+  mcpConfigSnapshot(): Promise<PiMcpConfigSnapshot> {
+    return this.mcpConfig.snapshot(this.session.sessionId);
   }
 
   async listResources(kind: PiResourceKind): Promise<PiResourceCatalogSnapshot> {
@@ -1940,6 +1950,8 @@ export class SessionHost {
       this.#agentProviders = agentProviders;
       const fleet = new PiSubagentsFleetBridge();
       this.#fleet = fleet;
+      const mcpConfig = new PiMcpConfigBridge();
+      this.#mcpConfig = mcpConfig;
       const services = await createAgentSessionServices({
         agentDir,
         cwd,
@@ -1959,6 +1971,11 @@ export class SessionHost {
               factory: createPiSubagentsFleetBridgeExtension(fleet),
               hidden: true,
               name: "piarium-subagents-fleet-bridge",
+            },
+            {
+              factory: createPiMcpConfigBridgeExtension(mcpConfig),
+              hidden: true,
+              name: "piarium-mcp-config-bridge",
             },
             {
               factory: createAgentProviderBridgeExtension(agentProviders),
@@ -2121,6 +2138,7 @@ export class SessionHost {
     if (runtime) await runtime.dispose();
     this.#agentProviders = undefined;
     this.#fleet = undefined;
+    this.#mcpConfig = undefined;
     this.#recovery = undefined;
   }
 
@@ -2132,6 +2150,11 @@ export class SessionHost {
   get recovery(): RecoveryPluginAdapter {
     if (!this.#recovery) throw new HostError("recovery_unavailable", "Recovery is unavailable");
     return this.#recovery;
+  }
+
+  get mcpConfig(): PiMcpConfigBridge {
+    if (!this.#mcpConfig) throw new HostError("mcp_config_unavailable", "MCP config bridge is unavailable");
+    return this.#mcpConfig;
   }
 
   #assertRecoveryReady(sessionId: string): void {

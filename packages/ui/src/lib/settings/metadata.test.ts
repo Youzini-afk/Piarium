@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { SETTINGS_PAGE_METADATA, resolveSettingsSlug } from './metadata';
+import { SETTINGS_PAGE_METADATA, resolveSettingsSlug, type SettingsRuntimeContext } from './metadata';
+
+const runtimeContext = (mcpInstalled: boolean): SettingsRuntimeContext => ({
+  isDesktop: false,
+  isMobile: false,
+  isVSCode: false,
+  isWeb: true,
+  mcpInstalled,
+});
 
 describe('settings metadata', () => {
   test('does not expose the removed Smart Search settings page', () => {
@@ -31,6 +39,13 @@ describe('settings metadata', () => {
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugins')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugin-settings')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugin-settings')?.kind).toBe('split');
+  });
+
+  test('exposes the split MCP page only for an installed adapter', () => {
+    const mcp = SETTINGS_PAGE_METADATA.find((page) => page.slug === 'mcp');
+    expect(mcp?.kind).toBe('split');
+    expect(mcp?.isAvailable?.(runtimeContext(false))).toBe(false);
+    expect(mcp?.isAvailable?.(runtimeContext(true))).toBe(true);
   });
 
   test('does not route removed OpenCode settings through compatibility aliases', () => {

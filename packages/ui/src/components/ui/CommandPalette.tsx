@@ -47,6 +47,11 @@ import {
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
+import {
+  refreshMcpSettingsAvailability,
+  useMcpSettingsAvailabilityState,
+} from '@/lib/settings/mcp-availability';
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 
@@ -106,6 +111,15 @@ export const CommandPalette: React.FC = () => {
   const { files: filesApi, git: gitApi } = useRuntimeAPIs();
   const ensureGitStatus = useGitStore((s) => s.ensureStatus);
   const { isMobile } = useDeviceInfo();
+  const { runtimeTarget: mcpRuntimeTarget, targetKey: mcpTargetKey } = useResourceRuntimeTarget();
+  const mcpAvailability = useMcpSettingsAvailabilityState();
+  const mcpInstalled = mcpAvailability.targetKey === mcpTargetKey
+    && mcpAvailability.installed === true;
+
+  React.useEffect(() => {
+    if (!isCommandPaletteOpen) return;
+    void refreshMcpSettingsAvailability(mcpRuntimeTarget, mcpTargetKey);
+  }, [isCommandPaletteOpen, mcpRuntimeTarget, mcpTargetKey]);
 
   const currentRoot = React.useMemo(
     () => (effectiveDirectory ? normalizePath(effectiveDirectory) : null),
@@ -275,8 +289,14 @@ export const CommandPalette: React.FC = () => {
   // ---------------------------------------------------------------------------
   const settingsRuntimeCtx = React.useMemo<SettingsRuntimeContext>(() => {
     const isDesktop = isDesktopShell();
-    return { isVSCode: isVSCodeRuntime(), isWeb: !isDesktop && isWebRuntime(), isDesktop, isMobile };
-  }, [isMobile]);
+    return {
+      isVSCode: isVSCodeRuntime(),
+      isWeb: !isDesktop && isWebRuntime(),
+      isDesktop,
+      isMobile,
+      mcpInstalled,
+    };
+  }, [isMobile, mcpInstalled]);
 
   const settingsEntries = React.useMemo<CommandEntry[]>(() => {
     return SETTINGS_PAGE_METADATA

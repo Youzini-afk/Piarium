@@ -1,18 +1,19 @@
 # Maintained extension compatibility
 
-Last verified: 2026-08-03
+Last verified: 2026-08-12
 
 Piarium Phase 1 loads extensions through Pi `0.83.0` and its generic `ExtensionUIContext` bridge.
 The smoke test creates an isolated agent directory and disposable workspace, loads one extension,
-checks Pi diagnostics, lists its registered commands, disposes the runtime, and removes all test
-state. It does not invoke network, model, recovery, or destructive commands.
+checks Pi diagnostics, lists its registered commands and public read-only MCP catalog when present,
+disposes the runtime, and removes all test state. It does not invoke network, model, recovery, or
+destructive commands.
 
 | Extension | Version | Phase 1 load result | Registered commands observed |
 | --- | --- | --- | --- |
 | pi-wtf | 0.2.4 | Pass | `fuck`, `fuck?`, `fuck!` |
 | pi-workspace-history | 0.2.2 | Pass | `undo`, `redo`, `checkpoint` |
 | pi-subagents | 0.38.0 | Pass | 19 subagent and workflow commands |
-| pi-mcp-adapter | 2.17.0 | Pass | `mcp`, `mcp-auth` |
+| pi-mcp-adapter | 2.23.0 + Piarium `62255b3` | Pass | `mcp`, `mcp-auth`; read-only `configCatalog/v1` RPC |
 | pi-web-access | 0.17.1 | Pass | `websearch`, `curator`, `google-account`, `search` |
 | @cortexkit/pi-magic-context | 0.33.0 | Pass | 9 context, dream, and embedding commands |
 
@@ -39,8 +40,10 @@ plugin ownership intact:
 - the Magic Context `0.33.0` smoke exposes all nine current Pi commands used by the adapter. Session
   operations invoke those registered commands and render only their public custom entries or UI;
   no private database is inspected;
-- MCP consumes `pi-mcp-adapter/status/v1`, invokes the adapter's commands, and edits its native config
-  sources without taking over merging, transports, OAuth, or the credential store;
+- MCP consumes `pi-mcp-adapter/status/v1` and the adapter-owned read-only `configCatalog/v1`, invokes
+  adapter commands, and edits one revisioned native config source without taking over merging,
+  transports, OAuth, or the credential store. The Piarium-maintained plugin commit
+  `62255b394e10c2d1ced621cd95abc457bec2a7f1` is the verified contract implementation;
 - Web Access uses its native `web-search.json`; its current command catalog drives the Curator,
   Gemini Web account, and stored-result session actions, while search/fetch tools, plugin dialogs,
   widgets, and custom entries travel through the generic Pi extension bridge. Command discovery is

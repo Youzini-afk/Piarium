@@ -4,8 +4,10 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { Button } from '@/components/ui/button';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
@@ -48,6 +50,7 @@ const integrationForPackage = (entry: PackageDescriptor): PluginIntegration | nu
 
 export const PluginSettingsPage: React.FC = () => {
   const { t } = useI18n();
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const activeSessionId = usePiSessionStore((state) => {
     const sessionId = state.currentSessionId;
@@ -88,11 +91,13 @@ export const PluginSettingsPage: React.FC = () => {
         const identity = pluginSettingsPackageIdentity(entry);
         if (!visited.has(identity) && identity !== selectedIdentity) return null;
         const integration = integrationForPackage(entry);
+        const integrationId = pluginSettingsIntegrationForPluginId(entry.name)
+          ?? pluginSettingsIntegrationForPluginId(entry.source);
         return (
           <div key={identity} hidden={identity !== selectedIdentity} className="h-full">
             <SettingsPageLayout
               title={entry.name}
-              titleLeading={<Icon name={integration?.icon ?? 'code-box'} className="size-5 text-muted-foreground" />}
+              titleLeading={<Icon name={integrationId === 'mcp' ? 'server' : integration?.icon ?? 'code-box'} className="size-5 text-muted-foreground" />}
               description={entry.source}
               showSaveStatus={false}
             >
@@ -104,7 +109,11 @@ export const PluginSettingsPage: React.FC = () => {
                   {entry.version ? <span>v{entry.version}</span> : null}
                   {entry.resolvedPath ? <code className="break-all">{entry.resolvedPath}</code> : null}
                 </div>
-                {integration?.id === 'subagents' ? (
+                {integrationId === 'mcp' ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('mcp')}>
+                    {t('settings.piarium.pluginSettings.mcp.open')}
+                  </Button>
+                ) : integration?.id === 'subagents' ? (
                   <SubagentsSettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
                 ) : integration?.id === 'magic-context' ? (
                   <MagicContextSettings

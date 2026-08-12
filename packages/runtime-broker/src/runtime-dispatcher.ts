@@ -417,6 +417,14 @@ async function dispatchRuntimeRequestUnchecked(
     case "model.list": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "model.list", {});
     }
+    case "mcp.config.snapshot": {
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "mcp.config.snapshot",
+        {},
+      );
+    }
     case "model.select": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "model.select", {
