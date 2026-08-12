@@ -76,6 +76,28 @@ describe("Pi protocol projector", () => {
     assert.equal("partial" in projected.update, false);
   });
 
+  it("preserves Pi 0.84 deferred completion state", () => {
+    const deferredAssistant = {
+      ...assistant,
+      deferred: { id: "provider-private-handle" },
+      stopReason: "deferred",
+    } as unknown as AgentMessage;
+    const projectedMessage = projectMessage(deferredAssistant);
+    assert.equal(projectedMessage.role, "assistant");
+    if (projectedMessage.role !== "assistant") return;
+    assert.equal(projectedMessage.stopReason, "deferred");
+    assert.equal("deferred" in projectedMessage, false);
+
+    const projectedEvent = projectAgentEvent({
+      assistantMessageEvent: { reason: "deferred", type: "done" },
+      message: deferredAssistant,
+      type: "message_update",
+    } as AgentSessionEvent);
+    assert.equal(projectedEvent.type, "message_update");
+    if (projectedEvent.type !== "message_update") return;
+    assert.deepEqual(projectedEvent.update, { reason: "deferred", type: "done" });
+  });
+
   it("preserves tree identity and sanitizes extension entry data", () => {
     const projected = projectSessionEntry({
       customType: "piarium.test",

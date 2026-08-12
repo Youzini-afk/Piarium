@@ -62,7 +62,7 @@ export interface PiAssistantMessage {
   rawStopReason?: string;
   responseModel?: string;
   role: "assistant";
-  stopReason: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted";
+  stopReason: "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
   timestamp: number;
   usage: PiUsage;
 }
@@ -246,7 +246,7 @@ export type PiAssistantStreamUpdate =
   | { contentIndex: number; type: "toolcall_start" }
   | { contentIndex: number; delta: string; type: "toolcall_delta" }
   | { contentIndex: number; toolCall: PiToolCall; type: "toolcall_end" }
-  | { reason: "stop" | "length" | "toolUse"; type: "done" }
+  | { reason: "stop" | "length" | "toolUse" | "deferred"; type: "done" }
   | { reason: "aborted" | "error"; type: "error" };
 
 export interface PiCompactionResult {

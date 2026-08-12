@@ -11,7 +11,6 @@ COPY package.json bun.lock ./
 COPY bun-patches ./bun-patches
 COPY patches ./patches
 COPY fix-deprecation.js ./
-COPY scripts/repair-pi-shrinkwrap.mjs ./scripts/repair-pi-shrinkwrap.mjs
 COPY packages/electron/package.json ./packages/electron/package.json
 COPY packages/mobile/package.json ./packages/mobile/package.json
 COPY packages/pi-host/package.json ./packages/pi-host/package.json
@@ -24,8 +23,7 @@ COPY packages/vscode/runtime/package.json ./packages/vscode/runtime/package.json
 COPY packages/web/package.json ./packages/web/package.json
 RUN bun install --frozen-lockfile --ignore-scripts \
   && node ./fix-deprecation.js \
-  && node ./node_modules/patch-package/index.js \
-  && node ./scripts/repair-pi-shrinkwrap.mjs
+  && node ./node_modules/patch-package/index.js
 
 COPY . .
 RUN PIARIUM_SOURCE_REVISION="${PIARIUM_SOURCE_REVISION}" \

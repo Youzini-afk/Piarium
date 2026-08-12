@@ -56,7 +56,7 @@ The automated boundary covers:
 - a deterministic fake-provider prompt that streams, settles, and forks;
 - generic extension loading and interactive UI round trips;
 - compiled host stdio startup/shutdown;
-- compiled runtime-broker session/configuration integration against real Pi `0.83.0`;
+- compiled runtime-broker session/configuration integration against real Pi `0.84.1`;
 - a real Electron → preload → main → Pi-worker smoke journey, including a sustained active-session
   renderer state and clean shutdown.
 

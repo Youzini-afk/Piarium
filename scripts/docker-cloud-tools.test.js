@@ -70,15 +70,14 @@ describe('Piarium cloud container runtime', () => {
     expect(appDockerfile).not.toContain('playwright install --with-deps chrome');
   });
 
-  it('applies repository patches and the Pi dependency repair before building', () => {
+  it('applies repository patches before building', () => {
     expect(appDockerfile).toContain('COPY bun-patches ./bun-patches');
     expect(appDockerfile).toContain('COPY patches ./patches');
     expect(appDockerfile).toContain('COPY fix-deprecation.js ./');
-    expect(appDockerfile).toContain('COPY scripts/repair-pi-shrinkwrap.mjs ./scripts/repair-pi-shrinkwrap.mjs');
     expect(appDockerfile).toContain('bun install --frozen-lockfile --ignore-scripts');
     expect(appDockerfile).toContain('node ./fix-deprecation.js');
     expect(appDockerfile).toContain('node ./node_modules/patch-package/index.js');
-    expect(appDockerfile).toContain('node ./scripts/repair-pi-shrinkwrap.mjs');
+    expect(appDockerfile).not.toContain('repair-pi-shrinkwrap');
   });
 
   it('uses one Piarium container identity and only the canonical password variable', () => {

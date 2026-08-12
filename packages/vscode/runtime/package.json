@@ -5,19 +5,15 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.83.0",
-    "@earendil-works/pi-ai": "0.83.0",
-    "@earendil-works/pi-coding-agent": "0.83.0",
-    "brace-expansion": "5.0.9",
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "jsonc-parser": "3.3.1",
-    "proper-lockfile": "4.1.2",
-    "undici": "8.10.0"
+    "proper-lockfile": "4.1.2"
   },
   "overrides": {
-    "brace-expansion": "5.0.9",
     "protobufjs": "7.6.5",
     "rimraf": "6.1.2",
-    "undici": "8.10.0",
     "gaxios": {
       "rimraf": "6.1.2"
     }

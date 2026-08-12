@@ -2,7 +2,7 @@
 
 Last verified: 2026-08-12
 
-Piarium Phase 1 loads extensions through Pi `0.83.0` and its generic `ExtensionUIContext` bridge.
+Piarium Phase 1 loads extensions through Pi `0.84.1` and its generic `ExtensionUIContext` bridge.
 The smoke test creates an isolated agent directory and disposable workspace, loads one extension,
 checks Pi diagnostics, lists its registered commands and public read-only MCP catalog when present,
 disposes the runtime, and removes all test state. It does not invoke network, model, recovery, or
@@ -19,10 +19,10 @@ destructive commands.
 | pi-openai-codex-compat | 0.0.7-alpha.0 | Pass | `codex-settings` |
 | pi-observational-memory | 3.0.4 | Pass | `om:status`, `om:view` |
 
-`pi-openai-codex-compat@0.0.7-alpha.0` declares Pi `>=0.84.0 <0.85.0`, while the current Piarium
-runtime is pinned to Pi `0.83.0`. The Phase 1 smoke above proves entry-point loading and command
-registration only; Codex provider transport and remote compaction still require a Pi runtime
-upgrade and dedicated integration verification before Piarium can claim full runtime compatibility.
+`pi-openai-codex-compat@0.0.7-alpha.0` declares Pi `>=0.84.0 <0.85.0`; Piarium's Pi `0.84.1`
+runtime now satisfies that contract. The Phase 1 smoke above still proves entry-point loading and
+command registration only. Codex provider transport and remote compaction require an authenticated,
+provider-specific integration check before Piarium claims that network path as verified.
 
 Run the reusable smoke harness after building Piarium:
 

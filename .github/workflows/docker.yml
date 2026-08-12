@@ -19,7 +19,6 @@ on:
       - scripts/cloud-runtime.bun.lock
       - scripts/docker-build-only-wrapper.sh
       - scripts/docker-entrypoint.sh
-      - scripts/repair-pi-shrinkwrap.mjs
       - .github/workflows/docker.yml
   pull_request:
     paths:
@@ -37,7 +36,6 @@ on:
       - scripts/cloud-runtime.bun.lock
       - scripts/docker-build-only-wrapper.sh
       - scripts/docker-entrypoint.sh
-      - scripts/repair-pi-shrinkwrap.mjs
       - .github/workflows/docker.yml
   workflow_dispatch:
     inputs:

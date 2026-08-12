@@ -53,9 +53,7 @@ describe("provider model discovery", () => {
         models: [],
         name: "Discovery test",
       });
-      await runtime.setRuntimeApiKey("discovery-test", "secret-test-key", {
-        allowNetwork: false,
-      });
+      await runtime.setRuntimeApiKey("discovery-test", "secret-test-key");
       const result = await discoverProviderModels({
         configuration: manager,
         cwd,

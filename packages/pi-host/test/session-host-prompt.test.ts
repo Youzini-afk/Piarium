@@ -38,9 +38,7 @@ describe("SessionHost prompt streaming", () => {
           },
         ],
       });
-      await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key", {
-        allowNetwork: false,
-      });
+      await services.modelRuntime.setRuntimeApiKey(model.provider, "faux-key");
       return { model };
     };
     const host = new SessionHost({

@@ -25,7 +25,7 @@ test("compiled broker handshakes with and disposes the compiled Pi host", async 
   try {
     const handshake = await broker.warmup();
     assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
-    assert.equal(handshake.runtime.piVersion, "0.83.0");
+    assert.equal(handshake.runtime.piVersion, "0.84.1");
     assert.deepEqual(await broker.listSessions(agentDir), []);
   } finally {
     await broker.dispose();

@@ -287,7 +287,7 @@ an integration smoke test without exposing credentials.
   `latest.yml`. Packaging rebuilds `better-sqlite3`, verifies the published `node-pty` N-API
   prebuild by starting a PTY under Electron 41, and unpacks one coherent production dependency tree
   for the ordinary Node Pi worker. A clean-profile unpacked-app smoke reaches Pi host protocol v1,
-  Pi 0.83.0, the local health endpoint, renderer app-ready state, and a create/close terminal
+  Pi 0.84.1, the local health endpoint, renderer app-ready state, and a create/close terminal
   session; the same smoke can copy persisted settings plus Chromium Local/Session Storage into an
   isolated profile to catch profile-dependent renderer regressions without modifying the source.
 - Git/Git Bash/npm/Pi discovery and guided repair.

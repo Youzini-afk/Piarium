@@ -74,18 +74,12 @@ capabilities and allowed-directory policy, external-access audit, renderer origi
 awaited background shutdown semantics. Deleting an OpenCode-specific module does not authorize
 deleting the security boundary that module currently enforces.
 
-## Temporary upstream dependency repair
+## Upstream dependency baseline
 
-Pi `0.83.0` publishes an npm shrinkwrap that pins `brace-expansion` `5.0.8`, even when the
-application-level override requests the patched `5.0.9`. Piarium keeps `5.0.9` as a direct,
-locked dependency and repairs that one nested installation in `postinstall`. `security:check`
-fails closed if the resolved Pi copy is still below `5.0.9`. Remove this narrowly scoped repair
-after Pi publishes a dependency tree containing `brace-expansion >=5.0.9`.
-
-The VS Code host runtime also replaces Pi's shrinkwrapped `undici` `8.5.0` with the locked
-`8.10.0` release after its isolated `npm ci`. Its package smoke test fails closed below `8.9.0`,
-the first release outside the affected 8.x advisory range. Remove this repair when Pi's published
-runtime no longer restores an affected copy.
+Pi `0.84.1` publishes `brace-expansion` `5.0.9` and `undici` `8.9.0` in its npm shrinkwrap, so
+Piarium no longer mutates Pi's installed dependency tree after installation. The root, cloud, and
+isolated VS Code lockfiles keep those resolved versions reproducible, and the VS Code packaged
+runtime smoke still rejects `brace-expansion <5.0.9` or `undici <8.9.0`.
 
 The root `allowScripts` policy pins approval to esbuild `0.28.1`, whose postinstall validates its
 platform binary. The no-op Google GenAI preinstall and protobufjs postinstall are explicitly denied;

@@ -44,11 +44,10 @@
     "lint:mobile": "bun run --cwd packages/mobile lint",
     "clean": "bun run --filter '*' clean",
     "changelog-card": "node scripts/changelog-card/generate.mjs",
-    "postinstall": "node ./fix-deprecation.js && patch-package && node ./scripts/repair-pi-shrinkwrap.mjs",
-    "security:check": "node ./scripts/repair-pi-shrinkwrap.mjs --check",
+    "postinstall": "node ./fix-deprecation.js && patch-package",
     "test:pi": "bun run --filter '@piarium/*' test",
     "test:pi:dist": "bun run --sequential --filter '@piarium/*' test:dist",
-    "check:pi": "bun run security:check && bun run build:type-dependencies && bun run --filter '@piarium/*' type-check && bun run test:pi",
+    "check:pi": "bun run build:type-dependencies && bun run --filter '@piarium/*' type-check && bun run test:pi",
     "test:cloud": "bunx vitest run scripts/cloud-runtime-layout.test.js scripts/cloud-remote-deploy.test.js scripts/docker-cloud-tools.test.js",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
@@ -98,7 +97,6 @@
     "release:test:arm": "./scripts/test-release-build.sh aarch64"
   },
   "dependencies": {
-    "brace-expansion": "5.0.9",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-css": "^6.3.1",
@@ -189,7 +187,6 @@
     "shell-quote": "1.10.0",
     "tar": "7.5.22",
     "tmp": "0.2.7",
-    "undici": "7.29.0",
     "uuid": "11.1.1",
     "vite": "7.3.6",
     "yaml": "2.9.0"

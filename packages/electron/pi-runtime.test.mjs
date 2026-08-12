@@ -74,7 +74,7 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
   try {
     const handshake = await broker.warmup();
     assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
-    assert.equal(handshake.runtime.piVersion, '0.83.0');
+    assert.equal(handshake.runtime.piVersion, '0.84.1');
   } finally {
     await broker.dispose();
     assert.ok(events.some((event) => event.kind === 'worker.exit' && event.expected));
