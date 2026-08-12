@@ -2141,6 +2141,7 @@ export const settingsDict = {
   'settings.page.pluginSettings.title': '플러그인 설정',
   'settings.piarium.pluginSettings.description': '소유권을 가져오지 않고 공통 Pi 확장 기능을 구성합니다. 구조화된 컨트롤은 확장이 소유한 파일을 업데이트하고, 고급 편집은 알 수 없는 모든 필드를 보존합니다.',
   'settings.piarium.pluginSettings.integrations.title': '지원되는 확장 기능',
+  'settings.piarium.pluginSettings.installed.empty': '설치된 Pi 패키지가 없습니다.',
   'settings.piarium.pluginSettings.integrations.description': '편집할 확장 기능을 선택하세요. 설치 전에도 구성을 준비할 수 있습니다.',
   'settings.piarium.pluginSettings.configuration.description': '공통 설정은 컨트롤로 표시되며, 여기서 설정하지 않은 필드는 플러그인 기본값을 사용합니다.',
   'settings.piarium.pluginSettings.status.install.checking': '패키지 확인 중',

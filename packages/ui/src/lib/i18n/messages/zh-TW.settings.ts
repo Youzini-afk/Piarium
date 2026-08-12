@@ -2139,6 +2139,7 @@ export const settingsDict = {
   'settings.page.pluginSettings.title': '外掛設定',
   'settings.piarium.pluginSettings.description': '用圖形介面配置常用 Pi 外掛，但不從外掛手中奪走配置所有權。結構化控制元件直接更新外掛自己的檔案，高階編輯器會保留所有未知欄位。',
   'settings.piarium.pluginSettings.integrations.title': '已適配外掛',
+  'settings.piarium.pluginSettings.installed.empty': '尚無已安裝的 Pi 外掛。',
   'settings.piarium.pluginSettings.integrations.description': '選擇要配置的外掛。即使尚未安裝，也可以提前準備配置。',
   'settings.piarium.pluginSettings.configuration.description': '常用設定以控制元件呈現；未在這裡顯式設定的欄位繼續跟隨外掛預設值。',
   'settings.piarium.pluginSettings.status.install.checking': '正在檢查插件',

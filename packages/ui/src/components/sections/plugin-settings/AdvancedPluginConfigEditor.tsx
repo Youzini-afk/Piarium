@@ -29,6 +29,7 @@ import {
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 
 interface AdvancedPluginConfigEditorProps {
   cwd: string;
@@ -66,11 +67,14 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
   const [saving, setSaving] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const generationRef = React.useRef(0);
+  const mutationRevisionRef = React.useRef(0);
+  const dirtyRef = React.useRef(false);
   const editorExtensions = React.useMemo(() => [json()], []);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (preserveNewerDraft = false) => {
     if (!selection) return;
     const generation = ++generationRef.current;
+    const mutationRevision = mutationRevisionRef.current;
     const actionTargetKey = runtimeTargetKey;
     const runtimeKey = getRuntimeKey();
     setLoading(true);
@@ -87,6 +91,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         || actionTargetKey !== runtimeTargetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
+      if (preserveNewerDraft && mutationRevision !== mutationRevisionRef.current) return;
       setSnapshot(next);
       setDraft(next.content);
     } catch (error) {
@@ -95,8 +100,6 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         || actionTargetKey !== runtimeTargetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      setSnapshot(null);
-      setDraft('{}\n');
       setLoadError(errorMessage(error));
     } finally {
       if (
@@ -108,9 +111,12 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
   }, [runtimeTarget, runtimeTargetKey, selection]);
 
   React.useEffect(() => {
-    setSnapshot(null);
-    setDraft('{}\n');
-    if (selection) void load();
+    if (!selection) return;
+    if (!dirtyRef.current) {
+      setSnapshot(null);
+      setDraft('{}\n');
+      void load();
+    }
   }, [load, selection]);
 
   const parsed = React.useMemo(() => {
@@ -135,6 +141,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
     return { error: null, valid: true };
   }, [draft, selection]);
   const dirty = snapshot !== null && draft !== snapshot.content;
+  dirtyRef.current = dirty;
   const selectionChanged = selection === null
     || root !== selection.root
     || format !== selection.format
@@ -186,6 +193,22 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
     if (!nextPath || dirty) return;
     setSelection({ format, path: nextPath, root });
   };
+
+  React.useEffect(() => {
+    const refreshCleanDraft = (): void => {
+      if (!dirtyRef.current && selection && document.visibilityState === 'visible') void load(true);
+    };
+    window.addEventListener('focus', refreshCleanDraft);
+    document.addEventListener('visibilitychange', refreshCleanDraft);
+    const unsubscribe = subscribePiRuntimeCatalogChanged((reason) => {
+      if (reason === 'plugin-config' || reason === 'reload') refreshCleanDraft();
+    });
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', refreshCleanDraft);
+      document.removeEventListener('visibilitychange', refreshCleanDraft);
+    };
+  }, [load, selection]);
 
   return (
     <div className="space-y-5">
@@ -263,7 +286,10 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       <div className="h-80 overflow-hidden rounded-md border border-border/60 bg-background">
         <CodeMirrorEditor
           value={draft}
-          onChange={setDraft}
+          onChange={(content) => {
+            mutationRevisionRef.current += 1;
+            setDraft(content);
+          }}
           extensions={editorExtensions}
           className="h-full"
           enableSearch

@@ -2096,6 +2096,7 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.integrations.title': 'Adapted extensions',
   'settings.piarium.pluginSettings.integrations.description': 'Choose an extension to edit. Configuration remains available even before installation, so it can be prepared in advance.',
   'settings.piarium.pluginSettings.integrations.choose': 'Plugin',
+  'settings.piarium.pluginSettings.installed.empty': 'No installed Pi packages.',
   'settings.piarium.pluginSettings.configuration.description': 'Common settings are presented as controls; fields not set here continue to use the plugin default.',
   'settings.piarium.pluginSettings.status.install.checking': 'Checking package',
   'settings.piarium.pluginSettings.status.install.configured-missing': 'Configured, missing',

@@ -2108,6 +2108,7 @@ export const settingsDict = {
   'settings.page.pluginSettings.title': 'Ustawienia wtyczek',
   "settings.piarium.pluginSettings.description": "Skonfiguruj popularne rozszerzenia Pi bez odbierania im własności. Ustrukturyzowane elementy sterujące aktualizują pliki należące do rozszerzenia, a zaawansowana edycja zachowuje każde nieznane pole.",
   "settings.piarium.pluginSettings.integrations.title": "Dostosowane rozszerzenia",
+  "settings.piarium.pluginSettings.installed.empty": "Brak zainstalowanych pakietów Pi.",
   "settings.piarium.pluginSettings.integrations.description": "Wybierz rozszerzenie do edycji. Konfiguracja pozostaje dostępna jeszcze przed instalacją, dzięki czemu można ją przygotować wcześniej.",
   "settings.piarium.pluginSettings.configuration.description": "Typowe ustawienia są prezentowane jako elementy sterujące; pola, które nie zostały tu ustawione, nadal korzystają z domyślnej wtyczki.",
   "settings.piarium.pluginSettings.status.install.checking": "Sprawdzanie pakietu",

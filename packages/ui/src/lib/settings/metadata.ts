@@ -147,7 +147,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'plugin-settings',
     title: 'Plugin Settings',
     group: 'pi',
-    kind: 'single',
+    kind: 'split',
     keywords: ['pi', 'plugin', 'settings', 'configuration', 'subagents', 'magic context', 'web access', 'workspace history', 'wtf'],
   },
   {

@@ -2066,6 +2066,7 @@ export const settingsDict = {
   'settings.piarium.plugins.toast.failed': '无法变更 Pi 插件配置',
   'settings.piarium.pluginSettings.description': '用图形界面配置常用 Pi 插件，但不从插件手中夺走配置所有权。结构化控件直接更新插件自己的文件，高级编辑器会保留所有未知字段。',
   'settings.piarium.pluginSettings.integrations.title': '已适配插件',
+  'settings.piarium.pluginSettings.installed.empty': '尚无已安装的 Pi 插件。',
   'settings.piarium.pluginSettings.integrations.description': '选择要配置的插件。即使尚未安装，也可以提前准备配置。',
   'settings.piarium.pluginSettings.configuration.description': '常用设置以控件呈现；未在这里显式设置的字段继续跟随插件默认值。',
   'settings.piarium.pluginSettings.status.install.checking': '正在检查插件',

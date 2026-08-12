@@ -30,6 +30,7 @@ describe('settings metadata', () => {
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'mcp')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugins')?.group).toBe('pi');
     expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugin-settings')?.group).toBe('pi');
+    expect(SETTINGS_PAGE_METADATA.find((page) => page.slug === 'plugin-settings')?.kind).toBe('split');
   });
 
   test('does not route removed OpenCode settings through compatibility aliases', () => {

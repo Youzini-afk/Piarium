@@ -23,10 +23,11 @@ describe('plugin settings navigation', () => {
       section: 'agents',
     });
 
-    requestPluginSettingsTarget('example-agents', 'profiles');
+    requestPluginSettingsTarget('example-agents', 'profiles', 'project:../example-agents');
     expect(consumePluginSettingsTarget()).toEqual({
       integrationId: null,
       pluginId: 'example-agents',
+      packageIdentity: 'project:../example-agents',
       section: 'profiles',
     });
   });

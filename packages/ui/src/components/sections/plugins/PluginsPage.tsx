@@ -230,7 +230,7 @@ export const PluginsPage: React.FC = () => {
   }, [installScope, refresh, runtimeTarget, t, targetKey]);
 
   const openPackageConfiguration = React.useCallback((entry: PackageDescriptor) => {
-    requestPluginSettingsTarget(entry.name);
+    requestPluginSettingsTarget(entry.name, undefined, `${entry.scope}:${entry.source}`);
     setSettingsPage('plugin-settings');
   }, [setSettingsPage]);
 

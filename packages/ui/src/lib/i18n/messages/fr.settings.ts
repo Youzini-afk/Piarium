@@ -2659,6 +2659,7 @@ export const settingsDict = {
   'settings.page.pluginSettings.title': 'Paramètres des extensions',
   "settings.piarium.pluginSettings.description": "Configurez les extensions Pi courantes sans en retirer la propriété. Les contrôles structurés mettent à jour les fichiers appartenant à l'extension, tandis que l'édition avancée préserve chaque champ inconnu.",
   "settings.piarium.pluginSettings.integrations.title": "Extensions adaptées",
+  "settings.piarium.pluginSettings.installed.empty": "Aucun package Pi n’est installé.",
   "settings.piarium.pluginSettings.integrations.description": "Choisissez une extension à modifier. La configuration reste disponible avant même l'installation, elle peut donc être préparée à l'avance.",
   "settings.piarium.pluginSettings.configuration.description": "Les paramètres courants sont présentés sous forme de contrôles ; les champs non définis ici continuent à utiliser la valeur par défaut du plugin.",
   "settings.piarium.pluginSettings.status.install.checking": "Vérification du colis",

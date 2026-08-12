@@ -8,6 +8,7 @@ export type PluginSettingsIntegrationId =
 
 export interface PluginSettingsNavigationTarget {
   integrationId: PluginSettingsIntegrationId | null;
+  packageIdentity?: string;
   pluginId: string;
   section?: string;
 }
@@ -21,6 +22,13 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-web-access': 'web-access',
   'pi-workspace-history': 'workspace-history',
   'pi-wtf': 'wtf',
+};
+
+export const pluginSettingsIntegrationForPluginId = (
+  pluginId: string,
+): PluginSettingsIntegrationId | null => {
+  const normalized = pluginId.trim().replace(/^npm:/, '').replace(/@[^/@]+$/, '').toLowerCase();
+  return INTEGRATION_BY_PLUGIN_ID[normalized] ?? null;
 };
 
 const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, string>> = {
@@ -43,11 +51,15 @@ export const requestPluginSettingsIntegration = (
   };
 };
 
-export const requestPluginSettingsTarget = (pluginId: string, section?: string): void => {
-  const normalized = pluginId.trim().replace(/^npm:/, '').toLowerCase();
+export const requestPluginSettingsTarget = (
+  pluginId: string,
+  section?: string,
+  packageIdentity?: string,
+): void => {
   pendingTarget = {
-    integrationId: INTEGRATION_BY_PLUGIN_ID[normalized] ?? null,
+    integrationId: pluginSettingsIntegrationForPluginId(pluginId),
     pluginId,
+    ...(packageIdentity === undefined ? {} : { packageIdentity }),
     ...(section === undefined ? {} : { section }),
   };
 };

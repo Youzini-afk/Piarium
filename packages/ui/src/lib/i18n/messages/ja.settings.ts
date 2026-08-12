@@ -1964,6 +1964,7 @@ export const settingsDict = {
   'settings.piarium.mcp.config.raw.show': 'Raw Advanced JSONC を表示',
   'settings.piarium.mcp.config.raw.hide': 'Raw Advanced JSONC を隠す',
   'settings.piarium.pluginSettings.integrations.choose': 'プラグイン',
+  'settings.piarium.pluginSettings.installed.empty': 'インストール済みの Pi パッケージはありません。',
   'settings.piarium.pluginSettings.field.pluginDefault': '継承／プラグイン既定値',
   'settings.piarium.pluginSettings.field.useDefault': '継承値／既定値を使用',
   'settings.piarium.pluginSettings.field.unsupportedValue': '対応していない値 — 詳細設定で編集',

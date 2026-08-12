@@ -22,7 +22,10 @@ import {
 } from '@/lib/pi-runtime/json-object-document';
 import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
+import {
+  notifyPiRuntimeCatalogChanged,
+  subscribePiRuntimeCatalogChanged,
+} from '@/lib/pi-runtime/catalog-events';
 import { useI18n } from '@/lib/i18n';
 import {
   asJsonObject,
@@ -87,6 +90,16 @@ interface DraftState {
   targetKey: string | null;
 }
 
+export interface DraftReloadOptions {
+  preserveNewerDraft?: boolean;
+}
+
+export const shouldApplyPluginDraftReload = (
+  options: DraftReloadOptions,
+  startedRevision: number,
+  currentRevision: number,
+): boolean => !options.preserveNewerDraft || startedRevision === currentRevision;
+
 const initialState = (): DraftState => ({
   draft: {},
   error: null,
@@ -101,6 +114,34 @@ const initialState = (): DraftState => ({
   targetKey: null,
 });
 
+const useRefreshCleanDraft = (
+  dirty: boolean,
+  loaded: boolean,
+  reload: (options?: DraftReloadOptions) => Promise<void>,
+): void => {
+  const dirtyRef = React.useRef(dirty);
+  const loadedRef = React.useRef(loaded);
+  dirtyRef.current = dirty;
+  loadedRef.current = loaded;
+  React.useEffect(() => {
+    const refresh = (): void => {
+      if (document.visibilityState === 'visible' && loadedRef.current && !dirtyRef.current) {
+        void reload({ preserveNewerDraft: true });
+      }
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    const unsubscribe = subscribePiRuntimeCatalogChanged((reason) => {
+      if (reason === 'plugin-config' || reason === 'reload') refresh();
+    });
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [reload]);
+};
+
 const errorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : String(error)
 );
@@ -109,6 +150,7 @@ const useDraftActions = (
   state: DraftState,
   setState: React.Dispatch<React.SetStateAction<DraftState>>,
   targetKey: string,
+  mutationRevisionRef: React.MutableRefObject<number>,
 ) => {
   const active = state.targetKey === targetKey;
   const updateDraft = (
@@ -134,12 +176,14 @@ const useDraftActions = (
     rawContent: active ? state.rawContent : '{}\n',
     rawError: active ? state.rawError : null,
     removeValue: (path: readonly string[]) => {
+      mutationRevisionRef.current += 1;
       setState((current) => current.targetKey === targetKey
         ? updateDraft(current, (draft) => removeJsonPath(draft, path))
         : current);
     },
     saving: active && state.saving,
     setRawContent: (content: string) => {
+      mutationRevisionRef.current += 1;
       setState((current) => {
         if (current.targetKey !== targetKey) return current;
         try {
@@ -159,6 +203,7 @@ const useDraftActions = (
       });
     },
     setValue: (path: readonly string[], value: JsonValue) => {
+      mutationRevisionRef.current += 1;
       setState((current) => current.targetKey === targetKey
         ? updateDraft(current, (draft) => setJsonPath(draft, path, value))
         : current);
@@ -175,11 +220,13 @@ export const useSettingsObjectDraft = ({
   const { t } = useI18n();
   const [state, setState] = React.useState<DraftState>(initialState);
   const generationRef = React.useRef(0);
+  const mutationRevisionRef = React.useRef(0);
   const targetKeyRef = React.useRef(targetKey);
   targetKeyRef.current = targetKey;
 
-  const reload = React.useCallback(async () => {
+  const reload = React.useCallback(async (options: DraftReloadOptions = {}) => {
     const generation = ++generationRef.current;
+    const mutationRevision = mutationRevisionRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
     setState((current) => current.targetKey === actionTargetKey
@@ -192,6 +239,10 @@ export const useSettingsObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
+      if (!shouldApplyPluginDraftReload(options, mutationRevision, mutationRevisionRef.current)) {
+        setState((current) => ({ ...current, loading: false }));
+        return;
+      }
       const document = asJsonObject(snapshot[scope][property]);
       const rawContent = formatPiJsonObjectDocument(document);
       setState({
@@ -213,11 +264,9 @@ export const useSettingsObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      setState({
-        ...initialState(),
-        error: errorMessage(error),
-        targetKey: actionTargetKey,
-      });
+      setState((current) => current.targetKey === actionTargetKey
+        ? { ...current, error: errorMessage(error), loading: false }
+        : { ...initialState(), error: errorMessage(error), targetKey: actionTargetKey });
     }
   }, [property, runtimeTarget, scope, targetKey]);
 
@@ -274,7 +323,9 @@ export const useSettingsObjectDraft = ({
     }
   }, [property, runtimeTarget, scope, state.draft, state.rawError, state.saving, state.source, state.targetKey, t, targetKey]);
 
-  return { ...useDraftActions(state, setState, targetKey), reload, save };
+  const actions = useDraftActions(state, setState, targetKey, mutationRevisionRef);
+  useRefreshCleanDraft(actions.dirty, actions.loaded, reload);
+  return { ...actions, reload, save };
 };
 
 export const useConfigDocumentObjectDraft = ({
@@ -286,11 +337,13 @@ export const useConfigDocumentObjectDraft = ({
   const { t } = useI18n();
   const [state, setState] = React.useState<DraftState>(initialState);
   const generationRef = React.useRef(0);
+  const mutationRevisionRef = React.useRef(0);
   const targetKeyRef = React.useRef(targetKey);
   targetKeyRef.current = targetKey;
 
-  const reload = React.useCallback(async () => {
+  const reload = React.useCallback(async (options: DraftReloadOptions = {}) => {
     const generation = ++generationRef.current;
+    const mutationRevision = mutationRevisionRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
     setState((current) => current.targetKey === actionTargetKey
@@ -303,6 +356,10 @@ export const useConfigDocumentObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
+      if (!shouldApplyPluginDraftReload(options, mutationRevision, mutationRevisionRef.current)) {
+        setState((current) => ({ ...current, loading: false }));
+        return;
+      }
       setState({
         draft: snapshot.document,
         error: null,
@@ -322,11 +379,9 @@ export const useConfigDocumentObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      setState({
-        ...initialState(),
-        error: errorMessage(error),
-        targetKey: actionTargetKey,
-      });
+      setState((current) => current.targetKey === actionTargetKey
+        ? { ...current, error: errorMessage(error), loading: false }
+        : { ...initialState(), error: errorMessage(error), targetKey: actionTargetKey });
     }
   }, [path, runtimeTarget, scope, targetKey]);
 
@@ -385,7 +440,9 @@ export const useConfigDocumentObjectDraft = ({
     }
   }, [path, runtimeTarget, scope, state.draft, state.rawError, state.saving, state.source, state.targetKey, t, targetKey]);
 
-  return { ...useDraftActions(state, setState, targetKey), reload, save };
+  const actions = useDraftActions(state, setState, targetKey, mutationRevisionRef);
+  useRefreshCleanDraft(actions.dirty, actions.loaded, reload);
+  return { ...actions, reload, save };
 };
 
 const parseTextObject = (content: string, format: PiConfigTextFormat): JsonObject => {
@@ -445,11 +502,13 @@ export const useTextObjectDraft = ({
   const [snapshot, setSnapshot] = React.useState<PiConfigTextDocumentSnapshot | null>(null);
   const contentRef = React.useRef('{}\n');
   const generationRef = React.useRef(0);
+  const mutationRevisionRef = React.useRef(0);
   const targetKeyRef = React.useRef(targetKey);
   targetKeyRef.current = targetKey;
 
-  const reload = React.useCallback(async () => {
+  const reload = React.useCallback(async (options: DraftReloadOptions = {}) => {
     const generation = ++generationRef.current;
+    const mutationRevision = mutationRevisionRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
     setState((current) => current.targetKey === actionTargetKey
@@ -462,6 +521,10 @@ export const useTextObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
+      if (!shouldApplyPluginDraftReload(options, mutationRevision, mutationRevisionRef.current)) {
+        setState((current) => ({ ...current, loading: false }));
+        return;
+      }
       const parsed = parsePluginTextObjectDraft(nextSnapshot.content, format);
       setSnapshot(nextSnapshot);
       contentRef.current = nextSnapshot.content;
@@ -486,11 +549,9 @@ export const useTextObjectDraft = ({
         || actionTargetKey !== targetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      setState({
-        ...initialState(),
-        error: errorMessage(error),
-        targetKey: actionTargetKey,
-      });
+      setState((current) => current.targetKey === actionTargetKey
+        ? { ...current, error: errorMessage(error), loading: false }
+        : { ...initialState(), error: errorMessage(error), targetKey: actionTargetKey });
     }
   }, [format, paths, root, runtimeTarget, targetKey]);
 
@@ -505,6 +566,7 @@ export const useTextObjectDraft = ({
 
   const setValue = React.useCallback((path: readonly string[], value: JsonValue) => {
     if (state.targetKey !== targetKey || targetKey !== targetKeyRef.current) return;
+    mutationRevisionRef.current += 1;
     const next = updateJsoncPath(contentRef.current, path, value);
     contentRef.current = next;
     setContent(next);
@@ -514,6 +576,7 @@ export const useTextObjectDraft = ({
 
   const removeValue = React.useCallback((path: readonly string[]) => {
     if (state.targetKey !== targetKey || targetKey !== targetKeyRef.current) return;
+    mutationRevisionRef.current += 1;
     const next = removeJsoncPath(contentRef.current, path);
     contentRef.current = next;
     setContent(next);
@@ -523,6 +586,7 @@ export const useTextObjectDraft = ({
 
   const setRawContent = React.useCallback((next: string) => {
     if (state.targetKey !== targetKey || targetKey !== targetKeyRef.current) return;
+    mutationRevisionRef.current += 1;
     contentRef.current = next;
     setContent(next);
     try {
@@ -593,7 +657,7 @@ export const useTextObjectDraft = ({
   }, [content, format, rawError, runtimeTarget, snapshot, state.saving, state.targetKey, t, targetKey]);
 
   const active = state.targetKey === targetKey;
-  return {
+  const result = {
     dirty: active && snapshot !== null && content !== snapshot.content,
     draft: active ? state.draft : {},
     error: active ? state.error : null,
@@ -610,4 +674,6 @@ export const useTextObjectDraft = ({
     setRawContent,
     setValue,
   };
+  useRefreshCleanDraft(result.dirty, result.loaded, reload);
+  return result;
 };

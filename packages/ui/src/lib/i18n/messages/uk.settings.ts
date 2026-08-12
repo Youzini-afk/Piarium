@@ -2139,6 +2139,7 @@ export const settingsDict = {
   'settings.page.pluginSettings.title': 'Налаштування плагінів',
   'settings.piarium.pluginSettings.description': 'Налаштовуйте спільні розширення Pi, не забираючи в них право власності. Структуровані елементи керування оновлюють файли розширень, а розширене редагування зберігає всі невідомі поля.',
   'settings.piarium.pluginSettings.integrations.title': 'Адаптовані розширення',
+  'settings.piarium.pluginSettings.installed.empty': 'Немає встановлених пакетів Pi.',
   'settings.piarium.pluginSettings.integrations.description': 'Виберіть розширення для редагування. Конфігурація доступна ще до встановлення, тому її можна підготувати заздалегідь.',
   'settings.piarium.pluginSettings.configuration.description': 'Поширені параметри подано як елементи керування; поля, не задані тут, і надалі використовують типові значення плагіна.',
   'settings.piarium.pluginSettings.status.install.checking': 'Перевірка пакета',
