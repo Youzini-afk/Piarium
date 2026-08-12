@@ -217,11 +217,14 @@ into a surface-owned read-only panel, so Piarium does not copy the component's p
 Commands, custom session entries, tool details, and extension errors have generic renderers so an
 unknown package remains usable before a first-class adapter exists.
 
-The Plugins settings page is a direct client of Pi's typed `package.list/install/update/remove`
+The Plugins settings page is a direct client of Pi's typed
+`package.list/install/setEnabled/update/remove`
 operations. It does not maintain an OpenCode registry, copy extension files, or restrict package
 sources: recommended cards are only shortcuts, while any source accepted by Pi's `PackageManager`
 can be passed through unchanged. Package mutations target the current live session when one exists,
 so Pi reloads the real extension instance; otherwise they use the current workspace catalog context.
+Disabling a package keeps its installation and native configuration intact, filters all Pi resource
+types from that package, and restores the package's previous native filters when enabled again.
 
 ### 7.2 First-class adapters
 

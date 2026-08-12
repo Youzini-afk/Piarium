@@ -98,6 +98,48 @@ test("broker owns catalog and per-session Pi workers", async () => {
     });
     assert.equal(mcpConfig.provider.state, "unavailable");
     assert.equal(mcpConfig.catalog, undefined);
+    const packageRoot = join(root, "broker-package");
+    await mkdir(packageRoot, { recursive: true });
+    await writeFile(
+      join(packageRoot, "package.json"),
+      `${JSON.stringify({ name: "broker-package", pi: { extensions: ["./index.ts"] } })}\n`,
+    );
+    await writeFile(
+      join(packageRoot, "index.ts"),
+      `export default function (pi: any) {
+        pi.registerCommand("broker-package-command", { description: "Broker package", handler() {} });
+      }\n`,
+    );
+    const installedPackage = await dispatchRuntimeRequest(broker, "package.install", {
+      cwd: workspace,
+      scope: "project",
+      source: packageRoot,
+    });
+    assert.equal(installedPackage.enabled, true);
+    const disabledPackage = await dispatchRuntimeRequest(broker, "package.setEnabled", {
+      cwd: workspace,
+      enabled: false,
+      scope: "project",
+      source: installedPackage.source,
+    });
+    assert.equal(disabledPackage.enabled, false);
+    assert.equal(
+      (await dispatchRuntimeRequest(broker, "command.list", { cwd: workspace }))
+        .some((command) => command.name === "broker-package-command"),
+      false,
+    );
+    const reenabledPackage = await dispatchRuntimeRequest(broker, "package.setEnabled", {
+      cwd: workspace,
+      enabled: true,
+      scope: "project",
+      source: installedPackage.source,
+    });
+    assert.equal(reenabledPackage.enabled, true);
+    assert.equal(
+      (await dispatchRuntimeRequest(broker, "command.list", { cwd: workspace }))
+        .some((command) => command.name === "broker-package-command"),
+      true,
+    );
     const updatedSettings = await dispatchRuntimeRequest(broker, "settings.update", {
       cwd: workspace,
       remove: [],

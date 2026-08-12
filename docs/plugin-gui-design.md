@@ -41,7 +41,7 @@ package's current schema, commands, public events, and documented lifecycle.
 
 | Surface | Responsibility | Must not own |
 | --- | --- | --- |
-| Pi Packages | Install, update, remove, scope, source, version, reload state | Extension-specific configuration |
+| Pi Packages | Install, enable, disable, update, remove, scope, source, version, reload state | Extension-specific configuration |
 | Plugin Settings | First-class GUI adapters plus advanced native document editing | Package installation semantics or copied plugin state |
 | Agents | Unified provider catalog and provider-advertised lifecycle actions | A universal agent schema that overrides providers |
 | Fleet | Live and recent delegated work, task graph, controls, artifacts | Agent definitions or terminal-text parsing |
@@ -59,7 +59,9 @@ The current catalog surfaces follow those boundaries directly:
 
 - Pi Packages distinguishes a configured source from a source that is actually present on disk,
   shows its resolved path and whether Pi stores a structured package entry, and links to Plugin
-  Settings. Pi's update operation is
+  Settings. Its package switch disables every Pi resource type from that source while retaining the
+  installed files, native configuration, and any existing resource filters for exact restoration.
+  Pi's update operation is
   truthfully described as source-wide across user and project scopes; the scope selector applies to
   installation and removal, not to a fictional scoped update implementation.
 - Commands projects each extension, prompt, or skill command's native source path, scope, origin,
@@ -304,7 +306,7 @@ Authority:
 - its registered panel, reconnect, authentication, logout, enable, and disable commands;
 - the adapter's OS keyring/OAuth implementation for credentials.
 
-The dedicated MCP page is visible only while `package.list` reports an installed
+The dedicated MCP page is visible only while `package.list` reports an installed and enabled
 `pi-mcp-adapter`. Its split view uses the adapter's read-only `configCatalog/v1` RPC as the left-hand
 catalog: one row per deduplicated effective server, with runtime state joined by server name. The
 right pane shows the selected server, its runtime actions, and the highest-precedence native source

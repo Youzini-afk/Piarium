@@ -36,7 +36,10 @@ describe("SessionHost Pi packages", () => {
     );
     const host = new SessionHost({
       agentDir,
-      emit: <E extends HostEvent>(_event: E, _data: HostEventData<E>) => undefined,
+      emit: <E extends HostEvent>(event: E, data: HostEventData<E>) => {
+        void event;
+        void data;
+      },
       projectTrustOverride: true,
     });
 
@@ -46,6 +49,7 @@ describe("SessionHost Pi packages", () => {
 
       const installed = await host.installPackage(packageRoot, "project");
       assert.equal(installed.name, "fixture-pi-package");
+      assert.equal(installed.enabled, true);
       assert.equal(installed.scope, "project");
       assert.equal(installed.installed, true);
       assert.equal(installed.structured, false);
@@ -56,6 +60,27 @@ describe("SessionHost Pi packages", () => {
       assert.equal(command?.source, "extension");
       assert.equal(command?.sourceInfo?.source, installed.source);
       assert.equal(command?.sourceInfo?.scope, "project");
+
+      const disabled = await host.setPackageEnabled(installed.source, "project", false);
+      assert.equal(disabled.enabled, false);
+      assert.equal(disabled.installed, true);
+      assert.equal(
+        host.listCommands(snapshot.sessionId)
+          .some((entry) => entry.name === "fixture-package-command"),
+        false,
+      );
+      const disabledSettings = JSON.parse(
+        await readFile(join(cwd, ".pi", "settings.json"), "utf8"),
+      ) as { packages?: Array<{ extensions?: string[]; source: string }> };
+      assert.deepEqual(disabledSettings.packages?.[0]?.extensions, []);
+
+      const reenabled = await host.setPackageEnabled(installed.source, "project", true);
+      assert.equal(reenabled.enabled, true);
+      assert.equal(
+        host.listCommands(snapshot.sessionId)
+          .some((entry) => entry.name === "fixture-package-command"),
+        true,
+      );
 
       const settings = JSON.parse(
         await readFile(join(cwd, ".pi", "settings.json"), "utf8"),

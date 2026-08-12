@@ -3,6 +3,7 @@ import type { PackageDescriptor, PiPackageScope, RuntimeContextTarget } from '@p
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -23,6 +24,7 @@ import {
   listPiPackages,
   piPackageNameFromSource,
   removePiPackage,
+  setPiPackageEnabled,
   updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
@@ -31,18 +33,18 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { RECOMMENDED_PACKAGES } from './recommended-packages';
 
-type PackageAction = 'install' | 'remove' | 'update' | 'update-all';
+type PackageAction = 'install' | 'remove' | 'set-enabled' | 'update' | 'update-all';
 
 const PACKAGE_ACTION_SUCCESS_KEYS = {
   install: 'settings.piarium.plugins.toast.install',
   remove: 'settings.piarium.plugins.toast.remove',
   update: 'settings.piarium.plugins.toast.update',
   'update-all': 'settings.piarium.plugins.toast.updateAll',
-} satisfies Record<PackageAction, I18nKey>;
+} satisfies Record<Exclude<PackageAction, 'set-enabled'>, I18nKey>;
 
 const packageActionLabel = (
-  action: PackageAction | null,
-  expected: PackageAction,
+  action: Exclude<PackageAction, 'set-enabled'> | null,
+  expected: Exclude<PackageAction, 'set-enabled'>,
   t: ReturnType<typeof useI18n>['t'],
 ): string => {
   if (action === expected) {
@@ -67,17 +69,20 @@ const PackageStatus: React.FC<{ packageInfo?: PackageDescriptor }> = ({ packageI
   const { t } = useI18n();
   const configured = packageInfo !== undefined;
   const installed = packageInfo?.installed === true;
+  const enabled = packageInfo?.enabled === true;
   return (
-    <span className={configured && installed
+    <span className={configured && installed && enabled
       ? 'typography-micro text-[var(--status-success)]'
-      : configured
+      : configured && !installed
         ? 'typography-micro text-[var(--status-warning)]'
-      : 'typography-micro text-muted-foreground'}>
-      {configured && installed
+        : 'typography-micro text-muted-foreground'}>
+      {configured && installed && enabled
         ? t('settings.piarium.recovery.status.configured')
-        : configured
+        : configured && !installed
           ? t('settings.piarium.plugins.status.missing')
-        : t('settings.piarium.recovery.status.notConfigured')}
+          : configured
+            ? t('settings.piarium.plugins.status.disabled')
+            : t('settings.piarium.recovery.status.notConfigured')}
     </span>
   );
 };
@@ -156,6 +161,7 @@ export const PluginsPage: React.FC = () => {
     action: PackageAction,
     source?: string,
     scope: PiPackageScope = installScope,
+    enabled?: boolean,
   ) => {
     if (action !== 'update-all' && !source) return;
     const actionTargetKey = targetKey;
@@ -171,6 +177,8 @@ export const PluginsPage: React.FC = () => {
       } else if (action === 'remove') {
         const result = await removePiPackage(runtimeTarget, source!, scope);
         if (!result.removed) throw new Error(`Pi package is not configured: ${source}`);
+      } else if (action === 'set-enabled') {
+        await setPiPackageEnabled(runtimeTarget, source!, scope, enabled === true);
       } else if (action === 'update') {
         await updatePiPackages(runtimeTarget, source!);
       } else {
@@ -180,7 +188,7 @@ export const PluginsPage: React.FC = () => {
       if (actionTargetKey === targetKeyRef.current && runtimeKey === getRuntimeKey()) {
         await refresh();
       }
-      toast.success(t(PACKAGE_ACTION_SUCCESS_KEYS[action]));
+      if (action !== 'set-enabled') toast.success(t(PACKAGE_ACTION_SUCCESS_KEYS[action]));
     } catch (error) {
       console.error(`Failed to ${action} Pi package:`, error);
       toast.error(t('settings.piarium.plugins.toast.failed'), {
@@ -252,7 +260,11 @@ export const PluginsPage: React.FC = () => {
               className="!font-normal"
               title={t('settings.piarium.plugins.actions.updateAllDescription')}
             >
-              {packageActionLabel(busyAction?.action ?? null, 'update-all', t)}
+              {packageActionLabel(
+                busyAction?.action === 'set-enabled' ? null : busyAction?.action ?? null,
+                'update-all',
+                t,
+              )}
             </Button>
             <Button
               type="button"
@@ -275,10 +287,11 @@ export const PluginsPage: React.FC = () => {
         ) : null}
 
         {packages.map((entry) => {
-          const action = busyAction?.source === entry.source
+          const matchingAction = busyAction?.source === entry.source
             && (busyAction.action === 'update' || busyAction.scope === entry.scope)
             ? busyAction.action
             : null;
+          const action = matchingAction === 'set-enabled' ? null : matchingAction;
           return (
             <div key={`${entry.scope}:${entry.source}`} className="rounded-lg border border-border/60 px-3 py-3">
               <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
@@ -286,9 +299,11 @@ export const PluginsPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     <Icon
                       name="plug-2"
-                      className={entry.installed
+                      className={entry.installed && entry.enabled
                         ? 'size-4 text-[var(--status-success)]'
-                        : 'size-4 text-[var(--status-warning)]'}
+                        : entry.installed
+                          ? 'size-4 text-muted-foreground'
+                          : 'size-4 text-[var(--status-warning)]'}
                     />
                     <span className="typography-ui-label text-foreground">{entry.name}</span>
                     <PackageStatus packageInfo={entry} />
@@ -310,6 +325,17 @@ export const PluginsPage: React.FC = () => {
                   ) : null}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Switch
+                    checked={entry.enabled}
+                    disabled={isBusy || !entry.installed}
+                    onCheckedChange={(checked) => void runPackageAction(
+                      'set-enabled',
+                      entry.source,
+                      entry.scope,
+                      checked,
+                    )}
+                    aria-label={t('settings.piarium.plugins.actions.activationAria', { name: entry.name })}
+                  />
                   {isPiPackageUpdatable(entry.source) ? (
                     <Button
                       type="button"
@@ -370,6 +396,7 @@ export const PluginsPage: React.FC = () => {
           const action = busyAction?.source === source && busyAction.scope === installScope
             ? busyAction.action
             : null;
+          const packageAction = action === 'set-enabled' ? null : action;
           return (
             <div key={item.name} className="rounded-lg border border-border/60 px-3 py-3">
               <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
@@ -377,9 +404,11 @@ export const PluginsPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     <Icon
                       name="plug-2"
-                      className={configured?.installed
+                      className={configured?.installed && configured.enabled
                         ? 'size-4 text-[var(--status-success)]'
-                        : configured
+                        : configured?.installed
+                          ? 'size-4 text-muted-foreground'
+                          : configured
                           ? 'size-4 text-[var(--status-warning)]'
                           : 'size-4 text-muted-foreground'}
                     />
@@ -398,19 +427,32 @@ export const PluginsPage: React.FC = () => {
                     onClick={() => void runPackageAction('install', item.source, installScope)}
                     className="!font-normal"
                   >
-                    {packageActionLabel(action, 'install', t)}
+                    {packageActionLabel(packageAction, 'install', t)}
                   </Button>
                 ) : configured ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    disabled={isBusy}
-                    onClick={() => openPackageConfiguration(configured)}
-                    className="!font-normal"
-                  >
-                    {t('settings.piarium.plugins.actions.configure')}
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Switch
+                      checked={configured.enabled}
+                      disabled={isBusy || !configured.installed}
+                      onCheckedChange={(checked) => void runPackageAction(
+                        'set-enabled',
+                        configured.source,
+                        configured.scope,
+                        checked,
+                      )}
+                      aria-label={t('settings.piarium.plugins.actions.activationAria', { name: configured.name })}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={isBusy}
+                      onClick={() => openPackageConfiguration(configured)}
+                      className="!font-normal"
+                    >
+                      {t('settings.piarium.plugins.actions.configure')}
+                    </Button>
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -461,7 +503,7 @@ export const PluginsPage: React.FC = () => {
               : packageActionLabel(
                 busyAction?.source === (customPackage?.source ?? normalizedCustomSource)
                   && (busyAction.action === 'update' || busyAction.scope === installScope)
-                  ? busyAction.action
+                  ? busyAction.action === 'set-enabled' ? null : busyAction.action
                   : null,
                 customPackage ? 'update' : 'install',
                 t,

@@ -57,6 +57,7 @@ type SessionScopedRuntimeMethod =
   | "package.install"
   | "package.list"
   | "package.remove"
+  | "package.setEnabled"
   | "package.update"
   | "provider.list"
   | "provider.config.delete"
@@ -168,6 +169,7 @@ export const RUNTIME_METHODS = [
   "package.install",
   "package.list",
   "package.remove",
+  "package.setEnabled",
   "package.update",
   "project.trust.respond",
   "provider.list",

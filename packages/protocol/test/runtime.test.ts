@@ -56,6 +56,7 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("config.text.get"), true);
     assert.equal(isRuntimeMethod("config.text.update"), true);
     assert.equal(isRuntimeMethod("mcp.config.snapshot"), true);
+    assert.equal(isRuntimeMethod("package.setEnabled"), true);
     assert.equal(isRuntimeMethod("session.tree"), true);
     assert.equal(isRuntimeMethod("session.features.get"), true);
     assert.equal(isRuntimeMethod("session.features.mutate"), true);

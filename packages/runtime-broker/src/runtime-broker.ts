@@ -76,6 +76,7 @@ export type PiCatalogMethod =
   | "package.install"
   | "package.list"
   | "package.remove"
+  | "package.setEnabled"
   | "package.update"
   | "provider.list"
   | "provider.config.delete"

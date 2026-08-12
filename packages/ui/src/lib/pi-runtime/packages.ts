@@ -67,3 +67,13 @@ export const removePiPackage = async (
   const { client } = await getPiRuntimeConnection();
   return client.request('package.remove', { ...target, scope, source });
 };
+
+export const setPiPackageEnabled = async (
+  target: RuntimeContextTarget,
+  source: string,
+  scope: PiPackageScope,
+  enabled: boolean,
+) => {
+  const { client } = await getPiRuntimeConnection();
+  return client.request('package.setEnabled', { ...target, enabled, scope, source });
+};

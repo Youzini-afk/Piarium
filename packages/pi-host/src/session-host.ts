@@ -12,6 +12,7 @@ import {
   createAgentSessionRuntime,
   createAgentSessionServices,
   DefaultPackageManager,
+  type PackageSource,
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SessionManager,
@@ -69,6 +70,11 @@ import type {
   SessionTreeResult,
   ThinkingLevel,
 } from "@piarium/protocol";
+import {
+  packageSourceEnabled,
+  packageSourceValue,
+  setPackageSourceEnabled,
+} from "./package-activation.js";
 import { HostError } from "./errors.js";
 import {
   AgentProviderBridge,
@@ -1442,7 +1448,14 @@ export class SessionHost {
     const manager = this.#packageManager();
     return manager.listConfiguredPackages().map((entry) => {
       const version = packageVersionFromPath(entry.installedPath);
+      const settings = entry.scope === "project"
+        ? this.runtime.services.settingsManager.getProjectSettings()
+        : this.runtime.services.settingsManager.getGlobalSettings();
+      const configured = (settings.packages ?? []).find((candidate) => (
+        packageSourceValue(candidate) === entry.source
+      ));
       return {
+        enabled: configured === undefined ? true : packageSourceEnabled(configured),
         installed: entry.installedPath !== undefined && existsSync(entry.installedPath),
         name: packageNameFromSource(entry.source),
         ...(entry.installedPath === undefined ? {} : { resolvedPath: entry.installedPath }),
@@ -1464,6 +1477,7 @@ export class SessionHost {
       entry.scope === scope
       && (entry.source === source || (resolvedPath !== undefined && entry.resolvedPath === resolvedPath))
     )) ?? {
+      enabled: true,
       installed: resolvedPath !== undefined,
       name: packageNameFromSource(source),
       ...(resolvedPath === undefined ? {} : { resolvedPath }),
@@ -1471,6 +1485,42 @@ export class SessionHost {
       source,
       structured: false,
     };
+  }
+
+  async setPackageEnabled(
+    source: string,
+    scope: PiPackageScope,
+    enabled: boolean,
+  ): Promise<PackageDescriptor> {
+    const settings = this.runtime.services.settingsManager;
+    const current = scope === "project"
+      ? settings.getProjectSettings().packages ?? []
+      : settings.getGlobalSettings().packages ?? [];
+    const index = current.findIndex((entry) => packageSourceValue(entry) === source);
+    if (index === -1) {
+      throw new HostError("package_not_configured", `Pi package is not configured: ${source}`);
+    }
+    const next: PackageSource[] = [...current];
+    next[index] = setPackageSourceEnabled(next[index] as PackageSource, enabled);
+    if (scope === "project") settings.setProjectPackages(next);
+    else settings.setPackages(next);
+    await settings.flush();
+    const writeErrors = settings.drainErrors();
+    if (writeErrors.length > 0) {
+      await settings.reload();
+      throw new HostError(
+        "settings_write_failed",
+        writeErrors.map((entry) => entry.error.message).join("; "),
+      );
+    }
+    await this.session.reload();
+    const descriptor = this.listPackages().find((entry) => (
+      entry.scope === scope && entry.source === source
+    ));
+    if (!descriptor) {
+      throw new HostError("package_not_configured", `Pi package is not configured: ${source}`);
+    }
+    return descriptor;
   }
 
   async removePackage(source: string, scope: PiPackageScope): Promise<boolean> {

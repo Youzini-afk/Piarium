@@ -650,6 +650,12 @@ export class HostController {
             readPackageScope(params),
           ),
         };
+      case "package.setEnabled":
+        return this.#sessionHost.setPackageEnabled(
+          readString(params, "source"),
+          readPackageScope(params),
+          readBoolean(params, "enabled"),
+        );
       case "package.update":
         return this.#sessionHost.updatePackages(optionalString(params, "source"));
       case "extension.ui.respond": {

@@ -25,6 +25,7 @@ describe('Pi package identity', () => {
   test('finds a configured integration without replacing its original source', () => {
     const configured = findPiPackage([
       {
+        enabled: true,
         installed: true,
         name: 'pi-wtf',
         scope: 'project',

@@ -110,6 +110,7 @@ const sanitizeHealthSnapshot = (value: unknown): JsonRecord | null => {
 const summarizePackages = (packages: PackageDescriptor[]) => ({
   installed: packages.filter((entry) => entry.installed).length,
   packages: packages.map((entry) => ({
+    enabled: entry.enabled,
     installed: entry.installed,
     name: entry.name,
     scope: entry.scope,

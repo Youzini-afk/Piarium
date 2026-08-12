@@ -573,6 +573,13 @@ async function dispatchRuntimeRequestUnchecked(
         source: requireString(input, "source"),
       });
     }
+    case "package.setEnabled": {
+      return requestForRuntimeContext(broker, requireRuntimeContext(input), method, {
+        enabled: requireBoolean(input, "enabled"),
+        scope: requireEnum(input, "scope", ["global", "project"] as const),
+        source: requireString(input, "source"),
+      });
+    }
     case "package.update": {
       const source = optionalString(input, "source");
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "package.update", {

@@ -6,6 +6,7 @@ import {
 } from './plugin-settings-store';
 
 const entry = (input: Partial<PackageDescriptor> & Pick<PackageDescriptor, 'scope' | 'source'>): PackageDescriptor => ({
+  enabled: true,
   installed: true,
   name: input.source,
   structured: false,

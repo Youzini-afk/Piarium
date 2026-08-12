@@ -31,6 +31,7 @@ const publish = (next: McpSettingsAvailabilityState): void => {
 export const isPiMcpAdapterInstalled = (packages: readonly PackageDescriptor[]): boolean => (
   packages.some((candidate) => (
     candidate.installed
+    && candidate.enabled
     && (
       candidate.name === 'pi-mcp-adapter'
       || piPackageNameFromSource(candidate.source) === 'pi-mcp-adapter'

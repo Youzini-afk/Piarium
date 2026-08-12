@@ -245,6 +245,10 @@ export interface HostMethodMap {
     params: { scope: PiPackageScope; source: string };
     result: { removed: boolean };
   };
+  "package.setEnabled": {
+    params: { enabled: boolean; scope: PiPackageScope; source: string };
+    result: PackageDescriptor;
+  };
   "package.update": {
     params: { source?: string };
     result: PackageDescriptor[];

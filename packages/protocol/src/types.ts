@@ -108,6 +108,7 @@ export interface ImageAttachment {
 export type ProviderAuthType = "api_key" | "oauth";
 
 export interface PackageDescriptor {
+  enabled: boolean;
   installed: boolean;
   name: string;
   resolvedPath?: string;

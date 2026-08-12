@@ -78,6 +78,7 @@ mock.module('@/lib/pi-runtime/packages', () => ({
   listPiPackages: async (target: unknown) => {
     packageTargets.push(target);
     return [{
+      enabled: true,
       installed: true,
       name: 'magic-context',
       resolvedPath: 'C:/private/package',
