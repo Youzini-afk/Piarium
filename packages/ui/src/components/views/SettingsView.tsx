@@ -8,6 +8,7 @@ import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { PromptsSidebar } from '@/components/sections/prompts/PromptsSidebar';
@@ -520,6 +521,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
         return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
+      case 'agents':
+        return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
       case 'prompts':
         return <PromptsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills':

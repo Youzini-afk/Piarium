@@ -91,7 +91,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'agents',
     title: 'Agents',
     group: 'pi',
-    kind: 'single',
+    kind: 'split',
     keywords: ['agent', 'agents', 'subagent', 'subagents', 'roles', 'workflow', 'pi-subagents', 'magic context', 'historian', 'dreamer', 'sidekick'],
   },
   {
