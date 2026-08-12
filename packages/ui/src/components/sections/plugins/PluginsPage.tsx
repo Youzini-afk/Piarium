@@ -29,47 +29,9 @@ import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
+import { RECOMMENDED_PACKAGES } from './recommended-packages';
 
 type PackageAction = 'install' | 'remove' | 'update' | 'update-all';
-
-interface RecommendedPackage {
-  descriptionKey: I18nKey;
-  name: string;
-  source: string;
-}
-
-const RECOMMENDED_PACKAGES: RecommendedPackage[] = [
-  {
-    name: 'pi-subagents',
-    source: 'npm:pi-subagents',
-    descriptionKey: 'settings.piarium.plugins.package.subagents',
-  },
-  {
-    name: '@cortexkit/pi-magic-context',
-    source: 'npm:@cortexkit/pi-magic-context',
-    descriptionKey: 'settings.piarium.plugins.package.magicContext',
-  },
-  {
-    name: 'pi-mcp-adapter',
-    source: 'https://github.com/Youzini-afk/pi-mcp-adapter.git',
-    descriptionKey: 'settings.piarium.plugins.package.mcp',
-  },
-  {
-    name: 'pi-web-access',
-    source: 'npm:pi-web-access',
-    descriptionKey: 'settings.piarium.plugins.package.webAccess',
-  },
-  {
-    name: 'pi-workspace-history',
-    source: 'npm:pi-workspace-history',
-    descriptionKey: 'settings.piarium.plugins.package.workspaceHistory',
-  },
-  {
-    name: 'pi-wtf',
-    source: 'npm:pi-wtf',
-    descriptionKey: 'settings.piarium.plugins.package.wtf',
-  },
-];
 
 const PACKAGE_ACTION_SUCCESS_KEYS = {
   install: 'settings.piarium.plugins.toast.install',

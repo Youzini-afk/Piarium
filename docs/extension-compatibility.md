@@ -18,6 +18,7 @@ destructive commands.
 | @cortexkit/pi-magic-context | 0.33.0 | Pass | 9 context, dream, and embedding commands |
 | pi-openai-codex-compat | 0.0.7-alpha.0 | Pass | `codex-settings` |
 | pi-observational-memory | 3.0.4 | Pass | `om:status`, `om:view` |
+| context-mode | 1.0.169 | Pass | `ctx-stats`, `ctx-doctor` |
 
 `pi-openai-codex-compat@0.0.7-alpha.0` declares Pi `>=0.84.0 <0.85.0`; Piarium's Pi `0.84.1`
 runtime now satisfies that contract. The Phase 1 smoke above still proves entry-point loading and

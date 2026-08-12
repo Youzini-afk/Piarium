@@ -55,6 +55,7 @@ advance independently.
 | `pi-web-access` | Native `web-search.json`, Curator and account actions, and stored-result navigation |
 | `pi-openai-codex-compat` | Native global/project request, reasoning, remote-compaction, and Codex-tool configuration |
 | `pi-observational-memory` | Native global/project observation, reflection, compaction, pool, and worker configuration |
+| `context-mode` | Recommended native Pi package with generic plugin configuration because it has no single canonical settings document |
 
 See [maintained extension compatibility](docs/extension-compatibility.md) for the currently verified
 versions and exact evidence.
