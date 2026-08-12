@@ -30,7 +30,7 @@ bodies, bearer/pairing data, or file contents.
 Before changing imported OpenChamber code, read the nearest package `README.md` and
 `DOCUMENTATION.md`, then load every matching `.agents/skills/*/SKILL.md`. At minimum:
 
-- any code/dependency/export/build change: `openchamber-change-discipline`;
+- any code/dependency/export/build change: `piarium-change-discipline`;
 - shared runtime APIs/routes: `ui-api-decoupling`;
 - session state/sync: `sync-state-invariants`;
 - Electron/packaging/processes: `desktop-shell`;

@@ -1,13 +1,13 @@
 ---
 name: sync-state-invariants
-description: Use when changing session synchronization, bootstrap or reconnect state, event reducers, polling, optimistic updates, message queues, live activity, ordering/reconciliation, runtime-scoped caches, or directory-dependent session behavior.
+description: Use when changing Piarium session synchronization, bootstrap/reconnect state, event reducers, polling, optimistic updates, message queues, live activity, ordering/reconciliation, runtime-scoped caches, persisted snapshots, or directory-dependent session behavior.
 ---
 
 # Sync State Invariants
 
 ## Read First
 
-Read `packages/ui/src/sync/DOCUMENTATION.md` and the nearest owning module documentation before editing.
+Read `AGENTS.md`, the nearest existing owning module documentation, and the actual store/runtime callers before editing. Do not assume a legacy OpenChamber sync directory or document still exists.
 
 ## Sources Of Truth
 

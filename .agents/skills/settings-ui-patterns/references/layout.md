@@ -35,14 +35,14 @@ All primitives and class constants below live in
 
 Sidebar groups (`packages/ui/src/lib/settings/metadata.ts`, order in `SettingsView.tsx`):
 
-- **OpenChamber** (`general` group): General, Appearance, Chat, Notifications, Sessions, Shortcuts, Voice, Usage, About.
+- **General** (`general` group): General, Appearance, Chat, Notifications, Sessions, Shortcuts, Voice, Usage, About.
 - **Workspace** (`projects`): Projects, Remote Instances, External Tunnel, Git.
-- **OpenCode** (`opencode`): Providers, Agents, Behavior, Commands, MCP, Plugins.
+- **Pi runtime** (`pi`): Providers, Agents, Fleet, Commands, Prompt Templates, Skills, MCP, Pi Packages, Plugin Settings.
 - **Library** (`content`): Magic Prompts, Snippets, Skills, Skills Catalog.
 
 Placement rules:
 
-- **General** hosts app-level settings that don't belong to a feature page: startup/tray/window, network access + UI password, passkeys, OpenCode CLI binary, terminal shell/navigation, message stream transport, privacy.
+- **General** hosts app-level settings that don't belong to a feature page: startup/tray/window, network access + UI password, passkeys, terminal shell/navigation, message stream transport, and privacy.
 - Feature pages (Appearance, Chat, Sessions…) keep only settings about that feature. If a setting reads awkwardly on its page, move it to General rather than inventing a new page.
 - New pages need metadata, `pageOrder`, nav icon, `settings.page.<slug>.title/description` in every locale, and mobile whitelist (`MOBILE_SETTINGS_PAGES` in `MobileApp.tsx`) when relevant.
 

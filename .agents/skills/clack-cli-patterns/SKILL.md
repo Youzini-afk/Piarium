@@ -1,13 +1,11 @@
 ---
 name: clack-cli-patterns
-description: Use when creating or modifying OpenChamber CLI commands, prompts, terminal output, non-TTY behavior, `--quiet`, or `--json` behavior.
-license: MIT
-compatibility: opencode
+description: Use when creating or modifying Piarium CLI commands, prompts, terminal output, non-TTY behavior, `--quiet`, or `--json` behavior.
 ---
 
 ## Overview
 
-OpenChamber terminal CLI uses `@clack/prompts` for interactive UX, but command policy and validation must be mode-agnostic.
+Piarium's terminal CLI uses `@clack/prompts` for interactive UX, but command policy and validation must be mode-agnostic.
 
 **Core principle:** policy-first, UX-second. Clack is presentation, not enforcement.
 

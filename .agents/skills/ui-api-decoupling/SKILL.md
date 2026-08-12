@@ -1,93 +1,39 @@
 ---
 name: ui-api-decoupling
-description: Use when creating or modifying OpenChamber shared UI data access, OpenCode SDK calls, `RuntimeAPIs`, runtime fetch/auth/URLs, authenticated browser assets, bridges/proxies, runtime switching, or server API routes.
+description: Use when creating or modifying Piarium shared UI data access, `RuntimeAPIs`, Pi runtime protocol calls, runtime fetch/auth/URLs, authenticated browser assets, bridges, relays, runtime switching, or server API routes.
 ---
 
-# UI API Decoupling
+# Piarium UI API Decoupling
 
-## Core Boundary
-
-- Official OpenCode API calls use `@opencode-ai/sdk/v2` through `opencodeClient`.
-- OpenChamber-owned HTTP capabilities use `RuntimeAPIs` where runtime-specific behavior exists, otherwise explicit OpenChamber routes through `runtimeFetch`.
-- Browser/realtime consumers use shared runtime URL/socket helpers.
-- Shared UI never hardcodes localhost, ports, API origins, credentials, or one runtime's transport assumptions.
-
-## Classify First
+## Choose the owning path
 
 | Need | Correct path |
 |---|---|
-| Official OpenCode endpoint | `opencodeClient` or its SDK client |
-| SDK gap for official OpenCode | Narrow documented wrapper in `opencodeClient` preserving request fidelity |
-| OpenChamber HTTP route | `runtimeFetch('/api/...')` |
-| Runtime-owned capability | Extend `RuntimeAPIs` and implement each applicable runtime |
-| Browser-owned authenticated URL | Runtime URL resolver and scoped URL auth |
-| SSE/WebSocket | Owning realtime transport; also load `relay-transport` |
+| Pi session, package, provider, command, recovery, or config operation | `@piarium/protocol` through the Pi runtime client/broker/host. |
+| Runtime-specific capability used by shared UI | Extend `RuntimeAPIs` and implement every applicable runtime. |
+| Piarium Web/server capability | Explicit `/api/...` route consumed through `runtimeFetch`. |
+| Browser-owned asset or realtime URL | Runtime URL resolver and the owning auth/relay transport. |
+| Intentional external service | Plain `fetch`, with its external-origin contract explicit. |
 
-## Load References By Task
+Read `references/implementation-map.md` when locating implementations. Read `references/runtime-parity.md` before adding or changing a shared runtime capability. Read `references/browser-assets-and-auth.md` for browser assets, downloads, iframes, URL auth, or preview proxy work.
 
-| Task | Required reference |
-|---|---|
-| Iframes, downloads, raw images, object URLs, URL tokens, preview proxy/subresources | `references/browser-assets-and-auth.md` |
-| Adding runtime capabilities, VS Code behavior, Electron privilege/security, unsupported runtime behavior | `references/runtime-parity.md` |
-| Locating implementations, route registration, runtime switching, or focused tests | `references/implementation-map.md` |
+## Mandatory rules
 
-Load every matching reference before editing.
+1. Shared UI consumes `RuntimeAPIs`, Pi runtime clients, or `runtimeFetch`; it does not hardcode hosts, ports, credentials, or one runtime's transport.
+2. Pi runtime operations use the Piarium protocol. Do not recreate removed OpenCode SDK/proxy contracts.
+3. Resolve runtime endpoint, auth, and directory state at call time. Key caches by runtime identity where paths or IDs can collide.
+4. Authoritative reads distinguish failure from successful empty state and preserve prior valid state on failure.
+5. Runtime-specific privilege stays in Web server, Electron main/preload, VS Code extension host, or Pi host—not the renderer.
+6. HTTP auth belongs to `runtimeFetch`; browser/realtime auth belongs to scoped URL/relay transports. Never put long-lived credentials in URLs.
+7. Register explicit Piarium routes before broad fallback middleware.
+8. Define Web, Electron, VS Code, hosted-mobile, and Capacitor behavior explicitly for shared contracts; a stable unsupported result is preferable to accidental fallthrough.
 
-## Mandatory Rules
+## Runtime switching
 
-1. **Do not bypass the SDK for official OpenCode APIs.** Preserve SDK-generated method, body, headers, query, auth, and abort signal.
-2. **Keep OpenChamber routes explicit.** Register them before the generic OpenCode proxy.
-3. **Use runtime APIs for runtime-owned capabilities.** Components consume hooks/providers, not runtime globals.
-4. **Resolve runtime state at call time.** Do not cache runtime base URLs, resolver output, credentials, or SDK clients across endpoint switches.
-5. **Let transport own auth.** HTTP uses runtime bearer handling; browser/realtime URLs use scoped short-lived URL auth where headers are impossible.
-6. **Never put long-lived client credentials in URLs.** Do not manually append URL tokens.
-7. **Define runtime parity explicitly.** Shared UI needs deliberate web, Electron, VS Code, hosted-mobile, and Capacitor behavior or stable unsupported responses.
-8. **Authoritative fetches must signal failure.** Do not convert failure into a valid empty value that callers use to clear state.
-9. **Keep privileges at the native/runtime boundary.** UI visibility and prompts are not authorization.
-10. **Confirm trust-boundary mutations.** Host imports, credential writes, privileged deep links, and runtime switching require explicit user intent.
-
-## HTTP Decision Rules
-
-Pass route paths directly to `runtimeFetch`:
-
-```ts
-await runtimeFetch('/health');
-await runtimeFetch('/api/config/settings');
-await runtimeFetch('/api/fs/raw', { query: { path } });
-```
-
-Do not immediately fetch a URL produced by `getRuntimeUrlResolver()`. Use the resolver only when the browser/realtime API itself consumes the URL:
-
-```ts
-const iframeSrc = getRuntimeUrlResolver().authenticatedAsset('/api/preview/frame');
-const eventUrl = getRuntimeUrlResolver().sse('/api/event');
-```
-
-Plain `fetch` is reserved for intentional external origins that are not the active OpenChamber/OpenCode runtime.
-
-## Runtime Switch Safety
-
-Review runtime base URL, auth, SDK clients, terminal/realtime transports, stores, session memory, and caches. Key caches by runtime identity where IDs, paths, or URLs can collide. Reset or reconnect affected state through the established runtime-switch flow.
-
-## Common Anti-Patterns
-
-| Avoid | Use |
-|---|---|
-| Raw feature `fetch` to official OpenCode | SDK wrapper/client |
-| Component reads runtime globals | `useRuntimeAPIs()` / provider |
-| Hardcoded runtime URL | `runtimeFetch` or runtime URL resolver |
-| Browser URL containing bearer/client token | Scoped URL-auth helper |
-| Web-only shared route | Explicit VS Code/mobile decision |
-| Returning `[]` after authoritative fetch failure | Throw or distinct failure result |
-| Rebuilding SDK `Request` from URL only | Preserve original request body/headers/signal |
+- Capture runtime identity with asynchronous work and reject stale completions after a switch.
+- Reset or rebind endpoint-scoped stores, transports, directory state, and caches through the established switch lifecycle.
+- Never reuse a home/workspace path learned from a previous host.
 
 ## Verification
 
-- Official calls use SDK paths or documented SDK-gap wrappers.
-- OpenChamber routes win before generic proxy fallback.
-- Request fidelity, auth, abort, query, and body behavior are tested.
-- Browser/realtime auth uses narrow allowlists and scoped tokens.
-- Every applicable runtime has implementation or explicit unsupported behavior.
-- Runtime switching cannot reuse stale endpoint/auth/cache state.
-- Privileged Electron/extension behavior is enforced outside the renderer.
-- Focused transport, bridge, proxy, auth, and runtime tests pass; static type/lint checks alone are insufficient.
+Test request fidelity, auth, failure signaling, stale completions, runtime switching, and every applicable bridge/runtime. Static type-check and lint do not prove runtime parity.
