@@ -62,6 +62,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
   const [path, setPath] = React.useState('');
   const [selection, setSelection] = React.useState<CustomSelection | null>(null);
   const [snapshot, setSnapshot] = React.useState<PiConfigTextDocumentSnapshot | null>(null);
+  const snapshotTargetKeyRef = React.useRef<string | null>(null);
   const [draft, setDraft] = React.useState('{}\n');
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -93,6 +94,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       ) return;
       if (preserveNewerDraft && mutationRevision !== mutationRevisionRef.current) return;
       setSnapshot(next);
+      snapshotTargetKeyRef.current = actionTargetKey;
       setDraft(next.content);
     } catch (error) {
       if (
@@ -112,12 +114,13 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
 
   React.useEffect(() => {
     if (!selection) return;
-    if (!dirtyRef.current) {
+    if (snapshotTargetKeyRef.current !== runtimeTargetKey || !dirtyRef.current) {
       setSnapshot(null);
+      snapshotTargetKeyRef.current = null;
       setDraft('{}\n');
       void load();
     }
-  }, [load, selection]);
+  }, [load, runtimeTargetKey, selection]);
 
   const parsed = React.useMemo(() => {
     if (!selection) return { error: null, valid: false };
@@ -140,7 +143,8 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
     }
     return { error: null, valid: true };
   }, [draft, selection]);
-  const dirty = snapshot !== null && draft !== snapshot.content;
+  const snapshotMatchesTarget = snapshotTargetKeyRef.current === runtimeTargetKey;
+  const dirty = snapshotMatchesTarget && snapshot !== null && draft !== snapshot.content;
   dirtyRef.current = dirty;
   const selectionChanged = selection === null
     || root !== selection.root
@@ -149,7 +153,15 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
   const projectBlocked = selection?.root === 'project' && snapshot?.projectTrusted === false;
 
   const save = React.useCallback(async () => {
-    if (!snapshot || !selection || !parsed.valid || !dirty || projectBlocked || saving) return;
+    if (
+      !snapshot
+      || !snapshotMatchesTarget
+      || !selection
+      || !parsed.valid
+      || !dirty
+      || projectBlocked
+      || saving
+    ) return;
     const generation = generationRef.current;
     const actionTargetKey = runtimeTargetKey;
     const runtimeKey = getRuntimeKey();
@@ -169,6 +181,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         || runtimeKey !== getRuntimeKey()
       ) return;
       setSnapshot(next);
+      snapshotTargetKeyRef.current = actionTargetKey;
       setDraft(next.content);
     } catch (error) {
       if (
@@ -186,7 +199,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         && runtimeKey === getRuntimeKey()
       ) setSaving(false);
     }
-  }, [dirty, draft, parsed.valid, projectBlocked, runtimeTarget, runtimeTargetKey, saving, selection, snapshot, t]);
+  }, [dirty, draft, parsed.valid, projectBlocked, runtimeTarget, runtimeTargetKey, saving, selection, snapshot, snapshotMatchesTarget, t]);
 
   const chooseSelection = (): void => {
     const nextPath = path.trim();
