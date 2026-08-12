@@ -2,6 +2,7 @@ import React from 'react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
@@ -174,6 +175,8 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
   }, [apis]);
+
+  React.useEffect(() => subscribeDefaultDirectoryToRuntimeChanges(apis), [apis]);
 
   useAppFontEffects();
   useMiniChatKeyboardShortcuts();

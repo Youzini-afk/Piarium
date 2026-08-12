@@ -14,6 +14,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import type { RuntimeAPIs } from '@/lib/api/types';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
@@ -321,6 +322,7 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network
 };
 
 interface SessionAuthGateProps {
+  apis: RuntimeAPIs;
   children: React.ReactNode;
 }
 
@@ -332,6 +334,7 @@ interface ErrorScreenProps {
 }
 
 export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
+  apis,
   children,
 }) => {
   const { t } = useI18n();
@@ -573,10 +576,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       void (async () => {
         await initializeAppearancePreferences();
         await syncDesktopSettings();
-        await applyPersistedDirectoryPreferences();
+        await applyPersistedDirectoryPreferences(apis);
       })();
     }
-  }, [skipAuth, state]);
+  }, [apis, skipAuth, state]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

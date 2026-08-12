@@ -37,6 +37,7 @@ import { AboutDialog } from '@/components/ui/AboutDialog';
 import { PiariumDiagnosticsDialog } from '@/components/ui/PiariumDiagnosticsDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -245,6 +246,8 @@ function App({ apis }: AppProps) {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
   }, [apis]);
+
+  React.useEffect(() => subscribeDefaultDirectoryToRuntimeChanges(apis), [apis]);
 
   React.useEffect(() => {
     if (embeddedSessionChat) {

@@ -31,13 +31,13 @@ initializeLocale();
 // and hydrates once persisted preferences are applied. Users with non-default
 // themes may briefly see default appearance on cold start; accepted trade-off
 // for faster time-to-first-paint.
-void initializeAppearancePreferences().then(() => {
-  void Promise.all([
-    syncDesktopSettings(),
-    applyPersistedDirectoryPreferences(),
-  ]).catch((err) => {
+void initializeAppearancePreferences().then(async () => {
+  try {
+    await syncDesktopSettings();
+    await applyPersistedDirectoryPreferences(runtimeAPIs);
+  } catch (err) {
     console.error('[main] settings init failed:', err);
-  });
+  }
 
   // Start watchers regardless of whether secondary settings succeed.
   startAppearanceAutoSave();
@@ -58,7 +58,7 @@ createRoot(rootElement).render(
     <I18nProvider>
       <ThemeSystemProvider>
         <ThemeProvider>
-          <SessionAuthGate>
+          <SessionAuthGate apis={runtimeAPIs}>
             <App apis={runtimeAPIs} />
           </SessionAuthGate>
         </ThemeProvider>

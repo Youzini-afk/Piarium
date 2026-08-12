@@ -19,6 +19,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
@@ -2732,6 +2733,8 @@ export function MobileApp({ apis }: MobileAppProps) {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
   }, [apis]);
+
+  React.useEffect(() => subscribeDefaultDirectoryToRuntimeChanges(apis), [apis]);
 
   // Switching instances (or disconnecting) only changes the runtime endpoint; the
   // Cross-instance changes reset instance-owned stores. Same-device LAN/relay

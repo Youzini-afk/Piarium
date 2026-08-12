@@ -15,16 +15,16 @@ import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
 import { ElectronMiniChatApp } from './ElectronMiniChatApp';
 
-const initializeSharedPreferences = () => {
+const initializeSharedPreferences = (apis: RuntimeAPIs) => {
   initializeLocale();
 
-  void initializeAppearancePreferences().then(() => {
-    void Promise.all([
-      syncDesktopSettings(),
-      applyPersistedDirectoryPreferences(),
-    ]).catch((err) => {
+  void initializeAppearancePreferences().then(async () => {
+    try {
+      await syncDesktopSettings();
+      await applyPersistedDirectoryPreferences(apis);
+    } catch (err) {
       console.error('[mini-chat-main] settings init failed:', err);
-    });
+    }
 
     startAppearanceAutoSave();
     startModelPrefsAutoSave();
@@ -35,7 +35,7 @@ const initializeSharedPreferences = () => {
 };
 
 export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
-  initializeSharedPreferences();
+  initializeSharedPreferences(apis);
 
   const rootElement = document.getElementById('root');
   if (!rootElement) {
@@ -47,7 +47,7 @@ export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
       <I18nProvider>
         <ThemeSystemProvider>
           <ThemeProvider>
-            <SessionAuthGate>
+            <SessionAuthGate apis={apis}>
               <ElectronMiniChatApp apis={apis} />
             </SessionAuthGate>
           </ThemeProvider>

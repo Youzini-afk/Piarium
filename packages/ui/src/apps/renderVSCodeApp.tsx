@@ -14,16 +14,16 @@ import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
 import { VSCodeApp } from './VSCodeApp';
 
-const initializeSharedPreferences = () => {
+const initializeSharedPreferences = (apis: RuntimeAPIs) => {
   initializeLocale();
 
-  void initializeAppearancePreferences().then(() => {
-    void Promise.all([
-      syncDesktopSettings(),
-      applyPersistedDirectoryPreferences(),
-    ]).catch((err) => {
+  void initializeAppearancePreferences().then(async () => {
+    try {
+      await syncDesktopSettings();
+      await applyPersistedDirectoryPreferences(apis);
+    } catch (err) {
       console.error('[vscode-main] settings init failed:', err);
-    });
+    }
 
     startAppearanceAutoSave();
     startModelPrefsAutoSave();
@@ -34,7 +34,7 @@ const initializeSharedPreferences = () => {
 };
 
 export function renderVSCodeApp(apis: RuntimeAPIs) {
-  initializeSharedPreferences();
+  initializeSharedPreferences(apis);
 
   const rootElement = document.getElementById('root');
   if (!rootElement) {
@@ -46,7 +46,7 @@ export function renderVSCodeApp(apis: RuntimeAPIs) {
       <I18nProvider>
         <ThemeSystemProvider>
           <ThemeProvider>
-            <SessionAuthGate>
+            <SessionAuthGate apis={apis}>
               <VSCodeApp apis={apis} />
             </SessionAuthGate>
           </ThemeProvider>

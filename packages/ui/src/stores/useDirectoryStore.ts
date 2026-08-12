@@ -390,8 +390,8 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
         set(() => updates as Partial<DirectoryStore>);
 
-        if ((shouldReplaceCurrent || currentChanged) && resolvedReady) {
-          const nextDirectory = shouldReplaceCurrent ? resolvedHome : (resolvedCurrent as string);
+        if (currentChanged && resolvedReady) {
+          const nextDirectory = resolvedCurrent as string;
           invalidateFileSearchCache();
           safeStorage.setItem('lastDirectory', nextDirectory);
           void updateDesktopSettings({ lastDirectory: nextDirectory });

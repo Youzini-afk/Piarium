@@ -20,16 +20,16 @@ import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoade
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { MobileApp } from './MobileApp';
 
-const initializeSharedPreferences = () => {
+const initializeSharedPreferences = (apis: RuntimeAPIs) => {
   initializeLocale();
 
-  void initializeAppearancePreferences().then(() => {
-    void Promise.all([
-      syncDesktopSettings(),
-      applyPersistedDirectoryPreferences(),
-    ]).catch((err) => {
+  void initializeAppearancePreferences().then(async () => {
+    try {
+      await syncDesktopSettings();
+      await applyPersistedDirectoryPreferences(apis);
+    } catch (err) {
       console.error('[mobile-main] settings init failed:', err);
-    });
+    }
 
     startAppearanceAutoSave();
     startModelPrefsAutoSave();
@@ -45,7 +45,7 @@ const initializeSharedPreferences = () => {
 
 export function renderMobileApp(apis: RuntimeAPIs) {
   preloadMarkdownRenderer();
-  initializeSharedPreferences();
+  initializeSharedPreferences(apis);
 
   // Expose the widget snapshot builder so the native shell can read the session overview
   // (attention count + recent sessions) and feed the home/lock-screen/Control Center widgets.
@@ -85,7 +85,7 @@ export function renderMobileApp(apis: RuntimeAPIs) {
         <ThemeSystemProvider>
           <ThemeProvider>
             <DiffWorkerProvider>
-              {isNativeShell ? app : <SessionAuthGate>{app}</SessionAuthGate>}
+              {isNativeShell ? app : <SessionAuthGate apis={resolvedApis}>{app}</SessionAuthGate>}
             </DiffWorkerProvider>
           </ThemeProvider>
         </ThemeSystemProvider>

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
+import type { RuntimeAPIs } from '@/lib/api/types';
 
 type ComponentFn<P extends Record<string, unknown> = Record<string, unknown>> = (props: P) => unknown;
 
@@ -310,6 +311,7 @@ mock.module('@/lib/passkeys', () => ({
 }));
 
 const { SessionAuthGate } = await import('./SessionAuthGate');
+const runtimeApis = {} as RuntimeAPIs;
 
 const flushEffects = async () => {
   while (pendingEffects.length > 0) {
@@ -326,9 +328,9 @@ const flushEffects = async () => {
 };
 
 const renderGate = async () => {
-  const firstPass = renderComponent(SessionAuthGate, { children: 'child' });
+  const firstPass = renderComponent(SessionAuthGate, { apis: runtimeApis, children: 'child' });
   await flushEffects();
-  const secondPass = renderComponent(SessionAuthGate, { children: 'child' });
+  const secondPass = renderComponent(SessionAuthGate, { apis: runtimeApis, children: 'child' });
   await flushEffects();
   return secondPass ?? firstPass;
 };
