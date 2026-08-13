@@ -1,5 +1,6 @@
 import dgram from 'dgram';
 import os from 'os';
+import { randomInt } from 'node:crypto';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import {
   getUnauthenticatedLanErrorMessage,
@@ -125,6 +126,26 @@ function hasUiPasswordConfigured(password) {
   return typeof password === 'string' && password.trim().length > 0;
 }
 
+const UI_PASSWORD_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+
+function generateUiPassword(length = 16) {
+  let password = '';
+  for (let index = 0; index < length; index += 1) {
+    password += UI_PASSWORD_CHARSET[randomInt(UI_PASSWORD_CHARSET.length)];
+  }
+  return password;
+}
+
+function resolveServeUiPassword({ uiPassword, explicitUiPassword }) {
+  if (hasUiPasswordConfigured(uiPassword)) {
+    return { password: uiPassword, generated: false };
+  }
+  if (explicitUiPassword === true) {
+    return { password: generateUiPassword(), generated: true };
+  }
+  return { password: undefined, generated: false };
+}
+
 function assertAuthenticatedNetworkExposure({ host, uiPassword }) {
   const bindHost = resolveConfiguredBindHost(host);
   if (hasUiPasswordConfigured(uiPassword)) {
@@ -150,5 +171,7 @@ export {
   detectLanIPv4Address,
   assertSafeBrowserPort,
   hasUiPasswordConfigured,
+  generateUiPassword,
+  resolveServeUiPassword,
   assertAuthenticatedNetworkExposure,
 };

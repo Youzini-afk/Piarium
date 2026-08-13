@@ -34,12 +34,14 @@ import {
   discoverRunningInstances,
   discoverUnconfirmedRegistryInstanceOnPort,
   ensureTunnelProfilesMigrated,
+  generateUiPassword,
   getInstanceFilePath,
   getPidFilePath,
   isPiariumCmdline,
   isPiariumProcessRunning,
   parseArgs,
   resolveServeHost,
+  resolveServeUiPassword,
 } from './cli.js';
 
 async function withTempPiariumDataDir(fn) {
@@ -699,6 +701,25 @@ describe('network-exposed auth validation', () => {
         delete process.env.PIARIUM_ALLOW_UNAUTHENTICATED_LAN;
       }
     }
+  });
+});
+
+describe('serve UI password resolution', () => {
+  it('keeps configured passwords and generates only for a bare explicit flag', () => {
+    expect(resolveServeUiPassword({ uiPassword: 'secret', explicitUiPassword: true }))
+      .toEqual({ password: 'secret', generated: false });
+    const generated = resolveServeUiPassword({ uiPassword: '', explicitUiPassword: true });
+    expect(generated.generated).toBe(true);
+    expect(generated.password).toMatch(/^[A-HJ-NP-Za-km-z2-9]{16}$/);
+    expect(resolveServeUiPassword({ uiPassword: undefined, explicitUiPassword: false }))
+      .toEqual({ password: undefined, generated: false });
+    expect(generateUiPassword()).not.toBe(generateUiPassword());
+  });
+
+  it('parses a bare --ui-password as explicit and empty', () => {
+    const parsed = parseArgs(['serve', '--ui-password']);
+    expect(parsed.options.explicitUiPassword).toBe(true);
+    expect(parsed.options.uiPassword).toBe('');
   });
 });
 
