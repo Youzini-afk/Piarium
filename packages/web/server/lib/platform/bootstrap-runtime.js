@@ -29,6 +29,8 @@ export const createServerBootstrapRuntime = (dependencies) => {
       getPairingTransports,
       getDirectCandidateUrls,
       getServerId,
+      getServerPort = () => null,
+      getTunnelUrl = () => null,
       getServerLabel,
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
@@ -78,6 +80,8 @@ export const createServerBootstrapRuntime = (dependencies) => {
       gracefulShutdown,
       getHealthSnapshot,
       getServerId,
+      getServerPort,
+      getTunnelUrl,
       tunnelAuthController,
       uiAuthController,
     });

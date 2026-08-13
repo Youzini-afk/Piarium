@@ -87,12 +87,14 @@ const extractAuditTarget = (req) => {
 export const registerServerStatusRoutes = (app, dependencies) => {
   const {
     express,
-    process,
+    process: processLike = globalThis.process,
     piariumVersion,
     runtimeName,
     serverStartedAt,
     gracefulShutdown,
     getHealthSnapshot,
+    getServerPort = () => null,
+    getTunnelUrl = () => null,
     // Stable server identity (hash of the public signing key — not a secret).
     // Exposed on /health and /api/version so a client can verify that a
     // learned/probed address belongs to the expected server BEFORE sending its
@@ -156,7 +158,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
   const isDevShutdownAllowed = () => {
     // Dev-only escape hatch: allow terminating the whole dev process group.
     // This should never be enabled in production runtimes.
-    return process.env.PIARIUM_DEV_SHUTDOWN === 'true';
+    return processLike.env.PIARIUM_DEV_SHUTDOWN === 'true';
   };
 
   const isSameOriginRequest = (req) => {
@@ -177,7 +179,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     if (!pid || typeof pid !== 'number' || !Number.isFinite(pid) || pid <= 0) {
       return null;
     }
-    if (process.platform === 'win32') {
+    if (processLike.platform === 'win32') {
       return null;
     }
 
@@ -222,7 +224,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     if (!Number.isFinite(port) || port <= 0) {
       return;
     }
-    if (process.platform === 'win32') {
+    if (processLike.platform === 'win32') {
       return;
     }
 
@@ -236,11 +238,11 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       const pids = String(result.stdout || '')
         .split(/\s+/)
         .map((value) => Number.parseInt(value, 10))
-        .filter((pid) => Number.isFinite(pid) && pid > 0 && pid !== process.pid);
+        .filter((pid) => Number.isFinite(pid) && pid > 0 && pid !== processLike.pid);
 
       for (const pid of pids) {
         try {
-          process.kill(pid, 'SIGTERM');
+      processLike.kill(pid, 'SIGTERM');
         } catch {
         }
       }
@@ -248,7 +250,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
         setTimeout(() => {
           for (const pid of pids) {
             try {
-              process.kill(pid, 'SIGKILL');
+              processLike.kill(pid, 'SIGKILL');
             } catch {
             }
           }
@@ -336,8 +338,8 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       // This is dev-only and limited to loopback ports supplied by the UI.
       await Promise.all(previewPorts.map((port) => killListenPort(port)));
 
-      const pgid = await resolveProcessGroupId(process.pid);
-      const ppid = typeof process.ppid === 'number' ? process.ppid : null;
+      const pgid = await resolveProcessGroupId(processLike.pid);
+      const ppid = typeof processLike.ppid === 'number' ? processLike.ppid : null;
       const parentPgid = ppid ? await resolveProcessGroupId(ppid) : null;
 
       // Kick off shutdown cleanup first.
@@ -346,7 +348,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       const pgidsToKill = Array.from(new Set([pgid, parentPgid].filter(Boolean)));
       for (const id of pgidsToKill) {
         try {
-          process.kill(-id, 'SIGTERM');
+          processLike.kill(-id, 'SIGTERM');
         } catch {
         }
       }
@@ -354,7 +356,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       setTimeout(() => {
         for (const id of pgidsToKill) {
           try {
-            process.kill(-id, 'SIGKILL');
+            processLike.kill(-id, 'SIGKILL');
           } catch {
           }
         }
@@ -363,7 +365,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       // Ensure the server process itself exits even if the group kill fails.
       setTimeout(() => {
         try {
-          process.exit(0);
+          processLike.exit(0);
         } catch {
         }
       }, 2500).unref?.();
@@ -371,18 +373,24 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       console.error('Dev shutdown request failed:', error?.message || error);
       // As a last resort, exit.
       try {
-        process.exit(0);
+        processLike.exit(0);
       } catch {
       }
     }
   });
 
   app.get('/api/system/info', (_req, res) => {
+    const rawPort = getServerPort();
+    const rawTunnelUrl = getTunnelUrl();
     res.json({
       piariumVersion,
       runtime: runtimeName,
-      pid: process.pid,
+      pid: processLike.pid,
       startedAt: serverStartedAt,
+      port: Number.isFinite(rawPort) && rawPort > 0 ? rawPort : null,
+      tunnelUrl: typeof rawTunnelUrl === 'string' && rawTunnelUrl.trim()
+        ? rawTunnelUrl.trim()
+        : null,
     });
   });
 

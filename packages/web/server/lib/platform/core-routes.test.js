@@ -9,6 +9,26 @@ describe('core-routes', () => {
     vi.useRealTimers();
   });
 
+  it('reports service addresses from the active server and tunnel owners', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      express,
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({}),
+      getServerPort: () => 4123,
+      getTunnelUrl: () => 'https://piarium.example/',
+      piariumVersion: '1.0.0',
+      runtimeName: 'test',
+    });
+
+    const response = await request(app).get('/api/system/info').expect(200);
+    expect(response.body).toMatchObject({
+      piariumVersion: '1.0.0',
+      port: 4123,
+      tunnelUrl: 'https://piarium.example/',
+    });
+  });
+
   it('should call gracefulShutdown with exitProcess: true on /api/system/shutdown', async () => {
     const app = express();
     let shutdownOpts = null;

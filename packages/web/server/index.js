@@ -652,6 +652,8 @@ async function main(options = {}) {
     getPairingTransports: resolvePairingTransports,
     getDirectCandidateUrls: resolveDirectLanUrls,
     getServerId: () => relayServiceInstance?.getServerId() ?? Promise.resolve(null),
+    getServerPort: activePort,
+    getTunnelUrl: () => tunnelService.getPublicUrl(),
     getServerLabel: () => os.hostname()?.trim() || 'Piarium',
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
