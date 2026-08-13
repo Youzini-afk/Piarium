@@ -245,4 +245,32 @@ describe('Pi interaction state', () => {
       trustRequests: [],
     });
   });
+
+  test('clears extension dialogs and chrome when their session worker exits', async () => {
+    const runtime = new FakeRuntime();
+    const store = createPiInteractionStore(runtime);
+    await store.getState().connect();
+    const source = { role: 'session' as const, sessionId: 'session-a', workerId: 'worker-a' };
+    runtime.event('extension.ui.request', {
+      id: 'confirm-exit',
+      method: 'confirm',
+      payload: { message: 'Continue?', title: 'Pending' },
+      sessionId: 'session-a',
+    }, source);
+    runtime.event('extension.ui.request', {
+      method: 'setStatus',
+      payload: { key: 'plugin', text: 'working' },
+      sessionId: 'session-a',
+    }, source, 2);
+
+    runtime.event('session.worker.exited', {
+      code: 1,
+      expected: false,
+      sessionId: 'session-a',
+      signal: null,
+    }, source, 3);
+
+    expect(store.getState().dialogs).toEqual([]);
+    expect(store.getState().sessions).toEqual({});
+  });
 });

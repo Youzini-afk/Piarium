@@ -164,6 +164,42 @@ test("surface connection projects routed host events only after handshake", asyn
   }
 });
 
+test("surface connection reports a session worker exit to every connected surface", async () => {
+  const harness = createHarness();
+  try {
+    await handshake(harness);
+    harness.emit({
+      code: 1,
+      expected: false,
+      kind: "worker.exit",
+      role: "session",
+      sequence: 8,
+      sessionId: "session-crashed",
+      signal: null,
+      workerId: "worker-crashed",
+    });
+    assert.deepEqual(await harness.next(), {
+      data: {
+        code: 1,
+        expected: false,
+        sessionId: "session-crashed",
+        signal: null,
+      },
+      event: "session.worker.exited",
+      kind: "event",
+      seq: 8,
+      source: {
+        role: "session",
+        sessionId: "session-crashed",
+        workerId: "worker-crashed",
+      },
+      v: PIARIUM_PROTOCOL_VERSION,
+    });
+  } finally {
+    harness.connection.close();
+  }
+});
+
 test("surface connection enforces an explicit pending-request budget", async () => {
   const harness = createHarness({ maxPendingRequests: 1 });
   let resolveList: ((value: []) => void) | undefined;

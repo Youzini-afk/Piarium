@@ -411,6 +411,17 @@ export const createPiInteractionStore = (
           }));
           return;
         }
+        case 'session.worker.exited': {
+          const { sessionId } = envelope.data;
+          set((state) => ({
+            dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== sessionId),
+            responding: Object.fromEntries(Object.entries(state.responding).filter(([key]) => (
+              !state.dialogs.some((dialog) => dialog.sessionId === sessionId && piDialogResponseKey(dialog.id) === key)
+            ))),
+            sessions: withoutKey(state.sessions, sessionId),
+          }));
+          return;
+        }
         default:
           return;
       }

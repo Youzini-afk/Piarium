@@ -68,6 +68,12 @@ export interface HostEventMap {
     sessionId: string;
   };
   "session.snapshot": SessionSnapshot;
+  "session.worker.exited": {
+    code: number | null;
+    expected: boolean;
+    sessionId: string;
+    signal: string | null;
+  };
 }
 
 export const HOST_EVENTS = [
@@ -88,6 +94,7 @@ export const HOST_EVENTS = [
   "recovery.status",
   "session.closed",
   "session.snapshot",
+  "session.worker.exited",
 ] as const satisfies readonly (keyof HostEventMap)[];
 
 const HOST_EVENT_SET = new Set<string>(HOST_EVENTS);

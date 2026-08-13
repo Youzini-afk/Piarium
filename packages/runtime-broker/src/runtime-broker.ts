@@ -46,6 +46,7 @@ export type PiRuntimeBrokerEvent =
       expected: boolean;
       kind: "worker.exit";
       role: "catalog" | "session";
+      sequence: number;
       sessionId?: string;
       signal: NodeJS.Signals | null;
       workerId: string;
@@ -635,6 +636,7 @@ export class PiRuntimeBroker {
       expected,
       kind: "worker.exit",
       role,
+      sequence: client.lastSequence + 1,
       ...(sessionId === undefined ? {} : { sessionId }),
       signal: exit.signal,
       workerId: client.id,

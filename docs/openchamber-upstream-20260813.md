@@ -42,7 +42,7 @@ it through the native Pi protocol, runtime broker, extension contracts, and prod
 | Mobile transient reconnect and device diagnostics | `dea3826f`, `f4005982` | Transient reconnect behavior adopted against Piarium's endpoint-aware mobile state. Explicit token rejection disconnects immediately; temporary reachability failures get bounded fast/full-budget retries and never replace a later manual connection. The upstream hidden diagnostics UI was not copied. |
 | Measured Vite/chunk and lazy-render improvements | `fdcf5c27` | Adopted after a Piarium-specific bundle audit. Diff, Files, Git, PR, Plan, Settings, Ghostty, Markdown Shiki, diff workers, and Nerd Fonts now load at their real first consumer. The upstream package-name parser did not recognize Bun's nested `node_modules/.bun/.../node_modules` layout and still produced a 15.8 MB eager `.bun` vendor chunk; Piarium resolves the innermost package and isolates Vite's preload helper. Production entry resources fell from 16,411,160 to 838,532 raw bytes (94.9%). Obsolete OpenCode chat tool components were not restored. |
 | Provider/OAuth/custom-provider fixes | `70af851b` and follow-ups | Audited against Pi's provider runtime. Piarium already projects API-key/OAuth methods on every catalog read, uses one provider-owned login call that waits for browser callback, device polling, or manual completion before persisting credentials, preserves the effective edit scope, resets the edit form, and keeps secrets outside config DTOs. The OpenCode JSON-body route and two-step OAuth callback are not applicable. Piarium supplements the upstream behavior by gating `.pi/models.json` on project trust and making form-owned field removal real while preserving comments, credentials, and unknown native keys. It intentionally does not hide every unauthenticated model: Pi supports anonymous/local providers, and model availability remains the runtime-owned signal. |
-| OpenCode session sync, question/permission routing, MCP settings/auth | `0f52a9be`, `ee5e45ae`, `d33cf518`, `622b8bb6` | Do not copy the implementation. Audit the underlying invariants against Piarium's session worker routing, Pi extension UI requests, and `pi-mcp-adapter`. Add a Pi-native fix only where the same failure is reproducible. |
+| OpenCode session sync, question/permission routing, MCP settings/auth | `0f52a9be`, `ee5e45ae`, `d33cf518`, `622b8bb6` | Audited by failure mode rather than copied. OpenCode's directory-store routing, worktree directory guessing, queued-send retry, callback proxy, and Apply-&-Restart state do not exist in Piarium. Piarium already routes every session action and Extension UI response through the broker's exact `sessionId → worker` binding; MCP authentication remains a `pi-mcp-adapter` command/status contract. One shared failure did reproduce: an unexpected Pi session-worker exit was server-only and left busy/tool/dialog UI stale. A routed terminal event now settles that session and clears its extension UI. |
 
 ## Phase checkpoints
 
@@ -116,3 +116,19 @@ complete browser callback/device-code/manual-code flow and stores the credential
 returns. Provider methods are rebuilt from the active Pi provider on every list/reconnect. The UI
 continues to show configured anonymous and local providers because absence of a credential is not a
 valid reason to hide models in Pi; each model's runtime `available` flag remains authoritative.
+
+### Session and extension interaction convergence
+
+Completed against the Pi worker topology. OpenCode's parent-directory versus worktree routing bugs
+are structurally absent: the public runtime accepts a `sessionId`, the broker owns the single active
+worker for that id, and Extension UI/provider-auth responses carry the request's emitted session id
+back to that exact worker. Piarium therefore does not restore directory-resolution indexes, local
+question stores, permission stores, or an OpenCode queued-send scheduler.
+
+The applicable interrupted-turn invariant is now explicit. When a Pi session worker exits, the
+broker forwards one ordered `session.worker.exited` terminal event to connected surfaces. The session
+store closes the live record, clears busy/streaming/compaction/retry state, marks unfinished live
+assistant output and running tool executions as interrupted errors, and raises background attention
+for an unexpected exit. The interaction store removes dialogs and session chrome owned by that dead
+worker. Persisted Pi entries are not rewritten; reopening the session continues to refresh them from
+Pi's JSONL authority.

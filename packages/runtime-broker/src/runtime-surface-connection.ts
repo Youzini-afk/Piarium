@@ -90,7 +90,27 @@ export class PiRuntimeSurfaceConnection {
     this.#onClose = options.onClose;
     this.#sendFrame = options.send;
     this.#unsubscribe = options.broker.subscribe((event) => {
-      if (this.#closed || this.#handshake !== "complete" || event.kind !== "host") return;
+      if (this.#closed || this.#handshake !== "complete") return;
+      if (event.kind === "worker.exit") {
+        if (event.role !== "session" || event.sessionId === undefined) return;
+        this.#send(createRuntimeEvent(
+          {
+            role: event.role,
+            workerId: event.workerId,
+            sessionId: event.sessionId,
+          },
+          event.sequence,
+          "session.worker.exited",
+          {
+            code: event.code,
+            expected: event.expected,
+            sessionId: event.sessionId,
+            signal: event.signal,
+          },
+        ));
+        return;
+      }
+      if (event.kind !== "host") return;
       this.#send(createRuntimeEvent(
         {
           role: event.role,

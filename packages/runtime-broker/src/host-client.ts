@@ -105,6 +105,10 @@ export class PiHostClient {
     return this.#child !== undefined && isChildRunning(this.#child);
   }
 
+  get lastSequence(): number {
+    return this.#lastSequence;
+  }
+
   get sessionId(): string | undefined {
     return this.#sessionId;
   }

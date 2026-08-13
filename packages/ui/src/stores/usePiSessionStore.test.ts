@@ -349,6 +349,50 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.extensionStates).toEqual({});
   });
 
+  test('settles live state when the owning session worker exits', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return [];
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    await store.getState().loadCatalog();
+    store.setState({
+      records: {
+        'session-crashed': {
+          extensionStates: {},
+          liveAssistant: assistant('partial'),
+          open: true,
+          sessionId: 'session-crashed',
+          snapshot: { ...snapshot('session-crashed'), busy: true, isStreaming: true },
+          toolExecutions: {
+            running: {
+              args: null,
+              name: 'bash',
+              status: 'running',
+              toolCallId: 'running',
+            },
+          },
+        },
+      },
+    });
+
+    runtime.event('session.worker.exited', {
+      code: 1,
+      expected: false,
+      sessionId: 'session-crashed',
+      signal: null,
+    }, 'session-crashed');
+
+    const record = store.getState().records['session-crashed'];
+    expect(record?.open).toBe(false);
+    expect(record?.snapshot?.busy).toBe(false);
+    expect(record?.snapshot?.isStreaming).toBe(false);
+    expect(record?.liveAssistant?.stopReason).toBe('error');
+    expect(record?.toolExecutions.running?.status).toBe('error');
+    expect(store.getState().attentionBySession['session-crashed']?.kind).toBe('error');
+  });
+
   test('tracks background completion and errors as Pi-native session attention', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

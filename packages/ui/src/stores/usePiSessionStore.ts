@@ -253,6 +253,28 @@ const updateSnapshot = (
   snapshot === undefined ? undefined : { ...snapshot, ...patch }
 );
 
+const settleInterruptedSession = (
+  current: PiSessionViewState,
+): PiSessionViewState => ({
+  ...current,
+  liveAssistant: current.liveAssistant?.stopReason === 'pending'
+    ? { ...current.liveAssistant, errorMessage: 'Pi session worker exited', stopReason: 'error' }
+    : current.liveAssistant,
+  open: false,
+  snapshot: updateSnapshot(current.snapshot, {
+    busy: false,
+    isCompacting: false,
+    isStreaming: false,
+    retryAttempt: 0,
+  }),
+  toolExecutions: Object.fromEntries(Object.entries(current.toolExecutions).map(([id, execution]) => [
+    id,
+    execution.status === 'running'
+      ? { ...execution, isError: true, status: 'error' as const }
+      : execution,
+  ])),
+});
+
 const appendEntry = (
   result: SessionEntriesResult | undefined,
   entry: PiSessionEntry,
@@ -504,6 +526,20 @@ export const createPiSessionStore = (
               ...current,
               open: false,
             })),
+          }));
+          return;
+        }
+        case 'session.worker.exited': {
+          const { expected, sessionId } = envelope.data;
+          set((state) => ({
+            attentionBySession: expected || isPiSessionActivelyVisible(sessionId, state.currentSessionId)
+              ? state.attentionBySession
+              : {
+                  ...state.attentionBySession,
+                  [sessionId]: { kind: 'error', updatedAt: Date.now() },
+                },
+            lastError: expected ? state.lastError : 'Pi session worker exited unexpectedly',
+            records: upsertRecord(state.records, sessionId, settleInterruptedSession),
           }));
           return;
         }
