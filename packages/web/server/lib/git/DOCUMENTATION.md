@@ -88,7 +88,8 @@ The following functions are exported and used by the web server:
 The following functions are internal helpers used by exported functions:
 - `buildSshCommand(sshKeyPath)`: Build SSH command string for git config.
 - `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution.
-- `createGit(directory)`: Create simple-git instance with environment.
+- `createGit(directory)`: Create a simple-git instance pinned to the explicit repository directory.
+  Global configuration reads use the user's home directory as their stable non-repository base.
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.
 - `parseWorktreePorcelain(raw)`: Parse `git worktree list --porcelain` output.

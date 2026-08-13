@@ -363,6 +363,11 @@ describe('symlink diffs', () => {
 // ---------------------------------------------------------------------------
 
 describe('getStatus', () => {
+  it('requires the target repository instead of inheriting process.cwd()', async () => {
+    await expect(getStatus(undefined)).rejects.toThrow('directory is required');
+    await expect(getStatus('   ')).rejects.toThrow('directory is required');
+  });
+
   it('handles repositories without upstream tracking', async () => {
     if (!canRunGit()) return;
 
