@@ -53,6 +53,7 @@ try {
   await fs.writeFile(path.join(userApps, 'missing-exec.desktop'), '[Desktop Entry]\nType=Application\nName=Missing Exec\nIcon=missing\n', 'utf8');
   await fs.writeFile(path.join(systemApps, 'ghostty.desktop'), '[Desktop Entry]\nType=Application\nName=Ghostty\nExec=ghostty --working-directory=%f --open-uri=%u\nIcon=ghostty\n', 'utf8');
   await fs.writeFile(path.join(systemApps, 'plain.desktop'), '[Desktop Entry]\nType=Application\nName=Plain Editor\nExec=plain-editor --flag\nIcon=plain\n', 'utf8');
+  await fs.writeFile(path.join(systemApps, 'generic-terminal.desktop'), '[Desktop Entry]\nType=Application\nName=System Console\nExec=system-console --working-directory=%f\nCategories=System;TerminalEmulator;\n', 'utf8');
   await fs.writeFile(path.join(systemApps, 'thunar.desktop'), [
     '[Desktop Entry]',
     'Type=Application',
@@ -69,7 +70,7 @@ try {
   assert(dirs.includes(systemApps), 'XDG_DATA_DIRS applications dir should be included');
 
   const entries = await readLinuxDesktopEntries({ applicationDirs: [userApps, systemApps], env, homeDir: tempRoot });
-  assert(entries.length === 4, `expected 4 visible valid entries, got ${entries.length}`);
+  assert(entries.length === 5, `expected 5 visible valid entries, got ${entries.length}`);
   assert(entries.some((entry) => entry.name === 'Visual Studio Code'), 'valid desktop entry should be parsed');
   assert(entries.some((entry) => entry.name === 'Ghostty'), 'system desktop entry should be parsed');
   assert(entries.some((entry) => entry.name === 'Plain Editor'), 'no-placeholder entry should be parsed');
@@ -149,8 +150,8 @@ try {
 
   const fallbackTerminalSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'terminal', appName: 'Terminal', targetKind: 'project', entries, env });
   assert(fallbackTerminalSpecs.length >= 1, 'missing terminal desktop entry should include xdg-terminal-exec fallback');
-  assert(fallbackTerminalSpecs[0]?.program === 'xdg-terminal-exec', 'missing terminal entry should use xdg-terminal-exec first');
-  assert(fallbackTerminalSpecs[0]?.args.join('|') === '--working-directory|/tmp/My Project', `xdg-terminal-exec fallback should keep working directory args, got ${fallbackTerminalSpecs[0]?.args.join('|')}`);
+  assert(fallbackTerminalSpecs[0]?.program === 'system-console', 'generic terminal should use the TerminalEmulator desktop category');
+  assert(fallbackTerminalSpecs[1]?.program === 'xdg-terminal-exec', 'generic terminal should retain xdg-terminal-exec fallback');
 
   const defaultSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'finder', appName: 'Finder', targetKind: 'project', entries, env });
   assert(defaultSpecs[0].kind === 'default', 'finder maps to safe default Linux opener spec');

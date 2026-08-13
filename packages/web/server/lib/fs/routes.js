@@ -340,6 +340,7 @@ export const registerFsRoutes = (app, dependencies) => {
     path,
     fsPromises,
     spawn,
+    platform = process.platform,
     crypto,
     normalizeDirectoryPath,
     resolveProjectDirectory,
@@ -349,6 +350,27 @@ export const registerFsRoutes = (app, dependencies) => {
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
+  });
+
+  const spawnDetached = (command, args) => new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(command, args, { windowsHide: true, stdio: 'ignore', detached: true });
+    } catch (error) {
+      reject(new Error('Failed to launch file browser', { cause: error }));
+      return;
+    }
+    const onError = (error) => {
+      child.removeListener('spawn', onSpawn);
+      reject(new Error('Failed to launch file browser', { cause: error }));
+    };
+    const onSpawn = () => {
+      child.removeListener('error', onError);
+      child.unref();
+      resolve();
+    };
+    child.once('error', onError);
+    child.once('spawn', onSpawn);
   });
 
   const execJobs = new Map();
@@ -982,13 +1004,12 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = path.resolve(targetPath.trim());
       await fsPromises.access(resolved);
 
-      const platform = process.platform;
       if (platform === 'darwin') {
         const stat = await fsPromises.stat(resolved);
         if (stat.isDirectory()) {
-          spawn('open', [resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          await spawnDetached('open', [resolved]);
         } else {
-          spawn('open', ['-R', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          await spawnDetached('open', ['-R', resolved]);
         }
       } else if (platform === 'win32') {
         const stat = await fsPromises.stat(resolved);
@@ -1012,7 +1033,7 @@ export const registerFsRoutes = (app, dependencies) => {
       } else {
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
-        spawn('xdg-open', [dir], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+        await spawnDetached('xdg-open', [dir]);
       }
 
       return res.json({ success: true, path: resolved });

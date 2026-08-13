@@ -564,6 +564,13 @@ export const isWebRuntime = (): boolean => {
   return !isVSCodeRuntime();
 };
 
+/** Electron shares the web API implementation, so the API platform alone does
+ * not tell us whether an action can use a browser download or local shell. */
+export const isBrowserClientRuntime = (
+  platform: 'web' | 'desktop' | 'vscode',
+  desktopShell = isDesktopShell(),
+): boolean => platform === 'web' && !desktopShell;
+
 export const getDesktopHomeDirectory = async (): Promise<string | null> => {
   if (typeof window !== 'undefined') {
     const embedded = window.__PIARIUM_HOME__;

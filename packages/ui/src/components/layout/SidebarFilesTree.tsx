@@ -43,6 +43,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { useI18n } from '@/lib/i18n';
+import { isBrowserClientRuntime, isDesktopLocalOriginActive } from '@/lib/desktop';
 
 type FileNode = {
   name: string;
@@ -189,6 +190,7 @@ interface FileRowProps {
   root: string;
   isExpanded: boolean;
   isActive: boolean;
+  isBrowserClient: boolean;
   status?: FileStatus | null;
   badge?: { modified: number; added: number } | null;
   permissions: {
@@ -210,6 +212,7 @@ const FileRow: React.FC<FileRowProps> = ({
   root,
   isExpanded,
   isActive,
+  isBrowserClient,
   status,
   badge,
   permissions,
@@ -222,6 +225,9 @@ const FileRow: React.FC<FileRowProps> = ({
   const { t } = useI18n();
   const isDir = node.type === 'directory';
   const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
+  const canDownload = !isDir && Boolean(downloadFile);
+  const canRevealPath = canReveal && !isBrowserClient;
+  const hasMenuActions = canRename || canCreateFile || canCreateFolder || canDelete || canDownload || canRevealPath;
 
   // Menu open state is local to each row so opening a menu in one row
   // never re-renders its siblings. Previously this state lived on the
@@ -230,10 +236,10 @@ const FileRow: React.FC<FileRowProps> = ({
   const [rightClickOpen, setRightClickOpen] = React.useState(false);
 
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
-    if (!canRename && !canCreateFile && !canCreateFolder && !canDelete && !canReveal) return;
+    if (!hasMenuActions) return;
     event?.preventDefault();
     setRightClickOpen(true);
-  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal]);
+  }, [hasMenuActions]);
 
   const handleInteraction = React.useCallback(() => {
     if (isDir) {
@@ -274,7 +280,7 @@ const FileRow: React.FC<FileRowProps> = ({
       }}>
         <Icon name="file-copy" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.copyPath')}
       </Item>
-      {!isDir && downloadFile && (
+      {canDownload && downloadFile && (
         <Item onClick={(e: React.MouseEvent) => {
           e.stopPropagation();
           void downloadFile(node.path).catch((error) => {
@@ -282,10 +288,10 @@ const FileRow: React.FC<FileRowProps> = ({
             toast.error(t('sidebarFilesTree.toast.operationFailed'));
           });
         }}>
-          <Icon name="download" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.save')}
+          <Icon name="download" className="mr-2 h-4 w-4" /> {t(isBrowserClient ? 'sidebarFilesTree.menu.download' : 'sidebarFilesTree.menu.save')}
         </Item>
       )}
-      {canReveal && (
+      {canRevealPath && (
         <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRevealPath(node.path); }}>
           <Icon name="folder-received" className="mr-2 h-4 w-4" /> {t(getRevealLabelKey())}
         </Item>
@@ -361,7 +367,7 @@ const FileRow: React.FC<FileRowProps> = ({
           </span>
         )}
       </button>
-      {(canRename || canCreateFile || canCreateFolder || canDelete || canReveal) && (
+      {hasMenuActions && (
         <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
           <DropdownMenu
             open={contextMenuOpen}
@@ -405,6 +411,7 @@ const areFileRowPropsEqual = (prev: FileRowProps, next: FileRowProps): boolean =
   && prev.root === next.root
   && prev.isExpanded === next.isExpanded
   && prev.isActive === next.isActive
+  && prev.isBrowserClient === next.isBrowserClient
   && prev.status === next.status
   && prev.badge === next.badge
   && prev.permissions === next.permissions
@@ -421,7 +428,8 @@ const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
 
 export const SidebarFilesTree: React.FC = () => {
   const { t } = useI18n();
-  const { files } = useRuntimeAPIs();
+  const { files, runtime } = useRuntimeAPIs();
+  const isBrowserClient = isBrowserClientRuntime(runtime.platform);
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
   const showHidden = useDirectoryShowHidden();
@@ -534,7 +542,8 @@ export const SidebarFilesTree: React.FC = () => {
   const canCreateFolder = Boolean(files.createDirectory);
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
-  const canReveal = Boolean(files.revealPath);
+  const canReveal = Boolean(files.revealPath)
+    && (runtime.platform === 'vscode' || isDesktopLocalOriginActive());
 
   const fileRowPermissions = React.useMemo(
     () => ({ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }),
@@ -1038,6 +1047,7 @@ export const SidebarFilesTree: React.FC = () => {
             root={root}
             isExpanded={isExpanded}
             isActive={isActive}
+            isBrowserClient={isBrowserClient}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={fileRowPermissions}

@@ -69,7 +69,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
+import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
@@ -359,6 +359,7 @@ interface FileRowProps {
   isExpanded: boolean;
   isActive: boolean;
   isMobile: boolean;
+  isBrowserClient: boolean;
   alwaysShowActions: boolean;
   status?: FileStatus | null;
   badge?: { modified: number; added: number } | null;
@@ -386,6 +387,7 @@ const FileRow: React.FC<FileRowProps> = ({
   isExpanded,
   isActive,
   isMobile,
+  isBrowserClient,
   alwaysShowActions,
   status,
   badge,
@@ -403,14 +405,17 @@ const FileRow: React.FC<FileRowProps> = ({
   const { t } = useI18n();
   const isDir = node.type === 'directory';
   const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
+  const canDownload = !isDir && Boolean(downloadFile);
+  const canRevealPath = canReveal && !isBrowserClient;
+  const hasMenuActions = canRename || canCreateFile || canCreateFolder || canDelete || canDownload || canRevealPath;
 
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
-    if (!canRename && !canCreateFile && !canCreateFolder && !canDelete && !canReveal) {
+    if (!hasMenuActions) {
       return;
     }
     event?.preventDefault();
     setRightClickMenuPath(node.path);
-  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal, node.path, setRightClickMenuPath]);
+  }, [hasMenuActions, node.path, setRightClickMenuPath]);
 
   const handleInteraction = React.useCallback(() => {
     if (isDir) {
@@ -464,7 +469,7 @@ const FileRow: React.FC<FileRowProps> = ({
       }}>
         <Icon name="file-copy-2" className="mr-2 size-4" /> {t('filesView.tree.menu.copyRelativePath')}
       </Item>
-      {!isDir && downloadFile && (
+      {canDownload && downloadFile && (
         <Item onClick={(e: React.MouseEvent) => {
           e.stopPropagation();
           void downloadFile(node.path).catch((error) => {
@@ -472,10 +477,10 @@ const FileRow: React.FC<FileRowProps> = ({
             toast.error(t('sidebarFilesTree.toast.operationFailed'));
           });
         }}>
-          <Icon name="download" className="mr-2 size-4" /> {t('sidebarFilesTree.menu.save')}
+          <Icon name="download" className="mr-2 size-4" /> {t(isBrowserClient ? 'sidebarFilesTree.menu.download' : 'sidebarFilesTree.menu.save')}
         </Item>
       )}
-      {canReveal && (
+      {canRevealPath && (
         <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRevealPath(node.path); }}>
           <Icon name="folder-received" className="mr-2 size-4" /> {t(getRevealLabelKey())}
         </Item>
@@ -544,7 +549,7 @@ const FileRow: React.FC<FileRowProps> = ({
           </span>
         )}
       </button>
-      {(canRename || canCreateFile || canCreateFolder || canDelete || canReveal) && (
+      {hasMenuActions && (
         <div className={cn(
           "absolute right-1 top-1/2 -translate-y-1/2",
           alwaysShowActions ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100"
@@ -716,6 +721,7 @@ const useAssetAuthRefresh = (
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
+  const isBrowserClient = isBrowserClientRuntime(runtime.platform);
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
   const { isMobile, isTablet, screenWidth } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
@@ -951,7 +957,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const canCreateFolder = Boolean(files.createDirectory);
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
-  const canReveal = Boolean(files.revealPath);
+  const canReveal = Boolean(files.revealPath)
+    && (runtime.platform === 'vscode' || isDesktopLocalOriginActive());
   const openInApps = useOpenInAppsStore((state) => state.availableApps);
   const openInCacheStale = useOpenInAppsStore((state) => state.isCacheStale);
   const initializeOpenInApps = useOpenInAppsStore((state) => state.initialize);
@@ -2286,6 +2293,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             isExpanded={isExpanded}
             isActive={isActive}
             isMobile={isMobile}
+            isBrowserClient={isBrowserClient}
             alwaysShowActions={alwaysShowActions}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
