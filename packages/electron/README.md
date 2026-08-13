@@ -43,6 +43,8 @@ bun run electron:dev
 
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 
+`postinstall` verifies that Electron's package, downloaded runtime, version, and native architecture agree. An interrupted or script-skipped install is repaired automatically; `electron:dev` performs the same check before starting any development servers.
+
 Useful variants:
 
 ```bash

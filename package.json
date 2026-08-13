@@ -44,7 +44,7 @@
     "lint:mobile": "bun run --cwd packages/mobile lint",
     "clean": "bun run --filter '*' clean",
     "changelog-card": "node scripts/changelog-card/generate.mjs",
-    "postinstall": "node ./fix-deprecation.js && patch-package",
+    "postinstall": "node ./fix-deprecation.js && patch-package && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
     "test:pi": "bun run --filter '@piarium/*' test",
     "test:pi:dist": "bun run --sequential --filter '@piarium/*' test:dist",
     "check:pi": "bun run build:type-dependencies && bun run --filter '@piarium/*' type-check && bun run test:pi",

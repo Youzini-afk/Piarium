@@ -45,6 +45,17 @@ function spawnProcess(command, args, options = {}) {
   });
 }
 
+function ensureElectronInstalled() {
+  const result = spawnSync('node', [path.join(__dirname, 'ensure-electron.mjs')], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error('[electron:dev] Electron is missing or incomplete; run `bun install` with network access');
+  }
+}
+
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -178,6 +189,7 @@ async function stopChildTree(child) {
 }
 
 async function main() {
+  ensureElectronInstalled();
   console.log('[electron:dev] building Pi runtime worker and broker...');
   await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
 
