@@ -350,13 +350,14 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
   const deleteSession = usePiSessionStore((state) => state.deleteSession);
-  const pendingDialogCountBySession = usePiInteractionStore((state) => {
+  const pendingDialogs = usePiInteractionStore((state) => state.dialogs);
+  const pendingDialogCountBySession = React.useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const dialog of state.dialogs) {
+    for (const dialog of pendingDialogs) {
       counts[dialog.sessionId] = (counts[dialog.sessionId] ?? 0) + 1;
     }
     return counts;
-  });
+  }, [pendingDialogs]);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
