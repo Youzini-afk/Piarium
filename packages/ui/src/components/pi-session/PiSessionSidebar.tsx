@@ -51,6 +51,7 @@ import {
   piSessionTitle,
   type PiSessionNode,
 } from './sessionPresentation';
+import { PiSessionActivityDuration } from './PiSessionActivityDuration';
 
 interface PiSessionSidebarProps {
   isVisible?: boolean;
@@ -126,7 +127,6 @@ const groupSessionForest = (
 
 interface SessionRowProps {
   attentionBySession: Readonly<Record<string, PiSessionAttentionState>>;
-  busySessionIds: ReadonlySet<string>;
   currentSessionId: string | null;
   editingId: string | null;
   editingName: string;
@@ -160,7 +160,8 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
   const timestamp = Date.parse(session.updatedAt);
   const timeLabel = formatSessionCompactDateLabel(Number.isFinite(timestamp) ? timestamp : Date.now());
   const isCurrent = props.currentSessionId === session.id;
-  const isBusy = props.busySessionIds.has(session.id);
+  const sessionRecord = usePiSessionStore((state) => state.records[session.id]);
+  const isBusy = sessionRecord?.snapshot?.busy ?? false;
   const pendingDialogCount = countPiSessionSubtreeValues(
     node,
     props.pendingDialogCountBySession,
@@ -192,7 +193,11 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
         )}
 
         {isBusy ? (
-          <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" />
+          <span
+            className="mx-[3px] size-2 shrink-0 rounded-full bg-primary"
+            aria-label={t('sessions.sidebar.session.status.active')}
+            title={t('sessions.sidebar.session.status.active')}
+          />
         ) : attention?.kind === 'error' ? (
           <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" />
         ) : attention ? (
@@ -238,8 +243,17 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
                 <span>{pendingDialogCount}</span>
               </span>
             ) : null}
-            <span className="shrink-0 typography-micro text-muted-foreground/70 group-hover/session:hidden">
-              {timeLabel}
+            <span className="shrink-0 group-hover/session:hidden">
+              {isBusy && sessionRecord?.activityStartedAt !== undefined ? (
+                <PiSessionActivityDuration startedAt={sessionRecord.activityStartedAt} />
+              ) : attention && sessionRecord?.settledActivityDurationMs !== undefined ? (
+                <PiSessionActivityDuration
+                  durationMs={sessionRecord.settledActivityDurationMs}
+                  error={attention.kind === 'error'}
+                />
+              ) : (
+                <span className="typography-micro text-muted-foreground/70">{timeLabel}</span>
+              )}
             </span>
           </button>
         )}
@@ -336,7 +350,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
   const deleteSession = usePiSessionStore((state) => state.deleteSession);
-  const records = usePiSessionStore((state) => state.records);
   const pendingDialogCountBySession = usePiInteractionStore((state) => {
     const counts: Record<string, number> = {};
     for (const dialog of state.dialogs) {
@@ -381,12 +394,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
       };
     }).filter((group) => group.forest.length > 0);
   }, [activeSessions, archivedSessions, isPinned, projects, query, showArchived, untitled]);
-
-  const busySessionIds = React.useMemo(() => new Set(
-    Object.values(records)
-      .filter((record) => record.snapshot?.busy)
-      .map((record) => record.sessionId),
-  ), [records]);
 
   const selectProjectForPath = React.useCallback((cwd: string) => {
     const normalizedCwd = normalizePath(cwd);
@@ -619,7 +626,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       key={node.session.id}
                       node={node}
                       attentionBySession={attentionBySession}
-                      busySessionIds={busySessionIds}
                       currentSessionId={currentSessionId}
                       editingId={editingId}
                       editingName={editingName}

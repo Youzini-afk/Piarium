@@ -240,16 +240,20 @@ describe('Pi session event state', () => {
       snapshot: snapshot('session-a'),
       toolExecutions: {},
     };
-    const busy = reducePiAgentEvent(initial, { type: 'agent_start' });
+    const busy = reducePiAgentEvent(initial, { type: 'agent_start' }, 1_000);
+    const repeatedStart = reducePiAgentEvent(busy, { type: 'agent_start' }, 2_000);
     const queued = reducePiAgentEvent(busy, {
       followUp: ['later'],
       steering: ['now'],
       type: 'queue_update',
     });
-    const settled = reducePiAgentEvent(queued, { type: 'agent_settled' });
+    const settled = reducePiAgentEvent(queued, { type: 'agent_settled' }, 5_500);
+    expect(repeatedStart.activityStartedAt).toBe(1_000);
     expect(queued.snapshot?.followUp).toEqual(['later']);
     expect(queued.snapshot?.steering).toEqual(['now']);
     expect(settled.snapshot?.busy).toBe(false);
+    expect(settled.activityStartedAt).toBeUndefined();
+    expect(settled.settledActivityDurationMs).toBe(4_500);
   });
 });
 
@@ -360,6 +364,7 @@ describe('Pi session store', () => {
     store.setState({
       records: {
         'session-crashed': {
+          activityStartedAt: 0,
           extensionStates: {},
           liveAssistant: assistant('partial'),
           open: true,
@@ -390,6 +395,8 @@ describe('Pi session store', () => {
     expect(record?.snapshot?.isStreaming).toBe(false);
     expect(record?.liveAssistant?.stopReason).toBe('error');
     expect(record?.toolExecutions.running?.status).toBe('error');
+    expect(record?.activityStartedAt).toBeUndefined();
+    expect(record?.settledActivityDurationMs).toBeGreaterThan(0);
     expect(store.getState().attentionBySession['session-crashed']?.kind).toBe('error');
   });
 

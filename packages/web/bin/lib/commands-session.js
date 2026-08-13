@@ -211,11 +211,19 @@ const resolveSessionDirectory = async (port, payload, options) => {
 
 const createWorktree = async (port, directory, worktree, setUpstream, options) => {
   if (!worktree) return { directory, worktree: null };
+  // Worktree creation runs Git plus repository bootstrap and can legitimately
+  // exceed the four-second default used by instant CLI API calls. The server
+  // cannot cancel that filesystem mutation when the HTTP client gives up, so
+  // use a window that lets this explicit operation report its real outcome.
+  const WORKTREE_CREATION_TIMEOUT_MS = 120_000;
   const body = await requestPiariumApi(
     port,
     `/api/git/worktrees?directory=${encodeURIComponent(directory)}`,
     {
       ...options,
+      timeoutMs: Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+        ? options.timeoutMs
+        : WORKTREE_CREATION_TIMEOUT_MS,
       method: 'POST',
       body: JSON.stringify({
         mode: 'new',

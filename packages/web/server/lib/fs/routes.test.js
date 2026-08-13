@@ -312,6 +312,37 @@ describe('fs list', () => {
     });
   });
 
+  it('keeps listed entries in the requested path space when the directory is a symlink', async () => {
+    const fsPromises = {
+      realpath: vi.fn(async (targetPath) => (
+        targetPath === '/repo/linked-workspace' ? '/physical/workspace' : targetPath
+      )),
+      stat: vi.fn(async () => ({ isDirectory: () => true })),
+      readdir: vi.fn(async () => [{
+        name: 'src',
+        isDirectory: () => true,
+        isFile: () => false,
+        isSymbolicLink: () => false,
+      }]),
+    };
+    const handler = registerList(fsPromises);
+
+    const res = await callList(handler, { path: '/repo/linked-workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      path: '/repo/linked-workspace',
+      entries: [{
+        name: 'src',
+        path: '/repo/linked-workspace/src',
+        isDirectory: true,
+        isFile: false,
+        isSymbolicLink: false,
+      }],
+    });
+    expect(fsPromises.readdir).toHaveBeenCalledWith('/physical/workspace', { withFileTypes: true });
+  });
+
   it('returns the normal missing-directory error for every path', async () => {
     const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
     const handler = registerList({

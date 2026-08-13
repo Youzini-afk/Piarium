@@ -38,6 +38,7 @@ export interface PiToolExecutionState {
 }
 
 export interface PiSessionViewState {
+  activityStartedAt?: number;
   allEntries?: SessionEntriesResult;
   branchEntries?: SessionEntriesResult;
   extensionStates: Record<string, JsonValue>;
@@ -46,6 +47,7 @@ export interface PiSessionViewState {
   open: boolean;
   recoveryStatus?: RecoveryStatus;
   sessionId: string;
+  settledActivityDurationMs?: number;
   snapshot?: SessionSnapshot;
   stats?: SessionStats;
   toolExecutions: Record<string, PiToolExecutionState>;
@@ -259,25 +261,35 @@ const updateSnapshot = (
 
 const settleInterruptedSession = (
   current: PiSessionViewState,
-): PiSessionViewState => ({
-  ...current,
-  liveAssistant: current.liveAssistant?.stopReason === 'pending'
-    ? { ...current.liveAssistant, errorMessage: 'Pi session worker exited', stopReason: 'error' }
-    : current.liveAssistant,
-  open: false,
-  snapshot: updateSnapshot(current.snapshot, {
-    busy: false,
-    isCompacting: false,
-    isStreaming: false,
-    retryAttempt: 0,
-  }),
-  toolExecutions: Object.fromEntries(Object.entries(current.toolExecutions).map(([id, execution]) => [
-    id,
-    execution.status === 'running'
-      ? { ...execution, isError: true, status: 'error' as const }
-      : execution,
-  ])),
-});
+  now = Date.now(),
+): PiSessionViewState => {
+  const next: PiSessionViewState = {
+    ...current,
+    liveAssistant: current.liveAssistant?.stopReason === 'pending'
+      ? { ...current.liveAssistant, errorMessage: 'Pi session worker exited', stopReason: 'error' }
+      : current.liveAssistant,
+    open: false,
+    snapshot: updateSnapshot(current.snapshot, {
+      busy: false,
+      isCompacting: false,
+      isStreaming: false,
+      retryAttempt: 0,
+    }),
+    toolExecutions: Object.fromEntries(Object.entries(current.toolExecutions).map(([id, execution]) => [
+      id,
+      execution.status === 'running'
+        ? { ...execution, isError: true, status: 'error' as const }
+        : execution,
+    ])),
+  };
+  if (current.activityStartedAt !== undefined) {
+    next.settledActivityDurationMs = Math.max(0, now - current.activityStartedAt);
+    delete next.activityStartedAt;
+  } else if (current.snapshot?.busy) {
+    delete next.settledActivityDurationMs;
+  }
+  return next;
+};
 
 const appendEntry = (
   result: SessionEntriesResult | undefined,
@@ -323,14 +335,23 @@ const mergeEntriesArrivingDuringRequest = (
 export const reducePiAgentEvent = (
   current: PiSessionViewState,
   event: PiAgentEvent,
+  now = Date.now(),
 ): PiSessionViewState => {
   const next: PiSessionViewState = { ...current, lastAgentEvent: event };
 
   switch (event.type) {
     case 'agent_start':
+      next.activityStartedAt = current.activityStartedAt ?? now;
+      delete next.settledActivityDurationMs;
       next.snapshot = updateSnapshot(current.snapshot, { busy: true });
       return next;
     case 'agent_settled':
+      if (current.activityStartedAt !== undefined) {
+        next.settledActivityDurationMs = Math.max(0, now - current.activityStartedAt);
+        delete next.activityStartedAt;
+      } else if (current.snapshot?.busy) {
+        delete next.settledActivityDurationMs;
+      }
       next.snapshot = updateSnapshot(current.snapshot, {
         busy: false,
         isCompacting: false,

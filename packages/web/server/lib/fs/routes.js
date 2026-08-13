@@ -1171,10 +1171,12 @@ export const registerFsRoutes = (app, dependencies) => {
       ? req.query.path.trim()
       : os.homedir();
     const respectGitignore = req.query.respectGitignore === 'true';
+    let requestedPath = '';
     let resolvedPath = '';
 
     try {
-      resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
+      requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = await realpathCache.resolve(requestedPath);
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
@@ -1233,8 +1235,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const entries = await Promise.all(
         dirents.map(async (dirent) => {
-          const entryPath = path.join(resolvedPath, dirent.name);
-          if (respectGitignore && ignoredPaths.has(entryPath)) {
+          const physicalEntryPath = path.join(resolvedPath, dirent.name);
+          if (respectGitignore && ignoredPaths.has(physicalEntryPath)) {
             return null;
           }
 
@@ -1243,7 +1245,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           if (!isDirectory && isSymbolicLink) {
             try {
-              const linkStats = await fsPromises.stat(entryPath);
+              const linkStats = await fsPromises.stat(physicalEntryPath);
               isDirectory = linkStats.isDirectory();
             } catch {
               isDirectory = false;
@@ -1252,7 +1254,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           return {
             name: dirent.name,
-            path: entryPath,
+            path: path.join(requestedPath, dirent.name),
             isDirectory,
             isFile: dirent.isFile(),
             isSymbolicLink,
@@ -1261,7 +1263,7 @@ export const registerFsRoutes = (app, dependencies) => {
       );
 
       return res.json({
-        path: resolvedPath,
+        path: requestedPath,
         entries: entries.filter(Boolean),
       });
     } catch (error) {
