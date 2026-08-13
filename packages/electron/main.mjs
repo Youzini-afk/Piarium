@@ -35,6 +35,7 @@ import {
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import { mintOutsideFileGrant } from '@piarium/web/server/lib/fs/routes.js';
 import { resolvePiariumDataDir } from '@piarium/web/server/lib/platform/data-paths.js';
+import { clearAppImageArgv0FromProcessEnv } from '@piarium/web/server/lib/platform/inherited-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1513,6 +1514,7 @@ import { pathLooksUserConfigured, mergePathValues } from '@piarium/web/server/li
 // git, etc.) inherit process.env directly now — there is no sidecar
 // subprocess to hand a custom env to.
 const inheritUserShellEnv = () => {
+  clearAppImageArgv0FromProcessEnv();
   const shellEnv = loadShellEnv();
   if (!shellEnv) return;
 
@@ -1522,7 +1524,7 @@ const inheritUserShellEnv = () => {
   const currentPathLooksUserConfigured = pathLooksUserConfigured(currentPath, homeDir, delimiter);
 
   for (const [key, value] of Object.entries(shellEnv)) {
-    if (key === 'PATH') continue;
+    if (key === 'PATH' || key === 'ARGV0') continue;
     if (typeof process.env[key] === 'undefined') {
       process.env[key] = value;
     }
