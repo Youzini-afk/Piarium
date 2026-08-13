@@ -28,7 +28,7 @@ Unknown requests fail explicitly. Filesystem and shell-like operations remain in
 
 ## Worktrees
 
-Worktree creation has three observable phases: `directory-created`, `git-ready`, and `setup-ready`. Fast creation may return after the directory exists while the tracked bootstrap task populates Git, applies upstream configuration, and runs the explicit Piarium setup command. Removal waits for an active bootstrap task so the directory cannot be recreated after deletion.
+Worktree creation has three observable phases: `directory-created`, `git-ready`, and `setup-ready`. Fast creation may return after the directory exists while the tracked bootstrap task populates Git with long-path support, restores Git's `post-checkout` hook semantics, applies upstream configuration, and runs the explicit Piarium setup command. Removal waits for an active bootstrap task so the directory cannot be recreated after deletion.
 
 Generated worktrees use the Piarium data directory and default `piarium/<name>` branches. The project key is derived from the canonical repository path. The service does not write `.git/opencode`, consume OpenCode project storage, or mirror sandbox metadata into another engine's schema.
 

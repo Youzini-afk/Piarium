@@ -31,7 +31,7 @@ The following functions are exported and used by the web server:
 - `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree.
 - `getRangeDiff(directory, { base, head, path, contextLines })`: Get diff between two refs.
 - `getRangeFiles(directory, { base, head })`: Get list of changed files between two refs.
-- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs).
+- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as link targets).
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
 - `revertFile(directory, filePath, options)`: Revert a file. Default scope `all` discards staged and working-tree changes; scope `working` discards only unstaged/working-tree changes.
 - `stageFile(directory, filePath)`: Add one file path to the index.
@@ -39,7 +39,7 @@ The following functions are exported and used by the web server:
 - `applyHunk(directory, filePath, options)`: Apply a single-hunk patch via `git apply`. `options.action` is `stage` (`git apply --cached`), `unstage` (`git apply --cached --reverse`), or `discard` (`git apply --reverse` in the working tree). The patch is written to a temp file; a `--check` runs first so a stale hunk fails with a clear "refresh and try again" error instead of a partial mutation. The patch target path must match the requested file.
 
 ### Branch Operations
-- `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
+- `getBranches(directory)`: Get local/remote branches plus each remote's repository-declared default branch. Cached remote-tracking branches remain visible while their remote is offline.
 - `createBranch(directory, branchName, options)`: Create and checkout a new branch.
 - `checkoutBranch(directory, branchName)`: Checkout an existing branch.
 - `deleteBranch(directory, branch, options)`: Delete a branch (supports force flag).
@@ -127,6 +127,7 @@ The following functions are internal helpers used by exported functions:
 - Fast-create background failures remove the pre-created directory only if it is still empty. User-created files are never recursively deleted by this cleanup.
 - Worktree removal waits for any active create/bootstrap task for that directory before deleting it, preventing a background Git or setup task from restoring removed state or racing filesystem cleanup.
 - Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains byte-for-byte and metadata-identical across the retry window, it is treated as stale, removed, and population continues automatically; changing locks are left untouched and reported as failures.
+- Worktree population enables `core.longpaths` for the repository and for each reset command so managed Windows paths can be checked out. After population Piarium invokes the repository's executable `post-checkout` hook with Git's new-worktree arguments; hook failures are logged without discarding the usable worktree.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.

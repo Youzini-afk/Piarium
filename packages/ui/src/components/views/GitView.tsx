@@ -1361,12 +1361,21 @@ export const GitView: React.FC<GitViewProps> = ({
     }));
   }, [remotes, remoteBranches, remoteUrl, status?.tracking]);
 
+  const currentBranch = status?.current ?? null;
+  const defaultBranch = React.useMemo(() => {
+    const trackingRemote = status?.tracking?.trim().split('/')[0];
+    return (trackingRemote && branches?.defaultBranches?.[trackingRemote])
+      ?? branches?.defaultBranches?.origin;
+  }, [branches, status?.tracking]);
+
   const baseBranch = React.useMemo(() => deriveBaseBranch({
     remoteNames: new Set(effectiveRemotes.map((remote) => remote.name)),
     localBranches,
     worktreeCreatedFromBranch: worktreeMetadata?.createdFromBranch,
     rootBranchHint,
-  }), [effectiveRemotes, localBranches, rootBranchHint, worktreeMetadata?.createdFromBranch]);
+    defaultBranch,
+    headBranch: currentBranch,
+  }), [currentBranch, defaultBranch, effectiveRemotes, localBranches, rootBranchHint, worktreeMetadata?.createdFromBranch]);
 
   const updateTargetBranch = React.useMemo(() => {
     const remoteNames = effectiveRemotes.map((remote) => remote.name);
@@ -1455,7 +1464,6 @@ export const GitView: React.FC<GitViewProps> = ({
 
   const stagedCount = stagedChangeEntries.length;
   const isBusy = isLoading || syncAction !== null || commitAction !== null;
-  const currentBranch = status?.current ?? null;
   const canShowIntegrateCommitsSection = Boolean(
     worktreeMetadata && repoRootForIntegrate && sourceBranchForIntegrate && shouldShowIntegrateCommits
   );

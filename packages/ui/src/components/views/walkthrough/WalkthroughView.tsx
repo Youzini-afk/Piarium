@@ -16,7 +16,7 @@ import { openExternalUrl } from '@/lib/url';
 import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import type { WalkthroughSource, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { deriveBaseBranch } from '@/components/views/git/baseBranch';
+import { deriveBaseBranch, hasResolvableBaseBranch } from '@/components/views/git/baseBranch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useGitBranches, useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -186,14 +186,20 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
     const baseRef = deriveBaseBranch({
       remoteNames,
       localBranches,
+      defaultBranch: branches?.defaultBranches?.[status?.tracking?.trim().split('/')[0] || '']
+        ?? branches?.defaultBranches?.origin,
+      headBranch: headRef,
     });
-    const resolvable = localBranches.includes(baseRef)
-      || remoteBranches.some((name) => name === baseRef || name.endsWith(`/${baseRef}`));
+    const resolvable = hasResolvableBaseBranch({
+      baseBranch: baseRef,
+      localBranches,
+      remoteBranches,
+    });
     if (!baseRef || baseRef === headRef || !resolvable) {
       return null;
     }
     return { kind: 'branch', baseRef, headRef };
-  }, [branches, currentBranch]);
+  }, [branches, currentBranch, status?.tracking]);
 
   // The pull request for this branch used to appear only after visiting the PR
   // panel, because nothing else asked GitHub about it. Ask here too: the status

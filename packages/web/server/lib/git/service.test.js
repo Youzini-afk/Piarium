@@ -12,6 +12,7 @@ import {
   createWorktree,
   getWorktreeBootstrapStatus,
   getStatus,
+  getFileDiff,
   populateWorktreeWithLockRecovery,
   removeWorktree,
   resolvePrimaryWorktreeRoot,
@@ -19,6 +20,7 @@ import {
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
+  setLocalIdentity,
   stageFiles,
   unstageFiles,
   applyHunk,
@@ -164,6 +166,24 @@ describe('resolveBaseRefForLog', () => {
   it('returns undefined when from is a whitespace-only string', async () => {
     const checkRef = async () => true;
     expect(await resolveBaseRefForLog('   ', checkRef)).toBeUndefined();
+  });
+});
+
+describe('setLocalIdentity', () => {
+  it('writes an explicitly selected SSH key through the targeted simple-git opt-in', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir } = await createTempRepo();
+
+    await setLocalIdentity(tmpDir, {
+      userName: 'SSH User',
+      userEmail: 'ssh@example.com',
+      authType: 'ssh',
+      sshKey: '/tmp/test key',
+    });
+
+    expect(runGit(tmpDir, ['config', '--local', '--get', 'core.sshCommand']).trim()).toBe(
+      "ssh -i '/tmp/test key' -o IdentitiesOnly=yes"
+    );
   });
 });
 
@@ -322,6 +342,22 @@ describe('applyHunk', () => {
   });
 });
 
+describe('symlink diffs', () => {
+  it('represents an untracked directory symlink by its link target', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const { tmpDir } = await createTempRepo();
+    fs.mkdirSync(path.join(tmpDir, 'source'));
+    fs.symlinkSync('source', path.join(tmpDir, 'linked-source'));
+
+    const patch = await getDiff(tmpDir, { path: 'linked-source' });
+    const split = await getFileDiff(tmpDir, { path: 'linked-source' });
+
+    expect(patch).toContain('new file mode 120000');
+    expect(patch).toContain('+source');
+    expect(split).toMatchObject({ original: '', modified: 'source', isBinary: false });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // getStatus
 // ---------------------------------------------------------------------------
@@ -381,6 +417,12 @@ describe('worktree root resolution', () => {
 // ---------------------------------------------------------------------------
 
 describe('createWorktree', () => {
+  const installPostCheckoutHook = (repo, script) => {
+    const hookPath = path.join(repo, '.git', 'hooks', 'post-checkout');
+    fs.writeFileSync(hookPath, script);
+    fs.chmodSync(hookPath, 0o755);
+  };
+
   it('returns ready/setup-ready when no bootstrap state is recorded', async () => {
     const directory = path.join(createTempDir(), 'missing-worktree');
 
@@ -434,6 +476,46 @@ describe('createWorktree', () => {
       } else {
         process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
       }
+    }
+  });
+
+  it('runs post-checkout after populating the managed worktree', async () => {
+    if (!canRunGit()) return;
+    const previousPiariumDataDir = process.env.PIARIUM_DATA_DIR;
+    const dataHome = createTempDir();
+    process.env.PIARIUM_DATA_DIR = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const expectedHead = runGit(repo, ['rev-parse', 'HEAD']).trim();
+      const hookLog = path.join(dataHome, 'post-checkout.log');
+      installPostCheckoutHook(
+        repo,
+        `#!/bin/sh\nprintf '%s|%s|%s' "$1" "$2" "$3" > ${JSON.stringify(hookLog)}\n`,
+      );
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        worktreeName: 'hook-test',
+        branchName: 'piarium/hook-test',
+        returnAfterDirectoryCreated: true,
+      });
+
+      await expect.poll(() => fs.existsSync(hookLog), { timeout: 5_000 }).toBe(true);
+      expect(fs.readFileSync(hookLog, 'utf8')).toBe(`${'0'.repeat(40)}|${expectedHead}|1`);
+      await expect.poll(
+        async () => (await getWorktreeBootstrapStatus(created.path)).status,
+        { timeout: 5_000 },
+      ).toBe('ready');
+    } finally {
+      if (previousPiariumDataDir === undefined) delete process.env.PIARIUM_DATA_DIR;
+      else process.env.PIARIUM_DATA_DIR = previousPiariumDataDir;
     }
   });
 
@@ -585,6 +667,7 @@ describe('createWorktree', () => {
     await expect(populateWorktreeWithLockRecovery(worktree)).resolves.toBeUndefined();
     expect(fs.existsSync(lockPath)).toBe(false);
     expect(normalizeEol(fs.readFileSync(path.join(worktree, 'README.md'), 'utf8'))).toBe('# Test\n');
+    expect(runGit(repo, ['config', '--get', 'core.longpaths']).trim()).toBe('true');
   });
 
   it('preflights fast create branch-in-use failures before creating the candidate directory', async () => {

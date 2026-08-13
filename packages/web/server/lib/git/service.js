@@ -30,6 +30,7 @@ const WORKTREE_BOOTSTRAP_FAILED = 'failed';
 const WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED = 'directory-created';
 const WORKTREE_BOOTSTRAP_PHASE_GIT_READY = 'git-ready';
 const WORKTREE_BOOTSTRAP_PHASE_SETUP_READY = 'setup-ready';
+const GIT_NULL_REF = '0'.repeat(40);
 const WORKTREE_INDEX_LOCK_RETRY_DELAY_MS = 250;
 const WORKTREE_INDEX_LOCK_STALE_DELAY_MS = 750;
 
@@ -356,12 +357,17 @@ const buildGitEnv = async () => {
   return env;
 };
 
-const createGit = async (directory) => {
+const createGit = async (directory, { allowUnsafeSshCommand = false } = {}) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
-  const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
+  const unsafe = hasCustomBinary || allowUnsafeSshCommand
+    ? {
+      ...(hasCustomBinary && { allowUnsafeCustomBinary: true }),
+      ...(allowUnsafeSshCommand && { allowUnsafeSshCommand: true }),
+    }
+    : undefined;
   if (!directory) {
     return createSimpleGit({ env, spawnOptions, binary, unsafe });
   }
@@ -498,7 +504,9 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
     }
 
     const repoPath = toGitPath(path.relative(repoRoot, absolutePath));
-    const existsInWorktree = await fsp.stat(absolutePath).then((stat) => stat.isFile()).catch(() => false);
+    const worktreeEntry = await fsp.lstat(absolutePath).catch(() => null);
+    const isSymbolicLink = worktreeEntry?.isSymbolicLink() ?? false;
+    const existsInWorktree = worktreeEntry?.isFile() || isSymbolicLink;
     const existsInIndex = await git.raw(['cat-file', '-e', `:${repoPath}`]).then(() => true).catch(() => false);
     const existsInHead = await git.raw(['cat-file', '-e', `HEAD:${repoPath}`]).then(() => true).catch(() => false);
 
@@ -507,11 +515,26 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
         absolutePath,
         repoPath,
         repoRoot,
+        isSymbolicLink,
       };
     }
   }
 
   throw new Error('Invalid file path');
+};
+
+const buildUntrackedSymlinkDiff = async (fileContext) => {
+  const target = await fsp.readlink(fileContext.absolutePath);
+  return [
+    `diff --git a/${fileContext.repoPath} b/${fileContext.repoPath}`,
+    'new file mode 120000',
+    '--- /dev/null',
+    `+++ b/${fileContext.repoPath}`,
+    '@@ -0,0 +1 @@',
+    `+${target}`,
+    '\\ No newline at end of file',
+    '',
+  ].join('\n');
 };
 
 const cleanBranchName = (branch) => {
@@ -830,6 +853,37 @@ const buildRawGitOptions = (raw) => {
   });
 };
 
+const hasGitRefSyntax = (value) => /[*?[\]^~:\\]/.test(value);
+
+const resolveRangeBaseRef = async (git, baseRef) => {
+  const originCandidate = `refs/remotes/origin/${baseRef}`;
+  const originExists = await git
+    .raw(['rev-parse', '--verify', originCandidate])
+    .then((value) => Boolean(String(value || '').trim()))
+    .catch(() => false);
+  if (originExists) {
+    return `origin/${baseRef}`;
+  }
+
+  if (hasGitRefSyntax(baseRef)) {
+    return baseRef;
+  }
+
+  const resolvesLocally = await git
+    .raw(['rev-parse', '--verify', `refs/heads/${baseRef}`])
+    .then((value) => Boolean(String(value || '').trim()))
+    .catch(() => false);
+  if (resolvesLocally) {
+    return baseRef;
+  }
+
+  const remoteMatch = await git
+    .raw(['for-each-ref', '--count=1', '--format=%(refname:short)', `refs/remotes/*/${baseRef}`])
+    .then((value) => String(value || '').trim())
+    .catch(() => '');
+  return remoteMatch || baseRef;
+};
+
 const getRemoteBranchComparison = async (git, remoteName, branchName) => {
   const remote = String(remoteName || '').trim();
   const branch = String(branchName || '').trim();
@@ -957,34 +1011,66 @@ const getFileIdentity = async (filePath) => {
   }
 };
 
+// Managed worktrees live under Piarium's data directory, which can make an
+// otherwise valid repository path exceed Git for Windows' default path limit.
+// The command override guarantees bootstrap itself can populate the tree; the
+// shared local config keeps later Git operations in the same repository
+// consistent. A failed config write is non-fatal because reset still carries
+// the command-scoped override.
+const WORKTREE_POPULATE_RESET_ARGS = ['-c', 'core.longpaths=true', 'reset', '--hard'];
+
+const isFilenameTooLongError = (message) => /file ?name too long/i.test(String(message || ''));
+
+const formatWorktreePopulateError = (message) => {
+  const text = String(message || '').trim() || 'Failed to populate worktree';
+  if (!isFilenameTooLongError(text)) {
+    return text;
+  }
+  return [
+    text,
+    'The worktree checkout path exceeds this system\'s path-length limit.',
+    'Piarium enabled Git `core.longpaths` for worktree population. If this still fails on Windows, enable OS long paths (LongPathsEnabled) or open the repository from a shorter absolute path.',
+  ].join('\n');
+};
+
+export const ensureWorktreeLongpaths = async (directory) => {
+  const current = await runGitCommand(directory, ['config', '--get', 'core.longpaths']);
+  if (String(current.stdout || '').trim().toLowerCase() === 'true') {
+    return;
+  }
+  await runGitCommand(directory, ['config', 'core.longpaths', 'true']);
+};
+
 export const populateWorktreeWithLockRecovery = async (directory) => {
-  let result = await runGitCommand(directory, ['reset', '--hard']);
+  await ensureWorktreeLongpaths(directory);
+
+  let result = await runGitCommand(directory, WORKTREE_POPULATE_RESET_ARGS);
   if (result.success) {
     return;
   }
   if (!isIndexLockError(result)) {
-    throw new Error(result.message || 'Failed to populate worktree');
+    throw new Error(formatWorktreePopulateError(result.message));
   }
 
   await wait(WORKTREE_INDEX_LOCK_RETRY_DELAY_MS);
-  result = await runGitCommand(directory, ['reset', '--hard']);
+  result = await runGitCommand(directory, WORKTREE_POPULATE_RESET_ARGS);
   if (result.success) {
     return;
   }
   if (!isIndexLockError(result)) {
-    throw new Error(result.message || 'Failed to populate worktree');
+    throw new Error(formatWorktreePopulateError(result.message));
   }
 
   const lockPath = await getWorktreeIndexLockPath(directory);
   const identity = lockPath ? await getFileIdentity(lockPath) : null;
   await wait(WORKTREE_INDEX_LOCK_STALE_DELAY_MS);
 
-  result = await runGitCommand(directory, ['reset', '--hard']);
+  result = await runGitCommand(directory, WORKTREE_POPULATE_RESET_ARGS);
   if (result.success) {
     return;
   }
   if (!isIndexLockError(result) || !lockPath || !identity || await getFileIdentity(lockPath) !== identity) {
-    throw new Error(result.message || 'Failed to populate worktree');
+    throw new Error(formatWorktreePopulateError(result.message));
   }
 
   await fsp.unlink(lockPath).catch((error) => {
@@ -992,7 +1078,38 @@ export const populateWorktreeWithLockRecovery = async (directory) => {
       throw error;
     }
   });
-  await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
+  const finalResult = await runGitCommand(directory, WORKTREE_POPULATE_RESET_ARGS);
+  if (!finalResult.success) {
+    throw new Error(formatWorktreePopulateError(finalResult.message || 'Failed to populate worktree'));
+  }
+};
+
+// `git worktree add --no-checkout` followed by `reset --hard` skips Git's
+// normal post-checkout hook. Restore that documented checkout semantic after
+// the tree has been populated. A hook failure is reported but does not turn an
+// otherwise usable worktree into a failed Piarium bootstrap.
+const runPostCheckoutHook = async (directory) => {
+  const headResult = await runGitCommand(directory, ['rev-parse', 'HEAD']);
+  if (!headResult.success) return;
+  const head = String(headResult.stdout || '').trim();
+  if (!head) return;
+
+  // Let Git locate and launch the hook. This respects core.hooksPath and uses
+  // Git for Windows' shell runner for extensionless scripts, unlike spawning
+  // the hook file directly from Node.
+  const result = await runGitCommand(directory, [
+    'hook',
+    'run',
+    '--ignore-missing',
+    'post-checkout',
+    '--',
+    GIT_NULL_REF,
+    head,
+    '1',
+  ]);
+  if (!result.success) {
+    console.warn(`[GitService] post-checkout hook failed in worktree ${directory}: ${result.message || result.stderr || result.stdout}`);
+  }
 };
 
 const derivePrimaryWorktreeRootFromGitDir = (gitDir) => {
@@ -1634,6 +1751,7 @@ const queueWorktreeBootstrap = (args) => {
   const task = new Promise((resolve) => setTimeout(resolve, 0))
     .then(async () => {
       await populateWorktreeWithLockRecovery(directory);
+      await runPostCheckoutHook(directory);
       if (setUpstream) {
         await applyUpstreamConfiguration({
           primaryWorktree,
@@ -1878,7 +1996,7 @@ export async function hasLocalIdentity(directory) {
 }
 
 export async function setLocalIdentity(directory, profile) {
-  const git = await createGit(directory);
+  const git = await createGit(directory, { allowUnsafeSshCommand: true });
 
   try {
 
@@ -1888,12 +2006,12 @@ export async function setLocalIdentity(directory, profile) {
     const authType = profile.authType || 'ssh';
 
     if (authType === 'ssh' && profile.sshKey) {
-      await git.addConfig(
+      await git.raw([
+        'config',
+        '--local',
         'core.sshCommand',
-        buildSshCommand(profile.sshKey),
-        false,
-        'local'
-      );
+        buildSshCommand(profile.sshKey)
+      ]);
       await git.raw(['config', '--local', '--unset', 'credential.helper']).catch(() => {});
     } else if (authType === 'token' && profile.host) {
       await git.addConfig(
@@ -1995,7 +2113,15 @@ export async function getStatus(directory, options = {}) {
         const absolutePath = path.join(repoRoot, file.path);
 
         try {
-          const stat = await fsp.stat(absolutePath);
+          const stat = await fsp.lstat(absolutePath);
+          if (stat.isSymbolicLink()) {
+            newFileStats.push({
+              path: file.path,
+              insertions: 1,
+              deletions: 0,
+            });
+            continue;
+          }
           if (!stat.isFile() || stat.size > MAX_NEW_FILE_STAT_SIZE) {
             continue;
           }
@@ -2219,6 +2345,10 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
       await git.raw(['ls-files', '--error-unmatch', '--', fileContext.repoPath]);
       return diff;
     } catch {
+      if (fileContext.isSymbolicLink) {
+        return buildUntrackedSymlinkDiff(fileContext);
+      }
+
       const noIndexArgs = ['diff', '--no-color'];
       if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
         noIndexArgs.push(`-U${Math.max(0, contextLines)}`);
@@ -2265,6 +2395,9 @@ export async function getUntrackedDiffs(directory, filePaths = [], { contextLine
   return Promise.all(paths.map(async (filePath) => {
     try {
       const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+      if (fileContext.isSymbolicLink) {
+        return buildUntrackedSymlinkDiff(fileContext);
+      }
       const args = ['diff', '--no-color'];
       if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
         args.push(`-U${Math.max(0, contextLines)}`);
@@ -2289,18 +2422,10 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
     throw new Error('base and head are required');
   }
 
-  // Prefer remote-tracking base ref so merged commits don't reappear
-  // when local base branch is stale (common when user stays on feature branch).
-  let resolvedBase = baseRef;
-  const originCandidate = `refs/remotes/origin/${baseRef}`;
-  try {
-    const verified = await git.raw(['rev-parse', '--verify', originCandidate]);
-    if (verified && verified.trim()) {
-      resolvedBase = `origin/${baseRef}`;
-    }
-  } catch {
-    // ignore
-  }
+  // Prefer a current remote-tracking base so merged commits do not reappear
+  // when the local base is stale. Repositories without `origin` resolve the
+  // same branch through whichever remote actually owns it.
+  const resolvedBase = await resolveRangeBaseRef(git, baseRef);
 
   const args = ['diff', '--no-color'];
   if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
@@ -2323,16 +2448,7 @@ export async function getRangeFiles(directory, { base, head } = {}) {
     throw new Error('base and head are required');
   }
 
-  let resolvedBase = baseRef;
-  const originCandidate = `refs/remotes/origin/${baseRef}`;
-  try {
-    const verified = await git.raw(['rev-parse', '--verify', originCandidate]);
-    if (verified && verified.trim()) {
-      resolvedBase = `origin/${baseRef}`;
-    }
-  } catch {
-    // ignore
-  }
+  const resolvedBase = await resolveRangeBaseRef(git, baseRef);
 
   const raw = await git.raw(['diff', '--name-only', `${resolvedBase}...${headRef}`]);
   return String(raw || '')
@@ -2456,9 +2572,9 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const isImage = isImageFile(filePath);
   const mimeType = isImage ? getImageMimeType(filePath) : null;
-  const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+  const { absolutePath, repoPath, isSymbolicLink } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
 
-  if (!isImage) {
+  if (!isImage && !isSymbolicLink) {
     const isBinaryBySniff = await looksBinaryBySniff(absolutePath);
     const isBinary = isBinaryBySniff || (await isBinaryDiff(repoRoot, repoPath, staged));
     if (isBinary) {
@@ -2512,8 +2628,18 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
         modified = await git.show([`:${repoPath}`]);
       }
     } else {
-      const stat = await fsp.stat(absolutePath);
-      if (stat.isFile()) {
+      if (isSymbolicLink) {
+        modified = await fsp.readlink(absolutePath);
+      } else {
+        const stat = await fsp.stat(absolutePath);
+        if (!stat.isFile()) {
+          return {
+            original: typeof original === 'string' ? original.replace(/\r\n/g, '\n') : original,
+            modified: '',
+            path: filePath,
+            isBinary: false,
+          };
+        }
         if (isImage) {
           // For images, read as binary and convert to data URL
           const buffer = await fsp.readFile(absolutePath);
@@ -3269,6 +3395,7 @@ export async function getBranches(directory) {
     const allBranches = result.all;
     const remoteBranches = allBranches.filter(branch => branch.startsWith('remotes/'));
     const activeRemoteBranches = await filterActiveRemoteBranches(git, remoteBranches);
+    const defaultBranches = await getRemoteDefaultBranches(git);
 
     const filteredAll = [
       ...allBranches.filter(branch => !branch.startsWith('remotes/')),
@@ -3278,7 +3405,8 @@ export async function getBranches(directory) {
     return {
       all: filteredAll,
       current: result.current,
-      branches: result.branches
+      branches: result.branches,
+      defaultBranches,
     };
   } catch (error) {
     console.error('Failed to get branches:', error);
@@ -3286,10 +3414,56 @@ export async function getBranches(directory) {
   }
 }
 
+async function getRemoteDefaultBranches(git) {
+  let defaults = {};
+
+  try {
+    const refs = await git.raw([
+      'for-each-ref',
+      '--format=%(refname) %(symref)',
+      'refs/remotes',
+    ]);
+    defaults = Object.fromEntries(
+      refs.trim().split('\n').flatMap((line) => {
+        const [ref, symbolicRef] = line.split(' ');
+        const match = ref.match(/^refs\/remotes\/([^/]+)\/HEAD$/);
+        const prefix = match ? `refs/remotes/${match[1]}/` : '';
+        return match && typeof symbolicRef === 'string' && symbolicRef.startsWith(prefix)
+          ? [[match[1], symbolicRef.slice(prefix.length)]]
+          : [];
+      })
+    );
+  } catch {
+    defaults = {};
+  }
+
+  try {
+    const remotes = await git.getRemotes();
+    const missing = remotes.filter((remote) => remote?.name && !defaults[remote.name]);
+    const resolved = await Promise.all(missing.map(async (remote) => {
+      try {
+        const output = await git.raw(['ls-remote', '--symref', remote.name, 'HEAD']);
+        const match = String(output || '').match(/^ref:\s+refs\/heads\/(.+?)\s+HEAD$/m);
+        return match ? [remote.name, match[1]] : null;
+      } catch {
+        return null;
+      }
+    }));
+    for (const entry of resolved) {
+      if (entry) defaults[entry[0]] = entry[1];
+    }
+  } catch {
+    // Local remote/HEAD refs remain authoritative when a remote is offline.
+  }
+
+  return defaults;
+}
+
 async function filterActiveRemoteBranches(git, remoteBranches) {
   try {
     const remotes = await git.getRemotes();
     const branchesByRemote = new Map();
+    const unreachableRemotes = new Set();
 
     await Promise.all(remotes.map(async (remote) => {
       try {
@@ -3304,7 +3478,7 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
         }
         branchesByRemote.set(remote.name, actualRemoteBranches);
       } catch {
-        // Skip remotes that fail (e.g., unreachable)
+        unreachableRemotes.add(remote.name);
       }
     }));
 
@@ -3313,6 +3487,7 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
       if (!match) return false;
       const remoteName = remoteBranch.split('/')[1];
       const branchName = match[1];
+      if (unreachableRemotes.has(remoteName)) return true;
       return branchesByRemote.get(remoteName)?.has(branchName) ?? false;
     });
   } catch (error) {
