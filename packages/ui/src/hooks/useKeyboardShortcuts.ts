@@ -14,6 +14,7 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { nextPiFavoriteModel, nextPiThinkingLevel } from '@/lib/pi-runtime/keyboardActions';
 import { listPiModels } from '@/lib/pi-runtime/providers';
+import { addPiSelectionToChat } from '@/lib/pi-runtime/addSelectionToChat';
 
 const focusPiTimeline = (): void => {
   const timeline = document.querySelector<HTMLElement>('[data-pi-timeline="true"]');
@@ -324,6 +325,12 @@ export const useKeyboardShortcuts = () => {
         e.preventDefault();
         const { isSettingsDialogOpen } = useUIStore.getState();
         setSettingsDialogOpen(!isSettingsDialogOpen);
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('add_selection_to_chat'))) {
+        e.preventDefault();
+        void addPiSelectionToChat();
         return;
       }
 

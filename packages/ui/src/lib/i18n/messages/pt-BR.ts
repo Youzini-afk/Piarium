@@ -1781,6 +1781,7 @@ export const dict: Record<I18nKey, string> = {
   "helpDialog.item.createNewSession": "Criar nova sessão",
   "helpDialog.item.createNewWorktreeDraft": "Criar novo rascunho de worktree",
   "helpDialog.item.focusChatInput": "Focar entrada do chat",
+  "helpDialog.item.addSelectionToChat": "Adicionar o texto selecionado ao chat",
   "helpDialog.item.togglePromptNavigator": "Mostrar ou ocultar navegador de prompts",
   "helpDialog.item.abortActiveRun": "Interromper execução ativa (duplo clique)",
   "helpDialog.item.toggleRightSidebar": 'Alternar painel de contexto',

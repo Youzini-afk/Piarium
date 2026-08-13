@@ -1463,6 +1463,7 @@ export const dict = {
   'helpDialog.item.createNewSession': 'Créer une nouvelle session',
   'helpDialog.item.createNewWorktreeDraft': 'Créer un nouveau brouillon d\'worktree',
   'helpDialog.item.focusChatInput': 'Concentration sur la saisie du chat',
+  'helpDialog.item.addSelectionToChat': 'Ajouter le texte sélectionné au chat',
   'helpDialog.item.togglePromptNavigator': 'Afficher ou masquer le navigateur de prompts',
   'helpDialog.item.abortActiveRun': 'Abandonner l’exécution active (double pression)',
   'helpDialog.item.toggleRightSidebar': 'Afficher/masquer le panneau de contexte',

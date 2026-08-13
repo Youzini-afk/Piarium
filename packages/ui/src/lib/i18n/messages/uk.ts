@@ -1784,6 +1784,7 @@ export const dict: Record<I18nKey, string> = {
   "helpDialog.item.createNewSession": "Створити нову сесію",
   "helpDialog.item.createNewWorktreeDraft": "Створити нову чернетку worktree",
   "helpDialog.item.focusChatInput": "Фокус на полі вводу чату",
+  "helpDialog.item.addSelectionToChat": "Додати вибраний текст до чату",
   "helpDialog.item.togglePromptNavigator": "Показати або приховати навігатор промптів",
   "helpDialog.item.abortActiveRun": "Перервати активний запуск (подвійне натискання)",
   "helpDialog.item.toggleRightSidebar": 'Перемкнути контекстну панель',

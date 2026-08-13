@@ -1647,6 +1647,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.createNewSession': '새 세션 만들기',
   'helpDialog.item.createNewWorktreeDraft': '새 워크트리 드래프트 만들기',
   'helpDialog.item.focusChatInput': '채팅 입력창으로 포커스 이동',
+  'helpDialog.item.addSelectionToChat': '선택한 텍스트를 채팅에 추가',
   'helpDialog.item.togglePromptNavigator': '프롬프트 탐색기 표시/숨기기',
   'helpDialog.item.abortActiveRun': '활성 실행 중단(두 번 누르기)',
   'helpDialog.item.toggleRightSidebar': '컨텍스트 패널 표시 전환',

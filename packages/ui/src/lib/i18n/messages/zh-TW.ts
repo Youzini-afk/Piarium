@@ -1615,6 +1615,7 @@ export const dict: Record<I18nKey, string> = {
   'helpDialog.item.createNewSession': '建立新會話',
   'helpDialog.item.createNewWorktreeDraft': '建立新 worktree 草稿',
   'helpDialog.item.focusChatInput': '聚焦聊天輸入框',
+  'helpDialog.item.addSelectionToChat': '將選取文字加入聊天',
   'helpDialog.item.togglePromptNavigator': '顯示或隱藏提示詞導覽',
   'helpDialog.item.abortActiveRun': '中止目前執行（連按兩下）',
   'helpDialog.item.toggleRightSidebar': '切換上下文面板',

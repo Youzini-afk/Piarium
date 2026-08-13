@@ -905,6 +905,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '跳轉到行（檔案編輯器）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '開啟命令面板',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦輸入方塊',
+  'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '將選取文字加入聊天',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '開啟設定',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '切換終端機停靠區',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '切換終端機展開',

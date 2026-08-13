@@ -119,6 +119,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'add_selection_to_chat',
+    defaultCombo: 'mod+l',
+    label: 'Add selection to chat',
+    description: 'Append selected text to the chat input',
+    customizable: true,
+  },
+  {
     id: 'focus_input',
     defaultCombo: 'mod+i',
     label: 'Focus input',
@@ -160,7 +167,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   },
   {
     id: 'toggle_sidebar',
-    defaultCombo: 'mod+l',
+    defaultCombo: 'mod+alt+l',
     label: 'Toggle sidebar',
     description: 'Toggle the session sidebar',
     customizable: true,

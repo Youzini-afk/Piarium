@@ -128,6 +128,7 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         { id: 'focus_input', descriptionKey: "helpDialog.item.focusChatInput", icon: RiText, keys: '' },
+        { id: 'add_selection_to_chat', descriptionKey: "helpDialog.item.addSelectionToChat", icon: RiText, keys: '' },
         {
           id: 'toggle_prompt_navigator',
           descriptionKey: "helpDialog.item.togglePromptNavigator",

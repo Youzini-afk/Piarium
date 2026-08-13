@@ -12,6 +12,7 @@ import {
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
+import { addPiSelectionToChat } from '@/lib/pi-runtime/addSelectionToChat';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -79,6 +80,7 @@ type MenuAction =
   | 'toggle-terminal'
   | 'toggle-terminal-expanded'
   | 'copy'
+  | 'add-selection-to-chat'
   | 'theme-light'
   | 'theme-dark'
   | 'theme-system'
@@ -268,6 +270,10 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
           }
           break;
         }
+
+        case 'add-selection-to-chat':
+          void addPiSelectionToChat();
+          break;
 
         case 'theme-light':
           setThemeMode('light');

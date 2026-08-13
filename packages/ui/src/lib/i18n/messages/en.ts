@@ -1644,6 +1644,7 @@ export const dict = {
   'helpDialog.item.createNewSession': 'Create New Session',
   'helpDialog.item.createNewWorktreeDraft': 'Create New Worktree Draft',
   'helpDialog.item.focusChatInput': 'Focus Chat Input',
+  'helpDialog.item.addSelectionToChat': 'Add Selected Text to Chat',
   'helpDialog.item.togglePromptNavigator': 'Toggle Prompt Navigator',
   'helpDialog.item.abortActiveRun': 'Abort active run (double press)',
   'helpDialog.item.toggleRightSidebar': 'Toggle context panel',
