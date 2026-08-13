@@ -493,6 +493,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           </div>
         ) : (
           <PiTimeline
+            cwd={snapshot.cwd}
             entries={entries}
             hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
             liveAssistant={currentRecord.liveAssistant}

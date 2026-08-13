@@ -1,10 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getDiffPatchEntries, getRenderablePatchInfo } from './toolDiffUtils';
+import { getApplyPatchFileEntries, getDiffPatchEntries, getRenderablePatchInfo } from './toolDiffUtils';
 
 const identity = (path: string) => path;
 
 describe('toolDiffUtils', () => {
+    test('reads every Pi apply_patch change and opens move destinations', () => {
+        expect(getApplyPatchFileEntries({
+            changes: [
+                { kind: 'update', path: 'src/old.ts', moveTo: 'src/new.ts', displayDiff: '@@ -1 +1 @@\n-old\n+new' },
+                { kind: 'add', path: 'src/added.ts', displayDiff: '@@ -0,0 +1 @@\n+new' },
+                { kind: 'delete', path: 'src/deleted.ts', displayDiff: '@@ -1 +0,0 @@\n-old' },
+            ],
+        })).toEqual([
+            { deleted: false, filePath: 'src/new.ts', patch: '@@ -1 +1 @@\n-old\n+new' },
+            { deleted: false, filePath: 'src/added.ts', patch: '@@ -0,0 +1 @@\n+new' },
+            { deleted: true, filePath: 'src/deleted.ts', patch: '@@ -1 +0,0 @@\n-old' },
+        ]);
+    });
+
     test('renders raw apply_patch add-file envelopes as visual diffs', () => {
         const entries = getDiffPatchEntries(undefined, [
             '*** Begin Patch',

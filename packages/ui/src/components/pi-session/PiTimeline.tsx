@@ -11,9 +11,13 @@ import type {
 import { Icon } from '@/components/icon/Icon';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
+import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { toAbsoluteFilePath } from '@/lib/path-utils';
+import type { EditorAPI } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PiToolExecutionState } from '@/stores/usePiSessionStore';
 import { PiExtensionStatusCard } from './PiExtensionStatusCard';
 import {
@@ -27,6 +31,7 @@ import {
 } from './extensionPresentation';
 
 interface PiTimelineProps {
+  cwd: string;
   entries: PiSessionEntry[];
   hiddenThinkingLabel?: string;
   liveAssistant?: PiAssistantMessage;
@@ -285,9 +290,11 @@ const ToolResultContent: React.FC<{
 
 const PiToolCard: React.FC<{
   call: PiToolCall;
+  cwd: string;
+  editor?: EditorAPI;
   execution?: PiToolExecutionState;
   result?: PiToolResultMessage;
-}> = ({ call, execution, result }) => {
+}> = ({ call, cwd, editor, execution, result }) => {
   const status = result
     ? (result.isError ? 'error' : 'success')
     : execution?.status ?? 'running';
@@ -295,6 +302,9 @@ const PiToolCard: React.FC<{
   const transientSubagentRun = (call.name === 'subagent' || call.name === 'subagent_wait') && transientOutput !== undefined
     ? parseSubagentRun(transientOutput)
     : undefined;
+  const applyPatchFiles = call.name === 'apply_patch'
+    ? getApplyPatchFileEntries(result?.details ?? transientOutput)
+    : [];
   return (
     <details
       className={cn(
@@ -337,6 +347,30 @@ const PiToolCard: React.FC<{
             </pre>
           </div>
         ) : null}
+        {applyPatchFiles.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {applyPatchFiles.map((file) => (
+              <button
+                key={file.filePath}
+                type="button"
+                disabled={file.deleted || !editor}
+                onClick={() => {
+                  if (!editor) return;
+                  const absolutePath = toAbsoluteFilePath(cwd, file.filePath);
+                  if (file.patch) {
+                    void editor.openDiff('', absolutePath, `${file.filePath} (changes)`, { patch: file.patch });
+                  } else {
+                    void editor.openFile(absolutePath);
+                  }
+                }}
+                className="inline-flex min-w-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-default disabled:opacity-50"
+              >
+                <Icon name="file-code" className="size-3.5 shrink-0" />
+                <span className="max-w-64 truncate">{file.filePath}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
     </details>
   );
@@ -353,13 +387,15 @@ const MetaEntry: React.FC<{
 );
 
 const AssistantMessage: React.FC<{
+  cwd: string;
+  editor?: EditorAPI;
   entryId: string;
   executionById: Record<string, PiToolExecutionState>;
   hiddenThinkingLabel?: string;
   message: PiAssistantMessage;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
   streaming?: boolean;
-}> = ({ entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => (
+}> = ({ cwd, editor, entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => (
   <div className="max-w-full">
     {message.content.map((content, index) => {
       if (content.type === 'text') {
@@ -396,6 +432,8 @@ const AssistantMessage: React.FC<{
         <PiToolCard
           key={`${entryId}:tool:${content.id}`}
           call={content}
+          cwd={cwd}
+          editor={editor}
           execution={executionById[content.id]}
           result={resultByCallId.get(content.id)}
         />
@@ -410,6 +448,7 @@ const AssistantMessage: React.FC<{
 );
 
 export const PiTimeline: React.FC<PiTimelineProps> = ({
+  cwd,
   entries,
   hiddenThinkingLabel,
   liveAssistant,
@@ -422,6 +461,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   toolExecutions,
 }) => {
   const { t } = useI18n();
+  const { editor } = useRuntimeAPIs();
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const followTailRef = React.useRef(true);
   const resultByCallId = React.useMemo(() => {
@@ -539,6 +579,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
               return (
                 <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
                   <AssistantMessage
+                    cwd={cwd}
+                    editor={editor}
                     entryId={entry.id}
                     executionById={toolExecutions}
                     hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
@@ -747,6 +789,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
         {liveAssistant && (
           <article className="mr-auto w-full max-w-[52rem]" aria-live="polite">
             <AssistantMessage
+              cwd={cwd}
+              editor={editor}
               entryId={`live:${sessionId}`}
               executionById={toolExecutions}
               hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}

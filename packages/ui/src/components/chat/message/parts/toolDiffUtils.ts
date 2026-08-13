@@ -3,6 +3,7 @@ import { parsePatchFiles } from '@pierre/diffs';
 export type DiffPatchEntry = {
     id: string;
     title: string;
+    filePath?: string;
     patch: string;
     renderMode: 'diff' | 'text';
 };
@@ -143,6 +144,44 @@ export const getPatchText = (value: unknown): string | undefined => {
     }
 
     return undefined;
+};
+
+export const getApplyPatchFilePath = (file: unknown): string | null => {
+    if (!isRecord(file)) return null;
+    return typeof file.movePath === 'string'
+        ? file.movePath
+        : typeof file.moveTo === 'string'
+            ? file.moveTo
+            : typeof file.filePath === 'string'
+                ? file.filePath
+                : typeof file.path === 'string'
+                    ? file.path
+                    : typeof file.relativePath === 'string'
+                        ? file.relativePath
+                        : null;
+};
+
+export const getApplyPatchFileEntries = (details: unknown): Array<{
+    deleted: boolean;
+    filePath: string;
+    patch?: string;
+}> => {
+    if (!isRecord(details)) return [];
+    const source = Array.isArray(details.files)
+        ? details.files
+        : Array.isArray(details.changes)
+            ? details.changes
+            : [];
+    return source.flatMap((file) => {
+        if (!isRecord(file)) return [];
+        const filePath = getApplyPatchFilePath(file);
+        if (!filePath) return [];
+        return [{
+            deleted: file.type === 'delete' || file.kind === 'delete',
+            filePath,
+            patch: getPatchText(file.patch) ?? getPatchText(file.diff) ?? getPatchText(file.displayDiff),
+        }];
+    });
 };
 
 const normalizeParsedPath = (path: string | undefined): string => {
