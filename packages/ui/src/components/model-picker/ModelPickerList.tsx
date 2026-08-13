@@ -430,7 +430,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   );
 
   const allowedProviderSet = React.useMemo(() => {
-    if (!allowedProviderIds || allowedProviderIds.length === 0) return null;
+    if (!allowedProviderIds) return null;
     return new Set(allowedProviderIds);
   }, [allowedProviderIds]);
 

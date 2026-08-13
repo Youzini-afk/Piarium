@@ -74,8 +74,7 @@ export const WalkthroughBlocker = ({
     onSelectModel(providerId, modelId);
   }, [onSelectModel]);
 
-  // Offering a model the catalog already says cannot do this would just move
-  // the same refusal one click later.
+  // Name the model that was actually tried so the refusal is actionable.
   const label = modelLabel(model);
 
   const description = () => {
