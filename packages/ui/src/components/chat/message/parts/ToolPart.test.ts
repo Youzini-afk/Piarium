@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { tryParseJsonOutput } from '../toolRenderers';
 import { getStreamingThrottleText } from '../../hooks/useStreamingTextThrottle';
-import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
+import { getStreamingOutputAppend, getToolOutput, renderTerminalOutput } from './toolOutput';
 
 describe('getToolOutput', () => {
     test('prefers authoritative state output', () => {
@@ -18,6 +18,23 @@ describe('getToolOutput', () => {
 
     test('does not expose metadata output for other tools', () => {
         expect(getToolOutput('read', undefined, 'metadata output')).toBe(undefined);
+    });
+});
+
+describe('renderTerminalOutput', () => {
+    test('renders final progress and removes ANSI styling', () => {
+        expect(renderTerminalOutput('Downloading 10%\r\u001B[2K\u001B[32mDownloading 90%\u001B[0m')).toBe('Downloading 90%');
+    });
+
+    test('applies cursor movement and line erasure', () => {
+        expect(renderTerminalOutput('First\nWorking\u001B[1A\r\u001B[2KDone\n')).toBe('Done\nWorking');
+        expect(renderTerminalOutput('Hello World\u001B[6G\u001B[1K')).toBe('      World');
+    });
+
+    test('does not let terminal cursor coordinates allocate unbounded output', () => {
+        const output = renderTerminalOutput('\u001B[999999999;999999999Hdone');
+        expect(output.endsWith('done')).toBe(true);
+        expect(output.length).toBeLessThanOrEqual(100_004);
     });
 });
 

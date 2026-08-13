@@ -116,6 +116,8 @@ export function classifyMention(
     classifier: MentionClassifier,
 ): MentionKind | null {
     if (!name) return null;
+    // HTML fragments are prompt text, never agent or local-file references.
+    if (name.includes('<') || name.includes('>')) return null;
     if (classifier.knownAgentNames.has(name.toLowerCase())) return 'agent';
     if (looksLikeFilePath(name, classifier.confirmedMentions)) return 'file';
     return null;

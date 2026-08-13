@@ -296,3 +296,20 @@ an integration smoke test without exposing credentials.
 
 Acceptance: install on a clean Windows user profile, run the Phase 5–6 smoke journey, restart with
 active history intact, upgrade in place, and uninstall without deleting user projects or sessions.
+
+## Phase 8 — OpenChamber upstream capability absorption (active)
+
+The reviewed fork/upstream reconciliation and capability-by-capability disposition live in
+[openchamber-upstream-20260813.md](openchamber-upstream-20260813.md). The merge is used as an audit
+source rather than copied over the Pi-native engine.
+
+- In progress: directly portable Markdown, terminal-output, and layout fixes.
+- Next: retained relay integrity and mobile reconnect behavior.
+- Planned as Pi-native features: Work Status, guided code walkthroughs, and Markdown loop discovery
+  for the existing scheduler.
+- OpenCode session sync, provider routes, MCP ownership, and lifecycle code remain excluded; only a
+  reproducible underlying invariant may be reimplemented at its Pi owner.
+
+Acceptance: every adopted capability names its authoritative owner, preserves fork behavior where
+it is still required, and has no production dependency on OpenCode or a duplicate compatibility
+implementation.

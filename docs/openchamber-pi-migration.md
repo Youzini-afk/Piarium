@@ -5,8 +5,12 @@
 Piarium adopts the maintainer's OpenChamber fork, not a pristine upstream checkout:
 
 - repository: `https://github.com/Youzini-afk/openchamber`;
-- reviewed clean source commit: `f551150e57de87858383dd62f45462189adf4125`;
-- that commit includes the maintainer's custom history and the reviewed upstream merge;
+- original reviewed fork baseline: `f551150e57de87858383dd62f45462189adf4125`;
+- reviewed upstream tip: `dea3826f8759e503465a9a9ac5614f4d54caa1b0`;
+- reviewed fork/upstream reconciliation: `24379cc84b2818a61f62301fa83c82a24d17986a`
+  on `sync/upstream-20260813`;
+- the reconciliation is an audit source, not a replacement engine: Piarium adopts its behavior through
+  the capability ledger below and does not restore OpenCode contracts;
 - copied OpenChamber material remains subject to its MIT license and copyright notice.
 
 Every OpenChamber source worktree is read-only for this project. Imports are produced from the
@@ -29,6 +33,11 @@ The following fork capabilities are product requirements, not incidental patches
 An upstream or Pi implementation may replace a fork implementation only after focused review shows
 equivalent user behavior, persistence, security boundaries, platform support, and tests. Partial
 equivalence is supplemented; a materially divergent implementation is not adopted.
+
+The current upstream review and per-capability disposition are recorded in
+[openchamber-upstream-20260813.md](openchamber-upstream-20260813.md). This keeps the Git conflict
+resolution, the product decision, and the Pi-native implementation as three separately reviewable
+steps.
 
 ## Direct Pi-native refactor
 

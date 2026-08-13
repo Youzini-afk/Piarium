@@ -10,6 +10,7 @@ import type {
 } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
+import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -591,7 +592,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                     <code className="min-w-0 flex-1 break-all">{message.command}</code>
                     {message.cancelled ? <span>cancelled</span> : message.exitCode !== undefined ? <span>exit {message.exitCode}</span> : null}
                   </div>
-                  <pre className="overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 font-mono typography-meta text-foreground">{message.output}</pre>
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words px-3 py-2 font-mono typography-meta text-foreground">{renderTerminalOutput(message.output)}</pre>
                   {message.truncated && (
                     <p className="border-t border-border/60 px-3 py-1.5 typography-micro text-[var(--status-warning)]">
                       Output was truncated by Pi; the complete output path is shown below when available.
