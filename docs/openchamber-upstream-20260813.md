@@ -35,7 +35,7 @@ it through the native Pi protocol, runtime broker, extension contracts, and prod
 | Raw HTML in assistant Markdown stays inert | `3de9be9f` | Adopted directly. Raw HTML is visible text; `script` and `style` are forbidden again at the sanitization boundary. Composer HTML fragments are not treated as file mentions. |
 | Final shell output reflects terminal control sequences | `91d2a546`, `1c27155b` | Adopted in the Pi-native timeline. ANSI styling, carriage-return progress, cursor movement, and line erasure are normalized only for persisted/final output. Synthetic cursor expansion has a dedicated allocation budget; real output remains Pi-owned and is not truncated here. |
 | Code line numbers never wrap | `a7db4015` | Adopted directly in shared Markdown CSS. |
-| Work Status panel | `f2523d0c`, `222057ab`, `630ac299`, `d7231b6d`, `ee9c9d6f` | Pi-native implementation required. Reuse the interaction design, but source state from `SessionSnapshot`, `SessionStats`, `PiSessionFeatureState`, package/extension state, Fleet, MCP status, and Pi provider data. Do not restore OpenCode todo, goal, MCP, or quota stores. |
+| Work Status panel | `f2523d0c`, `222057ab`, `630ac299`, `d7231b6d`, `ee9c9d6f` | Adopted as a Pi-native wide-chat panel. It projects `SessionSnapshot`, `SessionStats`, `PiSessionFeatureState`, current tool executions, Fleet RPC, MCP public status, and pinned branch entries. It does not restore OpenCode todo, goal, MCP, or quota stores. |
 | Guided diff/branch/PR walkthrough | `2ea828b8` and follow-up fixes | Pi-native implementation required. Reuse the presentation and review flow after replacing OpenCode model/session calls with Pi model selection and a Pi session/tool contract. Git diff ownership stays with Piarium's Git API. |
 | Markdown loops in `.agents/loops` | `0ba330c7`, `8a367382`, `bac56fc7`, `ffef080b` | Reimplement in the Pi-native scheduler. Markdown files should be authoritative and synchronize into the existing Pi scheduled-task execution path; no OpenCode agent or permission fields are imported. |
 | Relay request-body integrity | `854a0db9`, `aaf397e6`, `d634cd23` | Adopted at Piarium's retained relay boundary. Empty body sources emit an explicit frame, ordinary control bodies are forwarded only after completion, missing frames abort as an ambiguous transport failure, and stalled buffers are released. Large uploads retain streaming behavior. |
@@ -72,3 +72,9 @@ background without overriding a manual connection.
 
 Implement Work Status, walkthroughs, and Markdown loops as separate recovery points. Each phase must
 name its authoritative Pi data source and remove any temporary duplicate owner before completion.
+
+Work Status is complete for the main chat surface. It appears only when the chat container retains
+enough width for both the conversation and a 288px panel; mobile, VS Code, Mini Chat, and embedded
+agent-manager conversations do not mount it. Session statistics refresh from the existing Pi stats
+method, Fleet uses the existing read-only RPC, MCP uses `pi-mcp-adapter/status/v1`, and pinned rows
+resolve only from the already loaded branch rather than introducing another message owner.

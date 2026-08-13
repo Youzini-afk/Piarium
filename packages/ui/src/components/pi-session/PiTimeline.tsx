@@ -485,7 +485,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             if (message.role === 'user') {
               const pinned = pinnedEntryIds.has(entry.id);
               return (
-                <article key={entry.id} className="group/message ml-auto max-w-[min(85%,48rem)]" style={{ contentVisibility: 'auto' }}>
+                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message ml-auto max-w-[min(85%,48rem)]" style={{ contentVisibility: 'auto' }}>
                   <div className="rounded-2xl rounded-br-md bg-primary/10 px-4 py-3 text-foreground">
                     <PiUserContentView content={message.content} messageId={entry.id} />
                   </div>
@@ -537,7 +537,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             if (message.role === 'assistant') {
               const pinned = pinnedEntryIds.has(entry.id);
               return (
-                <article key={entry.id} className="group/message mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
+                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
                   <AssistantMessage
                     entryId={entry.id}
                     executionById={toolExecutions}

@@ -48,6 +48,7 @@ import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
 import { PiModelSelectorDialog } from './PiModelSelectorDialog';
 import { PiTimeline } from './PiTimeline';
+import { PiWorkStatusPanel } from './PiWorkStatusPanel';
 import { piSessionTitle } from './sessionPresentation';
 import { renderPiComposerSubmission } from './piComposerSubmission';
 
@@ -56,6 +57,7 @@ interface PiChatViewProps {
   autoOpenDraft?: boolean;
   readOnly?: boolean;
   showHeader?: boolean;
+  showWorkStatus?: boolean;
 }
 
 const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
@@ -78,6 +80,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   autoOpenDraft = true,
   readOnly = false,
   showHeader = true,
+  showWorkStatus = false,
 }) => {
   const { t } = useI18n();
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
@@ -449,8 +452,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     : snapshot.name?.trim() || untitled);
   return (
     <TooltipProvider>
-      <div className={cn('flex h-full min-h-0 flex-col bg-background', !active && 'pointer-events-none')}>
-        {showHeader ? <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2 sm:px-6">
+      <div className={cn('@container flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {showHeader ? <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2 sm:px-6">
           <div className="min-w-0 flex-1">
             <h2 className="truncate typography-ui-label font-medium text-foreground">{title}</h2>
             <p className="truncate typography-micro text-muted-foreground">{snapshot.cwd}</p>
@@ -530,7 +534,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             onSend={handleSend}
           />
         )}
-        <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />
+          <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />
+        </div>
+        {showWorkStatus ? <PiWorkStatusPanel sessionId={currentSessionId} /> : null}
       </div>
 
       <PiModelSelectorDialog />

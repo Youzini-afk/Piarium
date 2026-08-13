@@ -3054,6 +3054,17 @@ export const dict = {
   'contextPanel.recovery.toast.cancelled': '{provider} a annulé la récupération',
   'contextPanel.recovery.toast.delegated': 'La récupération a été déléguée à {provider} ; l’extension indiquera le résultat final',
   'contextPanel.recovery.destructive.description': 'La réparation destructive réécrit l’historique de session Pi. Elle est irréversible et n’annule ni les fichiers ni les effets externes.',
+  'chat.workStatus.title': 'État du travail',
+  'chat.workStatus.section.session': 'Session',
+  'chat.workStatus.section.activity': 'Activité',
+  'chat.workStatus.section.pinned': 'Contexte épinglé',
+  'chat.workStatus.toolCalls': 'Appels d’outils',
+  'chat.workStatus.tokens': 'Jetons',
+  'chat.workStatus.queue': 'File d’attente',
+  'chat.workStatus.state.working': 'En cours',
+  'chat.workStatus.state.compacting': 'Compactage',
+  'chat.workStatus.state.retrying': 'Nouvelle tentative',
+  'chat.workStatus.state.idle': 'Inactif',
 } as const;
 
 export type I18nKey = keyof typeof dict;
