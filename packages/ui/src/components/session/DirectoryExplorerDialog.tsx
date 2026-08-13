@@ -39,6 +39,7 @@ import {
   isFilesystemError,
   type FilesystemErrorReason,
 } from '@/lib/api/files-errors';
+import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 interface DirectoryExplorerDialogProps {
   open: boolean;
@@ -428,8 +429,15 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
         description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
       });
+      return;
     }
-  }, [addProject, addedProjectPaths, t]);
+    handleClose();
+    void startPiSessionDraftFromNavigation({ projectId: added.id }).catch((error) => {
+      toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, [addProject, addedProjectPaths, handleClose, t]);
 
   const finalizeSelection = React.useCallback(async (target: string) => {
     if (!target || isConfirming) return;
@@ -469,6 +477,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         return;
       }
       handleClose();
+      await startPiSessionDraftFromNavigation({ projectId: added.id });
     } catch (error) {
       toast.error(t('directoryExplorerDialog.toast.failedToSelectDirectory'), {
         description: error instanceof Error ? error.message : t('directoryExplorerDialog.toast.unknownError'),
