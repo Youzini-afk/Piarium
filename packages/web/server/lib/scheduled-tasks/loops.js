@@ -280,7 +280,10 @@ export const discoverLoopFiles = async (
   const files = [];
   if (projectPath) {
     const projectDirectory = await fsPromises.realpath(projectPath).catch(() => path.resolve(projectPath));
-    const worktreeRoot = await resolveWorktreeRoot(projectDirectory).catch(() => projectDirectory);
+    const discoveredWorktreeRoot = await resolveWorktreeRoot(projectDirectory).catch(() => projectDirectory);
+    const worktreeRootCandidate = discoveredWorktreeRoot || projectDirectory;
+    const worktreeRoot = await fsPromises.realpath(worktreeRootCandidate)
+      .catch(() => path.resolve(worktreeRootCandidate));
     for (const ancestor of ancestorDirectories(projectDirectory, worktreeRoot || projectDirectory, path)) {
       for (const filePath of await walkLoopFiles(path.join(ancestor, '.agents', LOOP_DIRECTORY), { fsPromises, path })) {
         files.push({ filePath, scope: 'project' });

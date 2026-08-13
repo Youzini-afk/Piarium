@@ -320,14 +320,24 @@ describe('terminal runtime', () => {
       const created = createResponse();
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-shell', cwd: '/repo', shell: 'zsh', loginShell: true } }, created);
       expect(created.statusCode).toBe(200);
-      expect(harness.processes[0].shell).toBe('/bin/zsh');
-      expect(harness.processes[0].args).toEqual(['-l']);
+      if (process.platform === 'linux') {
+        expect(harness.processes[0].shell).toMatch(/\/env$/);
+        expect(harness.processes[0].args).toEqual(['-u', 'ARGV0', '/bin/zsh', '-l']);
+      } else {
+        expect(harness.processes[0].shell).toBe('/bin/zsh');
+        expect(harness.processes[0].args).toEqual(['-l']);
+      }
 
       const restarted = createResponse();
       await harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'term-shell' }, body: { shell: 'bash', loginShell: true } }, restarted);
       expect(restarted.statusCode).toBe(200);
-      expect(harness.processes[1].shell).toBe('/bin/bash');
-      expect(harness.processes[1].args).toEqual(['-l']);
+      if (process.platform === 'linux') {
+        expect(harness.processes[1].shell).toMatch(/\/env$/);
+        expect(harness.processes[1].args).toEqual(['-u', 'ARGV0', '/bin/bash', '-l']);
+      } else {
+        expect(harness.processes[1].shell).toBe('/bin/bash');
+        expect(harness.processes[1].args).toEqual(['-l']);
+      }
     } finally { await harness.runtime.shutdown(); }
   });
 

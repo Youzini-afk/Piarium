@@ -13,6 +13,7 @@ describe('walkthrough routes', () => {
   let base;
   let releaseJob;
   let job;
+  let generationRequestWaiters;
 
   let lastArgs;
 
@@ -23,10 +24,12 @@ describe('walkthrough routes', () => {
     },
     async generateWalkthrough(args) {
       lastArgs = args;
-      if (job) return job;
-      job = new Promise((resolve) => {
-        releaseJob = () => resolve({ walkthrough: { title: 'DONE' }, hunks: [], hunkCount: 1 });
-      }).finally(() => { job = null; });
+      if (!job) {
+        job = new Promise((resolve) => {
+          releaseJob = () => resolve({ walkthrough: { title: 'DONE' }, hunks: [], hunkCount: 1 });
+        }).finally(() => { job = null; });
+      }
+      generationRequestWaiters.shift()?.();
       return job;
     },
     async cancelWalkthroughGeneration() {
@@ -40,10 +43,14 @@ describe('walkthrough routes', () => {
     body: JSON.stringify({ directory: '/repo', source: SOURCE }),
     signal,
   });
+  const waitForGenerationRequest = () => new Promise((resolve) => {
+    generationRequestWaiters.push(resolve);
+  });
 
   beforeEach(async () => {
     job = null;
     releaseJob = undefined;
+    generationRequestWaiters = [];
     lastArgs = undefined;
     const app = express();
     app.use(express.json());
@@ -54,12 +61,14 @@ describe('walkthrough routes', () => {
   });
 
   afterEach(async () => {
+    releaseJob?.();
     await new Promise((resolve) => server.close(resolve));
   });
 
   it('answers a generation request that nobody interrupted', async () => {
+    const requested = waitForGenerationRequest();
     const pending = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await requested;
     releaseJob();
 
     const body = await (await pending).json();
@@ -69,10 +78,10 @@ describe('walkthrough routes', () => {
 
   it('delivers the result to a client that reconnected after a refresh', async () => {
     const controller = new AbortController();
+    const initiallyRequested = waitForGenerationRequest();
     generate(controller.signal).catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await initiallyRequested;
     controller.abort();
-    await new Promise((resolve) => setTimeout(resolve, 20));
 
     // The reloaded page sees work in progress and re-attaches to it.
     const read = await (await fetch(
@@ -80,8 +89,9 @@ describe('walkthrough routes', () => {
     )).json();
     expect(read.generating).toBe(true);
 
+    const reattachRequested = waitForGenerationRequest();
     const reattached = generate();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await reattachRequested;
     releaseJob();
 
     const body = await (await reattached).json();
@@ -108,12 +118,13 @@ describe('walkthrough routes', () => {
     );
     expect(lastArgs.language).toBe('uk');
 
+    const requested = waitForGenerationRequest();
     const pending = fetch(`${base}/api/walkthrough/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory: '/repo', source: SOURCE, language: 'ja' }),
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await requested;
     releaseJob();
     await pending;
 
@@ -129,8 +140,9 @@ describe('walkthrough routes', () => {
   });
 
   it('cancels through its own endpoint rather than a dropped connection', async () => {
+    const requested = waitForGenerationRequest();
     generate().catch(() => {});
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await requested;
 
     const response = await fetch(`${base}/api/walkthrough/cancel`, {
       method: 'POST',
