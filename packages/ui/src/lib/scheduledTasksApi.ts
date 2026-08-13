@@ -7,6 +7,11 @@ export type ScheduledTask = {
   id: string;
   name: string;
   enabled: boolean;
+  loopFile?: string;
+  loopScope?: 'project' | 'user';
+  loopRevision?: string;
+  loopError?: string;
+  loopShadowed?: boolean;
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
     times?: string[];
@@ -21,7 +26,9 @@ export type ScheduledTask = {
     providerID: string;
     modelID: string;
     thinkingLevel?: ThinkingLevel;
+    agent?: string;
     runAsGoal?: boolean;
+    goalTokenBudget?: number;
   };
   state: {
     createdAt: number;
@@ -33,6 +40,13 @@ export type ScheduledTask = {
     lastSessionId?: string;
     nextRunAt?: number;
   };
+};
+
+export type ScheduledTaskLoopDocument = {
+  content: string;
+  path: string;
+  revision: string;
+  scope: 'project' | 'user';
 };
 
 const parseErrorMessage = async (response: Response, fallback: string) => {
@@ -105,6 +119,70 @@ export const deleteScheduledTask = async (projectID: string, taskID: string): Pr
     return [];
   }
   return parsed.tasks as ScheduledTask[];
+};
+
+const loopFileEndpoint = (projectID: string, taskID: string): string => {
+  const safeProjectID = ensureProjectID(projectID);
+  const safeTaskID = ensureProjectID(taskID);
+  return `/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/loop-file`;
+};
+
+export const fetchScheduledTaskLoopDocument = async (
+  projectID: string,
+  taskID: string,
+): Promise<ScheduledTaskLoopDocument> => {
+  const response = await runtimeFetch(loopFileEndpoint(projectID, taskID));
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Failed to load loop file'));
+  const parsed = await response.json().catch(() => null);
+  if (!parsed?.document || typeof parsed.document.content !== 'string' || typeof parsed.document.revision !== 'string') {
+    throw new Error('Loop file response is invalid');
+  }
+  return parsed.document as ScheduledTaskLoopDocument;
+};
+
+export const updateScheduledTaskLoopDocument = async (
+  projectID: string,
+  taskID: string,
+  document: Pick<ScheduledTaskLoopDocument, 'content' | 'revision'>,
+): Promise<ScheduledTaskLoopDocument> => {
+  const response = await runtimeFetch(loopFileEndpoint(projectID, taskID), {
+    method: 'PUT',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ content: document.content, expectedRevision: document.revision }),
+  });
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Failed to save loop file'));
+  const parsed = await response.json().catch(() => null);
+  if (!parsed?.document || typeof parsed.document.content !== 'string' || typeof parsed.document.revision !== 'string') {
+    throw new Error('Loop file response is invalid');
+  }
+  return parsed.document as ScheduledTaskLoopDocument;
+};
+
+export const setScheduledTaskLoopEnabled = async (
+  projectID: string,
+  taskID: string,
+  enabled: boolean,
+  expectedRevision?: string,
+): Promise<void> => {
+  const response = await runtimeFetch(loopFileEndpoint(projectID, taskID), {
+    method: 'PATCH',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled, expectedRevision }),
+  });
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Failed to update loop file'));
+};
+
+export const deleteScheduledTaskLoopFile = async (
+  projectID: string,
+  taskID: string,
+  expectedRevision?: string,
+): Promise<void> => {
+  const response = await runtimeFetch(loopFileEndpoint(projectID, taskID), {
+    method: 'DELETE',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ expectedRevision }),
+  });
+  if (!response.ok) throw new Error(await parseErrorMessage(response, 'Failed to delete loop file'));
 };
 
 export const runScheduledTaskNow = async (projectID: string, taskID: string): Promise<{ sessionId?: string }> => {

@@ -1,4 +1,12 @@
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import {
+  LoopRevisionConflictError,
+  parseLoopContent,
+  readLoopFile,
+  setLoopFileEnabled,
+  writeLoopFile,
+} from './loops.js';
 
 class ScheduledTaskError extends Error {
   constructor(message, statusCode = 500, details = {}) {
@@ -57,13 +65,115 @@ export const createScheduledTaskService = (dependencies) => {
 
   const list = async (projectID) => {
     await findProjectByID(projectID);
-    return projectConfigRuntime.listScheduledTasks(projectID);
+    return scheduledTasksRuntime.syncProject(projectID);
+  };
+
+  const findLoopTask = async (projectID, taskID) => {
+    await findProjectByID(projectID);
+    const normalizedTaskID = asNonEmptyString(taskID);
+    if (!normalizedTaskID) throw new ScheduledTaskError('taskId is required', 400);
+    await scheduledTasksRuntime.syncProject(projectID);
+    const tasks = await projectConfigRuntime.listScheduledTasks(projectID);
+    const task = tasks.find((entry) => entry.id === normalizedTaskID);
+    if (!task) throw new ScheduledTaskError('Task not found', 404);
+    if (!task.loopFile) throw new ScheduledTaskError('Task is not managed by a loop file', 400);
+    return task;
+  };
+
+  const readLoopDocument = async (projectID, taskID) => {
+    const task = await findLoopTask(projectID, taskID);
+    try {
+      const document = await readLoopFile(task.loopFile);
+      return {
+        ...document,
+        path: task.loopFile,
+        scope: task.loopScope || 'project',
+      };
+    } catch (error) {
+      if (error?.code === 'ENOENT') throw new ScheduledTaskError('Loop file not found', 404);
+      throw new ScheduledTaskError(error instanceof Error ? error.message : 'Failed to read loop file', 500);
+    }
+  };
+
+  const updateLoopDocument = async (projectID, taskID, { content, expectedRevision } = {}) => {
+    if (typeof content !== 'string') throw new ScheduledTaskError('content is required', 400);
+    const revision = asNonEmptyString(expectedRevision);
+    if (!revision) throw new ScheduledTaskError('expectedRevision is required', 400);
+    const parsed = parseLoopContent(content);
+    if (!parsed.definition) throw new ScheduledTaskError(parsed.error || 'Loop file is invalid', 400);
+    const task = await findLoopTask(projectID, taskID);
+    try {
+      await writeLoopFile(task.loopFile, content, { expectedRevision: revision });
+    } catch (error) {
+      if (error instanceof LoopRevisionConflictError) throw new ScheduledTaskError(error.message, 409);
+      if (error?.code === 'ENOENT') throw new ScheduledTaskError('Loop file not found', 404);
+      throw new ScheduledTaskError(error instanceof Error ? error.message : 'Failed to write loop file', 500);
+    }
+    const tasks = await scheduledTasksRuntime.syncProject(projectID);
+    return {
+      document: {
+        ...await readLoopFile(task.loopFile),
+        path: task.loopFile,
+        scope: task.loopScope || 'project',
+      },
+      task: tasks.find((entry) => entry.id === taskID) || null,
+    };
+  };
+
+  const setLoopEnabled = async (projectID, taskID, enabled, expectedRevision) => {
+    if (typeof enabled !== 'boolean') throw new ScheduledTaskError('enabled must be a boolean', 400);
+    const task = await findLoopTask(projectID, taskID);
+    try {
+      await setLoopFileEnabled(task.loopFile, enabled, {
+        expectedRevision: asNonEmptyString(expectedRevision) || task.loopRevision,
+      });
+    } catch (error) {
+      if (error instanceof LoopRevisionConflictError) throw new ScheduledTaskError(error.message, 409);
+      if (error?.code === 'ENOENT') throw new ScheduledTaskError('Loop file not found', 404);
+      const message = error instanceof Error ? error.message : 'Failed to update loop file';
+      throw new ScheduledTaskError(message, message.toLowerCase().includes('frontmatter') || message.toLowerCase().includes('invalid') ? 400 : 500);
+    }
+    const tasks = await scheduledTasksRuntime.syncProject(projectID);
+    return tasks.find((entry) => entry.id === taskID) || null;
+  };
+
+  const removeLoopFile = async (projectID, taskID, expectedRevision) => {
+    const task = await findLoopTask(projectID, taskID);
+    const revision = asNonEmptyString(expectedRevision) || task.loopRevision;
+    try {
+      const current = await readLoopFile(task.loopFile);
+      if (revision && current.revision !== revision) {
+        throw new LoopRevisionConflictError();
+      }
+      await fsPromises.unlink(task.loopFile);
+    } catch (error) {
+      if (error instanceof LoopRevisionConflictError) throw new ScheduledTaskError(error.message, 409);
+      if (error?.code === 'ENOENT') throw new ScheduledTaskError('Loop file not found', 404);
+      throw new ScheduledTaskError(error instanceof Error ? error.message : 'Failed to delete loop file', 500);
+    }
+    return scheduledTasksRuntime.syncProject(projectID);
   };
 
   const upsert = async (projectID, taskInput) => {
     await findProjectByID(projectID);
     if (!taskInput || typeof taskInput !== 'object') {
       throw new ScheduledTaskError('task payload is required', 400);
+    }
+    if (
+      taskInput.loopFile !== undefined
+      || taskInput.loopScope !== undefined
+      || taskInput.loopRevision !== undefined
+      || taskInput.loopError !== undefined
+      || taskInput.loopShadowed !== undefined
+    ) {
+      throw new ScheduledTaskError('Loop metadata is managed by Piarium', 400);
+    }
+    const incomingID = asNonEmptyString(taskInput.id);
+    if (incomingID) {
+      const current = await projectConfigRuntime.listScheduledTasks(projectID);
+      if (current.some((task) => task.id === incomingID && task.loopFile)) {
+        throw new ScheduledTaskError('Loop tasks must be edited through their Markdown file', 400);
+      }
     }
     let upserted;
     try {
@@ -86,6 +196,17 @@ export const createScheduledTaskService = (dependencies) => {
     await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new ScheduledTaskError('taskId is required', 400);
+    const current = await projectConfigRuntime.listScheduledTasks(projectID);
+    const existing = current.find((task) => task.id === normalizedTaskID);
+    if (existing?.loopFile) {
+      try {
+        await fsPromises.access(existing.loopFile);
+        throw new ScheduledTaskError('Loop tasks must be deleted through their Markdown file', 400);
+      } catch (error) {
+        if (error instanceof ScheduledTaskError) throw error;
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
     const result = await projectConfigRuntime.deleteScheduledTask(projectID, normalizedTaskID);
     if (!result.deleted) throw new ScheduledTaskError('Task not found', 404);
     await scheduledTasksRuntime.syncProject(projectID);
@@ -111,6 +232,9 @@ export const createScheduledTaskService = (dependencies) => {
     const tasks = await list(projectID);
     const task = tasks.find((entry) => entry?.id === taskID);
     if (!task) throw new ScheduledTaskError('Task not found', 404);
+    if (task.loopFile) {
+      return setLoopEnabled(projectID, taskID, enabled, task.loopRevision);
+    }
     const result = await upsert(projectID, { ...task, enabled });
     return result.task;
   };
@@ -148,6 +272,10 @@ export const createScheduledTaskService = (dependencies) => {
     remove,
     run,
     setEnabled,
+    readLoopDocument,
+    updateLoopDocument,
+    setLoopEnabled,
+    removeLoopFile,
     status,
   };
 };

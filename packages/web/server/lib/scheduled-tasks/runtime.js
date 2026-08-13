@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
+import { discoverLoops } from './loops.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -288,7 +289,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
   const syncTaskSchedule = async (projectID, task) => {
     if (!task) {
-      return;
+      return task;
     }
     const nextRunAt = computeNextRunAt(task, Date.now());
     const statePatch = {
@@ -301,7 +302,9 @@ export const createScheduledTasksRuntime = (deps) => {
       if (result.task.enabled && Number.isFinite(result.task.state?.nextRunAt)) {
         scheduleTask(projectID, result.task.id, result.task.state.nextRunAt);
       }
+      return result.task;
     }
+    return task;
   };
 
   const ensureProjectPath = async (projectID) => {
@@ -323,16 +326,28 @@ export const createScheduledTasksRuntime = (deps) => {
   };
 
   const syncProject = async (projectID) => {
-    await ensureProjectPath(projectID);
+    const projectPath = await ensureProjectPath(projectID);
 
-    const tasks = await projectConfigRuntime.listScheduledTasks(projectID);
-    setProjectTasks(projectID, tasks);
+    let tasks = await projectConfigRuntime.listScheduledTasks(projectID);
+    if (projectPath && typeof projectConfigRuntime.reconcileLoopTasks === 'function') {
+      try {
+        tasks = await projectConfigRuntime.reconcileLoopTasks(projectID, await discoverLoops(projectPath, { logger }));
+      } catch (error) {
+        // A discovery failure must not make existing scheduled tasks disappear
+        // or prevent the task list from opening. Keep the last persisted state
+        // and retry on the next sync.
+        logger.warn?.('[ScheduledTasks] failed to reconcile Markdown loops:', error);
+      }
+    }
+    const activeTasks = tasks.filter((task) => task.loopShadowed !== true);
+    setProjectTasks(projectID, activeTasks);
 
-    for (const task of tasks) {
-      await syncTaskSchedule(projectID, task);
+    for (const task of activeTasks) {
+      const nextTask = await syncTaskSchedule(projectID, task);
+      if (nextTask) updateInMemoryTask(projectID, nextTask);
     }
 
-    return tasks;
+    return Array.from(tasksByProject.get(projectID)?.values() || []);
   };
 
   const syncAllProjects = async () => {

@@ -51,6 +51,24 @@ describe('project-config runtime', () => {
     }
   });
 
+  it('preserves long task definitions without silent truncation', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const name = 'n'.repeat(500);
+      const prompt = 'p'.repeat(25_000);
+      const result = await runtime.upsertScheduledTask('project-test', {
+        name,
+        enabled: true,
+        schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
+        execution: { prompt, providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+      expect(result.task.name).toBe(name);
+      expect(result.task.execution.prompt).toBe(prompt);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('rejects invalid cron expressions', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
@@ -168,6 +186,114 @@ describe('project-config runtime', () => {
       expect(result.task.schedule.date).toBe('2026-04-20');
       expect(result.task.schedule.time).toBe('13:45');
       expect(result.task.schedule.timezone).toBe('Europe/Kyiv');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps JSON tasks separate and reconciles loops by file identity', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await runtime.upsertScheduledTask('project-test', {
+        name: 'digest',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
+        execution: { prompt: 'json prompt', providerID: 'openai', modelID: 'gpt-4.1' },
+      });
+      const loops = [{
+        definition: {
+          name: 'digest',
+          enabled: true,
+          schedule: { kind: 'cron', cron: '0 10 * * *', timezone: 'UTC' },
+          execution: { prompt: 'loop prompt', providerID: 'openai', modelID: 'gpt-4.1' },
+        },
+        filePath: '/repo/.agents/loops/digest.md',
+        revision: 'rev-1',
+        scope: 'project',
+      }];
+      const first = await runtime.reconcileLoopTasks('project-test', loops);
+      expect(first).toHaveLength(2);
+      expect(first.find((task) => !task.loopFile)?.execution.prompt).toBe('json prompt');
+      const loopTask = first.find((task) => task.loopFile);
+      expect(loopTask.execution.prompt).toBe('loop prompt');
+
+      const renamed = await runtime.reconcileLoopTasks('project-test', [{
+        ...loops[0],
+        definition: { ...loops[0].definition, name: 'renamed' },
+        revision: 'rev-2',
+      }]);
+      expect(renamed).toHaveLength(2);
+      expect(renamed.find((task) => task.loopFile)?.id).toBe(loopTask.id);
+      expect(renamed.find((task) => task.loopFile)?.name).toBe('renamed');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the last good loop projection while its file is malformed', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const valid = [{
+        definition: {
+          name: 'digest',
+          enabled: true,
+          schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
+          execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+        },
+        filePath: '/repo/.agents/loops/digest.md',
+        revision: 'rev-1',
+        scope: 'project',
+      }];
+      const first = await runtime.reconcileLoopTasks('project-test', valid);
+      const malformed = await runtime.reconcileLoopTasks('project-test', [{
+        definition: null,
+        error: 'Invalid YAML',
+        filePath: valid[0].filePath,
+        name: 'digest',
+        revision: 'rev-bad',
+        scope: 'project',
+      }]);
+      expect(malformed).toHaveLength(1);
+      expect(malformed[0].id).toBe(first[0].id);
+      expect(malformed[0].enabled).toBe(true);
+      expect(malformed[0].loopError).toBe('Invalid YAML');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('disables a lower loop when a higher-precedence file with the same name appears', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const definition = {
+        name: 'digest',
+        enabled: true,
+        schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
+        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+      };
+      await runtime.reconcileLoopTasks('project-test', [{
+        definition,
+        filePath: '/home/user/.agents/loops/digest.md',
+        revision: 'user-rev',
+        scope: 'user',
+      }]);
+      const tasks = await runtime.reconcileLoopTasks('project-test', [
+        {
+          definition,
+          filePath: '/repo/.agents/loops/digest.md',
+          revision: 'project-rev',
+          scope: 'project',
+        },
+        {
+          definition,
+          filePath: '/home/user/.agents/loops/digest.md',
+          revision: 'user-rev',
+          scope: 'user',
+        },
+      ]);
+      expect(tasks).toHaveLength(2);
+      expect(tasks.find((task) => task.loopScope === 'project')).toMatchObject({ enabled: true });
+      expect(tasks.find((task) => task.loopScope === 'user')).toMatchObject({ enabled: true, loopShadowed: true });
     } finally {
       await cleanup();
     }

@@ -81,6 +81,70 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      return res.json({ document: await scheduledTaskService.readLoopDocument(projectID, taskID) });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to read loop file:', error);
+      return res.status(500).json({ error: 'Failed to read loop file' });
+    }
+  });
+
+  app.put('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      return res.json(await scheduledTaskService.updateLoopDocument(projectID, taskID, req.body));
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to write loop file:', error);
+      return res.status(500).json({ error: 'Failed to write loop file' });
+    }
+  });
+
+  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      const task = await scheduledTaskService.setLoopEnabled(
+        projectID,
+        taskID,
+        req.body?.enabled,
+        req.body?.expectedRevision,
+      );
+      return res.json({ task });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to update loop file:', error);
+      return res.status(500).json({ error: 'Failed to update loop file' });
+    }
+  });
+
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      return res.json({
+        tasks: await scheduledTaskService.removeLoopFile(projectID, taskID, req.body?.expectedRevision),
+      });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to delete loop file:', error);
+      return res.status(500).json({ error: 'Failed to delete loop file' });
+    }
+  });
+
   app.post('/api/projects/:projectId/scheduled-tasks/:taskId/run', async (req, res) => {
     const projectID = parseProjectID(req);
     const taskID = parseTaskID(req);

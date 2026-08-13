@@ -20,13 +20,16 @@ import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
 import {
   deleteScheduledTask,
+  deleteScheduledTaskLoopFile,
   fetchScheduledTasks,
   runScheduledTaskNow,
+  setScheduledTaskLoopEnabled,
   upsertScheduledTask,
   type ScheduledTask,
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
+import { ScheduledTaskLoopEditorDialog } from './ScheduledTaskLoopEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
@@ -183,6 +186,7 @@ export function ScheduledTasksDialog() {
   const [loading, setLoading] = React.useState(true);
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorTask, setEditorTask] = React.useState<ScheduledTask | null>(null);
+  const [loopEditorTask, setLoopEditorTask] = React.useState<ScheduledTask | null>(null);
   const [mutatingTaskID, setMutatingTaskID] = React.useState<string | null>(null);
 
   const selectedProject = React.useMemo(
@@ -313,10 +317,11 @@ export function ScheduledTasksDialog() {
     setMutatingTaskID(task.id);
     setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled } : item)));
     try {
-      await upsertScheduledTask(selectedProjectID, {
-        ...task,
-        enabled,
-      });
+      if (task.loopFile) {
+        await setScheduledTaskLoopEnabled(selectedProjectID, task.id, enabled, task.loopRevision);
+      } else {
+        await upsertScheduledTask(selectedProjectID, { ...task, enabled });
+      }
       await reloadTasks(selectedProjectID, { silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.updateFailed'));
@@ -330,14 +335,20 @@ export function ScheduledTasksDialog() {
     if (!selectedProjectID) {
       return;
     }
-    const confirmed = window.confirm(t('sessions.scheduledTasks.dialog.confirm.deleteTask', { taskName: task.name }));
+    const confirmed = window.confirm(task.loopFile
+      ? t('sessions.scheduledTasks.dialog.confirm.deleteLoopFile', { taskName: task.name })
+      : t('sessions.scheduledTasks.dialog.confirm.deleteTask', { taskName: task.name }));
     if (!confirmed) {
       return;
     }
 
     setMutatingTaskID(task.id);
     try {
-      await deleteScheduledTask(selectedProjectID, task.id);
+      if (task.loopFile) {
+        await deleteScheduledTaskLoopFile(selectedProjectID, task.id, task.loopRevision);
+      } else {
+        await deleteScheduledTask(selectedProjectID, task.id);
+      }
       await reloadTasks(selectedProjectID, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
     } catch (error) {
@@ -346,6 +357,15 @@ export function ScheduledTasksDialog() {
       setMutatingTaskID(null);
     }
   }, [selectedProjectID, reloadTasks, t]);
+
+  const handleEditTask = React.useCallback((task: ScheduledTask) => {
+    if (task.loopFile) {
+      setLoopEditorTask(task);
+      return;
+    }
+    setEditorTask(task);
+    setEditorOpen(true);
+  }, []);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -459,6 +479,14 @@ export function ScheduledTasksDialog() {
                   <div className="typography-micro truncate text-muted-foreground">
                     {formatSchedule(task, t)}
                   </div>
+                  {task.loopFile ? (
+                    <div className="typography-micro truncate text-muted-foreground/70" title={task.loopFile}>
+                      {task.loopScope === 'user'
+                        ? t('sessions.scheduledTasks.dialog.loopFile.user')
+                        : t('sessions.scheduledTasks.dialog.loopFile.project')}
+                      {' · '}{task.loopFile}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
@@ -515,6 +543,15 @@ export function ScheduledTasksDialog() {
                     <span className="min-w-0 break-words">{task.state.lastError}</span>
                   </div>
                 ) : null}
+                {task.loopError ? (
+                  <div
+                    className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
+                    style={toneStyle('error')}
+                  >
+                    <Icon name="error-warning" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="min-w-0 break-words">{task.loopError}</span>
+                  </div>
+                ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
                   <label
@@ -547,10 +584,7 @@ export function ScheduledTasksDialog() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        setEditorTask(task);
-                        setEditorOpen(true);
-                      }}
+                      onClick={() => handleEditTask(task)}
                       disabled={isBusy}
                       aria-label={t('sessions.scheduledTasks.dialog.actions.editAria', { taskName: task.name })}
                     >
@@ -667,6 +701,15 @@ export function ScheduledTasksDialog() {
         task={editorTask}
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}
+      />
+      <ScheduledTaskLoopEditorDialog
+        open={Boolean(loopEditorTask)}
+        projectID={selectedProjectID}
+        task={loopEditorTask}
+        onOpenChange={(next) => {
+          if (!next) setLoopEditorTask(null);
+        }}
+        onSaved={() => reloadTasks(selectedProjectID, { silent: true })}
       />
     </>
   );

@@ -1,10 +1,8 @@
+import crypto from 'node:crypto';
 import { DateTime, IANAZone } from 'luxon';
 import parser from 'cron-parser';
 
 const PROJECT_CONFIG_VERSION = 1;
-const MAX_TASK_NAME_LENGTH = 80;
-const MAX_TASK_PROMPT_LENGTH = 20_000;
-const MAX_CRON_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
 const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -192,7 +190,7 @@ const normalizeSchedule = (value, existingSchedule) => {
     return { kind, date, time, timezone };
   }
 
-  const cron = clampLength(asNonEmptyString(value.cron) || '', MAX_CRON_LENGTH);
+  const cron = asNonEmptyString(value.cron) || '';
   if (!cron) {
     throw new Error('schedule.cron is required for cron schedule');
   }
@@ -209,7 +207,7 @@ const normalizeExecution = (value) => {
     throw new Error('execution is required');
   }
 
-  const prompt = clampLength(asNonEmptyString(value.prompt) || '', MAX_TASK_PROMPT_LENGTH);
+  const prompt = asNonEmptyString(value.prompt) || '';
   const providerID = asNonEmptyString(value.providerID);
   const modelID = asNonEmptyString(value.modelID);
   const requestedThinkingLevel = asNonEmptyString(value.thinkingLevel);
@@ -222,8 +220,8 @@ const normalizeExecution = (value) => {
   if (goalTokenBudget !== undefined && !runAsGoal) {
     throw new Error('execution.goalTokenBudget requires execution.runAsGoal');
   }
-  if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget < 1000 || goalTokenBudget > 100_000_000)) {
-    throw new Error('execution.goalTokenBudget must be from 1000 to 100000000');
+  if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget <= 0)) {
+    throw new Error('execution.goalTokenBudget must be a positive integer');
   }
 
   if (!prompt) {
@@ -305,7 +303,7 @@ const normalizeTaskForStorage = (value, options) => {
   }
 
   const id = existingId || incomingId || createId();
-  const name = clampLength(asNonEmptyString(value.name) || '', MAX_TASK_NAME_LENGTH);
+  const name = asNonEmptyString(value.name) || '';
   if (!name) {
     throw new Error('task.name is required');
   }
@@ -325,6 +323,14 @@ const normalizeTaskForStorage = (value, options) => {
     updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
   };
 
+  const loopFile = asNonEmptyString(value.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
+  const loopScope = value.loopScope === 'project' || value.loopScope === 'user'
+    ? value.loopScope
+    : (existingTask?.loopScope === 'project' || existingTask?.loopScope === 'user' ? existingTask.loopScope : undefined);
+  const loopRevision = asNonEmptyString(value.loopRevision) ?? asNonEmptyString(existingTask?.loopRevision);
+  const loopError = asNonEmptyString(value.loopError);
+  const loopShadowed = value.loopShadowed === true;
+
   return {
     id,
     name,
@@ -332,6 +338,11 @@ const normalizeTaskForStorage = (value, options) => {
     schedule,
     execution,
     state,
+    ...(loopFile ? { loopFile } : {}),
+    ...(loopScope ? { loopScope } : {}),
+    ...(loopRevision ? { loopRevision } : {}),
+    ...(loopError ? { loopError } : {}),
+    ...(loopShadowed ? { loopShadowed: true } : {}),
   };
 };
 
@@ -563,11 +574,165 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
+  const reconcileLoopTasks = async (projectID, loopsInput) => {
+    return withProjectWriteLock(projectID, async () => {
+      const current = await readProjectConfigFromDisk(projectID);
+      const loops = Array.isArray(loopsInput) ? loopsInput : [];
+      const existingLoopTaskByPath = new Map(
+        current.scheduledTasks
+          .filter((task) => task.loopFile)
+          .map((task) => [task.loopFile, task]),
+      );
+      const discoveredByPath = new Map();
+      const selectedPathByName = new Map();
+
+      // Discovery is already ordered from highest to lowest precedence:
+      // nearest project ancestor, then farther project ancestors, then user.
+      // A malformed higher-precedence file still shadows a lower one by using
+      // its last-good persisted name, so an edit error cannot start two loops.
+      for (const loop of loops) {
+        const filePath = asNonEmptyString(loop?.filePath);
+        if (!filePath || discoveredByPath.has(filePath)) continue;
+        const existing = existingLoopTaskByPath.get(filePath);
+        const effectiveName = asNonEmptyString(loop?.definition?.name)
+          || asNonEmptyString(loop?.name)
+          || asNonEmptyString(existing?.name);
+        const normalized = { ...loop, filePath, effectiveName };
+        discoveredByPath.set(filePath, normalized);
+        if (effectiveName && !selectedPathByName.has(effectiveName)) {
+          selectedPathByName.set(effectiveName, filePath);
+        }
+      }
+
+      const now = Date.now();
+      const nextTasks = [];
+      const consumedPaths = new Set();
+      const existingIDs = new Set(current.scheduledTasks.map((task) => task.id));
+
+      for (const task of current.scheduledTasks) {
+        if (!task.loopFile) {
+          nextTasks.push(task);
+          continue;
+        }
+
+        const loop = discoveredByPath.get(task.loopFile);
+        if (!loop) {
+          // Only a genuinely removed file removes its runtime projection.
+          continue;
+        }
+        consumedPaths.add(task.loopFile);
+
+        const selectedName = loop.effectiveName || task.name;
+        const shadowed = Boolean(
+          selectedName
+          && selectedPathByName.get(selectedName) !== task.loopFile
+        );
+        if (!loop.definition || shadowed) {
+          nextTasks.push(normalizeTaskForStorage({
+            ...task,
+            loopError: loop.error || undefined,
+            loopFile: task.loopFile,
+            loopRevision: loop.revision || task.loopRevision,
+            loopScope: loop.scope || task.loopScope,
+            loopShadowed: shadowed,
+          }, {
+            now,
+            createId: taskIDFactory,
+            existingTask: task,
+            allowCreate: false,
+            refreshUpdatedAt: false,
+          }));
+          continue;
+        }
+
+        nextTasks.push(normalizeTaskForStorage({
+          ...task,
+          ...loop.definition,
+          execution: loop.definition.execution,
+          loopError: undefined,
+          loopFile: task.loopFile,
+          loopRevision: loop.revision,
+          loopScope: loop.scope,
+          loopShadowed: false,
+        }, {
+          now,
+          createId: taskIDFactory,
+          existingTask: task,
+          allowCreate: false,
+          refreshUpdatedAt: false,
+        }));
+      }
+
+      for (let index = 0; index < nextTasks.length; index += 1) {
+        const task = nextTasks[index];
+        if (!task.loopFile || task.loopShadowed || !task.name) continue;
+        const selectedPath = selectedPathByName.get(task.name);
+        if (!selectedPath || selectedPath === task.loopFile) continue;
+        nextTasks[index] = normalizeTaskForStorage({
+          ...task,
+          loopShadowed: true,
+        }, {
+          now,
+          createId: taskIDFactory,
+          existingTask: task,
+          allowCreate: false,
+          refreshUpdatedAt: false,
+        });
+      }
+
+      for (const loop of discoveredByPath.values()) {
+        if (consumedPaths.has(loop.filePath) || !loop.definition) continue;
+        const shadowed = selectedPathByName.get(loop.definition.name) !== loop.filePath;
+        if (shadowed) continue;
+
+        let id = `loop:${crypto.createHash('sha256').update(path.resolve(loop.filePath), 'utf8').digest('hex')}`;
+        if (existingIDs.has(id)) id = taskIDFactory();
+        existingIDs.add(id);
+        try {
+          nextTasks.push(normalizeTaskForStorage({
+            ...loop.definition,
+            id,
+            loopFile: loop.filePath,
+            loopRevision: loop.revision,
+            loopScope: loop.scope,
+          }, {
+            now,
+            createId: taskIDFactory,
+            existingTask: null,
+            allowCreate: true,
+            refreshUpdatedAt: false,
+          }));
+        } catch (error) {
+          console.warn(`[ScheduledTasks] ignored loop ${loop.filePath}:`, error?.message ?? error);
+        }
+      }
+
+      if (JSON.stringify(nextTasks) !== JSON.stringify(current.scheduledTasks)) {
+        if (nextTasks.length === 0 && current.scheduledTasks.every((task) => task.loopFile)) {
+          const raw = await readRawProjectConfigFromDisk(projectID);
+          const hasOtherState = Object.keys(raw).some((key) => key !== 'version' && key !== 'scheduledTasks');
+          if (!hasOtherState) {
+            await fsPromises.unlink(resolveProjectConfigPath(projectID)).catch((error) => {
+              if (error?.code !== 'ENOENT') throw error;
+            });
+            return nextTasks;
+          }
+        }
+        await writeProjectConfigToDisk(projectID, {
+          version: PROJECT_CONFIG_VERSION,
+          scheduledTasks: nextTasks,
+        });
+      }
+      return nextTasks;
+    });
+  };
+
   return {
     listScheduledTasks,
     upsertScheduledTask,
     deleteScheduledTask,
     updateScheduledTaskState,
+    reconcileLoopTasks,
     resolveProjectConfigPath,
   };
 };

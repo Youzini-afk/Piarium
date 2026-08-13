@@ -1,35 +1,39 @@
 ---
 title: Scheduled Tasks
-description: Run a prompt automatically on a schedule.
+description: Run a Pi prompt automatically on a schedule.
 ---
 
 # Scheduled Tasks
 
-A scheduled task runs a prompt for you on a schedule — for example, a daily "summarize yesterday's changes" or a weekly cleanup. When it runs, OpenChamber starts a new session and sends the prompt on its own. Open the scheduler from the button at the top of the session sidebar.
+A scheduled task starts a new Pi session and sends a prompt at the configured time. Open the scheduler from the session sidebar.
 
-## Create a task
+## Create a task in Piarium
 
-1. Open the scheduled tasks dialog from the session sidebar.
-2. Add a task and give it a name.
-3. Choose when it runs:
-   - **daily** — at one or more times each day
-   - **weekly** — on chosen weekdays and times
-   - **once** — a single date and time
-4. Set what it does: the prompt to send, and the provider, model, and agent to use. The prompt can be a slash command, like `/review`.
-5. Save, and make sure the task is enabled.
+Choose a project, add a task, then select a daily, weekly, one-time, or cron schedule. Choose the Pi provider, model, and thinking level, and enter the prompt or slash command. **Run now** starts the same task immediately. **Run as goal** starts a Pi session goal for work that should continue beyond one reply.
 
-You can run any task immediately with **run now** to check it does what you expect.
+## Define a loop in Markdown
 
-Check **Run as goal** to make the run pursue its prompt to completion instead of stopping after one reply — see [Session Goals](/session-goals/).
+A loop is a portable scheduled task whose definition is a Markdown file. Place it in the current project’s `.agents/loops/` directory, or in `~/.agents/loops/` for all projects:
 
-## What success looks like
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: openai-codex/gpt-5.3-codex
+thinking: high
+agent: reviewer
+timezone: Asia/Shanghai
+run_as_goal: true
+goal_token_budget: 25000
+---
+Summarize repository changes since yesterday.
+```
 
-After a run, the task shows when it last ran, whether it succeeded, and a link to the session it created. If a run fails, the error is shown there too.
+The file is the authoritative definition. Piarium’s task list edits that Markdown directly, writes the enabled toggle back to frontmatter, and deletes the file only after confirmation. If an agent or another editor changes the file while the editor is open, saving reports a revision conflict rather than overwriting it.
 
-## Keep in mind
+`name`, `schedule`, `model`, and the Markdown body are required. `model` uses `provider/model`. `enabled` defaults to `false`, so a repository cannot start unattended model runs merely because it was cloned or pulled. `thinking`, `agent`, `timezone`, `run_as_goal`, and `goal_token_budget` are optional Pi fields. Loop files use cron schedules; the GUI also supports daily, weekly, and one-time schedules.
 
-Tasks only fire while the OpenChamber server is running. If you close it, scheduled runs are paused until it's back up.
+Piarium checks the nearest project directory first, then its ancestors up to the Git worktree root, then the user directory. A higher-priority loop with the same name shadows lower definitions. If a file is temporarily invalid during editing or conflict resolution, its last valid task and runtime history remain available and the parse error is shown. Removing the file removes only its loop task; an ordinary GUI task with the same name is never taken over.
 
-## Related
-
-- [Commands & Snippets](/commands-snippets/) — reuse a slash command as the prompt
+Tasks run only while the Piarium server is running. Runtime history—last run, next run, result, duration, and created Pi session—stays in Piarium’s project state and is not written into the Markdown file.

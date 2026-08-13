@@ -1206,7 +1206,6 @@ export function ScheduledTaskEditorDialog(props: {
                       value={draft.name}
                       onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
                       placeholder={t('sessions.scheduledTasks.editor.taskName.placeholder')}
-                      maxLength={80}
                       className="w-full sm:max-w-[220px]"
                     />
                   </div>
