@@ -19,7 +19,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
-import { ensureMarkdownShikiTheme, getMarkdownSyntaxVars } from './markdown/markdownTheme';
+import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,
@@ -906,10 +906,6 @@ const useMorphdomMarkdown = ({
 }) => {
   const onContentChangeRef = React.useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
-
-  React.useEffect(() => {
-    ensureMarkdownShikiTheme();
-  }, []);
 
   const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
   const refreshMermaidViewers = React.useCallback(() => {

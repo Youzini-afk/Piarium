@@ -6,6 +6,14 @@ import { themeStoragePlugin } from './vite-theme-plugin'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+const packageNameFromModuleId = (id: string): string | null => {
+  const normalized = id.replace(/\\/g, '/')
+  const match = normalized.split('node_modules/').at(-1)
+  if (!match) return null
+  const segments = match.split('/')
+  return match.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0] || null
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -29,13 +37,20 @@ export default defineConfig({
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
         manualChunks(id) {
+          if (id.includes('vite/preload-helper')) return 'vite-preload-helper'
           if (!id.includes('node_modules')) return undefined
 
-          const match = id.split('node_modules/')[1]
-          if (!match) return undefined
+          const packageName = packageNameFromModuleId(id)
+          if (!packageName) return undefined
 
-          const segments = match.split('/')
-          const packageName = match.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0]
+          if (
+            packageName === '@shikijs/langs' ||
+            packageName === '@shikijs/themes' ||
+            packageName === '@codemirror/legacy-modes' ||
+            packageName === '@pierre/diffs'
+          ) {
+            return undefined
+          }
 
           if (packageName === 'react' || packageName === 'react-dom') return 'vendor-react'
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand'

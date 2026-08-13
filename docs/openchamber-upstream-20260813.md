@@ -40,7 +40,7 @@ it through the native Pi protocol, runtime broker, extension contracts, and prod
 | Markdown loops in `.agents/loops` | `0ba330c7`, `8a367382`, `bac56fc7`, `ffef080b` | Adopted in the Pi-native scheduler. Markdown remains authoritative and uses Pi model, thinking, agent, and goal fields. File-path identity prevents same-name GUI tasks from being hijacked; revisioned edits prevent agent/UI races; malformed higher-priority loops keep their last-good state without activating a lower duplicate. No OpenCode owner, permission, or variant field is imported. |
 | Relay request-body integrity | `854a0db9`, `aaf397e6`, `d634cd23` | Adopted at Piarium's retained relay boundary. Empty body sources emit an explicit frame, ordinary control bodies are forwarded only after completion, missing frames abort as an ambiguous transport failure, and stalled buffers are released. Large uploads retain streaming behavior. |
 | Mobile transient reconnect and device diagnostics | `dea3826f`, `f4005982` | Transient reconnect behavior adopted against Piarium's endpoint-aware mobile state. Explicit token rejection disconnects immediately; temporary reachability failures get bounded fast/full-budget retries and never replace a later manual connection. The upstream hidden diagnostics UI was not copied. |
-| Measured Vite/chunk and lazy-render improvements | `fdcf5c27` | Audit by consumer. Apply only changes still relevant to Piarium's bundle graph and measure the Piarium build; do not copy obsolete OpenCode components to reproduce upstream numbers. |
+| Measured Vite/chunk and lazy-render improvements | `fdcf5c27` | Adopted after a Piarium-specific bundle audit. Diff, Files, Git, PR, Plan, Settings, Ghostty, Markdown Shiki, diff workers, and Nerd Fonts now load at their real first consumer. The upstream package-name parser did not recognize Bun's nested `node_modules/.bun/.../node_modules` layout and still produced a 15.8 MB eager `.bun` vendor chunk; Piarium resolves the innermost package and isolates Vite's preload helper. Production entry resources fell from 16,411,160 to 838,532 raw bytes (94.9%). Obsolete OpenCode chat tool components were not restored. |
 | Provider/OAuth/custom-provider fixes | `70af851b` and follow-ups | Compare behavior with Piarium's provider protocol and current custom-provider GUI. Adopt missing validation, scope, credential, reconnect, and OAuth behavior in the Pi owner; do not copy `/api/provider` or OpenCode provider stores. |
 | OpenCode session sync, question/permission routing, MCP settings/auth | `0f52a9be`, `ee5e45ae`, `d33cf518`, `622b8bb6` | Do not copy the implementation. Audit the underlying invariants against Piarium's session worker routing, Pi extension UI requests, and `pi-mcp-adapter`. Add a Pi-native fix only where the same failure is reproducible. |
 
@@ -86,3 +86,18 @@ Generation is explicit, deduplicated per repository/source, survives a detached 
 cancelled explicitly. Results are content-addressed under the Piarium data directory and retain
 stale/uncovered hunks instead of presenting an incomplete review as complete. VS Code does not show
 the surface because that host still does not serve the Git/model HTTP routes this implementation owns.
+
+### Build graph and first-use loading
+
+Completed against Piarium's Bun workspace rather than copying upstream's chunk names. The settings
+window does not fetch until its first open; context surfaces keep their state but load their heavy
+implementation only when selected; Ghostty JS/WASM and remote Nerd Fonts load only when a terminal
+mounts; Markdown creates its Shiki worker only for an actual highlighting request; diff worker pools
+and Pierre theme registration stay dormant until a diff consumer requests a pool. CSS syntax variables
+remain dependency-free, and the unused `openchamber-md` Pierre registration was removed.
+
+The production `index.html` resource graph is the acceptance measurement: before this phase it eagerly
+referenced 16,411,160 bytes, dominated by a 15,780,665-byte `vendor-.bun` chunk. After resolving the
+innermost package name and separating Vite's dynamic-import helper, it references 838,532 bytes and no
+longer preloads Settings, CodeMirror, Pierre/Shiki, Ghostty, Git, or Files chunks. These are raw emitted
+bytes, not a claim about every device's wall-clock startup time.

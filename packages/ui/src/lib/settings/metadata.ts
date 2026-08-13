@@ -1,3 +1,5 @@
+import type { IconName } from '@/components/icon/icons';
+
 export type SettingsPageSlug =
   | 'home'
   | 'general'
@@ -228,4 +230,64 @@ export function resolveSettingsSlug(value: string | null | undefined): SettingsP
   }
 
   return 'home';
+}
+
+// Keep this lightweight metadata beside the page registry. Consumers such as
+// the command palette should not have to import the entire settings surface
+// merely to render a navigation icon.
+export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
+  switch (slug) {
+    case 'general':
+      return 'settings-3';
+    case 'projects':
+      return 'folders';
+    case 'remote-instances':
+      return 'computer';
+    case 'appearance':
+      return 'palette';
+    case 'chat':
+      return 'chat-ai-3';
+    case 'magic-prompts':
+      return 'ai-generate-2';
+    case 'snippets':
+      return 'chat-thread';
+    case 'notifications':
+      return 'notification-3';
+    case 'shortcuts':
+      return 'command';
+    case 'sessions':
+      return 'chat-history';
+    case 'providers':
+      return 'cloud';
+    case 'agents':
+      return 'robot-2';
+    case 'fleet':
+      return 'pulse';
+    case 'commands':
+      return 'command';
+    case 'prompts':
+      return 'file-text';
+    case 'skills':
+      return 'sparkling';
+    case 'mcp':
+      return null;
+    case 'plugins':
+      return 'plug-2';
+    case 'plugin-settings':
+      return 'settings-3';
+    case 'git':
+      return 'git-branch';
+    case 'usage':
+      return 'bar-chart-2';
+    case 'voice':
+      return 'mic';
+    case 'tunnel':
+      return 'home-office';
+    case 'about':
+      return 'information';
+    case 'home':
+      return null;
+    default:
+      return 'robot-2';
+  }
 }

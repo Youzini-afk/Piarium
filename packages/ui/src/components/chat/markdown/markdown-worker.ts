@@ -1,4 +1,3 @@
-import MarkdownShikiWorkerUrl from './markdown-shiki.worker.ts?worker&url';
 import type { MarkdownTokenRun, MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 
 // Main-thread client for the markdown Shiki worker. Moves syntax tokenization
@@ -10,6 +9,7 @@ import type { MarkdownTokenRun, MarkdownWorkerRequest, MarkdownWorkerResponse } 
 type PendingResolver = (response: MarkdownWorkerResponse | null) => void;
 
 let worker: Worker | undefined;
+let workerPromise: Promise<Worker | undefined> | undefined;
 let nextId = 0;
 const pending = new Map<number, PendingResolver>();
 // Theme names whose full definition we've already shipped to the live worker, so
@@ -22,31 +22,37 @@ const failAll = (): void => {
   sentThemes.clear();
   worker?.terminate();
   worker = undefined;
+  workerPromise = undefined;
 };
 
-const getWorker = (): Worker | undefined => {
+const getWorker = async (): Promise<Worker | undefined> => {
   if (worker) return worker;
   if (typeof window === 'undefined' || typeof Worker === 'undefined') return undefined;
-  try {
-    worker = new Worker(MarkdownShikiWorkerUrl, { type: 'module' });
-  } catch (err) {
-    console.error('Failed to create Shiki worker:', err);
-    return undefined;
-  }
-  worker.onmessage = (event: MessageEvent<MarkdownWorkerResponse>) => {
-    const resolve = pending.get(event.data.id);
-    if (!resolve) return;
-    pending.delete(event.data.id);
-    resolve(event.data);
-  };
-  worker.onerror = failAll;
-  worker.onmessageerror = failAll;
-  worker.postMessage({ type: 'init' } satisfies MarkdownWorkerRequest);
-  return worker;
+  workerPromise ??= import('./markdown-shiki.worker.ts?worker&url')
+    .then(({ default: workerUrl }) => {
+      if (worker) return worker;
+      worker = new Worker(workerUrl, { type: 'module' });
+      worker.onmessage = (event: MessageEvent<MarkdownWorkerResponse>) => {
+        const resolve = pending.get(event.data.id);
+        if (!resolve) return;
+        pending.delete(event.data.id);
+        resolve(event.data);
+      };
+      worker.onerror = failAll;
+      worker.onmessageerror = failAll;
+      worker.postMessage({ type: 'init' } satisfies MarkdownWorkerRequest);
+      return worker;
+    })
+    .catch((err) => {
+      workerPromise = undefined;
+      console.error('Failed to create Shiki worker:', err);
+      return undefined;
+    });
+  return workerPromise;
 };
 
-const request = (payload: (id: number) => MarkdownWorkerRequest): Promise<MarkdownWorkerResponse | null> => {
-  const instance = getWorker();
+const request = async (payload: (id: number) => MarkdownWorkerRequest): Promise<MarkdownWorkerResponse | null> => {
+  const instance = await getWorker();
   if (!instance) return Promise.resolve(null);
   const id = ++nextId;
   return new Promise<MarkdownWorkerResponse | null>((resolve) => {

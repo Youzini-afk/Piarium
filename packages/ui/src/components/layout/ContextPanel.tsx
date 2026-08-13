@@ -4,12 +4,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { DiffView } from '@/components/views/DiffView';
-import { FilesView } from '@/components/views/FilesView';
-import { GitView } from '@/components/views/GitView';
-import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
-import { PlanView } from '@/components/views/PlanView';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { PiRecoveryPanel } from './PiRecoveryPanel';
 import { SidebarFilesTree } from './SidebarFilesTree';
@@ -54,7 +49,15 @@ import {
   previewProxyTargetCache,
 } from '@/lib/preview/screenshot-capture';
 
+// The context panel itself is part of the desktop shell. Keep its optional
+// surfaces outside that eager graph; each remains mounted only while its tab
+// exists, preserving the existing state behavior.
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((module) => ({ default: module.WalkthroughView })));
+const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((module) => ({ default: module.DiffView })));
+const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((module) => ({ default: module.FilesView })));
+const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
+const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/PullRequestView').then((module) => ({ default: module.PullRequestView })));
+const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -2873,7 +2876,9 @@ export const ContextPanel: React.FC = () => {
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
             <div className="h-full min-w-0 flex-1">
               {hasOpenEditorFile ? (
-                <FilesView mode="editor-only" />
+                <React.Suspense fallback={null}>
+                  <FilesView mode="editor-only" />
+                </React.Suspense>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                   <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
@@ -2939,16 +2944,18 @@ export const ContextPanel: React.FC = () => {
               activeTab?.id !== tab.id && 'hidden'
             )}
           >
-            <DiffView
-              hideStackedFileSidebar
-              stackedDefaultCollapsedAll
-              pinSelectedFileHeaderToTopOnNavigate
-              showOpenInEditorAction
-              diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
-              onDiffScopeChange={handleDiffScopeChange}
-              targetFilePath={tab.targetPath}
-              flushContent
-            />
+            <React.Suspense fallback={null}>
+              <DiffView
+                hideStackedFileSidebar
+                stackedDefaultCollapsedAll
+                pinSelectedFileHeaderToTopOnNavigate
+                showOpenInEditorAction
+                diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
+                onDiffScopeChange={handleDiffScopeChange}
+                targetFilePath={tab.targetPath}
+                flushContent
+              />
+            </React.Suspense>
           </div>
         ))}
         {hasTerminalTab ? (
@@ -2963,7 +2970,9 @@ export const ContextPanel: React.FC = () => {
             </React.Suspense>
           </div>
         ) : null}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? (
+          <React.Suspense fallback={null}>{activeNonChatContent}</React.Suspense>
+        ) : null}
       </div>
       </div>
     </aside>

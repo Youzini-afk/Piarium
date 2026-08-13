@@ -31,14 +31,15 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 
 import { ChatView } from '@/components/views/ChatView';
-import { DiffView } from '@/components/views/DiffView';
-import { FilesView } from '@/components/views/FilesView';
-import { GitView } from '@/components/views/GitView';
-import { PlanView } from '@/components/views/PlanView';
 
 // Keep TerminalView eager: the bottom dock reserves its height immediately, so
 // suspending here leaves a large blank panel on slower machines.
-// Other heavy views stay on-demand to reduce initial bundle parse time.
+// Other heavy views stay on-demand: Diff/Files bring CodeMirror and the diff
+// renderer into the graph, while Git/Plan are irrelevant until selected.
+const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then(m => ({ default: m.PlanView })));
+const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then(m => ({ default: m.GitView })));
+const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));
+const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
@@ -50,6 +51,13 @@ export const MainLayout: React.FC = () => {
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
     const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
+    // Rendering a closed lazy dialog still asks React to fetch its component.
+    // Mount it after the first real open, then retain it for close animation and
+    // in-window state just as before.
+    const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(isSettingsDialogOpen);
+    React.useEffect(() => {
+        if (isSettingsDialogOpen) setSettingsWindowMounted(true);
+    }, [isSettingsDialogOpen]);
     const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
@@ -433,12 +441,14 @@ export const MainLayout: React.FC = () => {
                     </div>
 
                     {/* Desktop settings: windowed dialog with blur */}
-                    <React.Suspense fallback={null}>
-                        <SettingsWindow
-                            open={isSettingsDialogOpen}
-                            onOpenChange={setSettingsDialogOpen}
-                        />
-                    </React.Suspense>
+                    {settingsWindowMounted ? (
+                        <React.Suspense fallback={null}>
+                            <SettingsWindow
+                                open={isSettingsDialogOpen}
+                                onOpenChange={setSettingsDialogOpen}
+                            />
+                        </React.Suspense>
+                    ) : null}
                 </>
             )}
 

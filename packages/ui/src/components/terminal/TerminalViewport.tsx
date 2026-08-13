@@ -1,5 +1,5 @@
 import React from 'react';
-import { FitAddon, Ghostty, Terminal as GhosttyTerminal } from 'ghostty-web';
+import type { FitAddon, Ghostty, Terminal as GhosttyTerminal } from 'ghostty-web';
 
 import { cn } from '@/lib/utils';
 import type { TerminalTheme } from '@/lib/terminalTheme';
@@ -15,8 +15,30 @@ import {
 } from '@/lib/terminalTouchSelection';
 import type { TerminalChunk } from '@/stores/useTerminalStore';
 
-let ghosttyPromise: Promise<Ghostty> | null = null;
-const loadGhostty = (): Promise<Ghostty> => ghosttyPromise ??= Ghostty.load();
+// TerminalView remains part of the shell so its dock has stable geometry, but
+// the emulator JS and WASM are irrelevant until a terminal is actually mounted.
+type GhosttyModule = typeof import('ghostty-web');
+type GhosttyRuntime = { module: GhosttyModule; ghostty: Ghostty };
+let ghosttyRuntimePromise: Promise<GhosttyRuntime> | null = null;
+const loadGhostty = (): Promise<GhosttyRuntime> =>
+  ghosttyRuntimePromise ??= import('ghostty-web').then(async (module) => ({
+    module,
+    ghostty: await module.Ghostty.load(),
+  }));
+
+// The web entry owns the optional remote Nerd Fonts. Give a cached/healthy
+// source a brief chance to load before Ghostty builds its glyph atlas, but do
+// not leave the terminal unusable when that external CDN is unreachable.
+const NERD_FONT_FIRST_TERMINAL_WAIT_MS = 2_000;
+const ensureNerdFonts = (): Promise<void> => {
+  if (typeof window === 'undefined') return Promise.resolve();
+  const loader = (window as typeof window & { __PIARIUM_ENSURE_NERD_FONTS__?: () => Promise<void> }).__PIARIUM_ENSURE_NERD_FONTS__;
+  if (typeof loader !== 'function') return Promise.resolve();
+  return Promise.race([
+    Promise.resolve(loader()).catch(() => undefined),
+    new Promise<void>((resolve) => window.setTimeout(resolve, NERD_FONT_FIRST_TERMINAL_WAIT_MS)),
+  ]).then(() => undefined);
+};
 
 export type TerminalController = {
   focus: () => void;
@@ -166,10 +188,10 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     window.addEventListener('focus', handleWindowFocus);
     window.addEventListener('blur', handleWindowBlur);
 
-    loadGhostty().then((ghostty) => {
+    Promise.all([loadGhostty(), ensureNerdFonts()]).then(([{ module, ghostty }]) => {
       if (disposed) return;
-      terminal = new GhosttyTerminal(getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false));
-      const fitAddon = new FitAddon();
+      terminal = new module.Terminal(getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false));
+      const fitAddon = new module.FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
       terminalRef.current = terminal;

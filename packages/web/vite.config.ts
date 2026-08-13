@@ -14,6 +14,14 @@ const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase()
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
 
+const packageNameFromModuleId = (id: string): string | null => {
+  const normalized = id.replace(/\\/g, '/');
+  const match = normalized.split('node_modules/').at(-1);
+  if (!match) return null;
+  const segments = match.split('/');
+  return match.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0] || null;
+};
+
 const themeJsonHmrPlugin = () => ({
   name: 'openchamber-theme-json-hmr',
   handleHotUpdate({ file, server }: { file: string; server: { ws: { send: (payload: unknown) => void } } }) {
@@ -133,13 +141,31 @@ export default defineConfig({
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
         manualChunks(id) {
+          // Keep Vite's tiny dynamic-import runtime independent. Without an
+          // explicit chunk Rollup can place it inside a large registry package
+          // (observed with Shiki), making every entry preload that package just
+          // to call the helper.
+          if (id.includes('vite/preload-helper')) return 'vite-preload-helper';
           if (!id.includes('node_modules')) return undefined;
 
-          const match = id.split('node_modules/')[1];
-          if (!match) return undefined;
+          // Bun and pnpm place packages below an intermediate store directory
+          // followed by another node_modules segment. Use the innermost package
+          // path; otherwise every Bun dependency is misidentified as `.bun`
+          // and collapsed into one enormous eagerly preloaded vendor chunk.
+          const packageName = packageNameFromModuleId(id);
+          if (!packageName) return undefined;
 
-          const segments = match.split('/');
-          const packageName = match.startsWith('@') ? `${segments[0]}/${segments[1]}` : segments[0];
+          // These packages expose registries of dynamically imported grammars,
+          // themes and modes. Grouping each whole package defeats that design
+          // and makes the first requested language download every sibling.
+          if (
+            packageName === '@shikijs/langs' ||
+            packageName === '@shikijs/themes' ||
+            packageName === '@codemirror/legacy-modes' ||
+            packageName === '@pierre/diffs'
+          ) {
+            return undefined;
+          }
 
           if (packageName === 'react' || packageName === 'react-dom') return 'vendor-react';
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand';
