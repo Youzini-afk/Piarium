@@ -61,6 +61,8 @@ export interface TunnelHttpRequestPayload {
   path: string;
   query: string;
   headers: Record<string, string>;
+  /** Distinguishes an intentionally bodyless request from lost body frames. */
+  hasBody?: boolean;
 }
 
 export interface TunnelHttpResponsePayload {

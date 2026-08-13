@@ -61,7 +61,15 @@ import { BusyDots } from '@/components/chat/message/parts/BusyDots';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
-import { autoConnectLastInstance, connectionDisplayUrl, getAutoConnectTargetLabel, isActiveRuntimeConnection, reprobeActiveConnection, useMobileConnection } from './mobileConnections';
+import {
+  autoConnectLastInstance,
+  connectionDisplayUrl,
+  getAutoConnectTargetLabel,
+  isActiveRuntimeConnection,
+  reprobeActiveConnection,
+  useMobileConnection,
+  type AutoConnectOutcome,
+} from './mobileConnections';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
@@ -2652,7 +2660,7 @@ export function MobileApp({ apis }: MobileAppProps) {
       // saved instance instead of dead-ending on the connect screen until the
       // user restarts the app. Success fires runtime-endpoint-changed, which
       // re-bootstraps everything.
-      void autoConnectLastInstance();
+      void autoConnectLastInstance({ fast: false, skipIfConnected: true });
       return;
     }
 
@@ -2676,23 +2684,37 @@ export function MobileApp({ apis }: MobileAppProps) {
         disconnect();
         return;
       }
+      if (outcome === 'needs-login') {
+        disconnect();
+        return;
+      }
       if (outcome === 'unreachable') {
         // Right after a resume or Wi-Fi switch the network is often still
         // settling (on Android without a SIM there is NO connectivity at all for
-        // a few seconds), so a single fast probe races the network coming up.
-        // Retry once after a grace period before tearing the connection down.
-        window.setTimeout(() => {
-          if (nativeResumeValidationSeqRef.current !== validationSeq) return;
-          void reprobeActiveConnection().then((retry) => {
+        // a few seconds), WireGuard can be re-handshaking, and relay TLS + WS +
+        // E2EE can still be warming. Retry on a widening ladder; the last pass
+        // uses the full connection budget before the app disconnects.
+        const retryDelaysMs = [4_000, 10_000];
+        const retryAt = (attempt: number) => {
+          window.setTimeout(() => {
             if (nativeResumeValidationSeqRef.current !== validationSeq) return;
-            if (retry === 'switched') return;
-            if (retry === 'unchanged') {
-              refreshInPlace();
-              return;
-            }
-            disconnect();
-          });
-        }, 4000);
+            const lastAttempt = attempt === retryDelaysMs.length - 1;
+            void reprobeActiveConnection({ fast: !lastAttempt }).then((retry) => {
+              if (nativeResumeValidationSeqRef.current !== validationSeq) return;
+              if (retry === 'switched') return;
+              if (retry === 'unchanged') {
+                refreshInPlace();
+                return;
+              }
+              if (retry === 'needs-login' || lastAttempt) {
+                disconnect();
+                return;
+              }
+              retryAt(attempt + 1);
+            });
+          }, retryDelaysMs[attempt]);
+        };
+        retryAt(0);
         return;
       }
       if (outcome === 'switched') return;
@@ -2768,11 +2790,18 @@ export function MobileApp({ apis }: MobileAppProps) {
     }
     let cancelled = false;
     setAutoConnectPhase('attempting');
-    void autoConnectLastInstance()
-      .catch(() => false)
-      .then(() => {
-        if (!cancelled) setAutoConnectPhase('done');
-      });
+    void (async () => {
+      const outcome = await autoConnectLastInstance()
+        .catch((): AutoConnectOutcome => ({ status: 'no-candidate' }));
+      if (cancelled) return;
+      // Release the splash after the fast decision. A transiently cold network
+      // gets one full-budget background retry; a manual connection made during
+      // that retry remains authoritative.
+      setAutoConnectPhase('done');
+      if (outcome.status === 'unreachable') {
+        void autoConnectLastInstance({ fast: false, skipIfConnected: true }).catch(() => null);
+      }
+    })();
     return () => {
       cancelled = true;
     };

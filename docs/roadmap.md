@@ -304,7 +304,7 @@ The reviewed fork/upstream reconciliation and capability-by-capability dispositi
 source rather than copied over the Pi-native engine.
 
 - In progress: directly portable Markdown, terminal-output, and layout fixes.
-- Next: retained relay integrity and mobile reconnect behavior.
+- Implemented: retained relay request-body integrity and mobile transient reconnect behavior.
 - Planned as Pi-native features: Work Status, guided code walkthroughs, and Markdown loop discovery
   for the existing scheduler.
 - OpenCode session sync, provider routes, MCP ownership, and lifecycle code remain excluded; only a

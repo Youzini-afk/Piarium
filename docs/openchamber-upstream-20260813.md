@@ -38,8 +38,8 @@ it through the native Pi protocol, runtime broker, extension contracts, and prod
 | Work Status panel | `f2523d0c`, `222057ab`, `630ac299`, `d7231b6d`, `ee9c9d6f` | Pi-native implementation required. Reuse the interaction design, but source state from `SessionSnapshot`, `SessionStats`, `PiSessionFeatureState`, package/extension state, Fleet, MCP status, and Pi provider data. Do not restore OpenCode todo, goal, MCP, or quota stores. |
 | Guided diff/branch/PR walkthrough | `2ea828b8` and follow-up fixes | Pi-native implementation required. Reuse the presentation and review flow after replacing OpenCode model/session calls with Pi model selection and a Pi session/tool contract. Git diff ownership stays with Piarium's Git API. |
 | Markdown loops in `.agents/loops` | `0ba330c7`, `8a367382`, `bac56fc7`, `ffef080b` | Reimplement in the Pi-native scheduler. Markdown files should be authoritative and synchronize into the existing Pi scheduled-task execution path; no OpenCode agent or permission fields are imported. |
-| Relay request-body integrity | `854a0db9`, `aaf397e6`, `d634cd23` | Review for direct platform adoption. The relay is retained by Piarium, so zero-body framing, lost-frame rejection, and buffer release belong at the existing relay boundary. |
-| Mobile transient reconnect and device diagnostics | `dea3826f`, `f4005982` | Review for direct platform adoption against Piarium's endpoint-aware mobile connection state. Preserve current authenticated runtime bootstrap and do not reintroduce an OpenCode health owner. |
+| Relay request-body integrity | `854a0db9`, `aaf397e6`, `d634cd23` | Adopted at Piarium's retained relay boundary. Empty body sources emit an explicit frame, ordinary control bodies are forwarded only after completion, missing frames abort as an ambiguous transport failure, and stalled buffers are released. Large uploads retain streaming behavior. |
+| Mobile transient reconnect and device diagnostics | `dea3826f`, `f4005982` | Transient reconnect behavior adopted against Piarium's endpoint-aware mobile state. Explicit token rejection disconnects immediately; temporary reachability failures get bounded fast/full-budget retries and never replace a later manual connection. The upstream hidden diagnostics UI was not copied. |
 | Measured Vite/chunk and lazy-render improvements | `fdcf5c27` | Audit by consumer. Apply only changes still relevant to Piarium's bundle graph and measure the Piarium build; do not copy obsolete OpenCode components to reproduce upstream numbers. |
 | Provider/OAuth/custom-provider fixes | `70af851b` and follow-ups | Compare behavior with Piarium's provider protocol and current custom-provider GUI. Adopt missing validation, scope, credential, reconnect, and OAuth behavior in the Pi owner; do not copy `/api/provider` or OpenCode provider stores. |
 | OpenCode session sync, question/permission routing, MCP settings/auth | `0f52a9be`, `ee5e45ae`, `d33cf518`, `622b8bb6` | Do not copy the implementation. Audit the underlying invariants against Piarium's session worker routing, Pi extension UI requests, and `pi-mcp-adapter`. Add a Pi-native fix only where the same failure is reproducible. |
@@ -61,9 +61,12 @@ Acceptance:
 
 ### Platform transport and mobile lifecycle
 
-Audit the retained relay and mobile code against the three relay integrity changes and the transient
-mobile reconnect changes. Apply them only where Piarium still has the same state transition and
-transport ownership.
+Completed against Piarium's retained relay and mobile code. The relay uses `hasBody` plus explicit
+empty frames to distinguish empty bodies from missing frames, buffers ordinary control requests
+until `StreamEnd`, releases stalled buffers at the delivery deadline, and leaves larger uploads on
+the previous streaming path. Mobile resume uses a 4-second/10-second retry ladder with a final
+full-budget probe; cold launch releases the splash after the fast verdict and retries once in the
+background without overriding a manual connection.
 
 ### Pi-native product capabilities
 
