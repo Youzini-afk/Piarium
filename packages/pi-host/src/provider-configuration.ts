@@ -49,6 +49,7 @@ interface RuntimeConfigurationState {
 
 const EMPTY_CONFIG = "{\n  \"providers\": {}\n}\n";
 const LOCK_RETRY_MS = 50;
+const EDITABLE_PROVIDER_KEYS = ["api", "authHeader", "baseUrl", "models", "name"] as const;
 
 function configurableDuration(name: string): number | undefined {
   const configured = process.env[name];
@@ -449,6 +450,7 @@ async function updateProviderEntry(
   path: string,
   providerId: string,
   value: JsonObject | undefined,
+  replaceKeys: readonly string[] = [],
 ): Promise<void> {
   await mkdir(resolve(path, ".."), { mode: 0o700, recursive: true });
   const release = await acquireLock(path);
@@ -465,6 +467,17 @@ async function updateProviderEntry(
     }
     const current = providerRecord(document, providerId);
     if (value && current) {
+      for (const key of replaceKeys) {
+        if (Object.prototype.hasOwnProperty.call(value, key) || !Object.prototype.hasOwnProperty.call(current, key)) {
+          continue;
+        }
+        content = applyEdits(
+          content,
+          modify(content, ["providers", providerId, key], undefined, {
+            formattingOptions: { insertSpaces: true, tabSize: 2 },
+          }),
+        );
+      }
       for (const [key, entry] of Object.entries(value)) {
         if (JSON.stringify(current[key]) === JSON.stringify(entry)) continue;
         content = applyEdits(
@@ -504,7 +517,7 @@ export class ProviderConfigurationManager {
     this.#customPath = configuredPath ? resolve(configuredPath) : undefined;
   }
 
-  async apply(runtime: ModelRuntime, cwd: string): Promise<string[]> {
+  async apply(runtime: ModelRuntime, cwd: string, projectTrusted: boolean): Promise<string[]> {
     const warnings: string[] = [];
     let state = this.#runtimeStates.get(runtime);
     if (!state) {
@@ -535,6 +548,7 @@ export class ProviderConfigurationManager {
     state.appliedIds.clear();
     await runtime.refresh({ allowNetwork: false });
     for (const scope of ["project", "custom"] as const) {
+      if (scope === "project" && !projectTrusted) continue;
       const path = this.#pathForScope(scope, cwd);
       if (!path) continue;
       let document: ConfigDocument;
@@ -571,10 +585,15 @@ export class ProviderConfigurationManager {
     return warnings;
   }
 
-  async getDetails(runtime: ModelRuntime, cwd: string, providerId: string): Promise<ProviderConfigDetails> {
+  async getDetails(
+    runtime: ModelRuntime,
+    cwd: string,
+    providerId: string,
+    projectTrusted: boolean,
+  ): Promise<ProviderConfigDetails> {
     const normalizedId = this.#providerId(providerId);
-    const documents = await this.#documents(cwd);
-    const locations = await this.#locations(cwd, documents, normalizedId);
+    const documents = await this.#documents(cwd, projectTrusted);
+    const locations = await this.#locations(cwd, documents, normalizedId, projectTrusted);
     let effectiveScope: ProviderConfigScope | undefined;
     let effective: JsonObject | undefined;
     for (const scope of ["custom", "project", "user"] as const) {
@@ -607,7 +626,9 @@ export class ProviderConfigurationManager {
     cwd: string,
     scope: ProviderConfigScope,
     input: ProviderConfigInput,
+    projectTrusted: boolean,
   ): Promise<ProviderConfigDetails> {
+    this.#assertProjectScopeTrusted(scope, projectTrusted);
     const config = parseProviderConfigInput(input);
     const path = this.#requiredPathForScope(scope, cwd);
     await this.#assertSafePath(scope, cwd, path, true);
@@ -622,9 +643,9 @@ export class ProviderConfigurationManager {
     // partial overrides available while preventing a malformed new model from being silently saved
     // and then skipped during the next catalog refresh.
     runtimeProviderConfig(runtime, config.id, next);
-    await updateProviderEntry(path, config.id, next);
-    await this.apply(runtime, cwd);
-    return this.getDetails(runtime, cwd, config.id);
+    await updateProviderEntry(path, config.id, next, EDITABLE_PROVIDER_KEYS);
+    await this.apply(runtime, cwd, projectTrusted);
+    return this.getDetails(runtime, cwd, config.id, projectTrusted);
   }
 
   async delete(
@@ -632,10 +653,14 @@ export class ProviderConfigurationManager {
     cwd: string,
     providerId: string,
     scope: ProviderConfigScope | "all",
+    projectTrusted: boolean,
   ): Promise<ProviderConfigDetails> {
     const normalizedId = this.#providerId(providerId);
     const scopes: ProviderConfigScope[] =
       scope === "all" ? ["user", "project", "custom"] : [scope];
+    for (const targetScope of scopes) {
+      this.#assertProjectScopeTrusted(targetScope, projectTrusted);
+    }
     for (const targetScope of scopes) {
       const path = this.#pathForScope(targetScope, cwd);
       if (!path) continue;
@@ -643,13 +668,17 @@ export class ProviderConfigurationManager {
       if (!(await pathExists(path))) continue;
       await updateProviderEntry(path, normalizedId, undefined);
     }
-    await this.apply(runtime, cwd);
-    return this.getDetails(runtime, cwd, normalizedId);
+    await this.apply(runtime, cwd, projectTrusted);
+    return this.getDetails(runtime, cwd, normalizedId, projectTrusted);
   }
 
-  async effectiveConfig(cwd: string, providerId: string): Promise<ProviderConfigInput> {
+  async effectiveConfig(
+    cwd: string,
+    providerId: string,
+    projectTrusted: boolean,
+  ): Promise<ProviderConfigInput> {
     const normalizedId = this.#providerId(providerId);
-    const documents = await this.#documents(cwd);
+    const documents = await this.#documents(cwd, projectTrusted);
     for (const scope of ["custom", "project", "user"] as const) {
       const document = documents[scope];
       const value = document ? providerRecord(document, normalizedId) : undefined;
@@ -668,6 +697,15 @@ export class ProviderConfigurationManager {
       throw new HostError("invalid_params", "providerId is invalid");
     }
     return normalized;
+  }
+
+  #assertProjectScopeTrusted(scope: ProviderConfigScope, projectTrusted: boolean): void {
+    if (scope === "project" && !projectTrusted) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to access project provider configuration",
+      );
+    }
   }
 
   #pathForScope(scope: ProviderConfigScope, cwd: string): string | undefined {
@@ -728,9 +766,11 @@ export class ProviderConfigurationManager {
 
   async #documents(
     cwd: string,
+    projectTrusted: boolean,
   ): Promise<Partial<Record<ProviderConfigScope, ConfigDocument>>> {
     const result: Partial<Record<ProviderConfigScope, ConfigDocument>> = {};
     for (const scope of ["user", "project", "custom"] as const) {
+      if (scope === "project" && !projectTrusted) continue;
       const path = this.#pathForScope(scope, cwd);
       if (!path) continue;
       await this.#assertSafePath(scope, cwd, path, false);
@@ -743,6 +783,7 @@ export class ProviderConfigurationManager {
     cwd: string,
     documents: Partial<Record<ProviderConfigScope, ConfigDocument>>,
     providerId: string,
+    projectTrusted: boolean,
   ): Promise<Record<ProviderConfigScope, ProviderConfigLocation>> {
     const location = (
       scope: ProviderConfigScope,
@@ -759,7 +800,7 @@ export class ProviderConfigurationManager {
     });
     return {
       custom: location("custom", this.#customPath !== undefined, this.#customPath),
-      project: location("project", true, this.#pathForScope("project", cwd)),
+      project: location("project", projectTrusted, this.#pathForScope("project", cwd)),
       user: location("user", true, this.#pathForScope("user", cwd)),
     };
   }

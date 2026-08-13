@@ -61,7 +61,7 @@ describe("ProviderConfigurationManager", () => {
     });
     const manager = new ProviderConfigurationManager({ agentDir });
     try {
-      const details = await manager.upsert(runtime, cwd, "user", config("local", "local-model"));
+      const details = await manager.upsert(runtime, cwd, "user", config("local", "local-model"), true);
       assert.equal(details.effectiveScope, "user");
       assert.equal(details.config?.models?.[0]?.id, "local-model");
       assert.equal(details.locations.user.exists, true);
@@ -89,13 +89,14 @@ describe("ProviderConfigurationManager", () => {
     });
     const manager = new ProviderConfigurationManager({ agentDir, customConfigPath: customPath });
     try {
-      await manager.upsert(runtime, cwd, "user", config("layered", "user-model"));
-      await manager.upsert(runtime, cwd, "project", config("layered", "project-model"));
+      await manager.upsert(runtime, cwd, "user", config("layered", "user-model"), true);
+      await manager.upsert(runtime, cwd, "project", config("layered", "project-model"), true);
       const details = await manager.upsert(
         runtime,
         cwd,
         "custom",
         config("layered", "custom-model"),
+        true,
       );
       assert.equal(details.effectiveScope, "custom");
       assert.deepEqual(
@@ -105,21 +106,21 @@ describe("ProviderConfigurationManager", () => {
       assert.equal(details.locations.project.exists, true);
       assert.equal(details.locations.custom.exists, true);
 
-      const afterCustomDelete = await manager.delete(runtime, cwd, "layered", "custom");
+      const afterCustomDelete = await manager.delete(runtime, cwd, "layered", "custom", true);
       assert.equal(afterCustomDelete.effectiveScope, "project");
       assert.deepEqual(
         runtime.getModels("layered").map((model) => model.id),
         ["user-model", "project-model"],
       );
-      const afterAllDelete = await manager.delete(runtime, cwd, "layered", "all");
+      const afterAllDelete = await manager.delete(runtime, cwd, "layered", "all", true);
       assert.equal(afterAllDelete.effectiveScope, undefined);
       assert.equal(runtime.getProvider("layered"), undefined);
 
-      await manager.upsert(runtime, cwd, "user", config("partial", "base-model"));
+      await manager.upsert(runtime, cwd, "user", config("partial", "base-model"), true);
       const partial = await manager.upsert(runtime, cwd, "project", {
         baseUrl: "http://127.0.0.1:11434/v1",
         id: "partial",
-      });
+      }, true);
       assert.equal(partial.effectiveScope, "project");
       assert.equal(partial.config?.api, undefined);
       assert.equal(partial.config?.models, undefined);
@@ -131,6 +132,7 @@ describe("ProviderConfigurationManager", () => {
         cwd,
         "project",
         config(longProviderId, "long-id-model"),
+        true,
       );
       assert.equal(longIdDetails.providerId, longProviderId);
 
@@ -140,6 +142,7 @@ describe("ProviderConfigurationManager", () => {
         cwd,
         "project",
         config(unrestrictedProviderId, "unrestricted-id-model"),
+        true,
       );
       assert.equal(unrestrictedIdDetails.providerId, unrestrictedProviderId);
 
@@ -147,13 +150,108 @@ describe("ProviderConfigurationManager", () => {
         manager.upsert(runtime, cwd, "project", {
           id: "invalid-model-definition",
           models: [{ id: "missing-api-and-base-url" }],
-        }),
+        }, true),
         /does not define an API/,
       );
       assert.equal(
-        (await manager.getDetails(runtime, cwd, "invalid-model-definition")).locations.project.exists,
+        (await manager.getDetails(runtime, cwd, "invalid-model-definition", true)).locations.project.exists,
         false,
       );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("replaces editable fields without deleting native credentials or unknown keys", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-provider-replace-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    await writeFile(join(agentDir, "models.json"), `{
+  // Keep the native document and fields Piarium does not own.
+  "providers": {
+    "editable": {
+      "name": "Remove me",
+      "baseUrl": "https://remove.example.test/v1",
+      "api": "openai-completions",
+      "authHeader": true,
+      "apiKey": "$EDITABLE_PROVIDER_KEY",
+      "futureSetting": { "keep": true },
+      "models": [{
+        "id": "editable-model",
+        "api": "openai-completions",
+        "baseUrl": "https://model.example.test/v1"
+      }]
+    }
+  }
+}\n`);
+    const runtime = await ModelRuntime.create({
+      allowModelNetwork: false,
+      authPath: join(agentDir, "auth.json"),
+      modelsPath: join(agentDir, "models.json"),
+    });
+    const manager = new ProviderConfigurationManager({ agentDir });
+    try {
+      await manager.upsert(runtime, cwd, "user", {
+        api: "openai-completions",
+        id: "editable",
+        models: [{
+          api: "openai-completions",
+          baseUrl: "https://model.example.test/v1",
+          id: "editable-model",
+        }],
+      }, true);
+
+      const content = await readFile(join(agentDir, "models.json"), "utf8");
+      assert.match(content, /Keep the native document/);
+      assert.match(content, /\$EDITABLE_PROVIDER_KEY/);
+      assert.match(content, /futureSetting/);
+      assert.doesNotMatch(content, /Remove me/);
+      assert.doesNotMatch(content, /remove\.example\.test/);
+      assert.doesNotMatch(content, /authHeader/);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("does not read or mutate project providers until the project is trusted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-provider-trust-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await mkdir(agentDir, { recursive: true });
+    await mkdir(join(cwd, ".pi"), { recursive: true });
+    await writeFile(join(cwd, ".pi", "models.json"), JSON.stringify({
+      providers: {
+        "project-only": {
+          api: "openai-completions",
+          baseUrl: "https://project.example.test/v1",
+          models: [{ id: "project-model" }],
+        },
+      },
+    }));
+    const runtime = await ModelRuntime.create({
+      allowModelNetwork: false,
+      authPath: join(agentDir, "auth.json"),
+      modelsPath: join(agentDir, "models.json"),
+    });
+    const manager = new ProviderConfigurationManager({ agentDir });
+    try {
+      await manager.apply(runtime, cwd, false);
+      assert.equal(runtime.getProvider("project-only"), undefined);
+      const hiddenDetails = await manager.getDetails(runtime, cwd, "project-only", false);
+      assert.equal(hiddenDetails.locations.project.available, false);
+      assert.equal(hiddenDetails.locations.project.exists, false);
+      await assert.rejects(
+        manager.upsert(runtime, cwd, "project", config("blocked", "blocked-model"), false),
+        /Project is not trusted/,
+      );
+
+      await manager.apply(runtime, cwd, true);
+      assert.ok(runtime.getProvider("project-only"));
+      const trustedDetails = await manager.getDetails(runtime, cwd, "project-only", true);
+      assert.equal(trustedDetails.locations.project.available, true);
+      assert.equal(trustedDetails.locations.project.exists, true);
     } finally {
       await rm(root, { force: true, recursive: true });
     }

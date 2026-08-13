@@ -122,6 +122,11 @@ type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => v
 
 const PIARIUM_INSTRUCTIONS_MESSAGE_TYPE = "piarium.instructions";
 
+function hasPiariumTrustRequiringProjectResources(cwd: string): boolean {
+  return hasTrustRequiringProjectResources(cwd)
+    || existsSync(join(resolve(cwd), ".pi", "models.json"));
+}
+
 export interface SessionHostOptions {
   agentDir: string;
   configureServices?: (
@@ -1271,9 +1276,11 @@ export class SessionHost {
   }
 
   async listModels(): Promise<ModelDescriptor[]> {
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
     await this.#providerConfiguration.apply(
       this.runtime.services.modelRuntime,
       this.runtime.cwd,
+      projectTrusted,
     );
     const runtime = this.runtime.services.modelRuntime;
     const available = new Set(
@@ -1291,9 +1298,11 @@ export class SessionHost {
     modelId: string,
   ): Promise<SessionSnapshot> {
     this.assertSession(sessionId);
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
     await this.#providerConfiguration.apply(
       this.runtime.services.modelRuntime,
       this.runtime.cwd,
+      projectTrusted,
     );
     const model = this.runtime.services.modelRuntime.getModel(provider, modelId);
     if (!model) throw new HostError("model_not_found", `Unknown model: ${provider}/${modelId}`);
@@ -1308,9 +1317,11 @@ export class SessionHost {
   }
 
   async listProviders(): Promise<ProviderDescriptor[]> {
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
     await this.#providerConfiguration.apply(
       this.runtime.services.modelRuntime,
       this.runtime.cwd,
+      projectTrusted,
     );
     const runtime = this.runtime.services.modelRuntime;
     return runtime.getProviders().map((provider) => {
@@ -1349,7 +1360,8 @@ export class SessionHost {
 
   async loginProvider(providerId: string, type: ProviderAuthType): Promise<boolean> {
     const modelRuntime = this.runtime.services.modelRuntime;
-    await this.#providerConfiguration.apply(modelRuntime, this.runtime.cwd);
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
+    await this.#providerConfiguration.apply(modelRuntime, this.runtime.cwd, projectTrusted);
     type LoginInteraction = Parameters<typeof modelRuntime.login>[2];
     const sessionId = this.session.sessionId;
     const interaction: LoginInteraction = {
@@ -1372,8 +1384,14 @@ export class SessionHost {
 
   async getProviderConfiguration(providerId: string): Promise<ProviderConfigDetails> {
     const runtime = this.runtime.services.modelRuntime;
-    await this.#providerConfiguration.apply(runtime, this.runtime.cwd);
-    return this.#providerConfiguration.getDetails(runtime, this.runtime.cwd, providerId);
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
+    await this.#providerConfiguration.apply(runtime, this.runtime.cwd, projectTrusted);
+    return this.#providerConfiguration.getDetails(
+      runtime,
+      this.runtime.cwd,
+      providerId,
+      projectTrusted,
+    );
   }
 
   async upsertProviderConfiguration(
@@ -1381,11 +1399,13 @@ export class SessionHost {
     config: ProviderConfigInput,
   ): Promise<ProviderConfigDetails> {
     const runtime = this.runtime.services.modelRuntime;
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
     const details = await this.#providerConfiguration.upsert(
       runtime,
       this.runtime.cwd,
       scope,
       config,
+      projectTrusted,
     );
     this.#emit("provider.config.changed", {
       providerId: config.id,
@@ -1400,13 +1420,31 @@ export class SessionHost {
     scope: ProviderConfigDeleteScope,
   ): Promise<ProviderConfigDetails> {
     const runtime = this.runtime.services.modelRuntime;
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
+    if ((scope === "project" || scope === "all") && !projectTrusted) {
+      throw new HostError(
+        "project_not_trusted",
+        "Project is not trusted; refusing to change project provider configuration",
+      );
+    }
     if (scope === "auth" || scope === "all") {
       await runtime.logout(providerId);
     }
     const details =
       scope === "auth"
-        ? await this.#providerConfiguration.getDetails(runtime, this.runtime.cwd, providerId)
-        : await this.#providerConfiguration.delete(runtime, this.runtime.cwd, providerId, scope);
+        ? await this.#providerConfiguration.getDetails(
+          runtime,
+          this.runtime.cwd,
+          providerId,
+          projectTrusted,
+        )
+        : await this.#providerConfiguration.delete(
+          runtime,
+          this.runtime.cwd,
+          providerId,
+          scope,
+          projectTrusted,
+        );
     this.#emit("provider.config.changed", {
       providerId,
       scope,
@@ -1421,7 +1459,8 @@ export class SessionHost {
     requestCredential: boolean = false,
   ): Promise<ProviderModelDiscoveryResult> {
     const runtime = this.runtime.services.modelRuntime;
-    await this.#providerConfiguration.apply(runtime, this.runtime.cwd);
+    const projectTrusted = this.runtime.services.settingsManager.isProjectTrusted();
+    await this.#providerConfiguration.apply(runtime, this.runtime.cwd, projectTrusted);
     if (config && config.id !== providerId) {
       throw new HostError(
         "invalid_params",
@@ -1438,6 +1477,7 @@ export class SessionHost {
       configuration: this.#providerConfiguration,
       ...(config === undefined ? {} : { config }),
       cwd: this.runtime.cwd,
+      projectTrusted,
       ...(apiKey === undefined ? {} : { apiKey }),
       providerId,
       runtime,
@@ -1984,7 +2024,7 @@ export class SessionHost {
   #createRuntimeFactory(): CreateAgentSessionRuntimeFactory {
     if (this.#runtimeFactory) return this.#runtimeFactory;
     return async ({ cwd, agentDir, sessionManager, sessionStartEvent }) => {
-      const requiresTrust = hasTrustRequiringProjectResources(cwd);
+      const requiresTrust = hasPiariumTrustRequiringProjectResources(cwd);
       const storedDecision = this.#trustStore.get(cwd);
       const initialTrust =
         this.#projectTrustOverride ??
@@ -2055,6 +2095,7 @@ export class SessionHost {
       const providerWarnings = await this.#providerConfiguration.apply(
         services.modelRuntime,
         cwd,
+        settingsManager.isProjectTrusted(),
       );
       services.diagnostics.push(
         ...providerWarnings.map((message) => ({ message, type: "warning" as const })),

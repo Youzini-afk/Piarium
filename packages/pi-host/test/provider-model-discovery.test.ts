@@ -52,12 +52,13 @@ describe("provider model discovery", () => {
         id: "discovery-test",
         models: [],
         name: "Discovery test",
-      });
+      }, true);
       await runtime.setRuntimeApiKey("discovery-test", "secret-test-key");
       const result = await discoverProviderModels({
         configuration: manager,
         cwd,
         providerId: "discovery-test",
+        projectTrusted: true,
         runtime,
       });
       assert.equal(requestedUrl, "/v1/models");
@@ -112,6 +113,7 @@ describe("provider model discovery", () => {
         configuration: manager,
         cwd,
         providerId: "anonymous-discovery",
+        projectTrusted: true,
         runtime,
       });
       assert.equal(authorizations[0], undefined);
@@ -127,6 +129,7 @@ describe("provider model discovery", () => {
         configuration: manager,
         cwd,
         providerId: "anonymous-discovery",
+        projectTrusted: true,
         runtime,
       });
       assert.equal(authorizations[1], "Bearer one-shot-draft-key");

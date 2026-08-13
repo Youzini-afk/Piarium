@@ -41,7 +41,7 @@ it through the native Pi protocol, runtime broker, extension contracts, and prod
 | Relay request-body integrity | `854a0db9`, `aaf397e6`, `d634cd23` | Adopted at Piarium's retained relay boundary. Empty body sources emit an explicit frame, ordinary control bodies are forwarded only after completion, missing frames abort as an ambiguous transport failure, and stalled buffers are released. Large uploads retain streaming behavior. |
 | Mobile transient reconnect and device diagnostics | `dea3826f`, `f4005982` | Transient reconnect behavior adopted against Piarium's endpoint-aware mobile state. Explicit token rejection disconnects immediately; temporary reachability failures get bounded fast/full-budget retries and never replace a later manual connection. The upstream hidden diagnostics UI was not copied. |
 | Measured Vite/chunk and lazy-render improvements | `fdcf5c27` | Adopted after a Piarium-specific bundle audit. Diff, Files, Git, PR, Plan, Settings, Ghostty, Markdown Shiki, diff workers, and Nerd Fonts now load at their real first consumer. The upstream package-name parser did not recognize Bun's nested `node_modules/.bun/.../node_modules` layout and still produced a 15.8 MB eager `.bun` vendor chunk; Piarium resolves the innermost package and isolates Vite's preload helper. Production entry resources fell from 16,411,160 to 838,532 raw bytes (94.9%). Obsolete OpenCode chat tool components were not restored. |
-| Provider/OAuth/custom-provider fixes | `70af851b` and follow-ups | Compare behavior with Piarium's provider protocol and current custom-provider GUI. Adopt missing validation, scope, credential, reconnect, and OAuth behavior in the Pi owner; do not copy `/api/provider` or OpenCode provider stores. |
+| Provider/OAuth/custom-provider fixes | `70af851b` and follow-ups | Audited against Pi's provider runtime. Piarium already projects API-key/OAuth methods on every catalog read, uses one provider-owned login call that waits for browser callback, device polling, or manual completion before persisting credentials, preserves the effective edit scope, resets the edit form, and keeps secrets outside config DTOs. The OpenCode JSON-body route and two-step OAuth callback are not applicable. Piarium supplements the upstream behavior by gating `.pi/models.json` on project trust and making form-owned field removal real while preserving comments, credentials, and unknown native keys. It intentionally does not hide every unauthenticated model: Pi supports anonymous/local providers, and model availability remains the runtime-owned signal. |
 | OpenCode session sync, question/permission routing, MCP settings/auth | `0f52a9be`, `ee5e45ae`, `d33cf518`, `622b8bb6` | Do not copy the implementation. Audit the underlying invariants against Piarium's session worker routing, Pi extension UI requests, and `pi-mcp-adapter`. Add a Pi-native fix only where the same failure is reproducible. |
 
 ## Phase checkpoints
@@ -101,3 +101,18 @@ referenced 16,411,160 bytes, dominated by a 15,780,665-byte `vendor-.bun` chunk.
 innermost package name and separating Vite's dynamic-import helper, it references 838,532 bytes and no
 longer preloads Settings, CodeMirror, Pierre/Shiki, Ghostty, Git, or Files chunks. These are raw emitted
 bytes, not a claim about every device's wall-clock startup time.
+
+### Provider configuration and authentication
+
+Completed at Piarium's Pi provider boundary. Project-local `.pi/models.json` is now itself a
+trust-requiring resource, is neither read nor registered before approval, and cannot be written or
+deleted through Provider settings while the project is untrusted. The user and explicit operator
+layers remain available. Editing a native provider now replaces the GUI-owned `api`, `authHeader`,
+`baseUrl`, `models`, and `name` fields, so clearing one actually removes it; comments, `apiKey`,
+headers, compatibility settings, and future unknown keys remain intact.
+
+Pi's OAuth implementation needs no OpenCode callback emulation. `ModelRuntime.login()` owns the
+complete browser callback/device-code/manual-code flow and stores the credential only after it
+returns. Provider methods are rebuilt from the active Pi provider on every list/reconnect. The UI
+continues to show configured anonymous and local providers because absence of a credential is not a
+valid reason to hide models in Pi; each model's runtime `available` flag remains authoritative.

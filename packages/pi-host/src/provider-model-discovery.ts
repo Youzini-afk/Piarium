@@ -343,11 +343,16 @@ export async function discoverProviderModels(options: {
   config?: ProviderConfigInput;
   configuration: ProviderConfigurationManager;
   cwd: string;
+  projectTrusted: boolean;
   providerId: string;
   runtime: ModelRuntime;
 }): Promise<ProviderModelDiscoveryResult> {
   const config = options.config
-    ?? await options.configuration.effectiveConfig(options.cwd, options.providerId);
+    ?? await options.configuration.effectiveConfig(
+      options.cwd,
+      options.providerId,
+      options.projectTrusted,
+    );
   const runtimeProvider = options.runtime.getProvider(options.providerId);
   const runtimeModel = options.runtime.getModels(options.providerId)[0];
   const configuredApi = config.api ?? runtimeModel?.api;
