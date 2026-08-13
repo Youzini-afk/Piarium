@@ -80,13 +80,14 @@ export const handleNativeVSCodeBridgeMessage = async (
     case 'editor:openFile': {
       const { path: filePath, line, column } = payload as { path?: string; line?: number; column?: number };
       if (!filePath) return { id, type, success: false, error: 'Path is required' };
-      const document = await vscode.workspace.openTextDocument(filePath);
       const options: vscode.TextDocumentShowOptions = {};
       if (typeof line === 'number') {
         const position = new vscode.Position(Math.max(0, line - 1), Math.max(0, column ?? 0));
         options.selection = new vscode.Range(position, position);
       }
-      await vscode.window.showTextDocument(document, options);
+      // Let VS Code choose the registered editor. openTextDocument/showTextDocument
+      // forces notebooks such as .ipynb into their JSON text representation.
+      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), options);
       return { id, type, success: true };
     }
 
