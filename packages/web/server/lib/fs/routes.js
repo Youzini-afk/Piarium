@@ -7,6 +7,12 @@ const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
 
 const outsideFileGrants = new Map();
 
+const isOsPermissionError = (error) => (
+  error
+  && typeof error === 'object'
+  && (error.code === 'EACCES' || error.code === 'EPERM')
+);
+
 const pruneOutsideFileGrants = () => {
   const now = Date.now();
   for (const [token, grant] of outsideFileGrants.entries()) {
@@ -1172,7 +1178,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
-        return res.status(400).json({ error: 'Specified path is not a directory' });
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
 
       const dirents = await fsPromises.readdir(resolvedPath, { withFileTypes: true });
@@ -1265,10 +1271,10 @@ export const registerFsRoutes = (app, dependencies) => {
         console.error('Failed to list directory:', error);
       }
       if (code === 'ENOENT') {
-        return res.status(404).json({ error: 'Directory not found' });
+        return res.status(404).json({ error: 'Directory not found', reason: 'not-found' });
       }
-      if (code === 'EACCES') {
-        return res.status(403).json({ error: 'Access to directory denied' });
+      if (isOsPermissionError(err)) {
+        return res.status(403).json({ error: 'Access to directory denied', reason: 'os-permission' });
       }
       return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });
     }

@@ -35,6 +35,10 @@ import {
 } from '@/lib/directoryShowHidden';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import {
+  isFilesystemError,
+  type FilesystemErrorReason,
+} from '@/lib/api/files-errors';
 
 interface DirectoryExplorerDialogProps {
   open: boolean;
@@ -155,7 +159,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const loadGitIdentityProfiles = useGitIdentitiesStore((s) => s.loadProfiles);
   const loadGlobalGitIdentity = useGitIdentitiesStore((s) => s.loadGlobalIdentity);
   const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);
-  const { isDesktop, requestAccess, startAccessing } = useFileSystemAccess();
+  const { canRequestAccess, requestAccess, startAccessing } = useFileSystemAccess();
   const { isMobile } = useDeviceInfo();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const addButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -165,6 +169,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [entries, setEntries] = React.useState<BrowseEntry[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isBrowseDirectoryMissing, setIsBrowseDirectoryMissing] = React.useState(false);
+  const [browseErrorReason, setBrowseErrorReason] = React.useState<FilesystemErrorReason | null>(null);
+  const [browseReloadKey, setBrowseReloadKey] = React.useState(0);
   const [highlightedIndex, setHighlightedIndex] = React.useState(0);
   const [isConfirming, setIsConfirming] = React.useState(false);
   const [isOpeningFinder, setIsOpeningFinder] = React.useState(false);
@@ -257,16 +263,19 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   React.useEffect(() => {
     if (!open || !browseDirectoryAbsolutePath) {
       setEntries([]);
+      setBrowseErrorReason(null);
       return;
     }
 
     let cancelled = false;
     setIsLoading(true);
     setIsBrowseDirectoryMissing(false);
+    setBrowseErrorReason(null);
     files.listDirectory(browseDirectoryAbsolutePath)
       .then((result) => {
         if (cancelled) return;
         setIsBrowseDirectoryMissing(false);
+        setBrowseErrorReason(null);
         const nextEntries = result.entries
           .filter((entry) => entry.isDirectory)
           .map((entry) => ({
@@ -276,10 +285,12 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           .sort((left, right) => left.name.localeCompare(right.name));
         setEntries(nextEntries);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
           setEntries([]);
-          setIsBrowseDirectoryMissing(true);
+          const reason = isFilesystemError(error) ? error.reason : 'unknown';
+          setBrowseErrorReason(reason);
+          setIsBrowseDirectoryMissing(reason === 'not-found');
         }
       })
       .finally(() => {
@@ -289,7 +300,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     return () => {
       cancelled = true;
     };
-  }, [browseDirectoryAbsolutePath, files, open]);
+  }, [browseDirectoryAbsolutePath, browseReloadKey, files, open]);
 
   const filteredEntries = React.useMemo(() => {
     const lowerFilter = browseFilterQuery.toLowerCase();
@@ -336,12 +347,21 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     &&
     targetPath
     && !isAlreadyAdded
+    && (browseErrorReason === null || browseErrorReason === 'not-found')
     && (
       (hasTrailingPathSeparator(query) && isBrowseDirectoryMissing)
       || (!hasTrailingPathSeparator(query) && browseFilterQuery.trim().length > 0 && exactEntry === null)
     )
   );
-  const canAddProject = !isConfirming && !isOpeningFinder && !isAlreadyAdded && Boolean(targetPath);
+  const canAddProject = !isConfirming
+    && !isOpeningFinder
+    && !isAlreadyAdded
+    && (mode === 'add-project'
+      ? browseErrorReason !== 'os-permission'
+        && browseErrorReason !== 'invalid-response'
+        && browseErrorReason !== 'unknown'
+      : browseErrorReason === null)
+    && Boolean(targetPath);
   const canSubmitClone = canAddProject && cloneRemoteUrl.trim().length > 0;
   const highlightedRow = rows[highlightedIndex] ?? null;
   const hasHighlightedBrowseItem = Boolean(
@@ -477,7 +497,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [browseToDisplayPath, browseToEntry]);
 
   const handleOpenInFinder = React.useCallback(async () => {
-    if (!isDesktop || isOpeningFinder) return;
+    if (!canRequestAccess || isOpeningFinder) return;
     setIsOpeningFinder(true);
     try {
       const result = await requestAccess(targetPath);
@@ -506,7 +526,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     } finally {
       setIsOpeningFinder(false);
     }
-  }, [finalizeSelection, isDesktop, isOpeningFinder, requestAccess, startAccessing, t, targetPath]);
+  }, [canRequestAccess, finalizeSelection, isOpeningFinder, requestAccess, startAccessing, t, targetPath]);
 
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
@@ -614,6 +634,24 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           <div className="py-10 text-center typography-ui-label text-muted-foreground">
             {t('directoryExplorerDialog.browse.loading')}
           </div>
+        ) : browseErrorReason && browseErrorReason !== 'not-found' ? (
+          <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+            <div className="typography-ui-label text-status-error">
+              {browseErrorReason === 'os-permission'
+                ? t('directoryExplorerDialog.browse.permissionDenied')
+                : t('directoryExplorerDialog.browse.loadFailed')}
+            </div>
+            <div className="flex items-center gap-2">
+              {browseErrorReason === 'os-permission' && canRequestAccess ? (
+                <Button size="xs" onClick={() => void handleOpenInFinder()} disabled={isOpeningFinder}>
+                  {t('directoryExplorerDialog.browse.grantAccess')}
+                </Button>
+              ) : null}
+              <Button variant="outline" size="xs" onClick={() => setBrowseReloadKey((key) => key + 1)}>
+                {t('directoryExplorerDialog.browse.retry')}
+              </Button>
+            </div>
+          </div>
         ) : rows.length === 0 ? (
           <div className="py-10 text-center typography-ui-label text-muted-foreground">
             {t('directoryExplorerDialog.browse.empty')}
@@ -708,7 +746,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     <>
       {!isMobile ? footerHints : null}
       <div className={cn('flex w-full flex-row justify-end gap-2 sm:w-auto', isMobile && 'justify-stretch')}>
-        {isDesktop ? (
+        {canRequestAccess ? (
           <Button variant="ghost" size="xs" onClick={handleOpenInFinder} disabled={isConfirming || isOpeningFinder || (canUseCloneMode && isCloneMode)}>
             {isOpeningFinder ? t('directoryExplorerDialog.actions.openingFinder') : t('directoryExplorerDialog.actions.openInFinder')}
           </Button>

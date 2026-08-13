@@ -62,6 +62,22 @@ describe('createWebFilesAPI', () => {
     });
   });
 
+  it('preserves directory permission failures for native recovery', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'Access to directory denied', reason: 'os-permission' },
+      { status: 403 },
+    ));
+
+    await expect(api.listDirectory('/restricted')).rejects.toMatchObject({
+      name: 'FilesystemError',
+      reason: 'os-permission',
+      status: 403,
+    });
+  });
+
   it('opts into outside-workspace directory creation for project onboarding', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/current-workspace' });

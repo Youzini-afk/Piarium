@@ -323,7 +323,21 @@ describe('fs list', () => {
     const res = await callList(handler, { path: '/repo/.opencode/plans' });
 
     expect(res.statusCode).toBe(404);
-    expect(res.body).toEqual({ error: 'Directory not found' });
+    expect(res.body).toEqual({ error: 'Directory not found', reason: 'not-found' });
+  });
+
+  it('returns a stable reason for operating-system permission failures', async () => {
+    const denied = Object.assign(new Error('denied'), { code: 'EPERM' });
+    const handler = registerList({
+      realpath: vi.fn(async () => { throw denied; }),
+      stat: vi.fn(),
+      readdir: vi.fn(),
+    });
+
+    const res = await callList(handler, { path: '/restricted' });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access to directory denied', reason: 'os-permission' });
   });
 });
 
