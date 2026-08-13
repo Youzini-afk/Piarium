@@ -5,6 +5,7 @@ import {
   buildEmbeddedSessionChatURL,
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
   EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+  getActiveEmbeddedSessionChatTab,
   getOrCreateEmbeddedSessionChatURL,
   getEmbeddedSessionChatOriginSessionId,
   isEmbeddedSessionChat,
@@ -53,6 +54,12 @@ afterAll(() => {
 });
 
 describe('embedded session chat URL', () => {
+  test('selects only the active persisted chat tab for mounting', () => {
+    const tabs = [{ id: 'chat-1' }, { id: 'chat-2' }, { id: 'chat-3' }];
+    expect(getActiveEmbeddedSessionChatTab(tabs, 'chat-2')).toBe(tabs[1]);
+    expect(getActiveEmbeddedSessionChatTab(tabs, null)).toBeNull();
+  });
+
   test('includes compact parent theme bootstrap data', () => {
     const currentTheme = makeTheme('custom-dark', 'dark');
 

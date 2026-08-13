@@ -51,6 +51,7 @@ import { PiTimeline } from './PiTimeline';
 import { PiWorkStatusPanel } from './PiWorkStatusPanel';
 import { piSessionTitle } from './sessionPresentation';
 import { renderPiComposerSubmission } from './piComposerSubmission';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
 
 interface PiChatViewProps {
   active?: boolean;
@@ -350,6 +351,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         pinned,
         type: 'context.set',
       });
+      requestAnimationFrame(focusChatInput);
     } catch (error) {
       console.warn('[pi-session] context pin failed:', error);
       toast.error(t('chat.messageBody.actions.contextPinFailed'));
