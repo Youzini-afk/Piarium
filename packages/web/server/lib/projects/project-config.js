@@ -620,6 +620,12 @@ export const createProjectConfigRuntime = (deps) => {
           // Only a genuinely removed file removes its runtime projection.
           continue;
         }
+
+        // A loop file owns exactly one runtime projection. Older versions
+        // could leave a duplicate row behind after a frontmatter rename; keep
+        // the first persisted task (and therefore its runtime history) and
+        // unschedule every later orphan for the same authoritative file.
+        if (consumedPaths.has(task.loopFile)) continue;
         consumedPaths.add(task.loopFile);
 
         const selectedName = loop.effectiveName || task.name;

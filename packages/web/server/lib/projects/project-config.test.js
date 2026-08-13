@@ -230,6 +230,43 @@ describe('project-config runtime', () => {
     }
   });
 
+  it('removes orphan duplicate projections owned by the same loop file', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const definition = {
+        name: 'digest',
+        enabled: true,
+        schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
+        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-4.1' },
+      };
+      const filePath = '/repo/.agents/loops/digest.md';
+      const first = await runtime.reconcileLoopTasks('project-test', [{
+        definition,
+        filePath,
+        revision: 'rev-1',
+        scope: 'project',
+      }]);
+      const original = first[0];
+
+      await runtime.upsertScheduledTask('project-test', {
+        ...original,
+        id: 'orphan-duplicate',
+      });
+      const reconciled = await runtime.reconcileLoopTasks('project-test', [{
+        definition,
+        filePath,
+        revision: 'rev-2',
+        scope: 'project',
+      }]);
+
+      expect(reconciled).toHaveLength(1);
+      expect(reconciled[0].id).toBe(original.id);
+      expect(reconciled[0].loopRevision).toBe('rev-2');
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('keeps the last good loop projection while its file is malformed', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
