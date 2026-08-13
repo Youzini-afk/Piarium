@@ -34,6 +34,18 @@ describe('terminal state reconciliation', () => {
     expect(/^tab-\d+$/.test(tabId)).toBe(false);
   });
 
+  test('keeps default labels unique after a tab closes', () => {
+    setup();
+    const second = useTerminalStore.getState().createTab('/repo');
+    useTerminalStore.getState().createTab('/repo');
+    useTerminalStore.getState().closeTab('/repo', second);
+    useTerminalStore.getState().createTab('/repo');
+
+    expect(
+      useTerminalStore.getState().getDirectoryState('/repo')!.tabs.map((tab) => tab.label),
+    ).toEqual(['Terminal', 'Terminal 3', 'Terminal 4']);
+  });
+
   test('does not let stale snapshots replace newer output', () => {
     const tabId = setup();
     useTerminalStore.getState().replaceBuffer('/repo', tabId, 'new', 8);

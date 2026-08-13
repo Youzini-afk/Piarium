@@ -1107,6 +1107,8 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.editorEmpty.description": "Elige un archivo del árbol para empezar a editar.",
   "contextRail.surface.editor.description": "Editar archivos del proyecto",
   "contextRail.surface.git.description": "Commits, ramas y pull requests",
+  "contextRail.surface.git.changesCountAria": "{label}, {count} archivos modificados",
+  "contextRail.surface.git.changesCountTooltip": "{count} archivos modificados",
   "contextRail.surface.terminal.description": "Terminal integrada",
   "contextRail.surface.diff.description": "Revisar cambios en curso",
   "contextRail.surface.plan.description": "Ver el plan actual",

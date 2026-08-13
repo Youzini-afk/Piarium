@@ -24,6 +24,7 @@ import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinne
  */
 
 const EDGE_ZONE = 32; // px from a side where the swipe must begin
+const ANDROID_EDGE_ZONE = 80; // stay outside Android's system Back gesture strip
 const MIN_DISTANCE = 64; // px of horizontal travel required to commit a switch
 const MAX_OFF_AXIS_RATIO = 0.7; // |dy| must stay below |dx| * this (keep it horizontal)
 
@@ -76,6 +77,8 @@ export const useEdgeSwipeSessionSwitch = (
   React.useEffect(() => {
     const element = ref.current;
     if (!element) return;
+    const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
+    const edgeZone = platform === 'android' ? ANDROID_EDGE_ZONE : EDGE_ZONE;
 
     let tracking = false;
     let fromLeftEdge = false;
@@ -89,8 +92,8 @@ export const useEdgeSwipeSessionSwitch = (
       }
       const touch = event.touches[0];
       const width = element.clientWidth;
-      const nearLeft = touch.clientX <= EDGE_ZONE;
-      const nearRight = touch.clientX >= width - EDGE_ZONE;
+      const nearLeft = touch.clientX <= edgeZone;
+      const nearRight = touch.clientX >= width - edgeZone;
       tracking = nearLeft || nearRight;
       fromLeftEdge = nearLeft;
       startX = touch.clientX;

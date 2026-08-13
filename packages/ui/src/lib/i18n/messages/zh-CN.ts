@@ -1107,6 +1107,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.editorEmpty.description': '从文件树中选择一个文件开始编辑。',
   'contextRail.surface.editor.description': '编辑项目文件',
   'contextRail.surface.git.description': '提交、分支和拉取请求',
+  'contextRail.surface.git.changesCountAria': '{label}，{count} 个更改的文件',
+  'contextRail.surface.git.changesCountTooltip': '{count} 个更改的文件',
   'contextRail.surface.terminal.description': '内置终端',
   'contextRail.surface.diff.description': '查看工作区更改',
   'contextRail.surface.plan.description': '查看当前计划',

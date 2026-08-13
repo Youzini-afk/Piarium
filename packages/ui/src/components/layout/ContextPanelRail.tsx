@@ -36,18 +36,24 @@ const EMPTY_TABS: never[] = [];
 type RailItemProps = {
   surface: ContextSurfaceDescriptor;
   isActive: boolean;
-  showActivityDot: boolean;
   label: string;
   description: string;
+  badgeAriaLabel?: string;
+  badgeCount?: number;
+  badgeDescription?: string;
   onSelect: (surface: ContextSurfaceDescriptor) => void;
 };
+
+const formatBadgeCount = (count: number): string => count > 99 ? '99+' : String(count);
 
 const ContextPanelRailItem: React.FC<RailItemProps> = ({
   surface,
   isActive,
-  showActivityDot,
   label,
   description,
+  badgeAriaLabel,
+  badgeCount,
+  badgeDescription,
   onSelect,
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -67,7 +73,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             {...attributes}
             {...listeners}
             onClick={() => onSelect(surface)}
-            aria-label={label}
+            aria-label={badgeAriaLabel ?? label}
             aria-pressed={isActive}
             className={cn(
               'flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors',
@@ -77,11 +83,13 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             )}
           >
             <Icon name={surface.icon} className="h-[18px] w-[18px]" />
-            {showActivityDot ? (
+            {badgeCount !== undefined && badgeCount > 0 ? (
               <span
                 aria-hidden="true"
-                className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-              />
+                className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-muted px-1 text-[0.625rem] font-medium leading-none text-muted-foreground"
+              >
+                {formatBadgeCount(badgeCount)}
+              </span>
             ) : null}
           </button>
         </TooltipTrigger>
@@ -89,6 +97,9 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
           <div className="flex flex-col gap-0.5">
             <span>{label}</span>
             <span className="typography-micro text-muted-foreground">{description}</span>
+            {badgeDescription ? (
+              <span className="typography-micro text-muted-foreground">{badgeDescription}</span>
+            ) : null}
           </div>
         </TooltipContent>
       </Tooltip>
@@ -162,17 +173,29 @@ export const ContextPanelRail: React.FC = () => {
     >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={surfaces.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
-          {surfaces.map((surface) => (
-            <ContextPanelRailItem
-              key={surface.id}
-              surface={surface}
-              isActive={activeMode === surface.mode}
-              showActivityDot={surface.id === 'git' && changedFilesCount > 0}
-              label={t(surface.labelKey)}
-              description={t(surface.descriptionKey)}
-              onSelect={(selected) => openContextSurface(directoryKey, selected.mode)}
-            />
-          ))}
+          {surfaces.map((surface) => {
+            const label = t(surface.labelKey);
+            const badgeCount = surface.id === 'git' && changedFilesCount > 0
+              ? changedFilesCount
+              : undefined;
+            return (
+              <ContextPanelRailItem
+                key={surface.id}
+                surface={surface}
+                isActive={activeMode === surface.mode}
+                label={label}
+                description={t(surface.descriptionKey)}
+                badgeCount={badgeCount}
+                badgeAriaLabel={badgeCount === undefined
+                  ? undefined
+                  : t('contextRail.surface.git.changesCountAria', { label, count: badgeCount })}
+                badgeDescription={badgeCount === undefined
+                  ? undefined
+                  : t('contextRail.surface.git.changesCountTooltip', { count: badgeCount })}
+                onSelect={(selected) => openContextSurface(directoryKey, selected.mode)}
+              />
+            );
+          })}
         </SortableContext>
       </DndContext>
     </nav>

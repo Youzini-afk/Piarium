@@ -1107,6 +1107,8 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.editorEmpty.description": "Виберіть файл у дереві, щоб почати редагування.",
   "contextRail.surface.editor.description": "Редагування файлів проєкту",
   "contextRail.surface.git.description": "Коміти, гілки та pull request-и",
+  "contextRail.surface.git.changesCountAria": "{label}, {count} змінених файлів",
+  "contextRail.surface.git.changesCountTooltip": "{count} змінених файлів",
   "contextRail.surface.terminal.description": "Вбудований термінал",
   "contextRail.surface.diff.description": "Перегляд поточних змін",
   "contextRail.surface.plan.description": "Перегляд поточного плану",

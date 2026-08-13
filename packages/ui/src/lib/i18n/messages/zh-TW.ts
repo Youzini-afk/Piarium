@@ -1109,6 +1109,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.editorEmpty.description': '從檔案樹選擇檔案開始編輯。',
   'contextRail.surface.editor.description': '編輯專案檔案',
   'contextRail.surface.git.description': '提交、分支與拉取請求',
+  'contextRail.surface.git.changesCountAria': '{label}，{count} 個變更的檔案',
+  'contextRail.surface.git.changesCountTooltip': '{count} 個變更的檔案',
   'contextRail.surface.terminal.description': '內建終端機',
   'contextRail.surface.diff.description': '檢視工作區變更',
   'contextRail.surface.plan.description': '檢視目前計畫',

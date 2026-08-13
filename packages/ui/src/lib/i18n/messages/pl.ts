@@ -1421,6 +1421,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.editorEmpty.description': 'Wybierz plik z drzewa, aby rozpocząć edycję.',
   'contextRail.surface.editor.description': 'Edytuj pliki projektu',
   'contextRail.surface.git.description': 'Commity, gałęzie i pull requesty',
+  'contextRail.surface.git.changesCountAria': '{label}, {count} zmienionych plików',
+  'contextRail.surface.git.changesCountTooltip': '{count} zmienionych plików',
   'contextRail.surface.terminal.description': 'Wbudowany terminal',
   'contextRail.surface.diff.description': 'Przeglądaj bieżące zmiany',
   'contextRail.surface.plan.description': 'Zobacz bieżący plan',
