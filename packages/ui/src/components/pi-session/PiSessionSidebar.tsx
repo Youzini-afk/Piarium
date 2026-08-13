@@ -29,6 +29,7 @@ import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import {
   selectActivePiSessions,
   selectArchivedPiSessions,
@@ -45,6 +46,7 @@ import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
 import {
   buildPiSessionForest,
   collectPiSessionSubtreeIds,
+  countPiSessionSubtreeValues,
   filterPiSessionForest,
   piSessionTitle,
   type PiSessionNode,
@@ -142,6 +144,7 @@ interface SessionRowProps {
   onToggleExpanded(sessionId: string): void;
   onTogglePinned(session: SessionSummary): void;
   onUnarchive(session: SessionSummary): void;
+  pendingDialogCountBySession: Readonly<Record<string, number>>;
   pinnedIds: Set<string>;
   untitled: string;
 }
@@ -158,6 +161,11 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
   const timeLabel = formatSessionCompactDateLabel(Number.isFinite(timestamp) ? timestamp : Date.now());
   const isCurrent = props.currentSessionId === session.id;
   const isBusy = props.busySessionIds.has(session.id);
+  const pendingDialogCount = countPiSessionSubtreeValues(
+    node,
+    props.pendingDialogCountBySession,
+    hasChildren && !expanded,
+  );
   const attention = props.attentionBySession[session.id];
   const archived = session.archivedAt !== undefined;
   const pendingRenameRef = React.useRef(false);
@@ -220,6 +228,16 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
             className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
           >
             <span className="min-w-0 flex-1 truncate typography-ui-label font-normal">{title}</span>
+            {pendingDialogCount > 0 ? (
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 rounded bg-[var(--status-info)]/10 px-1 py-0.5 typography-micro text-[var(--status-info)]"
+                title={t('chat.questionCard.inputNeeded')}
+                aria-label={t('chat.questionCard.inputNeeded')}
+              >
+                <Icon name="question" className="size-3" />
+                <span>{pendingDialogCount}</span>
+              </span>
+            ) : null}
             <span className="shrink-0 typography-micro text-muted-foreground/70 group-hover/session:hidden">
               {timeLabel}
             </span>
@@ -319,6 +337,13 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
   const deleteSession = usePiSessionStore((state) => state.deleteSession);
   const records = usePiSessionStore((state) => state.records);
+  const pendingDialogCountBySession = usePiInteractionStore((state) => {
+    const counts: Record<string, number> = {};
+    for (const dialog of state.dialogs) {
+      counts[dialog.sessionId] = (counts[dialog.sessionId] ?? 0) + 1;
+    }
+    return counts;
+  });
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
@@ -599,6 +624,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       editingId={editingId}
                       editingName={editingName}
                       expandedIds={expandedIds}
+                      pendingDialogCountBySession={pendingDialogCountBySession}
                       pinnedIds={pinnedIds}
                       untitled={untitled}
                       onSelect={(session) => void handleSelect(session)}

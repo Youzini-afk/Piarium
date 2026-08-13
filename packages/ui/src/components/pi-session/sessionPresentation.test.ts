@@ -3,6 +3,7 @@ import type { SessionSummary } from '@piarium/protocol';
 import {
   buildPiSessionForest,
   collectPiSessionSubtreeIds,
+  countPiSessionSubtreeValues,
   comparePiSessions,
   filterPiSessionForest,
   piSessionTitle,
@@ -91,6 +92,18 @@ describe('Pi session presentation', () => {
       'child-b',
     ]);
     expect(collectPiSessionSubtreeIds(summaries, 'cycle-a')).toEqual(['cycle-a', 'cycle-b']);
+  });
+
+  test('rolls up pending interactions only while child rows are hidden', () => {
+    const root = buildPiSessionForest([
+      session('parent'),
+      session('child', { parentId: 'parent' }),
+      session('grandchild', { parentId: 'child' }),
+    ])[0]!;
+    const counts = { parent: 1, child: 2, grandchild: 1 };
+
+    expect(countPiSessionSubtreeValues(root, counts, false)).toBe(1);
+    expect(countPiSessionSubtreeValues(root, counts, true)).toBe(4);
   });
 
   test('searches full session text and preserves matching ancestors', () => {

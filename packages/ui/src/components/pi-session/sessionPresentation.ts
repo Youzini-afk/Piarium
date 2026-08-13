@@ -7,6 +7,19 @@ export interface PiSessionNode {
 
 export type PiSessionPinnedPredicate = (session: SessionSummary) => boolean;
 
+export const countPiSessionSubtreeValues = (
+  node: PiSessionNode,
+  values: Readonly<Record<string, number>>,
+  includeChildren: boolean,
+): number => {
+  const own = values[node.session.id] ?? 0;
+  if (!includeChildren) return own;
+  return own + node.children.reduce(
+    (count, child) => count + countPiSessionSubtreeValues(child, values, true),
+    0,
+  );
+};
+
 const timestamp = (value: string): number => {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
