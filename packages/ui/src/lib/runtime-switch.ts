@@ -76,11 +76,44 @@ const sameOrigin = (left: string, right: string): boolean => {
 };
 
 export const getRuntimeApiBaseUrl = (): string => activeApiBaseUrl || readInjectedApiBaseUrl();
+
+let cachedRuntimeKey = '';
+let cachedActiveApiBaseUrl: string | null = null;
+let cachedRawApiBaseUrl: string | undefined;
+let cachedRawLocalOrigin: string | undefined;
+
+const readRawRuntimeGlobal = (
+  key: '__PIARIUM_API_BASE_URL__' | '__PIARIUM_LOCAL_ORIGIN__',
+): string | undefined => {
+  if (typeof window === 'undefined') return undefined;
+  const value = (window as typeof window & {
+    __PIARIUM_API_BASE_URL__?: string;
+    __PIARIUM_LOCAL_ORIGIN__?: string;
+  })[key];
+  return typeof value === 'string' ? value : undefined;
+};
+
 export const getRuntimeKey = (): string => {
   if (activeRuntimeKey) return activeRuntimeKey;
+
+  const rawApiBaseUrl = readRawRuntimeGlobal('__PIARIUM_API_BASE_URL__');
+  const rawLocalOrigin = readRawRuntimeGlobal('__PIARIUM_LOCAL_ORIGIN__');
+  if (
+    cachedActiveApiBaseUrl === activeApiBaseUrl
+    && cachedRawApiBaseUrl === rawApiBaseUrl
+    && cachedRawLocalOrigin === rawLocalOrigin
+  ) {
+    return cachedRuntimeKey;
+  }
+
   const apiBaseUrl = getRuntimeApiBaseUrl();
-  if (sameOrigin(apiBaseUrl, readInjectedLocalOrigin())) return 'local';
-  return normalizeRuntimeUrlKey(apiBaseUrl);
+  cachedRuntimeKey = sameOrigin(apiBaseUrl, readInjectedLocalOrigin())
+    ? 'local'
+    : normalizeRuntimeUrlKey(apiBaseUrl);
+  cachedActiveApiBaseUrl = activeApiBaseUrl;
+  cachedRawApiBaseUrl = rawApiBaseUrl;
+  cachedRawLocalOrigin = rawLocalOrigin;
+  return cachedRuntimeKey;
 };
 
 export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null; runtimeKey?: string | null } = {}): void => {
