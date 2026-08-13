@@ -268,3 +268,31 @@ export const parsePairingConnectionPayload = (value: string): PairingConnectionP
     return null;
   }
 };
+
+// Old Android WebViews can mis-parse non-special schemes such as
+// `piarium://connect`. This sibling reads the two query fields directly, then
+// delegates to the same payload normalization used by the URL-based parser.
+export const parsePairingConnectionPayloadString = (value: string): PairingConnectionPayload | null => {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
+  const question = trimmed.indexOf('?');
+  if (question === -1 || !/^piarium:\/\/connect\/?$/i.test(trimmed.slice(0, question))) return null;
+  let version: string | null = null;
+  let encoded: string | null = null;
+  for (const part of trimmed.slice(question + 1).split('&')) {
+    const equals = part.indexOf('=');
+    if (equals === -1) continue;
+    const key = part.slice(0, equals);
+    const fieldValue = part.slice(equals + 1);
+    if (key === 'v') version = fieldValue;
+    else if (key === 'p') encoded = fieldValue;
+  }
+  if (version !== '2' || !encoded || encoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
+  const decoded = base64UrlDecode(encoded);
+  if (!decoded || decoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
+  try {
+    return normalizePairingPayload(JSON.parse(decoded) as unknown);
+  } catch {
+    return null;
+  }
+};

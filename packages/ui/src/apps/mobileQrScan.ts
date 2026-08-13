@@ -10,7 +10,11 @@
 // at runtime instead of importing the package so the web build stays dependency-free
 // and the browser-hosted mobile UI degrades to `unsupported` cleanly.
 
-import { parsePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
+import {
+  parsePairingConnectionPayload,
+  parsePairingConnectionPayloadString,
+  type PairingConnectionPayload,
+} from '@/lib/connectionPayload';
 
 export type MobileConnectionPayload = {
   url: string;
@@ -116,7 +120,8 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   if (!trimmed) return null;
 
   if (/^piarium:\/\//i.test(trimmed)) {
-    const pairing = parsePairingConnectionPayload(trimmed);
+    const pairing = parsePairingConnectionPayload(trimmed)
+      ?? parsePairingConnectionPayloadString(trimmed);
     return pairing ? { pairing } : null;
   }
 

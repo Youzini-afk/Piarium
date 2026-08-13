@@ -115,6 +115,29 @@ describe('remote client auth runtime', () => {
     }
   });
 
+  it('keeps relay demand after a client is observed using the relay', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const created = await runtime.createClient({ label: 'Phone' });
+      expect(created.client.usesRelay).toBe(false);
+      expect(await runtime.hasActiveRelayClients()).toBe(false);
+
+      const relayed = await runtime.authenticateBearerToken(created.token, {
+        headers: { 'x-piarium-relay-connection': 'connection-1' },
+      });
+      expect(relayed?.client.usesRelay).toBe(true);
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+
+      await runtime.authenticateBearerToken(created.token, { headers: {} });
+      const [client] = await runtime.listClients();
+      expect(client.usesRelay).toBe(true);
+      expect(client.lastTransport).toBe('direct');
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('does not resurrect revoked clients after concurrent auth traffic', async () => {
     const { dir, runtime } = await createRuntime();
     try {

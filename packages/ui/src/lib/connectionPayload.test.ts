@@ -4,6 +4,7 @@ import {
   buildPairingConnectionPayload,
   encodePairingConnectionPayload,
   parsePairingConnectionPayload,
+  parsePairingConnectionPayloadString,
 } from './connectionPayload';
 
 const hostEncPubJwk = { kty: 'EC', crv: 'P-256', x: 'eHhY', y: 'eVlZ' } as const;
@@ -101,5 +102,18 @@ describe('connection payload helpers', () => {
       candidates: [{ type: 'lan', url: 'http://runtime.example' }],
     })).toString('base64url');
     expect(parsePairingConnectionPayload(`piarium://connect?v=2&p=${expired}`)).toBeNull();
+  });
+
+  test('parses pairing links without relying on the WebView URL implementation', () => {
+    const encoded = encodePairingConnectionPayload(buildPairingConnectionPayload({
+      pairingId: 'pair_android',
+      secret: 'one-time-secret',
+      candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096', priority: 10 }],
+    }));
+    const mixedCase = encoded.replace('piarium://connect', 'Piarium://CONNECT');
+
+    expect(parsePairingConnectionPayloadString(mixedCase)).toEqual(parsePairingConnectionPayload(encoded));
+    expect(parsePairingConnectionPayloadString('piarium://connect?v=1&p=unused')).toBeNull();
+    expect(parsePairingConnectionPayloadString('piarium:///connect?v=2&p=unused')).toBeNull();
   });
 });

@@ -238,14 +238,14 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     });
   };
 
-  // Relay-transport demand from paired devices: any non-revoked, non-expired
-  // client that was paired over the relay.
+  // Relay demand includes both pairing-time intent and the authoritative fact
+  // that a device has actually reached this host through the relay.
   const hasActiveRelayClients = async () => {
     return withStoreMutation(async () => {
       const store = await readStore();
       const now = Date.now();
       return store.clients.some((client) => {
-        if (client.usesRelay !== true) return false;
+        if (client.usesRelay !== true && client.lastTransport !== 'relay') return false;
         if (client.revokedAt) return false;
         const expires = Date.parse(client.expiresAt || '');
         return !Number.isFinite(expires) || expires > now;
@@ -345,7 +345,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     }
     // Which transport carried this request: the relay tunnel proxy stamps every
     // forwarded request with x-piarium-relay-connection; anything else is a
-    // direct (local/LAN/tunnel-URL) request. Display-only device metadata.
+    // direct (local/LAN/tunnel-URL) request. This also drives relay demand.
     const transport = req?.headers?.['x-piarium-relay-connection'] ? 'relay' : 'direct';
     return withStoreMutation(async () => {
       const tokenHash = hashToken(token);
@@ -355,9 +355,14 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return null;
       const now = Date.now();
       const lastUsedAt = Date.parse(client.lastUsedAt || '');
+      // A relayed request proves this client depends on the relay even if it was
+      // created before usesRelay existed. Keep the signal sticky: a later LAN
+      // request does not make the remote path unnecessary.
+      const healUsesRelay = transport === 'relay' && client.usesRelay !== true;
+      if (healUsesRelay) client.usesRelay = true;
       // Write on the throttle interval — or immediately when the transport
       // changed, so a LAN⇄relay switch is visible right away, not a minute late.
-      if (!Number.isFinite(lastUsedAt) || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS || client.lastTransport !== transport) {
+      if (healUsesRelay || !Number.isFinite(lastUsedAt) || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS || client.lastTransport !== transport) {
         client.lastUsedAt = new Date(now).toISOString();
         client.lastTransport = transport;
         await writeStore(store);

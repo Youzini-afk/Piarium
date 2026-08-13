@@ -796,11 +796,18 @@ async function main(options = {}) {
       process,
     }),
     hasRelayDemand: async () => {
-      const [pending, paired] = await Promise.all([
-        clientPairingRuntime.hasActiveRelaySession().catch(() => false),
-        remoteClientAuthRuntime.hasActiveRelayClients().catch(() => false),
+      // A failed store read is unknown demand, not evidence that no device uses
+      // the relay. Keep the current lifecycle state until both stores can be
+      // read reliably; either affirmative result still wins immediately.
+      const [pending, paired] = await Promise.allSettled([
+        clientPairingRuntime.hasActiveRelaySession(),
+        remoteClientAuthRuntime.hasActiveRelayClients(),
       ]);
-      return pending || paired;
+      if (pending.status === 'fulfilled' && pending.value) return true;
+      if (paired.status === 'fulfilled' && paired.value) return true;
+      if (pending.status === 'rejected') throw pending.reason;
+      if (paired.status === 'rejected') throw paired.reason;
+      return false;
     },
   });
   relayServiceInstance = relayService;

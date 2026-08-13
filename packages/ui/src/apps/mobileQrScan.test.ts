@@ -29,6 +29,16 @@ describe('parseConnectionPayload', () => {
     expect(payload.pairing.candidates.map((c) => c.type)).toEqual(['lan', 'relay']);
   });
 
+  test('accepts a pairing link through the Android string fallback', () => {
+    const url = encodePairingConnectionPayload(buildPairingConnectionPayload({
+      pairingId: 'pair_android',
+      secret: 'one-time',
+      candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096', priority: 10 }],
+    })).replace('piarium://connect', 'Piarium://CONNECT');
+    const payload = parseConnectionPayload(url);
+    expect(payload && 'pairing' in payload ? payload.pairing.pairingId : null).toBe('pair_android');
+  });
+
   test('rejects non-connection and legacy/relay-offer payloads', () => {
     expect(parseConnectionPayload('')).toBeNull();
     expect(parseConnectionPayload('hello world')).toBeNull();
