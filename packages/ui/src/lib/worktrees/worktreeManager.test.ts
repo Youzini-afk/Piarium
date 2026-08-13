@@ -58,7 +58,13 @@ mock.module('@/lib/gitApi', () => ({
   },
 }));
 
-const { createWorktree, getLatestWorktreeMetadata, listProjectWorktrees, worktreeMapsEqual } = await import('./worktreeManager');
+const {
+  createWorktree,
+  getLatestWorktreeMetadata,
+  listProjectWorktrees,
+  partitionWorktreesByRegisteredProject,
+  worktreeMapsEqual,
+} = await import('./worktreeManager');
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -229,5 +235,26 @@ describe('worktreeMapsEqual', () => {
       ['/repo', [wt('/r/main', 'main'), wt('/r/feat', 'feat'), wt('/r/old', 'new-branch')]],
     ]);
     expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+});
+
+describe('partitionWorktreesByRegisteredProject', () => {
+  const worktree = (path: string, projectDirectory = '/repo'): WorktreeMetadata => ({
+    path,
+    projectDirectory,
+    branch: path.split('/').pop() ?? path,
+    label: path.split('/').pop() ?? path,
+  });
+
+  test('shows a shared topology once and omits separately configured checkouts', () => {
+    const projects = [{ path: '/repo' }, { path: '/worktrees/alpha' }];
+    const topology = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [worktree('/worktrees/alpha'), worktree('/worktrees/loose')]],
+      ['/worktrees/alpha', [worktree('/repo'), worktree('/worktrees/loose')]],
+    ]);
+
+    const result = partitionWorktreesByRegisteredProject(projects, topology);
+    expect([...result.keys()]).toEqual(['/repo']);
+    expect(result.get('/repo')?.map((entry) => entry.path)).toEqual(['/worktrees/loose']);
   });
 });

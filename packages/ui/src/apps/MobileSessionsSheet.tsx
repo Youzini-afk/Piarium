@@ -43,7 +43,10 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import {
+  listProjectWorktrees,
+  partitionWorktreesByRegisteredProject,
+} from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
@@ -597,7 +600,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           if (entry[2]) nextGitProjectPaths.add(entry[0]);
         }
       }
-      setWorktreesByProject(next);
+      setWorktreesByProject(partitionWorktreesByRegisteredProject(projects, next));
       setGitProjectPaths(nextGitProjectPaths);
     };
     void run();

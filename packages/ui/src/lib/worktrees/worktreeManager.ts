@@ -214,6 +214,52 @@ export const worktreeMapsEqual = (
   return true;
 };
 
+/** Assign one shared Git worktree topology to one configured project. */
+export const partitionWorktreesByRegisteredProject = (
+  projects: ReadonlyArray<Pick<ProjectRef, 'path'>>,
+  worktreesByProject: ReadonlyMap<string, WorktreeMetadata[]>,
+): Map<string, WorktreeMetadata[]> => {
+  const configuredOrder = new Map<string, number>();
+  projects.forEach((project, index) => {
+    const projectPath = normalizePath(project.path.trim());
+    if (projectPath && !configuredOrder.has(projectPath)) configuredOrder.set(projectPath, index);
+  });
+
+  type Source = { projectIndex: number; projectPath: string; worktrees: WorktreeMetadata[] };
+  const sourcesByRepository = new Map<string, Source[]>();
+  for (const [rawProjectPath, worktrees] of worktreesByProject) {
+    if (worktrees.length === 0) continue;
+    const projectPath = normalizePath(rawProjectPath.trim());
+    const projectIndex = configuredOrder.get(projectPath);
+    if (!projectPath || projectIndex === undefined) continue;
+    const repositoryRoot = normalizePath(
+      (worktrees.find((worktree) => worktree.projectDirectory?.trim())?.projectDirectory || projectPath).trim(),
+    );
+    if (!repositoryRoot) continue;
+    const sources = sourcesByRepository.get(repositoryRoot) ?? [];
+    sources.push({ projectIndex, projectPath, worktrees });
+    sourcesByRepository.set(repositoryRoot, sources);
+  }
+
+  const result = new Map<string, WorktreeMetadata[]>();
+  for (const [repositoryRoot, sources] of sourcesByRepository) {
+    sources.sort((left, right) => left.projectIndex - right.projectIndex);
+    const first = sources[0];
+    if (!first) continue;
+    const owner = configuredOrder.has(repositoryRoot) ? repositoryRoot : first.projectPath;
+    const topology = sources.find((source) => source.projectPath === owner) ?? first;
+    const seen = new Set<string>();
+    const owned = topology.worktrees.filter((worktree) => {
+      const worktreePath = normalizePath(worktree.path.trim());
+      if (!worktreePath || configuredOrder.has(worktreePath) || seen.has(worktreePath)) return false;
+      seen.add(worktreePath);
+      return true;
+    });
+    if (owned.length > 0) result.set(owner, owned);
+  }
+  return result;
+};
+
 // Cache worktree listings to avoid repeated git worktree list + rev-parse calls
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
 const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
