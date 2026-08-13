@@ -96,6 +96,7 @@ export interface PiSessionStoreState {
     text: string,
     images?: ImageAttachment[],
     instructions?: string,
+    expectedRuntimeKey?: string,
   ): Promise<boolean>;
   forkSession(
     sessionId: string,
@@ -106,6 +107,7 @@ export interface PiSessionStoreState {
   mutateFeatures(
     sessionId: string,
     mutation: PiSessionFeatureMutation,
+    expectedRuntimeKey?: string,
   ): Promise<PiSessionFeatureState>;
   navigateSession(
     sessionId: string,
@@ -118,6 +120,7 @@ export interface PiSessionStoreState {
     text: string,
     images?: ImageAttachment[],
     instructions?: string,
+    expectedRuntimeKey?: string,
   ): Promise<boolean>;
   recoverTo(
     sessionId: string,
@@ -146,6 +149,7 @@ export interface PiSessionStoreState {
     text: string,
     images?: ImageAttachment[],
     instructions?: string,
+    expectedRuntimeKey?: string,
   ): Promise<boolean>;
   undoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult>;
   unarchiveSession(sessionId: string): Promise<SessionSummary>;
@@ -654,10 +658,20 @@ export const createPiSessionStore = (
     const request = async <M extends RuntimeMethod>(
       method: M,
       params: RuntimeMethodParams<M>,
+      requestedRuntimeKey?: string,
     ): Promise<{ result: RuntimeMethodResult<M>; runtimeKey: string }> => {
-      const expectedRuntimeKey = runtime.currentKey();
+      const expectedRuntimeKey = requestedRuntimeKey ?? runtime.currentKey();
       try {
+        if (!contextIsCurrent(expectedRuntimeKey)) {
+          throw new Error(`Pi runtime changed before ${method}`);
+        }
         const connection = await connect();
+        if (
+          connection.runtimeKey !== expectedRuntimeKey
+          || !contextIsCurrent(expectedRuntimeKey)
+        ) {
+          throw new Error(`Pi runtime changed before ${method}`);
+        }
         const result = await connection.client.request(method, params);
         if (!contextIsCurrent(connection.runtimeKey)) {
           throw new Error(`Pi runtime changed during ${method}`);
@@ -820,13 +834,13 @@ export const createPiSessionStore = (
         return result;
       },
 
-      followUp: async (sessionId, text, images, instructions) => {
+      followUp: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
         const { result } = await request('agent.followUp', {
           ...(images === undefined ? {} : { images }),
           ...(instructions === undefined ? {} : { instructions }),
           sessionId,
           text,
-        });
+        }, expectedRuntimeKey);
         return result.accepted;
       },
 
@@ -896,8 +910,12 @@ export const createPiSessionStore = (
         }
       },
 
-      mutateFeatures: async (sessionId, mutation) => {
-        const { result } = await request('session.features.mutate', { mutation, sessionId });
+      mutateFeatures: async (sessionId, mutation, expectedRuntimeKey) => {
+        const { result } = await request(
+          'session.features.mutate',
+          { mutation, sessionId },
+          expectedRuntimeKey,
+        );
         set((state) => ({
           lastError: null,
           records: upsertRecord(state.records, sessionId, (current) => ({
@@ -974,13 +992,13 @@ export const createPiSessionStore = (
         }
       },
 
-      prompt: async (sessionId, text, images, instructions) => {
+      prompt: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
         const { result } = await request('agent.prompt', {
           ...(images === undefined ? {} : { images }),
           ...(instructions === undefined ? {} : { instructions }),
           sessionId,
           text,
-        });
+        }, expectedRuntimeKey);
         return result.accepted;
       },
 
@@ -1177,13 +1195,13 @@ export const createPiSessionStore = (
         }));
       },
 
-      steer: async (sessionId, text, images, instructions) => {
+      steer: async (sessionId, text, images, instructions, expectedRuntimeKey) => {
         const { result } = await request('agent.steer', {
           ...(images === undefined ? {} : { images }),
           ...(instructions === undefined ? {} : { instructions }),
           sessionId,
           text,
-        });
+        }, expectedRuntimeKey);
         return result.accepted;
       },
 

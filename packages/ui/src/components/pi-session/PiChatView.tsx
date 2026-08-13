@@ -219,25 +219,29 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             ? { tokenBudget: settings.sessionGoalDefaultBudget }
             : {}),
           type: 'goal.start',
-        });
+        }, draftRuntimeKey);
         startedGoalId = featureState.goal?.id ?? null;
       }
       let accepted: boolean;
       if (projectPiSessionActivity(snapshot).isWorking) {
         if (followUpBehavior === 'queue') {
-          accepted = await followUp(sessionId, promptText, currentDraft.images, instructions);
+          accepted = await followUp(sessionId, promptText, currentDraft.images, instructions, draftRuntimeKey);
         } else {
-          accepted = await steer(sessionId, promptText, currentDraft.images, instructions);
+          accepted = await steer(sessionId, promptText, currentDraft.images, instructions, draftRuntimeKey);
         }
       } else {
-        accepted = await prompt(sessionId, promptText, currentDraft.images, instructions);
+        accepted = await prompt(sessionId, promptText, currentDraft.images, instructions, draftRuntimeKey);
       }
       if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
       clearPiDraft(sessionId, draftRuntimeKey);
     } catch (error) {
       if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
       if (startedGoalId) {
-        await mutateFeatures(sessionId, { goalId: startedGoalId, type: 'goal.clear' }).catch(() => undefined);
+        await mutateFeatures(
+          sessionId,
+          { goalId: startedGoalId, type: 'goal.clear' },
+          draftRuntimeKey,
+        ).catch(() => undefined);
       }
       if (consumedGoalArm.armed) {
         useSessionGoalArmStore.getState().setArmed(true, consumedGoalArm.objectiveOverride);

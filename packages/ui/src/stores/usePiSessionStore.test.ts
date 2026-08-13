@@ -835,4 +835,20 @@ describe('Pi session store', () => {
     expect(store.getState().summaries).toEqual([]);
     expect(store.getState().currentSessionId).toBeNull();
   });
+
+  test('does not dispatch a captured prompt after the runtime changes', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'agent.prompt') return { accepted: true };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    runtime.switchTo('runtime-b');
+
+    await expect(
+      store.getState().prompt('session-a', 'stay on runtime A', undefined, undefined, 'runtime-a'),
+    ).rejects.toThrow('runtime changed');
+    expect(runtime.calls).toEqual([]);
+  });
 });
