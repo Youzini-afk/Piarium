@@ -28,6 +28,8 @@ type TerminalViewProps = {
     visible?: boolean;
 };
 
+const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;
+
 export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const { t } = useI18n();
     const { terminal, runtime } = useRuntimeAPIs();
@@ -109,7 +111,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
-    const [hasViewportSize, setHasViewportSize] = React.useState(false);
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
     const activeTerminalIdRef = React.useRef<string | null>(null);
@@ -118,6 +119,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const directoryRef = React.useRef<string | null>(effectiveDirectory);
     const terminalControllerRef = React.useRef<TerminalController | null>(null);
     const lastViewportSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
+    const pendingTerminalCreatesRef = React.useRef(new Set<string>());
     const isTerminalVisibleRef = React.useRef(false);
     const previewScanTailRef = React.useRef('');
     const pendingPreviewProbeUrlsRef = React.useRef<Set<string>>(new Set());
@@ -424,7 +426,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
             }
 
             const tab = state.tabs.find((t) => t.id === tabId) ?? state.tabs[0];
-            let terminalId = tab?.terminalSessionId ?? null;
+            const terminalId = tab?.terminalSessionId ?? null;
             const terminalLifecycle = tab?.lifecycle ?? 'idle';
             const isActionTab = Boolean(tab?.label?.startsWith('Action:'));
             const buffer = useTerminalStore.getState().getBuffer(directory, tabId);
@@ -441,10 +443,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                     return;
                 }
 
-                const size = lastViewportSizeRef.current;
-                if (!size && isTerminalVisibleRef.current) {
+                const createKey = `${directory}\u0000${tabId}`;
+                if (pendingTerminalCreatesRef.current.has(createKey)) {
                     return;
                 }
+
+                const initialSize = lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;
+                pendingTerminalCreatesRef.current.add(createKey);
 
                 setConnectionError(null);
                 setIsFatalError(false);
@@ -454,8 +459,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
                     const session = await terminal.createSession({
                         cwd: directory,
                         sessionId: tabId,
-                        cols: size?.cols,
-                        rows: size?.rows,
+                        cols: initialSize.cols,
+                        rows: initialSize.rows,
                         shell: terminalShell,
                         loginShell: terminalLoginShell,
                         ...terminalAppearanceRef.current,
@@ -476,19 +481,33 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
 
                     setTabSessionId(directory, tabId, session.sessionId);
                     if (!stillActive) return;
-                    terminalId = session.sessionId;
-                } catch (error) {
-                    if (!cancelled) {
-                        setConnectionError(
-                            error instanceof Error
-                                ? error.message
-                                : t('terminalView.error.startSessionFailed')
-                        );
-                        setIsFatalError(true);
-                        setIsReconnectPending(false);
-                        setConnecting(directory, tabId, false);
+
+                    const viewportSize = lastViewportSizeRef.current;
+                    if (
+                        viewportSize
+                        && (viewportSize.cols !== initialSize.cols || viewportSize.rows !== initialSize.rows)
+                    ) {
+                        void terminal.resize({ sessionId: session.sessionId, ...viewportSize }).catch(() => {});
                     }
+                    // The stored session ID reruns this effect; that next run
+                    // owns stream startup so this cleanup cannot immediately
+                    // tear down the new stream.
                     return;
+                } catch (error) {
+                    const owningTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((entry) => entry.id === tabId);
+                    if (!owningTab || owningTab.terminalSessionId) return;
+                    setConnecting(directory, tabId, false);
+                    if (directoryRef.current !== directory || activeTabIdRef.current !== tabId) return;
+                    setConnectionError(
+                        error instanceof Error
+                            ? error.message
+                            : t('terminalView.error.startSessionFailed')
+                    );
+                    setIsFatalError(true);
+                    setIsReconnectPending(false);
+                    return;
+                } finally {
+                    pendingTerminalCreatesRef.current.delete(createKey);
                 }
             }
 
@@ -513,7 +532,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         terminalLifecycle,
         activeTabId,
         hasOpenedTerminalViewport,
-        hasViewportSize,
         enableTabs,
         terminalHydrated,
         ensureDirectory,
@@ -568,7 +586,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         resetTerminalPreviewScan();
 
         try {
-            const size = lastViewportSizeRef.current ?? { cols: 80, rows: 24 };
+            const size = lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;
             const restarted = await terminal.restartSession(originalSessionId, { cwd: effectiveDirectory, shell: terminalShell, loginShell: terminalLoginShell, ...size, ...terminalAppearanceRef.current });
             const owningTab = useTerminalStore.getState().getDirectoryState(effectiveDirectory)?.tabs.find((tab) => tab.id === tabId);
             if (owningTab?.terminalSessionId !== originalSessionId) return;
@@ -698,10 +716,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const handleViewportResize = React.useCallback(
         (cols: number, rows: number) => {
             const previous = lastViewportSizeRef.current;
-            if (!previous) {
-                lastViewportSizeRef.current = { cols, rows };
-                if (!terminalIdRef.current) setHasViewportSize(true);
-            } else if (previous.cols !== cols || previous.rows !== rows) {
+            if (!previous || previous.cols !== cols || previous.rows !== rows) {
                 lastViewportSizeRef.current = { cols, rows };
             }
             if (!isTerminalVisibleRef.current) {
