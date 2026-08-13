@@ -7,6 +7,7 @@ import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
+import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSmartSearchRoutes } from '../smart-search/routes.js';
 import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
@@ -16,6 +17,7 @@ import { registerPiRuntimeHttpRoute } from './pi-runtime-http-route.js';
 export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
   let quotaProviders = null;
   let smallModelService = null;
+  let walkthroughService = null;
 
   const getQuotaProviders = async () => {
     quotaProviders ??= await import('../quota/index.js');
@@ -25,6 +27,17 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
   const getSmallModelService = async () => {
     smallModelService ??= await import('../small-model/index.js');
     return smallModelService;
+  };
+
+  const getWalkthroughService = async () => {
+    if (!walkthroughService) {
+      const [service, pullRequest] = await Promise.all([
+        import('../walkthrough/index.js'),
+        import('../walkthrough/pull-request.js'),
+      ]);
+      walkthroughService = { ...service, getPullRequestDiff: pullRequest.getPullRequestDiff };
+    }
+    return walkthroughService;
   };
 
   const registerRoutes = async (app, dependencies) => {
@@ -128,6 +141,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
     });
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
+    registerWalkthroughRoutes(app, { getWalkthroughService });
     registerGitHubRoutes(app);
     registerGitRoutes(app);
     registerWorkspaceRoutes(app, {

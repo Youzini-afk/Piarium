@@ -4,7 +4,7 @@ import path from 'path';
 import { readPiAuthFile as readAuthFile, readPiConfigLayers as readConfigLayers } from '../pi-config/storage.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
-import { callSmallModel } from './call.js';
+import { callSmallModel, resolveProviderLogin } from './call.js';
 
 const PIARIUM_SETTINGS_FILE = path.join(
   process.env.PIARIUM_DATA_DIR
@@ -38,21 +38,47 @@ const readSmallModelSettingsOverride = () => {
 const DEFAULT_CONTEXT_TOKENS = 64_000;
 const OUTPUT_RESERVE_TOKENS = 4_000;
 
-const clampPromptToModelLimit = ({ prompt, catalog, providerID, modelID }) => {
+export const getModelInputCharBudget = ({ catalog, providerID, modelID, outputReserveTokens }) => {
   const limit = catalog?.[providerID]?.models?.[modelID]?.limit;
-  const contextTokens = Number(limit?.context) > 0 ? Number(limit.context) : DEFAULT_CONTEXT_TOKENS;
-  const inputBudgetTokens = Math.max(1_000, contextTokens - OUTPUT_RESERVE_TOKENS);
-  const maxChars = inputBudgetTokens * 4;
-  if (prompt.length <= maxChars) {
+  const known = Number(limit?.context) > 0;
+  const contextTokens = known ? Number(limit.context) : DEFAULT_CONTEXT_TOKENS;
+  const reserve = Number(outputReserveTokens) > 0 ? Number(outputReserveTokens) : OUTPUT_RESERVE_TOKENS;
+  const inputBudgetTokens = Math.max(1_000, contextTokens - reserve);
+  return { maxChars: inputBudgetTokens * 4, contextTokens, contextKnown: known };
+};
+
+const resolveOutputTokens = ({ catalog, providerID, modelID, maxOutputTokens }) => {
+  const requested = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : 0;
+  if (!requested) return undefined;
+  const limit = Number(catalog?.[providerID]?.models?.[modelID]?.limit?.output);
+  return limit > 0 ? Math.min(requested, limit) : requested;
+};
+
+const clampPromptToModelLimit = ({ prompt, system, catalog, providerID, modelID, onOverflow, outputReserveTokens }) => {
+  const { maxChars } = getModelInputCharBudget({ catalog, providerID, modelID, outputReserveTokens });
+  const systemChars = system?.length ?? 0;
+  const requiredChars = prompt.length + systemChars;
+  if (requiredChars <= maxChars) {
     return { prompt, truncated: false };
   }
-  return { prompt: `${prompt.slice(0, maxChars)}…`, truncated: true };
+  const availablePromptChars = maxChars - systemChars;
+  if (onOverflow === 'error' || availablePromptChars < 2) {
+    throw Object.assign(
+      new Error(`Input is too large for ${providerID}/${modelID}: ${requiredChars} characters exceeds the ${maxChars} the model's context allows`),
+      { statusCode: 413, code: 'context-too-small', providerID, modelID, requiredChars, availableChars: maxChars },
+    );
+  }
+  return { prompt: `${prompt.slice(0, availablePromptChars - 1)}…`, truncated: true };
 };
+
+export const __testing = { clampPromptToModelLimit };
 
 const readConfiguredSmallModel = (workingDirectory) => {
   try {
     const { mergedConfig } = readConfigLayers(workingDirectory);
-    const value = mergedConfig?.smallModel;
+    const value = typeof mergedConfig?.smallModel === 'string'
+      ? mergedConfig.smallModel
+      : mergedConfig?.small_model;
     return typeof value === 'string' ? value : null;
   } catch {
     return null;
@@ -63,7 +89,7 @@ const readConfiguredSmallModel = (workingDirectory) => {
  * Generates text with the user's small model, resolved and authenticated
  * entirely server-side from Pi's configuration and auth store.
  */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider = false }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider = false, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
@@ -103,11 +129,23 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     );
   }
 
-  const clamped = clampPromptToModelLimit({
-    prompt: prompt.trim(),
+  const outputTokens = resolveOutputTokens({
     catalog,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
+    maxOutputTokens,
+  });
+
+  const normalizedSystem = typeof system === 'string' && system.trim() ? system.trim() : undefined;
+
+  const clamped = clampPromptToModelLimit({
+    prompt: prompt.trim(),
+    system: normalizedSystem,
+    catalog,
+    providerID: resolved.providerID,
+    modelID: resolved.modelID,
+    onOverflow,
+    outputReserveTokens: outputTokens,
   });
 
   const text = await callSmallModel({
@@ -117,8 +155,11 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     providerID: resolved.providerID,
     modelID: resolved.modelID,
     prompt: clamped.prompt,
-    system: typeof system === 'string' && system.trim() ? system.trim() : undefined,
-    maxOutputTokens,
+    system: normalizedSystem,
+    maxOutputTokens: outputTokens,
+    responseSchema,
+    timeoutMs,
+    signal,
   });
 
   return {
@@ -155,16 +196,58 @@ export function listAuthenticatedProviders() {
 /**
  * Reports which model would be used, without calling it.
  */
-export async function describeSmallModel({ directory, preferredProviderID, preferredModelID } = {}) {
+const resolveReserveTokens = (outputReserveTokens, limits) => (
+  typeof outputReserveTokens === 'function' ? outputReserveTokens(limits) : outputReserveTokens
+);
+
+export async function describeSmallModel({ directory, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel } = {}) {
   const auth = readAuthFile();
   const catalog = await getModelCatalog().catch(() => ({}));
-  const resolved = resolveSmallModel({
-    auth,
+  const explicit = parseModelRef(overrideModel);
+  const resolved = explicit
+    ? { ...explicit, source: 'request' }
+    : resolveSmallModel({
+      auth,
+      catalog,
+      settingsSmallModel: readSmallModelSettingsOverride(),
+      configSmallModel: readConfiguredSmallModel(directory),
+      preferredProviderID,
+      preferredModelID,
+    });
+  if (!resolved) return resolved;
+
+  const entry = catalog?.[resolved.providerID]?.models?.[resolved.modelID];
+  const outputTokenLimit = Number(entry?.limit?.output) > 0 ? Number(entry.limit.output) : null;
+  const { contextTokens, contextKnown } = getModelInputCharBudget({
     catalog,
-    settingsSmallModel: readSmallModelSettingsOverride(),
-    configSmallModel: readConfiguredSmallModel(directory),
-    preferredProviderID,
-    preferredModelID,
+    providerID: resolved.providerID,
+    modelID: resolved.modelID,
   });
-  return resolved;
+  const reserveTokens = resolveReserveTokens(outputReserveTokens, { contextTokens, outputTokenLimit });
+  const { maxChars } = getModelInputCharBudget({
+    catalog,
+    providerID: resolved.providerID,
+    modelID: resolved.modelID,
+    outputReserveTokens: reserveTokens,
+  });
+  const hasLogin = Boolean(resolveProviderLogin({
+    auth,
+    workingDirectory: directory,
+    providerID: resolved.providerID,
+  }));
+
+  return {
+    ...resolved,
+    hasLogin,
+    inputCharBudget: maxChars,
+    contextTokens,
+    contextKnown,
+    outputTokens: Number(reserveTokens) > 0 ? Number(reserveTokens) : null,
+    structuredOutput: typeof entry?.structured_output === 'boolean'
+      ? entry.structured_output
+      : typeof entry?.structuredOutput === 'boolean'
+        ? entry.structuredOutput
+        : null,
+    outputTokenLimit,
+  };
 }

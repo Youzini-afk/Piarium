@@ -1,4 +1,5 @@
 import React from 'react';
+import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
@@ -52,6 +53,8 @@ import {
   getBrowserProxyTargetKey,
   previewProxyTargetCache,
 } from '@/lib/preview/screenshot-capture';
+
+const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((module) => ({ default: module.WalkthroughView })));
 
 const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -157,6 +160,7 @@ const getModeLabel = (
   if (mode === 'chat') return t('contextPanel.mode.chat');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
+  if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'browser') return t('contextPanel.mode.browser');
@@ -245,6 +249,10 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
 
   if (tab.mode === 'diff') {
     return <Icon name="arrow-left-right" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'walkthrough') {
+    return <Icon name="compass-3" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'git') {
@@ -2682,6 +2690,10 @@ export const ContextPanel: React.FC = () => {
     () => tabs.some((tab) => tab.mode === 'terminal'),
     [tabs],
   );
+  const hasWalkthroughTab = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'walkthrough'),
+    [tabs],
+  );
   const BrowserPane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
@@ -2944,7 +2956,14 @@ export const ContextPanel: React.FC = () => {
             <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} />
           </div>
         ) : null}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' ? activeNonChatContent : null}
+        {hasWalkthroughTab ? (
+          <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
+            <React.Suspense fallback={null}>
+              <WalkthroughView directory={effectiveDirectory} />
+            </React.Suspense>
+          </div>
+        ) : null}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' ? activeNonChatContent : null}
       </div>
       </div>
     </aside>

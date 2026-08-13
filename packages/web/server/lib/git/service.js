@@ -2241,6 +2241,46 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
   }
 }
 
+/** Individual untracked file paths, honoring Git ignore rules. */
+export async function listUntrackedPaths(directory) {
+  const { repoRoot } = await createRepositoryGitContext(directory);
+  const result = await runGitCommand(repoRoot, ['ls-files', '--others', '--exclude-standard']);
+  if (!result.success) return [];
+  return String(result.stdout || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Produce one unified patch per untracked file while resolving repository
+ * ownership only once. Results retain input order; unreadable files are empty.
+ */
+export async function getUntrackedDiffs(directory, filePaths = [], { contextLines = 3 } = {}) {
+  const paths = (Array.isArray(filePaths) ? filePaths : [])
+    .filter((value) => typeof value === 'string' && value);
+  if (paths.length === 0) return [];
+
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+  return Promise.all(paths.map(async (filePath) => {
+    try {
+      const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+      const args = ['diff', '--no-color'];
+      if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
+        args.push(`-U${Math.max(0, contextLines)}`);
+      }
+      args.push('--no-index', '--', '/dev/null', fileContext.repoPath);
+      try {
+        return await git.raw(args);
+      } catch (error) {
+        return error?.exitCode === 1 && error?.message ? error.message : '';
+      }
+    } catch {
+      return '';
+    }
+  }));
+}
+
 export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3 } = {}) {
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';

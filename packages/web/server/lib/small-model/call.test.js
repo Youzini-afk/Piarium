@@ -364,6 +364,85 @@ describe('callSmallModel — custom provider config', () => {
   });
 });
 
+describe('callSmallModel — structured output', () => {
+  let fetchMock;
+  let originalFetch;
+
+  const schema = {
+    type: 'object',
+    properties: { title: { type: 'string' } },
+    required: ['title'],
+    additionalProperties: false,
+  };
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    readConfig.mockReset();
+    readConfig.mockReturnValue({});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('sends a JSON schema to OpenAI-compatible providers', async () => {
+    fetchMock.mockResolvedValue(ok('{"title":"ok"}'));
+
+    await callSmallModel({
+      auth: { openai: { type: 'api_key', key: 'sk-test' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5-mini',
+      prompt: 'review',
+      responseSchema: schema,
+    });
+
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: { name: 'response', strict: true, schema },
+    });
+  });
+
+  it('uses a forced tool call for Anthropic structured output', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'tool_use', name: 'response', input: { title: 'ok' } }] }),
+    });
+
+    const text = await callSmallModel({
+      auth: { anthropic: { type: 'api_key', key: 'sk-ant' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'anthropic',
+      modelID: 'claude-haiku-4-5',
+      prompt: 'review',
+      responseSchema: schema,
+    });
+
+    expect(JSON.parse(text)).toEqual({ title: 'ok' });
+    const body = JSON.parse(lastCall(fetchMock).init.body);
+    expect(body.tool_choice).toEqual({ type: 'tool', name: 'response' });
+  });
+
+  it('refuses schema requests on the ChatGPT-plan transport', async () => {
+    await expect(callSmallModel({
+      auth: { openai: { type: 'oauth', access: 'token', refresh: 'refresh' } },
+      catalog: {},
+      workingDirectory: '/proj',
+      providerID: 'openai',
+      modelID: 'gpt-5',
+      prompt: 'review',
+      responseSchema: schema,
+    })).rejects.toThrow('does not support structured output');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('callSmallModel — Google thinking configuration', () => {
   let fetchMock;
   let originalFetch;

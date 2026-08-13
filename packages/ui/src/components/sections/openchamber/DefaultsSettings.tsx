@@ -37,6 +37,7 @@ const DEFAULT_VALUE = '__default__';
 type ProductDefaults = {
   smallModelOverride?: string;
   smallModelUseDefault?: boolean;
+  walkthroughModelOverride?: string;
 };
 
 const getDisplayModel = (
@@ -67,6 +68,9 @@ const loadProductDefaults = async (): Promise<ProductDefaults> => {
           smallModelUseDefault: typeof settings.smallModelUseDefault === 'boolean'
             ? settings.smallModelUseDefault
             : undefined,
+          walkthroughModelOverride: typeof settings.walkthroughModelOverride === 'string'
+            ? settings.walkthroughModelOverride
+            : undefined,
         };
       }
     } catch {
@@ -86,6 +90,9 @@ const loadProductDefaults = async (): Promise<ProductDefaults> => {
       : undefined,
     smallModelUseDefault: typeof settings.smallModelUseDefault === 'boolean'
       ? settings.smallModelUseDefault
+      : undefined,
+    walkthroughModelOverride: typeof settings.walkthroughModelOverride === 'string'
+      ? settings.walkthroughModelOverride
       : undefined,
   } : {};
 };
@@ -108,6 +115,7 @@ export const DefaultsSettings: React.FC = () => {
   const [isSaving, setIsSaving] = React.useState(false);
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
+  const [walkthroughModelOverride, setWalkthroughModelOverride] = React.useState<string | undefined>();
   const [smallModelProviders, setSmallModelProviders] = React.useState<string[] | undefined>();
 
   React.useEffect(() => {
@@ -129,6 +137,8 @@ export const DefaultsSettings: React.FC = () => {
         setSmallModelUseDefault(productResult.value.smallModelUseDefault ?? true);
         const override = productResult.value.smallModelOverride?.trim();
         setSmallModelOverride(override || undefined);
+        const walkthroughOverride = productResult.value.walkthroughModelOverride?.trim();
+        setWalkthroughModelOverride(walkthroughOverride || undefined);
       }
       setIsLoading(false);
     });
@@ -233,9 +243,23 @@ export const DefaultsSettings: React.FC = () => {
     () => getDisplayModel(smallModelOverride),
     [smallModelOverride],
   );
+  const parsedWalkthroughModel = React.useMemo(
+    () => getDisplayModel(walkthroughModelOverride),
+    [walkthroughModelOverride],
+  );
+
+  const handleWalkthroughModelChange = React.useCallback(async (providerId: string, modelId: string) => {
+    const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
+    setWalkthroughModelOverride(newValue);
+    try {
+      await updateDesktopSettings({ walkthroughModelOverride: newValue ?? '' });
+    } catch (error) {
+      console.warn('Failed to save walkthrough model override:', error);
+    }
+  }, []);
 
   React.useEffect(() => {
-    if (smallModelUseDefault || smallModelProviders !== undefined) return;
+    if (smallModelProviders !== undefined) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -257,7 +281,7 @@ export const DefaultsSettings: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [smallModelUseDefault, smallModelProviders]);
+  }, [smallModelProviders]);
 
   if (isLoading) return null;
 
@@ -381,6 +405,30 @@ export const DefaultsSettings: React.FC = () => {
               />
             </SettingsFieldRow>
           ) : null}
+
+          <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
+            <div className="flex items-center gap-1.5">
+              <SettingsGroupTitle>
+                {t('settings.openchamber.defaults.walkthroughModel.title')}
+              </SettingsGroupTitle>
+              <SettingsInfoHint>
+                {t('settings.openchamber.defaults.walkthroughModel.description')}
+              </SettingsInfoHint>
+            </div>
+            <SettingsFieldRow
+              settingsItem="sessions.walkthrough-model"
+              label={t('settings.openchamber.defaults.walkthroughModel.overrideModel')}
+            >
+              <ModelSelector
+                providerId={parsedWalkthroughModel.providerId}
+                modelId={parsedWalkthroughModel.modelId}
+                onChange={handleWalkthroughModelChange}
+                allowedProviderIds={smallModelProviders}
+                placeholder={t('settings.openchamber.defaults.walkthroughModel.usesSmallModel')}
+                className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+              />
+            </SettingsFieldRow>
+          </SettingsInset>
         </div>
       </div>
     </SettingsSection>

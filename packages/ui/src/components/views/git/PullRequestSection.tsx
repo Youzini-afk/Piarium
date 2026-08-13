@@ -33,6 +33,9 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { useUIStore } from '@/stores/useUIStore';
+import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
+import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
@@ -337,7 +340,10 @@ export const PullRequestSection: React.FC<{
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
-  const { isMobile, hasTouchInput } = useDeviceInfo();
+  const { isMobile, hasTouchInput, screenWidth } = useDeviceInfo();
+  const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
+  const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
 
   const openGitHubSettings = React.useCallback(() => {
     setSettingsPage('github');
@@ -1514,6 +1520,23 @@ export const PullRequestSection: React.FC<{
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              {showWalkthroughAction ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                  onClick={() => {
+                    requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
+                    openContextSurface(directory, 'walkthrough');
+                  }}
+                  aria-label={t('walkthrough.action.open')}
+                >
+                  <Icon name="compass-3" className="size-4" />
+                  <span className="pr-actions__walkthrough-label typography-ui-label">
+                    {t('walkthrough.action.open')}
+                  </span>
+                </Button>
+              ) : null}
               {canMerge && pr.draft && pr.state === 'open' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
