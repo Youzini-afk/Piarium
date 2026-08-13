@@ -140,7 +140,7 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className="max-h-[min(70vh,42rem)] min-w-[22rem] overflow-y-auto">
+      <DropdownMenuContent align={align} className="max-h-[min(70vh,42rem)] w-[min(22rem,calc(100vw-1rem))] min-w-0 overflow-y-auto">
         <DropdownMenuItem onClick={() => void create()}>
           <Icon name="chat-new" className="mr-2 size-4" />
           {t('sessions.sidebar.header.actions.newSession')}
