@@ -3,9 +3,11 @@ import os from 'os';
 import { randomInt } from 'node:crypto';
 import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import {
+  getInvalidBindHostErrorMessage,
   getUnauthenticatedLanErrorMessage,
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
+  normalizeBindHost,
 } from '../../server/lib/security/bind-host.js';
 
 // Browser-unsafe ports (Fetch/Chromium restricted ports).
@@ -29,7 +31,12 @@ function resolveConfiguredBindHost(hostOverride) {
     : typeof process.env.PIARIUM_HOST === 'string'
       ? process.env.PIARIUM_HOST.trim()
       : '';
-  return configured || '127.0.0.1';
+  const candidate = configured || '127.0.0.1';
+  const normalized = normalizeBindHost(candidate);
+  if (!normalized) {
+    throw new TunnelCliError(getInvalidBindHostErrorMessage(candidate), EXIT_CODE.USAGE_ERROR);
+  }
+  return normalized;
 }
 
 function resolveServeHost(hostOverride) {

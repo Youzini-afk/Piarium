@@ -31,9 +31,11 @@ import {
 } from './lib/tunnels/types.js';
 import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
+  getInvalidBindHostErrorMessage,
   getUnauthenticatedLanErrorMessage,
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
+  normalizeBindHost,
 } from './lib/security/bind-host.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
@@ -501,7 +503,9 @@ async function main(options = {}) {
   isShuttingDown = false;
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : undefined;
-  const effectiveBindHost = host || process.env.PIARIUM_HOST?.trim() || '127.0.0.1';
+  const configuredBindHost = host || process.env.PIARIUM_HOST?.trim() || '127.0.0.1';
+  const effectiveBindHost = normalizeBindHost(configuredBindHost);
+  if (!effectiveBindHost) throw new Error(getInvalidBindHostErrorMessage(configuredBindHost));
   const uiPassword = typeof options.uiPassword === 'string'
     ? options.uiPassword
     : typeof process.env.PIARIUM_UI_PASSWORD === 'string'

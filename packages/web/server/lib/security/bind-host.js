@@ -15,6 +15,28 @@ const normalizeIpv4MappedAddress = (host) => {
   return match ? match[1] : normalized;
 };
 
+const ALL_NUMERIC_DOTTED_RE = /^\d+(?:\.\d+)*$/;
+
+/** Normalize a Node TCP bind host without resolving it or narrowing valid DNS names. */
+export const normalizeBindHost = (host) => {
+  if (typeof host !== 'string') return null;
+  const trimmed = host.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith('[') || trimmed.endsWith(']')) {
+    if (!(trimmed.startsWith('[') && trimmed.endsWith(']'))) return null;
+    const address = trimmed.slice(1, -1);
+    return net.isIP(address) === 6 ? address : null;
+  }
+  if (net.isIP(trimmed) !== 0) return trimmed;
+  if (ALL_NUMERIC_DOTTED_RE.test(trimmed)) return null;
+  if (/[\s/:\\@?#]/u.test(trimmed)) return null;
+
+  const hostname = trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed;
+  if (!hostname || hostname.length > 253 || hostname.split('.').some((label) => !label)) return null;
+  return trimmed;
+};
+
 const isLoopbackIpv4 = (host) => {
   if (net.isIP(host) !== 4) return false;
   const first = Number.parseInt(host.split('.')[0] || '', 10);
@@ -30,6 +52,9 @@ export const isLoopbackBindHost = (host) => {
 };
 
 export const isNetworkExposedBindHost = (host) => !isLoopbackBindHost(host);
+
+export const getInvalidBindHostErrorMessage = (host) =>
+  `Invalid Piarium bind host: ${JSON.stringify(host)}. Use a hostname or IP address without a URL scheme, port, or path.`;
 
 export const isUnsafeUnauthenticatedLanAllowed = (env = process.env) =>
   env?.PIARIUM_ALLOW_UNAUTHENTICATED_LAN === 'true';

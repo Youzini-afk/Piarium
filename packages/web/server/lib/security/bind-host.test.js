@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isLoopbackBindHost,
   isNetworkExposedBindHost,
+  normalizeBindHost,
 } from './bind-host.js';
 
 describe('bind host exposure classification', () => {
@@ -31,6 +32,20 @@ describe('bind host exposure classification', () => {
     ]) {
       expect(isLoopbackBindHost(host), host).toBe(false);
       expect(isNetworkExposedBindHost(host), host).toBe(true);
+    }
+  });
+});
+
+describe('bind host normalization', () => {
+  it('keeps supported hosts and unwraps IPv6 URL brackets for Node listen', () => {
+    expect(normalizeBindHost(' 0.0.0.0 ')).toBe('0.0.0.0');
+    expect(normalizeBindHost('service.internal')).toBe('service.internal');
+    expect(normalizeBindHost('[::1]')).toBe('::1');
+  });
+
+  it('rejects URLs, host-port pairs, paths, and malformed numeric addresses', () => {
+    for (const host of ['http://localhost', 'localhost:3000', '/tmp/socket', '0.0.0.0.0']) {
+      expect(normalizeBindHost(host), host).toBeNull();
     }
   });
 });
