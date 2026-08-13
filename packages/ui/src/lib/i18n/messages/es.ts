@@ -1975,6 +1975,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.attachedContext": "Contexto adjunto: {count}",
   "chat.piComposer.queueFollowUp": "Poner el seguimiento en cola",
   "chat.piComposer.steerCurrentRun": "Redirigir la ejecución actual",
+  "chat.piComposer.sendResultUnknown": "La conexión se perdió después del envío. El borrador se conservó; revisa la sesión antes de volver a enviarlo.",
   "chat.draftPresets.explore.label": "Explore the codebase",
   "chat.draftPresets.catchup.label": "Catch me up",
   "chat.draftPresets.weigh.label": "Weigh my options",

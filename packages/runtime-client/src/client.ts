@@ -13,6 +13,7 @@ import {
 import type { RuntimeTransport } from "./transport.js";
 
 interface PendingRequest {
+  method: RuntimeMethod;
   reject(error: unknown): void;
   resolve(value: unknown): void;
   timer: ReturnType<typeof setTimeout> | undefined;
@@ -43,6 +44,19 @@ export class PiRuntimeRequestError extends Error {
     this.code = response.error.code;
     this.details = response.error.details;
     this.retryable = response.error.retryable === true;
+  }
+}
+
+/** A sent request lost its transport before a response established the outcome. */
+export class PiRuntimeAmbiguousRequestError extends Error {
+  override readonly cause: Error;
+  readonly method: RuntimeMethod;
+
+  constructor(method: RuntimeMethod, cause: Error) {
+    super(`Pi runtime connection was lost after ${method} was sent; the result is unknown`);
+    this.name = "PiRuntimeAmbiguousRequestError";
+    this.cause = cause;
+    this.method = method;
   }
 }
 
@@ -113,6 +127,7 @@ export class PiRuntimeClient {
             reject(new Error(`Pi runtime request timed out: ${method}`));
           }, timeoutMs);
       this.#pending.set(id, {
+        method,
         reject,
         resolve: (value) => resolve(value as RuntimeMethodResult<M>),
         timer,
@@ -194,7 +209,7 @@ export class PiRuntimeClient {
     if (this.#closed) return;
     this.#closed = true;
     this.#connected = false;
-    this.#failPending(error ?? new Error("Pi runtime transport closed"));
+    this.#failPending(error ?? new Error("Pi runtime transport closed"), true);
     this.#listeners.clear();
   }
 
@@ -206,10 +221,10 @@ export class PiRuntimeClient {
     pending.reject(error);
   }
 
-  #failPending(error: Error): void {
+  #failPending(error: Error, ambiguous = false): void {
     for (const pending of this.#pending.values()) {
       if (pending.timer !== undefined) clearTimeout(pending.timer);
-      pending.reject(error);
+      pending.reject(ambiguous ? new PiRuntimeAmbiguousRequestError(pending.method, error) : error);
     }
     this.#pending.clear();
   }

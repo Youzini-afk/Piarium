@@ -1824,6 +1824,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.attachedContext': '添付コンテキスト: {count}',
   'chat.piComposer.queueFollowUp': 'フォローアップをキューに追加',
   'chat.piComposer.steerCurrentRun': '現在の実行を修正',
+  'chat.piComposer.sendResultUnknown': '送信後に接続が切れました。下書きは保持されています。再送信する前にセッションを確認してください。',
   'chat.draftPresets.explore.label': 'コードベースを探索',
   'chat.draftPresets.catchup.label': '状況を把握',
   'chat.draftPresets.weigh.label': '選択肢を比較検討',

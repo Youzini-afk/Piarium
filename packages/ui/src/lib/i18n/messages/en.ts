@@ -1827,6 +1827,7 @@ export const dict = {
   'chat.piComposer.attachedContext': 'Attached context: {count}',
   'chat.piComposer.queueFollowUp': 'Queue follow-up',
   'chat.piComposer.steerCurrentRun': 'Steer current run',
+  'chat.piComposer.sendResultUnknown': 'The connection was lost after sending. The draft was kept; check the session before sending it again.',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',
   'chat.draftPresets.weigh.label': 'Weigh my options',

@@ -1798,6 +1798,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.attachedContext': '已附加上下文：{count}',
   'chat.piComposer.queueFollowUp': '將後續訊息加入佇列',
   'chat.piComposer.steerCurrentRun': '調整目前執行',
+  'chat.piComposer.sendResultUnknown': '訊息送出後連線中斷，結果尚不確定。草稿已保留，請先檢查工作階段再決定是否重送。',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',
   'chat.draftPresets.weigh.label': 'Weigh my options',

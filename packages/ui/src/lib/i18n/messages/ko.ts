@@ -1830,6 +1830,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.attachedContext': '첨부된 컨텍스트: {count}',
   'chat.piComposer.queueFollowUp': '후속 메시지를 대기열에 추가',
   'chat.piComposer.steerCurrentRun': '현재 실행에 지시',
+  'chat.piComposer.sendResultUnknown': '전송 후 연결이 끊겼습니다. 초안은 유지되었습니다. 다시 보내기 전에 세션을 확인하세요.',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',
   'chat.draftPresets.weigh.label': 'Weigh my options',

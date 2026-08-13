@@ -693,6 +693,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.attachedContext': 'Dołączony kontekst: {count}',
   'chat.piComposer.queueFollowUp': 'Dodaj dalszą wiadomość do kolejki',
   'chat.piComposer.steerCurrentRun': 'Skieruj bieżące wykonanie',
+  'chat.piComposer.sendResultUnknown': 'Po wysłaniu utracono połączenie. Szkic został zachowany; sprawdź sesję przed ponownym wysłaniem.',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',
   'chat.draftPresets.weigh.label': 'Weigh my options',

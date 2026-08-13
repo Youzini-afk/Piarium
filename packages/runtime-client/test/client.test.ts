@@ -7,7 +7,11 @@ import {
   decodeRuntimeEnvelope,
   encodeRuntimeEnvelope,
 } from "@piarium/protocol";
-import { PiRuntimeClient, PiRuntimeRequestError } from "../src/index.js";
+import {
+  PiRuntimeAmbiguousRequestError,
+  PiRuntimeClient,
+  PiRuntimeRequestError,
+} from "../src/index.js";
 import type { RuntimeTransport, RuntimeTransportHandlers } from "../src/index.js";
 
 class MemoryTransport implements RuntimeTransport {
@@ -117,7 +121,13 @@ describe("PiRuntimeClient", () => {
     const request = client.request("session.list", {});
     transport.disconnect(new Error("offline"));
 
-    await assert.rejects(request, /offline/);
+    await assert.rejects(request, (error: unknown) => {
+      assert.ok(error instanceof PiRuntimeAmbiguousRequestError);
+      assert.equal(error.method, "session.list");
+      assert.match(error.message, /result is unknown/);
+      assert.match(error.cause.message, /offline/);
+      return true;
+    });
   });
 
   it("does not impose a client-side request timeout by default", async () => {

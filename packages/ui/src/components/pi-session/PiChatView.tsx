@@ -1,4 +1,5 @@
 import React from 'react';
+import { PiRuntimeAmbiguousRequestError } from '@piarium/runtime-client';
 import type {
   PiSessionMessageEntry,
   RecoveryMode,
@@ -247,7 +248,13 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         useSessionGoalArmStore.getState().setArmed(true, consumedGoalArm.objectiveOverride);
       }
       console.error('Failed to send Pi prompt:', error);
-      toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.messageSendFailed'));
+      toast.error(
+        error instanceof PiRuntimeAmbiguousRequestError
+          ? t('chat.piComposer.sendResultUnknown')
+          : error instanceof Error
+            ? error.message
+            : t('chat.chatInput.toast.messageSendFailed'),
+      );
     } finally {
       setSending(false);
     }
