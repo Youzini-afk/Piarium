@@ -72,6 +72,7 @@ import {
 } from './mobileConnections';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
+import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
 import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
@@ -688,6 +689,8 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   const [connectionName, setConnectionName] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
+  const [isCompletingScan, setIsCompletingScan] = React.useState(false);
+  const scanAbortRef = React.useRef<AbortController | null>(null);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
   // QR pairing is the primary flow; the manual URL form stays collapsed unless
   // scanning is unavailable (web build) or the user asks for it.
@@ -721,19 +724,27 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   }, [conn]);
 
   const handleScanQr = React.useCallback(async () => {
-    if (isScanning || isBusy) return;
+    if (scanAbortRef.current || isBusy) return;
     conn.setError(null);
     setIsScanning(true);
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
     try {
-      const result = await scanConnectionQr();
+      const result = await scanConnectionQr({ signal: controller.signal });
+      if (scanAbortRef.current === controller) {
+        scanAbortRef.current = null;
+        setIsScanning(false);
+      }
       switch (result.status) {
         case 'ok':
+          setIsCompletingScan(true);
           setServerUrl(result.url);
           if (result.label) setConnectionName(result.label);
           if (result.clientToken) setClientToken(result.clientToken);
           await conn.connect({ url: result.url, clientToken: result.clientToken, label: result.label });
           break;
         case 'pairing':
+          setIsCompletingScan(true);
           await conn.redeemPairingConnection(result.pairing);
           break;
         case 'permission-denied':
@@ -753,9 +764,15 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
           break;
       }
     } finally {
-      setIsScanning(false);
+      setIsCompletingScan(false);
+      if (scanAbortRef.current === controller) {
+        scanAbortRef.current = null;
+        setIsScanning(false);
+      }
     }
-  }, [conn, isBusy, isScanning, t]);
+  }, [conn, isBusy, t]);
+
+  React.useEffect(() => () => scanAbortRef.current?.abort(), []);
 
   const handlePasswordSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -768,6 +785,9 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
   }, [conn]);
 
   return (
+    <>
+    {isScanning ? <MobileQrScannerOverlay onCancel={() => scanAbortRef.current?.abort()} /> : null}
+    {isCompletingScan ? <MobileQrConnectionLoading /> : null}
     <main className="oc-keyboard-fill-screen flex min-h-dvh flex-col overflow-y-auto bg-background px-6 pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+28px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top,0px))+28px)] text-foreground">
       <div className="m-auto flex w-full max-w-[360px] shrink-0 flex-col items-center gap-9 py-8">
         <div className="flex flex-col items-center gap-5 text-center">
@@ -942,6 +962,7 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
         )}
       </div>
     </main>
+    </>
   );
 };
 
@@ -963,6 +984,8 @@ const MobileInstancesSurface: React.FC<{
   const [clientToken, setClientToken] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
+  const [isCompletingScan, setIsCompletingScan] = React.useState(false);
+  const scanAbortRef = React.useRef<AbortController | null>(null);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
   // The manual add/edit form is hidden until asked for — the sheet leads with
   // the list of instances (with live status), not a wall of inputs.
@@ -996,11 +1019,17 @@ const MobileInstancesSurface: React.FC<{
   // Scan a pairing QR into the add/edit form fields (does not change edit mode, so
   // the form-reset effect doesn't wipe the scanned values). The user reviews + saves.
   const handleScanInstance = React.useCallback(async () => {
-    if (isScanning) return;
+    if (scanAbortRef.current) return;
     setError(null);
     setIsScanning(true);
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
     try {
-      const result = await scanConnectionQr();
+      const result = await scanConnectionQr({ signal: controller.signal });
+      if (scanAbortRef.current === controller) {
+        scanAbortRef.current = null;
+        setIsScanning(false);
+      }
       switch (result.status) {
         case 'ok':
           // Legacy token QR: prefill the manual form for review before saving.
@@ -1010,6 +1039,7 @@ const MobileInstancesSurface: React.FC<{
           setFormOpen(true);
           break;
         case 'pairing':
+          setIsCompletingScan(true);
           await conn.redeemPairingConnection(result.pairing);
           break;
         case 'permission-denied':
@@ -1029,9 +1059,15 @@ const MobileInstancesSurface: React.FC<{
           break;
       }
     } finally {
-      setIsScanning(false);
+      setIsCompletingScan(false);
+      if (scanAbortRef.current === controller) {
+        scanAbortRef.current = null;
+        setIsScanning(false);
+      }
     }
-  }, [conn, isScanning, setError, t]);
+  }, [conn, setError, t]);
+
+  React.useEffect(() => () => scanAbortRef.current?.abort(), []);
 
   const handlePasswordSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
@@ -1105,6 +1141,9 @@ const MobileInstancesSurface: React.FC<{
   }
 
   return (
+    <>
+    {isScanning ? <MobileQrScannerOverlay onCancel={() => scanAbortRef.current?.abort()} /> : null}
+    {isCompletingScan ? <MobileQrConnectionLoading /> : null}
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto px-5 py-4">
         <div className="space-y-6">
@@ -1293,6 +1332,7 @@ const MobileInstancesSurface: React.FC<{
         </div>
       </div>
     </div>
+    </>
   );
 };
 

@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 import { encodePairingConnectionPayload, buildPairingConnectionPayload } from '@/lib/connectionPayload';
 
-import { parseConnectionPayload } from './mobileQrScan';
+import { parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 
 const hostEncPubJwk = { kty: 'EC', crv: 'P-256', x: 'eHhY', y: 'eVlZ' } as const;
 
@@ -48,5 +48,66 @@ describe('parseConnectionPayload', () => {
     expect(parseConnectionPayload('piarium://connect?v=1&server=http%3A%2F%2F192.168.1.10%3A2606&token=tok')).toBeNull();
     // Legacy relay-offer format (mode=relay + fragment) is no longer accepted.
     expect(parseConnectionPayload('piarium://connect?v=1&mode=relay#offer=eyJ2IjoxfQ')).toBeNull();
+  });
+});
+
+describe('scanConnectionQr on Android', () => {
+  const originalWindow = globalThis.window;
+
+  afterEach(() => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+  });
+
+  test('uses the bundled scanner and cleans up after a result', async () => {
+    const listeners = new Map<string, (event: { barcodes?: Array<{ rawValue?: string }> }) => void>();
+    let removeCalls = 0;
+    let stopCalls = 0;
+    let oneShotScanCalls = 0;
+    const remove = () => { removeCalls += 1; };
+    const stopScan = async () => { stopCalls += 1; };
+    const scan = async () => { oneShotScanCalls += 1; return { barcodes: [] }; };
+    const plugin = {
+      requestPermissions: mock(async () => ({ camera: 'granted' })),
+      scan,
+      stopScan,
+      startScan: mock(async () => {
+        listeners.get('barcodesScanned')?.({ barcodes: [{ rawValue: 'https://piarium.example' }] });
+      }),
+      addListener: mock((event: string, callback: (info: { barcodes?: Array<{ rawValue?: string }> }) => void) => {
+        listeners.set(event, callback);
+        return Promise.resolve({ remove });
+      }),
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { Capacitor: { getPlatform: () => 'android', Plugins: { BarcodeScanner: plugin } } },
+    });
+
+    expect(await scanConnectionQr()).toEqual({ status: 'ok', url: 'https://piarium.example' });
+    expect(oneShotScanCalls).toBe(0);
+    expect(stopCalls).toBe(1);
+    expect(removeCalls).toBe(2);
+  });
+
+  test('stops the native scanner when cancelled', async () => {
+    let stopCalls = 0;
+    const stopScan = async () => { stopCalls += 1; };
+    const plugin = {
+      requestPermissions: mock(async () => ({ camera: 'granted' })),
+      startScan: mock(async () => undefined),
+      stopScan,
+      addListener: mock(async () => ({ remove: mock(() => undefined) })),
+    };
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { Capacitor: { getPlatform: () => 'android', Plugins: { BarcodeScanner: plugin } } },
+    });
+    const controller = new AbortController();
+    const result = scanConnectionQr({ signal: controller.signal });
+    await Promise.resolve();
+    controller.abort();
+
+    expect(await result).toEqual({ status: 'cancelled' });
+    expect(stopCalls).toBe(1);
   });
 });
