@@ -1977,13 +1977,13 @@ export const GitView: React.FC<GitViewProps> = ({
   }, [currentDirectory, git, conflictOperation, refreshStatusAndBranches, refreshLog, clearConflictState, t]);
 
   // Check if there are unresolved conflicts (files with 'U' status)
-  const hasUnresolvedConflicts = React.useMemo(() => {
-    if (!status?.files) return false;
-    return status.files.some((f) =>
+  const conflictCount = React.useMemo(() => {
+    if (!status?.files) return 0;
+    return status.files.filter((f) =>
       (f.index === 'U' || f.working_dir === 'U') ||
       (f.index === 'A' && f.working_dir === 'A') ||
       (f.index === 'D' && f.working_dir === 'D')
-    );
+    ).length;
   }, [status?.files]);
 
   const handleContinueOperation = React.useCallback(async () => {
@@ -2370,7 +2370,7 @@ export const GitView: React.FC<GitViewProps> = ({
             onContinue={handleContinueOperation}
             onAbort={handleAbortOperation}
             onResolveWithAI={handleResolveWithAIFromBanner}
-            hasUnresolvedConflicts={hasUnresolvedConflicts}
+            conflictCount={conflictCount}
             isLoading={isLoading}
           />
         )}
