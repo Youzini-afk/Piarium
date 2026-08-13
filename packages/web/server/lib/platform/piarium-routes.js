@@ -1,3 +1,16 @@
+const SYSTEMD_SERVICE_UNIT_PATTERN = /^[A-Za-z0-9:_.@-]+\.service$/;
+
+export const resolveSystemdServiceUnit = (environment) => {
+  if (!environment.INVOCATION_ID) return null;
+  const configured = typeof environment.PIARIUM_SYSTEMD_UNIT === 'string'
+    ? environment.PIARIUM_SYSTEMD_UNIT.trim()
+    : '';
+  const unit = configured || 'piarium.service';
+  return SYSTEMD_SERVICE_UNIT_PATTERN.test(unit) ? unit : null;
+};
+
+const quotePosixShell = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+
 export const registerPiariumRoutes = (app, dependencies) => {
   const {
     fs,
@@ -51,7 +64,7 @@ export const registerPiariumRoutes = (app, dependencies) => {
 
   app.post('/api/piarium/update-install', async (_req, res) => {
     try {
-      const { spawn: spawnChild } = await import('child_process');
+      const { spawn: spawnChild, spawnSync } = await import('child_process');
       const {
         checkForUpdates,
         getUpdateCommand,
@@ -107,6 +120,55 @@ export const registerPiariumRoutes = (app, dependencies) => {
       }
       const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
       const isForegroundService = launchMode === 'foreground';
+      const systemdServiceUnit = isForegroundService && process.platform === 'linux'
+        ? resolveSystemdServiceUnit(process.env)
+        : null;
+
+      if (isForegroundService) {
+        if (!systemdServiceUnit) {
+          return res.status(409).json({
+            error: 'Foreground servers must be updated by their service manager. When using systemd, set PIARIUM_SYSTEMD_UNIT if the unit is not piarium.service.',
+          });
+        }
+
+        const updateJobName = `piarium-update-${Date.now()}`;
+        const updateScript = [
+          'set -eu',
+          updateCmd,
+          `systemctl --user restart ${quotePosixShell(systemdServiceUnit)}`,
+        ].join('\n');
+        const queued = spawnSync('systemd-run', [
+          '--user',
+          `--unit=${updateJobName}`,
+          '--collect',
+          '--service-type=exec',
+          `--setenv=PATH=${process.env.PATH || ''}`,
+          '/bin/sh',
+          '-c',
+          updateScript,
+        ], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        if (queued.status !== 0) {
+          const detail = (queued.stderr || queued.stdout || queued.error?.message || '').trim();
+          return res.status(409).json({
+            error: detail || `Could not queue update job for ${systemdServiceUnit}`,
+          });
+        }
+
+        return res.json({
+          success: true,
+          message: 'Update queued; Piarium will restart after installation completes',
+          version: updateInfo.version,
+          packageManager: pm,
+          autoRestart: true,
+          restartManager: 'systemd',
+          jobId: updateJobName,
+          logPath: `journalctl --user-unit ${updateJobName}.service`,
+        });
+      }
 
       const isWindows = process.platform === 'win32';
       const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -151,7 +213,7 @@ export const registerPiariumRoutes = (app, dependencies) => {
         restartCmdPrimary += ' --api-only';
         restartCmdFallback += ' --api-only';
       }
-      const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+      const restartCmd = `(${restartCmdPrimary}) || (${restartCmdFallback})`;
       const updateLogPath = path.join(piariumDataDir, 'update-install.log');
       const logPreamble = [
         '',
@@ -176,7 +238,7 @@ export const registerPiariumRoutes = (app, dependencies) => {
         version: updateInfo.version,
         packageManager: pm,
         autoRestart: true,
-        restartManager: isForegroundService ? 'service' : 'cli',
+        restartManager: 'cli',
       });
 
         setTimeout(() => {
