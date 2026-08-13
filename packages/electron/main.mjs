@@ -14,7 +14,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { createTray, createTrayController } from './tray.mjs';
 import { NotificationListener } from './notification-listener.mjs';
 import { createDesktopPiRuntimeBroker } from './pi-runtime.mjs';
-import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
+import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
@@ -93,13 +93,15 @@ if (isDev) {
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
-// Lift Chromium's ~6-connections-per-host cap for the loopback backend. The
-// packaged renderer is cross-origin (piarium-ui:// → http://127.0.0.1), so
-// every API call also needs a CORS preflight; during startup a few slow
-// Pi runtime requests otherwise hold the whole pool and every other
-// request — including opening the first session — queues for seconds behind
-// them. Loopback has no per-host connection cost that the cap protects.
-app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
+// The bundled renderer needs more loopback connections because every API call
+// is cross-origin. Vite HMR is different: lifting the cap floods its transform
+// pipeline with the module graph and delays React startup.
+if (shouldIgnoreLoopbackConnectionLimit({
+  development: isDev,
+  packagedUi: process.env.PIARIUM_ELECTRON_USE_BUNDLED_UI === '1',
+})) {
+  app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
+}
 
 protocol.registerSchemesAsPrivileged([
   {
