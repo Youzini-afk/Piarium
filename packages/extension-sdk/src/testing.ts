@@ -8,6 +8,7 @@ import type {
   PiariumExtensionAssetPayload,
   PiariumExtensionServiceProvision,
   PiariumExtensionStaticContribution,
+  PiariumExtensionStorageOpenRequest,
   PiariumExtensionStorageSnapshot,
 } from "@piarium/extension-contract";
 import type {
@@ -53,6 +54,7 @@ export const runSurfaceExtensionConformance = async (options: {
 
 export interface HostConformanceResult {
   finalStorage: PiariumExtensionStorageSnapshot;
+  finalStorages: PiariumExtensionStorageSnapshot[];
   providedServiceIds: string[];
   registeredDisposers: number;
 }
@@ -124,19 +126,62 @@ export const runHostExtensionConformance = async (options: {
   const controller = new AbortController();
   const disposers: Array<() => void | Promise<void>> = [];
   const services = new Map<string, PiariumHostServiceHandler>();
-  let storage: PiariumExtensionStorageSnapshot = {
-    address: { extensionId: options.extensionId, key: "host", scope: "application" },
+  const storageKey = (request: Pick<PiariumExtensionStorageOpenRequest, "key" | "scope">): string => (
+    `${request.scope}\0${request.key}`
+  );
+  const createStorage = (request: PiariumExtensionStorageOpenRequest): PiariumExtensionStorageSnapshot => ({
+    address: { extensionId: options.extensionId, key: request.key, scope: request.scope },
     authoritative: true,
     diagnostics: [],
     document: {
       data: structuredClone(options.initialData ?? {}),
       revision: 0,
-      schemaVersion: options.storageSchemaVersion ?? 1,
+      schemaVersion: request.schemaVersion ?? options.storageSchemaVersion ?? 1,
       updatedAt: new Date(0).toISOString(),
     },
     exists: options.initialData !== undefined,
     storageState: options.initialData === undefined ? "missing" : "ready",
+  });
+  const storages = new Map<string, PiariumExtensionStorageSnapshot>();
+  storages.set(storageKey({ key: "state", scope: "application" }), createStorage({
+    key: "state",
+    schemaVersion: options.storageSchemaVersion ?? 1,
+    scope: "application",
+  }));
+  const storageClient = (request: PiariumExtensionStorageOpenRequest) => {
+    const key = storageKey(request);
+    if (!storages.has(key)) storages.set(key, createStorage(request));
+    return {
+      get snapshot() { return structuredClone(storages.get(key) as PiariumExtensionStorageSnapshot); },
+      refresh: async () => structuredClone(storages.get(key) as PiariumExtensionStorageSnapshot),
+      update: async (data: JsonObject, expectedRevision?: number) => {
+        const current = storages.get(key) as PiariumExtensionStorageSnapshot;
+        const revision = expectedRevision ?? current.document.revision;
+        if (revision !== current.document.revision) {
+          throw new Error(`Conformance storage revision conflict: expected ${revision}, current ${current.document.revision}`);
+        }
+        const next: PiariumExtensionStorageSnapshot = {
+          ...current,
+          document: {
+            ...current.document,
+            data: structuredClone(data),
+            revision: current.document.revision + 1,
+            schemaVersion: request.schemaVersion ?? current.document.schemaVersion,
+            updatedAt: new Date().toISOString(),
+          },
+          exists: true,
+          storageState: "ready",
+        };
+        storages.set(key, next);
+        return structuredClone(next);
+      },
+    };
   };
+  const defaultStorage = storageClient({
+    key: "state",
+    schemaVersion: options.storageSchemaVersion ?? 1,
+    scope: "application",
+  });
   const context: PiariumBrokeredHostContext = {
     capabilities: {
       call: async (capability, method) => {
@@ -158,24 +203,10 @@ export const runHostExtensionConformance = async (options: {
     },
     signal: controller.signal,
     storage: {
-      get snapshot() { return structuredClone(storage); },
-      update: async (data, expectedRevision = storage.document.revision) => {
-        if (expectedRevision !== storage.document.revision) {
-          throw new Error(`Conformance storage revision conflict: expected ${expectedRevision}, current ${storage.document.revision}`);
-        }
-        storage = {
-          ...storage,
-          document: {
-            ...storage.document,
-            data: structuredClone(data),
-            revision: storage.document.revision + 1,
-            updatedAt: new Date().toISOString(),
-          },
-          exists: true,
-          storageState: "ready",
-        };
-        return structuredClone(storage);
-      },
+      get snapshot() { return defaultStorage.snapshot; },
+      open: async (request) => storageClient(request),
+      refresh: () => defaultStorage.refresh(),
+      update: (data, expectedRevision) => defaultStorage.update(data, expectedRevision),
     },
   };
   const returned = await options.activation(context);
@@ -190,5 +221,10 @@ export const runHostExtensionConformance = async (options: {
   }
   services.clear();
   if (cleanupErrors.length > 0) throw new Error(`Host extension cleanup failed: ${cleanupErrors.join("; ")}`);
-  return { finalStorage: structuredClone(storage), providedServiceIds, registeredDisposers };
+  return {
+    finalStorage: defaultStorage.snapshot,
+    finalStorages: [...storages.values()].map((snapshot) => structuredClone(snapshot)),
+    providedServiceIds,
+    registeredDisposers,
+  };
 };

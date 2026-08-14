@@ -66,6 +66,9 @@ const refreshProjectTrustOwner = (): void => {
   const generation = ++trustGeneration;
   setPiariumExtensionProjectTrust(false);
   if (!target) return;
+  void surfaceExtensionLoader.triggerActivation('workspace-match').catch((error) => {
+    console.error('[Piarium Extensions] Workspace Surface activation failed:', error);
+  });
   void getPiSettings(target).then((settings) => {
     if (generation !== trustGeneration || nextOwnerKey !== trustOwnerKey || runtimeKey !== getRuntimeKey()) return;
     setPiariumExtensionProjectTrust(settings.projectTrusted);

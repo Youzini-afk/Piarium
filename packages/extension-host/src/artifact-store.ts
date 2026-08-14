@@ -17,6 +17,9 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import type { BuildOptions, Metafile } from "esbuild";
 import {
   PIARIUM_EXTENSION_MANIFEST_FILE,
+  assertPiariumApplicationVersion,
+  assertPiariumExtensionManifestCompatibility,
+  isPiariumExtensionId,
   parsePiariumExtensionManifest,
   type PiariumExtensionAssetPayload,
   type PiariumExtensionPreparedArtifact,
@@ -50,6 +53,7 @@ interface ArtifactIndex {
   entrypoints: Record<string, ArtifactEntrypointRecord>;
   files: Record<string, ArtifactFileRecord>;
   host?: { module: string };
+  manifest: PiariumExtensionManifest;
   schemaVersion: 1;
 }
 
@@ -63,6 +67,7 @@ export interface ExtensionArtifactStoreOptions {
   buildModule?: ExtensionModuleBuilder;
   dataDir: string;
   packageSources?: PiariumExtensionPackageSourceRegistry;
+  piariumVersion: string;
   run?: ExtensionSourceCommandRunner;
 }
 
@@ -75,6 +80,22 @@ const buildModuleWithEsbuild: ExtensionModuleBuilder = async (options) => {
 };
 
 const sha256 = (value: Uint8Array | string): string => `sha256-${createHash("sha256").update(value).digest("hex")}`;
+
+const canonicalJson = (value: unknown): string => {
+  if (value === null || typeof value === "boolean" || typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  throw new Error("Piarium extension artifact index contains a non-JSON value");
+};
+
+const artifactIntegrityForIndex = (index: Omit<ArtifactIndex, "artifactIntegrity">): string => sha256(canonicalJson(index));
 
 const toLogicalPath = (value: string): string => value.split(sep).join("/");
 
@@ -154,16 +175,101 @@ const walkFiles = async (root: string): Promise<string[]> => {
   return files.sort();
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+);
+
+const INTEGRITY_PATTERN = /^sha256-[0-9a-f]{64}$/;
+const LOGICAL_PATH_PATTERN = /^(?!\/)(?![A-Za-z]:[\\/])(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)(?!.*\0).+$/;
+
+const assertExactKeys = (record: Record<string, unknown>, expected: readonly string[], label: string): void => {
+  const actual = Object.keys(record).sort();
+  const canonicalExpected = [...expected].sort();
+  if (actual.length !== canonicalExpected.length || actual.some((key, index) => key !== canonicalExpected[index])) {
+    throw new Error(`${label} has unsupported or missing fields`);
+  }
+};
+
 const parseIndex = (value: unknown): ArtifactIndex => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Piarium extension artifact index is invalid");
-  const record = value as Partial<ArtifactIndex>;
-  if (record.schemaVersion !== 1 || typeof record.artifactIntegrity !== "string" || !record.artifactIntegrity.startsWith("sha256-")) {
+  if (!isRecord(value)) throw new Error("Piarium extension artifact index is invalid");
+  const hasHost = value.host !== undefined;
+  assertExactKeys(
+    value,
+    hasHost
+      ? ["artifactIntegrity", "entrypoints", "files", "host", "manifest", "schemaVersion"]
+      : ["artifactIntegrity", "entrypoints", "files", "manifest", "schemaVersion"],
+    "Piarium extension artifact index",
+  );
+  if (value.schemaVersion !== 1 || typeof value.artifactIntegrity !== "string" || !INTEGRITY_PATTERN.test(value.artifactIntegrity)) {
     throw new Error("Piarium extension artifact index header is invalid");
   }
-  if (!record.files || typeof record.files !== "object" || !record.entrypoints || typeof record.entrypoints !== "object") {
+  const manifest = parsePiariumExtensionManifest(value.manifest);
+  if (!isRecord(value.files) || !isRecord(value.entrypoints)) {
     throw new Error("Piarium extension artifact index contents are invalid");
   }
-  return record as ArtifactIndex;
+
+  const files: Record<string, ArtifactFileRecord> = {};
+  for (const [logicalPath, rawFile] of Object.entries(value.files)) {
+    if (!LOGICAL_PATH_PATTERN.test(logicalPath) || logicalPath === INDEX_FILE || !isRecord(rawFile)) {
+      throw new Error(`Piarium extension artifact file record is invalid: ${logicalPath}`);
+    }
+    assertExactKeys(rawFile, ["contentType", "integrity"], `Piarium extension artifact file record ${logicalPath}`);
+    if (typeof rawFile.contentType !== "string" || rawFile.contentType.trim().length === 0
+      || typeof rawFile.integrity !== "string" || !INTEGRITY_PATTERN.test(rawFile.integrity)) {
+      throw new Error(`Piarium extension artifact file record is invalid: ${logicalPath}`);
+    }
+    files[logicalPath] = { contentType: rawFile.contentType, integrity: rawFile.integrity };
+  }
+
+  const entrypoints: Record<string, ArtifactEntrypointRecord> = {};
+  for (const [entrypointId, rawEntrypoint] of Object.entries(value.entrypoints)) {
+    if (!isPiariumExtensionId(entrypointId) || !isRecord(rawEntrypoint)) {
+      throw new Error(`Piarium extension artifact Surface entrypoint record is invalid: ${entrypointId}`);
+    }
+    assertExactKeys(rawEntrypoint, ["module", "styles"], `Piarium extension artifact Surface entrypoint ${entrypointId}`);
+    if (typeof rawEntrypoint.module !== "string" || !LOGICAL_PATH_PATTERN.test(rawEntrypoint.module)
+      || !Array.isArray(rawEntrypoint.styles)
+      || rawEntrypoint.styles.some((style) => typeof style !== "string" || !LOGICAL_PATH_PATTERN.test(style))) {
+      throw new Error(`Piarium extension artifact Surface entrypoint record is invalid: ${entrypointId}`);
+    }
+    const styles = rawEntrypoint.styles as string[];
+    if (new Set(styles).size !== styles.length || !files[rawEntrypoint.module]
+      || styles.some((style) => !files[style])) {
+      throw new Error(`Piarium extension artifact Surface entrypoint files are invalid: ${entrypointId}`);
+    }
+    entrypoints[entrypointId] = { module: rawEntrypoint.module, styles: [...styles] };
+  }
+  const executableEntrypoints = (manifest.entrypoints?.surfaces ?? [])
+    .filter((entrypoint) => entrypoint.mode !== "declarative")
+    .map((entrypoint) => entrypoint.id)
+    .sort();
+  if (JSON.stringify(Object.keys(entrypoints).sort()) !== JSON.stringify(executableEntrypoints)) {
+    throw new Error("Piarium extension artifact Surface entrypoint mapping does not match its manifest snapshot");
+  }
+
+  let host: ArtifactIndex["host"];
+  if (hasHost) {
+    if (!isRecord(value.host)) throw new Error("Piarium extension artifact Host entrypoint record is invalid");
+    assertExactKeys(value.host, ["module"], "Piarium extension artifact Host entrypoint");
+    if (typeof value.host.module !== "string" || !LOGICAL_PATH_PATTERN.test(value.host.module) || !files[value.host.module]) {
+      throw new Error("Piarium extension artifact Host entrypoint file is invalid");
+    }
+    host = { module: value.host.module };
+  }
+  if (Boolean(host) !== Boolean(manifest.entrypoints?.host)) {
+    throw new Error("Piarium extension artifact Host entrypoint mapping does not match its manifest snapshot");
+  }
+  if (!files[`package/${PIARIUM_EXTENSION_MANIFEST_FILE}`]) {
+    throw new Error("Piarium extension artifact manifest file is missing from its index");
+  }
+  return {
+    artifactIntegrity: value.artifactIntegrity,
+    entrypoints,
+    files,
+    ...(host ? { host } : {}),
+    manifest,
+    schemaVersion: 1,
+  };
 };
 
 const readManifest = async (sourceRoot: string): Promise<PiariumExtensionManifest> => {
@@ -185,6 +291,7 @@ const hasDependencies = async (sourceRoot: string): Promise<boolean> => {
 export class ExtensionArtifactStore {
   readonly dataDir: string;
   readonly directory: string;
+  readonly piariumVersion: string;
   readonly #build: ExtensionModuleBuilder;
   readonly #packageSources: PiariumExtensionPackageSourceRegistry;
   readonly #run: ExtensionSourceCommandRunner;
@@ -192,6 +299,8 @@ export class ExtensionArtifactStore {
   constructor(options: ExtensionArtifactStoreOptions) {
     this.dataDir = resolve(options.dataDir);
     this.directory = join(this.dataDir, "extensions", "artifacts", "sha256");
+    this.piariumVersion = options.piariumVersion;
+    assertPiariumApplicationVersion(this.piariumVersion);
     this.#build = options.buildModule ?? buildModuleWithEsbuild;
     this.#run = options.run ?? runExtensionSourceCommand;
     this.#packageSources = options.packageSources ?? createDefaultExtensionPackageSourceRegistry({ run: this.#run });
@@ -199,13 +308,19 @@ export class ExtensionArtifactStore {
 
   async prepare(source: PiariumExtensionPackageSource, signal?: AbortSignal): Promise<PiariumExtensionPreparedArtifact> {
     const temporaryRoot = await mkdtemp(join(tmpdir(), "piarium-extension-"));
-    const sourceRoot = join(temporaryRoot, "source");
+    const materializedSourceRoot = join(temporaryRoot, "source");
     const artifactRoot = join(temporaryRoot, "artifact");
     try {
-      await this.#packageSources.materialize(source, sourceRoot, signal);
+      const sourceRoot = await this.#packageSources.materialize(source, materializedSourceRoot, signal);
       await assertSafeTree(sourceRoot);
       const manifest = await readManifest(sourceRoot);
+      assertPiariumExtensionManifestCompatibility(manifest, this.piariumVersion);
       if (!(await exists(join(sourceRoot, "node_modules"))) && await hasDependencies(sourceRoot)) {
+        if (source.kind === "local") {
+          throw new Error(
+            `Local Piarium extension dependencies are not installed: ${source.display}. Run npm install in the extension project before reloading it. Piarium will not modify the working tree.`,
+          );
+        }
         const npm = await resolveNpmLaunchTarget();
         await this.#run(npm.executable, [...npm.argsPrefix, "install", "--ignore-scripts", "--no-audit", "--no-fund"], {
           cwd: sourceRoot,
@@ -299,10 +414,15 @@ export class ExtensionArtifactStore {
         const bytes = await readFile(join(artifactRoot, ...logicalPath.split("/")));
         files[logicalPath] = { contentType: contentTypeForPath(logicalPath), integrity: sha256(bytes) };
       }
-      const artifactIntegrity = sha256(Object.entries(files)
-        .map(([path, file]) => `${path}\0${file.integrity}\0${file.contentType}\n`)
-        .join(""));
-      const index: ArtifactIndex = { artifactIntegrity, entrypoints, files, ...(host ? { host } : {}), schemaVersion: 1 };
+      const indexContent: Omit<ArtifactIndex, "artifactIntegrity"> = {
+        entrypoints,
+        files,
+        ...(host ? { host } : {}),
+        manifest,
+        schemaVersion: 1,
+      };
+      const artifactIntegrity = artifactIntegrityForIndex(indexContent);
+      const index: ArtifactIndex = { artifactIntegrity, ...indexContent };
       await writeFile(join(artifactRoot, INDEX_FILE), `${JSON.stringify(index, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
       const finalPath = join(this.directory, artifactIntegrity.slice("sha256-".length));
@@ -312,6 +432,7 @@ export class ExtensionArtifactStore {
       } catch (error) {
         if (!(await exists(finalPath))) throw error;
       }
+      await this.#readVerifiedIndex(finalPath, artifactIntegrity, manifest, true);
       return {
         integrity: artifactIntegrity,
         manifest,
@@ -329,25 +450,15 @@ export class ExtensionArtifactStore {
     artifactRoot: string,
     artifactIntegrity: string,
     logicalPath: string,
+    expectedManifest?: PiariumExtensionManifest,
   ): Promise<PiariumExtensionAssetPayload> {
-    const root = await this.#assertArtifactRoot(artifactRoot, artifactIntegrity);
-    const index = parseIndex(JSON.parse(await readFile(join(root, INDEX_FILE), "utf8")) as unknown);
-    if (index.artifactIntegrity !== artifactIntegrity) throw new Error("Piarium extension artifact integrity no longer matches the catalog");
-    const record = index.files[logicalPath];
-    if (!record) throw new Error(`Piarium extension artifact does not contain asset: ${logicalPath}`);
-    const path = resolve(root, ...logicalPath.split("/"));
-    const relativePath = relative(root, path);
-    if (!relativePath || relativePath.startsWith("..") || resolve(root, relativePath) !== path) {
-      throw new Error("Piarium extension asset path escapes its immutable artifact");
-    }
-    const bytes = await readFile(path);
-    const fileIntegrity = sha256(bytes);
-    if (fileIntegrity !== record.integrity) throw new Error(`Piarium extension asset integrity failed: ${logicalPath}`);
+    const { index, root } = await this.#readVerifiedIndex(artifactRoot, artifactIntegrity, expectedManifest);
+    const { bytes, record } = await this.#readVerifiedFile(root, index, logicalPath);
     return {
       artifactIntegrity,
       bytesBase64: bytes.toString("base64"),
       contentType: record.contentType,
-      integrity: fileIntegrity,
+      integrity: record.integrity,
       path: logicalPath,
     };
   }
@@ -356,14 +467,24 @@ export class ExtensionArtifactStore {
     artifactRoot: string,
     artifactIntegrity: string,
     entrypointId: string,
+    expectedManifest?: PiariumExtensionManifest,
   ): Promise<PiariumExtensionManagedEntrypointPayload> {
-    const root = await this.#assertArtifactRoot(artifactRoot, artifactIntegrity);
-    const index = parseIndex(JSON.parse(await readFile(join(root, INDEX_FILE), "utf8")) as unknown);
+    const { index, root } = await this.#readVerifiedIndex(artifactRoot, artifactIntegrity, expectedManifest);
     const entrypoint = index.entrypoints[entrypointId];
     if (!entrypoint) throw new Error(`Managed Surface entrypoint is not present in the artifact: ${entrypointId}`);
+    const readPayload = async (logicalPath: string): Promise<PiariumExtensionAssetPayload> => {
+      const { bytes, record } = await this.#readVerifiedFile(root, index, logicalPath);
+      return {
+        artifactIntegrity,
+        bytesBase64: bytes.toString("base64"),
+        contentType: record.contentType,
+        integrity: record.integrity,
+        path: logicalPath,
+      };
+    };
     const [module, styles] = await Promise.all([
-      this.readAsset(root, artifactIntegrity, entrypoint.module),
-      Promise.all(entrypoint.styles.map((path) => this.readAsset(root, artifactIntegrity, path))),
+      readPayload(entrypoint.module),
+      Promise.all(entrypoint.styles.map(readPayload)),
     ]);
     return { artifactIntegrity, entrypointId, module, styles };
   }
@@ -371,16 +492,70 @@ export class ExtensionArtifactStore {
   async resolveBrokeredHostEntrypoint(
     artifactRoot: string,
     artifactIntegrity: string,
+    expectedManifest?: PiariumExtensionManifest,
   ): Promise<BrokeredHostEntrypointArtifact> {
+    const { index, root } = await this.#readVerifiedIndex(artifactRoot, artifactIntegrity, expectedManifest);
+    if (!index.host) throw new Error("Host entrypoint is not present in the artifact");
+    const { path, record } = await this.#readVerifiedFile(root, index, index.host.module);
+    return { artifactIntegrity, integrity: record.integrity, modulePath: path };
+  }
+
+  async #readVerifiedIndex(
+    artifactRoot: string,
+    artifactIntegrity: string,
+    expectedManifest?: PiariumExtensionManifest,
+    verifyAllFiles = false,
+  ): Promise<{ index: ArtifactIndex; root: string }> {
     const root = await this.#assertArtifactRoot(artifactRoot, artifactIntegrity);
     const index = parseIndex(JSON.parse(await readFile(join(root, INDEX_FILE), "utf8")) as unknown);
-    if (!index.host) throw new Error("Host entrypoint is not present in the artifact");
-    const record = index.files[index.host.module];
-    if (!record) throw new Error("Host entrypoint file is missing from the artifact index");
-    const modulePath = resolve(root, ...index.host.module.split("/"));
-    const bytes = await readFile(modulePath);
-    if (sha256(bytes) !== record.integrity) throw new Error("Host entrypoint integrity failed");
-    return { artifactIntegrity, integrity: record.integrity, modulePath };
+    const indexContent: Omit<ArtifactIndex, "artifactIntegrity"> = {
+      entrypoints: index.entrypoints,
+      files: index.files,
+      ...(index.host ? { host: index.host } : {}),
+      manifest: index.manifest,
+      schemaVersion: 1,
+    };
+    const canonicalIntegrity = artifactIntegrityForIndex(indexContent);
+    if (canonicalIntegrity !== index.artifactIntegrity || index.artifactIntegrity !== artifactIntegrity) {
+      throw new Error("Piarium extension artifact canonical index integrity no longer matches its content address");
+    }
+    const manifestLogicalPath = `package/${PIARIUM_EXTENSION_MANIFEST_FILE}`;
+    const { bytes: manifestBytes } = await this.#readVerifiedFile(root, index, manifestLogicalPath);
+    const artifactManifest = parsePiariumExtensionManifest(JSON.parse(manifestBytes.toString("utf8")) as unknown);
+    if (canonicalJson(artifactManifest) !== canonicalJson(index.manifest)) {
+      throw new Error("Piarium extension artifact manifest file does not match its authenticated index snapshot");
+    }
+    if (expectedManifest && canonicalJson(expectedManifest) !== canonicalJson(index.manifest)) {
+      throw new Error("Piarium extension artifact manifest snapshot no longer matches the catalog record");
+    }
+    if (verifyAllFiles) {
+      const actualFiles = (await walkFiles(root)).filter((logicalPath) => logicalPath !== INDEX_FILE);
+      const indexedFiles = Object.keys(index.files).sort();
+      if (JSON.stringify(actualFiles) !== JSON.stringify(indexedFiles)) {
+        throw new Error("Piarium extension artifact files do not match its authenticated index");
+      }
+      await Promise.all(indexedFiles.map((logicalPath) => this.#readVerifiedFile(root, index, logicalPath)));
+    }
+    return { index, root };
+  }
+
+  async #readVerifiedFile(
+    root: string,
+    index: ArtifactIndex,
+    logicalPath: string,
+  ): Promise<{ bytes: Buffer; path: string; record: ArtifactFileRecord }> {
+    const record = index.files[logicalPath];
+    if (!record) throw new Error(`Piarium extension artifact does not contain asset: ${logicalPath}`);
+    const path = resolve(root, ...logicalPath.split("/"));
+    const relativePath = relative(root, path);
+    if (!relativePath || relativePath.startsWith("..") || resolve(root, relativePath) !== path) {
+      throw new Error("Piarium extension asset path escapes its immutable artifact");
+    }
+    const info = await lstat(path);
+    if (!info.isFile()) throw new Error(`Piarium extension artifact asset is not an immutable file: ${logicalPath}`);
+    const bytes = await readFile(path);
+    if (sha256(bytes) !== record.integrity) throw new Error(`Piarium extension asset integrity failed: ${logicalPath}`);
+    return { bytes, path, record };
   }
 
   async #assertArtifactRoot(artifactRoot: string, artifactIntegrity: string): Promise<string> {

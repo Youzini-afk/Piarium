@@ -128,8 +128,23 @@ function cloneDocument(document: PiariumExtensionCatalogDocument): PiariumExtens
   return structuredClone(document);
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  throw new Error("Piarium extension catalog contains a non-JSON value");
+}
+
 function fingerprint(document: PiariumExtensionCatalogDocument): string {
-  return createHash("sha256").update(JSON.stringify(document)).digest("hex");
+  return createHash("sha256").update(canonicalJson(document)).digest("hex");
 }
 
 function diagnostic(code: string, message: string): PiariumExtensionDiagnostic {

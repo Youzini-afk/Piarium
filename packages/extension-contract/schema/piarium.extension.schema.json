@@ -13,7 +13,7 @@
     "engines": {
       "type": "object",
       "required": ["piarium"],
-      "properties": { "piarium": { "$ref": "#/$defs/text" } }
+      "properties": { "piarium": { "$ref": "#/$defs/semverRange" } }
     },
     "entrypoints": {
       "type": "object",
@@ -200,6 +200,11 @@
     "semver": {
       "type": "string",
       "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "semverRange": {
+      "type": "string",
+      "minLength": 1,
+      "format": "semver-range"
     },
     "service": {
       "type": "object",

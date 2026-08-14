@@ -51,3 +51,48 @@ test("failed migration and malformed replacement never become authoritative empt
   assert.equal(stale.storageState, "stale");
   assert.deepEqual(stale.document.data, { value: "kept" });
 });
+
+test("storage scopes and keys keep independent revisions and conflicts", async () => {
+  const dataDir = await temporaryDirectory();
+  const storage = new ExtensionStorageStore(dataDir);
+  const profile = { extensionId: address.extensionId, key: "preferences", scope: "profile" as const };
+  const workspace = { extensionId: address.extensionId, key: "preferences", scope: "workspace" as const };
+  const alternate = { extensionId: address.extensionId, key: "layout", scope: "workspace" as const };
+  const profileWritten = await storage.update(profile, 0, 1, { value: "profile" });
+  const workspaceWritten = await storage.update(workspace, 0, 2, { value: "workspace" });
+  const alternateWritten = await storage.update(alternate, 0, 1, { value: "layout" });
+  assert.equal(profileWritten.document.revision, 1);
+  assert.equal(workspaceWritten.document.revision, 1);
+  assert.equal(alternateWritten.document.revision, 1);
+  assert.deepEqual((await storage.read(profile)).document.data, { value: "profile" });
+  assert.deepEqual((await storage.read(workspace)).document.data, { value: "workspace" });
+  await assert.rejects(storage.update(workspace, 0, 2, { value: "stale" }), /expected revision 0, actual revision 1/i);
+  assert.deepEqual((await storage.read(alternate)).document.data, { value: "layout" });
+});
+
+test("deleting extension data removes only the exact validated namespace and clears cached state", async () => {
+  const dataDir = await temporaryDirectory();
+  const storage = new ExtensionStorageStore(dataDir);
+  const neighbor = { ...address, extensionId: "dev.example.storage-neighbor" };
+  await storage.update(address, 0, 1, { value: "delete" });
+  await storage.update(neighbor, 0, 1, { value: "keep" });
+  await storage.deleteExtensionData(address.extensionId);
+  assert.equal((await storage.read(address)).exists, false);
+  assert.deepEqual((await storage.read(neighbor)).document.data, { value: "keep" });
+  await assert.rejects(storage.deleteExtensionData("../escape"), /Invalid Piarium extension ID/);
+});
+
+test("prepared writes validate every address before committing the group", async () => {
+  const dataDir = await temporaryDirectory();
+  const storage = new ExtensionStorageStore(dataDir);
+  const first = { ...address, key: "first" };
+  const second = { ...address, key: "second", scope: "workspace" as const };
+  await storage.update(first, 0, 1, { value: "old-first" });
+  await storage.update(second, 0, 1, { value: "old-second" });
+  const firstWrite = await storage.prepareWrite(first, 1, { value: "new-first" });
+  const secondWrite = await storage.prepareWrite(second, 1, { value: "new-second" });
+  await storage.update(second, 1, 1, { value: "concurrent" });
+  await assert.rejects(storage.commitPrepared([firstWrite, secondWrite]), /expected revision 1, actual revision 2/i);
+  assert.deepEqual((await storage.read(first)).document.data, { value: "old-first" });
+  assert.deepEqual((await storage.read(second)).document.data, { value: "concurrent" });
+});

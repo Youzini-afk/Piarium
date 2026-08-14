@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import {
+  isPiariumExtensionId,
   PiariumExtensionContractError,
   parsePiariumExtensionStorageAddress,
   parsePiariumExtensionStorageSnapshot,
@@ -14,6 +15,8 @@ import {
 import { ExtensionStorageError, ExtensionStorageRevisionConflictError } from "./errors.js";
 
 const LOCK_RETRY_MS = 25;
+const transactionState = Symbol("extensionStorageTransactionState");
+const transactionSetCommitted = Symbol("extensionStorageTransactionSetCommitted");
 
 interface StoredExtensionDocument extends PiariumExtensionStorageDocument {
   address: PiariumExtensionStorageAddress;
@@ -23,6 +26,15 @@ interface LastValidStorage {
   document: PiariumExtensionStorageDocument;
   exists: boolean;
   fingerprint: string;
+}
+
+interface ExtensionStorageTransactionState {
+  address: PiariumExtensionStorageAddress;
+  committed: PiariumExtensionStorageSnapshot | null;
+  data: JsonObject;
+  previous: PiariumExtensionStorageSnapshot;
+  schemaVersion: number;
+  store: ExtensionStorageStore;
 }
 
 const errorCode = (error: unknown): string | undefined => (
@@ -151,19 +163,28 @@ export class ExtensionStorageMigrationTransaction {
   }
 
   async commit(): Promise<PiariumExtensionStorageSnapshot> {
-    this.#committed ??= await this.#store.update(
-      this.address,
-      this.previous.document.revision,
-      this.targetSchemaVersion,
-      this.#targetData,
-    );
+    this.#committed ??= (await this.#store.commitPrepared([this]))[0] as PiariumExtensionStorageSnapshot;
     return this.#committed;
   }
 
   async rollbackCommitted(): Promise<void> {
     if (!this.#committed) return;
-    await this.#store.restore(this.address, this.#committed.document.revision, this.previous);
-    this.#committed = null;
+    await this.#store.rollbackPrepared([this]);
+  }
+
+  [transactionState](): ExtensionStorageTransactionState {
+    return {
+      address: this.address,
+      committed: this.#committed,
+      data: structuredClone(this.#targetData),
+      previous: this.previous,
+      schemaVersion: this.targetSchemaVersion,
+      store: this.#store,
+    };
+  }
+
+  [transactionSetCommitted](snapshot: PiariumExtensionStorageSnapshot | null): void {
+    this.#committed = snapshot;
   }
 }
 
@@ -213,6 +234,138 @@ export class ExtensionStorageStore {
         return this.#snapshot(address, document, true, true, "ready", []);
       } finally {
         await release();
+      }
+    });
+  }
+
+  async deleteExtensionData(extensionId: string): Promise<void> {
+    if (!isPiariumExtensionId(extensionId)) throw new Error(`Invalid Piarium extension ID: ${extensionId}`);
+    const namespace = join(this.directory, extensionId);
+    const namespacePrefix = `${namespace}${sep}`;
+    const belongsToNamespace = (path: string): boolean => path === namespace || path.startsWith(namespacePrefix);
+    const pending = [...this.#queues]
+      .filter(([path]) => belongsToNamespace(path))
+      .map(([, operation]) => operation);
+    await Promise.all(pending);
+    await rm(namespace, { force: true, recursive: true });
+    for (const path of [...this.#lastValid.keys()]) {
+      if (belongsToNamespace(path)) this.#lastValid.delete(path);
+    }
+    for (const path of [...this.#queues.keys()]) {
+      if (belongsToNamespace(path)) this.#queues.delete(path);
+    }
+  }
+
+  commitPrepared(
+    transactions: readonly ExtensionStorageMigrationTransaction[],
+  ): Promise<PiariumExtensionStorageSnapshot[]> {
+    if (transactions.length === 0) return Promise.resolve([]);
+    const states = transactions.map((transaction) => transaction[transactionState]());
+    if (states.some((state) => state.store !== this)) throw new Error("Extension storage transaction belongs to another store");
+    if (states.every((state) => state.committed !== null)) {
+      return Promise.resolve(states.map((state) => structuredClone(state.committed as PiariumExtensionStorageSnapshot)));
+    }
+    if (states.some((state) => state.committed !== null)) throw new Error("Cannot commit a partially committed storage transaction group");
+    const entries = states.map((state, index) => ({ index, path: this.#path(state.address), state }))
+      .sort((left, right) => left.path.localeCompare(right.path));
+    if (new Set(entries.map((entry) => entry.path)).size !== entries.length) {
+      throw new Error("Extension storage transaction group contains a duplicate address");
+    }
+    return this.#serializeMany(entries.map((entry) => entry.path), async () => {
+      const releases: Array<() => Promise<void>> = [];
+      try {
+        for (const entry of entries) {
+          await mkdir(dirname(entry.path), { mode: 0o700, recursive: true });
+          releases.push(await acquireLock(`${entry.path}.lock`));
+        }
+        const current = await Promise.all(entries.map((entry) => this.#readStrict(entry.state.address)));
+        current.forEach((value, index) => {
+          const expectedRevision = entries[index]?.state.previous.document.revision ?? -1;
+          if (value.document.revision !== expectedRevision) {
+            throw new ExtensionStorageRevisionConflictError(expectedRevision, value.document.revision);
+          }
+        });
+        const documents = entries.map((entry, index): PiariumExtensionStorageDocument => ({
+          data: structuredClone(entry.state.data),
+          revision: (current[index]?.document.revision ?? 0) + 1,
+          schemaVersion: entry.state.schemaVersion,
+          updatedAt: new Date().toISOString(),
+        }));
+        let written = 0;
+        try {
+          for (; written < entries.length; written += 1) {
+            const entry = entries[written] as typeof entries[number];
+            await atomicWrite(entry.path, { address: entry.state.address, ...documents[written] });
+          }
+        } catch (error) {
+          const rollbackErrors: string[] = [];
+          for (let index = written - 1; index >= 0; index -= 1) {
+            const entry = entries[index] as typeof entries[number];
+            try {
+              if (entry.state.previous.exists) {
+                await atomicWrite(entry.path, { address: entry.state.address, ...entry.state.previous.document });
+              } else await rm(entry.path, { force: true });
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
+            }
+          }
+          if (rollbackErrors.length > 0) {
+            throw new ExtensionStorageError(
+              "storage_write_failed",
+              `Failed to commit and fully roll back Piarium extension storage: ${rollbackErrors.join("; ")}`,
+              { cause: error },
+            );
+          }
+          throw error;
+        }
+        const snapshots: PiariumExtensionStorageSnapshot[] = new Array(entries.length);
+        entries.forEach((entry, index) => {
+          const document = documents[index] as PiariumExtensionStorageDocument;
+          const snapshot = this.#snapshot(entry.state.address, document, true, true, "ready", []);
+          this.#lastValid.set(entry.path, { document: structuredClone(document), exists: true, fingerprint: fingerprint(document) });
+          transactions[entry.index]?.[transactionSetCommitted](snapshot);
+          snapshots[entry.index] = snapshot;
+        });
+        return snapshots;
+      } finally {
+        for (const release of releases.reverse()) await release();
+      }
+    });
+  }
+
+  rollbackPrepared(transactions: readonly ExtensionStorageMigrationTransaction[]): Promise<void> {
+    const states = transactions.map((transaction) => transaction[transactionState]());
+    const committed = states.map((state, index) => ({ index, state })).filter((entry) => entry.state.committed !== null);
+    if (committed.length === 0) return Promise.resolve();
+    if (committed.length !== states.length) throw new Error("Cannot roll back a partially committed storage transaction group");
+    if (states.some((state) => state.store !== this)) throw new Error("Extension storage transaction belongs to another store");
+    const entries = committed.map((entry) => ({ ...entry, path: this.#path(entry.state.address) }))
+      .sort((left, right) => left.path.localeCompare(right.path));
+    return this.#serializeMany(entries.map((entry) => entry.path), async () => {
+      const releases: Array<() => Promise<void>> = [];
+      try {
+        for (const entry of entries) releases.push(await acquireLock(`${entry.path}.lock`));
+        const current = await Promise.all(entries.map((entry) => this.#readStrict(entry.state.address)));
+        current.forEach((value, index) => {
+          const expectedRevision = entries[index]?.state.committed?.document.revision ?? -1;
+          if (value.document.revision !== expectedRevision) {
+            throw new ExtensionStorageRevisionConflictError(expectedRevision, value.document.revision);
+          }
+        });
+        for (const entry of entries) {
+          if (entry.state.previous.exists) {
+            await atomicWrite(entry.path, { address: entry.state.address, ...entry.state.previous.document });
+          } else await rm(entry.path, { force: true });
+          const document = structuredClone(entry.state.previous.document);
+          this.#lastValid.set(entry.path, {
+            document,
+            exists: entry.state.previous.exists,
+            fingerprint: fingerprint(document),
+          });
+          transactions[entry.index]?.[transactionSetCommitted](null);
+        }
+      } finally {
+        for (const release of releases.reverse()) await release();
       }
     });
   }
@@ -365,6 +518,18 @@ export class ExtensionStorageStore {
     const tracked = result.then(() => undefined, () => undefined);
     this.#queues.set(key, tracked);
     void tracked.finally(() => { if (this.#queues.get(key) === tracked) this.#queues.delete(key); }).catch(() => undefined);
+    return result;
+  }
+
+  #serializeMany<T>(keys: readonly string[], operation: () => Promise<T>): Promise<T> {
+    const uniqueKeys = [...new Set(keys)].sort();
+    const previous = Promise.all(uniqueKeys.map((key) => this.#queues.get(key) ?? Promise.resolve()));
+    const result = previous.then(operation, operation);
+    const tracked = result.then(() => undefined, () => undefined);
+    for (const key of uniqueKeys) this.#queues.set(key, tracked);
+    void tracked.finally(() => {
+      for (const key of uniqueKeys) if (this.#queues.get(key) === tracked) this.#queues.delete(key);
+    }).catch(() => undefined);
     return result;
   }
 }

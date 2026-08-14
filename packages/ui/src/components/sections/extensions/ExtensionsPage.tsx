@@ -21,11 +21,16 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/ui';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsRadioGroup,
+  SettingsRadioOption,
+  SettingsSection,
+} from '@/components/sections/shared/SettingsSection';
 import {
   refreshPiariumExtensionCatalog,
   discardPiariumExtensionCandidate,
   installPiariumExtension,
+  reloadPiariumExtensionLocalSource,
   removePiariumExtension,
   reviewPiariumExtensionCapabilities,
   reviewPiariumExtensionCandidateCapabilities,
@@ -467,6 +472,7 @@ const ExtensionCard: React.FC<{
   const { t } = useI18n();
   const [inspectOpen, setInspectOpen] = React.useState(false);
   const [removeOpen, setRemoveOpen] = React.useState(false);
+  const [deleteData, setDeleteData] = React.useState(false);
   const status = actualStatus(entry);
   const candidate = entry.candidate;
   const selectedCapabilities: PiariumExtensionCapabilityReference[] = (["host", "surface"] as const).flatMap((realm) => (
@@ -645,11 +651,25 @@ const ExtensionCard: React.FC<{
         </div>
       ) : null}
       <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-border/50 pt-3">
+        {entry.source.kind === 'local' ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={busy}
+            onClick={() => { void reloadPiariumExtensionLocalSource(entry.manifest.id).catch(() => undefined); }}
+          >
+            {t('settings.piarium.extensions.actions.reloadLocal')}
+          </Button>
+        ) : null}
         <Button type="button" variant="ghost" size="xs" onClick={() => setInspectOpen(true)}>
           {t('settings.piarium.extensions.actions.inspect')}
         </Button>
         {entry.source.kind !== 'builtin' ? (
-          <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => setRemoveOpen(true)}>
+          <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => {
+            setDeleteData(false);
+            setRemoveOpen(true);
+          }}>
             {t('settings.piarium.extensions.actions.remove')}
           </Button>
         ) : null}
@@ -778,14 +798,36 @@ const ExtensionCard: React.FC<{
         </DialogContent>
       </Dialog>
 
-      <Dialog open={removeOpen} onOpenChange={(open) => !busy && setRemoveOpen(open)}>
+      <Dialog open={removeOpen} onOpenChange={(open) => {
+        if (busy) return;
+        setRemoveOpen(open);
+        if (!open) setDeleteData(false);
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{t('settings.piarium.extensions.remove.title', {
               name: entry.manifest.displayName ?? entry.manifest.id,
             })}</DialogTitle>
-            <DialogDescription>{t('settings.piarium.extensions.remove.retainsData')}</DialogDescription>
+            <DialogDescription>{t('settings.piarium.extensions.remove.storageScope')}</DialogDescription>
           </DialogHeader>
+          <SettingsRadioGroup aria-label={t('settings.piarium.extensions.remove.dataChoice')}>
+            <SettingsRadioOption
+              selected={!deleteData}
+              onSelect={() => setDeleteData(false)}
+              label={t('settings.piarium.extensions.remove.retainData')}
+              description={t('settings.piarium.extensions.remove.retainDataDescription')}
+              ariaLabel={t('settings.piarium.extensions.remove.retainData')}
+              disabled={busy}
+            />
+            <SettingsRadioOption
+              selected={deleteData}
+              onSelect={() => setDeleteData(true)}
+              label={t('settings.piarium.extensions.remove.deleteData')}
+              description={t('settings.piarium.extensions.remove.deleteDataDescription')}
+              ariaLabel={t('settings.piarium.extensions.remove.deleteData')}
+              disabled={busy}
+            />
+          </SettingsRadioGroup>
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={busy} onClick={() => setRemoveOpen(false)}>
               {t('settings.common.actions.cancel')}
@@ -795,7 +837,7 @@ const ExtensionCard: React.FC<{
               variant="destructive"
               disabled={busy}
               onClick={() => {
-                void removePiariumExtension(entry.manifest.id).then(() => setRemoveOpen(false)).catch(() => undefined);
+                void removePiariumExtension(entry.manifest.id, deleteData).then(() => setRemoveOpen(false)).catch(() => undefined);
               }}
             >
               {t('settings.piarium.extensions.actions.remove')}

@@ -118,6 +118,32 @@ describe('Piarium extension recovery routes', () => {
     expect(response.body).toEqual(entrypoint);
   });
 
+  it('forwards explicit removal data choices and keeps legacy requests as retain', async () => {
+    const extensionRuntime = { removeExtension: vi.fn(async () => snapshot(false, 2)) };
+    const app = createApp({ snapshot: vi.fn(async () => snapshot()) }, {}, extensionRuntime);
+    const path = '/api/piarium/extensions/v1/extensions/dev.example.extension';
+    await request(app)
+      .delete(path)
+      .set('x-test-session', 'yes')
+      .send({ expectedRevision: 1 })
+      .expect(200);
+    expect(extensionRuntime.removeExtension).toHaveBeenLastCalledWith({
+      deleteData: false,
+      expectedRevision: 1,
+      extensionId: 'dev.example.extension',
+    });
+    await request(app)
+      .delete(path)
+      .set('x-test-session', 'yes')
+      .send({ deleteData: true, expectedRevision: 1 })
+      .expect(200);
+    expect(extensionRuntime.removeExtension).toHaveBeenLastCalledWith({
+      deleteData: true,
+      expectedRevision: 1,
+      extensionId: 'dev.example.extension',
+    });
+  });
+
   it('coordinates Host state, candidate preparation, and service invocation through authenticated routes', async () => {
     const state = {
       catalog: snapshot(),
@@ -151,6 +177,7 @@ describe('Piarium extension recovery routes', () => {
       reviewCapabilities: vi.fn(async () => snapshot()),
       reviewCandidateCapabilities: vi.fn(async () => snapshot()),
       invokeService: vi.fn(async () => 'service-result'),
+      reloadLocalSource: vi.fn(async () => ({ outcome: 'unchanged', snapshot: snapshot() })),
       removeExtension: vi.fn(async () => snapshot()),
       upsertServiceRoutingRule: vi.fn(async () => state.routing),
       removeServiceRoutingRule: vi.fn(async () => state.routing),
@@ -188,6 +215,20 @@ describe('Piarium extension recovery routes', () => {
       })
       .expect(200);
     expect(reviewed.body.snapshot.revision).toBe(1);
+    await request(app)
+      .post('/api/piarium/extensions/v1/extensions/dev.example.extension/reload-local-source')
+      .send({ expectedRevision: 1 })
+      .expect(401);
+    const reloaded = await request(app)
+      .post('/api/piarium/extensions/v1/extensions/dev.example.extension/reload-local-source')
+      .set('x-test-session', 'yes')
+      .send({ expectedRevision: 1, source: { kind: 'local', specifier: 'must-not-be-forwarded' } })
+      .expect(200);
+    expect(reloaded.body.outcome).toBe('unchanged');
+    expect(extensionRuntime.reloadLocalSource).toHaveBeenCalledWith({
+      expectedRevision: 1,
+      extensionId: 'dev.example.extension',
+    }, expect.any(AbortSignal));
     const selectedReview = await request(app)
       .post('/api/piarium/extensions/v1/review-capabilities')
       .set('x-test-session', 'yes')

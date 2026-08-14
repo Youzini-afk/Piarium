@@ -13,6 +13,11 @@ piarium-extension build ./my-extension
 piarium-extension test ./my-extension
 ```
 
+Every command accepts `--quiet` for exactly one concise result or error line and `--json` for one
+machine-readable JSON value. Quiet failures retain all validation issues in that single structured
+line. Validation and non-zero failure exit codes are identical in human, non-TTY, quiet, and JSON
+modes.
+
 `init` is non-interactive. Both `--id` and `--name` are required, and an existing non-empty target is
 never overwritten. The generated project contains a public manifest, package metadata, TypeScript
 configuration, a managed Surface entrypoint, and author documentation.

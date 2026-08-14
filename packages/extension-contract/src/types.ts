@@ -321,7 +321,24 @@ export interface PiariumExtensionPackageInstallRequest {
   source: PiariumExtensionPackageSource;
 }
 
+export interface PiariumExtensionLocalSourceReloadRequest {
+  expectedRevision: number;
+  extensionId: string;
+}
+
+export type PiariumExtensionLocalSourceReloadResult =
+  | {
+      outcome: "unchanged";
+      snapshot: PiariumExtensionCatalogSnapshot;
+    }
+  | {
+      candidateIntegrity: string;
+      outcome: "staged";
+      snapshot: PiariumExtensionCatalogSnapshot;
+    };
+
 export interface PiariumExtensionRemoveRequest {
+  deleteData: boolean;
   expectedRevision: number;
   extensionId: string;
 }
@@ -385,6 +402,12 @@ export type PiariumExtensionStorageScope = "application" | "profile" | "session"
 export interface PiariumExtensionStorageAddress {
   extensionId: string;
   key: string;
+  scope: PiariumExtensionStorageScope;
+}
+
+export interface PiariumExtensionStorageOpenRequest {
+  key: string;
+  schemaVersion?: number;
   scope: PiariumExtensionStorageScope;
 }
 

@@ -36,6 +36,7 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@clack/prompts": "^1.7.0",
     "@piarium/extension-contract": "0.1.0",
     "@piarium/extension-sdk": "0.1.0",
     "@piarium/extension-surface": "0.1.0",

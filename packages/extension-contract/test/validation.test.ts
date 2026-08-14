@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   PiariumExtensionContractError,
+  assertPiariumExtensionManifestCompatibility,
   parsePiariumExtensionCatalogAvailability,
   parsePiariumExtensionCatalogDocument,
   parsePiariumExtensionCandidateCapabilityReviewRequest,
   parsePiariumExtensionCapabilityReviewRequest,
   parsePiariumExtensionAssetPayload,
   parsePiariumExtensionManagedEntrypointRequest,
+  parsePiariumExtensionLocalSourceReloadRequest,
+  parsePiariumExtensionLocalSourceReloadResult,
   parsePiariumExtensionManifest,
+  parsePiariumExtensionRemoveRequest,
+  parsePiariumExtensionStorageOpenRequest,
 } from "../src/index.js";
 
 const manifest = () => ({
@@ -90,11 +95,93 @@ test("validates explicit selected-version capability decisions", () => {
   }), PiariumExtensionContractError);
 });
 
+test("validates local source reload requests and results without a source specifier", () => {
+  const request = parsePiariumExtensionLocalSourceReloadRequest({
+    expectedRevision: 4,
+    extensionId: "dev.example.memory-workbench",
+  });
+  assert.deepEqual(request, { expectedRevision: 4, extensionId: "dev.example.memory-workbench" });
+  assert.equal("source" in request, false);
+  const snapshot = {
+    schemaVersion: 1,
+    hostId: "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a",
+    revision: 4,
+    loadedAt: "2026-08-14T00:00:00.000Z",
+    authoritative: true,
+    storageState: "ready",
+    diagnostics: [],
+    extensions: [],
+  };
+  const staged = parsePiariumExtensionLocalSourceReloadResult({
+    candidateIntegrity: `sha256-${"c".repeat(64)}`,
+    outcome: "staged",
+    snapshot,
+  });
+  assert.equal(staged.outcome, "staged");
+  assert.throws(() => parsePiariumExtensionLocalSourceReloadResult({
+    outcome: "staged",
+    snapshot,
+  }), PiariumExtensionContractError);
+});
+
+test("defaults legacy remove requests to retained data and validates explicit deletion", () => {
+  assert.deepEqual(parsePiariumExtensionRemoveRequest({
+    expectedRevision: 3,
+    extensionId: "dev.example.memory-workbench",
+  }), {
+    deleteData: false,
+    expectedRevision: 3,
+    extensionId: "dev.example.memory-workbench",
+  });
+  assert.equal(parsePiariumExtensionRemoveRequest({
+    deleteData: true,
+    expectedRevision: 3,
+    extensionId: "dev.example.memory-workbench",
+  }).deleteData, true);
+  assert.throws(() => parsePiariumExtensionRemoveRequest({
+    deleteData: "yes",
+    expectedRevision: 3,
+    extensionId: "dev.example.memory-workbench",
+  }), PiariumExtensionContractError);
+});
+
+test("validates public storage addresses without accepting a forged extension namespace", () => {
+  assert.deepEqual(parsePiariumExtensionStorageOpenRequest({
+    key: "preferences",
+    schemaVersion: 2,
+    scope: "workspace",
+  }), { key: "preferences", schemaVersion: 2, scope: "workspace" });
+  assert.throws(() => parsePiariumExtensionStorageOpenRequest({
+    extensionId: "dev.example.someone-else",
+    key: "preferences",
+    scope: "workspace",
+  }), (error) => error instanceof PiariumExtensionContractError
+    && error.issues.some((issue) => issue.includes("assigned by the Piarium Host")));
+});
+
 test("normalizes a complete Piarium extension manifest", () => {
   const parsed = parsePiariumExtensionManifest(manifest());
   assert.equal(parsed.id, "dev.example.memory-workbench");
   assert.equal(parsed.entrypoints?.surfaces?.[0]?.mode, "managed");
   assert.equal(parsed.contributions?.[0]?.data.route, "memory");
+});
+
+test("rejects invalid Piarium SemVer ranges and checks compatibility at range boundaries", () => {
+  assert.throws(
+    () => parsePiariumExtensionManifest({ ...manifest(), engines: { piarium: "definitely not semver" } }),
+    (error) => error instanceof PiariumExtensionContractError
+      && error.issues.includes("engines.piarium must be a valid SemVer range"),
+  );
+  const parsed = parsePiariumExtensionManifest({
+    ...manifest(),
+    engines: { piarium: ">=1.2.3 <2.0.0" },
+  });
+  assert.doesNotThrow(() => assertPiariumExtensionManifestCompatibility(parsed, "1.2.3"));
+  assert.doesNotThrow(() => assertPiariumExtensionManifestCompatibility(parsed, "1.9.9"));
+  assert.throws(
+    () => assertPiariumExtensionManifestCompatibility(parsed, "2.0.0"),
+    /requires Piarium >=1\.2\.3 <2\.0\.0; current version is 2\.0\.0/,
+  );
 });
 
 test("rejects traversal, duplicate IDs, and unsupported surfaces together", () => {

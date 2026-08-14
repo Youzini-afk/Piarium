@@ -1,9 +1,11 @@
 import {
+  assertPiariumApplicationVersion,
   parsePiariumExtensionActualState,
   parsePiariumExtensionCandidateCapabilityReviewRequest,
   parsePiariumExtensionCandidateSelectionRequest,
   parsePiariumExtensionCapabilityReviewRequest,
   parsePiariumExtensionHostStateWaitRequest,
+  parsePiariumExtensionLocalSourceReloadRequest,
   parsePiariumExtensionPackageInstallRequest,
   parsePiariumExtensionRemoveRequest,
   parsePiariumExtensionServiceInvocationRequest,
@@ -19,6 +21,8 @@ import {
   type PiariumExtensionCatalogSnapshot,
   type PiariumExtensionHostStateSnapshot,
   type PiariumExtensionHostStateWaitRequest,
+  type PiariumExtensionLocalSourceReloadRequest,
+  type PiariumExtensionLocalSourceReloadResult,
   type PiariumExtensionPackageInstallRequest,
   type PiariumExtensionRemoveRequest,
   type PiariumExtensionServiceInvocationRequest,
@@ -43,6 +47,7 @@ import { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { HostServiceRegistry } from "./service-registry.js";
 import { ServiceRoutingStore } from "./service-routing-store.js";
+import { ExtensionStorageError } from "./errors.js";
 import { ExtensionStorageStore } from "./storage-store.js";
 import { WorkbenchProfileStore } from "./workbench-profile-store.js";
 
@@ -52,6 +57,7 @@ export interface ApplicationExtensionRuntimeOptions {
   catalog?: ApplicationExtensionCatalog;
   dataDir: string;
   packages?: ExtensionPackageManager;
+  piariumVersion: string;
   routing?: ServiceRoutingStore;
   services?: HostServiceRegistry;
   storage?: ExtensionStorageStore;
@@ -63,6 +69,7 @@ export class ApplicationExtensionRuntime {
   readonly capabilities: HostCapabilityRegistry;
   readonly catalog: ApplicationExtensionCatalog;
   readonly packages: ExtensionPackageManager;
+  readonly piariumVersion: string;
   readonly routing: ServiceRoutingStore;
   readonly services: HostServiceRegistry;
   readonly storage: ExtensionStorageStore;
@@ -75,8 +82,17 @@ export class ApplicationExtensionRuntime {
   #stopped = false;
 
   private constructor(options: ApplicationExtensionRuntimeOptions, hostId: string) {
+    this.piariumVersion = options.piariumVersion;
+    assertPiariumApplicationVersion(this.piariumVersion);
     this.catalog = options.catalog ?? new ApplicationExtensionCatalog({ dataDir: options.dataDir });
-    this.packages = options.packages ?? new ExtensionPackageManager({ catalog: this.catalog, dataDir: options.dataDir });
+    this.packages = options.packages ?? new ExtensionPackageManager({
+      catalog: this.catalog,
+      dataDir: options.dataDir,
+      piariumVersion: this.piariumVersion,
+    });
+    if (this.packages.piariumVersion !== this.piariumVersion) {
+      throw new Error("Extension package manager targets another Piarium application version");
+    }
     this.capabilities = options.capabilities ?? new HostCapabilityRegistry();
     this.services = options.services ?? new HostServiceRegistry(hostId);
     if (this.services.hostId !== hostId) throw new Error("Extension service registry belongs to another application host");
@@ -186,6 +202,21 @@ export class ApplicationExtensionRuntime {
     });
   }
 
+  reloadLocalSource(
+    requestValue: PiariumExtensionLocalSourceReloadRequest | unknown,
+    signal?: AbortSignal,
+  ): Promise<PiariumExtensionLocalSourceReloadResult> {
+    const request = parsePiariumExtensionLocalSourceReloadRequest(requestValue);
+    return this.#mutate(async () => {
+      const result = await this.packages.reloadLocalSource(request, signal);
+      if (result.outcome === "staged") {
+        await this.supervisor.reconcile(result.snapshot);
+        this.#publish();
+      }
+      return result;
+    });
+  }
+
   removeExtension(
     requestValue: PiariumExtensionRemoveRequest | unknown,
   ): Promise<PiariumExtensionCatalogSnapshot> {
@@ -203,6 +234,17 @@ export class ApplicationExtensionRuntime {
       try {
         const removed = await this.catalog.remove(request.extensionId, request.expectedRevision);
         await this.supervisor.reconcile(removed);
+        if (request.deleteData) {
+          try {
+            await this.storage.deleteExtensionData(request.extensionId);
+          } catch (error) {
+            throw new ExtensionStorageError(
+              "storage_write_failed",
+              `Piarium extension ${request.extensionId} was removed, but its namespaced storage could not be deleted`,
+              { cause: error },
+            );
+          }
+        }
         return removed;
       } catch (error) {
         await this.supervisor.reconcile(await this.catalog.snapshot()).catch(() => undefined);

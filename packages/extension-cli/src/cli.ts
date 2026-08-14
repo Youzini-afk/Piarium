@@ -4,29 +4,47 @@ import { initProject } from "./init.js";
 import { checkProject, formatContractError } from "./project.js";
 import { testProject } from "./test-command.js";
 import { pathToFileURL } from "node:url";
+import { CliOutput, type CliConsole } from "./cli-output.js";
 
 const usage = `Usage:
   piarium-extension init [dir] --id <extension-id> --name <display-name>
   piarium-extension check [dir]
   piarium-extension build [dir]
   piarium-extension test [dir]
+
+Global output options:
+  --quiet  Emit one concise result line
+  --json   Emit one JSON value and no human-formatted output
 `;
 
 interface ParsedArgs {
   command: string | undefined;
   directory: string | undefined;
+  help: boolean;
   id: string | undefined;
+  json: boolean;
   name: string | undefined;
+  quiet: boolean;
 }
 
 const parseArgs = (args: string[]): ParsedArgs => {
-  const result: ParsedArgs = { command: undefined, directory: undefined, id: undefined, name: undefined };
+  const result: ParsedArgs = {
+    command: undefined,
+    directory: undefined,
+    help: false,
+    id: undefined,
+    json: false,
+    name: undefined,
+    quiet: false,
+  };
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (!value) continue;
-    if (value === "--help" || value === "-h") return { command: "help", directory: undefined, id: undefined, name: undefined };
-    if (value === "--id" || value === "--name") {
+    if (value === "--help" || value === "-h") result.help = true;
+    else if (value === "--json") result.json = true;
+    else if (value === "--quiet") result.quiet = true;
+    else if (value === "--id" || value === "--name") {
       const next = args[index + 1];
       if (!next || next.startsWith("--")) throw new Error(`${value} requires a value`);
       if (value === "--id") result.id = next;
@@ -34,6 +52,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
       index += 1;
       continue;
     }
+    if (value === "--help" || value === "-h" || value === "--json" || value === "--quiet") continue;
     if (value.startsWith("--id=") || value.startsWith("--name=")) {
       const split = value.indexOf("=");
       const option = value.slice(0, split);
@@ -46,17 +65,24 @@ const parseArgs = (args: string[]): ParsedArgs => {
     if (value.startsWith("--")) throw new Error(`Unknown option: ${value}`);
     positional.push(value);
   }
-  result.command = positional.shift();
+  result.command = result.help ? "help" : positional.shift();
   if (positional.length > 1) throw new Error(`Unexpected arguments: ${positional.slice(1).join(" ")}`);
   result.directory = positional[0];
+  if (result.json && result.quiet) throw new Error("--json and --quiet are mutually exclusive output modes");
   return result;
 };
 
-export const runCli = async (args: string[], output = console): Promise<number> => {
+export const runCli = async (args: string[], output: CliConsole = console): Promise<number> => {
+  let parsed: ParsedArgs | undefined;
   try {
-    const parsed = parseArgs(args);
+    parsed = parseArgs(args);
+    const cliOutput = new CliOutput({ json: parsed.json, quiet: parsed.quiet }, output);
     if (!parsed.command || parsed.command === "help") {
-      output.log(usage);
+      cliOutput.success({
+        human: [usage],
+        json: { command: "help", usage },
+        quiet: "piarium-extension init|check|build|test",
+      });
       return 0;
     }
     if (parsed.command === "init") {
@@ -66,7 +92,11 @@ export const runCli = async (args: string[], output = console): Promise<number> 
         id: parsed.id,
         name: parsed.name,
       });
-      output.log(`Created Piarium extension template in ${directory}`);
+      cliOutput.success({
+        human: [`Created Piarium extension template in ${directory}`],
+        json: { command: "init", directory, displayName: parsed.name, extensionId: parsed.id },
+        quiet: `created ${directory}`,
+      });
       return 0;
     }
     if (parsed.command === "check") {
@@ -74,28 +104,66 @@ export const runCli = async (args: string[], output = console): Promise<number> 
       if (result.missingFiles.length > 0) {
         throw new Error(`Manifest is valid, but referenced entrypoint files are missing: ${result.missingFiles.join(", ")}. Run piarium-extension build to create them.`);
       }
-      output.log(`OK: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`);
+      cliOutput.success({
+        human: [`OK: ${result.project.manifest.id}@${result.project.manifest.version} (${result.referencedFiles.length} referenced entrypoint file${result.referencedFiles.length === 1 ? "" : "s"})`],
+        json: {
+          command: "check",
+          extensionId: result.project.manifest.id,
+          missingFiles: result.missingFiles,
+          referencedFiles: result.referencedFiles,
+          version: result.project.manifest.version,
+        },
+        quiet: `ok ${result.project.manifest.id}@${result.project.manifest.version} files:${result.referencedFiles.length}`,
+      });
       return 0;
     }
     if (parsed.command === "build") {
       const result = await buildProject(parsed.directory);
-      if (result.outputs.length === 0) output.log(`OK: ${result.project.manifest.id} has no executable entrypoints (declarative-only)`);
-      else {
-        output.log(`Built ${result.project.manifest.id}@${result.project.manifest.version}:`);
-        for (const item of result.outputs) output.log(`  ${item.kind} ${item.entrypointId} (${item.mode}) -> ${item.file}`);
-      }
+      const human = result.outputs.length === 0
+        ? [`OK: ${result.project.manifest.id} has no executable entrypoints (declarative-only)`]
+        : [
+          `Built ${result.project.manifest.id}@${result.project.manifest.version}:`,
+          ...result.outputs.map((item) => `  ${item.kind} ${item.entrypointId} (${item.mode}) -> ${item.file}`),
+        ];
+      cliOutput.success({
+        human,
+        json: {
+          command: "build",
+          extensionId: result.project.manifest.id,
+          outputs: result.outputs,
+          version: result.project.manifest.version,
+        },
+        quiet: `built ${result.project.manifest.id}@${result.project.manifest.version} outputs:${result.outputs.length}`,
+      });
       return 0;
     }
     if (parsed.command === "test") {
       const result = await testProject(parsed.directory);
-      output.log(`PASS: ${result.project.manifest.id}@${result.project.manifest.version}`);
-      for (const surface of result.surfaces) output.log(`  Surface ${surface.entrypointId}: ${surface.result} (${surface.mode})`);
-      output.log(`  Host: ${result.host}`);
+      cliOutput.success({
+        human: [
+          `PASS: ${result.project.manifest.id}@${result.project.manifest.version}`,
+          ...result.surfaces.map((surface) => `  Surface ${surface.entrypointId}: ${surface.result} (${surface.mode})`),
+          `  Host: ${result.host}`,
+        ],
+        json: {
+          command: "test",
+          extensionId: result.project.manifest.id,
+          host: result.host,
+          surfaces: result.surfaces,
+          version: result.project.manifest.version,
+        },
+        quiet: `pass ${result.project.manifest.id}@${result.project.manifest.version} surfaces:${result.surfaces.length} host:${result.host}`,
+      });
       return 0;
     }
     throw new Error(`Unknown command: ${parsed.command}\n\n${usage}`);
   } catch (error) {
-    for (const message of formatContractError(error)) output.error(`Error: ${message}`);
+    const inferredMode = parsed ?? {
+      json: args.includes("--json"),
+      quiet: args.includes("--quiet"),
+    };
+    new CliOutput({ json: inferredMode.json, quiet: inferredMode.quiet }, output)
+      .error(parsed?.command ?? args.find((value) => !value.startsWith("-")), formatContractError(error));
     return 1;
   }
 };

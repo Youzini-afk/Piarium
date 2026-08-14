@@ -9,7 +9,7 @@ import type {
 
 export interface PiariumExtensionPackageSourceResolver {
   readonly kind: PiariumExtensionPackageSourceKind;
-  materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<void>;
+  materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string>;
 }
 
 export interface ExtensionSourceCommandResult {
@@ -129,7 +129,7 @@ export class PiariumExtensionPackageSourceRegistry {
     };
   }
 
-  materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<void> {
+  materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
     const resolver = this.#resolvers.get(source.kind);
     if (!resolver) throw new Error(`Piarium extension package source is not supported by this host: ${source.kind}`);
     return resolver.materialize(source, destination, signal);
@@ -143,9 +143,17 @@ export class PiariumExtensionPackageSourceRegistry {
 export class LocalExtensionPackageSourceResolver implements PiariumExtensionPackageSourceResolver {
   readonly kind = "local" as const;
 
-  async materialize(source: PiariumExtensionPackageSource, destination: string): Promise<void> {
+  async materialize(
+    source: PiariumExtensionPackageSource,
+    destination: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    // Local development intentionally resolves the author's real worktree in place.
+    void destination;
+    signal?.throwIfAborted();
     const sourcePath = await realpath(resolve(source.specifier));
-    await cp(sourcePath, destination, { dereference: false, recursive: true, verbatimSymlinks: true });
+    signal?.throwIfAborted();
+    return sourcePath;
   }
 }
 
@@ -161,7 +169,7 @@ export class NpmExtensionPackageSourceResolver implements PiariumExtensionPackag
     this.#run = options.run ?? runExtensionSourceCommand;
   }
 
-  async materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<void> {
+  async materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
     const staging = join(dirname(destination), ".npm-pack");
     await mkdir(staging, { recursive: true });
     const npm = await resolveNpmLaunchTarget();
@@ -192,6 +200,7 @@ export class NpmExtensionPackageSourceResolver implements PiariumExtensionPackag
       strip: 1,
     });
     await rm(staging, { force: true, recursive: true });
+    return destination;
   }
 }
 
@@ -210,7 +219,7 @@ export class GitExtensionPackageSourceResolver implements PiariumExtensionPackag
     this.#run = options.run ?? runExtensionSourceCommand;
   }
 
-  async materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<void> {
+  async materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<string> {
     const { ref, url } = splitGitSpecifier(source.specifier);
     await mkdir(dirname(destination), { recursive: true });
     const args = ["clone", "--depth", "1", "--single-branch"];
@@ -218,6 +227,7 @@ export class GitExtensionPackageSourceResolver implements PiariumExtensionPackag
     args.push("--", url, destination);
     await this.#run("git", args, { cwd: dirname(destination), ...(signal ? { signal } : {}) });
     await rm(join(destination, ".git"), { force: true, recursive: true });
+    return destination;
   }
 }
 
@@ -229,11 +239,12 @@ export class BuiltinExtensionPackageSourceResolver implements PiariumExtensionPa
     this.#roots = roots instanceof Map ? roots : new Map(Object.entries(roots));
   }
 
-  async materialize(source: PiariumExtensionPackageSource, destination: string): Promise<void> {
+  async materialize(source: PiariumExtensionPackageSource, destination: string): Promise<string> {
     const configured = this.#roots.get(source.specifier);
     if (!configured) throw new Error(`Unknown built-in Piarium extension package: ${source.specifier}`);
     const sourcePath = await realpath(configured);
     await cp(sourcePath, destination, { dereference: false, recursive: true, verbatimSymlinks: true });
+    return destination;
   }
 }
 

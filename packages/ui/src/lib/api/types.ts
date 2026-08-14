@@ -14,6 +14,8 @@ import type {
   PiariumExtensionHostStateWaitRequest,
   PiariumExtensionManagedEntrypointPayload,
   PiariumExtensionManagedEntrypointRequest,
+  PiariumExtensionLocalSourceReloadRequest,
+  PiariumExtensionLocalSourceReloadResult,
   PiariumExtensionPackageInstallRequest,
   PiariumExtensionRemoveRequest,
   PiariumExtensionServiceInvocationRequest,
@@ -1635,6 +1637,7 @@ export interface ExtensionsAPI {
   requestCandidateApplication(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
   readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
   readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
+  reloadLocalSource(request: PiariumExtensionLocalSourceReloadRequest): Promise<PiariumExtensionLocalSourceReloadResult>;
   reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
   reviewCapabilities(request: PiariumExtensionCapabilityReviewRequest): Promise<PiariumExtensionCatalogSnapshot>;
   reviewCandidateCapabilities(request: PiariumExtensionCandidateCapabilityReviewRequest): Promise<PiariumExtensionCatalogSnapshot>;

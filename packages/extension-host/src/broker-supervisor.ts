@@ -1,6 +1,7 @@
 import { fork, type ChildProcess } from "node:child_process";
 import {
   parsePiariumExtensionServiceInvocationRequest,
+  parsePiariumExtensionStorageOpenRequest,
   type JsonObject,
   type JsonValue,
   type PiariumExtensionActualState,
@@ -75,19 +76,18 @@ interface BrokeredHostInstance {
   desiredRevision: number;
   grants: PiariumExtensionCapabilityGrant[];
   manifest: PiariumExtensionManifest;
-  migration: ExtensionStorageMigrationTransaction | null;
   owner: HostServiceOwnerIdentity;
   provisions: HostServiceProvision[];
   slot: "candidate" | "selected";
-  storage: BrokerStorageSession;
+  storages: Map<string, BrokerStorageSession>;
 }
 
 interface BrokerStorageSession {
   address: PiariumExtensionStorageAddress;
-  pendingData: JsonObject | null;
-  phase: "activating" | "active" | "disposed";
+  phase: "activating" | "active" | "disposed" | "draining";
   schemaVersion: number;
   snapshot: PiariumExtensionStorageSnapshot;
+  transaction: ExtensionStorageMigrationTransaction | null;
 }
 
 interface BrokerActivationResult {
@@ -108,6 +108,9 @@ export interface BrokeredHostSupervisorOptions {
 
 const serviceKey = (id: string, version: number): string => `${id}@${version}`;
 const ownerStorageKey = (owner: HostServiceOwnerIdentity): string => `${owner.extensionId}\0${owner.entrypointId}\0${owner.generation}`;
+const storageAddressKey = (address: Pick<PiariumExtensionStorageAddress, "key" | "scope">): string => (
+  `${address.scope}\0${address.key}`
+);
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -274,7 +277,7 @@ export class BrokeredHostSupervisor {
   readonly #staged = new Map<string, BrokeredHostInstance>();
   readonly #nativeRestartRequired = new Set<string>();
   readonly #storage: ExtensionStorageStore;
-  readonly #storageSessions = new Map<string, BrokerStorageSession>();
+  readonly #storageSessions = new Map<string, Map<string, BrokerStorageSession>>();
   readonly #transportFactory: BrokeredHostTransportFactory;
   #queue: Promise<void> = Promise.resolve();
 
@@ -336,6 +339,11 @@ export class BrokeredHostSupervisor {
   deactivateExtension(extensionId: string): Promise<void> {
     return this.#enqueue(async () => {
       const snapshot = await this.#catalog.snapshot();
+      const staged = this.#staged.get(extensionId);
+      if (staged) {
+        this.#staged.delete(extensionId);
+        await this.#disposeInstance(staged, false);
+      }
       await this.#deactivateWithDependents(extensionId, snapshot);
     });
   }
@@ -459,29 +467,22 @@ export class BrokeredHostSupervisor {
     if (staged.artifactIntegrity !== integrity) throw new Error(`Prepared Host candidate is stale: ${extensionId}`);
     const previous = this.#active.get(extensionId);
     const replacement = this.#services.prepareOwnerReplacement(staged.owner, staged.provisions);
-    let migrationCommitted = false;
+    let storageCommitted = false;
     let selected: PiariumExtensionCatalogSnapshot;
+    if (previous) this.#setStoragePhase(previous, "draining");
     try {
-      if (staged.migration) {
-        staged.storage.snapshot = await staged.migration.commit();
-        migrationCommitted = true;
-        await staged.broker.request("storage.sync", { storage: staged.storage.snapshot });
-      }
+      await this.#commitInstanceStorage(staged);
+      storageCommitted = true;
       selected = await this.#packages.selectCandidate({ candidateIntegrity: integrity, expectedRevision, extensionId });
     } catch (error) {
-      if (migrationCommitted) {
-        await staged.migration?.rollbackCommitted();
-        if (staged.migration) {
-          staged.storage.snapshot = staged.migration.previous;
-          await staged.broker.request("storage.sync", { storage: staged.storage.snapshot }).catch(() => undefined);
-        }
-      }
-      staged.storage.phase = "activating";
+      if (storageCommitted) await this.#rollbackInstanceStorage(staged);
+      this.#setStoragePhase(staged, "activating");
+      if (previous) this.#setStoragePhase(previous, "active");
       throw error;
     }
     replacement.commit();
-    staged.storage.phase = "active";
-    this.#active.set(extensionId, { ...staged, slot: "selected", migration: null });
+    this.#finalizeInstanceStorage(staged);
+    this.#active.set(extensionId, { ...staged, slot: "selected" });
     this.#staged.delete(extensionId);
     await this.#reportActual(extensionId, diagnosticState(
       selected.hostId,
@@ -629,16 +630,14 @@ export class BrokeredHostSupervisor {
       version: entry.selectedVersion,
     }, snapshot);
     const replacement = this.#services.prepareOwnerReplacement(candidate.owner, candidate.provisions);
-    let migrationCommitted = false;
+    let storageCommitted = false;
+    if (active) this.#setStoragePhase(active, "draining");
     try {
-      if (candidate.migration) {
-        candidate.storage.snapshot = await candidate.migration.commit();
-        migrationCommitted = true;
-        await candidate.broker.request("storage.sync", { storage: candidate.storage.snapshot });
-      }
+      await this.#commitInstanceStorage(candidate);
+      storageCommitted = true;
       replacement.commit();
-      candidate.storage.phase = "active";
-      this.#active.set(entry.manifest.id, { ...candidate, migration: null });
+      this.#finalizeInstanceStorage(candidate);
+      this.#active.set(entry.manifest.id, candidate);
       await this.#reportActual(entry.manifest.id, diagnosticState(
         snapshot.hostId,
         entry.desired.revision,
@@ -649,12 +648,10 @@ export class BrokeredHostSupervisor {
       if (active) await this.#disposeInstance(active, false);
     } catch (error) {
       await replacement.rollback().catch(() => undefined);
-      if (migrationCommitted) {
-        await candidate.migration?.rollbackCommitted();
-        if (candidate.migration) candidate.storage.snapshot = candidate.migration.previous;
-      }
+      if (storageCommitted) await this.#rollbackInstanceStorage(candidate);
       await this.#disposeInstance(candidate, false);
       if (active) {
+        this.#setStoragePhase(active, "active");
         this.#active.set(entry.manifest.id, active);
         await this.#reportActual(entry.manifest.id, diagnosticState(
           snapshot.hostId,
@@ -719,39 +716,35 @@ export class BrokeredHostSupervisor {
       });
     const address = { extensionId: entry.manifest.id, key: "state", scope: "application" as const };
     let storageSnapshot = await this.#storage.read(address);
-    let migration: ExtensionStorageMigrationTransaction | null = null;
     const targetSchemaVersion = selection.manifest.storage?.schemaVersion ?? storageSnapshot.document.schemaVersion;
     const storageSession: BrokerStorageSession = {
       address,
-      pendingData: null,
       phase: "activating",
       schemaVersion: targetSchemaVersion,
       snapshot: storageSnapshot,
+      transaction: null,
     };
-    this.#storageSessions.set(ownerStorageKey(owner), storageSession);
+    const storages = new Map([[storageAddressKey(address), storageSession]]);
+    this.#storageSessions.set(ownerStorageKey(owner), storages);
     try {
-      migration = await this.#storage.prepareMigration(address, targetSchemaVersion, async (input) => {
+      storageSession.transaction = await this.#storage.prepareMigration(address, targetSchemaVersion, async (input) => {
         const migrated = await broker.request("migrate", { input, modulePath: artifact.modulePath });
         if (!isRecord(migrated)) throw new Error("Host migration must return a JSON object");
         return migrated as JsonObject;
       });
-      if (migration) {
+      if (storageSession.transaction) {
         storageSnapshot = {
-          ...migration.previous,
+          ...storageSession.transaction.previous,
           document: {
-            ...migration.previous.document,
-            data: structuredClone(migration.targetData),
-            schemaVersion: migration.targetSchemaVersion,
+            ...storageSession.transaction.previous.document,
+            data: structuredClone(storageSession.transaction.targetData),
+            schemaVersion: storageSession.transaction.targetSchemaVersion,
           },
         };
       }
       storageSession.snapshot = storageSnapshot;
       const activation = await broker.request("activate", { modulePath: artifact.modulePath, storage: storageSnapshot }) as BrokerActivationResult;
       if (crashed) throw crashed;
-      if (storageSession.pendingData) {
-        if (migration) migration.stageData(storageSession.pendingData);
-        else migration = await this.#storage.prepareWrite(address, targetSchemaVersion, storageSession.pendingData);
-      }
       const provisions = this.#provisions(owner, broker, activation.provisions, selection.manifest);
       return {
         artifactIntegrity: selection.integrity,
@@ -759,11 +752,10 @@ export class BrokeredHostSupervisor {
         desiredRevision: entry.desired.revision,
         grants,
         manifest: selection.manifest,
-        migration,
         owner,
         provisions,
         slot: selection.slot,
-        storage: storageSession,
+        storages,
       };
     } catch (error) {
       storageSession.phase = "disposed";
@@ -865,7 +857,7 @@ export class BrokeredHostSupervisor {
   }
 
   async #disposeInstance(instance: BrokeredHostInstance, terminate: boolean): Promise<void> {
-    instance.storage.phase = "disposed";
+    this.#setStoragePhase(instance, "disposed");
     this.#storageSessions.delete(ownerStorageKey(instance.owner));
     if (terminate) await instance.broker.terminate();
     else await instance.broker.terminate().catch(() => instance.broker.forceTerminate());
@@ -904,6 +896,8 @@ export class BrokeredHostSupervisor {
     }
     this.#services.removeOwner(owner);
     this.#active.delete(extensionId);
+    this.#setStoragePhase(active, "disposed");
+    this.#storageSessions.delete(ownerStorageKey(owner));
     await this.#reportActual(extensionId, diagnosticState(
       hostId,
       desiredRevision,
@@ -932,9 +926,27 @@ export class BrokeredHostSupervisor {
         signal,
       );
     }
+    if (method === "storage.open") {
+      const request = parsePiariumExtensionStorageOpenRequest(params);
+      const session = await this.#openStorageSession(owner, request);
+      return asJsonValue(session.snapshot);
+    }
+    if (method === "storage.refresh") {
+      const request = parsePiariumExtensionStorageOpenRequest(params);
+      const session = await this.#openStorageSession(owner, request);
+      if (session.phase !== "active") return asJsonValue(session.snapshot);
+      session.snapshot = await this.#storage.read(session.address);
+      return asJsonValue(session.snapshot);
+    }
     if (method === "storage.update") {
-      const session = this.#storageSessions.get(ownerStorageKey(owner));
-      if (!session || session.phase === "disposed") throw new Error("Brokered Host storage owner is inactive");
+      if (params.extensionId !== undefined) throw new Error("Extension storage namespace is assigned by the Piarium Host");
+      const request = params.scope === undefined && params.key === undefined
+        ? { key: "state", scope: "application" as const }
+        : parsePiariumExtensionStorageOpenRequest({ key: params.key, scope: params.scope });
+      const session = await this.#openStorageSession(owner, request);
+      if (session.phase === "disposed" || session.phase === "draining") {
+        throw new Error("Brokered Host storage owner is inactive");
+      }
       const expectedRevision = Number(params.expectedRevision);
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error("Extension storage expectedRevision is invalid");
       if (expectedRevision !== session.snapshot.document.revision) {
@@ -943,10 +955,19 @@ export class BrokeredHostSupervisor {
       if (!isRecord(params.data)) throw new Error("Extension storage data must be a JSON object");
       const data = asJsonValue(params.data) as JsonObject;
       if (session.phase === "activating") {
-        session.pendingData = data;
+        session.transaction ??= await this.#storage.prepareWrite(
+          session.address,
+          session.schemaVersion,
+          data,
+        );
+        session.transaction.stageData(data);
         session.snapshot = {
           ...session.snapshot,
-          document: { ...session.snapshot.document, data: structuredClone(data) },
+          document: {
+            ...session.snapshot.document,
+            data: structuredClone(data),
+            schemaVersion: session.schemaVersion,
+          },
         };
         return asJsonValue(session.snapshot);
       }
@@ -960,6 +981,89 @@ export class BrokeredHostSupervisor {
     }
     if (method === "service.invoke") return this.#invokeService(params, signal);
     throw new Error(`Unknown Brokered Host child request: ${method}`);
+  }
+
+  async #openStorageSession(
+    owner: HostServiceOwnerIdentity,
+    requestValue: { key: string; schemaVersion?: number; scope: PiariumExtensionStorageAddress["scope"] },
+  ): Promise<BrokerStorageSession> {
+    const storages = this.#storageSessions.get(ownerStorageKey(owner));
+    if (!storages) throw new Error("Brokered Host storage owner is inactive");
+    const key = storageAddressKey(requestValue);
+    const existing = storages.get(key);
+    if (existing) {
+      if (requestValue.schemaVersion !== undefined && requestValue.schemaVersion !== existing.schemaVersion) {
+        throw new Error(`Extension storage ${requestValue.scope}/${requestValue.key} is already open with schemaVersion ${existing.schemaVersion}`);
+      }
+      return existing;
+    }
+    const phase = storages.values().next().value?.phase as BrokerStorageSession["phase"] | undefined;
+    if (!phase || phase === "disposed" || phase === "draining") throw new Error("Brokered Host storage owner is inactive");
+    const address: PiariumExtensionStorageAddress = {
+      extensionId: owner.extensionId,
+      key: requestValue.key,
+      scope: requestValue.scope,
+    };
+    const snapshot = await this.#storage.read(address);
+    const session: BrokerStorageSession = {
+      address,
+      phase,
+      schemaVersion: requestValue.schemaVersion ?? snapshot.document.schemaVersion,
+      snapshot,
+      transaction: null,
+    };
+    storages.set(key, session);
+    return session;
+  }
+
+  async #commitInstanceStorage(instance: BrokeredHostInstance): Promise<void> {
+    const sessions = [...instance.storages.values()].filter((session) => session.transaction !== null);
+    if (sessions.length === 0) return;
+    const transactions = sessions.map((session) => session.transaction as ExtensionStorageMigrationTransaction);
+    const snapshots = await this.#storage.commitPrepared(transactions);
+    sessions.forEach((session, index) => { session.snapshot = snapshots[index] as PiariumExtensionStorageSnapshot; });
+    try {
+      await this.#syncInstanceStorage(instance);
+    } catch (error) {
+      await this.#rollbackInstanceStorage(instance);
+      throw error;
+    }
+  }
+
+  async #rollbackInstanceStorage(instance: BrokeredHostInstance): Promise<void> {
+    const sessions = [...instance.storages.values()].filter((session) => session.transaction !== null);
+    if (sessions.length === 0) return;
+    const transactions = sessions.map((session) => session.transaction as ExtensionStorageMigrationTransaction);
+    await this.#storage.rollbackPrepared(transactions);
+    sessions.forEach((session) => {
+      const transaction = session.transaction as ExtensionStorageMigrationTransaction;
+      session.snapshot = {
+        ...transaction.previous,
+        document: {
+          ...transaction.previous.document,
+          data: structuredClone(transaction.targetData),
+          schemaVersion: transaction.targetSchemaVersion,
+        },
+      };
+    });
+    await this.#syncInstanceStorage(instance).catch(() => undefined);
+  }
+
+  #finalizeInstanceStorage(instance: BrokeredHostInstance): void {
+    for (const session of instance.storages.values()) {
+      session.phase = "active";
+      session.transaction = null;
+    }
+  }
+
+  #setStoragePhase(instance: BrokeredHostInstance, phase: BrokerStorageSession["phase"]): void {
+    for (const session of instance.storages.values()) session.phase = phase;
+  }
+
+  #syncInstanceStorage(instance: BrokeredHostInstance): Promise<unknown> {
+    return instance.broker.request("storage.sync", {
+      storages: [...instance.storages.values()].map((session) => session.snapshot),
+    });
   }
 
   async #reportActual(extensionId: string, state: PiariumExtensionActualState): Promise<void> {

@@ -31,6 +31,50 @@ const stringData = (data: Record<string, JsonValue>, key: string): string | unde
   typeof data[key] === 'string' ? data[key] : undefined
 );
 
+const isDeclarativeImplementation = (value: unknown): boolean => (
+  typeof value === 'object'
+  && value !== null
+  && (value as { kind?: unknown }).kind === 'declarative'
+);
+
+interface SurfaceCommandExecutionDependencies {
+  getSnapshot(): SurfaceRegistrySnapshot;
+  trigger(contribution: SurfaceContribution): Promise<void>;
+}
+
+const surfaceCommandExecutionDependencies: SurfaceCommandExecutionDependencies = {
+  getSnapshot: piariumSurfaceRuntime.getSnapshot,
+  trigger: async (contribution) => {
+    const { surfaceExtensionLoader } = await import('@/lib/extensions/managed-runtime');
+    await surfaceExtensionLoader.triggerActivation('command', {
+      contributionId: contribution.descriptor.id,
+      extensionId: contribution.owner.extensionId,
+    });
+  },
+};
+
+export const executeSurfaceCommandContribution = async (
+  contributionId: string,
+  context: Parameters<WorkbenchCommandImplementation['execute']>[0],
+  dependencies: SurfaceCommandExecutionDependencies = surfaceCommandExecutionDependencies,
+): Promise<void> => {
+  const contribution = dependencies.getSnapshot().visibleContributions.find((candidate) => (
+    candidate.descriptor.id === contributionId && candidate.descriptor.kind === 'command'
+  ));
+  if (!contribution) throw new Error(`Surface command contribution is no longer available: ${contributionId}`);
+  if (isDeclarativeImplementation(contribution.implementation)) {
+    await dependencies.trigger(contribution);
+  }
+  const latest = dependencies.getSnapshot().visibleContributions.find((candidate) => (
+    candidate.descriptor.id === contributionId && candidate.descriptor.kind === 'command'
+  ));
+  const implementation = latest?.implementation as Partial<WorkbenchCommandImplementation> | undefined;
+  if (!implementation || typeof implementation.execute !== 'function') {
+    throw new Error(`Surface command did not provide an executable implementation: ${contributionId}`);
+  }
+  await implementation.execute(context);
+};
+
 const commandRegistration = (contribution: SurfaceContribution): WorkbenchCommandRegistration | null => {
   if (contribution.descriptor.kind !== 'command') return null;
   const data = contribution.descriptor.data;
@@ -43,8 +87,13 @@ const commandRegistration = (contribution: SurfaceContribution): WorkbenchComman
   const keywords = Array.isArray(data.keywords)
     ? data.keywords.filter((value): value is string => typeof value === 'string')
     : [];
-  const implementation = contribution.implementation as WorkbenchCommandImplementation;
-  if (!commandId || !titleKey || !icon || order === undefined || typeof implementation?.execute !== 'function') {
+  const providedImplementation = contribution.implementation as Partial<WorkbenchCommandImplementation>;
+  const implementation: WorkbenchCommandImplementation | null = typeof providedImplementation?.execute === 'function'
+    ? providedImplementation as WorkbenchCommandImplementation
+    : isDeclarativeImplementation(contribution.implementation)
+      ? { execute: (context) => executeSurfaceCommandContribution(contribution.descriptor.id, context) }
+      : null;
+  if (!commandId || !titleKey || !icon || order === undefined || !implementation) {
     return null;
   }
   return {

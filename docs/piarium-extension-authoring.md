@@ -129,7 +129,7 @@ review does not execute code; update application is a separate explicit action.
 ## Managed Surface entrypoint
 
 ```ts
-import { defineSurfaceExtension } from "@piarium/extension-sdk"
+import { defineSurfaceExtension, defineSurfaceMount } from "@piarium/extension-sdk"
 
 export default defineSurfaceExtension((context) => {
   context.contribute({
@@ -139,9 +139,10 @@ export default defineSurfaceExtension((context) => {
     kind: "page",
     supports: ["desktop", "mobile", "vscode", "web"],
     title: "My Page",
-  }, {
-    render: () => undefined,
-  })
+  }, defineSurfaceMount((container, mount) => {
+    container.textContent = String(mount.props.title ?? "My Page")
+    return () => { container.textContent = "" }
+  }))
 
   context.onDispose(() => stopExternalBrowserEffect())
 })
@@ -155,6 +156,22 @@ one.
 Raw timers, listeners, framework roots, browser objects, or external effects created outside an SDK
 helper remain the author's responsibility. Register their cleanup with the Surface lifecycle or the
 returned activation disposer.
+
+`defineSurfaceMount` is the public rendering boundary. Piarium supplies the actual `HTMLElement`,
+current contribution props, owner generation, a mount-scoped `AbortSignal`, and `reportError`. The
+extension owns everything it creates inside that container, including a framework root, and returns a
+sync or async disposer. Piarium aborts and disposes the mounted instance exactly once when props or
+owner generation change, the contribution is withdrawn, or the extension is disabled. The optional
+React adapter implements this contract with an extension-owned React root; it does not share the
+workbench's React singleton.
+
+### Activation events
+
+Manifest contributions are indexed without loading executable code. An executable entrypoint with no
+activation list, `application-startup`, or `background` starts eagerly. Entrypoints declaring
+`command`, `contribution-visible`, `workspace-match`, or `service-request` stay inactive until that
+actual event occurs. The declared contribution remains visible while its executable implementation is
+inactive. Disabling clears the trigger latch, so re-enabling does not silently reuse a prior event.
 
 ## Isolated Surface entrypoint
 
@@ -202,6 +219,14 @@ export default defineHostExtension(async (context) => {
 
 Host storage is extension-namespaced, revision checked, and authoritative at the application host.
 Use the snapshot revision for every update. Missing, ready, and stale storage states are distinct.
+
+New code can open independent documents with
+`await context.storage.open({ scope, key, schemaVersion? })`. Supported scopes are `application`,
+`profile`, `workspace`, `surface`, and `session`; arbitrary keys let one extension separate unrelated
+state without inventing one product-wide schema. Every document has its own revision and update
+stream. Piarium injects the current extension ID, so the request cannot address another extension's
+namespace. `context.storage.snapshot` and `update` remain the `application/state` compatibility
+document.
 
 If the manifest storage schema version changes, export `migrate({ data, fromSchemaVersion,
 toSchemaVersion })`. Candidate migration is staged with activation; failed candidate activation keeps
@@ -258,12 +283,25 @@ piarium-extension test
 Extensions can call the same harnesses directly from `@piarium/extension-sdk/testing` for richer
 fixtures. These are contract tests, not a substitute for browser tests of the extension's own UI.
 
+All four author commands accept `--quiet` for a stable compact result or `--json` for a single JSON
+success/error value. These modes run the same validation and lifecycle checks as human output and keep
+non-zero exit codes on failure.
+
 ## Install and development workflow
 
 Open **Settings → Piarium Extensions → Install or update** and choose npm, Git, or local folder. The
 specifier is passed to the application-host package source resolver; the UI does not maintain an
-allowlist. A local directory is materialized into an immutable artifact, so subsequent working-tree
-edits become a new candidate only after another install/update action.
+allowlist. For a local folder, the application host reads the real project directory and builds a new
+immutable content-addressed artifact without copying or modifying the working tree. If `package.json`
+declares dependencies, install them in the project first; Piarium never runs `npm install` in a local
+extension project.
+
+An installed local extension has a **Reload local directory** action. Reload resolves the complete
+source identity already stored in the application-host catalog, so the UI neither receives nor
+resubmits the hidden path specifier. Unchanged content is a no-op. Changed content with no new
+capability request is applied to the current Surface through the normal candidate transaction; a
+failed candidate keeps the selected artifact and active generation. A candidate that adds a
+capability is only staged for review and still requires the explicit **Apply update** action afterward.
 
 An extension without requested capabilities is enabled on first installation. An extension that
 requests Host or Surface capabilities is installed disabled; decide every request in its card, then
@@ -320,8 +358,10 @@ layout references, service routing rules, and package artifacts.
 
 Remove first deactivates the extension and then deletes its catalog installation record. Built-in
 distribution extensions cannot be removed through this action; they can be disabled or omitted by a
-distribution. Remove retains extension settings and stored data. Artifact cache reclamation and data
-deletion are separate maintenance operations, never implicit uninstall side effects.
+distribution. The removal dialog makes the data choice explicit: **retain data** is the default, while
+**delete extension data** removes only that extension's validated Piarium storage namespace after the
+catalog record is removed. Neither choice deletes project files, Pi package data, plugin-native data,
+workspace files, or shared artifact-cache material.
 
 ## Workbench distribution profiles
 

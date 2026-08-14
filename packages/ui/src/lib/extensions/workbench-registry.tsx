@@ -31,6 +31,31 @@ type RenderImplementation<TProps extends object> = {
   render(props: TProps): React.ReactNode;
 };
 
+type MountDisposer = () => void | Promise<void>;
+
+interface MountContext<TProps extends object> {
+  readonly contributionId: string;
+  readonly owner: Readonly<SurfaceContribution['owner']>;
+  readonly props: Readonly<TProps>;
+  reportError(error: unknown): void;
+  readonly signal: AbortSignal;
+}
+
+type MountImplementation<TProps extends object> = {
+  mount(
+    container: HTMLElement,
+    context: MountContext<TProps>,
+  ): void | MountDisposer | Promise<void | MountDisposer>;
+};
+
+type WorkbenchMountFailurePhase = 'dispose' | 'mount' | 'render';
+
+interface WorkbenchMountSession {
+  dispose(reason?: unknown): Promise<void>;
+  readonly mounted: Promise<void>;
+  readonly signal: AbortSignal;
+}
+
 interface ReactContribution<TProps extends object> {
   Component: ComponentType<TProps>;
   framework: 'react-19';
@@ -39,6 +64,16 @@ interface ReactContribution<TProps extends object> {
 
 interface ReactReplacementProps {
   fallback: React.ReactNode;
+  target: string;
+}
+
+interface MountReplacementProps {
+  target: string;
+}
+
+interface MountOwnedViewProps {
+  onItemSelect?(): void;
+  region: 'content' | 'sidebar';
   target: string;
 }
 
@@ -57,6 +92,71 @@ const isRenderImplementation = <TProps extends object>(
   typeof value === 'object' && value !== null && typeof (value as { render?: unknown }).render === 'function'
 );
 
+const isMountImplementation = <TProps extends object>(
+  value: unknown,
+): value is MountImplementation<TProps> => (
+  typeof value === 'object' && value !== null && typeof (value as { mount?: unknown }).mount === 'function'
+);
+
+export const startWorkbenchMountSession = <TProps extends object>(options: {
+  container: HTMLElement;
+  contributionId: string;
+  implementation: MountImplementation<TProps>;
+  onError(error: unknown, phase: WorkbenchMountFailurePhase): void;
+  owner: SurfaceContribution['owner'];
+  props: TProps;
+}): WorkbenchMountSession => {
+  const controller = new AbortController();
+  let disposer: MountDisposer | undefined;
+  let disposal: Promise<void> | null = null;
+  const mounted = Promise.resolve().then(async () => {
+    const returned = await options.implementation.mount(options.container, {
+      contributionId: options.contributionId,
+      owner: { ...options.owner },
+      props: options.props,
+      reportError: (error) => options.onError(error, 'render'),
+      signal: controller.signal,
+    });
+    if (returned !== undefined && typeof returned !== 'function') {
+      throw new TypeError(`Surface contribution ${options.contributionId} mount must return a disposer or undefined`);
+    }
+    disposer = typeof returned === 'function' ? returned : undefined;
+  }).catch((error: unknown) => {
+    options.onError(error, 'mount');
+  });
+
+  return {
+    mounted,
+    signal: controller.signal,
+    dispose: (reason) => {
+      if (disposal) return disposal;
+      controller.abort(reason);
+      disposal = mounted.then(async () => {
+        if (!disposer) return;
+        const current = disposer;
+        disposer = undefined;
+        try {
+          await current();
+        } catch (error) {
+          options.onError(error, 'dispose');
+        }
+      });
+      return disposal;
+    },
+  };
+};
+
+export const workbenchContributionInstanceKey = (contribution: SurfaceContribution): string => {
+  const { owner } = contribution;
+  return [
+    contribution.descriptor.id,
+    owner.extensionId,
+    owner.entrypointId,
+    owner.realmId,
+    owner.generation,
+  ].join('\0');
+};
+
 const renderImplementation = <TProps extends object>(
   implementation: unknown,
   props: TProps,
@@ -69,11 +169,159 @@ const renderImplementation = <TProps extends object>(
   return null;
 };
 
+interface ContributionRenderBoundaryProps {
+  children: React.ReactNode;
+  contribution: SurfaceContribution;
+  fallback: React.ReactNode;
+}
+
+interface ContributionRenderBoundaryState {
+  failed: boolean;
+}
+
+class ContributionRenderBoundary extends React.Component<
+  ContributionRenderBoundaryProps,
+  ContributionRenderBoundaryState
+> {
+  state: ContributionRenderBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): ContributionRenderBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown, errorInfo: React.ErrorInfo): void {
+    const { descriptor, owner } = this.props.contribution;
+    console.error(
+      `[Piarium Extensions] Contribution ${descriptor.id} from ${owner.extensionId} failed to render:`,
+      error,
+      errorInfo,
+    );
+  }
+
+  render(): React.ReactNode {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+const WorkbenchRenderImplementation = <TProps extends object>({
+  fallbackOnEmpty,
+  implementation,
+  props,
+}: {
+  fallbackOnEmpty: React.ReactNode;
+  implementation: unknown;
+  props: TProps;
+}): React.ReactNode => {
+  const rendered = renderImplementation(implementation, props);
+  return rendered === null || rendered === undefined ? fallbackOnEmpty : rendered;
+};
+
+interface MountFailure {
+  contributionKey: string;
+  implementation: unknown;
+  props: object;
+}
+
+const WorkbenchMountHost = <TProps extends object>({
+  className,
+  contribution,
+  fallback,
+  implementation,
+  props,
+}: {
+  className?: string;
+  contribution: SurfaceContribution;
+  fallback: React.ReactNode;
+  implementation: MountImplementation<TProps>;
+  props: TProps;
+}): React.ReactNode => {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [failure, setFailure] = React.useState<MountFailure | null>(null);
+  const contributionKey = workbenchContributionInstanceKey(contribution);
+  const failed = failure?.contributionKey === contributionKey
+    && failure.implementation === implementation
+    && failure.props === props;
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let active = true;
+    const session = startWorkbenchMountSession({
+      container,
+      contributionId: contribution.descriptor.id,
+      implementation,
+      owner: contribution.owner,
+      props,
+      onError: (error, phase) => {
+        console.error(
+          `[Piarium Extensions] Contribution ${contribution.descriptor.id} from ${contribution.owner.extensionId} failed during ${phase}:`,
+          error,
+        );
+        if (!active || phase === 'dispose') return;
+        setFailure({ contributionKey, implementation, props });
+        void session.dispose(error);
+      },
+    });
+    return () => {
+      active = false;
+      void session.dispose(`Surface contribution ${contribution.descriptor.id} was unmounted`);
+    };
+  }, [contribution, contributionKey, implementation, props]);
+
+  if (failed) return fallback;
+  return (
+    <div
+      ref={containerRef}
+      className={className}
+      data-piarium-surface-contribution={contribution.descriptor.id}
+    />
+  );
+};
+
 export const useSurfaceRegistrySnapshot = (): SurfaceRegistrySnapshot => React.useSyncExternalStore(
   piariumSurfaceRuntime.subscribe,
   piariumSurfaceRuntime.getSnapshot,
   piariumSurfaceRuntime.getSnapshot,
 );
+
+interface VisibleContributionActivationDependencies {
+  trigger(contribution: SurfaceContribution): Promise<void>;
+}
+
+const visibleContributionActivationDependencies: VisibleContributionActivationDependencies = {
+  trigger: async (contribution) => {
+    const { surfaceExtensionLoader } = await import('./managed-runtime');
+    await surfaceExtensionLoader.triggerActivation('contribution-visible', {
+      contributionId: contribution.descriptor.id,
+      extensionId: contribution.owner.extensionId,
+    });
+  },
+};
+
+export const triggerVisibleSurfaceContributions = async (
+  contributions: readonly SurfaceContribution[],
+  dependencies: VisibleContributionActivationDependencies = visibleContributionActivationDependencies,
+): Promise<void> => {
+  for (const contribution of contributions) {
+    if (
+      typeof contribution.implementation !== 'object'
+      || contribution.implementation === null
+      || (contribution.implementation as { kind?: unknown }).kind !== 'declarative'
+    ) continue;
+    await dependencies.trigger(contribution);
+  }
+};
+
+const useVisibleContributionActivation = (contributions: readonly SurfaceContribution[]): void => {
+  const activationKey = contributions.map(workbenchContributionInstanceKey).join('\n');
+  React.useEffect(() => {
+    void triggerVisibleSurfaceContributions(contributions).catch((error) => {
+      console.error('[Piarium Extensions] Visible Surface contribution activation failed:', error);
+    });
+  // The owner-generation key changes exactly when a newly visible implementation needs evaluation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activationKey]);
+};
 
 export const WorkbenchProfileBridge: React.FC = () => {
   const catalog = usePiariumExtensionCatalog();
@@ -103,10 +351,32 @@ export const WorkbenchReplacement: React.FC<{
   target: string;
 }> = ({ fallback, target }) => {
   const snapshot = useSurfaceRegistrySnapshot();
+  const mountProps = React.useMemo<MountReplacementProps>(() => ({ target }), [target]);
   const contribution = selectedReplacement(snapshot, target);
+  useVisibleContributionActivation(contribution ? [contribution] : []);
   if (!contribution) return <>{fallback}</>;
-  const rendered = renderImplementation<ReactReplacementProps>(contribution.implementation, { fallback, target });
-  return rendered === null || rendered === undefined ? <>{fallback}</> : <>{rendered}</>;
+  const contributionKey = workbenchContributionInstanceKey(contribution);
+  if (isMountImplementation<MountReplacementProps>(contribution.implementation)) {
+    return (
+      <WorkbenchMountHost
+        key={contributionKey}
+        className="h-full min-h-0 w-full min-w-0"
+        contribution={contribution}
+        fallback={fallback}
+        implementation={contribution.implementation}
+        props={mountProps}
+      />
+    );
+  }
+  return (
+    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={fallback}>
+      <WorkbenchRenderImplementation
+        fallbackOnEmpty={fallback}
+        implementation={contribution.implementation}
+        props={{ fallback, target } satisfies ReactReplacementProps}
+      />
+    </ContributionRenderBoundary>
+  );
 };
 
 export interface WorkbenchOwnedViewImplementation {
@@ -121,32 +391,89 @@ export const WorkbenchOwnedView: React.FC<{
   target: string;
 }> = ({ fallback, onItemSelect, region, target }) => {
   const snapshot = useSurfaceRegistrySnapshot();
+  const mountProps = React.useMemo<MountOwnedViewProps>(
+    () => ({ region, target, ...(onItemSelect ? { onItemSelect } : {}) }),
+    [onItemSelect, region, target],
+  );
   const contribution = selectedReplacement(snapshot, target);
+  useVisibleContributionActivation(contribution ? [contribution] : []);
   if (!contribution) return <>{fallback}</>;
+  const contributionKey = workbenchContributionInstanceKey(contribution);
+  if (isMountImplementation<MountOwnedViewProps>(contribution.implementation)) {
+    return (
+      <WorkbenchMountHost
+        key={contributionKey}
+        className="h-full min-h-0 w-full min-w-0"
+        contribution={contribution}
+        fallback={fallback}
+        implementation={contribution.implementation}
+        props={mountProps}
+      />
+    );
+  }
   const implementation = contribution.implementation as WorkbenchOwnedViewImplementation;
+  return (
+    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={fallback}>
+      <WorkbenchOwnedViewRender
+        fallback={fallback}
+        implementation={implementation}
+        onItemSelect={onItemSelect}
+        region={region}
+      />
+    </ContributionRenderBoundary>
+  );
+};
+
+const WorkbenchOwnedViewRender: React.FC<{
+  fallback: React.ReactNode;
+  implementation: WorkbenchOwnedViewImplementation;
+  onItemSelect?(): void;
+  region: 'content' | 'sidebar';
+}> = ({ fallback, implementation, onItemSelect, region }) => {
   const rendered = region === 'content'
     ? implementation.renderContent?.()
     : implementation.renderSidebar?.({ onItemSelect });
-  if (rendered === undefined) return <>{fallback}</>;
-  return <>{rendered}</>;
+  return rendered === undefined ? <>{fallback}</> : <>{rendered}</>;
 };
+
+const EMPTY_MOUNT_PROPS: Readonly<Record<string, unknown>> = {};
 
 export const WorkbenchContributionSlot: React.FC<{
   kind?: PiariumExtensionContributionKind;
   props?: Record<string, unknown>;
   slot: string;
-}> = ({ kind, props = {}, slot }) => {
+}> = ({ kind, props, slot }) => {
   const snapshot = useSurfaceRegistrySnapshot();
+  const contributionProps = props ?? EMPTY_MOUNT_PROPS;
   const contributions = snapshot.visibleContributions.filter((contribution) => (
     contribution.descriptor.placement?.slot === slot
     && (kind === undefined || contribution.descriptor.kind === kind)
     && contribution.descriptor.replacement === undefined
   ));
-  return <>{contributions.map((contribution) => (
-    <React.Fragment key={contribution.descriptor.id}>
-      {renderImplementation(contribution.implementation, props)}
-    </React.Fragment>
-  ))}</>;
+  useVisibleContributionActivation(contributions);
+  return <>{contributions.map((contribution) => {
+    const contributionKey = workbenchContributionInstanceKey(contribution);
+    if (isMountImplementation<Record<string, unknown>>(contribution.implementation)) {
+      return (
+        <WorkbenchMountHost
+          key={contributionKey}
+          contribution={contribution}
+          fallback={null}
+          implementation={contribution.implementation}
+          props={contributionProps}
+        />
+      );
+    }
+    return (
+      <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={null}>
+        <WorkbenchRenderImplementation
+          fallbackOnEmpty={null}
+          implementation={contribution.implementation}
+          props={contributionProps}
+        />
+      </ContributionRenderBoundary>
+    );
+  })}</>;
 };
 
 export interface WorkbenchMatchRenderer<TInput> {
@@ -164,13 +491,16 @@ export const useWorkbenchMatchRenderers = <TInput,>(
   slot: string,
 ): WorkbenchMatchRendererRegistration<TInput>[] => {
   const snapshot = useSurfaceRegistrySnapshot();
-  return React.useMemo(() => snapshot.visibleContributions.flatMap((contribution) => {
-    if (contribution.descriptor.kind !== kind || contribution.descriptor.placement?.slot !== slot) return [];
+  const contributions = React.useMemo(() => snapshot.visibleContributions.filter((contribution) => (
+    contribution.descriptor.kind === kind && contribution.descriptor.placement?.slot === slot
+  )), [kind, slot, snapshot]);
+  useVisibleContributionActivation(contributions);
+  return React.useMemo(() => contributions.flatMap((contribution) => {
     const implementation = contribution.implementation as Partial<WorkbenchMatchRenderer<TInput>>;
     return typeof implementation.matches === 'function' && typeof implementation.render === 'function'
       ? [{ contributionId: contribution.descriptor.id, implementation: implementation as WorkbenchMatchRenderer<TInput> }]
       : [];
-  }), [kind, slot, snapshot]);
+  }), [contributions]);
 };
 
 export const renderFirstWorkbenchMatch = <TInput,>(

@@ -8,7 +8,7 @@ let modulePath = '';
 let loadedModule = null;
 let activationController = null;
 let requestCounter = 0;
-let storageSnapshot = null;
+const storageClients = new Map();
 
 const send = (message) => {
   if (typeof process.send !== 'function' || !process.connected) throw new Error('Broker parent is disconnected');
@@ -16,6 +16,31 @@ const send = (message) => {
 };
 
 const errorMessage = (error) => error instanceof Error ? error.message : String(error);
+const storageKey = (address) => `${address?.scope || ''}\0${address?.key || ''}`;
+
+const createStorageClient = (request, initialSnapshot) => {
+  const state = { snapshot: initialSnapshot };
+  const key = storageKey(request);
+  const clients = storageClients.get(key) ?? new Set();
+  clients.add(state);
+  storageClients.set(key, clients);
+  return {
+    get snapshot() { return state.snapshot; },
+    refresh: async () => {
+      state.snapshot = await requestParent('storage.refresh', request);
+      return state.snapshot;
+    },
+    update: async (data, expectedRevision = state.snapshot?.document?.revision) => {
+      state.snapshot = await requestParent('storage.update', {
+        data,
+        expectedRevision,
+        key: request.key,
+        scope: request.scope,
+      });
+      return state.snapshot;
+    },
+  };
+};
 
 const requestParent = (method, params) => new Promise((resolve, reject) => {
   const id = `child-${process.pid}-${++requestCounter}`;
@@ -72,7 +97,11 @@ const handleParentRequest = async (message) => {
       activationController = new AbortController();
       const stagedHandlers = new Map();
       const stagedProvisions = [];
-      storageSnapshot = message.params.storage;
+      storageClients.clear();
+      const defaultStorage = createStorageClient(
+        { key: 'state', scope: 'application' },
+        message.params.storage,
+      );
       const context = {
         capabilities: {
           call: (capability, method, params) => requestParent('capability.call', { capability, method, params }),
@@ -108,11 +137,13 @@ const handleParentRequest = async (message) => {
         },
         signal: activationController.signal,
         storage: {
-          get snapshot() { return storageSnapshot; },
-          update: async (data, expectedRevision = storageSnapshot?.document?.revision) => {
-            storageSnapshot = await requestParent('storage.update', { data, expectedRevision });
-            return storageSnapshot;
-          },
+          get snapshot() { return defaultStorage.snapshot; },
+          open: async (request) => createStorageClient(
+            request,
+            await requestParent('storage.open', request),
+          ),
+          refresh: () => defaultStorage.refresh(),
+          update: (data, expectedRevision) => defaultStorage.update(data, expectedRevision),
         },
       };
       const returned = await extension.activate(context);
@@ -129,7 +160,11 @@ const handleParentRequest = async (message) => {
       return implementation(...(Array.isArray(message.params?.args) ? message.params.args : []));
     }
     case 'storage.sync':
-      storageSnapshot = message.params?.storage;
+      for (const snapshot of Array.isArray(message.params?.storages)
+        ? message.params.storages
+        : [message.params?.storage].filter(Boolean)) {
+        for (const state of storageClients.get(storageKey(snapshot?.address)) ?? []) state.snapshot = snapshot;
+      }
       return null;
     case 'deactivate':
       await deactivate();

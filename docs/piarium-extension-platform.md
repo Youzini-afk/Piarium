@@ -932,8 +932,9 @@ preconditions at `PATCH /api/piarium/extensions/v1/extensions/:id/enabled` and
 `POST /api/piarium/extensions/v1/disable-all`. `/extensions/recovery` is a host-owned HTML manager
 that does not depend on the React workbench. Web, Electron, hosted mobile, and Capacitor expose this
 application-host API through their Runtime API even when the active Pi Runtime points elsewhere. VS
-Code returns a stable unsupported result until a VS Code application-host implementation is added.
-Phase A indexes and mutates records only; it does not load or execute an extension entrypoint.
+Code owns the same catalog, artifact, storage, and Host runtime under extension global storage and
+bridges it to the webview. Phase A itself indexes and mutates records only; entrypoint execution is
+owned by the later runtime phases.
 
 ### Phase B — Surface registry and built-in contributions
 
@@ -988,12 +989,26 @@ Surface transaction; only then is the host candidate selected and the new contri
 Activation or selection failure leaves the old selected artifact, active generation, layout, styles,
 and services in place. Owner cleanup removes styles and object URLs on update or disable.
 
+The artifact address is derived from one canonical digest covering the manifest snapshot, Host and
+Surface entrypoint mappings, every file path, content type, integrity record, and authenticated file
+bytes. Every reuse/read validates that digest against the catalog, directory address, manifest, and
+requested bytes; older unauthenticated cache layouts are rejected and rematerialized from their
+installation source. `engines.piarium` is parsed as a real SemVer range and checked against the actual
+Web or VS Code application version before installation, candidate staging, and selection.
+
 The framework-neutral `@piarium/extension-sdk` exposes activation, owned assets/styles, and a
 conformance harness. `@piarium/extension-react` is an optional React 19 peer adapter; external bundles
 do not inherit the workbench React singleton. Web and hosted surfaces use the application-host API,
 bundled Electron stages that Web build, and VS Code now owns the same host catalog/artifacts under its
 global storage and bridges authenticated bytes to the webview. Managed CommonJS evaluation uses the
 already-declared trusted managed realm and preserves VS Code's prohibition on blob scripts.
+
+Manifest-declared contributions are projected without loading executable code. Command,
+contribution-visibility, workspace-match, and service-request entrypoints activate only after their
+real event; eager/background entrypoints keep eager semantics. The public Surface mount contract gives
+an extension a real container plus props, owner metadata, abort signal, error reporting, and an
+exactly-once disposer. DOM/framework failures therefore fall back at the affected contribution seam
+rather than replacing the whole workbench.
 
 ### Phase D — Host services, storage, and dependencies
 
@@ -1012,11 +1027,14 @@ capability work and cannot terminate a Web, Electron, or VS Code Surface. This b
 API/lifecycle boundary rather than an OS sandbox. Access to Pi continues through the existing typed
 runtime broker and an explicit `pi-runtime` capability grant.
 
-The application host owns revisioned, namespaced storage below `PIARIUM_DATA_DIR/extensions/storage`,
-distinguishes missing/ready/stale data, preserves the last valid read, and stages schema migration
-with candidate activation. Candidate Host services and storage writes remain private until the
-Surface candidate succeeds; failed module activation, migration, or catalog selection disposes the
-candidate and restores the prior storage and active generation. The versioned Host service registry
+The application host owns revisioned, namespaced storage below `PIARIUM_DATA_DIR/extensions/storage`.
+Brokered extensions can open independent `application`, `profile`, `workspace`, `surface`, and
+`session` documents with arbitrary keys; each address has its own revision and optional schema
+version, while the Host injects the owning extension namespace. Storage distinguishes
+missing/ready/stale data, preserves the last valid read, and stages multi-document schema migration
+with candidate activation. Candidate Host services and all staged document writes remain private
+until the Surface candidate succeeds; a failed module activation, migration, catalog selection, or
+group commit rolls every touched document back with the prior active generation. The versioned Host service registry
 supports single, selected, and all-provider bindings, candidate-scoped calls, explicit selection,
 lazy `service-request` activation, atomic generation replacement, in-flight draining, and
 dependency-ordered teardown. Surface-local services now use the same dependent-first withdrawal
@@ -1171,15 +1189,20 @@ framework-neutral SDK, optional React adapter, JSON schemas, and author CLI are 
 explicit repository, license, engine, and public-publish metadata. `piarium-extension init` creates a
 standalone managed extension; `check` validates the manifest, version agreement, paths, and artifacts;
 `build` produces Node Host and browser Surface modules in the exact manifest locations, while the
-application host remains the sole owner of final isolated IIFE materialization; `test` executes the public managed, isolated, and brokered-Host lifecycle conformance
-harnesses. The complete external workflow and ownership rules are documented in
+application host remains the sole owner of final isolated IIFE materialization; `test` executes the
+public managed, isolated, and brokered-Host lifecycle conformance harnesses, including declarative
+registry publication rather than treating a declaration as an automatic pass. All author commands
+support Clack human output plus strict `--quiet` and single-value `--json` modes. The complete external
+workflow and ownership rules are documented in
 [piarium-extension-authoring.md](piarium-extension-authoring.md).
 
 Web/Electron-hosted Web and VS Code expose the same authenticated install/stage, selected and
 candidate capability review, persistent candidate-application request, apply/discard, disable,
 remove, profile, and diagnostic state through the application-host
-extension API. Removal deactivates first, rejects distribution-owned built-ins, removes the selected
-catalog record, and retains extension storage and immutable cache material as separate authorities.
+extension API. Removal deactivates first, rejects distribution-owned built-ins, and removes the
+selected catalog record. The request carries an explicit data choice: retention is the default; delete
+removes only the validated extension storage namespace, never project/Pi/plugin data or shared
+immutable cache material.
 The Extensions page accepts arbitrary npm, Git, and local sources; shows selected/candidate versions,
 first-install and update capability review, owner realms, live contributions/services, dependencies, artifacts, and attributed
 diagnostics; and never imports an extension's private UI code.

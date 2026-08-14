@@ -4,6 +4,7 @@ import {
   parsePiariumExtensionCatalogSnapshot,
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
+  parsePiariumExtensionLocalSourceReloadResult,
   parsePiariumExtensionManagedEntrypointPayload,
   parsePiariumExtensionServiceRoutingSnapshot,
   parsePiariumWorkbenchProfileSnapshot,
@@ -47,6 +48,9 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   ),
   readManagedEntrypoint: async (request) => parsePiariumExtensionManagedEntrypointPayload(
     await sendBridgeMessage('api:extensions:entrypoint', request),
+  ),
+  reloadLocalSource: async (request) => parsePiariumExtensionLocalSourceReloadResult(
+    await sendBridgeMessage('api:extensions:reload-local-source', request),
   ),
   reportActualState: async (extensionId, state) => {
     await sendBridgeMessage('api:extensions:actual', { extensionId, state });

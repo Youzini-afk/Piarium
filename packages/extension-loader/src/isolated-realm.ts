@@ -4,13 +4,24 @@ import type {
   PiariumExtensionStaticContribution,
 } from "@piarium/extension-contract";
 
-export interface IsolatedContributionImplementation {
-  readonly kind: "isolated-iframe" | "isolated-worker";
+interface IsolatedContributionImplementationBase {
   readonly realmId: string;
   readonly viewId: string;
-  mount(container: HTMLElement): () => void;
   postMessage(message: JsonValue): void;
 }
+
+export interface IsolatedIframeContributionImplementation extends IsolatedContributionImplementationBase {
+  readonly kind: "isolated-iframe";
+  mount(container: HTMLElement): () => void;
+}
+
+export interface IsolatedWorkerContributionImplementation extends IsolatedContributionImplementationBase {
+  readonly kind: "isolated-worker";
+}
+
+export type IsolatedContributionImplementation =
+  | IsolatedIframeContributionImplementation
+  | IsolatedWorkerContributionImplementation;
 
 export interface IsolatedRealmActivationContext {
   callCapability(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
@@ -288,7 +299,17 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
     }
     if (message.type === "fatal") { rejectReady(new Error(message.error || "Isolated Surface activation failed")); this.dispose("activation failed"); return; }
     if (message.type === "contribute") {
-      this.#activation.contribute(message.descriptor as PiariumExtensionStaticContribution, this.#implementation(message.viewId ?? "main"));
+      if (this.#identity.kind === "worker") {
+        rejectReady(new Error("Isolated Workers are background-only and cannot register visual Surface contributions"));
+        this.dispose("worker contribution rejected");
+        return;
+      }
+      try {
+        this.#activation.contribute(message.descriptor as PiariumExtensionStaticContribution, this.#implementation(message.viewId ?? "main"));
+      } catch (error) {
+        rejectReady(error instanceof Error ? error : new Error(String(error)));
+        this.dispose("contribution rejected");
+      }
       return;
     }
     if (message.type !== "request") return;
@@ -323,11 +344,16 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
   }
 
   #implementation(viewId: string): IsolatedContributionImplementation {
-    return {
-      kind: this.#identity.kind === "iframe" ? "isolated-iframe" : "isolated-worker",
+    const base = {
       realmId: this.#identity.realmId,
       viewId,
-      mount: (container) => {
+      postMessage: (message: JsonValue) => this.#port?.postMessage({ type: "message", value: message }),
+    };
+    if (this.#identity.kind === "worker") return { ...base, kind: "isolated-worker" };
+    return {
+      ...base,
+      kind: "isolated-iframe",
+      mount: (container: HTMLElement) => {
         if (!this.#iframe || this.#disposed) throw new Error("Isolated iframe realm is unavailable");
         const previousParent = this.#iframe.parentElement;
         const previousStyle = this.#iframe.style.cssText;
@@ -341,7 +367,6 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
           previousParent?.appendChild(this.#iframe);
         };
       },
-      postMessage: (message) => this.#port?.postMessage({ type: "message", value: message }),
     };
   }
 

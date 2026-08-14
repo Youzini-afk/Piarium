@@ -33,6 +33,8 @@ import {
   type PiariumExtensionManifest,
   type PiariumExtensionManagedEntrypointPayload,
   type PiariumExtensionManagedEntrypointRequest,
+  type PiariumExtensionLocalSourceReloadRequest,
+  type PiariumExtensionLocalSourceReloadResult,
   type PiariumExtensionPackageSource,
   type PiariumExtensionPackageInstallRequest,
   type PiariumExtensionRemoveRequest,
@@ -45,6 +47,7 @@ import {
   type PiariumExtensionStaticContribution,
   type PiariumExtensionStorageAddress,
   type PiariumExtensionStorageDocument,
+  type PiariumExtensionStorageOpenRequest,
   type PiariumExtensionStorageSnapshot,
   type PiariumExtensionSurfaceEntrypoint,
 } from "./types.js";
@@ -53,6 +56,7 @@ import {
   parsePiariumExtensionServiceRoutingContext,
   parsePiariumExtensionServiceRoutingSnapshot,
 } from "./service-routing.js";
+import semver from "semver";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -428,6 +432,7 @@ export function parsePiariumExtensionManifest(value: unknown): PiariumExtensionM
   if (!isRecord(value.engines)) issues.push("engines must be an object");
   const piariumEngine = text(rawEngines.piarium) ?? "*";
   if (!text(rawEngines.piarium)) issues.push("engines.piarium must be a non-empty compatibility range");
+  else if (semver.validRange(piariumEngine) === null) issues.push("engines.piarium must be a valid SemVer range");
 
   const rawEntrypoints = value.entrypoints;
   if (rawEntrypoints !== undefined && !isRecord(rawEntrypoints)) issues.push("entrypoints must be an object");
@@ -511,6 +516,24 @@ export function parsePiariumExtensionManifest(value: unknown): PiariumExtensionM
     ...(contributions ? { contributions } : {}),
     ...(storageSchemaVersion !== undefined ? { storage: { schemaVersion: storageSchemaVersion } } : {}),
   };
+}
+
+export function assertPiariumApplicationVersion(piariumVersion: string): void {
+  if (semver.valid(piariumVersion) === null) {
+    const issue = `piariumVersion must be a SemVer version; received ${JSON.stringify(piariumVersion)}`;
+    throw new PiariumExtensionContractError(`Piarium application version is invalid: ${issue}`, [issue]);
+  }
+}
+
+export function assertPiariumExtensionManifestCompatibility(
+  manifest: PiariumExtensionManifest,
+  piariumVersion: string,
+): void {
+  assertPiariumApplicationVersion(piariumVersion);
+  if (!semver.satisfies(piariumVersion, manifest.engines.piarium)) {
+    const issue = `extension ${manifest.id}@${manifest.version} requires Piarium ${manifest.engines.piarium}; current version is ${piariumVersion}`;
+    throw new PiariumExtensionContractError(`Piarium extension manifest is incompatible: ${issue}`, [issue]);
+  }
 }
 
 function parseSource(value: unknown, path: string, issues: string[]): PiariumExtensionPackageSource {
@@ -1227,13 +1250,55 @@ export function parsePiariumExtensionPackageInstallRequest(value: unknown): Piar
   return result;
 }
 
+export function parsePiariumExtensionLocalSourceReloadRequest(value: unknown): PiariumExtensionLocalSourceReloadRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) {
+    throw new PiariumExtensionContractError("Piarium extension local source reload request is invalid", ["request must be an object"]);
+  }
+  const result: PiariumExtensionLocalSourceReloadRequest = {
+    expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+  };
+  throwIssues("Piarium extension local source reload request", issues);
+  return result;
+}
+
+export function parsePiariumExtensionLocalSourceReloadResult(value: unknown): PiariumExtensionLocalSourceReloadResult {
+  const issues: string[] = [];
+  if (!isRecord(value)) {
+    throw new PiariumExtensionContractError("Piarium extension local source reload result is invalid", ["result must be an object"]);
+  }
+  const outcome = value.outcome === "staged" || value.outcome === "unchanged" ? value.outcome : undefined;
+  if (!outcome) issues.push("outcome must be staged or unchanged");
+  let snapshot: PiariumExtensionCatalogSnapshot | undefined;
+  try {
+    snapshot = parsePiariumExtensionCatalogSnapshot(value.snapshot);
+  } catch (error) {
+    if (error instanceof PiariumExtensionContractError) {
+      issues.push(...error.issues.map((issue) => `snapshot.${issue}`));
+    } else throw error;
+  }
+  if (outcome === "staged") {
+    const candidateIntegrity = integrity(value.candidateIntegrity, "candidateIntegrity", issues);
+    throwIssues("Piarium extension local source reload result", issues);
+    return { candidateIntegrity, outcome, snapshot: snapshot as PiariumExtensionCatalogSnapshot };
+  }
+  if (value.candidateIntegrity !== undefined) issues.push("candidateIntegrity is only valid for a staged reload");
+  throwIssues("Piarium extension local source reload result", issues);
+  return { outcome: "unchanged", snapshot: snapshot as PiariumExtensionCatalogSnapshot };
+}
+
 export function parsePiariumExtensionRemoveRequest(value: unknown): PiariumExtensionRemoveRequest {
   const issues: string[] = [];
   if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension remove request is invalid", ["request must be an object"]);
   const result = {
+    deleteData: value.deleteData === true,
     expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
     extensionId: identifier(value.extensionId, "extensionId", issues),
   };
+  if (value.deleteData !== undefined && typeof value.deleteData !== "boolean") {
+    issues.push("deleteData must be boolean");
+  }
   throwIssues("Piarium extension remove request", issues);
   return result;
 }
@@ -1408,6 +1473,28 @@ export function parsePiariumExtensionHostStateSnapshot(value: unknown): PiariumE
 }
 
 const STORAGE_SCOPES = new Set(["application", "profile", "session", "surface", "workspace"]);
+
+export function parsePiariumExtensionStorageOpenRequest(value: unknown): PiariumExtensionStorageOpenRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) {
+    throw new PiariumExtensionContractError("Piarium extension storage open request is invalid", ["request must be an object"]);
+  }
+  if (value.extensionId !== undefined) issues.push("extensionId is assigned by the Piarium Host and must not be supplied");
+  const key = text(value.key);
+  if (!key) issues.push("key must be a non-empty string");
+  const scope = text(value.scope);
+  if (!scope || !STORAGE_SCOPES.has(scope)) issues.push("scope is unsupported");
+  const schemaVersion = value.schemaVersion === undefined
+    ? undefined
+    : positiveRevision(value.schemaVersion, "schemaVersion", issues, true);
+  const result: PiariumExtensionStorageOpenRequest = {
+    key: key ?? "invalid",
+    scope: STORAGE_SCOPES.has(scope ?? "") ? scope as PiariumExtensionStorageOpenRequest["scope"] : "application",
+    ...(schemaVersion !== undefined ? { schemaVersion } : {}),
+  };
+  throwIssues("Piarium extension storage open request", issues);
+  return result;
+}
 
 export function parsePiariumExtensionStorageAddress(value: unknown): PiariumExtensionStorageAddress {
   const issues: string[] = [];

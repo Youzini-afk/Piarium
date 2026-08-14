@@ -1,5 +1,10 @@
 import { createRequire } from "node:module";
-import type { JsonObject, JsonValue, PiariumExtensionStorageSnapshot } from "@piarium/extension-contract";
+import type {
+  JsonObject,
+  JsonValue,
+  PiariumExtensionStorageOpenRequest,
+  PiariumExtensionStorageSnapshot,
+} from "@piarium/extension-contract";
 import type { BrokeredHostTransport } from "./broker-supervisor.js";
 
 interface NativeHostExtension {
@@ -17,9 +22,25 @@ interface NativeHostContext {
   signal: AbortSignal;
   storage: {
     readonly snapshot: PiariumExtensionStorageSnapshot;
+    open(request: PiariumExtensionStorageOpenRequest): Promise<NativeStorageDocumentClient>;
+    refresh(): Promise<PiariumExtensionStorageSnapshot>;
     update(data: JsonObject, expectedRevision?: number): Promise<PiariumExtensionStorageSnapshot>;
   };
 }
+
+interface NativeStorageDocumentClient {
+  readonly snapshot: PiariumExtensionStorageSnapshot;
+  refresh(): Promise<PiariumExtensionStorageSnapshot>;
+  update(data: JsonObject, expectedRevision?: number): Promise<PiariumExtensionStorageSnapshot>;
+}
+
+interface NativeStorageClientState {
+  snapshot: PiariumExtensionStorageSnapshot;
+}
+
+const storageKey = (address: Pick<PiariumExtensionStorageOpenRequest, "key" | "scope">): string => (
+  `${address.scope}\0${address.key}`
+);
 
 export interface NativeHostTransportOptions {
   requestFromExtension(method: string, params: unknown, signal: AbortSignal): Promise<JsonValue>;
@@ -55,7 +76,7 @@ export class NativeHostTransport implements BrokeredHostTransport {
   #controller: AbortController | null = null;
   #modulePath = "";
   #moduleValue: unknown;
-  #storage: PiariumExtensionStorageSnapshot | null = null;
+  readonly #storages = new Map<string, Set<NativeStorageClientState>>();
   #terminated = false;
 
   constructor(options: NativeHostTransportOptions) {
@@ -84,21 +105,42 @@ export class NativeHostTransport implements BrokeredHostTransport {
         this.#terminated = false;
         const extension = this.#load(String(params.modulePath ?? ""));
         this.#controller = new AbortController();
-        this.#storage = params.storage as PiariumExtensionStorageSnapshot;
+        this.#storages.clear();
         const stagedHandlers = new Map<string, Record<string, (...args: JsonValue[]) => unknown>>();
         const provisions: unknown[] = [];
-        const readStorage = (): PiariumExtensionStorageSnapshot => {
-          if (!this.#storage) throw new Error("Trusted-native Host storage is unavailable");
-          return this.#storage;
+        const createStorageClient = (
+          request: PiariumExtensionStorageOpenRequest,
+          initialSnapshot: PiariumExtensionStorageSnapshot,
+        ): NativeStorageDocumentClient => {
+          const state: NativeStorageClientState = { snapshot: initialSnapshot };
+          const key = storageKey(request);
+          const clients = this.#storages.get(key) ?? new Set<NativeStorageClientState>();
+          clients.add(state);
+          this.#storages.set(key, clients);
+          return {
+            get snapshot() { return state.snapshot; },
+            refresh: async () => {
+              state.snapshot = await this.#requestFromExtension(
+                "storage.refresh",
+                request,
+                this.#controller?.signal ?? new AbortController().signal,
+              ) as unknown as PiariumExtensionStorageSnapshot;
+              return state.snapshot;
+            },
+            update: async (data, expectedRevision = state.snapshot.document.revision) => {
+              state.snapshot = await this.#requestFromExtension(
+                "storage.update",
+                { data, expectedRevision, key: request.key, scope: request.scope },
+                this.#controller?.signal ?? new AbortController().signal,
+              ) as unknown as PiariumExtensionStorageSnapshot;
+              return state.snapshot;
+            },
+          };
         };
-        const updateStorage = async (data: JsonObject, expectedRevision = this.#storage?.document.revision) => {
-          this.#storage = await this.#requestFromExtension(
-            "storage.update",
-            { data, expectedRevision },
-            this.#controller?.signal ?? new AbortController().signal,
-          ) as unknown as PiariumExtensionStorageSnapshot;
-          return this.#storage;
-        };
+        const defaultStorage = createStorageClient(
+          { key: "state", scope: "application" },
+          params.storage as PiariumExtensionStorageSnapshot,
+        );
         const context: NativeHostContext = {
           capabilities: {
             call: (capability, capabilityMethod, capabilityParams) => this.#requestFromExtension(
@@ -134,9 +176,18 @@ export class NativeHostTransport implements BrokeredHostTransport {
           signal: this.#controller.signal,
           storage: {
             get snapshot() {
-              return readStorage();
+              return defaultStorage.snapshot;
             },
-            update: updateStorage,
+            open: async (request) => createStorageClient(
+              request,
+              await this.#requestFromExtension(
+                "storage.open",
+                request,
+                this.#controller?.signal ?? new AbortController().signal,
+              ) as unknown as PiariumExtensionStorageSnapshot,
+            ),
+            refresh: () => defaultStorage.refresh(),
+            update: (data, expectedRevision) => defaultStorage.update(data, expectedRevision),
           },
         };
         try {
@@ -156,7 +207,11 @@ export class NativeHostTransport implements BrokeredHostTransport {
         return methodHandler(...(Array.isArray(params.args) ? params.args as JsonValue[] : []));
       }
       case "storage.sync":
-        this.#storage = params.storage as PiariumExtensionStorageSnapshot;
+        for (const snapshot of Array.isArray(params.storages)
+          ? params.storages as PiariumExtensionStorageSnapshot[]
+          : params.storage ? [params.storage as PiariumExtensionStorageSnapshot] : []) {
+          for (const state of this.#storages.get(storageKey(snapshot.address)) ?? []) state.snapshot = snapshot;
+        }
         return null;
       case "deactivate":
         await this.#deactivate();

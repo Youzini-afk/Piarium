@@ -34,14 +34,14 @@ export class ExtensionCatalogStaleStateError extends Error {
 }
 
 export class ExtensionStorageError extends Error {
-  readonly code: "storage_invalid" | "storage_read_failed";
+  readonly code: "storage_invalid" | "storage_read_failed" | "storage_write_failed";
   readonly retryable: boolean;
 
   constructor(code: ExtensionStorageError["code"], message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "ExtensionStorageError";
     this.code = code;
-    this.retryable = code === "storage_read_failed";
+    this.retryable = code === "storage_read_failed" || code === "storage_write_failed";
   }
 }
 

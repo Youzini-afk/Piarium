@@ -42,6 +42,7 @@ const getRuntime = (
     const runtime = await ApplicationExtensionRuntime.create({
       brokerScript: join(context.extensionUri.fsPath, 'dist', 'broker-child.mjs'),
       dataDir,
+      piariumVersion: context.extension.packageJSON.version,
     });
     runtime.capabilities.register('pi-runtime', async (method, value) => {
       if (method !== 'request' || !value || typeof value !== 'object' || Array.isArray(value)) {
@@ -110,6 +111,8 @@ export const handleExtensionsBridgeMessage = async (
         type: request.type,
       };
     }
+    case 'api:extensions:reload-local-source':
+      return { data: await runtime.reloadLocalSource(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:candidate:prepare': {
       const payload = payloadRecord(request.payload);
       return {

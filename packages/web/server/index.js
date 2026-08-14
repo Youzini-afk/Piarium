@@ -131,9 +131,10 @@ const isEnvFlagDisabled = (value) => {
 const PIARIUM_VERSION = (() => {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
-    return typeof pkg?.version === 'string' && pkg.version.trim() ? pkg.version.trim() : 'unknown';
-  } catch {
-    return 'unknown';
+    if (typeof pkg?.version === 'string' && pkg.version.trim()) return pkg.version.trim();
+    throw new Error('package.json does not declare a version');
+  } catch (error) {
+    throw new Error(`Unable to resolve the Piarium Web application version: ${error?.message || error}`);
   }
 })();
 
@@ -565,6 +566,7 @@ async function main(options = {}) {
     || new ExtensionPackageManager({
     catalog: extensionCatalog,
     dataDir: PIARIUM_DATA_DIR,
+    piariumVersion: PIARIUM_VERSION,
   });
   let extensionRuntime = options.extensionRuntime || null;
   const ownsExtensionRuntime = !extensionRuntime;
@@ -733,6 +735,7 @@ async function main(options = {}) {
       catalog: extensionCatalog,
       dataDir: PIARIUM_DATA_DIR,
       packages: extensionPackages,
+      piariumVersion: PIARIUM_VERSION,
     });
   }
   const unregisterPiRuntimeCapability = extensionRuntime.capabilities.register('pi-runtime', async (method, value) => {

@@ -4,6 +4,7 @@ import {
   parsePiariumExtensionCatalogSnapshot,
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
+  parsePiariumExtensionLocalSourceReloadResult,
   parsePiariumExtensionManagedEntrypointPayload,
   parsePiariumExtensionServiceRoutingSnapshot,
   parsePiariumWorkbenchProfileSnapshot,
@@ -16,6 +17,7 @@ import {
   type PiariumExtensionManagedEntrypointRequest,
   type PiariumExtensionPackageInstallRequest,
   type PiariumExtensionHostStateWaitRequest,
+  type PiariumExtensionLocalSourceReloadRequest,
 } from '@piarium/extension-contract';
 import type { ExtensionsAPI } from '@piarium/ui/lib/api/types';
 import { refreshLocalRuntimeUrlAuthToken } from '@piarium/ui/lib/runtime-auth';
@@ -164,6 +166,12 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     parsePiariumExtensionManagedEntrypointPayload(await readJsonOrThrow(
       await applicationHostRequest('/api/piarium/extensions/v1/entrypoints/read', request),
     ))
+  ),
+  reloadLocalSource: async (request: PiariumExtensionLocalSourceReloadRequest) => (
+    parsePiariumExtensionLocalSourceReloadResult(await readJsonOrThrow(await applicationHostRequest(
+      `/api/piarium/extensions/v1/extensions/${encodeURIComponent(request.extensionId)}/reload-local-source`,
+      request,
+    )))
   ),
   reportActualState: async (extensionId: string, state: PiariumExtensionActualState) => {
     await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/actual', { extensionId, state }))

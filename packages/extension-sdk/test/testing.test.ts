@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SurfaceExtensionRuntime } from "@piarium/extension-surface";
 import {
+  defineSurfaceMount,
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
   resolveSurfaceExtensionModule,
@@ -49,11 +50,17 @@ test("the author conformance harness exercises Host storage, services, and clean
     activation: async (context) => {
       context.services.provide({ id: "dev.example.host-service", version: 1 }, { read: () => "ok" });
       await context.storage.update({ ready: true });
+      const workspace = await context.storage.open({ key: "preferences", schemaVersion: 2, scope: "workspace" });
+      await workspace.update({ layout: "wide" });
       context.effect(() => { disposed = true; });
     },
   });
   assert.deepEqual(result.providedServiceIds, ["dev.example.host-service@1"]);
   assert.deepEqual(result.finalStorage.document.data, { ready: true });
+  assert.deepEqual(
+    result.finalStorages.find((snapshot) => snapshot.address.scope === "workspace")?.document.data,
+    { layout: "wide" },
+  );
   assert.equal(result.registeredDisposers, 1);
   assert.equal(disposed, true);
 });
@@ -106,4 +113,41 @@ test("module resolvers preserve extension-object method ownership", async () => 
     },
   } as never);
   await surface.activate({} as never);
+});
+
+test("defineSurfaceMount exposes the framework-neutral DOM lifecycle contract", async () => {
+  const controller = new AbortController();
+  const container = { textContent: "" } as HTMLElement;
+  let disposed = 0;
+  const implementation = defineSurfaceMount<{ label: string }>(async (element, context) => {
+    assert.equal(context.contributionId, "dev.example.mount.panel");
+    assert.equal(context.owner.extensionId, "dev.example.mount");
+    assert.equal(context.signal, controller.signal);
+    element.textContent = context.props.label;
+    return () => {
+      disposed += 1;
+      element.textContent = "";
+    };
+  });
+
+  const cleanup = await implementation.mount(container, {
+    contributionId: "dev.example.mount.panel",
+    owner: {
+      desiredRevision: 1,
+      entrypointId: "main",
+      extensionId: "dev.example.mount",
+      extensionVersion: "1.0.0",
+      generation: 1,
+      hostId: "72694a4f-093a-4f79-8763-3ca9f06b7078",
+      realmId: "mount-test",
+    },
+    props: { label: "framework neutral" },
+    reportError: (error) => { throw error; },
+    signal: controller.signal,
+  });
+  assert.equal(container.textContent, "framework neutral");
+  assert.equal(typeof cleanup, "function");
+  if (typeof cleanup === "function") await cleanup();
+  assert.equal(disposed, 1);
+  assert.equal(container.textContent, "");
 });

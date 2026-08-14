@@ -1,6 +1,7 @@
 import { buildProject } from "./build.js";
 import { checkProject } from "./project.js";
 import type { PiariumIsolatedSurfaceModule, PiariumManagedSurfaceModule } from "@piarium/extension-sdk";
+import type { PiariumExtensionManifest } from "@piarium/extension-contract";
 import {
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
@@ -60,6 +61,34 @@ const runSurfaceConformance = async (
   });
 };
 
+const runDeclarativeConformance = async (
+  manifest: PiariumExtensionManifest,
+  entrypointId: string,
+  supports: readonly ("desktop" | "mobile" | "vscode" | "web")[],
+): Promise<void> => {
+  const surface = supports[0] ?? "web";
+  const runtime = new SurfaceExtensionRuntime({ surface });
+  await runSurfaceExtensionConformance({
+    activation: (context) => {
+      for (const contribution of manifest.contributions ?? []) {
+        if (!contribution.supports.includes(surface)) continue;
+        if (contribution.entrypoint && contribution.entrypoint !== entrypointId) continue;
+        context.contribute(contribution, structuredClone(contribution.data));
+      }
+    },
+    owner: {
+      desiredRevision: 1,
+      entrypointId,
+      extensionId: manifest.id,
+      extensionVersion: manifest.version,
+      generation: 0,
+      hostId: "00000000-0000-4000-8000-000000000001",
+      realmId: "piarium-cli-declarative-test",
+    },
+    runtime,
+  });
+};
+
 export const testProject = async (directory = "."): Promise<TestResult> => {
   await checkProject(directory);
   const built = await buildProject(directory);
@@ -71,6 +100,7 @@ export const testProject = async (directory = "."): Promise<TestResult> => {
   const surfaces: TestResult["surfaces"] = [];
   for (const entrypoint of project.manifest.entrypoints?.surfaces ?? []) {
     if (entrypoint.mode === "declarative") {
+      await runDeclarativeConformance(project.manifest, entrypoint.id, entrypoint.supports);
       surfaces.push({ entrypointId: entrypoint.id, mode: entrypoint.mode, result: "passed" });
       continue;
     }

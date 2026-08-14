@@ -1,4 +1,7 @@
-import type { SurfaceActivationContext } from "@piarium/extension-surface";
+import type {
+  SurfaceActivationContext,
+  SurfaceOwnerIdentity,
+} from "@piarium/extension-surface";
 import type {
   JsonObject,
   JsonValue,
@@ -6,6 +9,7 @@ import type {
   PiariumExtensionServiceProvision,
   PiariumExtensionServiceRoutingContext,
   PiariumExtensionStaticContribution,
+  PiariumExtensionStorageOpenRequest,
   PiariumExtensionStorageSnapshot,
 } from "@piarium/extension-contract";
 
@@ -29,6 +33,37 @@ export interface PiariumManagedSurfaceContext extends SurfaceActivationContext {
   readonly assets: PiariumSurfaceAssets;
   readonly styles: PiariumSurfaceStyles;
 }
+
+export type PiariumSurfaceMountDisposer = () => void | Promise<void>;
+
+/**
+ * Per-mount state supplied by a Piarium Surface host. The signal belongs to this
+ * mounted view, so it is aborted for prop changes as well as owner teardown.
+ */
+export interface PiariumSurfaceMountContext<TProps extends object = Record<string, unknown>> {
+  readonly contributionId: string;
+  readonly owner: Readonly<SurfaceOwnerIdentity>;
+  readonly props: Readonly<TProps>;
+  reportError(error: unknown): void;
+  readonly signal: AbortSignal;
+}
+
+/** Framework-neutral runtime implementation for a DOM-backed contribution. */
+export interface PiariumSurfaceMountImplementation<TProps extends object = Record<string, unknown>> {
+  mount(
+    container: HTMLElement,
+    context: PiariumSurfaceMountContext<TProps>,
+  ): void | PiariumSurfaceMountDisposer | Promise<void | PiariumSurfaceMountDisposer>;
+}
+
+export type PiariumSurfaceMount<TProps extends object = Record<string, unknown>> =
+  PiariumSurfaceMountImplementation<TProps>["mount"];
+
+export const defineSurfaceMount = <TProps extends object = Record<string, unknown>>(
+  implementation: PiariumSurfaceMount<TProps> | PiariumSurfaceMountImplementation<TProps>,
+): PiariumSurfaceMountImplementation<TProps> => typeof implementation === "function"
+  ? { mount: implementation }
+  : implementation;
 
 export type PiariumManagedSurfaceActivation = (
   context: PiariumManagedSurfaceContext,
@@ -123,9 +158,14 @@ export interface PiariumHostServiceUseOptions {
 
 export type PiariumHostServiceHandler = Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
 
-export interface PiariumHostStorageClient {
+export interface PiariumHostStorageDocumentClient {
   readonly snapshot: PiariumExtensionStorageSnapshot;
+  refresh(): Promise<PiariumExtensionStorageSnapshot>;
   update(data: JsonObject, expectedRevision?: number): Promise<PiariumExtensionStorageSnapshot>;
+}
+
+export interface PiariumHostStorageClient extends PiariumHostStorageDocumentClient {
+  open(request: PiariumExtensionStorageOpenRequest): Promise<PiariumHostStorageDocumentClient>;
 }
 
 export interface PiariumBrokeredHostContext {

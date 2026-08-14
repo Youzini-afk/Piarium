@@ -2,6 +2,7 @@ import {
   ExtensionCatalogRevisionConflictError,
   ExtensionCatalogStorageError,
   ExtensionStorageRevisionConflictError,
+  ExtensionStorageError,
 } from '@piarium/extension-host';
 import {
   PiariumExtensionContractError,
@@ -9,6 +10,7 @@ import {
   parsePiariumExtensionCandidateCapabilityReviewRequest,
   parsePiariumExtensionCapabilityReviewRequest,
   parsePiariumExtensionHostStateWaitRequest,
+  parsePiariumExtensionLocalSourceReloadRequest,
   parsePiariumExtensionPackageSource,
   parsePiariumExtensionRemoveRequest,
 } from '@piarium/extension-contract';
@@ -46,19 +48,24 @@ const sendMutationError = (res, error) => {
   if (error instanceof ExtensionCatalogStorageError) {
     return res.status(500).json({ error: { code: error.code, message: error.message, retryable: error.retryable } });
   }
+  if (error instanceof ExtensionStorageError) {
+    return res.status(500).json({ error: { code: error.code, message: error.message, retryable: error.retryable } });
+  }
   if (error instanceof PiariumExtensionContractError) {
     return res.status(400).json({
       error: { code: 'invalid_request', details: error.issues, message: error.message, retryable: false },
     });
   }
   const message = error instanceof Error ? error.message : String(error);
-  const notInstalled = message.includes('not installed');
+  const notLocalSource = message.includes('not installed from a local source');
+  const localDependenciesMissing = message.includes('Local Piarium extension dependencies are not installed');
+  const notInstalled = !notLocalSource && message.includes('not installed');
   const managedByDistribution = message.includes('managed by the distribution');
   const mustDisable = message.includes('before removing it');
   const capabilityReviewRequired = message.includes('capabilities require review before activation');
   const status = notInstalled
     ? 404
-    : managedByDistribution || mustDisable || capabilityReviewRequired
+    : managedByDistribution || mustDisable || capabilityReviewRequired || notLocalSource || localDependenciesMissing
       ? 409
       : 500;
   let code = 'mutation_failed';
@@ -66,11 +73,13 @@ const sendMutationError = (res, error) => {
   else if (managedByDistribution) code = 'extension_managed_by_distribution';
   else if (mustDisable) code = 'extension_must_be_disabled';
   else if (capabilityReviewRequired) code = 'extension_capability_review_required';
+  else if (notLocalSource) code = 'extension_not_local_source';
+  else if (localDependenciesMissing) code = 'extension_local_dependencies_missing';
   if (status === 500) console.error('[Piarium Extensions] Failed to mutate extension catalog:', error);
   return res.status(status).json({
     error: {
       code,
-      message: notInstalled || managedByDistribution || mustDisable || capabilityReviewRequired
+      message: notInstalled || managedByDistribution || mustDisable || capabilityReviewRequired || notLocalSource || localDependenciesMissing
         ? message
         : 'Failed to update Piarium extension catalog',
       retryable: false,
@@ -310,6 +319,25 @@ export const registerExtensionRoutes = (app, {
           ? await extensionRuntime.installOrStage({ expectedRevision: revision, source }, req.signal)
           : await extensionPackages.installOrStage(source, revision, req.signal);
         return res.json({ snapshot });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/extensions/:extensionId/reload-local-source',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      try {
+        const request = parsePiariumExtensionLocalSourceReloadRequest({
+          ...req.body,
+          extensionId: req.params.extensionId,
+        });
+        const result = extensionRuntime
+          ? await extensionRuntime.reloadLocalSource(request, req.signal)
+          : await extensionPackages.reloadLocalSource(request, req.signal);
+        return res.json(result);
       } catch (error) {
         return sendMutationError(res, error);
       }
