@@ -53,6 +53,10 @@ import { PiWorkStatusPanel } from './PiWorkStatusPanel';
 import { piSessionTitle } from './sessionPresentation';
 import { renderPiComposerSubmission } from './piComposerSubmission';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import {
+  WorkbenchReplacement,
+  WORKBENCH_REPLACEMENT_TARGETS,
+} from '@/lib/extensions/workbench-registry';
 
 interface PiChatViewProps {
   active?: boolean;
@@ -403,17 +407,22 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
               onSubmit={(starter) => { void handlePendingStarterSubmit(starter); }}
             />
           </div>
-          <PiComposer
-            cwd={pendingCwd}
-            draft={draft.text}
-            images={draft.images}
-            followUpBehavior={followUpBehavior}
-            sending={creating || sending}
-            sessionId={null}
-            onChangeDraft={(text) => updatePendingDraft({ text })}
-            onChangeImages={(images) => updatePendingDraft({ images })}
-            onSendText={handlePendingDictationSend}
-            onSend={submitPendingDraft}
+          <WorkbenchReplacement
+            target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
+            fallback={(
+              <PiComposer
+                cwd={pendingCwd}
+                draft={draft.text}
+                images={draft.images}
+                followUpBehavior={followUpBehavior}
+                sending={creating || sending}
+                sessionId={null}
+                onChangeDraft={(text) => updatePendingDraft({ text })}
+                onChangeImages={(images) => updatePendingDraft({ images })}
+                onSendText={handlePendingDictationSend}
+                onSend={submitPendingDraft}
+              />
+            )}
           />
         </div>
       </TooltipProvider>
@@ -503,18 +512,23 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             </div>
           </div>
         ) : (
-          <PiTimeline
-            cwd={snapshot.cwd}
-            entries={entries}
-            hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
-            liveAssistant={currentRecord.liveAssistant}
-            onRecover={handleRecover}
-            onTogglePinned={handleTogglePinned}
-            pinBusyEntryId={pinBusyEntryId}
-            pinnedEntryIds={pinnedEntryIds}
-            recoveryBusyEntryId={recoveryBusyEntryId}
-            sessionId={currentSessionId}
-            toolExecutions={currentRecord.toolExecutions}
+          <WorkbenchReplacement
+            target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
+            fallback={(
+              <PiTimeline
+                cwd={snapshot.cwd}
+                entries={entries}
+                hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
+                liveAssistant={currentRecord.liveAssistant}
+                onRecover={handleRecover}
+                onTogglePinned={handleTogglePinned}
+                pinBusyEntryId={pinBusyEntryId}
+                pinnedEntryIds={pinnedEntryIds}
+                recoveryBusyEntryId={recoveryBusyEntryId}
+                sessionId={currentSessionId}
+                toolExecutions={currentRecord.toolExecutions}
+              />
+            )}
           />
         )}
 
@@ -533,19 +547,24 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         <AutoReviewBanner />
 
         {!readOnly && (
-          <PiComposer
-            cwd={snapshot.cwd}
-            draft={draft.text}
-            images={draft.images}
-            followUpBehavior={followUpBehavior}
-            sending={creating || sending}
-            sessionId={snapshot.sessionId}
-            snapshot={snapshot}
-            onAbort={async () => { await abort(currentSessionId); }}
-            onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
-            onChangeImages={(images) => updateDraft(currentSessionId, { images })}
-            onSendText={handleDictationSend}
-            onSend={handleSend}
+          <WorkbenchReplacement
+            target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
+            fallback={(
+              <PiComposer
+                cwd={snapshot.cwd}
+                draft={draft.text}
+                images={draft.images}
+                followUpBehavior={followUpBehavior}
+                sending={creating || sending}
+                sessionId={snapshot.sessionId}
+                snapshot={snapshot}
+                onAbort={async () => { await abort(currentSessionId); }}
+                onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
+                onChangeImages={(images) => updateDraft(currentSessionId, { images })}
+                onSendText={handleDictationSend}
+                onSend={handleSend}
+              />
+            )}
           />
         )}
           <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />

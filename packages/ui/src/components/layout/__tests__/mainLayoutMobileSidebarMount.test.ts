@@ -18,7 +18,7 @@ describe('MainLayout mobile PiSessionSidebar mount (issue #1695 regression guard
         const mobileSidebarIndex = mainLayoutSource.indexOf('<PiSessionSidebar mobileVariant');
         expect(mobileSidebarIndex).toBeGreaterThan(-1);
 
-        const windowStart = Math.max(0, mobileSidebarIndex - 400);
+        const windowStart = Math.max(0, mobileSidebarIndex - 800);
         const precedingWindow = mainLayoutSource.slice(windowStart, mobileSidebarIndex);
 
         expect(/\{\s*mobileLeftDrawerVisible\s*&&\s*\(/.test(precedingWindow)).toBe(false);

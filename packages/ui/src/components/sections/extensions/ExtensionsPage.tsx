@@ -7,6 +7,8 @@ import type {
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from '@/components/ui';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import {
@@ -16,6 +18,15 @@ import {
   usePiariumExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { resolvePiariumWorkbenchLayout } from '@piarium/extension-contract';
+import {
+  selectActiveWorkbenchProfile,
+  setWorkbenchReplacementSelection,
+  useSurfaceRegistrySnapshot,
+  WORKBENCH_REPLACEMENT_TARGETS,
+} from '@/lib/extensions/workbench-registry';
+import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 
 const STATUS_KEYS: Readonly<Record<PiariumExtensionActualStatus, I18nKey>> = {
   active: 'settings.piarium.extensions.status.active',
@@ -43,6 +54,102 @@ const actualStatus = (entry: PiariumExtensionCatalogEntry): PiariumExtensionActu
 const capabilityKey = (reference: PiariumExtensionCapabilityReference): string => (
   `${reference.realm}:${reference.capability}`
 );
+
+const WORKBENCH_TARGET_LABELS: Readonly<Record<string, I18nKey>> = {
+  [WORKBENCH_REPLACEMENT_TARGETS.shell]: 'settings.piarium.extensions.workbench.target.shell',
+  [WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator]: 'settings.piarium.extensions.workbench.target.navigator',
+  [WORKBENCH_REPLACEMENT_TARGETS.chatTimeline]: 'settings.piarium.extensions.workbench.target.timeline',
+  [WORKBENCH_REPLACEMENT_TARGETS.chatComposer]: 'settings.piarium.extensions.workbench.target.composer',
+  [WORKBENCH_REPLACEMENT_TARGETS.agents]: 'settings.piarium.extensions.workbench.target.agents',
+  [WORKBENCH_REPLACEMENT_TARGETS.mcp]: 'settings.piarium.extensions.workbench.target.mcp',
+  [WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer]: 'settings.piarium.extensions.workbench.target.explorer',
+  [WORKBENCH_REPLACEMENT_TARGETS.settings]: 'settings.piarium.extensions.workbench.target.settings',
+};
+
+const WorkbenchProfileSection: React.FC = () => {
+  const { t } = useI18n();
+  const catalog = usePiariumExtensionCatalog();
+  const surface = useSurfaceRegistrySnapshot();
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const workbench = catalog.snapshot?.workbench;
+  if (!workbench?.authoritative) return null;
+  const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
+    surface: piariumSurfaceRuntime.surface,
+    userId: 'default',
+    ...(currentDirectory ? { workspaceId: currentDirectory } : {}),
+  });
+  const candidatesByTarget = new Map<string, typeof surface.contributions>();
+  for (const contribution of surface.contributions) {
+    const target = contribution.descriptor.replacement?.target;
+    if (!target) continue;
+    const current = candidatesByTarget.get(target) ?? [];
+    candidatesByTarget.set(target, [...current, contribution]);
+  }
+  const targets = [...new Set([
+    ...Object.keys(WORKBENCH_TARGET_LABELS),
+    ...Object.keys(resolved.replacementSelections),
+    ...candidatesByTarget.keys(),
+  ])];
+  const run = (operation: Promise<void>) => {
+    void operation.catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
+  };
+  return (
+    <SettingsSection title={t('settings.piarium.extensions.workbench.title')} settingsItem="extensions.workbench">
+      <div className="space-y-3">
+        <div className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
+          <span className="typography-ui-label text-foreground">{t('settings.piarium.extensions.workbench.profile')}</span>
+          <Select
+            value={resolved.profileId}
+            onValueChange={(profileId) => run(selectActiveWorkbenchProfile(profileId, currentDirectory || undefined))}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {workbench.document.profiles.map((profile) => (
+                <SelectItem key={profile.id} value={profile.id}>{profile.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {targets.map((target) => {
+          const candidates = candidatesByTarget.get(target) ?? [];
+          const selected = resolved.replacementSelections[target] ?? '__builtin__';
+          const selectedMissing = selected !== '__builtin__'
+            && !candidates.some((candidate) => candidate.descriptor.id === selected);
+          return (
+            <div key={target} className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
+              <div className="min-w-0">
+                <span className="typography-ui-label text-foreground">
+                  {WORKBENCH_TARGET_LABELS[target] ? t(WORKBENCH_TARGET_LABELS[target]) : target}
+                </span>
+              </div>
+              <Select
+                value={selected}
+                onValueChange={(value) => run(setWorkbenchReplacementSelection(
+                  target,
+                  value === '__builtin__' ? null : value,
+                  currentDirectory
+                    ? { scope: 'workspace', scopeId: currentDirectory }
+                    : { scope: 'user', scopeId: 'default' },
+                ))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__builtin__">{t('settings.piarium.extensions.workbench.builtin')}</SelectItem>
+                  {selectedMissing ? <SelectItem value={selected}>{selected}</SelectItem> : null}
+                  {candidates.map((candidate) => (
+                    <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
+                      {candidate.descriptor.title ?? candidate.descriptor.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
+};
 
 const ExtensionCard: React.FC<{
   busy: boolean;
@@ -192,6 +299,7 @@ export const ExtensionsPage: React.FC = () => {
           </div>
         ) : null}
       </SettingsSection>
+      <WorkbenchProfileSection />
     </SettingsPageLayout>
   );
 };

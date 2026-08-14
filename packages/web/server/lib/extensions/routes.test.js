@@ -102,6 +102,17 @@ describe('Piarium extension recovery routes', () => {
       catalog: snapshot(),
       revision: 4,
       services: { hostId: snapshot().hostId, providers: [], revision: 2, selections: {} },
+      workbench: {
+        authoritative: true,
+        diagnostics: [],
+        document: {
+          activeProfileId: 'default', layouts: [], profileSelections: { users: {}, workspaces: {} },
+          profiles: [{ id: 'default', label: 'Default' }], revision: 0, schemaVersion: 1,
+          updatedAt: '1970-01-01T00:00:00.000Z',
+        },
+        hostId: snapshot().hostId,
+        storageState: 'missing',
+      },
     };
     const extensionRuntime = {
       state: vi.fn(async () => state),
@@ -109,6 +120,7 @@ describe('Piarium extension recovery routes', () => {
       prepareCandidate: vi.fn(async (extensionId, integrity) => ({ extensionId, integrity, providers: [] })),
       reviewCandidateCapabilities: vi.fn(async () => snapshot()),
       invokeService: vi.fn(async () => 'service-result'),
+      updateWorkbenchLayout: vi.fn(async () => state.workbench),
     };
     const app = createApp({ snapshot: vi.fn(async () => snapshot()) }, {}, extensionRuntime);
     expect((await request(app).get('/api/piarium/extensions/v1/host-state').expect(200)).body).toEqual(state);
@@ -137,5 +149,12 @@ describe('Piarium extension recovery routes', () => {
       .send({ serviceId: 'dev.example.service', version: 1, method: 'read', args: [] })
       .expect(200);
     expect(invoked.body.result).toBe('service-result');
+    await request(app).patch('/api/piarium/extensions/v1/workbench/layout').send({}).expect(401);
+    const workbench = await request(app)
+      .patch('/api/piarium/extensions/v1/workbench/layout')
+      .set('x-test-session', 'yes')
+      .send({ expectedRevision: 0, layer: {} })
+      .expect(200);
+    expect(workbench.body.document.activeProfileId).toBe('default');
   });
 });

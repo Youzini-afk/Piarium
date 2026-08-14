@@ -21,6 +21,10 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PiToolExecutionState } from '@/stores/usePiSessionStore';
 import { PiExtensionStatusCard } from './PiExtensionStatusCard';
 import {
+  renderFirstWorkbenchMatch,
+  useWorkbenchMatchRenderers,
+} from '@/lib/extensions/workbench-registry';
+import {
   parseExtensionStatus,
   parseSubagentNotifications,
   parseSubagentRun,
@@ -295,6 +299,15 @@ const PiToolCard: React.FC<{
   execution?: PiToolExecutionState;
   result?: PiToolResultMessage;
 }> = ({ call, cwd, editor, execution, result }) => {
+  const toolRenderers = useWorkbenchMatchRenderers<{
+    call: PiToolCall;
+    cwd: string;
+    editor?: EditorAPI;
+    execution?: PiToolExecutionState;
+    result?: PiToolResultMessage;
+  }>('tool-renderer', 'chat.timeline.tools');
+  const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, editor, execution, result });
+  if (extensionRendered !== undefined) return <>{extensionRendered}</>;
   const status = result
     ? (result.isError ? 'error' : 'success')
     : execution?.status ?? 'running';
@@ -462,6 +475,11 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
 }) => {
   const { t } = useI18n();
   const { editor } = useRuntimeAPIs();
+  const messageRenderers = useWorkbenchMatchRenderers<{
+    cwd: string;
+    entry: PiSessionEntry;
+    sessionId: string;
+  }>('message-renderer', 'chat.timeline.entries');
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const followTailRef = React.useRef(true);
   const resultByCallId = React.useMemo(() => {
@@ -520,6 +538,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
     >
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
         {renderedEntries.map((entry) => {
+          const extensionRendered = renderFirstWorkbenchMatch(messageRenderers, { cwd, entry, sessionId });
+          if (extensionRendered !== undefined) {
+            return <React.Fragment key={entry.id}>{extensionRendered}</React.Fragment>;
+          }
           if (entry.type === 'message') {
             const { message } = entry;
             if (message.role === 'user') {

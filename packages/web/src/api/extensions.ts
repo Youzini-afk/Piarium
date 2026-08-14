@@ -5,6 +5,7 @@ import {
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
+  parsePiariumWorkbenchProfileSnapshot,
   type PiariumExtensionActualState,
   type PiariumExtensionAssetRequest,
   type PiariumExtensionCandidateCapabilityReviewRequest,
@@ -177,6 +178,18 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
   },
   setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
     await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/select', request)),
+  ),
+  updateWorkbenchLayout: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/layout', request, undefined, 'PATCH')),
+  ),
+  selectWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/profile/select', request, undefined, 'PATCH')),
+  ),
+  upsertWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/profiles', request, undefined, 'PUT')),
+  ),
+  removeWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/profiles/remove', request)),
   ),
   waitForHostState: async (request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal) => (
     parsePiariumExtensionHostStateSnapshot(await readJsonOrThrow(

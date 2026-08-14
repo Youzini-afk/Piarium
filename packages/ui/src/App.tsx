@@ -57,6 +57,11 @@ import {
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
 import { toast } from '@/components/ui';
+import {
+  WorkbenchProfileBridge,
+  WorkbenchReplacement,
+  WORKBENCH_REPLACEMENT_TARGETS,
+} from '@/lib/extensions/workbench-registry';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -621,7 +626,11 @@ function App({ apis }: AppProps) {
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
               <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-              <MainLayout />
+              <WorkbenchProfileBridge />
+              <WorkbenchReplacement
+                target={WORKBENCH_REPLACEMENT_TARGETS.shell}
+                fallback={<MainLayout />}
+              />
               <Toaster />
               {!isBootShell && (
                 <>

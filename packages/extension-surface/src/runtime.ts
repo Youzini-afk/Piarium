@@ -175,10 +175,7 @@ function selectVisibleContributions(
   for (const [target, candidates] of replacements) {
     const selectedId = replacementSelections.get(target);
     const selected = selectedId ? candidates.find((candidate) => candidate.descriptor.id === selectedId) : undefined;
-    const fallback = candidates.slice().sort((left, right) => (
-      (right.descriptor.replacement?.priority ?? 0) - (left.descriptor.replacement?.priority ?? 0)
-      || left.descriptor.id.localeCompare(right.descriptor.id)
-    ))[0];
+    const fallback = candidates.find((candidate) => candidate.descriptor.data.fallback === true);
     if (selected ?? fallback) additive.push((selected ?? fallback) as SurfaceContribution);
   }
   return orderContributions(additive, layoutReferences);
@@ -435,6 +432,13 @@ export class SurfaceExtensionRuntime {
   }
 
   setLayoutReferences(references: readonly SurfaceLayoutReference[]): void {
+    this.setWorkbenchState(references, Object.fromEntries(this.#replacementSelections));
+  }
+
+  setWorkbenchState(
+    references: readonly SurfaceLayoutReference[],
+    replacementSelections: Readonly<Record<string, string>>,
+  ): void {
     const next = new Map<string, SurfaceLayoutReference>();
     for (const reference of references) {
       if (!isPiariumExtensionId(reference.contributionId)) {
@@ -463,8 +467,16 @@ export class SurfaceExtensionRuntime {
         ...(reference.visible !== undefined ? { visible: reference.visible } : {}),
       });
     }
+    const nextSelections = new Map<string, string>();
+    for (const [target, contributionId] of Object.entries(replacementSelections)) {
+      if (!isPiariumExtensionId(target)) throw new Error(`Invalid replacement target: ${target}`);
+      if (!isPiariumExtensionId(contributionId)) throw new Error(`Invalid replacement contribution ID: ${contributionId}`);
+      nextSelections.set(target, contributionId);
+    }
     this.#layoutReferences.clear();
     for (const [id, reference] of next) this.#layoutReferences.set(id, reference);
+    this.#replacementSelections.clear();
+    for (const [target, contributionId] of nextSelections) this.#replacementSelections.set(target, contributionId);
     this.#publish();
   }
 

@@ -117,18 +117,21 @@ test("replacement selection and ordering update without a document refresh", asy
   await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
     context.contribute({
       ...page("dev.example.alpha.shell", 10),
-      replacement: { target: "workbench.shell", priority: 1 },
+      data: { fallback: true },
+      replacement: { target: "workbench.shell" },
     }, "alpha");
     context.contribute(page("dev.example.alpha.last", 20), "last");
   });
   await runtime.activate({ owner: owner("dev.example.beta", 1, 1) }, (context) => {
     context.contribute({
       ...page("dev.example.beta.shell", 0),
-      replacement: { target: "workbench.shell", priority: 2 },
+      replacement: { target: "workbench.shell" },
     }, "beta");
   });
+  assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["alpha", "last"]);
+  runtime.setReplacementSelection("workbench.shell", "dev.example.beta.shell");
   assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["beta", "last"]);
-  runtime.setReplacementSelection("workbench.shell", "dev.example.alpha.shell");
+  await runtime.deactivate(owner("dev.example.beta", 2, 2));
   assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["alpha", "last"]);
 });
 

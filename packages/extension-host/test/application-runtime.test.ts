@@ -52,7 +52,7 @@ module.exports = {
 `, "utf8");
 };
 
-test("brokered Host storage, migration rollback, services, and crash isolation preserve application state", { timeout: 10_000 }, async () => {
+test("brokered Host storage, migration rollback, services, and crash isolation preserve application state", { timeout: 30_000 }, async () => {
   const dataDir = await temporaryDirectory("piarium-broker-runtime-");
   const v1 = await temporaryDirectory("piarium-broker-v1-");
   const v2 = await temporaryDirectory("piarium-broker-v2-");

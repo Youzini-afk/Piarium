@@ -8,6 +8,7 @@ import type {
   PiariumExtensionCatalogSnapshot,
   PiariumExtensionManagedEntrypointPayload,
   PiariumExtensionManifest,
+  PiariumExtensionHostStateSnapshot,
 } from "@piarium/extension-contract";
 import { SurfaceExtensionRuntime } from "@piarium/extension-surface";
 import {
@@ -66,6 +67,27 @@ const snapshot = (revision: number, entry: PiariumExtensionCatalogEntry): Piariu
   storageState: "ready",
 });
 
+const hostState = (
+  catalog: PiariumExtensionCatalogSnapshot,
+  revision = catalog.revision,
+  providers: PiariumExtensionHostStateSnapshot['services']['providers'] = [],
+): PiariumExtensionHostStateSnapshot => ({
+  catalog,
+  revision,
+  services: { hostId, providers, revision, selections: {} },
+  workbench: {
+    authoritative: true,
+    diagnostics: [],
+    document: {
+      activeProfileId: 'default', layouts: [], profileSelections: { users: {}, workspaces: {} },
+      profiles: [{ id: 'default', label: 'Default' }], revision: 0, schemaVersion: 1,
+      updatedAt: '1970-01-01T00:00:00.000Z',
+    },
+    hostId,
+    storageState: 'missing',
+  },
+});
+
 test("evaluates a self-contained CommonJS managed module without a module URL", async () => {
   const loaded = await evaluateManagedSurfaceModule(
     "module.exports={default:{activate(){return 'active'}}};",
@@ -118,11 +140,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
-      hostState: async () => ({
-        catalog: current,
-        revision: current.revision,
-        services: { hostId, providers: [], revision: 0, selections: {} },
-      }),
+      hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       readAsset: async () => { throw new Error("unexpected asset read"); },
@@ -247,7 +265,7 @@ test("candidate code does not execute before added capabilities are reviewed", a
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
-      hostState: async () => ({ catalog: current, revision: current.revision, services: { hostId, providers: [], revision: 0, selections: {} } }),
+      hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => { prepared += 1; return { extensionId, integrity, providers: [] }; },
       readAsset: async () => { throw new Error("unexpected asset read"); },
@@ -308,11 +326,7 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
-      hostState: async () => ({
-        catalog: current,
-        revision: stateRevision,
-        services: { hostId, providers, revision: stateRevision, selections: {} },
-      }),
+      hostState: async () => hostState(current, stateRevision, providers),
       invokeService: async () => "host-value",
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       readAsset: async () => { throw new Error("unexpected asset read"); },
@@ -371,7 +385,7 @@ test("isolated Surface realms contribute transactionally and are physically disp
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
-      hostState: async () => ({ catalog: current, revision: current.revision, services: { hostId, providers: [], revision: 0, selections: {} } }),
+      hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       readAsset: async () => { throw new Error("unexpected asset read"); },
@@ -429,7 +443,7 @@ test("trusted-native Surface activation failure requires a Surface reload and is
       activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
       discardPreparedCandidate: async () => undefined,
-      hostState: async () => ({ catalog: current, revision: current.revision, services: { hostId, providers: [], revision: 0, selections: {} } }),
+      hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       readAsset: async () => { throw new Error("unexpected asset read"); },

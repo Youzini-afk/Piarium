@@ -1,6 +1,7 @@
 import {
   ExtensionCatalogRevisionConflictError,
   ExtensionCatalogStorageError,
+  ExtensionStorageRevisionConflictError,
 } from '@piarium/extension-host';
 import {
   parsePiariumExtensionActualState,
@@ -28,7 +29,7 @@ const expectedRevision = (body) => {
 };
 
 const sendMutationError = (res, error) => {
-  if (error instanceof ExtensionCatalogRevisionConflictError) {
+  if (error instanceof ExtensionCatalogRevisionConflictError || error instanceof ExtensionStorageRevisionConflictError) {
     return res.status(409).json({
       error: {
         code: 'revision_conflict',
@@ -286,6 +287,39 @@ export const registerExtensionRoutes = (app, {
         return res.status(400).json({ error: { code: 'service_selection_failed', message: error instanceof Error ? error.message : String(error), retryable: false } });
       }
     },
+  );
+
+  const workbenchMutation = (method) => async (req, res) => {
+    if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+    try {
+      return res.json(await extensionRuntime[method](req.body));
+    } catch (error) {
+      return sendMutationError(res, error);
+    }
+  };
+
+  app.patch(
+    '/api/piarium/extensions/v1/workbench/layout',
+    uiAuthController.requireAuth,
+    workbenchMutation('updateWorkbenchLayout'),
+  );
+
+  app.patch(
+    '/api/piarium/extensions/v1/workbench/profile/select',
+    uiAuthController.requireAuth,
+    workbenchMutation('selectWorkbenchProfile'),
+  );
+
+  app.put(
+    '/api/piarium/extensions/v1/workbench/profiles',
+    uiAuthController.requireAuth,
+    workbenchMutation('upsertWorkbenchProfile'),
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/workbench/profiles/remove',
+    uiAuthController.requireAuth,
+    workbenchMutation('removeWorkbenchProfile'),
   );
 
   app.patch(

@@ -17,6 +17,11 @@ import {
   type PiariumExtensionPackageInstallRequest,
   type PiariumExtensionServiceInvocationRequest,
   type PiariumExtensionServiceSelectionRequest,
+  type PiariumWorkbenchLayoutUpdateRequest,
+  type PiariumWorkbenchProfileRemoveRequest,
+  type PiariumWorkbenchProfileSelectionRequest,
+  type PiariumWorkbenchProfileSnapshot,
+  type PiariumWorkbenchProfileUpsertRequest,
 } from "@piarium/extension-contract";
 import {
   PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
@@ -28,6 +33,7 @@ import { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { HostServiceRegistry } from "./service-registry.js";
 import { ExtensionStorageStore } from "./storage-store.js";
+import { WorkbenchProfileStore } from "./workbench-profile-store.js";
 
 export interface ApplicationExtensionRuntimeOptions {
   brokerScript: string;
@@ -38,6 +44,7 @@ export interface ApplicationExtensionRuntimeOptions {
   services?: HostServiceRegistry;
   storage?: ExtensionStorageStore;
   transportFactory?: BrokeredHostTransportFactory;
+  workbench?: WorkbenchProfileStore;
 }
 
 export class ApplicationExtensionRuntime {
@@ -47,6 +54,7 @@ export class ApplicationExtensionRuntime {
   readonly services: HostServiceRegistry;
   readonly storage: ExtensionStorageStore;
   readonly supervisor: BrokeredHostSupervisor;
+  readonly workbench: WorkbenchProfileStore;
   readonly #listeners = new Set<() => void>();
   readonly #serviceUnsubscribe: () => void;
   #revision = 0;
@@ -60,6 +68,8 @@ export class ApplicationExtensionRuntime {
     this.services = options.services ?? new HostServiceRegistry(hostId);
     if (this.services.hostId !== hostId) throw new Error("Extension service registry belongs to another application host");
     this.storage = options.storage ?? new ExtensionStorageStore(options.dataDir);
+    this.workbench = options.workbench ?? new WorkbenchProfileStore({ hostId, storage: this.storage });
+    if (this.workbench.hostId !== hostId) throw new Error("Workbench profile store belongs to another application host");
     this.supervisor = new BrokeredHostSupervisor({
       brokerScript: options.brokerScript,
       capabilities: this.capabilities,
@@ -86,6 +96,7 @@ export class ApplicationExtensionRuntime {
         PIARIUM_BUILTIN_EXTENSION_PREFIX,
       );
       await this.supervisor.reconcile(snapshot);
+      await this.workbench.read();
       this.#publish();
     });
     return this.state();
@@ -96,8 +107,9 @@ export class ApplicationExtensionRuntime {
       const before = this.#revision;
       const catalog = await this.catalog.snapshot();
       const services = this.services.getSnapshot();
+      const workbench = await this.workbench.read();
       const after = this.#revision;
-      if (before === after) return { catalog, revision: after, services };
+      if (before === after) return { catalog, revision: after, services, workbench };
     }
   }
 
@@ -254,6 +266,46 @@ export class ApplicationExtensionRuntime {
       this.services.setSelection(request.serviceId, request.version, request.providerId);
       this.#publish();
       return this.state();
+    });
+  }
+
+  updateWorkbenchLayout(
+    request: PiariumWorkbenchLayoutUpdateRequest | unknown,
+  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    return this.#mutate(async () => {
+      const snapshot = await this.workbench.updateLayout(request);
+      this.#publish();
+      return snapshot;
+    });
+  }
+
+  selectWorkbenchProfile(
+    request: PiariumWorkbenchProfileSelectionRequest | unknown,
+  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    return this.#mutate(async () => {
+      const snapshot = await this.workbench.selectProfile(request);
+      this.#publish();
+      return snapshot;
+    });
+  }
+
+  upsertWorkbenchProfile(
+    request: PiariumWorkbenchProfileUpsertRequest | unknown,
+  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    return this.#mutate(async () => {
+      const snapshot = await this.workbench.upsertProfile(request);
+      this.#publish();
+      return snapshot;
+    });
+  }
+
+  removeWorkbenchProfile(
+    request: PiariumWorkbenchProfileRemoveRequest | unknown,
+  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    return this.#mutate(async () => {
+      const snapshot = await this.workbench.removeProfile(request);
+      this.#publish();
+      return snapshot;
     });
   }
 

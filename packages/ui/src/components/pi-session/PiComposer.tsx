@@ -30,6 +30,7 @@ import { getMagicPromptDefinition } from '@/lib/magicPrompts';
 import type { Snippet } from '@/types/snippet';
 import { PiActiveEditorContextSuggestion } from './PiActiveEditorContextSuggestion';
 import { PiGoalButton } from './PiGoalControls';
+import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 
 interface PiComposerProps {
   cwd: string;
@@ -347,6 +348,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
           <div data-chat-input-footer="true" className="flex items-center justify-between gap-2 px-2 pb-2">
             <div className="flex min-w-0 items-center gap-1">
+              <WorkbenchContributionSlot
+                kind="composer-action"
+                slot="chat.composer.actions.leading"
+                props={{ cwd, draft, images, onChangeDraft, onChangeImages, onSend, sending, sessionId, snapshot }}
+              />
               <input
                 ref={fileInputRef}
                 type="file"
@@ -418,6 +424,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             </div>
 
             <div className="flex shrink-0 items-center gap-1.5">
+              <WorkbenchContributionSlot
+                kind="composer-action"
+                slot="chat.composer.actions.trailing"
+                props={{ cwd, draft, images, onChangeDraft, onChangeImages, onSend, sending, sessionId, snapshot }}
+              />
               {busy && onAbort && (
                 <Tooltip>
                   <TooltipTrigger asChild>

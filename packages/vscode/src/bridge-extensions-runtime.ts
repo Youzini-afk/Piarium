@@ -166,6 +166,14 @@ export const handleExtensionsBridgeMessage = async (
       return { data: await runtime.invokeService(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:service:select':
       return { data: await runtime.setServiceSelection(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:workbench:layout':
+      return { data: await runtime.updateWorkbenchLayout(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:workbench:profile:select':
+      return { data: await runtime.selectWorkbenchProfile(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:workbench:profile:upsert':
+      return { data: await runtime.upsertWorkbenchProfile(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:workbench:profile:remove':
+      return { data: await runtime.removeWorkbenchProfile(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:actual': {
       const payload = payloadRecord(request.payload);
       const extensionId = typeof payload.extensionId === 'string' ? payload.extensionId : '';

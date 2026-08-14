@@ -52,6 +52,10 @@ import {
   type PiSessionNode,
 } from './sessionPresentation';
 import { PiSessionActivityDuration } from './PiSessionActivityDuration';
+import {
+  renderFirstWorkbenchMatch,
+  useWorkbenchMatchRenderers,
+} from '@/lib/extensions/workbench-registry';
 
 interface PiSessionSidebarProps {
   isVisible?: boolean;
@@ -170,6 +174,20 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
   const attention = props.attentionBySession[session.id];
   const archived = session.archivedAt !== undefined;
   const pendingRenameRef = React.useRef(false);
+  const decorationRenderers = useWorkbenchMatchRenderers<{
+    attention?: PiSessionAttentionState;
+    busy: boolean;
+    current: boolean;
+    pinned: boolean;
+    session: SessionSummary;
+  }>('session-decoration', 'sessions.navigator.row.decorations');
+  const extensionDecoration = renderFirstWorkbenchMatch(decorationRenderers, {
+    attention,
+    busy: isBusy,
+    current: isCurrent,
+    pinned,
+    session,
+  });
 
   return (
     <div>
@@ -233,6 +251,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
             className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
           >
             <span className="min-w-0 flex-1 truncate typography-ui-label font-normal">{title}</span>
+            {extensionDecoration}
             {pendingDialogCount > 0 ? (
               <span
                 className="inline-flex shrink-0 items-center gap-0.5 rounded bg-[var(--status-info)]/10 px-1 py-0.5 typography-micro text-[var(--status-info)]"

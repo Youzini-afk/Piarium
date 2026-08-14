@@ -1094,6 +1094,26 @@ Piarium contribution rather than carrying configuration state from the prior run
 Acceptance: an alternative shell can be enabled and disabled without losing sessions, projects,
 layout recovery, or the ability to enter safe mode.
 
+Implementation status (2026-08-14): complete. The application host now owns a revisioned workbench
+profile document below `PIARIUM_DATA_DIR`. Distribution, user, and workspace layout layers are
+resolved per Surface; they persist contribution visibility/order/region/size and explicit replacement
+selections while retaining references to contributions that are currently missing. Malformed or
+unreadable state is reported as stale and never converted into an authoritative empty layout. Web,
+Electron-hosted Web, and VS Code expose the same authenticated, revision-checked profile mutations
+through the application-host extension API and converge through the existing host-state watch.
+
+The React workbench applies the resolved profile to the Surface Registry atomically. The default
+`MainLayout` remains the built-in fallback above the boot/recovery kernel, while
+`workbench.shell`, `sessions.navigator`, `chat.timeline`, `chat.composer`, `agents.workbench`,
+`mcp.workbench`, `workspace.explorer`, and `settings.workbench` are live replacement points. Panels,
+message and tool renderers, composer actions, and session-row decorations are additive contribution
+slots. Disabling or losing the selected contribution therefore unmounts only that owner generation,
+keeps the selected contribution ID and layout record, and immediately renders the built-in fallback.
+Pi sessions, projects, and drafts remain owned by their runtime stores rather than any shell. The
+renderer-independent `/extensions/recovery` route and session-authenticated disable-all action remain
+outside the selected shell, so safe mode is reachable even when an alternative workbench cannot
+start.
+
 ### Phase H — Service routing and orchestration
 
 - Add selection scopes for workspace, project, runtime, session, agent, model, and invocation.

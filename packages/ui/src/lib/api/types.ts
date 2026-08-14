@@ -16,6 +16,11 @@ import type {
   PiariumExtensionPackageInstallRequest,
   PiariumExtensionServiceInvocationRequest,
   PiariumExtensionServiceSelectionRequest,
+  PiariumWorkbenchLayoutUpdateRequest,
+  PiariumWorkbenchProfileRemoveRequest,
+  PiariumWorkbenchProfileSelectionRequest,
+  PiariumWorkbenchProfileSnapshot,
+  PiariumWorkbenchProfileUpsertRequest,
   JsonValue,
 } from '@piarium/extension-contract';
 
@@ -1627,6 +1632,10 @@ export interface ExtensionsAPI {
   selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot>;
   setServiceSelection(request: PiariumExtensionServiceSelectionRequest): Promise<PiariumExtensionHostStateSnapshot>;
+  updateWorkbenchLayout(request: PiariumWorkbenchLayoutUpdateRequest): Promise<PiariumWorkbenchProfileSnapshot>;
+  selectWorkbenchProfile(request: PiariumWorkbenchProfileSelectionRequest): Promise<PiariumWorkbenchProfileSnapshot>;
+  upsertWorkbenchProfile(request: PiariumWorkbenchProfileUpsertRequest): Promise<PiariumWorkbenchProfileSnapshot>;
+  removeWorkbenchProfile(request: PiariumWorkbenchProfileRemoveRequest): Promise<PiariumWorkbenchProfileSnapshot>;
   waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;
 }
 

@@ -349,6 +349,7 @@ export interface PiariumExtensionHostStateSnapshot {
   catalog: PiariumExtensionCatalogSnapshot;
   revision: number;
   services: PiariumExtensionServiceCatalogSnapshot;
+  workbench: import("./workbench.js").PiariumWorkbenchProfileSnapshot;
 }
 
 export interface PiariumExtensionHostStateWaitRequest {

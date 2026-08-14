@@ -5,6 +5,7 @@ import {
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
+  parsePiariumWorkbenchProfileSnapshot,
 } from '@piarium/extension-contract';
 import type { ExtensionsAPI } from '@piarium/ui/lib/api/types';
 import { getVSCodeAPI, sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
@@ -51,6 +52,18 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   ),
   setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
     await sendBridgeMessage('api:extensions:service:select', request),
+  ),
+  updateWorkbenchLayout: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await sendBridgeMessage('api:extensions:workbench:layout', request),
+  ),
+  selectWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await sendBridgeMessage('api:extensions:workbench:profile:select', request),
+  ),
+  upsertWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await sendBridgeMessage('api:extensions:workbench:profile:upsert', request),
+  ),
+  removeWorkbenchProfile: async (request) => parsePiariumWorkbenchProfileSnapshot(
+    await sendBridgeMessage('api:extensions:workbench:profile:remove', request),
   ),
   waitForHostState: async (request, signal) => parsePiariumExtensionHostStateSnapshot(
     await sendBridgeMessageWithOptions('api:extensions:host-state:wait', request, {

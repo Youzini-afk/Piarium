@@ -21,6 +21,11 @@ import { MultiRunLauncher } from '@/components/multirun';
 import { TerminalView } from '@/components/views/TerminalView';
 import { DrawerProvider } from '@/contexts/DrawerContext';
 import { WorkspaceOverlays } from '@/components/workspace/WorkspaceOverlays';
+import {
+    WorkbenchContributionSlot,
+    WorkbenchReplacement,
+    WORKBENCH_REPLACEMENT_TARGETS,
+} from '@/lib/extensions/workbench-registry';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -262,6 +267,7 @@ export const MainLayout: React.FC = () => {
                 <PiInteractionHost />
                 <HelpDialog />
                 <WorkspaceOverlays />
+                <WorkbenchContributionSlot kind="panel" slot="workbench.overlay" />
                 <DirectoryExplorerDialog
                     open={directoryDialogOpen}
                     onOpenChange={setDirectoryDialogOpen}
@@ -354,7 +360,10 @@ export const MainLayout: React.FC = () => {
                                 aria-hidden={!mobileLeftDrawerOpen}
                             >
                                 <ErrorBoundary>
-                                    <PiSessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />
+                                    <WorkbenchReplacement
+                                        target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
+                                        fallback={<PiSessionSidebar mobileVariant isVisible={mobileLeftDrawerVisible} />}
+                                    />
                                 </ErrorBoundary>
                             </motion.div>
                             {mobileRightDrawerVisible && (
@@ -374,9 +383,14 @@ export const MainLayout: React.FC = () => {
                             style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
                         >
                             <ErrorBoundary>
-                                <React.Suspense fallback={null}>
-                                    <SettingsView onClose={() => setSettingsDialogOpen(false)} />
-                                </React.Suspense>
+                                <WorkbenchReplacement
+                                    target={WORKBENCH_REPLACEMENT_TARGETS.settings}
+                                    fallback={(
+                                        <React.Suspense fallback={null}>
+                                            <SettingsView onClose={() => setSettingsDialogOpen(false)} />
+                                        </React.Suspense>
+                                    )}
+                                />
                             </ErrorBoundary>
                         </div>
                     )}
@@ -394,7 +408,10 @@ export const MainLayout: React.FC = () => {
                             className="border-border"
                             topBar={<SidebarTopBar />}
                         >
-                            <PiSessionSidebar isVisible={isSidebarOpen} />
+                            <WorkbenchReplacement
+                                target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
+                                fallback={<PiSessionSidebar isVisible={isSidebarOpen} />}
+                            />
                         </Sidebar>
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                             <Header />
@@ -429,12 +446,19 @@ export const MainLayout: React.FC = () => {
                                                 <ErrorBoundary><ArchiveView /></ErrorBoundary>
                                                 <ErrorBoundary><WorktreesView /></ErrorBoundary>
                                             </main>
-                                            <ContextPanel />
+                                            <WorkbenchContributionSlot kind="panel" slot="workbench.secondary.before" />
+                                            <WorkbenchReplacement
+                                                target={WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer}
+                                                fallback={<ContextPanel />}
+                                            />
+                                            <WorkbenchContributionSlot kind="panel" slot="workbench.secondary.after" />
                                         </div>
                                     </div>
                                 </div>
                                 <div className="border-t border-border" data-page-scroll-lock="true">
+                                    <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.before" />
                                     <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+                                    <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.after" />
                                 </div>
                             </div>
                         </div>
@@ -442,12 +466,17 @@ export const MainLayout: React.FC = () => {
 
                     {/* Desktop settings: windowed dialog with blur */}
                     {settingsWindowMounted ? (
-                        <React.Suspense fallback={null}>
-                            <SettingsWindow
-                                open={isSettingsDialogOpen}
-                                onOpenChange={setSettingsDialogOpen}
-                            />
-                        </React.Suspense>
+                        <WorkbenchReplacement
+                            target={WORKBENCH_REPLACEMENT_TARGETS.settings}
+                            fallback={(
+                                <React.Suspense fallback={null}>
+                                    <SettingsWindow
+                                        open={isSettingsDialogOpen}
+                                        onOpenChange={setSettingsDialogOpen}
+                                    />
+                                </React.Suspense>
+                            )}
+                        />
                     ) : null}
                 </>
             )}

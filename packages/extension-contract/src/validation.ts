@@ -45,6 +45,7 @@ import {
   type PiariumExtensionStorageSnapshot,
   type PiariumExtensionSurfaceEntrypoint,
 } from "./types.js";
+import { parsePiariumWorkbenchProfileSnapshot } from "./workbench.js";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -1303,14 +1304,23 @@ export function parsePiariumExtensionHostStateSnapshot(value: unknown): PiariumE
   if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension host-state snapshot is invalid", ["snapshot must be an object"]);
   let catalog: PiariumExtensionCatalogSnapshot | undefined;
   let services: PiariumExtensionServiceCatalogSnapshot | undefined;
+  let workbench: ReturnType<typeof parsePiariumWorkbenchProfileSnapshot> | undefined;
   try { catalog = parsePiariumExtensionCatalogSnapshot(value.catalog); }
   catch (error) { if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `catalog.${issue}`)); else throw error; }
   try { services = parsePiariumExtensionServiceCatalogSnapshot(value.services); }
   catch (error) { if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `services.${issue}`)); else throw error; }
+  try { workbench = parsePiariumWorkbenchProfileSnapshot(value.workbench); }
+  catch (error) { issues.push(`workbench.${error instanceof Error ? error.message : String(error)}`); }
   if (catalog && services && catalog.hostId !== services.hostId) issues.push("catalog and services must belong to the same application host");
+  if (catalog && workbench && catalog.hostId !== workbench.hostId) issues.push("catalog and workbench must belong to the same application host");
   const revision = positiveRevision(value.revision, "revision", issues, true);
   throwIssues("Piarium extension host-state snapshot", issues);
-  return { catalog: catalog as PiariumExtensionCatalogSnapshot, revision, services: services as PiariumExtensionServiceCatalogSnapshot };
+  return {
+    catalog: catalog as PiariumExtensionCatalogSnapshot,
+    revision,
+    services: services as PiariumExtensionServiceCatalogSnapshot,
+    workbench: workbench as PiariumExtensionHostStateSnapshot["workbench"],
+  };
 }
 
 const STORAGE_SCOPES = new Set(["application", "profile", "session", "surface", "workspace"]);

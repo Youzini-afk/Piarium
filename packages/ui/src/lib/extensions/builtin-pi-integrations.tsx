@@ -34,21 +34,51 @@ import type {
   PiPluginSettingsAdapterRenderProps,
   PiSettingsPanelImplementation,
 } from './pi-integration-registry';
+import {
+  WorkbenchOwnedView,
+  WORKBENCH_REPLACEMENT_TARGETS,
+} from './workbench-registry';
 
 const pageImplementation = (definition: PiariumBuiltinExtensionDefinition): SettingsPageImplementation => {
   switch (definition.manifest.id) {
     case PIARIUM_BUILTIN_AGENTS_EXTENSION.manifest.id:
       return {
-        renderContent: () => <AgentsPage />,
-        renderSidebar: (options) => <AgentsSidebar onItemSelect={options.onItemSelect} />,
+        renderContent: () => (
+          <WorkbenchOwnedView
+            target={WORKBENCH_REPLACEMENT_TARGETS.agents}
+            region="content"
+            fallback={<AgentsPage />}
+          />
+        ),
+        renderSidebar: (options) => (
+          <WorkbenchOwnedView
+            target={WORKBENCH_REPLACEMENT_TARGETS.agents}
+            region="sidebar"
+            onItemSelect={options.onItemSelect}
+            fallback={<AgentsSidebar onItemSelect={options.onItemSelect} />}
+          />
+        ),
       };
     case PIARIUM_BUILTIN_FLEET_EXTENSION.manifest.id:
       return { renderContent: () => <FleetPage /> };
     case PIARIUM_BUILTIN_MCP_EXTENSION.manifest.id:
       return {
         isAvailable: (context) => context.mcpInstalled,
-        renderContent: () => <McpPage />,
-        renderSidebar: (options) => <McpSidebar onItemSelect={options.onItemSelect} />,
+        renderContent: () => (
+          <WorkbenchOwnedView
+            target={WORKBENCH_REPLACEMENT_TARGETS.mcp}
+            region="content"
+            fallback={<McpPage />}
+          />
+        ),
+        renderSidebar: (options) => (
+          <WorkbenchOwnedView
+            target={WORKBENCH_REPLACEMENT_TARGETS.mcp}
+            region="sidebar"
+            onItemSelect={options.onItemSelect}
+            fallback={<McpSidebar onItemSelect={options.onItemSelect} />}
+          />
+        ),
       };
     case PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION.manifest.id:
       return {
