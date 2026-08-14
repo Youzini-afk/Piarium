@@ -8,11 +8,14 @@ import {
   parsePiariumExtensionHostIdentityDocument,
   parsePiariumExtensionInstallationRecord,
   type PiariumExtensionCatalogDocument,
-  type PiariumExtensionCandidateRecord,
+  type PiariumExtensionCapabilityDecision,
   type PiariumExtensionCapabilityGrant,
+  type PiariumExtensionCapabilityReference,
   type PiariumExtensionDiagnostic,
   type PiariumExtensionHostIdentityDocument,
   type PiariumExtensionInstallationRecord,
+  type PiariumExtensionManifest,
+  type PiariumExtensionPreparedArtifact,
 } from "@piarium/extension-contract";
 import {
   ExtensionCatalogRevisionConflictError,
@@ -131,6 +134,14 @@ function diagnostic(code: string, message: string): PiariumExtensionDiagnostic {
   return { code, message, severity: "error", timestamp: new Date().toISOString() };
 }
 
+const capabilityKey = (value: PiariumExtensionCapabilityReference): string => `${value.realm}:${value.capability}`;
+
+function manifestCapabilities(manifest: PiariumExtensionManifest): PiariumExtensionCapabilityReference[] {
+  return (["host", "surface"] as const).flatMap((realm) => (
+    (manifest.capabilities?.[realm] ?? []).map((capability) => ({ capability, realm }))
+  ));
+}
+
 async function atomicWrite(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
@@ -247,14 +258,62 @@ export class ExtensionCatalogStore {
     });
   }
 
-  stageCandidate(candidate: PiariumExtensionCandidateRecord, expectedRevision: number): Promise<CatalogReadState> {
+  stageCandidate(candidate: PiariumExtensionPreparedArtifact, expectedRevision: number): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[candidate.manifest.id];
       if (!record) throw new Error(`Piarium extension is not installed: ${candidate.manifest.id}`);
       if (record.candidate?.integrity === candidate.integrity) return false;
-      record.candidate = structuredClone(candidate);
+      const selectedCapabilities = new Set(manifestCapabilities(record.manifest).map(capabilityKey));
+      const candidateCapabilities = manifestCapabilities(candidate.manifest);
+      const candidateKeys = new Set(candidateCapabilities.map(capabilityKey));
+      const added = candidateCapabilities.filter((reference) => !selectedCapabilities.has(capabilityKey(reference)));
+      const removed = manifestCapabilities(record.manifest).filter((reference) => !candidateKeys.has(capabilityKey(reference)));
+      const capabilityGrants = record.capabilityGrants
+        .filter((grant) => candidateKeys.has(capabilityKey(grant)))
+        .map((grant) => ({ ...grant, manifestVersion: candidate.manifest.version, updatedAt: now }));
+      record.candidate = {
+        ...structuredClone(candidate),
+        capabilitiesReviewed: added.length === 0,
+        capabilityDelta: { added, removed },
+        capabilityGrants,
+      };
       record.updatedAt = now;
       return true;
+    });
+  }
+
+  reviewCandidateCapabilities(
+    extensionId: string,
+    candidateIntegrity: string,
+    decisions: readonly PiariumExtensionCapabilityDecision[],
+    expectedRevision: number,
+  ): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[extensionId];
+      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      const candidate = record.candidate;
+      if (!candidate || candidate.integrity !== candidateIntegrity) {
+        throw new Error(`Piarium extension candidate is no longer current: ${extensionId}`);
+      }
+      const added = new Set(candidate.capabilityDelta.added.map(capabilityKey));
+      for (const decision of decisions) {
+        const key = capabilityKey(decision);
+        if (!added.has(key)) throw new Error(`Capability is not newly requested by the candidate: ${key}`);
+        const next: PiariumExtensionCapabilityGrant = {
+          capability: decision.capability,
+          granted: decision.granted,
+          manifestVersion: candidate.manifest.version,
+          realm: decision.realm,
+          updatedAt: now,
+        };
+        const index = candidate.capabilityGrants.findIndex((grant) => capabilityKey(grant) === key);
+        if (index >= 0) candidate.capabilityGrants[index] = next;
+        else candidate.capabilityGrants.push(next);
+      }
+      const decided = new Set(candidate.capabilityGrants.map(capabilityKey));
+      candidate.capabilitiesReviewed = [...added].every((key) => decided.has(key));
+      record.updatedAt = now;
+      return decisions.length > 0;
     });
   }
 
@@ -270,16 +329,16 @@ export class ExtensionCatalogStore {
       if (!candidate || candidate.integrity !== candidateIntegrity) {
         throw new Error(`Piarium extension candidate is no longer current: ${extensionId}`);
       }
+      if (!candidate.capabilitiesReviewed) {
+        throw new Error(`Piarium extension candidate capability changes require review: ${extensionId}`);
+      }
       record.manifest = structuredClone(candidate.manifest);
       record.source = structuredClone(candidate.source);
       record.integrity = candidate.integrity;
       record.resolvedPath = candidate.resolvedPath;
       record.resolvedVersion = candidate.resolvedVersion;
       record.selectedVersion = candidate.resolvedVersion;
-      record.capabilityGrants = record.capabilityGrants.filter((grant) => (
-        grant.manifestVersion === candidate.manifest.version
-        && (candidate.manifest.capabilities?.[grant.realm] ?? []).includes(grant.capability)
-      ));
+      record.capabilityGrants = structuredClone(candidate.capabilityGrants);
       delete record.candidate;
       record.updatedAt = now;
       return true;

@@ -19,7 +19,12 @@ const temporaryDirectory = async (prefix: string): Promise<string> => {
   return directory;
 };
 
-const writeExtension = async (directory: string, id: string, version: string): Promise<void> => {
+const writeExtension = async (
+  directory: string,
+  id: string,
+  version: string,
+  mode: "isolated" | "managed" | "native" = "managed",
+): Promise<void> => {
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "piarium.extension.json"), JSON.stringify({
     schemaVersion: 1,
@@ -27,7 +32,7 @@ const writeExtension = async (directory: string, id: string, version: string): P
     version,
     engines: { piarium: "*" },
     entrypoints: {
-      surfaces: [{ id: "main", file: "surface.js", mode: "managed", supports: ["web", "desktop", "vscode"] }],
+      surfaces: [{ id: "main", file: "surface.js", mode, supports: ["web", "desktop", "vscode"] }],
     },
   }), "utf8");
   await writeFile(join(directory, "package.json"), JSON.stringify({ name: id, version, type: "module" }), "utf8");
@@ -41,6 +46,25 @@ const writeExtension = async (directory: string, id: string, version: string): P
 
 test.after(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true })));
+});
+
+test("builds isolated Surface artifacts as self-contained realm scripts", async () => {
+  const dataDir = await temporaryDirectory("piarium-isolated-artifact-data-");
+  const source = await temporaryDirectory("piarium-isolated-artifact-source-");
+  await writeExtension(source, "dev.example.isolated", "1.0.0", "isolated");
+  const catalog = new ApplicationExtensionCatalog({ dataDir });
+  const packages = new ExtensionPackageManager({ catalog, dataDir });
+  const installed = await packages.installOrStage({ kind: "local", specifier: source, display: "Isolated" }, 0);
+  const selected = installed.extensions[0];
+  const payload = await packages.readManagedEntrypoint({
+    entrypointId: "main",
+    extensionId: "dev.example.isolated",
+    integrity: selected?.integrity ?? "",
+    slot: "selected",
+  });
+  assert.match(payload.module.path, /module\.js$/);
+  assert.match(Buffer.from(payload.module.bytesBase64, "base64").toString("utf8"), /PiariumIsolatedModule/);
+  assert.equal(payload.styles.length, 1);
 });
 
 test("installs immutable local artifacts and stages an update without selecting it", async () => {

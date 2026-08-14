@@ -12,8 +12,9 @@ import type {
 import { SurfaceExtensionRuntime } from "@piarium/extension-surface";
 import {
   evaluateManagedSurfaceModule,
-  ManagedSurfaceExtensionLoader,
+  SurfaceExtensionLoader,
   type ManagedStyleHost,
+  type IsolatedSurfaceRealmFactory,
 } from "../src/index.js";
 
 if (!globalThis.crypto) Object.defineProperty(globalThis, "crypto", { value: webcrypto });
@@ -98,7 +99,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
     },
   };
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
-  const loader = new ManagedSurfaceExtensionLoader({
+  const loader = new SurfaceExtensionLoader({
     evaluateModule: (source) => ({
       default: {
         activate: (context) => {
@@ -169,6 +170,9 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   current = snapshot(2, {
     ...current.extensions[0] as PiariumExtensionCatalogEntry,
     candidate: {
+      capabilitiesReviewed: true,
+      capabilityDelta: { added: [], removed: [] },
+      capabilityGrants: [],
       integrity: failedIntegrity,
       manifest: manifest("2.0.0"),
       preparedAt: "2026-08-14T00:01:00.000Z",
@@ -184,6 +188,9 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   current = snapshot(3, {
     ...current.extensions[0] as PiariumExtensionCatalogEntry,
     candidate: {
+      capabilitiesReviewed: true,
+      capabilityDelta: { added: [], removed: [] },
+      capabilityGrants: [],
       integrity: v3Integrity,
       manifest: manifest("3.0.0"),
       preparedAt: "2026-08-14T00:02:00.000Z",
@@ -207,6 +214,63 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   assert.equal(reported.some((state) => state.status === "inactive"), true);
 });
 
+test("candidate code does not execute before added capabilities are reviewed", async () => {
+  const selectedIntegrity = integrityFor("review-selected");
+  const candidateIntegrity = integrityFor("review-candidate");
+  const candidateManifest: PiariumExtensionManifest = {
+    ...manifest("2.0.0"),
+    capabilities: { surface: ["desktop.files"] },
+  };
+  const entry: PiariumExtensionCatalogEntry = {
+    ...catalogEntry("1.0.0", selectedIntegrity),
+    candidate: {
+      capabilitiesReviewed: false,
+      capabilityDelta: { added: [{ capability: "desktop.files", realm: "surface" }], removed: [] },
+      capabilityGrants: [],
+      integrity: candidateIntegrity,
+      manifest: candidateManifest,
+      preparedAt: "2026-08-14T00:01:00.000Z",
+      resolvedVersion: "2.0.0",
+      source: { display: "Test", kind: "local" },
+    },
+  };
+  const current = snapshot(2, entry);
+  const evaluated: string[] = [];
+  let prepared = 0;
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    evaluateModule: (source) => {
+      evaluated.push(source);
+      return { default: { activate: () => undefined } };
+    },
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => ({ catalog: current, revision: current.revision, services: { hostId, providers: [], revision: 0, selections: {} } }),
+      invokeService: async () => { throw new Error("unexpected service invocation"); },
+      prepareCandidate: async (extensionId, integrity) => { prepared += 1; return { extensionId, integrity, providers: [] }; },
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({
+        artifactIntegrity: request.integrity,
+        entrypointId: request.entrypointId,
+        module: asset(request.integrity === selectedIntegrity ? "selected" : "candidate", request.integrity, "runtime/surface/main/module.cjs"),
+        styles: [],
+      }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => { throw new Error("candidate must not be selected"); },
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  await loader.reconcile();
+  assert.deepEqual(evaluated, ["selected"]);
+  assert.equal(prepared, 0);
+});
+
 test("withdrawn Host services tear down dependent Surface owners", async () => {
   const artifactIntegrity = integrityFor("service-artifact");
   const serviceManifest: PiariumExtensionManifest = {
@@ -225,7 +289,7 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
     status: "active" as const,
   }];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
-  const loader = new ManagedSurfaceExtensionLoader({
+  const loader = new SurfaceExtensionLoader({
     evaluateModule: () => ({
       default: {
         activate: async (context) => {
@@ -273,4 +337,120 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
   current = { ...current, revision: current.revision + 1 };
   await loader.reconcile();
   assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+});
+
+test("isolated Surface realms contribute transactionally and are physically disposed on disable", async () => {
+  const artifactIntegrity = integrityFor("isolated-artifact");
+  const isolatedManifest: PiariumExtensionManifest = {
+    ...manifest("1.0.0"),
+    entrypoints: {
+      surfaces: [{ id: "main", file: "surface.js", isolation: "iframe", mode: "isolated", supports: ["web"] }],
+    },
+  };
+  let current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: isolatedManifest });
+  let disposed = false;
+  let receivedStyles: readonly string[] = [];
+  const isolatedRealmFactory: IsolatedSurfaceRealmFactory = {
+    create: (_source, styles, identity) => ({
+      activate: async (context) => {
+        context.contribute({
+          contractVersion: 1,
+          data: {},
+          id: "dev.example.managed.isolated-page",
+          kind: "page",
+          supports: ["web"],
+        }, { kind: "isolated-iframe", mount: () => () => undefined, postMessage: () => undefined, realmId: identity.realmId, viewId: "main" });
+      },
+      get disposed() { return disposed; },
+      dispose: () => { disposed = true; },
+    }),
+  };
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => ({ catalog: current, revision: current.revision, services: { hostId, providers: [], revision: 0, selections: {} } }),
+      invokeService: async () => { throw new Error("unexpected service invocation"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({
+        artifactIntegrity: request.integrity,
+        entrypointId: request.entrypointId,
+        module: asset("isolated", request.integrity, "runtime/surface/main/module.js"),
+        styles: [asset(".isolated {}", request.integrity, "runtime/surface/main/module.css", "text/css; charset=utf-8")],
+      }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    isolatedRealmFactory: {
+      create: (source, styles, identity) => {
+        receivedStyles = styles;
+        return isolatedRealmFactory.create(source, styles, identity);
+      },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+  assert.deepEqual(receivedStyles, [".isolated {}"]);
+  current = snapshot(2, {
+    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    desired: { enabled: false, revision: 2, updatedAt: "2026-08-14T00:05:00.000Z" },
+  });
+  await loader.reconcile();
+  assert.equal(disposed, true);
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+});
+
+test("trusted-native Surface activation failure requires a Surface reload and is not retried", async () => {
+  const artifactIntegrity = integrityFor("native-artifact");
+  const nativeManifest: PiariumExtensionManifest = {
+    ...manifest("1.0.0"),
+    entrypoints: {
+      surfaces: [{ id: "main", file: "surface.cjs", mode: "native", supports: ["web"] }],
+    },
+  };
+  const current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: nativeManifest });
+  const reported: PiariumExtensionActualState[] = [];
+  let evaluations = 0;
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    evaluateModule: () => {
+      evaluations += 1;
+      throw new Error("native top-level failure");
+    },
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => ({ catalog: current, revision: current.revision, services: { hostId, providers: [], revision: 0, selections: {} } }),
+      invokeService: async () => { throw new Error("unexpected service invocation"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({
+        artifactIntegrity: request.integrity,
+        entrypointId: request.entrypointId,
+        module: asset("native", request.integrity, "runtime/surface/main/module.cjs"),
+        styles: [],
+      }),
+      reportActualState: async (_extensionId, state) => { reported.push(state); },
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  await loader.reconcile();
+  await loader.reconcile();
+  assert.equal(evaluations, 1);
+  assert.equal(runtime.getSnapshot().actual[0]?.status, "restart-required");
+  assert.equal(reported.some((state) => state.status === "restart-required"), true);
 });

@@ -1,5 +1,6 @@
 import {
   parsePiariumExtensionActualState,
+  parsePiariumExtensionCandidateCapabilityReviewRequest,
   parsePiariumExtensionCandidateSelectionRequest,
   parsePiariumExtensionHostStateWaitRequest,
   parsePiariumExtensionPackageInstallRequest,
@@ -7,6 +8,7 @@ import {
   parsePiariumExtensionServiceSelectionRequest,
   type JsonValue,
   type PiariumExtensionActualState,
+  type PiariumExtensionCandidateCapabilityReviewRequest,
   type PiariumExtensionCandidateSelectionRequest,
   type PiariumExtensionCandidatePreparationResult,
   type PiariumExtensionCatalogSnapshot,
@@ -185,11 +187,26 @@ export class ApplicationExtensionRuntime {
     requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
   ): Promise<PiariumExtensionCatalogSnapshot> {
     const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
-    return this.#mutateCatalog(() => this.supervisor.selectCandidate(
-      request.extensionId,
-      request.candidateIntegrity,
-      request.expectedRevision,
-    ));
+    return this.#mutateCatalog(async () => {
+      const selected = await this.supervisor.selectCandidate(
+        request.extensionId,
+        request.candidateIntegrity,
+        request.expectedRevision,
+      );
+      await this.supervisor.reconcile(selected);
+      return this.catalog.snapshot();
+    });
+  }
+
+  reviewCandidateCapabilities(
+    requestValue: PiariumExtensionCandidateCapabilityReviewRequest | unknown,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumExtensionCandidateCapabilityReviewRequest(requestValue);
+    return this.#mutateCatalog(async () => {
+      const reviewed = await this.catalog.reviewCandidateCapabilities(request);
+      await this.supervisor.reconcile(reviewed);
+      return this.catalog.snapshot();
+    });
   }
 
   reportActualState(extensionId: string, stateValue: PiariumExtensionActualState | unknown): Promise<void> {

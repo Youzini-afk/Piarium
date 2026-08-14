@@ -124,6 +124,8 @@ export const handleExtensionsBridgeMessage = async (
       await runtime.discardPreparedCandidate(String(payload.extensionId ?? ''), String(payload.candidateIntegrity ?? ''));
       return { id: request.id, success: true, type: request.type };
     }
+    case 'api:extensions:candidate:review-capabilities':
+      return { data: await runtime.reviewCandidateCapabilities(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:candidate:select':
       return { data: await runtime.selectCandidate(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:host-state':

@@ -2,7 +2,9 @@ import type { SurfaceActivationContext } from "@piarium/extension-surface";
 import type {
   JsonObject,
   JsonValue,
+  PiariumExtensionAssetPayload,
   PiariumExtensionServiceProvision,
+  PiariumExtensionStaticContribution,
   PiariumExtensionStorageSnapshot,
 } from "@piarium/extension-contract";
 
@@ -54,6 +56,43 @@ export const resolveSurfaceExtensionModule = (
   if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") return candidate;
   throw new Error("Managed Piarium Surface module must export activate or a default extension definition");
 };
+
+export interface PiariumIsolatedCapabilityClient {
+  call(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
+  has(capability: string): boolean;
+}
+
+export interface PiariumIsolatedServiceClient {
+  use<TImplementation = unknown>(id: string, version: number, providerId?: string): TImplementation;
+}
+
+export interface PiariumIsolatedSurfaceContext {
+  readonly assets: {
+    read(path: string): Promise<PiariumExtensionAssetPayload>;
+  };
+  readonly capabilities: PiariumIsolatedCapabilityClient;
+  contribute(descriptor: PiariumExtensionStaticContribution, options?: { viewId?: string }): void;
+  effect(disposer: () => void | Promise<void>): void;
+  readonly services: PiariumIsolatedServiceClient;
+  readonly signal: AbortSignal;
+}
+
+export type PiariumIsolatedSurfaceActivation = (
+  context: PiariumIsolatedSurfaceContext,
+) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>;
+
+export interface PiariumIsolatedSurfaceExtension {
+  activate: PiariumIsolatedSurfaceActivation;
+}
+
+export type PiariumIsolatedSurfaceModule = {
+  activate?: PiariumIsolatedSurfaceActivation;
+  default?: PiariumIsolatedSurfaceActivation | PiariumIsolatedSurfaceExtension;
+};
+
+export const defineIsolatedExtension = (
+  extension: PiariumIsolatedSurfaceActivation | PiariumIsolatedSurfaceExtension,
+): PiariumIsolatedSurfaceExtension => typeof extension === "function" ? { activate: extension } : extension;
 
 export interface PiariumHostCapabilityClient {
   call(capability: string, method: string, params: JsonValue): Promise<JsonValue>;

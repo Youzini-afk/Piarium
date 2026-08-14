@@ -7,6 +7,7 @@ import {
   parsePiariumExtensionManagedEntrypointPayload,
   type PiariumExtensionActualState,
   type PiariumExtensionAssetRequest,
+  type PiariumExtensionCandidateCapabilityReviewRequest,
   type PiariumExtensionCandidateSelectionRequest,
   type PiariumExtensionCatalogAvailability,
   type PiariumExtensionManagedEntrypointRequest,
@@ -152,6 +153,11 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
         if (error instanceof SyntaxError) return undefined;
         throw error;
       });
+  },
+  reviewCandidateCapabilities: async (request: PiariumExtensionCandidateCapabilityReviewRequest) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/candidates/review-capabilities', request));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension capability review response is malformed');
+    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
   selectCandidate: async (request: PiariumExtensionCandidateSelectionRequest) => {
     const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/candidates/select', request));

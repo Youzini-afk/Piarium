@@ -19,7 +19,7 @@ import {
   PIARIUM_EXTENSION_MANIFEST_FILE,
   parsePiariumExtensionManifest,
   type PiariumExtensionAssetPayload,
-  type PiariumExtensionCandidateRecord,
+  type PiariumExtensionPreparedArtifact,
   type PiariumExtensionManagedEntrypointPayload,
   type PiariumExtensionManifest,
   type PiariumExtensionPackageSource,
@@ -196,7 +196,7 @@ export class ExtensionArtifactStore {
     this.#packageSources = options.packageSources ?? createDefaultExtensionPackageSourceRegistry({ run: this.#run });
   }
 
-  async prepare(source: PiariumExtensionPackageSource, signal?: AbortSignal): Promise<PiariumExtensionCandidateRecord> {
+  async prepare(source: PiariumExtensionPackageSource, signal?: AbortSignal): Promise<PiariumExtensionPreparedArtifact> {
     const temporaryRoot = await mkdtemp(join(tmpdir(), "piarium-extension-"));
     const sourceRoot = join(temporaryRoot, "source");
     const artifactRoot = join(temporaryRoot, "artifact");
@@ -224,12 +224,13 @@ export class ExtensionArtifactStore {
       });
       const entrypoints: Record<string, ArtifactEntrypointRecord> = {};
       for (const entrypoint of manifest.entrypoints?.surfaces ?? []) {
-        if (entrypoint.mode !== "managed") continue;
-        if (!entrypoint.file) throw new Error(`Managed Surface entrypoint has no file: ${entrypoint.id}`);
+        if (entrypoint.mode === "declarative") continue;
+        if (!entrypoint.file) throw new Error(`Executable Surface entrypoint has no file: ${entrypoint.id}`);
         const outputDirectory = join(artifactRoot, MANAGED_RUNTIME_DIRECTORY, entrypoint.id);
         await mkdir(outputDirectory, { recursive: true });
-        const modulePath = join(outputDirectory, "module.cjs");
-        if (entrypoint.file.endsWith(".cjs")) {
+        const isolated = entrypoint.mode === "isolated";
+        const modulePath = join(outputDirectory, isolated ? "module.js" : "module.cjs");
+        if (!isolated && entrypoint.file.endsWith(".cjs")) {
           await cp(resolve(sourceRoot, entrypoint.file), modulePath);
           entrypoints[entrypoint.id] = {
             module: toLogicalPath(relative(artifactRoot, modulePath)),
@@ -242,7 +243,8 @@ export class ExtensionArtifactStore {
           assetNames: "assets/[name]-[hash]",
           bundle: true,
           entryPoints: [resolve(sourceRoot, entrypoint.file)],
-          format: "cjs",
+          format: isolated ? "iife" : "cjs",
+          ...(isolated ? { globalName: "PiariumIsolatedModule" } : {}),
           loader: {
             ".gif": "file",
             ".jpeg": "file",
@@ -260,7 +262,7 @@ export class ExtensionArtifactStore {
           target: ["es2022"],
         };
         const result = await this.#build(options);
-        if (!result.metafile) throw new Error(`Managed Surface entrypoint build returned no metadata: ${entrypoint.id}`);
+        if (!result.metafile) throw new Error(`Surface entrypoint build returned no metadata: ${entrypoint.id}`);
         const stylePath = join(outputDirectory, "module.css");
         entrypoints[entrypoint.id] = {
           module: toLogicalPath(relative(artifactRoot, modulePath)),
@@ -270,7 +272,7 @@ export class ExtensionArtifactStore {
 
       let host: ArtifactIndex["host"];
       const hostEntrypoint = manifest.entrypoints?.host;
-      if (hostEntrypoint?.mode === "brokered") {
+      if (hostEntrypoint?.mode === "brokered" || hostEntrypoint?.mode === "native") {
         const outputDirectory = join(artifactRoot, "runtime", "host");
         const modulePath = join(outputDirectory, "module.cjs");
         await mkdir(outputDirectory, { recursive: true });
@@ -288,7 +290,7 @@ export class ExtensionArtifactStore {
             sourcemap: "external",
             target: ["node22"],
           });
-          if (!result.metafile) throw new Error("Brokered Host entrypoint build returned no metadata");
+          if (!result.metafile) throw new Error("Host entrypoint build returned no metadata");
         }
         host = { module: toLogicalPath(relative(artifactRoot, modulePath)) };
       }
@@ -374,12 +376,12 @@ export class ExtensionArtifactStore {
   ): Promise<BrokeredHostEntrypointArtifact> {
     const root = await this.#assertArtifactRoot(artifactRoot, artifactIntegrity);
     const index = parseIndex(JSON.parse(await readFile(join(root, INDEX_FILE), "utf8")) as unknown);
-    if (!index.host) throw new Error("Brokered Host entrypoint is not present in the artifact");
+    if (!index.host) throw new Error("Host entrypoint is not present in the artifact");
     const record = index.files[index.host.module];
-    if (!record) throw new Error("Brokered Host entrypoint file is missing from the artifact index");
+    if (!record) throw new Error("Host entrypoint file is missing from the artifact index");
     const modulePath = resolve(root, ...index.host.module.split("/"));
     const bytes = await readFile(modulePath);
-    if (sha256(bytes) !== record.integrity) throw new Error("Brokered Host entrypoint integrity failed");
+    if (sha256(bytes) !== record.integrity) throw new Error("Host entrypoint integrity failed");
     return { artifactIntegrity, integrity: record.integrity, modulePath };
   }
 

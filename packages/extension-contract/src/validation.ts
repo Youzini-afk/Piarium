@@ -10,13 +10,16 @@ import {
   type PiariumExtensionAssetPayload,
   type PiariumExtensionAssetRequest,
   type PiariumExtensionCandidateRecord,
+  type PiariumExtensionCandidateCapabilityReviewRequest,
   type PiariumExtensionCandidatePreparationResult,
   type PiariumExtensionCandidateSelectionRequest,
   type PiariumExtensionCatalogAvailability,
   type PiariumExtensionCatalogDocument,
   type PiariumExtensionCatalogEntry,
   type PiariumExtensionCatalogSnapshot,
+  type PiariumExtensionCapabilityDelta,
   type PiariumExtensionCapabilityGrant,
+  type PiariumExtensionCapabilityReference,
   type PiariumExtensionContributionKind,
   type PiariumExtensionDesiredState,
   type PiariumExtensionDiagnostic,
@@ -83,6 +86,7 @@ const ACTUAL_STATUSES = new Set<PiariumExtensionActualStatus>([
   "inactive",
   "loading",
   "resolving",
+  "restart-required",
   "rolling-back",
   "updating",
   "waiting",
@@ -256,10 +260,16 @@ function parseSurfaceEntrypoints(value: unknown, path: string, issues: string[])
     }
     if (supports.length === 0) issues.push(`${itemPath}.supports must contain at least one surface`);
     const activationEvents = activation(raw.activation, `${itemPath}.activation`, issues);
+    const isolation = text(raw.isolation);
+    if (isolation !== undefined && mode !== "isolated") issues.push(`${itemPath}.isolation is only valid for isolated entrypoints`);
+    if (mode === "isolated" && isolation !== undefined && isolation !== "iframe" && isolation !== "worker") {
+      issues.push(`${itemPath}.isolation must be iframe or worker`);
+    }
     result.push({
       id,
       mode: SURFACE_MODES.has(mode ?? "") ? mode as PiariumExtensionSurfaceEntrypoint["mode"] : "managed",
       supports,
+      ...(mode === "isolated" ? { isolation: isolation === "worker" ? "worker" : "iframe" } : {}),
       ...(file ? { file } : {}),
       ...(activationEvents ? { activation: activationEvents } : {}),
     });
@@ -540,6 +550,74 @@ function parseGrants(value: unknown, path: string, issues: string[]): PiariumExt
   return result;
 }
 
+const capabilityKey = (reference: PiariumExtensionCapabilityReference): string => `${reference.realm}:${reference.capability}`;
+
+function parseCapabilityReferences(value: unknown, path: string, issues: string[]): PiariumExtensionCapabilityReference[] {
+  if (!Array.isArray(value)) {
+    issues.push(`${path} must be an array`);
+    return [];
+  }
+  const seen = new Set<string>();
+  return value.flatMap((raw, index) => {
+    const itemPath = `${path}[${index}]`;
+    if (!isRecord(raw)) {
+      issues.push(`${itemPath} must be an object`);
+      return [];
+    }
+    const capability = identifier(raw.capability, `${itemPath}.capability`, issues);
+    const realm = raw.realm === "host" || raw.realm === "surface" ? raw.realm : undefined;
+    if (!realm) issues.push(`${itemPath}.realm must be host or surface`);
+    const reference = { capability, realm: realm ?? "surface" } as const;
+    const key = capabilityKey(reference);
+    if (seen.has(key)) issues.push(`${path} contains duplicate capability ${key}`);
+    seen.add(key);
+    return [reference];
+  });
+}
+
+function parseCapabilityDelta(value: unknown, path: string, issues: string[]): PiariumExtensionCapabilityDelta {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object`);
+    return { added: [], removed: [] };
+  }
+  return {
+    added: parseCapabilityReferences(value.added, `${path}.added`, issues),
+    removed: parseCapabilityReferences(value.removed, `${path}.removed`, issues),
+  };
+}
+
+function manifestCapabilityReferences(manifest: PiariumExtensionManifest): PiariumExtensionCapabilityReference[] {
+  return (["host", "surface"] as const).flatMap((realm) => (
+    (manifest.capabilities?.[realm] ?? []).map((capability) => ({ capability, realm }))
+  ));
+}
+
+function validateCandidateCapabilityReview(
+  selectedManifest: PiariumExtensionManifest,
+  candidateManifest: PiariumExtensionManifest,
+  delta: PiariumExtensionCapabilityDelta,
+  grants: PiariumExtensionCapabilityGrant[],
+  reviewed: boolean,
+  path: string,
+  issues: string[],
+): void {
+  const selected = new Set(manifestCapabilityReferences(selectedManifest).map(capabilityKey));
+  const candidate = new Set(manifestCapabilityReferences(candidateManifest).map(capabilityKey));
+  const expectedAdded = [...candidate].filter((key) => !selected.has(key)).sort();
+  const expectedRemoved = [...selected].filter((key) => !candidate.has(key)).sort();
+  const actualAdded = delta.added.map(capabilityKey).sort();
+  const actualRemoved = delta.removed.map(capabilityKey).sort();
+  if (JSON.stringify(actualAdded) !== JSON.stringify(expectedAdded)) issues.push(`${path}.capabilityDelta.added does not match the manifest capability change`);
+  if (JSON.stringify(actualRemoved) !== JSON.stringify(expectedRemoved)) issues.push(`${path}.capabilityDelta.removed does not match the manifest capability change`);
+  for (const grant of grants) {
+    if (grant.manifestVersion !== candidateManifest.version) issues.push(`${path}.capabilityGrants must target the candidate manifest version`);
+    if (!candidate.has(capabilityKey(grant))) issues.push(`${path}.capabilityGrants contains a capability not requested by the candidate manifest`);
+  }
+  const decisions = new Set(grants.map(capabilityKey));
+  const completelyReviewed = expectedAdded.every((key) => decisions.has(key));
+  if (reviewed !== completelyReviewed) issues.push(`${path}.capabilitiesReviewed does not match added-capability decisions`);
+}
+
 function parseCandidateRecord(value: unknown, path: string, issues: string[]): PiariumExtensionCandidateRecord | undefined {
   if (!isRecord(value)) {
     issues.push(`${path} must be an object`);
@@ -557,7 +635,11 @@ function parseCandidateRecord(value: unknown, path: string, issues: string[]): P
   if (resolvedVersion !== manifest.version) issues.push(`${path}.resolvedVersion must match manifest.version`);
   const resolvedPath = text(value.resolvedPath);
   if (!resolvedPath) issues.push(`${path}.resolvedPath must be a non-empty string`);
+  if (typeof value.capabilitiesReviewed !== "boolean") issues.push(`${path}.capabilitiesReviewed must be boolean`);
   return {
+    capabilitiesReviewed: value.capabilitiesReviewed === true,
+    capabilityDelta: parseCapabilityDelta(value.capabilityDelta, `${path}.capabilityDelta`, issues),
+    capabilityGrants: parseGrants(value.capabilityGrants, `${path}.capabilityGrants`, issues),
     integrity: integrity(value.integrity, `${path}.integrity`, issues),
     manifest,
     preparedAt: timestamp(value.preparedAt, `${path}.preparedAt`, issues),
@@ -597,6 +679,17 @@ export function parsePiariumExtensionInstallationRecord(value: unknown, path = "
     : parseCandidateRecord(value.candidate, `${path}.candidate`, issues);
   if (candidate && candidate.manifest.id !== manifest.id) {
     issues.push(`${path}.candidate.manifest.id must match selected manifest.id`);
+  }
+  if (candidate) {
+    validateCandidateCapabilityReview(
+      manifest,
+      candidate.manifest,
+      candidate.capabilityDelta,
+      candidate.capabilityGrants,
+      candidate.capabilitiesReviewed,
+      `${path}.candidate`,
+      issues,
+    );
   }
   throwIssues("Piarium extension installation", issues);
   return {
@@ -778,7 +871,32 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
       if (!SEMVER_PATTERN.test(candidateVersion)) issues.push(`${path}.candidate.resolvedVersion must be SemVer`);
       if (candidateVersion !== candidateManifest.version) issues.push(`${path}.candidate.resolvedVersion must match candidate manifest.version`);
       if (candidateManifest.id !== manifest.id) issues.push(`${path}.candidate.manifest.id must match selected manifest.id`);
+      if (typeof value.candidate.capabilitiesReviewed !== "boolean") {
+        issues.push(`${path}.candidate.capabilitiesReviewed must be boolean`);
+      }
+      const candidateDelta = parseCapabilityDelta(
+        value.candidate.capabilityDelta,
+        `${path}.candidate.capabilityDelta`,
+        issues,
+      );
+      const candidateGrants = parseGrants(
+        value.candidate.capabilityGrants,
+        `${path}.candidate.capabilityGrants`,
+        issues,
+      );
+      validateCandidateCapabilityReview(
+        manifest,
+        candidateManifest,
+        candidateDelta,
+        candidateGrants,
+        value.candidate.capabilitiesReviewed === true,
+        `${path}.candidate`,
+        issues,
+      );
       candidate = {
+        capabilitiesReviewed: value.candidate.capabilitiesReviewed === true,
+        capabilityDelta: candidateDelta,
+        capabilityGrants: candidateGrants,
         integrity: integrity(value.candidate.integrity, `${path}.candidate.integrity`, issues),
         manifest: candidateManifest,
         preparedAt: timestamp(value.candidate.preparedAt, `${path}.candidate.preparedAt`, issues),
@@ -996,6 +1114,38 @@ export function parsePiariumExtensionCandidateSelectionRequest(value: unknown): 
     extensionId: identifier(value.extensionId, "extensionId", issues),
   };
   throwIssues("Piarium extension candidate selection request", issues);
+  return result;
+}
+
+export function parsePiariumExtensionCandidateCapabilityReviewRequest(
+  value: unknown,
+): PiariumExtensionCandidateCapabilityReviewRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) {
+    throw new PiariumExtensionContractError("Piarium extension candidate capability review is invalid", ["request must be an object"]);
+  }
+  const decisions = Array.isArray(value.decisions) ? value.decisions.flatMap((raw, index) => {
+    const itemPath = `decisions[${index}]`;
+    if (!isRecord(raw)) {
+      issues.push(`${itemPath} must be an object`);
+      return [];
+    }
+    const capability = identifier(raw.capability, `${itemPath}.capability`, issues);
+    const realm = raw.realm === "host" || raw.realm === "surface" ? raw.realm : undefined;
+    if (!realm) issues.push(`${itemPath}.realm must be host or surface`);
+    if (typeof raw.granted !== "boolean") issues.push(`${itemPath}.granted must be boolean`);
+    const normalizedRealm: "host" | "surface" = realm ?? "surface";
+    return [{ capability, granted: raw.granted === true, realm: normalizedRealm }];
+  }) : (issues.push("decisions must be an array"), []);
+  const decisionKeys = decisions.map(capabilityKey);
+  if (new Set(decisionKeys).size !== decisionKeys.length) issues.push("decisions contains duplicate capabilities");
+  const result: PiariumExtensionCandidateCapabilityReviewRequest = {
+    candidateIntegrity: integrity(value.candidateIntegrity, "candidateIntegrity", issues),
+    decisions,
+    expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+  };
+  throwIssues("Piarium extension candidate capability review", issues);
   return result;
 }
 

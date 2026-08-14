@@ -622,12 +622,13 @@ content-addressed and authenticated; the manifest and selected installation reco
 integrity. A Surface never constructs filesystem URLs or embeds a long-lived bearer token in an
 asset URL.
 
-The implementation must support two browser-owned shapes:
+The browser implementation uses two shapes:
 
 - managed/native module artifacts fetched or resolved through the authenticated extension asset
   capability, with content hashes included in module identity;
-- isolated-app bootstrap URLs with a short-lived extension-scoped grant followed by a MessagePort
-  capability handshake.
+- isolated-app bootstrap documents or Workers created from authenticated content-addressed bytes,
+  followed by a versioned MessagePort capability handshake. Their blob/srcdoc identity is owned by
+  one realm and carries no reusable application credential.
 
 The browser asset implementation must work for Web, packaged Electron, VS Code webview, hosted
 mobile, and runtime switching. A focused prototype will choose between a self-contained fetched ESM
@@ -1024,6 +1025,30 @@ converge on the same application-host desired and service state.
 
 Acceptance: isolated teardown removes the realm; native failure enters a recoverable
 restart-required state; remote pages never gain local desktop grants.
+
+Implementation status (2026-08-14): complete. Executable Surface loading now treats managed,
+isolated, and trusted-native entrypoints as one candidate transaction. Isolated browser bundles run
+inside a sandboxed iframe or dedicated Worker, negotiate protocol v1 over a nonce-bound MessagePort,
+receive only policy-approved capabilities and service proxies, and keep their own DOM, CSS, and
+framework state. Ambient iframe/Worker network entrypoints are closed so network access can be
+provided through an explicit capability implementation. Disable, rollback, or failed activation
+closes the port, terminates the Worker or removes the iframe, revokes its blob, and withdraws all
+contributions without reloading the document.
+
+Trusted-native Surface modules and Host modules now have explicit cooperative lifecycle handling.
+Native Surface activation or cleanup failure reports `restart-required` and is not retried in the
+same realm; native Host updates keep the prior generation active and select the candidate only after
+the application host restarts. The catalog never claims physical unload for same-realm code.
+
+Candidate records now carry an exact host/surface capability delta, candidate-version decisions, and
+a review-complete flag. Unchanged decisions carry forward to the new manifest version; removed
+capabilities disappear; newly requested capabilities require an explicit grant or denial before any
+candidate code is prepared or activated. The same revision-checked review request is exposed by Web,
+Electron, and VS Code application hosts. Surface capability implementations declare whether they are
+remote-safe, local-only, project-trust-dependent, and Surface-compatible. The active Pi runtime's
+public project-trust state is owner-checked before it changes the capability context, so a runtime
+switch or failed read cannot reuse trust from another project, and remote pages cannot resolve local
+desktop capability implementations even when a persisted grant exists.
 
 ### Phase F — Pi integration adapters as Piarium extensions
 

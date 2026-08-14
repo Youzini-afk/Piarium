@@ -4,6 +4,7 @@ import {
 } from '@piarium/extension-host';
 import {
   parsePiariumExtensionActualState,
+  parsePiariumExtensionCandidateCapabilityReviewRequest,
   parsePiariumExtensionHostStateWaitRequest,
   parsePiariumExtensionPackageSource,
 } from '@piarium/extension-contract';
@@ -172,6 +173,21 @@ export const registerExtensionRoutes = (app, {
         if (!extensionId || !integrity) throw new Error('extensionId and candidateIntegrity are required');
         await extensionRuntime.discardPreparedCandidate(extensionId, integrity);
         return res.status(204).end();
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/candidates/review-capabilities',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      try {
+        const request = parsePiariumExtensionCandidateCapabilityReviewRequest(req.body);
+        return res.json({ snapshot: await (extensionRuntime
+          ? extensionRuntime.reviewCandidateCapabilities(request)
+          : extensionCatalog.reviewCandidateCapabilities(request)) });
       } catch (error) {
         return sendMutationError(res, error);
       }

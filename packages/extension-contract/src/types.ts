@@ -9,6 +9,7 @@ export type JsonObject = { [key: string]: JsonValue };
 export type PiariumApplicationSurface = "desktop" | "mobile" | "vscode" | "web";
 export type PiariumExtensionHostMode = "brokered" | "native";
 export type PiariumExtensionSurfaceMode = "declarative" | "isolated" | "managed" | "native";
+export type PiariumExtensionIsolationKind = "iframe" | "worker";
 export type PiariumExtensionActivationEvent =
   | "application-startup"
   | "background"
@@ -29,6 +30,7 @@ export interface PiariumExtensionHostEntrypoint extends PiariumExtensionEntrypoi
 
 export interface PiariumExtensionSurfaceEntrypoint extends PiariumExtensionEntrypointBase {
   id: string;
+  isolation?: PiariumExtensionIsolationKind;
   mode: PiariumExtensionSurfaceMode;
   supports: PiariumApplicationSurface[];
 }
@@ -139,6 +141,20 @@ export interface PiariumExtensionCapabilityGrant {
   updatedAt: string;
 }
 
+export interface PiariumExtensionCapabilityReference {
+  capability: string;
+  realm: PiariumExtensionRealmKind;
+}
+
+export interface PiariumExtensionCapabilityDelta {
+  added: PiariumExtensionCapabilityReference[];
+  removed: PiariumExtensionCapabilityReference[];
+}
+
+export interface PiariumExtensionCapabilityDecision extends PiariumExtensionCapabilityReference {
+  granted: boolean;
+}
+
 export interface PiariumExtensionDesiredState {
   enabled: boolean;
   revision: number;
@@ -153,6 +169,7 @@ export type PiariumExtensionActualStatus =
   | "inactive"
   | "loading"
   | "resolving"
+  | "restart-required"
   | "rolling-back"
   | "updating"
   | "waiting";
@@ -195,6 +212,18 @@ export interface PiariumExtensionInstallationRecord {
 }
 
 export interface PiariumExtensionCandidateRecord {
+  capabilitiesReviewed: boolean;
+  capabilityDelta: PiariumExtensionCapabilityDelta;
+  capabilityGrants: PiariumExtensionCapabilityGrant[];
+  integrity: string;
+  manifest: PiariumExtensionManifest;
+  preparedAt: string;
+  resolvedPath: string;
+  resolvedVersion: string;
+  source: PiariumExtensionPackageSource;
+}
+
+export interface PiariumExtensionPreparedArtifact {
   integrity: string;
   manifest: PiariumExtensionManifest;
   preparedAt: string;
@@ -204,6 +233,9 @@ export interface PiariumExtensionCandidateRecord {
 }
 
 export interface PiariumExtensionPublicCandidate {
+  capabilitiesReviewed: boolean;
+  capabilityDelta: PiariumExtensionCapabilityDelta;
+  capabilityGrants: PiariumExtensionCapabilityGrant[];
   integrity: string;
   manifest: PiariumExtensionManifest;
   preparedAt: string;
@@ -258,6 +290,13 @@ export interface PiariumExtensionManagedEntrypointPayload {
 
 export interface PiariumExtensionCandidateSelectionRequest {
   candidateIntegrity: string;
+  expectedRevision: number;
+  extensionId: string;
+}
+
+export interface PiariumExtensionCandidateCapabilityReviewRequest {
+  candidateIntegrity: string;
+  decisions: PiariumExtensionCapabilityDecision[];
   expectedRevision: number;
   extensionId: string;
 }

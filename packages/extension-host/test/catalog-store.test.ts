@@ -107,3 +107,53 @@ test("serializes mutations and rejects a stale expected revision", async () => {
   assert.equal(stored.revision, first.revision);
   assert.equal((await catalog.snapshot()).extensions[0]?.desired.enabled, false);
 });
+
+test("candidate capability deltas require explicit decisions and carry unchanged decisions forward", async () => {
+  const catalog = new ApplicationExtensionCatalog({ dataDir: await temporaryDirectory() });
+  const installed = await catalog.upsert(installation(), 0);
+  const candidateManifest = {
+    ...installation().manifest,
+    capabilities: { host: ["workspace.files"] },
+    version: "2.0.0",
+  };
+  const staged = await catalog.stageCandidate({
+    integrity: `sha256-${"1".repeat(64)}`,
+    manifest: candidateManifest,
+    preparedAt: "2026-08-14T00:01:00.000Z",
+    resolvedPath: "C:/extensions/dev.example.extension/2.0.0",
+    resolvedVersion: "2.0.0",
+    source: { kind: "npm", specifier: "npm:dev.example.extension", display: "npm:dev.example.extension" },
+  }, installed.revision);
+  assert.deepEqual(staged.extensions[0]?.candidate?.capabilityDelta.added, [{ capability: "workspace.files", realm: "host" }]);
+  assert.equal(staged.extensions[0]?.candidate?.capabilitiesReviewed, false);
+  await assert.rejects(
+    () => catalog.selectCandidate("dev.example.extension", `sha256-${"1".repeat(64)}`, staged.revision),
+    /require review/,
+  );
+
+  const reviewed = await catalog.reviewCandidateCapabilities({
+    candidateIntegrity: `sha256-${"1".repeat(64)}`,
+    decisions: [{ capability: "workspace.files", granted: false, realm: "host" }],
+    expectedRevision: staged.revision,
+    extensionId: "dev.example.extension",
+  });
+  assert.equal(reviewed.extensions[0]?.candidate?.capabilitiesReviewed, true);
+  const selected = await catalog.selectCandidate("dev.example.extension", `sha256-${"1".repeat(64)}`, reviewed.revision);
+  assert.deepEqual(selected.extensions[0]?.capabilityGrants.map(({ capability, granted, manifestVersion, realm }) => ({ capability, granted, manifestVersion, realm })), [{
+    capability: "workspace.files",
+    granted: false,
+    manifestVersion: "2.0.0",
+    realm: "host",
+  }]);
+
+  const unchanged = await catalog.stageCandidate({
+    integrity: `sha256-${"2".repeat(64)}`,
+    manifest: { ...candidateManifest, version: "3.0.0" },
+    preparedAt: "2026-08-14T00:02:00.000Z",
+    resolvedPath: "C:/extensions/dev.example.extension/3.0.0",
+    resolvedVersion: "3.0.0",
+    source: { kind: "npm", specifier: "npm:dev.example.extension", display: "npm:dev.example.extension" },
+  }, selected.revision);
+  assert.equal(unchanged.extensions[0]?.candidate?.capabilitiesReviewed, true);
+  assert.equal(unchanged.extensions[0]?.candidate?.capabilityGrants[0]?.manifestVersion, "3.0.0");
+});

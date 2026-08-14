@@ -10,6 +10,7 @@ import {
   type PiariumExtensionAssetPayload,
   type PiariumExtensionAssetRequest,
   type PiariumExtensionCandidateSelectionRequest,
+  type PiariumExtensionCapabilityGrant,
   type PiariumExtensionCandidatePreparationResult,
   type PiariumExtensionCatalogAvailability,
   type PiariumExtensionCatalogEntry,
@@ -33,14 +34,21 @@ import {
   type PiariumSurfaceAsset,
 } from "@piarium/extension-sdk";
 import {
+  SurfaceCapabilityRegistry,
   SurfaceExtensionRuntime,
   type SurfaceActivation,
   type SurfaceActivationContext,
   type SurfaceActivationOptions,
+  type SurfaceCapabilityAccessContext,
   type SurfaceOwnerIdentity,
 } from "@piarium/extension-surface";
+import {
+  browserIsolatedSurfaceRealmFactory,
+  type IsolatedSurfaceRealm,
+  type IsolatedSurfaceRealmFactory,
+} from "./isolated-realm.js";
 
-export interface ManagedSurfaceExtensionHost {
+export interface SurfaceExtensionHost {
   activateExtension(extensionId: string): Promise<void>;
   catalog(): Promise<PiariumExtensionCatalogAvailability>;
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
@@ -67,13 +75,13 @@ export interface ManagedStyleHost {
   stage(cssText: string, ownerLabel: string): ManagedStyleHandle;
 }
 
-export interface ManagedSurfaceLoaderDiagnostic extends PiariumExtensionDiagnostic {
+export interface SurfaceExtensionLoaderDiagnostic extends PiariumExtensionDiagnostic {
   entrypointId?: string;
   integrity?: string;
   moduleGeneration?: number;
 }
 
-export interface ManagedSurfaceLoaderSnapshot {
+export interface SurfaceExtensionLoaderSnapshot {
   active: Array<{
     entrypointId: string;
     extensionId: string;
@@ -81,14 +89,17 @@ export interface ManagedSurfaceLoaderSnapshot {
     integrity: string;
     moduleGeneration: number;
   }>;
-  diagnostics: ManagedSurfaceLoaderDiagnostic[];
+  diagnostics: SurfaceExtensionLoaderDiagnostic[];
   hostId: string | null;
   revision: number;
 }
 
-export interface ManagedSurfaceExtensionLoaderOptions {
+export interface SurfaceExtensionLoaderOptions {
+  accessContext?: () => Omit<SurfaceCapabilityAccessContext, "surface">;
+  capabilities?: SurfaceCapabilityRegistry;
   evaluateModule?: ManagedSurfaceModuleEvaluator;
-  host: ManagedSurfaceExtensionHost;
+  host: SurfaceExtensionHost;
+  isolatedRealmFactory?: IsolatedSurfaceRealmFactory;
   realmId?: string;
   styleHost?: ManagedStyleHost;
   surface: PiariumApplicationSurface;
@@ -97,17 +108,24 @@ export interface ManagedSurfaceExtensionLoaderOptions {
 
 interface ActiveEntrypoint {
   artifactIntegrity: string;
+  capabilityBindings: string;
+  mode: Exclude<PiariumExtensionSurfaceEntrypoint["mode"], "declarative">;
   moduleGeneration: number;
   owner: SurfaceOwnerIdentity;
   serviceBindings: string;
 }
 
 interface ArtifactSelection {
+  capabilityGrants: PiariumExtensionCapabilityGrant[];
   integrity: string;
   manifest: PiariumExtensionManifest;
   slot: "candidate" | "selected";
   version: string;
 }
+
+type ExecutableSurfaceEntrypoint = PiariumExtensionSurfaceEntrypoint & {
+  mode: Exclude<PiariumExtensionSurfaceEntrypoint["mode"], "declarative">;
+};
 
 const keyFor = (extensionId: string, entrypointId: string): string => `${extensionId}\0${entrypointId}`;
 
@@ -135,10 +153,10 @@ const verifyAsset = async (
 ): Promise<{ bytes: Uint8Array; payload: PiariumExtensionAssetPayload }> => {
   const payload = parsePiariumExtensionAssetPayload(value);
   if (payload.artifactIntegrity !== expectedArtifactIntegrity) {
-    throw new Error("Managed Surface asset belongs to another extension artifact generation");
+    throw new Error("Surface asset belongs to another extension artifact generation");
   }
   const bytes = decodeBase64(payload.bytesBase64);
-  if (await sha256(bytes) !== payload.integrity) throw new Error(`Managed Surface asset integrity failed: ${payload.path}`);
+  if (await sha256(bytes) !== payload.integrity) throw new Error(`Surface asset integrity failed: ${payload.path}`);
   return { bytes, payload };
 };
 
@@ -171,7 +189,7 @@ const defaultStyleHost: ManagedStyleHost = {
 class ModuleResourceScope {
   readonly #artifactIntegrity: string;
   readonly #disposers: Array<() => void> = [];
-  readonly #host: ManagedSurfaceExtensionHost;
+  readonly #host: SurfaceExtensionHost;
   readonly #identity: { extensionId: string; integrity: string; slot: "candidate" | "selected" };
   readonly #styleHost: ManagedStyleHost;
   readonly #styles: ManagedStyleHandle[] = [];
@@ -180,7 +198,7 @@ class ModuleResourceScope {
   constructor(options: {
     artifactIntegrity: string;
     extensionId: string;
-    host: ManagedSurfaceExtensionHost;
+    host: SurfaceExtensionHost;
     slot: "candidate" | "selected";
     styleHost: ManagedStyleHost;
   }) {
@@ -249,8 +267,9 @@ class ModuleResourceScope {
 
 const publicCandidateSelection = (entry: PiariumExtensionCatalogEntry): ArtifactSelection | null => {
   const candidate: PiariumExtensionPublicCandidate | undefined = entry.candidate;
-  if (candidate) {
+  if (candidate?.capabilitiesReviewed) {
     return {
+      capabilityGrants: candidate.capabilityGrants,
       integrity: candidate.integrity,
       manifest: candidate.manifest,
       slot: "candidate",
@@ -259,6 +278,7 @@ const publicCandidateSelection = (entry: PiariumExtensionCatalogEntry): Artifact
   }
   if (!entry.integrity) return null;
   return {
+    capabilityGrants: entry.capabilityGrants,
     integrity: entry.integrity,
     manifest: entry.manifest,
     slot: "selected",
@@ -266,12 +286,16 @@ const publicCandidateSelection = (entry: PiariumExtensionCatalogEntry): Artifact
   };
 };
 
-const compatibleManagedEntrypoints = (
+const selectionCapabilities = (selection: ArtifactSelection): string[] => selection.capabilityGrants
+  .filter((grant) => grant.realm === "surface" && grant.granted && grant.manifestVersion === selection.version)
+  .map((grant) => grant.capability);
+
+const compatibleExecutableEntrypoints = (
   manifest: PiariumExtensionManifest,
   surface: PiariumApplicationSurface,
-): PiariumExtensionSurfaceEntrypoint[] => (
-  (manifest.entrypoints?.surfaces ?? []).filter((entrypoint) => (
-    entrypoint.mode === "managed" && entrypoint.supports.includes(surface)
+): ExecutableSurfaceEntrypoint[] => (
+  (manifest.entrypoints?.surfaces ?? []).filter((entrypoint): entrypoint is ExecutableSurfaceEntrypoint => (
+    entrypoint.mode !== "declarative" && entrypoint.supports.includes(surface)
   ))
 );
 
@@ -287,14 +311,18 @@ const toReportedActual = (state: ReturnType<SurfaceExtensionRuntime["getSnapshot
   updatedAt: state.updatedAt,
 });
 
-export class ManagedSurfaceExtensionLoader {
+export class SurfaceExtensionLoader {
+  readonly #accessContext: () => SurfaceCapabilityAccessContext;
   readonly #active = new Map<string, ActiveEntrypoint>();
-  readonly #diagnostics: ManagedSurfaceLoaderDiagnostic[] = [];
+  readonly #capabilities: SurfaceCapabilityRegistry;
+  readonly #diagnostics: SurfaceExtensionLoaderDiagnostic[] = [];
   readonly #evaluate: ManagedSurfaceModuleEvaluator;
   readonly #failedCandidates = new Set<string>();
   readonly #generations = new Map<string, number>();
-  readonly #host: ManagedSurfaceExtensionHost;
+  readonly #host: SurfaceExtensionHost;
+  readonly #isolatedRealmFactory: IsolatedSurfaceRealmFactory;
   readonly #listeners = new Set<() => void>();
+  readonly #nativeRestartRequired = new Set<string>();
   readonly #realmId: string;
   readonly #styleHost: ManagedStyleHost;
   readonly #surface: PiariumApplicationSurface;
@@ -305,16 +333,26 @@ export class ManagedSurfaceExtensionLoader {
   #hostStateRevision = 0;
   #watchController: AbortController | null = null;
 
-  constructor(options: ManagedSurfaceExtensionLoaderOptions) {
+  constructor(options: SurfaceExtensionLoaderOptions) {
+    this.#accessContext = () => {
+      const provided = options.accessContext?.();
+      return {
+        access: provided?.access ?? (options.surface === "desktop" || options.surface === "vscode" ? "local" : "remote"),
+        projectTrusted: provided?.projectTrusted ?? false,
+        surface: options.surface,
+      };
+    };
+    this.#capabilities = options.capabilities ?? new SurfaceCapabilityRegistry();
     this.#evaluate = options.evaluateModule ?? evaluateManagedSurfaceModule;
     this.#host = options.host;
+    this.#isolatedRealmFactory = options.isolatedRealmFactory ?? browserIsolatedSurfaceRealmFactory;
     this.#realmId = options.realmId ?? defaultRealmId();
     this.#styleHost = options.styleHost ?? defaultStyleHost;
     this.#surface = options.surface;
     this.#surfaceRuntime = options.surfaceRuntime;
   }
 
-  getSnapshot = (): ManagedSurfaceLoaderSnapshot => ({
+  getSnapshot = (): SurfaceExtensionLoaderSnapshot => ({
     active: [...this.#active.values()].map((entry) => ({
       entrypointId: entry.owner.entrypointId,
       extensionId: entry.owner.extensionId,
@@ -366,7 +404,7 @@ export class ManagedSurfaceExtensionLoader {
   }
 
   async stop(): Promise<void> {
-    this.#watchController?.abort("Managed Surface extension loader stopped");
+    this.#watchController?.abort("Surface extension loader stopped");
     this.#watchController = null;
     await this.deactivateAll();
   }
@@ -391,7 +429,7 @@ export class ManagedSurfaceExtensionLoader {
 
     for (const entry of snapshot.extensions) {
       const selected = publicCandidateSelection(entry);
-      const entrypoints = selected ? compatibleManagedEntrypoints(selected.manifest, this.#surface) : [];
+      const entrypoints = selected ? compatibleExecutableEntrypoints(selected.manifest, this.#surface) : [];
       if (!entry.desired.enabled || !selected) continue;
       for (const entrypoint of entrypoints) desiredKeys.add(keyFor(entry.manifest.id, entrypoint.id));
     }
@@ -406,16 +444,18 @@ export class ManagedSurfaceExtensionLoader {
       if (!entry.desired.enabled) continue;
       const selected = publicCandidateSelection(entry);
       if (!selected) {
-        this.#diagnose(entry.manifest.id, "artifact_unavailable", "Managed Surface extension has no content-addressed artifact");
+        this.#diagnose(entry.manifest.id, "artifact_unavailable", "Surface extension has no content-addressed artifact");
         continue;
       }
-      const entrypoints = compatibleManagedEntrypoints(selected.manifest, this.#surface);
+      const entrypoints = compatibleExecutableEntrypoints(selected.manifest, this.#surface);
       if (entrypoints.length === 0) continue;
       const failedKey = `${entry.manifest.id}\0${selected.integrity}`;
       if (selected.slot === "candidate" && this.#failedCandidates.has(failedKey)) continue;
+      if (entrypoints.some((entrypoint) => entrypoint.mode === "native") && this.#nativeRestartRequired.has(entry.manifest.id)) continue;
       const expectedBindings = selected.slot === "selected"
         ? this.#serviceBindingSignature(this.#resolveExternalProviders(selected, hostState, null))
         : null;
+      const expectedCapabilityBindings = this.#capabilityBindingSignature(selectionCapabilities(selected), this.#accessContext());
       const currentEntrypoints = entrypoints
         .map((entrypoint) => this.#active.get(keyFor(entry.manifest.id, entrypoint.id)))
         .filter((value): value is ActiveEntrypoint => value !== undefined);
@@ -427,6 +467,7 @@ export class ManagedSurfaceExtensionLoader {
       }
       const allCurrent = entrypoints.every((entrypoint) => (
         this.#active.get(keyFor(entry.manifest.id, entrypoint.id))?.artifactIntegrity === selected.integrity
+        && this.#active.get(keyFor(entry.manifest.id, entrypoint.id))?.capabilityBindings === expectedCapabilityBindings
         && (expectedBindings === null
           || this.#active.get(keyFor(entry.manifest.id, entrypoint.id))?.serviceBindings === expectedBindings)
       ));
@@ -462,12 +503,15 @@ export class ManagedSurfaceExtensionLoader {
   async #activateEntryPoints(
     entry: PiariumExtensionCatalogEntry,
     selection: ArtifactSelection,
-    entrypoints: PiariumExtensionSurfaceEntrypoint[],
+    entrypoints: ExecutableSurfaceEntrypoint[],
     snapshot: PiariumExtensionCatalogSnapshot,
   ): Promise<PiariumExtensionCatalogSnapshot | null> {
     const resources: ModuleResourceScope[] = [];
+    const realms: IsolatedSurfaceRealm[] = [];
+    const nativeOwners: SurfaceOwnerIdentity[] = [];
     const requests: Array<{ activation: SurfaceActivation; options: SurfaceActivationOptions }> = [];
     const activated: ActiveEntrypoint[] = [];
+    try {
     let prepared: PiariumExtensionCandidatePreparationResult | null = null;
     if (selection.slot === "candidate") {
       prepared = parsePiariumExtensionCandidatePreparationResult(
@@ -491,21 +535,7 @@ export class ManagedSurfaceExtensionLoader {
         slot: selection.slot,
       }));
       const verifiedModule = await verifyAsset(payload.module, selection.integrity);
-      const module = await this.#evaluate(new TextDecoder().decode(verifiedModule.bytes), {
-        entrypointId: entrypoint.id,
-        extensionId: entry.manifest.id,
-        integrity: selection.integrity,
-      });
-      const extension = resolveSurfaceExtensionModule(module);
-      const resourceScope = new ModuleResourceScope({
-        artifactIntegrity: selection.integrity,
-        extensionId: entry.manifest.id,
-        host: this.#host,
-        slot: selection.slot,
-        styleHost: this.#styleHost,
-      });
-      await resourceScope.stageBundledStyles(payload.styles);
-      resources.push(resourceScope);
+      const source = new TextDecoder().decode(verifiedModule.bytes);
       const owner: SurfaceOwnerIdentity = {
         desiredRevision: entry.desired.revision,
         entrypointId: entrypoint.id,
@@ -515,15 +545,88 @@ export class ManagedSurfaceExtensionLoader {
         hostId: snapshot.hostId,
         realmId: this.#realmId,
       };
-      requests.push({
-        activation: async (context) => {
+      if (entrypoint.mode === "native") nativeOwners.push(owner);
+      const requestedGrants = selectionCapabilities(selection);
+      const accessContext = this.#accessContext();
+      const grantedCapabilities = this.#capabilities.resolveGranted(requestedGrants, accessContext);
+      let activation: SurfaceActivation;
+      if (entrypoint.mode === "isolated") {
+        const styles: string[] = [];
+        for (const style of payload.styles) {
+          const verifiedStyle = await verifyAsset(style, selection.integrity);
+          styles.push(new TextDecoder().decode(verifiedStyle.bytes));
+        }
+        const realm = this.#isolatedRealmFactory.create(source, styles, {
+          entrypointId: entrypoint.id,
+          extensionId: entry.manifest.id,
+          integrity: selection.integrity,
+          kind: entrypoint.isolation ?? "iframe",
+          realmId: `${this.#realmId}:${entry.manifest.id}:${entrypoint.id}:${moduleGeneration}`,
+        });
+        realms.push(realm);
+        activation = async (context) => {
+          context.onDispose(() => realm.dispose());
+          await realm.activate({
+            callCapability: (capability, method, params) => this.#capabilities.invoke(
+              capability,
+              method,
+              params,
+              owner,
+              grantedCapabilities,
+              accessContext,
+              context.signal,
+            ),
+            callService: async (serviceId, version, providerId, method, args) => {
+              if (providerId) {
+                const provider = externalProviders.find((candidate) => candidate.providerId === providerId);
+                if (!provider || provider.descriptor.id !== serviceId || provider.descriptor.version !== version) {
+                  throw new Error(`Isolated Surface service provider is unavailable: ${providerId}`);
+                }
+                return this.#host.invokeService({ args, method, providerId, serviceId, version });
+              }
+              const implementation = context.useService<Record<string, (...values: JsonValue[]) => JsonValue | Promise<JsonValue>>>(serviceId, version);
+              const handler = implementation?.[method];
+              if (typeof handler !== "function") throw new Error(`Isolated Surface service method is unavailable: ${serviceId}@${version}.${method}`);
+              return Promise.resolve(handler(...args));
+            },
+            contribute: (descriptor, implementation) => context.contribute(descriptor, implementation),
+            grantedCapabilities,
+            readAsset: async (path) => {
+              const value = await this.#host.readAsset({
+                extensionId: entry.manifest.id,
+                integrity: selection.integrity,
+                path,
+                slot: selection.slot,
+              });
+              return (await verifyAsset(value, selection.integrity)).payload;
+            },
+          });
+        };
+      } else {
+        const module = await this.#evaluate(source, {
+          entrypointId: entrypoint.id,
+          extensionId: entry.manifest.id,
+          integrity: selection.integrity,
+        });
+        const extension = resolveSurfaceExtensionModule(module);
+        const resourceScope = new ModuleResourceScope({
+          artifactIntegrity: selection.integrity,
+          extensionId: entry.manifest.id,
+          host: this.#host,
+          slot: selection.slot,
+          styleHost: this.#styleHost,
+        });
+        await resourceScope.stageBundledStyles(payload.styles);
+        resources.push(resourceScope);
+        activation = async (context) => {
           context.onDispose(() => resourceScope.dispose());
           await extension.activate(resourceScope.context(context));
-        },
+        };
+      }
+      requests.push({
+        activation,
         options: {
-          grantedCapabilities: entry.capabilityGrants
-            .filter((grant) => grant.realm === "surface" && grant.granted && grant.manifestVersion === selection.version)
-            .map((grant) => grant.capability),
+          grantedCapabilities,
           owner,
           ...(externalServices.length > 0 ? { externalServices } : {}),
           ...(selection.manifest.requires?.services
@@ -531,11 +634,17 @@ export class ManagedSurfaceExtensionLoader {
             : {}),
         },
       });
-      activated.push({ artifactIntegrity: selection.integrity, moduleGeneration, owner, serviceBindings });
+      activated.push({
+        artifactIntegrity: selection.integrity,
+        capabilityBindings: this.#capabilityBindingSignature(grantedCapabilities, accessContext),
+        mode: entrypoint.mode,
+        moduleGeneration,
+        owner,
+        serviceBindings,
+      });
     }
 
     let committedSnapshot: PiariumExtensionCatalogSnapshot | null = null;
-    try {
       await this.#surfaceRuntime.activateBatchWithCommit(requests, async () => {
         if (selection.slot !== "candidate") return;
         committedSnapshot = parsePiariumExtensionCatalogSnapshot(await this.#host.selectCandidate({
@@ -550,6 +659,15 @@ export class ManagedSurfaceExtensionLoader {
       return committedSnapshot;
     } catch (error) {
       for (const resource of resources) resource.dispose();
+      for (const realm of realms) realm.dispose(error);
+      for (const owner of nativeOwners) {
+        this.#nativeRestartRequired.add(owner.extensionId);
+        this.#surfaceRuntime.markRestartRequired(
+          owner,
+          "native_surface_rollback_not_guaranteed",
+          "Trusted-native Surface activation failed; reload this Surface before retrying the extension",
+        );
+      }
       await this.#reportActual(entry.manifest.id);
       throw error;
     }
@@ -647,6 +765,15 @@ export class ManagedSurfaceExtensionLoader {
     return providers.map((provider) => provider.providerId).sort().join("\0");
   }
 
+  #capabilityBindingSignature(capabilities: Iterable<string>, context: SurfaceCapabilityAccessContext): string {
+    return JSON.stringify({
+      access: context.access,
+      capabilities: this.#capabilities.resolveGranted(capabilities, context).sort(),
+      projectTrusted: context.projectTrusted,
+      surface: context.surface,
+    });
+  }
+
   async #deactivate(active: ActiveEntrypoint, desiredRevision: number): Promise<void> {
     const owner = {
       ...active.owner,
@@ -654,6 +781,21 @@ export class ManagedSurfaceExtensionLoader {
       generation: active.moduleGeneration + 1,
     };
     await this.#surfaceRuntime.deactivate(owner);
+    if (active.mode === "native") {
+      const actual = this.#surfaceRuntime.getSnapshot().actual.find((state) => (
+        state.extensionId === owner.extensionId
+        && state.entrypointId === owner.entrypointId
+        && state.realmId === owner.realmId
+      ));
+      if (actual?.diagnostics.some((item) => item.code === "deactivation_cleanup_failed")) {
+        this.#nativeRestartRequired.add(owner.extensionId);
+        this.#surfaceRuntime.markRestartRequired(
+          owner,
+          "native_surface_cleanup_failed",
+          "Trusted-native Surface cleanup failed; reload this Surface to complete deactivation",
+        );
+      }
+    }
     this.#active.delete(keyFor(active.owner.extensionId, active.owner.entrypointId));
     await this.#reportActual(active.owner.extensionId);
   }
@@ -669,7 +811,7 @@ export class ManagedSurfaceExtensionLoader {
     extensionId: string,
     code: string,
     message: string,
-    details: Pick<ManagedSurfaceLoaderDiagnostic, "entrypointId" | "integrity" | "moduleGeneration"> = {},
+    details: Pick<SurfaceExtensionLoaderDiagnostic, "entrypointId" | "integrity" | "moduleGeneration"> = {},
   ): void {
     this.#diagnostics.push({
       code,

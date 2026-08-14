@@ -4,6 +4,7 @@ import type {
   PiariumExtensionActualState,
   PiariumExtensionAssetPayload,
   PiariumExtensionAssetRequest,
+  PiariumExtensionCandidateCapabilityReviewRequest,
   PiariumExtensionCandidateSelectionRequest,
   PiariumExtensionCandidatePreparationResult,
   PiariumExtensionCatalogAvailability,
@@ -1622,6 +1623,7 @@ export interface ExtensionsAPI {
   readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
   readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
   reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
+  reviewCandidateCapabilities(request: PiariumExtensionCandidateCapabilityReviewRequest): Promise<PiariumExtensionCatalogSnapshot>;
   selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
   setServiceSelection(request: PiariumExtensionServiceSelectionRequest): Promise<PiariumExtensionHostStateSnapshot>;
   waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;

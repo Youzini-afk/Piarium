@@ -4,6 +4,7 @@ import {
   PiariumExtensionContractError,
   parsePiariumExtensionCatalogAvailability,
   parsePiariumExtensionCatalogDocument,
+  parsePiariumExtensionCandidateCapabilityReviewRequest,
   parsePiariumExtensionAssetPayload,
   parsePiariumExtensionManagedEntrypointRequest,
   parsePiariumExtensionManifest,
@@ -58,6 +59,20 @@ test("validates content-addressed managed entrypoint requests and asset bytes", 
     extensionId: "../escape",
     integrity: "sha256-not-a-digest",
     slot: "selected",
+  }), PiariumExtensionContractError);
+});
+
+test("validates explicit candidate capability decisions", () => {
+  const request = parsePiariumExtensionCandidateCapabilityReviewRequest({
+    candidateIntegrity: `sha256-${"b".repeat(64)}`,
+    decisions: [{ capability: "workspace.files", granted: false, realm: "host" }],
+    expectedRevision: 4,
+    extensionId: "dev.example.memory-workbench",
+  });
+  assert.equal(request.decisions[0]?.granted, false);
+  assert.throws(() => parsePiariumExtensionCandidateCapabilityReviewRequest({
+    ...request,
+    decisions: [request.decisions[0], request.decisions[0]],
   }), PiariumExtensionContractError);
 });
 

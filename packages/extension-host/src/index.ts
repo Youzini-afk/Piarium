@@ -7,5 +7,6 @@ export * from "./catalog-store.js";
 export * from "./errors.js";
 export * from "./package-sources.js";
 export * from "./package-manager.js";
+export * from "./native-host-transport.js";
 export * from "./service-registry.js";
 export * from "./storage-store.js";

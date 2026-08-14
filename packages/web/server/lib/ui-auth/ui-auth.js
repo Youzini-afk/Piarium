@@ -278,6 +278,7 @@ const isApplicationTokenWritePath = (pathname) => (
   || pathname === '/api/piarium/extensions/v1/entrypoints/read'
   || pathname === '/api/piarium/extensions/v1/candidates/prepare'
   || pathname === '/api/piarium/extensions/v1/candidates/discard-prepared'
+  || pathname === '/api/piarium/extensions/v1/candidates/review-capabilities'
   || pathname === '/api/piarium/extensions/v1/candidates/select'
   || pathname === '/api/piarium/extensions/v1/host-state/wait'
   || pathname === '/api/piarium/extensions/v1/services/invoke'

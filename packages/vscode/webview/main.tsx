@@ -346,8 +346,8 @@ onCommand('showNotification', (payload) => {
 });
 
 const bootstrap = async () => {
-  const { startManagedSurfaceExtensions } = await import('@piarium/ui/lib/extensions/managed-runtime');
-  void startManagedSurfaceExtensions().catch((error) => {
+  const { startSurfaceExtensions } = await import('@piarium/ui/lib/extensions/managed-runtime');
+  void startSurfaceExtensions().catch((error) => {
     console.error('[Piarium Extensions] Managed Surface startup failed:', error);
   });
   const folders = configuredWorkspaceFolders();

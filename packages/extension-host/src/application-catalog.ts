@@ -3,9 +3,10 @@ import {
   type PiariumExtensionActualState,
   type PiariumExtensionCatalogEntry,
   type PiariumExtensionCatalogSnapshot,
-  type PiariumExtensionCandidateRecord,
+  type PiariumExtensionCandidateCapabilityReviewRequest,
   type PiariumExtensionCapabilityGrant,
   type PiariumExtensionInstallationRecord,
+  type PiariumExtensionPreparedArtifact,
 } from "@piarium/extension-contract";
 import { ExtensionCatalogStaleStateError } from "./errors.js";
 import { ExtensionCatalogStore, type CatalogReadState } from "./catalog-store.js";
@@ -72,10 +73,25 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
-  async stageCandidate(candidate: PiariumExtensionCandidateRecord, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+  async stageCandidate(candidate: PiariumExtensionPreparedArtifact, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.stageCandidate(candidate, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
+  async reviewCandidateCapabilities(
+    request: PiariumExtensionCandidateCapabilityReviewRequest,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.reviewCandidateCapabilities(
+        request.extensionId,
+        request.candidateIntegrity,
+        request.decisions,
+        request.expectedRevision,
+      ),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
   }
@@ -136,6 +152,9 @@ export class ApplicationExtensionCatalog {
           actual,
           ...(record.candidate ? {
             candidate: {
+              capabilitiesReviewed: record.candidate.capabilitiesReviewed,
+              capabilityDelta: structuredClone(record.candidate.capabilityDelta),
+              capabilityGrants: structuredClone(record.candidate.capabilityGrants),
               integrity: record.candidate.integrity,
               manifest: structuredClone(record.candidate.manifest),
               preparedAt: record.candidate.preparedAt,

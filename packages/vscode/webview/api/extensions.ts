@@ -40,6 +40,9 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   reportActualState: async (extensionId, state) => {
     await sendBridgeMessage('api:extensions:actual', { extensionId, state });
   },
+  reviewCandidateCapabilities: async (request) => parsePiariumExtensionCatalogSnapshot(
+    await sendBridgeMessage('api:extensions:candidate:review-capabilities', request),
+  ),
   selectCandidate: async (request) => parsePiariumExtensionCatalogSnapshot(
     await sendBridgeMessage('api:extensions:candidate:select', request),
   ),

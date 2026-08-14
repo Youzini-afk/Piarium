@@ -417,6 +417,13 @@ export class SurfaceExtensionRuntime {
     });
   }
 
+  markRestartRequired(owner: SurfaceOwnerIdentity, code: string, message: string): void {
+    validateOwner(owner);
+    const key = ownerKey(owner);
+    this.#actual.set(key, actual(owner, "restart-required", [diagnostic(owner, code, message)]));
+    this.#publish();
+  }
+
   setReplacementSelection(target: string, contributionId: string | null): void {
     if (!isPiariumExtensionId(target)) throw new Error(`Invalid replacement target: ${target}`);
     if (contributionId === null) this.#replacementSelections.delete(target);

@@ -107,6 +107,7 @@ describe('Piarium extension recovery routes', () => {
       state: vi.fn(async () => state),
       waitForState: vi.fn(async () => state),
       prepareCandidate: vi.fn(async (extensionId, integrity) => ({ extensionId, integrity, providers: [] })),
+      reviewCandidateCapabilities: vi.fn(async () => snapshot()),
       invokeService: vi.fn(async () => 'service-result'),
     };
     const app = createApp({ snapshot: vi.fn(async () => snapshot()) }, {}, extensionRuntime);
@@ -118,6 +119,18 @@ describe('Piarium extension recovery routes', () => {
       .send({ extensionId: 'dev.example.extension', candidateIntegrity: `sha256-${'a'.repeat(64)}` })
       .expect(200);
     expect(prepared.body.providers).toEqual([]);
+    await request(app).post('/api/piarium/extensions/v1/candidates/review-capabilities').send({}).expect(401);
+    const reviewed = await request(app)
+      .post('/api/piarium/extensions/v1/candidates/review-capabilities')
+      .set('x-test-session', 'yes')
+      .send({
+        candidateIntegrity: `sha256-${'a'.repeat(64)}`,
+        decisions: [{ capability: 'workspace.files', granted: false, realm: 'host' }],
+        expectedRevision: 1,
+        extensionId: 'dev.example.extension',
+      })
+      .expect(200);
+    expect(reviewed.body.snapshot.revision).toBe(1);
     const invoked = await request(app)
       .post('/api/piarium/extensions/v1/services/invoke')
       .set('x-test-session', 'yes')

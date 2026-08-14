@@ -19,6 +19,7 @@ import {
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import type { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
+import { NativeHostTransport } from "./native-host-transport.js";
 import {
   HostServiceRegistry,
   type HostServiceOwnerIdentity,
@@ -269,6 +270,7 @@ export class BrokeredHostSupervisor {
   readonly #onStateChange: () => void;
   readonly #services: HostServiceRegistry;
   readonly #staged = new Map<string, BrokeredHostInstance>();
+  readonly #nativeRestartRequired = new Set<string>();
   readonly #storage: ExtensionStorageStore;
   readonly #storageSessions = new Map<string, BrokerStorageSession>();
   readonly #transportFactory: BrokeredHostTransportFactory;
@@ -323,7 +325,7 @@ export class BrokeredHostSupervisor {
     return this.#enqueue(async () => {
       const snapshot = await this.#catalog.snapshot();
       const entry = snapshot.extensions.find((value) => value.manifest.id === extensionId);
-      if (!entry?.desired.enabled || entry.manifest.entrypoints?.host?.mode !== "brokered") return;
+      if (!entry?.desired.enabled || !entry.manifest.entrypoints?.host) return;
       await this.#ensureSelectedActive(entry, snapshot, []);
     });
   }
@@ -334,7 +336,7 @@ export class BrokeredHostSupervisor {
       const snapshot = await this.#catalog.snapshot();
       const providers = snapshot.extensions.filter((entry) => (
         entry.desired.enabled
-        && entry.manifest.entrypoints?.host?.mode === "brokered"
+        && Boolean(entry.manifest.entrypoints?.host)
         && (entry.manifest.provides?.services ?? []).some((service) => (
           service.id === request.serviceId && service.version === request.version
         ))
@@ -387,6 +389,22 @@ export class BrokeredHostSupervisor {
     const snapshot = await this.#catalog.snapshot();
     const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
     if (!entry?.candidate || entry.candidate.integrity !== integrity) throw new Error(`Host candidate is no longer current: ${extensionId}`);
+    if (!entry.candidate.capabilitiesReviewed) throw new Error(`Host candidate capability changes require review: ${extensionId}`);
+    if (entry.candidate.manifest.entrypoints?.host?.mode === "native") {
+      if (this.#active.has(extensionId)) {
+        this.#nativeRestartRequired.add(extensionId);
+        await this.#reportActual(extensionId, diagnosticState(
+          snapshot.hostId,
+          entry.desired.revision,
+          this.#active.get(extensionId)?.owner.generation ?? 0,
+          "restart-required",
+          "trusted_native_update_requires_restart",
+          "The trusted-native Host candidate will activate after the application host restarts",
+        )).catch(() => undefined);
+        throw new Error("Trusted-native Host candidate requires an application-host restart");
+      }
+      return { extensionId, integrity, providers: [] };
+    }
     if (entry.candidate.manifest.entrypoints?.host?.mode !== "brokered") return { extensionId, integrity, providers: [] };
     for (const requirement of entry.candidate.manifest.requires?.services ?? []) {
       if (requirement.optional || this.#services.providersFor(requirement).length > 0) continue;
@@ -401,6 +419,7 @@ export class BrokeredHostSupervisor {
     if (current?.artifactIntegrity === integrity) return this.#candidatePreparation(current);
     if (current) await this.#disposeInstance(current, false);
     const instance = await this.#prepareInstance(entry, {
+      capabilityGrants: entry.candidate.capabilityGrants,
       integrity,
       manifest: entry.candidate.manifest,
       slot: "candidate",
@@ -419,7 +438,9 @@ export class BrokeredHostSupervisor {
     if (!staged) {
       const snapshot = await this.#catalog.snapshot();
       const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
-      if (entry?.candidate?.integrity === integrity && entry.candidate.manifest.entrypoints?.host?.mode === "brokered") {
+      if (entry?.candidate?.integrity === integrity
+        && entry.candidate.capabilitiesReviewed
+        && entry.candidate.manifest.entrypoints?.host?.mode === "brokered") {
         await this.#prepareCandidate(extensionId, integrity);
         staged = this.#staged.get(extensionId);
       }
@@ -468,12 +489,27 @@ export class BrokeredHostSupervisor {
     const enabled = new Map(snapshot.extensions.filter((entry) => entry.desired.enabled).map((entry) => [entry.manifest.id, entry]));
     for (const extensionId of [...this.#active.keys()]) {
       const entry = enabled.get(extensionId);
-      if (!entry || entry.manifest.entrypoints?.host?.mode !== "brokered") {
+      if (!entry || !entry.manifest.entrypoints?.host) {
         await this.#deactivateWithDependents(extensionId, snapshot);
       }
     }
     for (const entry of enabled.values()) {
-      if (entry.manifest.entrypoints?.host?.mode !== "brokered") continue;
+      if (!entry.manifest.entrypoints?.host) continue;
+      if (entry.candidate?.capabilitiesReviewed
+        && entry.candidate.manifest.entrypoints?.host?.mode === "native"
+        && !this.#active.has(entry.manifest.id)) {
+        if ((entry.candidate.manifest.entrypoints.surfaces ?? []).length === 0) {
+          const current = await this.#catalog.snapshot();
+          const selected = await this.#packages.selectCandidate({
+            candidateIntegrity: entry.candidate.integrity,
+            expectedRevision: current.revision,
+            extensionId: entry.manifest.id,
+          });
+          const selectedEntry = selected.extensions.find((value) => value.manifest.id === entry.manifest.id);
+          if (selectedEntry) await this.#ensureSelectedActive(selectedEntry, selected, []);
+        }
+        continue;
+      }
       const activation = entry.manifest.entrypoints.host.activation ?? [];
       const startsWithApplication = activation.length === 0
         || activation.includes("application-startup")
@@ -492,7 +528,7 @@ export class BrokeredHostSupervisor {
       }
       try {
         await this.#ensureSelectedActive(entry, snapshot, []);
-        if (entry.candidate && (entry.candidate.manifest.entrypoints?.surfaces ?? []).length === 0) {
+        if (entry.candidate?.capabilitiesReviewed && (entry.candidate.manifest.entrypoints?.surfaces ?? []).length === 0) {
           const current = await this.#catalog.snapshot();
           const candidate = current.extensions.find((value) => value.manifest.id === entry.manifest.id)?.candidate;
           if (!candidate || candidate.integrity !== entry.candidate.integrity) continue;
@@ -500,12 +536,14 @@ export class BrokeredHostSupervisor {
           await this.#selectCandidate(entry.manifest.id, candidate.integrity, current.revision);
         }
       } catch (error) {
+        const native = entry.manifest.entrypoints.host.mode === "native";
+        if (native) this.#nativeRestartRequired.add(entry.manifest.id);
         await this.#reportActual(entry.manifest.id, diagnosticState(
           snapshot.hostId,
           entry.desired.revision,
           this.#active.get(entry.manifest.id)?.owner.generation ?? 0,
-          this.#active.has(entry.manifest.id) ? "active" : "failed",
-          "brokered_host_activation_failed",
+          native ? "restart-required" : this.#active.has(entry.manifest.id) ? "active" : "failed",
+          native ? "trusted_native_host_activation_failed" : "brokered_host_activation_failed",
           error instanceof Error ? error.message : String(error),
         )).catch(() => undefined);
         continue;
@@ -520,6 +558,29 @@ export class BrokeredHostSupervisor {
   ): Promise<void> {
     const active = this.#active.get(entry.manifest.id);
     if (active && active.artifactIntegrity === entry.integrity && active.desiredRevision === entry.desired.revision) return;
+    const native = entry.manifest.entrypoints?.host?.mode === "native";
+    if (native && active && active.artifactIntegrity === entry.integrity) {
+      active.desiredRevision = entry.desired.revision;
+      await this.#reportActual(entry.manifest.id, diagnosticState(
+        snapshot.hostId,
+        entry.desired.revision,
+        active.owner.generation,
+        "active",
+      )).catch(() => undefined);
+      return;
+    }
+    if (native && (this.#nativeRestartRequired.has(entry.manifest.id) || (active && active.artifactIntegrity !== entry.integrity))) {
+      this.#nativeRestartRequired.add(entry.manifest.id);
+      await this.#reportActual(entry.manifest.id, diagnosticState(
+        snapshot.hostId,
+        entry.desired.revision,
+        active?.owner.generation ?? 0,
+        "restart-required",
+        "trusted_native_restart_required",
+        "The trusted-native Host generation can change only after the application host restarts",
+      )).catch(() => undefined);
+      return;
+    }
     if (stack.includes(entry.manifest.id)) {
       throw new Error(`Host service dependency cycle: ${[...stack, entry.manifest.id].join(" -> ")}`);
     }
@@ -542,8 +603,9 @@ export class BrokeredHostSupervisor {
         return;
       }
     }
-    if (!entry.integrity) throw new Error(`Brokered Host extension has no selected artifact: ${entry.manifest.id}`);
+    if (!entry.integrity) throw new Error(`Host extension has no selected artifact: ${entry.manifest.id}`);
     const candidate = await this.#prepareInstance(entry, {
+      capabilityGrants: entry.capabilityGrants,
       integrity: entry.integrity,
       manifest: entry.manifest,
       slot: "selected",
@@ -595,7 +657,7 @@ export class BrokeredHostSupervisor {
   #providerEntries(requirement: PiariumExtensionServiceRequirement, snapshot: PiariumExtensionCatalogSnapshot): PiariumExtensionCatalogEntry[] {
     const providers = snapshot.extensions.filter((entry) => (
       entry.desired.enabled
-      && entry.manifest.entrypoints?.host?.mode === "brokered"
+      && Boolean(entry.manifest.entrypoints?.host)
       && (entry.manifest.provides?.services ?? []).some((service) => service.id === requirement.id && service.version === requirement.version)
     ));
     if (requirement.binding === "all") return providers;
@@ -605,7 +667,13 @@ export class BrokeredHostSupervisor {
 
   async #prepareInstance(
     entry: PiariumExtensionCatalogEntry,
-    selection: { integrity: string; manifest: PiariumExtensionManifest; slot: "candidate" | "selected"; version: string },
+    selection: {
+      capabilityGrants: PiariumExtensionCatalogEntry["capabilityGrants"];
+      integrity: string;
+      manifest: PiariumExtensionManifest;
+      slot: "candidate" | "selected";
+      version: string;
+    },
     snapshot: PiariumExtensionCatalogSnapshot,
   ): Promise<BrokeredHostInstance> {
     const artifact = await this.#packages.resolveBrokeredHostEntrypoint(entry.manifest.id, selection.slot, selection.integrity);
@@ -617,16 +685,21 @@ export class BrokeredHostSupervisor {
       extensionVersion: selection.version,
       generation,
     };
-    const grants = entry.capabilityGrants.filter((grant) => grant.realm === "host" && grant.manifestVersion === selection.version);
+    const grants = selection.capabilityGrants.filter((grant) => grant.realm === "host" && grant.manifestVersion === selection.version);
     let crashed: Error | null = null;
-    const broker = this.#transportFactory({
-      grants,
-      owner,
-      onCrash: (error) => {
-        crashed = error;
-        void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
-      },
-    });
+    const requestFromExtension = (method: string, params: unknown, signal: AbortSignal) => (
+      this.#handleChildRequest(owner, grants, method, params, signal)
+    );
+    const broker = selection.manifest.entrypoints?.host?.mode === "native"
+      ? new NativeHostTransport({ requestFromExtension })
+      : this.#transportFactory({
+        grants,
+        owner,
+        onCrash: (error) => {
+          crashed = error;
+          void this.#handleCrash(entry.manifest.id, owner, error, snapshot.hostId, entry.desired.revision);
+        },
+      });
     const address = { extensionId: entry.manifest.id, key: "state", scope: "application" as const };
     let storageSnapshot = await this.#storage.read(address);
     let migration: ExtensionStorageMigrationTransaction | null = null;
@@ -642,7 +715,7 @@ export class BrokeredHostSupervisor {
     try {
       migration = await this.#storage.prepareMigration(address, targetSchemaVersion, async (input) => {
         const migrated = await broker.request("migrate", { input, modulePath: artifact.modulePath });
-        if (!isRecord(migrated)) throw new Error("Brokered Host migration must return a JSON object");
+        if (!isRecord(migrated)) throw new Error("Host migration must return a JSON object");
         return migrated as JsonObject;
       });
       if (migration) {
@@ -693,11 +766,11 @@ export class BrokeredHostSupervisor {
     const declared = new Map((manifest.provides?.services ?? []).map((service) => [serviceKey(service.id, service.version), service]));
     return values.map((value) => {
       if (!isRecord(value) || typeof value.id !== "string" || !Number.isSafeInteger(value.version)) {
-        throw new Error("Brokered Host service provision is invalid");
+        throw new Error("Host service provision is invalid");
       }
       const key = serviceKey(value.id, Number(value.version));
       const descriptor = declared.get(key);
-      if (!descriptor) throw new Error(`Brokered Host provided undeclared service: ${key}`);
+      if (!descriptor) throw new Error(`Host provided undeclared service: ${key}`);
       return {
         descriptor: { ...descriptor },
         handler: (method, args) => broker.request("service.invoke", {
@@ -745,8 +818,22 @@ export class BrokeredHostSupervisor {
     await this.#services.drainOwner(instance.owner);
     this.#active.delete(extensionId);
     this.#services.removeOwner(instance.owner);
-    await this.#disposeInstance(instance, true);
     const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
+    try {
+      await this.#disposeInstance(instance, true);
+    } catch (error) {
+      if (instance.manifest.entrypoints?.host?.mode !== "native") throw error;
+      this.#nativeRestartRequired.add(extensionId);
+      if (entry) await this.#reportActual(extensionId, diagnosticState(
+        snapshot.hostId,
+        entry.desired.revision,
+        instance.owner.generation + 1,
+        "restart-required",
+        "trusted_native_cleanup_failed",
+        error instanceof Error ? error.message : String(error),
+      )).catch(() => undefined);
+      return;
+    }
     if (entry) await this.#reportActual(extensionId, diagnosticState(
       snapshot.hostId,
       entry.desired.revision,
