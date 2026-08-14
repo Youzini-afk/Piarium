@@ -265,16 +265,23 @@ there rather than leaving an OpenCode compatibility surface in production code.
 
 ### 7.3 Separate Piarium extension platform
 
-Piarium's future product/workbench extensions are not Pi packages. They have a separate application-
+Piarium product/workbench extensions are not Pi packages. They have a separate application-
 host manager, manifest, lifecycle, state, asset, contribution, and service model. Pi integration
 adapters consume the existing typed Piarium protocol while leaving the Pi package independently
 installable, configurable, enabled, and usable from the Pi CLI.
+
+The first platform slice is implemented by `@piarium/extension-contract` and
+`@piarium/extension-host`: the application host owns a revisioned catalog and stable identity below
+`PIARIUM_DATA_DIR/extensions`, every applicable Web-derived surface exposes that application-host
+catalog rather than the selected Pi Runtime through its Runtime API, and `/extensions/recovery`
+remains usable without the main renderer. This slice stores desired and reported actual state but
+deliberately executes no third-party code.
 
 The target platform makes built-in pages and workflows replaceable above a narrow recovery kernel,
 supports declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and
 defines truthful dynamic-disable guarantees for each mode. Its full target architecture and phased
 migration are specified in [piarium-extension-platform.md](piarium-extension-platform.md). None of
-those future entrypoints authorize loading Pi extension code or private plugin state in the
+those entrypoints authorize loading Pi extension code or private plugin state in the
 renderer.
 
 ## 8. Recovery model

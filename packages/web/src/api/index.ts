@@ -19,6 +19,7 @@ import { createWebWorkspaceAPI } from './workspace';
 import { createWebMobileAPI } from './mobile';
 import { createWebSmartSearchAPI } from './smart-search';
 import { createWebClientAuthAPI } from './clientAuth';
+import { createWebExtensionsAPI } from './extensions';
 
 export interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -53,6 +54,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
     clientAuth: createWebClientAuthAPI(),
     mobile: createWebMobileAPI(),
     smartSearch: createWebSmartSearchAPI(),
+    extensions: createWebExtensionsAPI(),
     tools: createWebToolsAPI(),
   };
 };

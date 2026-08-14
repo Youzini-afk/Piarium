@@ -1,5 +1,6 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { PiariumExtensionCatalogAvailability } from '@piarium/extension-contract';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -1594,6 +1595,10 @@ export interface SmartSearchAPI {
   doctor(): Promise<SmartSearchDoctorResponse>;
 }
 
+export interface ExtensionsAPI {
+  catalog(): Promise<PiariumExtensionCatalogAvailability>;
+}
+
 export interface RuntimeAPIs {
   runtime: RuntimeDescriptor;
   terminal: TerminalAPI;
@@ -1610,6 +1615,7 @@ export interface RuntimeAPIs {
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
   smartSearch?: SmartSearchAPI;
+  extensions: ExtensionsAPI;
   tools: ToolsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;

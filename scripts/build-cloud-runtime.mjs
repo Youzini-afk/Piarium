@@ -21,6 +21,8 @@ const canonicalLockPath = path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock
 
 export const CLOUD_RUNTIME_SCHEMA_VERSION = 1;
 export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
+  'extension-contract',
+  'extension-host',
   'protocol',
   'pi-host',
   'runtime-broker',
@@ -56,6 +58,14 @@ const cloudIdentityTextExtensions = new Set([
 ]);
 
 const packageFiles = Object.freeze({
+  'extension-contract': {
+    required: ['package.json', 'dist'],
+    optional: [],
+  },
+  'extension-host': {
+    required: ['package.json', 'dist'],
+    optional: [],
+  },
   protocol: {
     required: ['package.json', 'dist'],
     optional: [],
@@ -251,6 +261,8 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
   if (requireInstall) {
     const brokerLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'runtime-broker');
     if (!existsSync(brokerLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/runtime-broker.');
+    const extensionHostLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'extension-host');
+    if (!existsSync(extensionHostLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/extension-host.');
   }
 
   verifyCloudRuntimeIdentity(outputDir);
@@ -293,7 +305,7 @@ export const installCloudRuntimeDependencies = (
   run('node', [
     '--input-type=module',
     '-e',
-    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); const pty = require('node-pty'); if (typeof pty.spawn !== 'function') throw new Error('node-pty is unavailable'); require.resolve('sherpa-onnx-node'); console.log(entry);",
+    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); const pty = require('node-pty'); if (typeof pty.spawn !== 'function') throw new Error('node-pty is unavailable'); require.resolve('sherpa-onnx-node'); console.log(entry);",
   ], {
     cwd: resolvedOutput,
     json,
@@ -302,6 +314,10 @@ export const installCloudRuntimeDependencies = (
 };
 
 const buildSourcePackages = ({ json }) => {
+  run('bun', ['run', '--cwd', 'packages/extension-host', 'build'], {
+    json,
+    label: 'Piarium extension host build',
+  });
   run('bun', ['run', '--cwd', 'packages/runtime-broker', 'build'], {
     json,
     label: 'Pi runtime build',

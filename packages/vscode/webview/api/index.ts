@@ -36,6 +36,12 @@ export const createVSCodeAPIs = (): RuntimeAPIs => ({
   permissions: createVSCodePermissionsAPI(),
   notifications: createVSCodeNotificationsAPI(),
   github: createVSCodeGitHubAPI(),
+  extensions: {
+    catalog: async () => ({
+      supported: false,
+      reason: 'Piarium extension hosting is not available in the VS Code surface yet.',
+    }),
+  },
   tools: createVSCodeToolsAPI(),
   editor: createVSCodeEditorAPI(),
   vscode: createVSCodeActionsAPI(),

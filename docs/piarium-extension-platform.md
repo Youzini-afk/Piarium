@@ -904,6 +904,23 @@ slices. These are implementation phases, not reductions of the extension model.
 Acceptance: missing/empty/malformed/failing catalogs are distinct; Web/Electron/VS Code/hosted-mobile
 parity is explicit; no extension code executes yet.
 
+Implementation status (2026-08-14): complete. `@piarium/extension-contract` now owns the validated
+manifest, installation, capability-grant, desired/actual-state, contribution, service, and public
+catalog DTOs. `@piarium/extension-host` owns a stable application-host UUID and the revisioned catalog
+below `PIARIUM_DATA_DIR/extensions`. Catalog and identity writes are serialized, cross-process locked,
+fsynced, and atomically renamed. A transient failure after a valid read returns that previous catalog
+as non-authoritative `stale`; an initial malformed catalog remains a failure rather than becoming an
+empty list.
+
+The Web application host exposes authenticated read-only catalog state at
+`GET /api/piarium/extensions/v1/catalog`. Session-authenticated recovery mutations use revision
+preconditions at `PATCH /api/piarium/extensions/v1/extensions/:id/enabled` and
+`POST /api/piarium/extensions/v1/disable-all`. `/extensions/recovery` is a host-owned HTML manager
+that does not depend on the React workbench. Web, Electron, hosted mobile, and Capacitor expose this
+application-host API through their Runtime API even when the active Pi Runtime points elsewhere. VS
+Code returns a stable unsupported result until a VS Code application-host implementation is added.
+Phase A indexes and mutates records only; it does not load or execute an extension entrypoint.
+
 ### Phase B — Surface registry and built-in contributions
 
 - Implement owner scopes, staging/commit/rollback, Contribution Registry, replacement selection,

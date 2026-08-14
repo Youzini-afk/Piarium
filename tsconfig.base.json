@@ -5,6 +5,8 @@
     "moduleResolution": "NodeNext",
     "baseUrl": ".",
     "paths": {
+      "@piarium/extension-contract": ["packages/extension-contract/src/index.ts"],
+      "@piarium/extension-host": ["packages/extension-host/src/index.ts"],
       "@piarium/pi-host": ["packages/pi-host/src/index.ts"],
       "@piarium/pi-host/discovery": ["packages/pi-host/src/runtime-discovery.ts"],
       "@piarium/protocol": ["packages/protocol/src/index.ts"],

@@ -314,7 +314,7 @@ Acceptance: every adopted capability names its authoritative owner, preserves fo
 it is still required, and has no production dependency on OpenCode or a duplicate compatibility
 implementation.
 
-## Phase 9 — Piarium extension platform (planned)
+## Phase 9 — Piarium extension platform (active)
 
 The complete target architecture is specified in
 [piarium-extension-platform.md](piarium-extension-platform.md). Piarium extensions are a separate
@@ -323,8 +323,10 @@ latter continue to extend Pi through Pi's own `PackageManager` and extension run
 
 Delivery is split into complete platform slices without reducing the target customization model:
 
-1. extension contract, application-host catalog, desired/actual state, capability grants, and
-   protected fallback manager;
+1. Implemented foundation: extension contract, application-host identity/catalog,
+   desired/actual-state and capability-grant records, package-source abstraction, read-only catalog
+   Runtime API, revision-checked recovery mutations, and a protected renderer-independent fallback
+   manager. This slice does not execute extension code;
 2. owner-scoped Surface lifecycle, contribution/service registries, layout references, and the
    first statically linked built-ins migrated from hard-coded switches;
 3. authenticated external Surface artifacts, managed dynamic activation, candidate update, and

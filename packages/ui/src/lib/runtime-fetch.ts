@@ -7,6 +7,16 @@ export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
 }
 
+type FetchDelegate = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+let nativeFetchDelegate: FetchDelegate | null = null;
+
+// Application-host APIs must not follow the active Pi Runtime resolver. The
+// runtime bridge retains the browser's original fetch here before patching
+// window.fetch, giving those APIs one explicit, testable transport boundary.
+export const fetchWithoutRuntimeRouting: FetchDelegate = (input, init) => (
+  nativeFetchDelegate ?? globalThis.fetch.bind(globalThis)
+)(input, init);
+
 const shouldResolveApiPath = (input: string): boolean => {
   return input.startsWith('/api/') || input === '/api' || input.startsWith('/auth/') || input === '/auth' || input === '/health';
 };
@@ -304,6 +314,7 @@ export const installRuntimeFetchBridge = (): void => {
   runtimeFetchBridgeInstalled = true;
 
   const nativeFetch = window.fetch.bind(window);
+  nativeFetchDelegate = nativeFetch;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const relayResponse = await tryRelayFetch(input, init ?? {});
     if (relayResponse) return relayResponse;

@@ -11,6 +11,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
+import { ApplicationExtensionCatalog } from '@piarium/extension-host';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -552,6 +553,7 @@ async function main(options = {}) {
 
   console.log(`Starting Piarium on port ${port === 0 ? 'auto' : port}`);
   const app = express();
+  const extensionCatalog = options.extensionCatalog || new ApplicationExtensionCatalog({ dataDir: PIARIUM_DATA_DIR });
   app.set('trust proxy', true);
   app.use((_req, res, next) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -850,6 +852,8 @@ async function main(options = {}) {
     piRuntimeBroker,
     getPiariumEventClients: () => uiPiariumEventClients,
     writeSseEvent,
+    extensionCatalog,
+    uiAuthController,
     reloadRuntimeConfiguration: async () => { await piRuntimeBroker.warmup(); },
   });
 

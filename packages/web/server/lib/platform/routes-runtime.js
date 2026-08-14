@@ -1,4 +1,5 @@
 import { registerExternalAccessRoutes } from '../external-access/routes.js';
+import { registerExtensionRoutes } from '../extensions/routes.js';
 import { registerFsRoutes } from '../fs/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
@@ -73,7 +74,11 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       getPiariumEventClients,
       writeSseEvent,
       reloadRuntimeConfiguration = async () => {},
+      extensionCatalog,
+      uiAuthController,
     } = dependencies;
+
+    registerExtensionRoutes(app, { extensionCatalog, uiAuthController });
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,

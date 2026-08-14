@@ -113,6 +113,17 @@
         "node-abi": "^4.33.0",
       },
     },
+    "packages/extension-contract": {
+      "name": "@piarium/extension-contract",
+      "version": "0.1.0",
+    },
+    "packages/extension-host": {
+      "name": "@piarium/extension-host",
+      "version": "0.1.0",
+      "dependencies": {
+        "@piarium/extension-contract": "0.1.0",
+      },
+    },
     "packages/mobile": {
       "name": "@piarium/mobile",
       "version": "0.1.0",
@@ -207,6 +218,7 @@
         "@dnd-kit/sortable": "^10.0.0",
         "@dnd-kit/utilities": "^3.2.2",
         "@lezer/highlight": "^1.2.3",
+        "@piarium/extension-contract": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-client": "workspace:*",
         "@pierre/diffs": "1.3.0-beta.6",
@@ -309,6 +321,8 @@
         "@clack/prompts": "^1.1.0",
         "@konbakuyomu/smart-search": "^0.1.14",
         "@octokit/rest": "^22.0.1",
+        "@piarium/extension-contract": "workspace:*",
+        "@piarium/extension-host": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-broker": "workspace:*",
         "@simplewebauthn/server": "13.3.1",
@@ -1193,6 +1207,10 @@
     "@peculiar/x509": ["@peculiar/x509@1.14.3", "", { "dependencies": { "@peculiar/asn1-cms": "^2.6.0", "@peculiar/asn1-csr": "^2.6.0", "@peculiar/asn1-ecc": "^2.6.0", "@peculiar/asn1-pkcs9": "^2.6.0", "@peculiar/asn1-rsa": "^2.6.0", "@peculiar/asn1-schema": "^2.6.0", "@peculiar/asn1-x509": "^2.6.0", "pvtsutils": "^1.3.6", "reflect-metadata": "^0.2.2", "tslib": "^2.8.1", "tsyringe": "^4.10.0" } }, "sha512-C2Xj8FZ0uHWeCXXqX5B4/gVFQmtSkiuOolzAgutjTfseNOHT3pUjljDZsTSxXFGgio54bCzVFqmEOUrIVk8RDA=="],
 
     "@piarium/electron": ["@piarium/electron@workspace:packages/electron"],
+
+    "@piarium/extension-contract": ["@piarium/extension-contract@workspace:packages/extension-contract"],
+
+    "@piarium/extension-host": ["@piarium/extension-host@workspace:packages/extension-host"],
 
     "@piarium/mobile": ["@piarium/mobile@workspace:packages/mobile"],
 

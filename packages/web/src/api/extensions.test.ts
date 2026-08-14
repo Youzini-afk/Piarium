@@ -1,0 +1,59 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const refreshLocalRuntimeUrlAuthToken = vi.fn();
+const fetchWithoutRuntimeRouting = vi.fn();
+
+vi.mock('@piarium/ui/lib/runtime-auth', () => ({
+  refreshLocalRuntimeUrlAuthToken,
+}));
+vi.mock('@piarium/ui/lib/runtime-fetch', () => ({
+  fetchWithoutRuntimeRouting,
+}));
+
+const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  refreshLocalRuntimeUrlAuthToken.mockReset();
+  fetchWithoutRuntimeRouting.mockReset();
+  if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+  else Reflect.deleteProperty(globalThis, 'window');
+});
+
+describe('createWebExtensionsAPI', () => {
+  it('reads from the application host instead of the selected Pi runtime', async () => {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        __PIARIUM_API_BASE_URL__: 'https://remote-pi.example',
+        __PIARIUM_LOCAL_ORIGIN__: 'http://127.0.0.1:57123',
+        location: { href: 'piarium-ui://app/', origin: 'piarium-ui://app' },
+      },
+    });
+    refreshLocalRuntimeUrlAuthToken.mockResolvedValue('local-url-token');
+    fetchWithoutRuntimeRouting.mockResolvedValue(Response.json({
+      supported: true,
+      status: 'ready',
+      snapshot: {
+        schemaVersion: 1,
+        hostId: '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a',
+        revision: 0,
+        loadedAt: '2026-08-14T00:00:00.000Z',
+        authoritative: true,
+        storageState: 'missing',
+        diagnostics: [],
+        extensions: [],
+      },
+    }));
+
+    const { createWebExtensionsAPI } = await import('./extensions');
+    const result = await createWebExtensionsAPI().catalog();
+
+    expect(result.supported).toBe(true);
+    expect(refreshLocalRuntimeUrlAuthToken).toHaveBeenCalledWith('http://127.0.0.1:57123');
+    const target = new URL(String(fetchWithoutRuntimeRouting.mock.calls[0]?.[0]));
+    expect(target.origin).toBe('http://127.0.0.1:57123');
+    expect(target.pathname).toBe('/api/piarium/extensions/v1/catalog');
+    expect(target.searchParams.get('piarium_url_token')).toBe('local-url-token');
+  });
+});

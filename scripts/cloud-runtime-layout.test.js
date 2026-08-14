@@ -34,6 +34,11 @@ const createFixture = () => {
   fs.writeFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), '# Third-party notices\n');
 
   const manifests = {
+    'extension-contract': { name: '@piarium/extension-contract', dependencies: {} },
+    'extension-host': {
+      name: '@piarium/extension-host',
+      dependencies: { '@piarium/extension-contract': '0.1.0' },
+    },
     protocol: { name: '@piarium/protocol', dependencies: {} },
     'pi-host': { name: '@piarium/pi-host', dependencies: { '@piarium/protocol': '0.1.0' } },
     'runtime-broker': {
@@ -46,6 +51,8 @@ const createFixture = () => {
     web: {
       name: '@piarium/web',
       dependencies: {
+        '@piarium/extension-contract': 'workspace:*',
+        '@piarium/extension-host': 'workspace:*',
         '@piarium/protocol': 'workspace:*',
         '@piarium/runtime-broker': 'workspace:*',
       },
@@ -76,6 +83,8 @@ describe('Piarium cloud runtime layout', () => {
     expect(fs.existsSync(lockPath)).toBe(true);
     const lockText = fs.readFileSync(lockPath, 'utf8');
     expect(lockText).toContain('"name": "piarium-cloud-runtime"');
+    expect(lockText).toContain('"packages/extension-contract"');
+    expect(lockText).toContain('"packages/extension-host"');
     expect(lockText).toContain('"packages/runtime-broker"');
     expect(lockText).toContain('"packages/pi-host"');
     expect(lockText).toContain('"packages/protocol"');
@@ -97,11 +106,13 @@ describe('Piarium cloud runtime layout', () => {
       'utf8',
     );
     const buildFunction = builderSource.slice(builderSource.indexOf('const buildSourcePackages'));
+    const extensionHostBuild = buildFunction.indexOf("'packages/extension-host'");
     const brokerBuild = buildFunction.indexOf("'packages/runtime-broker'");
     const clientBuild = buildFunction.indexOf("'packages/runtime-client'");
     const webBuild = buildFunction.indexOf("'packages/web'");
 
-    expect(brokerBuild).toBeGreaterThanOrEqual(0);
+    expect(extensionHostBuild).toBeGreaterThanOrEqual(0);
+    expect(brokerBuild).toBeGreaterThan(extensionHostBuild);
     expect(clientBuild).toBeGreaterThan(brokerBuild);
     expect(webBuild).toBeGreaterThan(clientBuild);
   });
@@ -112,6 +123,8 @@ describe('Piarium cloud runtime layout', () => {
     )));
 
     expect(CLOUD_RUNTIME_PACKAGE_DIRS).toEqual([
+      'extension-contract',
+      'extension-host',
       'protocol',
       'pi-host',
       'runtime-broker',
@@ -127,7 +140,7 @@ describe('Piarium cloud runtime layout', () => {
     }
   });
 
-  it('accepts the canonical four-package tree', () => {
+  it('accepts the canonical application-host runtime tree', () => {
     const fixture = createFixture();
     expect(verifyCloudRuntimeLayout(fixture)).toMatchObject({
       schemaVersion: CLOUD_RUNTIME_SCHEMA_VERSION,
