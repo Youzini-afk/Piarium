@@ -43,7 +43,18 @@ describe('Piarium cloud container runtime', () => {
     expect(appDockerfile.indexOf('FROM ')).toBeGreaterThan(appDockerfile.indexOf(runtimeArg));
     expect(appDockerfile).toContain('FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder');
 
-    for (const packageDirectory of ['protocol', 'pi-host', 'runtime-broker', 'web']) {
+    for (const packageDirectory of [
+      'extension-builtins',
+      'extension-contract',
+      'extension-host',
+      'extension-loader',
+      'extension-sdk',
+      'extension-surface',
+      'protocol',
+      'pi-host',
+      'runtime-broker',
+      'web',
+    ]) {
       expect(appDockerfile).toContain(`COPY packages/${packageDirectory}/package.json ./packages/${packageDirectory}/package.json`);
     }
 
