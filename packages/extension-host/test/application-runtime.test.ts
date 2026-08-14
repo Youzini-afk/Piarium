@@ -52,6 +52,28 @@ module.exports = {
 `, "utf8");
 };
 
+const writeRoutingProvider = async (directory: string, providerExtensionId: string, value: string): Promise<void> => {
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "piarium.extension.json"), JSON.stringify({
+    schemaVersion: 1,
+    id: providerExtensionId,
+    version: "1.0.0",
+    engines: { piarium: "*" },
+    entrypoints: { host: { activation: ["service-request"], file: "host.cjs", mode: "brokered" } },
+    provides: { services: [{ id: serviceId, multiple: true, version: 1 }] },
+  }), "utf8");
+  await writeFile(join(directory, "package.json"), JSON.stringify({ name: providerExtensionId, version: "1.0.0" }), "utf8");
+  await writeFile(join(directory, "host.cjs"), `
+module.exports = {
+  activate(context) {
+    context.services.provide({ id: '${serviceId}', multiple: true, version: 1 }, {
+      read() { return '${value}'; }
+    });
+  }
+};
+`, "utf8");
+};
+
 test("brokered Host storage, migration rollback, services, and crash isolation preserve application state", { timeout: 30_000 }, async () => {
   const dataDir = await temporaryDirectory("piarium-broker-runtime-");
   const v1 = await temporaryDirectory("piarium-broker-v1-");
@@ -130,5 +152,74 @@ test("trusted-native Host updates remain on the prior generation until applicati
     assert.equal(await restarted.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "2.0.0");
   } finally {
     await restarted.stop();
+  }
+});
+
+test("persistent routes select different real providers by session and isolate provider withdrawal", { timeout: 30_000 }, async () => {
+  const dataDir = await temporaryDirectory("piarium-routing-runtime-");
+  const alpha = await temporaryDirectory("piarium-routing-alpha-");
+  const beta = await temporaryDirectory("piarium-routing-beta-");
+  await writeRoutingProvider(alpha, "dev.example.alpha", "alpha");
+  await writeRoutingProvider(beta, "dev.example.beta", "beta");
+  const runtime = await ApplicationExtensionRuntime.create({
+    brokerScript: fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url)),
+    dataDir,
+  });
+  try {
+    const started = await runtime.start();
+    const withAlpha = await runtime.installOrStage({
+      expectedRevision: started.catalog.revision,
+      source: { display: "Alpha", kind: "local", specifier: alpha },
+    });
+    await runtime.installOrStage({
+      expectedRevision: withAlpha.revision,
+      source: { display: "Beta", kind: "local", specifier: beta },
+    });
+    await assert.rejects(
+      runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }),
+      /explicit routing rule is required/,
+    );
+    const providers = (await runtime.state()).services.providers;
+    const alphaProvider = providers.find((provider) => provider.extensionId === "dev.example.alpha");
+    const betaProvider = providers.find((provider) => provider.extensionId === "dev.example.beta");
+    assert.ok(alphaProvider);
+    assert.ok(betaProvider);
+    const alphaRoute = await runtime.upsertServiceRoutingRule({
+      expectedRevision: 0,
+      rule: {
+        allowFallback: false,
+        providerKey: alphaProvider.providerKey,
+        scope: { sessionId: "session-alpha" },
+        serviceId,
+        version: 1,
+      },
+    });
+    await runtime.upsertServiceRoutingRule({
+      expectedRevision: alphaRoute.document.revision,
+      rule: {
+        allowFallback: false,
+        providerKey: betaProvider.providerKey,
+        scope: { sessionId: "session-beta" },
+        serviceId,
+        version: 1,
+      },
+    });
+    assert.equal(await runtime.invokeService({
+      args: [], method: "read", routing: { sessionId: "session-alpha" }, serviceId, version: 1,
+    }), "alpha");
+    assert.equal(await runtime.invokeService({
+      args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
+    }), "beta");
+
+    await runtime.setEnabled("dev.example.alpha", false, (await runtime.state()).catalog.revision);
+    await assert.rejects(
+      runtime.invokeService({ args: [], method: "read", routing: { sessionId: "session-alpha" }, serviceId, version: 1 }),
+      /Selected provider .* is unavailable/,
+    );
+    assert.equal(await runtime.invokeService({
+      args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
+    }), "beta");
+  } finally {
+    await runtime.stop();
   }
 });

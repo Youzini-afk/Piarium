@@ -101,6 +101,13 @@ describe('Piarium extension recovery routes', () => {
     const state = {
       catalog: snapshot(),
       revision: 4,
+      routing: {
+        authoritative: true,
+        diagnostics: [],
+        document: { revision: 0, rules: [], schemaVersion: 1, updatedAt: '1970-01-01T00:00:00.000Z' },
+        hostId: snapshot().hostId,
+        storageState: 'missing',
+      },
       services: { hostId: snapshot().hostId, providers: [], revision: 2, selections: {} },
       workbench: {
         authoritative: true,
@@ -120,6 +127,8 @@ describe('Piarium extension recovery routes', () => {
       prepareCandidate: vi.fn(async (extensionId, integrity) => ({ extensionId, integrity, providers: [] })),
       reviewCandidateCapabilities: vi.fn(async () => snapshot()),
       invokeService: vi.fn(async () => 'service-result'),
+      upsertServiceRoutingRule: vi.fn(async () => state.routing),
+      removeServiceRoutingRule: vi.fn(async () => state.routing),
       updateWorkbenchLayout: vi.fn(async () => state.workbench),
     };
     const app = createApp({ snapshot: vi.fn(async () => snapshot()) }, {}, extensionRuntime);
@@ -149,6 +158,18 @@ describe('Piarium extension recovery routes', () => {
       .send({ serviceId: 'dev.example.service', version: 1, method: 'read', args: [] })
       .expect(200);
     expect(invoked.body.result).toBe('service-result');
+    await request(app).put('/api/piarium/extensions/v1/services/routing').send({}).expect(401);
+    const routed = await request(app)
+      .put('/api/piarium/extensions/v1/services/routing')
+      .set('x-test-session', 'yes')
+      .send({ expectedRevision: 0, rule: {} })
+      .expect(200);
+    expect(routed.body.document.rules).toEqual([]);
+    await request(app)
+      .post('/api/piarium/extensions/v1/services/routing/remove')
+      .set('x-test-session', 'yes')
+      .send({ expectedRevision: 0, scope: {}, serviceId: 'dev.example.service', version: 1 })
+      .expect(200);
     await request(app).patch('/api/piarium/extensions/v1/workbench/layout').send({}).expect(401);
     const workbench = await request(app)
       .patch('/api/piarium/extensions/v1/workbench/layout')

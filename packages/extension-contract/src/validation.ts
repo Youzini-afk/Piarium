@@ -46,6 +46,10 @@ import {
   type PiariumExtensionSurfaceEntrypoint,
 } from "./types.js";
 import { parsePiariumWorkbenchProfileSnapshot } from "./workbench.js";
+import {
+  parsePiariumExtensionServiceRoutingContext,
+  parsePiariumExtensionServiceRoutingSnapshot,
+} from "./service-routing.js";
 
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -1185,6 +1189,8 @@ function parseServiceProvider(value: unknown, path: string, issues: string[]): P
   if (!status) issues.push(`${path}.status must be active, candidate, or draining`);
   const providerId = text(value.providerId);
   if (!providerId) issues.push(`${path}.providerId must be a non-empty string`);
+  const providerKey = text(value.providerKey);
+  if (!providerKey) issues.push(`${path}.providerKey must be a non-empty string`);
   const extensionVersion = text(value.extensionVersion) ?? "0.0.0";
   if (!SEMVER_PATTERN.test(extensionVersion)) issues.push(`${path}.extensionVersion must be SemVer`);
   if (!descriptor) return undefined;
@@ -1195,6 +1201,7 @@ function parseServiceProvider(value: unknown, path: string, issues: string[]): P
     extensionVersion,
     generation: positiveRevision(value.generation, `${path}.generation`, issues, true),
     providerId: providerId ?? "invalid",
+    providerKey: providerKey ?? "invalid",
     status: status ?? "draining",
   };
 }
@@ -1263,12 +1270,18 @@ export function parsePiariumExtensionServiceInvocationRequest(value: unknown): P
     : (issues.push("args must be an array"), []);
   const providerId = value.providerId === undefined ? undefined : text(value.providerId);
   if (value.providerId !== undefined && !providerId) issues.push("providerId must be a non-empty string");
+  let routing: PiariumExtensionServiceInvocationRequest["routing"];
+  if (value.routing !== undefined) {
+    try { routing = parsePiariumExtensionServiceRoutingContext(value.routing, { allowEmpty: true }); }
+    catch (error) { issues.push(`routing.${error instanceof Error ? error.message : String(error)}`); }
+  }
   const result: PiariumExtensionServiceInvocationRequest = {
     args,
     method: method ?? "invalid",
     serviceId: identifier(value.serviceId, "serviceId", issues),
     version: positiveRevision(value.version, "version", issues),
     ...(providerId ? { providerId } : {}),
+    ...(routing ? { routing } : {}),
   };
   throwIssues("Piarium extension service invocation", issues);
   return result;
@@ -1304,20 +1317,25 @@ export function parsePiariumExtensionHostStateSnapshot(value: unknown): PiariumE
   if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension host-state snapshot is invalid", ["snapshot must be an object"]);
   let catalog: PiariumExtensionCatalogSnapshot | undefined;
   let services: PiariumExtensionServiceCatalogSnapshot | undefined;
+  let routing: ReturnType<typeof parsePiariumExtensionServiceRoutingSnapshot> | undefined;
   let workbench: ReturnType<typeof parsePiariumWorkbenchProfileSnapshot> | undefined;
   try { catalog = parsePiariumExtensionCatalogSnapshot(value.catalog); }
   catch (error) { if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `catalog.${issue}`)); else throw error; }
   try { services = parsePiariumExtensionServiceCatalogSnapshot(value.services); }
   catch (error) { if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `services.${issue}`)); else throw error; }
+  try { routing = parsePiariumExtensionServiceRoutingSnapshot(value.routing); }
+  catch (error) { issues.push(`routing.${error instanceof Error ? error.message : String(error)}`); }
   try { workbench = parsePiariumWorkbenchProfileSnapshot(value.workbench); }
   catch (error) { issues.push(`workbench.${error instanceof Error ? error.message : String(error)}`); }
   if (catalog && services && catalog.hostId !== services.hostId) issues.push("catalog and services must belong to the same application host");
+  if (catalog && routing && catalog.hostId !== routing.hostId) issues.push("catalog and routing must belong to the same application host");
   if (catalog && workbench && catalog.hostId !== workbench.hostId) issues.push("catalog and workbench must belong to the same application host");
   const revision = positiveRevision(value.revision, "revision", issues, true);
   throwIssues("Piarium extension host-state snapshot", issues);
   return {
     catalog: catalog as PiariumExtensionCatalogSnapshot,
     revision,
+    routing: routing as PiariumExtensionHostStateSnapshot["routing"],
     services: services as PiariumExtensionServiceCatalogSnapshot,
     workbench: workbench as PiariumExtensionHostStateSnapshot["workbench"],
   };

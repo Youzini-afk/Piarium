@@ -289,6 +289,27 @@ export const registerExtensionRoutes = (app, {
     },
   );
 
+  const serviceRoutingMutation = (method) => async (req, res) => {
+    if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+    try {
+      return res.json(await extensionRuntime[method](req.body));
+    } catch (error) {
+      return sendMutationError(res, error);
+    }
+  };
+
+  app.put(
+    '/api/piarium/extensions/v1/services/routing',
+    uiAuthController.requireAuth,
+    serviceRoutingMutation('upsertServiceRoutingRule'),
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/services/routing/remove',
+    uiAuthController.requireAuth,
+    serviceRoutingMutation('removeServiceRoutingRule'),
+  );
+
   const workbenchMutation = (method) => async (req, res) => {
     if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
     try {

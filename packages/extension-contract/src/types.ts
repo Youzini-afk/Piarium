@@ -315,6 +315,7 @@ export interface PiariumExtensionServiceProviderSnapshot {
   extensionVersion: string;
   generation: number;
   providerId: string;
+  providerKey: string;
   status: PiariumExtensionServiceProviderStatus;
 }
 
@@ -329,6 +330,7 @@ export interface PiariumExtensionServiceInvocationRequest {
   args: JsonValue[];
   method: string;
   providerId?: string;
+  routing?: import("./service-routing.js").PiariumExtensionServiceRoutingContext;
   serviceId: string;
   version: number;
 }
@@ -349,6 +351,7 @@ export interface PiariumExtensionHostStateSnapshot {
   catalog: PiariumExtensionCatalogSnapshot;
   revision: number;
   services: PiariumExtensionServiceCatalogSnapshot;
+  routing: import("./service-routing.js").PiariumExtensionServiceRoutingSnapshot;
   workbench: import("./workbench.js").PiariumWorkbenchProfileSnapshot;
 }
 

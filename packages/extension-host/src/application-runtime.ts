@@ -6,6 +6,7 @@ import {
   parsePiariumExtensionPackageInstallRequest,
   parsePiariumExtensionServiceInvocationRequest,
   parsePiariumExtensionServiceSelectionRequest,
+  resolvePiariumExtensionServiceRouting,
   type JsonValue,
   type PiariumExtensionActualState,
   type PiariumExtensionCandidateCapabilityReviewRequest,
@@ -16,6 +17,9 @@ import {
   type PiariumExtensionHostStateWaitRequest,
   type PiariumExtensionPackageInstallRequest,
   type PiariumExtensionServiceInvocationRequest,
+  type PiariumExtensionServiceRoutingRuleRemoveRequest,
+  type PiariumExtensionServiceRoutingRuleUpdateRequest,
+  type PiariumExtensionServiceRoutingSnapshot,
   type PiariumExtensionServiceSelectionRequest,
   type PiariumWorkbenchLayoutUpdateRequest,
   type PiariumWorkbenchProfileRemoveRequest,
@@ -32,6 +36,7 @@ import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./bro
 import { HostCapabilityRegistry } from "./capability-registry.js";
 import { ExtensionPackageManager } from "./package-manager.js";
 import { HostServiceRegistry } from "./service-registry.js";
+import { ServiceRoutingStore } from "./service-routing-store.js";
 import { ExtensionStorageStore } from "./storage-store.js";
 import { WorkbenchProfileStore } from "./workbench-profile-store.js";
 
@@ -41,6 +46,7 @@ export interface ApplicationExtensionRuntimeOptions {
   catalog?: ApplicationExtensionCatalog;
   dataDir: string;
   packages?: ExtensionPackageManager;
+  routing?: ServiceRoutingStore;
   services?: HostServiceRegistry;
   storage?: ExtensionStorageStore;
   transportFactory?: BrokeredHostTransportFactory;
@@ -51,6 +57,7 @@ export class ApplicationExtensionRuntime {
   readonly capabilities: HostCapabilityRegistry;
   readonly catalog: ApplicationExtensionCatalog;
   readonly packages: ExtensionPackageManager;
+  readonly routing: ServiceRoutingStore;
   readonly services: HostServiceRegistry;
   readonly storage: ExtensionStorageStore;
   readonly supervisor: BrokeredHostSupervisor;
@@ -68,6 +75,8 @@ export class ApplicationExtensionRuntime {
     this.services = options.services ?? new HostServiceRegistry(hostId);
     if (this.services.hostId !== hostId) throw new Error("Extension service registry belongs to another application host");
     this.storage = options.storage ?? new ExtensionStorageStore(options.dataDir);
+    this.routing = options.routing ?? new ServiceRoutingStore({ hostId, storage: this.storage });
+    if (this.routing.hostId !== hostId) throw new Error("Service routing store belongs to another application host");
     this.workbench = options.workbench ?? new WorkbenchProfileStore({ hostId, storage: this.storage });
     if (this.workbench.hostId !== hostId) throw new Error("Workbench profile store belongs to another application host");
     this.supervisor = new BrokeredHostSupervisor({
@@ -78,6 +87,7 @@ export class ApplicationExtensionRuntime {
       packages: this.packages,
       services: this.services,
       storage: this.storage,
+      invokeService: (request, signal) => this.#invokeRegisteredService(request, signal),
       ...(options.transportFactory ? { transportFactory: options.transportFactory } : {}),
     });
     this.#serviceUnsubscribe = this.services.subscribe(() => this.#publish());
@@ -97,6 +107,7 @@ export class ApplicationExtensionRuntime {
       );
       await this.supervisor.reconcile(snapshot);
       await this.workbench.read();
+      await this.routing.read();
       this.#publish();
     });
     return this.state();
@@ -107,9 +118,10 @@ export class ApplicationExtensionRuntime {
       const before = this.#revision;
       const catalog = await this.catalog.snapshot();
       const services = this.services.getSnapshot();
+      const routing = await this.routing.read();
       const workbench = await this.workbench.read();
       const after = this.#revision;
-      if (before === after) return { catalog, revision: after, services, workbench };
+      if (before === after) return { catalog, revision: after, routing, services, workbench };
     }
   }
 
@@ -246,17 +258,10 @@ export class ApplicationExtensionRuntime {
     if (typeof providerId === "string" && this.supervisor.hasStagedProvider(providerId)) {
       return this.supervisor.invokeStagedService(parsed, signal);
     }
-    const providers = this.services.getSnapshot().providers.filter((provider) => (
-      provider.status === "active"
-      && provider.descriptor.id === parsed.serviceId
-      && provider.descriptor.version === parsed.version
-      && (!providerId || provider.providerId === providerId)
-    ));
-    if (providers.length > 0) return this.services.invoke(parsed, signal);
-    return this.#mutate(async () => {
-      await this.supervisor.activateForService(parsed);
+    if (providerId) return this.services.invoke(parsed, signal);
+    return this.supervisor.activateForService(parsed).then(async () => {
       this.#publish();
-      return this.services.invoke(parsed, signal);
+      return this.#invokeRegisteredService(parsed, signal);
     });
   }
 
@@ -266,6 +271,26 @@ export class ApplicationExtensionRuntime {
       this.services.setSelection(request.serviceId, request.version, request.providerId);
       this.#publish();
       return this.state();
+    });
+  }
+
+  upsertServiceRoutingRule(
+    request: PiariumExtensionServiceRoutingRuleUpdateRequest | unknown,
+  ): Promise<PiariumExtensionServiceRoutingSnapshot> {
+    return this.#mutate(async () => {
+      const snapshot = await this.routing.upsertRule(request);
+      this.#publish();
+      return snapshot;
+    });
+  }
+
+  removeServiceRoutingRule(
+    request: PiariumExtensionServiceRoutingRuleRemoveRequest | unknown,
+  ): Promise<PiariumExtensionServiceRoutingSnapshot> {
+    return this.#mutate(async () => {
+      const snapshot = await this.routing.removeRule(request);
+      this.#publish();
+      return snapshot;
     });
   }
 
@@ -316,6 +341,39 @@ export class ApplicationExtensionRuntime {
     this.#serviceUnsubscribe();
     this.#publish();
     this.#listeners.clear();
+  }
+
+  async #invokeRegisteredService(
+    request: PiariumExtensionServiceInvocationRequest | unknown,
+    signal?: AbortSignal,
+  ): Promise<JsonValue> {
+    const parsed = parsePiariumExtensionServiceInvocationRequest(request);
+    if (parsed.providerId) return this.services.invoke(parsed, signal);
+    const services = this.services.getSnapshot();
+    const key = `${parsed.serviceId}@${parsed.version}`;
+    const legacySelection = services.selections[key];
+    if (legacySelection) return this.services.invoke({ ...parsed, providerId: legacySelection }, signal);
+    const candidates = services.providers.filter((provider) => (
+      provider.status === "active"
+      && provider.descriptor.id === parsed.serviceId
+      && provider.descriptor.version === parsed.version
+    ));
+    const routing = await this.routing.read();
+    const resolution = resolvePiariumExtensionServiceRouting({
+      candidates: candidates.map((provider) => ({
+        providerId: provider.providerId,
+        providerKey: provider.providerKey,
+      })),
+      document: routing.document,
+      serviceId: parsed.serviceId,
+      version: parsed.version,
+      ...(parsed.routing ? { context: parsed.routing } : {}),
+    });
+    if (resolution.status !== "resolved" || !resolution.providerId) {
+      const detail = resolution.diagnostics.map((diagnostic) => diagnostic.message).join("; ");
+      throw new Error(detail || `Host service provider is unavailable or ambiguous: ${key}`);
+    }
+    return this.services.invoke({ ...parsed, providerId: resolution.providerId }, signal);
   }
 
   #mutate<T>(operation: () => Promise<T>): Promise<T> {

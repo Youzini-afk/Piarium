@@ -14,4 +14,6 @@ source entrypoints are bundled by the application host with esbuild.
 
 The host serves verified artifact bytes through authenticated Runtime API operations. Public catalog
 responses never expose source specifiers or resolved filesystem paths, and asset responses never put
-credentials in module or resource URLs. Host entrypoint execution starts in Phase D.
+credentials in module or resource URLs. Brokered and explicitly trusted-native Host entrypoints use
+generation-scoped lifecycle ownership, versioned services, revisioned storage, candidate rollback,
+and persisted multi-scope service routing.

@@ -166,6 +166,10 @@ export const handleExtensionsBridgeMessage = async (
       return { data: await runtime.invokeService(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:service:select':
       return { data: await runtime.setServiceSelection(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:service:routing:upsert':
+      return { data: await runtime.upsertServiceRoutingRule(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:service:routing:remove':
+      return { data: await runtime.removeServiceRoutingRule(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:workbench:layout':
       return { data: await runtime.updateWorkbenchLayout(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:workbench:profile:select':

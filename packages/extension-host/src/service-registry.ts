@@ -38,6 +38,7 @@ interface ActiveProvider {
   onDrained: Array<() => void>;
   owner: HostServiceOwnerIdentity;
   providerId: string;
+  providerKey: string;
   status: "active" | "draining";
 }
 
@@ -89,6 +90,7 @@ export class HostServiceRegistry {
         extensionVersion: provider.owner.extensionVersion,
         generation: provider.owner.generation,
         providerId: provider.providerId,
+        providerKey: provider.providerKey,
         status: provider.status,
       }))
       .sort((left, right) => left.descriptor.id.localeCompare(right.descriptor.id)
@@ -203,6 +205,7 @@ export class HostServiceRegistry {
     provision: { descriptor: PiariumExtensionServiceProvision; handler: HostServiceHandler },
   ): ActiveProvider {
     const providerId = `${owner.extensionId}:${owner.entrypointId}:${owner.generation}:${serviceKey(provision.descriptor.id, provision.descriptor.version)}`;
+    const providerKey = `${owner.extensionId}:${owner.entrypointId}:${serviceKey(provision.descriptor.id, provision.descriptor.version)}`;
     return {
       descriptor: provision.descriptor,
       handler: provision.handler,
@@ -210,6 +213,7 @@ export class HostServiceRegistry {
       onDrained: [],
       owner: { ...owner },
       providerId,
+      providerKey,
       status: "active",
     };
   }

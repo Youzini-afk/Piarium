@@ -3,7 +3,9 @@ import type {
   PiariumExtensionCandidateCapabilityReviewRequest,
   PiariumExtensionCatalogSnapshot,
   PiariumExtensionHostStateSnapshot,
+  PiariumExtensionServiceRoutingContext,
 } from '@piarium/extension-contract';
+import { serviceRoutingRuleKey } from '@piarium/extension-contract';
 
 export interface PiariumExtensionCatalogStoreState {
   busyExtensionId: string | null;
@@ -147,6 +149,39 @@ export const reviewPiariumExtensionCandidateCapabilities = (
 ): Promise<void> => runMutation(request.extensionId, (catalog) => (
   extensionsApi().reviewCandidateCapabilities({ ...request, expectedRevision: catalog.revision })
 ));
+
+export const setPiariumExtensionServiceRoute = (
+  serviceId: string,
+  version: number,
+  scope: PiariumExtensionServiceRoutingContext,
+  providerKey: string | null,
+): Promise<void> => {
+  const operation = mutationQueue.then(async () => {
+    await startPiariumExtensionCatalog();
+    const current = state.snapshot;
+    if (!current) throw new Error('Piarium extension routing is unavailable');
+    const requestGeneration = generation;
+    const identity = serviceRoutingRuleKey({ scope, serviceId, version });
+    const existing = current.routing.document.rules.find((rule) => serviceRoutingRuleKey(rule) === identity);
+    if (providerKey === null) {
+      if (!existing) return;
+      await extensionsApi().removeServiceRoutingRule({
+        expectedRevision: current.routing.document.revision,
+        scope,
+        serviceId,
+        version,
+      });
+    } else {
+      await extensionsApi().upsertServiceRoutingRule({
+        expectedRevision: current.routing.document.revision,
+        rule: { allowFallback: false, providerKey, scope, serviceId, version },
+      });
+    }
+    if (requestGeneration === generation) await refreshPiariumExtensionCatalog();
+  });
+  mutationQueue = operation.catch(() => undefined);
+  return operation;
+};
 
 export const usePiariumExtensionCatalog = (): PiariumExtensionCatalogStoreState => {
   React.useEffect(() => {

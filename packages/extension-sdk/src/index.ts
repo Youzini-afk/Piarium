@@ -4,6 +4,7 @@ import type {
   JsonValue,
   PiariumExtensionAssetPayload,
   PiariumExtensionServiceProvision,
+  PiariumExtensionServiceRoutingContext,
   PiariumExtensionStaticContribution,
   PiariumExtensionStorageSnapshot,
 } from "@piarium/extension-contract";
@@ -102,6 +103,11 @@ export interface PiariumHostServiceClient {
   call(method: string, ...args: JsonValue[]): Promise<JsonValue>;
 }
 
+export interface PiariumHostServiceUseOptions {
+  providerId?: string;
+  routing?: PiariumExtensionServiceRoutingContext;
+}
+
 export type PiariumHostServiceHandler = Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
 
 export interface PiariumHostStorageClient {
@@ -114,7 +120,7 @@ export interface PiariumBrokeredHostContext {
   effect(disposer: () => void | Promise<void>): void;
   readonly services: {
     provide(descriptor: PiariumExtensionServiceProvision, handler: PiariumHostServiceHandler): void;
-    use(id: string, version: number, providerId?: string): PiariumHostServiceClient;
+    use(id: string, version: number, provider?: string | PiariumHostServiceUseOptions): PiariumHostServiceClient;
   };
   readonly signal: AbortSignal;
   readonly storage: PiariumHostStorageClient;

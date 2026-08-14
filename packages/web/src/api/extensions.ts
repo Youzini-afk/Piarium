@@ -5,6 +5,7 @@ import {
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
+  parsePiariumExtensionServiceRoutingSnapshot,
   parsePiariumWorkbenchProfileSnapshot,
   type PiariumExtensionActualState,
   type PiariumExtensionAssetRequest,
@@ -178,6 +179,12 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
   },
   setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
     await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/select', request)),
+  ),
+  upsertServiceRoutingRule: async (request) => parsePiariumExtensionServiceRoutingSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/routing', request, undefined, 'PUT')),
+  ),
+  removeServiceRoutingRule: async (request) => parsePiariumExtensionServiceRoutingSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/routing/remove', request)),
   ),
   updateWorkbenchLayout: async (request) => parsePiariumWorkbenchProfileSnapshot(
     await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/workbench/layout', request, undefined, 'PATCH')),

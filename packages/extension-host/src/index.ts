@@ -9,5 +9,6 @@ export * from "./package-sources.js";
 export * from "./package-manager.js";
 export * from "./native-host-transport.js";
 export * from "./service-registry.js";
+export * from "./service-routing-store.js";
 export * from "./storage-store.js";
 export * from "./workbench-profile-store.js";

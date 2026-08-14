@@ -5,6 +5,7 @@ import {
   parsePiariumExtensionCandidatePreparationResult,
   parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
+  parsePiariumExtensionServiceRoutingSnapshot,
   parsePiariumWorkbenchProfileSnapshot,
 } from '@piarium/extension-contract';
 import type { ExtensionsAPI } from '@piarium/ui/lib/api/types';
@@ -52,6 +53,12 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   ),
   setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
     await sendBridgeMessage('api:extensions:service:select', request),
+  ),
+  upsertServiceRoutingRule: async (request) => parsePiariumExtensionServiceRoutingSnapshot(
+    await sendBridgeMessage('api:extensions:service:routing:upsert', request),
+  ),
+  removeServiceRoutingRule: async (request) => parsePiariumExtensionServiceRoutingSnapshot(
+    await sendBridgeMessage('api:extensions:service:routing:remove', request),
   ),
   updateWorkbenchLayout: async (request) => parsePiariumWorkbenchProfileSnapshot(
     await sendBridgeMessage('api:extensions:workbench:layout', request),

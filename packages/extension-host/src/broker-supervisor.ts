@@ -103,6 +103,7 @@ export interface BrokeredHostSupervisorOptions {
   services: HostServiceRegistry;
   storage: ExtensionStorageStore;
   transportFactory?: BrokeredHostTransportFactory;
+  invokeService?(request: PiariumExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue>;
 }
 
 const serviceKey = (id: string, version: number): string => `${id}@${version}`;
@@ -269,6 +270,7 @@ export class BrokeredHostSupervisor {
   readonly #packages: ExtensionPackageManager;
   readonly #onStateChange: () => void;
   readonly #services: HostServiceRegistry;
+  readonly #invokeService: (request: PiariumExtensionServiceInvocationRequest | unknown, signal?: AbortSignal) => Promise<JsonValue>;
   readonly #staged = new Map<string, BrokeredHostInstance>();
   readonly #nativeRestartRequired = new Set<string>();
   readonly #storage: ExtensionStorageStore;
@@ -283,6 +285,7 @@ export class BrokeredHostSupervisor {
     this.#packages = options.packages;
     this.#onStateChange = options.onStateChange ?? (() => undefined);
     this.#services = options.services;
+    this.#invokeService = options.invokeService ?? ((request, signal) => this.#services.invoke(request, signal));
     this.#storage = options.storage;
     this.#transportFactory = options.transportFactory ?? ((transportOptions) => new ChildBrokeredHostTransport({
       brokerScript: this.#brokerScript,
@@ -787,6 +790,10 @@ export class BrokeredHostSupervisor {
     return `${owner.extensionId}:${owner.entrypointId}:${owner.generation}:${serviceKey(descriptor.id, descriptor.version)}`;
   }
 
+  #providerKey(owner: HostServiceOwnerIdentity, descriptor: PiariumExtensionServiceProvision): string {
+    return `${owner.extensionId}:${owner.entrypointId}:${serviceKey(descriptor.id, descriptor.version)}`;
+  }
+
   #candidatePreparation(instance: BrokeredHostInstance): PiariumExtensionCandidatePreparationResult {
     const providers = instance.provisions.map<PiariumExtensionServiceProviderSnapshot>((provision) => ({
       descriptor: { ...provision.descriptor },
@@ -795,6 +802,7 @@ export class BrokeredHostSupervisor {
       extensionVersion: instance.owner.extensionVersion,
       generation: instance.owner.generation,
       providerId: this.#providerId(instance.owner, provision.descriptor),
+      providerKey: this.#providerKey(instance.owner, provision.descriptor),
       status: "candidate",
     }));
     return {
@@ -936,7 +944,7 @@ export class BrokeredHostSupervisor {
       );
       return asJsonValue(session.snapshot);
     }
-    if (method === "service.invoke") return this.#services.invoke(params, signal);
+    if (method === "service.invoke") return this.#invokeService(params, signal);
     throw new Error(`Unknown Brokered Host child request: ${method}`);
   }
 

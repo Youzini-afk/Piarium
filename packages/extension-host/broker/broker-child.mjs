@@ -92,9 +92,19 @@ const handleParentRequest = async (message) => {
             stagedHandlers.set(key, handler);
             stagedProvisions.push(descriptor);
           },
-          use: (id, version, providerId) => ({
-            call: (method, ...args) => requestParent('service.invoke', { args, method, providerId, serviceId: id, version }),
-          }),
+          use: (id, version, provider) => {
+            const options = typeof provider === 'string' ? { providerId: provider } : (provider ?? {});
+            return {
+              call: (method, ...args) => requestParent('service.invoke', {
+                args,
+                method,
+                ...(options.providerId ? { providerId: options.providerId } : {}),
+                ...(options.routing ? { routing: options.routing } : {}),
+                serviceId: id,
+                version,
+              }),
+            };
+          },
         },
         signal: activationController.signal,
         storage: {

@@ -490,10 +490,10 @@ When a required service is withdrawn, consumers drain and deactivate before the 
 returns, enabled consumers activate again. Optional consumers receive a versioned availability
 change without being restarted unless their own manifest requests reconciliation.
 
-### 10.3 Selection and future orchestration
+### 10.3 Selection and orchestration
 
-Multiple providers are not forced into one global singleton. Selection policy can eventually bind a
-service by:
+Multiple providers are not forced into one global singleton. The application host persists stable
+provider keys separately from generation-bound runtime IDs and can bind a service by:
 
 - distribution default;
 - user or workspace profile;
@@ -504,9 +504,15 @@ service by:
 - provider/model;
 - invocation or workflow step.
 
-That routing layer is the future home for context, memory, compaction, recovery, or tool-service
+Rules are resolved from distribution through invocation scope. A rule may match several dimensions;
+equally specific conflicting rules are reported as ambiguous rather than resolved by package order.
+If a selected provider disappears, fallback to a less-specific rule occurs only when that rule opted
+into fallback. The rule remains persisted so reinstalling or re-enabling the provider restores the
+selection without rewriting plugin-owned configuration.
+
+This routing layer is the home for later context, memory, compaction, recovery, or tool-service
 orchestration. Piarium extensions advertise capabilities and consume the selected service; they do
-not inspect one another and invent coexistence bans.
+not inspect one another, mutate Pi package configuration, or invent coexistence bans.
 
 ## 11. Contribution runtime
 
@@ -1122,6 +1128,23 @@ start.
 
 Acceptance: different sessions/agents can resolve different implementations; provider loss degrades
 only affected consumers and does not mutate plugin-native configuration.
+
+Implementation status (2026-08-14): complete. Host service providers now publish a stable
+`providerKey` alongside their generation-bound `providerId`. A revisioned service-routing document is
+stored below `PIARIUM_DATA_DIR` with distribution, profile, user, workspace, project, runtime, session,
+agent, model-provider, model, and invocation dimensions. Resolution is deterministic, reports equal-
+specificity conflicts, preserves unavailable selections, and permits lower-scope fallback only when
+the matching rule explicitly allows it. Missing or malformed storage preserves the last valid state
+instead of becoming an authoritative empty policy.
+
+The same authenticated mutations and host-state projection are available to Web, Electron-hosted
+Web, and VS Code. Brokered Host extensions can pass routing context through the public SDK; the
+application host resolves the current generation immediately before each real service invocation.
+The Extensions page exposes user and current-workspace selection for services with several providers,
+while the public contract supports the finer session/agent/model/invocation scopes needed by later
+orchestration. Acceptance coverage activates two independently brokered multi-provider extensions,
+routes separate sessions to each implementation, withdraws one provider, and verifies that the other
+session continues without any Pi package or plugin-native configuration mutation.
 
 ### Phase I — Ecosystem tooling and distribution
 

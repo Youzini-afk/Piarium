@@ -3,6 +3,7 @@ import type {
   PiariumExtensionActualStatus,
   PiariumExtensionCatalogEntry,
   PiariumExtensionCapabilityReference,
+  PiariumExtensionServiceProviderSnapshot,
 } from '@piarium/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -14,12 +15,17 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import {
   refreshPiariumExtensionCatalog,
   reviewPiariumExtensionCandidateCapabilities,
+  setPiariumExtensionServiceRoute,
   setPiariumExtensionEnabled,
   usePiariumExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { resolvePiariumWorkbenchLayout } from '@piarium/extension-contract';
+import {
+  resolvePiariumExtensionServiceRouting,
+  resolvePiariumWorkbenchLayout,
+  serviceRoutingScopeKey,
+} from '@piarium/extension-contract';
 import {
   selectActiveWorkbenchProfile,
   setWorkbenchReplacementSelection,
@@ -139,6 +145,140 @@ const WorkbenchProfileSection: React.FC = () => {
                   {candidates.map((candidate) => (
                     <SelectItem key={candidate.descriptor.id} value={candidate.descriptor.id}>
                       {candidate.descriptor.title ?? candidate.descriptor.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
+};
+
+const serviceName = (serviceId: string): string => {
+  const tail = serviceId.split('.').filter(Boolean).at(-1) ?? serviceId;
+  return tail.replace(/[-_]+/g, ' ').replace(/\b\w/g, (value) => value.toUpperCase());
+};
+
+const ServiceRoutingSection: React.FC = () => {
+  const { t } = useI18n();
+  const catalog = usePiariumExtensionCatalog();
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const [scopeKind, setScopeKind] = React.useState<'user' | 'workspace'>(currentDirectory ? 'workspace' : 'user');
+  const [busyKey, setBusyKey] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!currentDirectory && scopeKind === 'workspace') setScopeKind('user');
+  }, [currentDirectory, scopeKind]);
+  const snapshot = catalog.snapshot;
+  if (!snapshot?.routing.authoritative) return null;
+
+  const activeProviders = snapshot.services.providers.filter((provider) => provider.status === 'active');
+  const providerGroups = new Map<string, PiariumExtensionServiceProviderSnapshot[]>();
+  for (const provider of activeProviders) {
+    const key = `${provider.descriptor.id}@${provider.descriptor.version}`;
+    providerGroups.set(key, [...(providerGroups.get(key) ?? []), provider]);
+  }
+  const serviceKeys = new Set([
+    ...[...providerGroups].filter(([, providers]) => providers.length > 1).map(([key]) => key),
+    ...snapshot.routing.document.rules.map((rule) => `${rule.serviceId}@${rule.version}`),
+  ]);
+  if (serviceKeys.size === 0) return null;
+
+  const editableScope = scopeKind === 'workspace' && currentDirectory
+    ? { workspaceId: currentDirectory }
+    : { userId: 'default' };
+  const routingContext = currentDirectory
+    ? { userId: 'default', workspaceId: currentDirectory }
+    : { userId: 'default' };
+  const editableScopeKey = serviceRoutingScopeKey(editableScope);
+  const extensionNames = new Map(snapshot.catalog.extensions.map((entry) => [
+    entry.manifest.id,
+    entry.manifest.displayName ?? entry.manifest.id,
+  ]));
+
+  const selectProvider = async (
+    serviceId: string,
+    version: number,
+    providerKey: string | null,
+  ): Promise<void> => {
+    const key = `${serviceId}@${version}`;
+    setBusyKey(key);
+    try {
+      await setPiariumExtensionServiceRoute(serviceId, version, editableScope, providerKey);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyKey((current) => current === key ? null : current);
+    }
+  };
+
+  return (
+    <SettingsSection title={t('settings.piarium.extensions.routing.title')} settingsItem="extensions.routing">
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <Select
+            value={scopeKind}
+            onValueChange={(value) => setScopeKind(value === 'workspace' ? 'workspace' : 'user')}
+          >
+            <SelectTrigger className="w-full @xl:w-56"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="user">{t('settings.piarium.extensions.routing.scope.user')}</SelectItem>
+              <SelectItem value="workspace" disabled={!currentDirectory}>
+                {t('settings.piarium.extensions.routing.scope.workspace')}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {[...serviceKeys].sort().map((key) => {
+          const separator = key.lastIndexOf('@');
+          const id = key.slice(0, separator);
+          const version = Number(key.slice(separator + 1));
+          const providers = providerGroups.get(key) ?? [];
+          const exactRule = snapshot.routing.document.rules.find((rule) => (
+            rule.serviceId === id
+            && rule.version === version
+            && serviceRoutingScopeKey(rule.scope) === editableScopeKey
+          ));
+          const selected = exactRule?.providerKey ?? '__automatic__';
+          const selectedMissing = selected !== '__automatic__'
+            && !providers.some((provider) => provider.providerKey === selected);
+          const resolution = resolvePiariumExtensionServiceRouting({
+            candidates: providers.map((provider) => ({ providerId: provider.providerId, providerKey: provider.providerKey })),
+            context: routingContext,
+            document: snapshot.routing.document,
+            serviceId: id,
+            version,
+          });
+          return (
+            <div key={key} className="grid gap-2 rounded-lg border border-border/60 px-3 py-3 @xl:grid-cols-[minmax(0,1fr)_minmax(14rem,0.8fr)] @xl:items-center">
+              <div className="min-w-0">
+                <div className="typography-ui-label text-foreground">{serviceName(id)}</div>
+                <div className={resolution.status === 'resolved'
+                  ? 'typography-micro text-muted-foreground'
+                  : 'typography-micro text-[var(--status-warning)]'}>
+                  {resolution.status === 'resolved'
+                    ? t('settings.piarium.extensions.routing.status.ready')
+                    : resolution.status === 'ambiguous'
+                      ? t('settings.piarium.extensions.routing.status.choose')
+                      : t('settings.piarium.extensions.routing.status.unavailable')}
+                </div>
+              </div>
+              <Select
+                value={selected}
+                disabled={busyKey === key}
+                onValueChange={(value) => { void selectProvider(id, version, value === '__automatic__' ? null : value); }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__automatic__">{t('settings.piarium.extensions.routing.automatic')}</SelectItem>
+                  {selectedMissing ? (
+                    <SelectItem value={selected}>{t('settings.piarium.extensions.routing.missing')}</SelectItem>
+                  ) : null}
+                  {providers.map((provider) => (
+                    <SelectItem key={provider.providerKey} value={provider.providerKey}>
+                      {extensionNames.get(provider.extensionId) ?? provider.extensionId}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -299,6 +439,7 @@ export const ExtensionsPage: React.FC = () => {
           </div>
         ) : null}
       </SettingsSection>
+      <ServiceRoutingSection />
       <WorkbenchProfileSection />
     </SettingsPageLayout>
   );

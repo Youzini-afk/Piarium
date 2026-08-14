@@ -74,6 +74,13 @@ const hostState = (
 ): PiariumExtensionHostStateSnapshot => ({
   catalog,
   revision,
+  routing: {
+    authoritative: true,
+    diagnostics: [],
+    document: { revision: 0, rules: [], schemaVersion: 1, updatedAt: '1970-01-01T00:00:00.000Z' },
+    hostId,
+    storageState: 'missing',
+  },
   services: { hostId, providers, revision, selections: {} },
   workbench: {
     authoritative: true,
@@ -304,6 +311,7 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
     extensionVersion: "1.0.0",
     generation: 1,
     providerId: "dev.example.provider:host:1:dev.example.host-service@1",
+    providerKey: "dev.example.provider:host:dev.example.host-service@1",
     status: "active" as const,
   }];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });

@@ -18,6 +18,7 @@ test("service replacement exposes the new generation while the old invocation dr
     descriptor: { id: "dev.example.echo", version: 1 },
     handler: async () => { await blocked; return "old"; },
   }]);
+  const firstProviderKey = services.getSnapshot().providers[0]?.providerKey;
   const oldInvocation = services.invoke({ args: [], method: "read", serviceId: "dev.example.echo", version: 1 });
   const replacement = services.prepareOwnerReplacement(owner("dev.example.provider", 2), [{
     descriptor: { id: "dev.example.echo", version: 1 },
@@ -25,6 +26,7 @@ test("service replacement exposes the new generation while the old invocation dr
   }]);
   replacement.commit();
   assert.deepEqual(services.getSnapshot().providers.map((provider) => provider.status).sort(), ["active", "draining"]);
+  assert.deepEqual(new Set(services.getSnapshot().providers.map((provider) => provider.providerKey)), new Set([firstProviderKey]));
   assert.equal(await services.invoke({ args: [], method: "read", serviceId: "dev.example.echo", version: 1 }), "new");
   let finalized = false;
   const finalizing = replacement.finalize().then(() => { finalized = true; });
