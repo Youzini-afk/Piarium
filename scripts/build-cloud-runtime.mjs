@@ -22,6 +22,7 @@ const canonicalLockPath = path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock
 export const CLOUD_RUNTIME_SCHEMA_VERSION = 1;
 export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'extension-contract',
+  'extension-builtins',
   'extension-host',
   'protocol',
   'pi-host',
@@ -59,6 +60,10 @@ const cloudIdentityTextExtensions = new Set([
 
 const packageFiles = Object.freeze({
   'extension-contract': {
+    required: ['package.json', 'dist'],
+    optional: [],
+  },
+  'extension-builtins': {
     required: ['package.json', 'dist'],
     optional: [],
   },

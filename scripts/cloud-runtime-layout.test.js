@@ -35,9 +35,16 @@ const createFixture = () => {
 
   const manifests = {
     'extension-contract': { name: '@piarium/extension-contract', dependencies: {} },
+    'extension-builtins': {
+      name: '@piarium/extension-builtins',
+      dependencies: { '@piarium/extension-contract': '0.1.0' },
+    },
     'extension-host': {
       name: '@piarium/extension-host',
-      dependencies: { '@piarium/extension-contract': '0.1.0' },
+      dependencies: {
+        '@piarium/extension-builtins': '0.1.0',
+        '@piarium/extension-contract': '0.1.0',
+      },
     },
     protocol: { name: '@piarium/protocol', dependencies: {} },
     'pi-host': { name: '@piarium/pi-host', dependencies: { '@piarium/protocol': '0.1.0' } },
@@ -83,6 +90,7 @@ describe('Piarium cloud runtime layout', () => {
     expect(fs.existsSync(lockPath)).toBe(true);
     const lockText = fs.readFileSync(lockPath, 'utf8');
     expect(lockText).toContain('"name": "piarium-cloud-runtime"');
+    expect(lockText).toContain('"packages/extension-builtins"');
     expect(lockText).toContain('"packages/extension-contract"');
     expect(lockText).toContain('"packages/extension-host"');
     expect(lockText).toContain('"packages/runtime-broker"');
@@ -124,6 +132,7 @@ describe('Piarium cloud runtime layout', () => {
 
     expect(CLOUD_RUNTIME_PACKAGE_DIRS).toEqual([
       'extension-contract',
+      'extension-builtins',
       'extension-host',
       'protocol',
       'pi-host',
