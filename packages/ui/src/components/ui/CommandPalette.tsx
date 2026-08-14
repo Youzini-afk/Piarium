@@ -31,13 +31,14 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { SessionSummary } from '@piarium/protocol';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
-import { SETTINGS_PAGE_METADATA, getSettingsNavIcon, type SettingsRuntimeContext } from '@/lib/settings/metadata';
+import { getSettingsNavIcon, type SettingsRuntimeContext } from '@/lib/settings/metadata';
+import { useSettingsPageRegistrations } from '@/lib/settings/surface-registry';
+import { useWorkbenchCommandRegistrations } from '@/lib/commands/surface-command-registry';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
 import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
 import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildCommandPaletteFileSearchKey, scoreCommandPaletteFiles } from './commandPaletteFilesState';
 import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
@@ -45,7 +46,6 @@ import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
-import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
 import {
   refreshMcpSettingsAvailability,
@@ -85,10 +85,6 @@ export const CommandPalette: React.FC = () => {
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
-  const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const openContextOverview = useUIStore((s) => s.openContextOverview);
-  const openContextSurface = useUIStore((s) => s.openContextSurface);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
 
@@ -114,6 +110,8 @@ export const CommandPalette: React.FC = () => {
   const mcpAvailability = useMcpSettingsAvailabilityState();
   const mcpInstalled = mcpAvailability.targetKey === mcpTargetKey
     && mcpAvailability.installed === true;
+  const settingsPageRegistrations = useSettingsPageRegistrations();
+  const workbenchCommandRegistrations = useWorkbenchCommandRegistrations();
 
   React.useEffect(() => {
     if (!isCommandPaletteOpen) return;
@@ -181,106 +179,29 @@ export const CommandPalette: React.FC = () => {
   // Commands
   // ---------------------------------------------------------------------------
   const commands = React.useMemo<CommandEntry[]>(() => {
-    const list: CommandEntry[] = [
-      {
-        id: 'new-session',
-        title: t('commandPalette.item.newSession'),
-        icon: <Icon name="add" className="mr-2 h-4 w-4" />,
-        shortcutId: 'new_chat',
-        searchText: t('commandPalette.item.newSession'),
-        onSelect: run(async () => {
-          try {
-            await startPiSessionDraftFromNavigation();
-          } catch (error) {
-            toast.error('Failed to create Pi session', {
-              description: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }),
-      },
-      {
-        id: 'new-worktree',
-        title: t('commandPalette.item.newWorktreeDraft'),
-        icon: <Icon name="git-branch" className="mr-2 h-4 w-4" />,
-        shortcutId: 'new_chat_worktree',
-        searchText: t('commandPalette.item.newWorktreeDraft'),
-        onSelect: run(async () => {
-          try {
-            await createPiWorktreeSession();
-          } catch (error) {
-            toast.error('Failed to create Pi worktree session', {
-              description: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }),
-      },
-      {
-        id: 'add-project',
-        title: t('commandPalette.item.addProject'),
-        icon: <Icon name="folder-add" className="mr-2 h-4 w-4" />,
-        searchText: t('commandPalette.item.addProject'),
-        onSelect: run(() => {
-          workspaceEvents.requestDirectoryDialog();
-        }),
-      },
-      {
-        id: 'toggle-sidebar',
-        title: isMobile
-          ? t('commandPalette.item.showSessionSwitcher')
-          : t('commandPalette.item.toggleSidebar'),
-        icon: <Icon name="layout-left" className="mr-2 h-4 w-4" />,
-        shortcutId: 'toggle_sidebar',
-        searchText: isMobile
-          ? t('commandPalette.item.showSessionSwitcher')
-          : t('commandPalette.item.toggleSidebar'),
-        onSelect: run(() => {
-          if (isMobile) {
-            const { isSessionSwitcherOpen } = useUIStore.getState();
-            setSessionSwitcherOpen(!isSessionSwitcherOpen);
-          } else {
-            toggleSidebar();
-          }
-        }),
-      },
-      {
-        id: 'toggle-terminal',
-        title: t('commandPalette.item.toggleTerminal'),
-        icon: <Icon name="terminal-box" className="mr-2 h-4 w-4" />,
-        shortcutId: 'toggle_terminal',
-        searchText: t('commandPalette.item.toggleTerminal'),
-        onSelect: run(() => {
-          if (currentDirectory) openContextSurface(currentDirectory, 'terminal');
-        }),
-      },
-      {
-        id: 'context-usage',
-        title: t('commandPalette.item.showContextUsage'),
-        icon: <Icon name="pie-chart" className="mr-2 h-4 w-4" />,
-        searchText: t('commandPalette.item.showContextUsage'),
-        onSelect: run(() => {
-          if (currentDirectory) openContextOverview(currentDirectory);
-        }),
-      },
-      {
-        id: 'open-settings',
-        title: t('commandPalette.item.openSettings'),
-        icon: <Icon name="settings-3" className="mr-2 h-4 w-4" />,
-        shortcutId: 'open_settings',
-        searchText: t('commandPalette.item.openSettings'),
-        onSelect: run(() => setSettingsDialogOpen(true)),
-      },
-    ];
-    return list;
+    const executionContext = { currentDirectory, isMobile };
+    return workbenchCommandRegistrations
+      .filter((registration) => registration.implementation.isAvailable?.(executionContext) ?? true)
+      .map((registration) => {
+        const titleKey = isMobile && registration.meta.mobileTitleKey
+          ? registration.meta.mobileTitleKey
+          : registration.meta.titleKey;
+        const title = t(titleKey);
+        return {
+          id: registration.meta.commandId,
+          title,
+          icon: <Icon name={registration.meta.icon} className="mr-2 h-4 w-4" />,
+          ...(registration.meta.shortcutId ? { shortcutId: registration.meta.shortcutId } : {}),
+          searchText: `${title} ${registration.meta.keywords.join(' ')}`,
+          onSelect: run(() => registration.implementation.execute(executionContext)),
+        } satisfies CommandEntry;
+      });
   }, [
-    t,
-    run,
-    isMobile,
-    setSessionSwitcherOpen,
-    toggleSidebar,
-    openContextSurface,
     currentDirectory,
-    openContextOverview,
-    setSettingsDialogOpen,
+    isMobile,
+    run,
+    t,
+    workbenchCommandRegistrations,
   ]);
 
   // ---------------------------------------------------------------------------
@@ -298,26 +219,28 @@ export const CommandPalette: React.FC = () => {
   }, [isMobile, mcpInstalled]);
 
   const settingsEntries = React.useMemo<CommandEntry[]>(() => {
-    return SETTINGS_PAGE_METADATA
+    return settingsPageRegistrations
+      .map((registration) => registration.meta)
       .filter((p) => p.slug !== 'home')
       .filter((p) => (p.isAvailable ? p.isAvailable(settingsRuntimeCtx) : true))
       .map((page) => {
         const iconName = getSettingsNavIcon(page.slug) ?? 'settings-3';
         const keywords = (page.keywords ?? []).join(' ');
+        const title = t(page.titleKey);
         return {
           id: `settings:${page.slug}`,
-          title: page.title,
-          icon: page.slug === 'mcp'
+          title,
+          icon: page.icon === 'mcp'
             ? <McpIcon className="mr-2 h-4 w-4" />
             : <Icon name={iconName} className="mr-2 h-4 w-4" />,
-          searchText: `${page.title} ${page.group} ${keywords}`,
+          searchText: `${title} ${page.group} ${keywords}`,
           onSelect: run(() => {
             setSettingsPage(page.slug);
             setSettingsDialogOpen(true);
           }),
         } satisfies CommandEntry;
       });
-  }, [settingsRuntimeCtx, run, setSettingsPage, setSettingsDialogOpen]);
+  }, [settingsPageRegistrations, settingsRuntimeCtx, run, setSettingsPage, setSettingsDialogOpen, t]);
 
   // ---------------------------------------------------------------------------
   // Sessions

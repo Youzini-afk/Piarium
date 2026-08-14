@@ -277,6 +277,15 @@ catalog rather than the selected Pi Runtime through its Runtime API, and `/exten
 remains usable without the main renderer. This slice stores desired and reported actual state but
 deliberately executes no third-party code.
 
+The second slice is implemented by `@piarium/extension-surface` and the shared UI Surface Registry.
+Activations stage owner-scoped contributions and services before one atomic publication; a failed or
+superseded candidate leaves the prior generation active, and deactivation withdraws visible records
+before asynchronous cleanup. Retained layout references, replacement selection, ordering, and
+per-realm actual state live in the registry. Settings pages/sidebars/search and primary Command
+Palette commands are now statically linked built-in extensions using that same lifecycle rather than
+hard-coded render switches. This proves in-place enable/disable but still does not load external
+Surface artifacts; managed asset loading belongs to the next platform slice.
+
 The target platform makes built-in pages and workflows replaceable above a narrow recovery kernel,
 supports declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and
 defines truthful dynamic-disable guarantees for each mode. Its full target architecture and phased

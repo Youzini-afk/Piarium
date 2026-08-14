@@ -124,6 +124,13 @@
         "@piarium/extension-contract": "0.1.0",
       },
     },
+    "packages/extension-surface": {
+      "name": "@piarium/extension-surface",
+      "version": "0.1.0",
+      "dependencies": {
+        "@piarium/extension-contract": "0.1.0",
+      },
+    },
     "packages/mobile": {
       "name": "@piarium/mobile",
       "version": "0.1.0",
@@ -219,6 +226,7 @@
         "@dnd-kit/utilities": "^3.2.2",
         "@lezer/highlight": "^1.2.3",
         "@piarium/extension-contract": "workspace:*",
+        "@piarium/extension-surface": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-client": "workspace:*",
         "@pierre/diffs": "1.3.0-beta.6",
@@ -1211,6 +1219,8 @@
     "@piarium/extension-contract": ["@piarium/extension-contract@workspace:packages/extension-contract"],
 
     "@piarium/extension-host": ["@piarium/extension-host@workspace:packages/extension-host"],
+
+    "@piarium/extension-surface": ["@piarium/extension-surface@workspace:packages/extension-surface"],
 
     "@piarium/mobile": ["@piarium/mobile@workspace:packages/mobile"],
 

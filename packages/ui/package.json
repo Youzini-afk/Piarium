@@ -45,6 +45,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@lezer/highlight": "^1.2.3",
     "@piarium/extension-contract": "workspace:*",
+    "@piarium/extension-surface": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-client": "workspace:*",
     "@pierre/diffs": "1.3.0-beta.6",

@@ -6,34 +6,6 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { McpPage } from '@/components/sections/mcp/McpPage';
-import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
-import { AgentsPage } from '@/components/sections/agents/AgentsPage';
-import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
-import { FleetPage } from '@/components/sections/fleet';
-import { CommandsPage } from '@/components/sections/commands/CommandsPage';
-import { PromptsSidebar } from '@/components/sections/prompts/PromptsSidebar';
-import { PromptsPage } from '@/components/sections/prompts/PromptsPage';
-import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
-import { SkillsPage } from '@/components/sections/skills/SkillsPage';
-import { PluginsPage } from '@/components/sections/plugins';
-import { PluginSettingsPage, PluginSettingsSidebar } from '@/components/sections/plugin-settings';
-import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
-import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
-import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
-import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
-import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
-import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
-import { UsagePage } from '@/components/sections/usage/UsagePage';
-import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
-import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
-import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
-import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
-import { GitPage } from '@/components/sections/git-identities/GitPage';
-import type { OpenChamberSection } from '@/components/sections/openchamber/types';
-import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
-import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
-import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
   SETTINGS_SECTION_TITLE_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -44,7 +16,6 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
 import {
-  SETTINGS_PAGE_METADATA,
   getSettingsNavIcon,
   getSettingsPageMeta,
   resolveSettingsSlug,
@@ -52,6 +23,7 @@ import {
   type SettingsRuntimeContext,
   type SettingsPageMeta,
 } from '@/lib/settings/metadata';
+import { useSettingsPageRegistrations } from '@/lib/settings/surface-registry';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
 import {
@@ -75,37 +47,6 @@ interface SettingsViewProps {
   visiblePageSlugs?: SettingsPageSlug[];
   initialMobileStage?: MobileStage;
 }
-
-const pageOrder: SettingsPageSlug[] = [
-  // Piarium
-  'general',
-  'appearance',
-  'chat',
-  'notifications',
-  'sessions',
-  'shortcuts',
-  'voice',
-  'usage',
-  'about',
-  // 'projects' group — Workspace
-  'projects',
-  'remote-instances',
-  'tunnel',
-  'git',
-  // Pi runtime
-  'providers',
-  'agents',
-  'fleet',
-  'commands',
-  'prompts',
-  'skills',
-  'mcp',
-  'plugins',
-  'plugin-settings',
-  // 'content' group — Library
-  'magic-prompts',
-  'snippets',
-];
 
 const NAV_GROUP_ORDER = ['general', 'projects', 'pi', 'content'] as const;
 
@@ -147,6 +88,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const mcpAvailability = useMcpSettingsAvailabilityState();
   const mcpInstalled = mcpAvailability.targetKey === mcpTargetKey
     && mcpAvailability.installed === true;
+  const settingsPageRegistrations = useSettingsPageRegistrations();
 
   React.useEffect(() => {
     void refreshMcpSettingsAvailability(runtimeTarget, mcpTargetKey);
@@ -216,20 +158,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const visiblePages = React.useMemo(() => {
     const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
-    return SETTINGS_PAGE_METADATA
+    return settingsPageRegistrations
+      .map((registration) => registration.meta)
       .filter((page) => page.slug !== 'home')
       .filter((page) => !allowedPages || allowedPages.has(page.slug))
       .filter((page) => isPageAvailable(page, runtimeCtx))
-      .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
-      .filter((page) => !(isMobile && page.slug === 'shortcuts'));
-  }, [runtimeCtx, isMobile, visiblePageSlugs]);
-
-  const sortedFilteredPages = React.useMemo(() => {
-    const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
-    return visiblePages
-      .slice()
-      .sort((a, b) => (rank.get(a.slug) ?? 999) - (rank.get(b.slug) ?? 999));
-  }, [visiblePages]);
+  }, [runtimeCtx, settingsPageRegistrations, visiblePageSlugs]);
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
 
@@ -259,77 +193,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [isMobile, setSettingsPage]);
 
   const activePageMeta = React.useMemo(() => {
-    return getSettingsPageMeta(settingsSlug);
-  }, [settingsSlug]);
+    return settingsPageRegistrations.find((registration) => registration.meta.slug === settingsSlug)?.meta ?? null;
+  }, [settingsPageRegistrations, settingsSlug]);
 
   // Nav is always open (collapsed state removed)
 
-  const openChamberSectionBySlug: Partial<Record<SettingsPageSlug, OpenChamberSection>> = React.useMemo(() => ({
-    general: 'general',
-    appearance: 'visual',
-    chat: 'chat',
-    shortcuts: 'shortcuts',
-    sessions: 'sessions',
-    notifications: 'notifications',
-    voice: 'voice',
-    tunnel: 'tunnel',
-  }), []);
-
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
-    switch (slug) {
-      case 'general':
-        return t('settings.page.general.title');
-      case 'projects':
-        return t('settings.page.projects.title');
-      case 'remote-instances':
-        return t('settings.page.remoteInstances.title');
-      case 'providers':
-        return t('settings.page.providers.title');
-      case 'agents':
-        return t('settings.page.agents.title');
-      case 'fleet':
-        return t('settings.page.fleet.title');
-      case 'commands':
-        return t('settings.page.commands.title');
-      case 'prompts':
-        return t('settings.page.prompts.title');
-      case 'skills':
-        return t('settings.page.skills.title');
-      case 'usage':
-        return t('settings.page.usage.title');
-      case 'mcp':
-        return t('settings.page.mcp.title');
-      case 'plugins':
-        return t('settings.page.plugins.title');
-      case 'plugin-settings':
-        return t('settings.page.pluginSettings.title');
-      case 'git':
-        return t('settings.page.git.title');
-      case 'appearance':
-        return t('settings.page.appearance.title');
-      case 'chat':
-        return t('settings.page.chat.title');
-      case 'shortcuts':
-        return t('settings.page.shortcuts.title');
-      case 'sessions':
-        return t('settings.page.sessions.title');
-      case 'magic-prompts':
-        return t('settings.page.magicPrompts.title');
-      case 'snippets':
-        return t('settings.page.snippets.title');
-      case 'notifications':
-        return t('settings.page.notifications.title');
-      case 'voice':
-        return t('settings.page.voice.title');
-      case 'tunnel':
-        return t('settings.page.tunnel.title');
-      case 'about':
-        return t('settings.page.about.title');
-      case 'home':
-      default:
-        return t('settings.view.home.title');
-    }
-  }, [t]);
+    const meta = settingsPageRegistrations.find((registration) => registration.meta.slug === slug)?.meta;
+    return meta ? t(meta.titleKey) : t('settings.view.home.title');
+  }, [settingsPageRegistrations, t]);
 
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
@@ -395,7 +267,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const openSearchResult = React.useCallback((result: SettingsSearchResult) => {
     const targetId = prepareSettingsSearchTarget(result);
-    setPendingSearchItemId(targetId);
+    setPendingSearchItemId(result.focusTargetId === null ? null : targetId);
     openPage(result.page);
     if (isMobile) {
       setMobileStage('page-content');
@@ -485,91 +357,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [t]);
 
   const renderPageSidebar = React.useCallback((slug: SettingsPageSlug, opts: { onItemSelect?: () => void }) => {
-    switch (slug) {
-      case 'projects':
-        return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'providers':
-        return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
-      case 'agents':
-        return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'plugin-settings':
-        return <PluginSettingsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'prompts':
-        return <PromptsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'skills':
-        return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'mcp':
-        return <McpSidebar onItemSelect={opts.onItemSelect} />;
-      case 'usage':
-        return <UsageSidebar onItemSelect={opts.onItemSelect} />;
-      case 'magic-prompts':
-        return <MagicPromptsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'snippets':
-        return <SnippetsSidebar onItemSelect={opts.onItemSelect} />;
-      default:
-        return null;
-    }
-  }, []);
+    const registration = settingsPageRegistrations.find((candidate) => candidate.meta.slug === slug);
+    return registration?.implementation.renderSidebar?.(opts) ?? null;
+  }, [settingsPageRegistrations]);
 
   const renderPageContent = React.useCallback((slug: SettingsPageSlug) => {
-    const meta = getSettingsPageMeta(slug);
-    if (meta && !isPageAvailable(meta, runtimeCtx)) {
+    const registration = settingsPageRegistrations.find((candidate) => candidate.meta.slug === slug);
+    if (!registration) return null;
+    if (!isPageAvailable(registration.meta, runtimeCtx)) {
       return renderUnavailable();
     }
-
-    switch (slug) {
-      case 'projects':
-        return <ProjectsPage />;
-      case 'remote-instances':
-        return <RemoteInstancesPage />;
-      case 'mcp':
-        return <McpPage />;
-      case 'plugins':
-        return <PluginsPage />;
-      case 'plugin-settings':
-        return <PluginSettingsPage />;
-      case 'providers':
-        return <ProvidersPage />;
-      case 'agents':
-        return <AgentsPage />;
-      case 'fleet':
-        return <FleetPage />;
-      case 'commands':
-        return <CommandsPage />;
-      case 'prompts':
-        return <PromptsPage />;
-      case 'skills':
-        return <SkillsPage />;
-      case 'usage':
-        return <UsagePage />;
-      case 'about':
-        return (
-          <SettingsPageLayout title={t('settings.page.about.title')} showSaveStatus={false}>
-            <AboutSettings />
-          </SettingsPageLayout>
-        );
-      case 'magic-prompts':
-        return <MagicPromptsPage />;
-      case 'snippets':
-        return <SnippetsPage />;
-      case 'git':
-        return <GitPage />;
-      case 'general':
-      case 'appearance':
-      case 'chat':
-      case 'shortcuts':
-      case 'sessions':
-      case 'notifications':
-      case 'voice':
-      case 'tunnel': {
-        const section = openChamberSectionBySlug[slug] ?? 'visual';
-        return <OpenChamberPage section={section} />;
-      }
-      case 'home':
-      default:
-        return null;
-    }
-  }, [openChamberSectionBySlug, renderUnavailable, runtimeCtx, t]);
+    return registration.implementation.renderContent();
+  }, [renderUnavailable, runtimeCtx, settingsPageRegistrations]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
@@ -691,8 +490,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 </div>
               )
             ) : (() => {
-              const pagesByGroup = new Map<string, typeof sortedFilteredPages>();
-              for (const page of sortedFilteredPages) {
+              const pagesByGroup = new Map<string, typeof visiblePages>();
+              for (const page of visiblePages) {
                 const group = page.group;
                 const existing = pagesByGroup.get(group);
                 if (existing) {
@@ -719,7 +518,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   {pages.map((page) => {
                     const selected = settingsSlug === page.slug;
                     const iconName = getSettingsNavIcon(page.slug);
-                    if (!iconName && page.slug !== 'mcp') return null;
+                    if (!iconName && page.icon !== 'mcp') return null;
 
                     return (
                       <Tooltip key={page.slug}>
@@ -735,14 +534,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                                 : 'text-foreground hover:bg-interactive-hover'
                             )}
                           >
-                            {page.slug === 'mcp'
+                            {page.icon === 'mcp'
                               ? <McpIcon className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />
                               : <Icon name={iconName!} className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />}
                             <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                               <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                              {page.slug === 'tunnel' && (
+                              {page.badgeKey && (
                                 <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
-                                  {t('settings.view.badge.beta')}
+                                  {t(page.badgeKey)}
                                 </span>
                               )}
                             </span>

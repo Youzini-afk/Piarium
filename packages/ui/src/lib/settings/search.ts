@@ -1,6 +1,6 @@
 import type { I18nKey } from '@/lib/i18n/store';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
-import { getSettingsPageMeta } from './metadata';
+import { getSettingsPageMeta, getSettingsPageMetadata } from './metadata';
 
 interface SettingsSearchItem {
   id: string;
@@ -15,6 +15,7 @@ export interface SettingsSearchResult extends SettingsSearchItem {
   title: string;
   description: string | null;
   pageTitle: string;
+  focusTargetId?: string | null;
 }
 
 export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
@@ -884,7 +885,30 @@ export function buildSettingsSearchResults({
   const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
   const terms = normalizedQuery.split(/\s+/).filter(Boolean);
 
-  return SETTINGS_SEARCH_ITEMS.flatMap((item) => {
+  const pageResults = getSettingsPageMetadata().flatMap((page): SettingsSearchResult[] => {
+    if (page.slug === 'home' || (allowedPages && !allowedPages.has(page.slug))) return [];
+    if (page.isAvailable && !page.isAvailable(runtimeCtx)) return [];
+    const title = getPageTitle(page.slug);
+    const haystack = normalizeSearchText([
+      title,
+      page.title,
+      page.group,
+      ...(page.keywords ?? []),
+    ].join(' '));
+    if (!terms.every((term) => haystack.includes(term))) return [];
+    return [{
+      id: `settings-page:${page.slug}`,
+      page: page.slug,
+      titleKey: page.titleKey,
+      keywords: page.keywords,
+      title,
+      description: null,
+      pageTitle: title,
+      focusTargetId: null,
+    }];
+  });
+
+  const itemResults = SETTINGS_SEARCH_ITEMS.flatMap((item) => {
     if (allowedPages && !allowedPages.has(item.page)) {
       return [];
     }
@@ -914,4 +938,5 @@ export function buildSettingsSearchResults({
       pageTitle: getPageTitle(item.page),
     }];
   });
+  return [...pageResults, ...itemResults];
 }

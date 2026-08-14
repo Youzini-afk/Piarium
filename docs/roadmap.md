@@ -327,8 +327,9 @@ Delivery is split into complete platform slices without reducing the target cust
    desired/actual-state and capability-grant records, package-source abstraction, read-only catalog
    Runtime API, revision-checked recovery mutations, and a protected renderer-independent fallback
    manager. This slice does not execute extension code;
-2. owner-scoped Surface lifecycle, contribution/service registries, layout references, and the
-   first statically linked built-ins migrated from hard-coded switches;
+2. Implemented Surface slice: owner-scoped lifecycle, atomic contribution/service registries,
+   replacement and provider selection, retained layout references, and the Settings workbench plus
+   primary Command Palette commands migrated from hard-coded switches;
 3. authenticated external Surface artifacts, managed dynamic activation, candidate update, and
    rollback;
 4. brokered Host entrypoints, extension storage/migrations, versioned dependencies, and

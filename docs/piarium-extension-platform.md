@@ -1,6 +1,6 @@
 # Piarium extension platform
 
-Status: target architecture and implementation plan; not yet implemented
+Status: target architecture; implementation complete through Phase B
 
 Last updated: 2026-08-14
 
@@ -932,6 +932,24 @@ Phase A indexes and mutates records only; it does not load or execute an extensi
 
 Acceptance: built-in and test extensions use the same registry; disabling removes their complete
 observable Surface contribution; mobile split navigation and search remain correct.
+
+Implementation status (2026-08-14): complete. `@piarium/extension-surface` now owns per-realm owner
+identity, serialized desired generations, staged contribution/service activation, atomic commit,
+failed-candidate rollback, reverse-order cleanup, explicit replacement and service-provider
+selection, ordering-cycle rejection, and per-extension actual-state diagnostics. Layout references
+retain missing contribution IDs and can hide or reorder live contributions without discarding their
+saved placement. The package remains framework-neutral and does not load external bundles.
+
+The shared UI owns one Surface Runtime external store. The statically linked Settings workbench and
+primary Command Palette commands activate as ordinary built-in extension generations. Settings
+metadata, navigation, split sidebars, content rendering, page-level search, command-palette page
+entries, command execution, availability, badges, and ordering are projected from live
+contributions; the former page-order and render switches are removed. Disabling either built-in or a
+test extension withdraws its pages or commands and re-enabling restores them without a document
+refresh. The existing mobile split flow and the MCP installed-package availability gate remain
+properties of the contributed page implementation. External managed module loading starts in Phase
+C; brokered Host services and dependency-driven cross-owner teardown remain Phase D work rather than
+being implied by this in-process Surface slice.
 
 ### Phase C — External managed Surface extensions
 
