@@ -1,0 +1,132 @@
+/* eslint-disable react-refresh/only-export-components */
+import React from 'react';
+import {
+  PIARIUM_BUILTIN_AGENTS_EXTENSION,
+  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+  PIARIUM_BUILTIN_FLEET_EXTENSION,
+  PIARIUM_BUILTIN_MCP_EXTENSION,
+  PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
+  PIARIUM_BUILTIN_RECOVERY_EXTENSION,
+  type PiariumBuiltinExtensionDefinition,
+} from '@piarium/extension-builtins';
+import type { SurfaceActivation, SurfaceActivationContext } from '@piarium/extension-surface';
+import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
+import { FleetPage } from '@/components/sections/fleet';
+import { McpPage } from '@/components/sections/mcp/McpPage';
+import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
+import { RecoverySettings } from '@/components/sections/openchamber/RecoverySettings';
+import { PluginSettingsPage, PluginSettingsSidebar } from '@/components/sections/plugin-settings';
+import { ContextModeSettings } from '@/components/sections/plugin-settings/ContextModeSettings';
+import { MagicContextSettings } from '@/components/sections/plugin-settings/MagicContextSettings';
+import { ObservationalMemorySettings } from '@/components/sections/plugin-settings/ObservationalMemorySettings';
+import { OpenAICodexCompatSettings } from '@/components/sections/plugin-settings/OpenAICodexCompatSettings';
+import { SubagentsSettings } from '@/components/sections/plugin-settings/SubagentsSettings';
+import { WebAccessSettings } from '@/components/sections/plugin-settings/WebAccessSettings';
+import { WorkspaceHistorySettings } from '@/components/sections/plugin-settings/WorkspaceHistorySettings';
+import { WtfSettings } from '@/components/sections/plugin-settings/WtfSettings';
+import { Button } from '@/components/ui/button';
+import { useI18n } from '@/lib/i18n';
+import type { SettingsPageImplementation } from '@/lib/settings/page-types';
+import { useUIStore } from '@/stores/useUIStore';
+import type {
+  PiPluginSettingsAdapterImplementation,
+  PiPluginSettingsAdapterRenderProps,
+  PiSettingsPanelImplementation,
+} from './pi-integration-registry';
+
+const pageImplementation = (definition: PiariumBuiltinExtensionDefinition): SettingsPageImplementation => {
+  switch (definition.manifest.id) {
+    case PIARIUM_BUILTIN_AGENTS_EXTENSION.manifest.id:
+      return {
+        renderContent: () => <AgentsPage />,
+        renderSidebar: (options) => <AgentsSidebar onItemSelect={options.onItemSelect} />,
+      };
+    case PIARIUM_BUILTIN_FLEET_EXTENSION.manifest.id:
+      return { renderContent: () => <FleetPage /> };
+    case PIARIUM_BUILTIN_MCP_EXTENSION.manifest.id:
+      return {
+        isAvailable: (context) => context.mcpInstalled,
+        renderContent: () => <McpPage />,
+        renderSidebar: (options) => <McpSidebar onItemSelect={options.onItemSelect} />,
+      };
+    case PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION.manifest.id:
+      return {
+        renderContent: () => <PluginSettingsPage />,
+        renderSidebar: (options) => <PluginSettingsSidebar onItemSelect={options.onItemSelect} />,
+      };
+    default:
+      throw new Error(`Built-in Pi integration does not own a settings page: ${definition.manifest.id}`);
+  }
+};
+
+const McpPluginSettingsAdapter: React.FC = () => {
+  const { t } = useI18n();
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  return (
+    <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('mcp')}>
+      {t('settings.piarium.pluginSettings.mcp.open')}
+    </Button>
+  );
+};
+
+const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplementation => ({
+  render: (props: PiPluginSettingsAdapterRenderProps) => {
+    switch (adapterId) {
+      case 'mcp':
+        return <McpPluginSettingsAdapter />;
+      case 'subagents':
+        return <SubagentsSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'magic-context':
+        return (
+          <MagicContextSettings
+            initialPanel={props.navigationSection === 'agents' ? 'agents' : undefined}
+            runtimeTarget={props.runtimeTarget}
+            targetKey={props.targetKey}
+          />
+        );
+      case 'web-access':
+        return <WebAccessSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'workspace-history':
+        return <WorkspaceHistorySettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'wtf':
+        return <WtfSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'openai-codex-compat':
+        return <OpenAICodexCompatSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'observational-memory':
+        return <ObservationalMemorySettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'context-mode':
+        return <ContextModeSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      default:
+        throw new Error(`Unknown built-in Pi Plugin Settings adapter: ${adapterId}`);
+    }
+  },
+});
+
+const contributionImplementation = (
+  definition: PiariumBuiltinExtensionDefinition,
+  contributionId: string,
+): unknown => {
+  if (definition.manifest.id === PIARIUM_BUILTIN_RECOVERY_EXTENSION.manifest.id) {
+    return { render: () => <RecoverySettings /> } satisfies PiSettingsPanelImplementation;
+  }
+  const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
+  if (contribution?.kind === 'settings-page') return pageImplementation(definition);
+  if (contribution?.kind === 'panel' && contribution.data.contract === 'pi-plugin-settings-adapter/v1') {
+    return adapterImplementation(String(contribution.data.adapterId));
+  }
+  throw new Error(`Built-in Pi integration contribution has no linked implementation: ${contributionId}`);
+};
+
+export const activateBuiltinPiIntegration = (
+  definition: PiariumBuiltinExtensionDefinition,
+): SurfaceActivation => (context: SurfaceActivationContext) => {
+  for (const contribution of definition.manifest.contributions ?? []) {
+    context.contribute(
+      contribution,
+      contributionImplementation(definition, contribution.id),
+    );
+  }
+};
+
+export const BUILTIN_PI_INTEGRATION_DEFINITIONS = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS;

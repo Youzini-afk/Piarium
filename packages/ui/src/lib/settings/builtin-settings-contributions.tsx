@@ -1,16 +1,11 @@
 import type { SurfaceActivationContext } from '@piarium/extension-surface';
-import { McpPage } from '@/components/sections/mcp/McpPage';
-import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
-import { AgentsPage } from '@/components/sections/agents/AgentsPage';
-import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
-import { FleetPage } from '@/components/sections/fleet';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { PromptsSidebar } from '@/components/sections/prompts/PromptsSidebar';
 import { PromptsPage } from '@/components/sections/prompts/PromptsPage';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { PluginsPage } from '@/components/sections/plugins';
-import { PluginSettingsPage, PluginSettingsSidebar } from '@/components/sections/plugin-settings';
+import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
@@ -65,14 +60,11 @@ export const BUILTIN_SETTINGS_PAGES: readonly BuiltinPageDefinition[] = [
   page({ slug: 'tunnel', title: 'External Tunnel', titleKey: 'settings.page.tunnel.title', group: 'projects', kind: 'single', icon: 'home-office', order: 22, badgeKey: 'settings.view.badge.beta', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'] }, { ...openChamberPage('tunnel'), isAvailable: notVSCode }),
   page({ slug: 'git', title: 'Git', titleKey: 'settings.page.git.title', group: 'projects', kind: 'single', icon: 'git-branch', order: 23, keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'] }, { isAvailable: notVSCode, renderContent: () => <GitPage /> }),
   page({ slug: 'providers', title: 'Providers', titleKey: 'settings.page.providers.title', group: 'pi', kind: 'split', icon: 'cloud', order: 40, keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'] }, { renderContent: () => <ProvidersPage />, renderSidebar: (options) => <ProvidersSidebar onItemSelect={options.onItemSelect} /> }),
-  page({ slug: 'agents', title: 'Agents', titleKey: 'settings.page.agents.title', group: 'pi', kind: 'split', icon: 'robot-2', order: 41, keywords: ['agent', 'agents', 'subagent', 'subagents', 'roles', 'workflow', 'pi-subagents', 'magic context', 'historian', 'dreamer', 'sidekick'] }, { renderContent: () => <AgentsPage />, renderSidebar: (options) => <AgentsSidebar onItemSelect={options.onItemSelect} /> }),
-  page({ slug: 'fleet', title: 'Fleet', titleKey: 'settings.page.fleet.title', group: 'pi', kind: 'single', icon: 'pulse', order: 42, keywords: ['fleet', 'subagent', 'subagents', 'delegation', 'tasks', 'running', 'pi-subagents'] }, { renderContent: () => <FleetPage /> }),
   page({ slug: 'commands', title: 'Commands', titleKey: 'settings.page.commands.title', group: 'pi', kind: 'single', icon: 'command', order: 43, keywords: ['pi', 'command', 'commands', 'slash command', 'extension command', 'prompt command', 'skill command'] }, { renderContent: () => <CommandsPage /> }),
   page({ slug: 'prompts', title: 'Prompts', titleKey: 'settings.page.prompts.title', group: 'pi', kind: 'split', icon: 'file-text', order: 44, keywords: ['pi', 'prompt', 'prompts', 'template', 'templates', 'markdown', '.md', 'argument hint'] }, { renderContent: () => <PromptsPage />, renderSidebar: (options) => <PromptsSidebar onItemSelect={options.onItemSelect} /> }),
   page({ slug: 'skills', title: 'Skills', titleKey: 'settings.page.skills.title', group: 'pi', kind: 'split', icon: 'sparkling', order: 45, keywords: ['pi', 'skill', 'skills', 'skill.md', 'markdown', 'package resource'] }, { renderContent: () => <SkillsPage />, renderSidebar: (options) => <SkillsSidebar onItemSelect={options.onItemSelect} /> }),
-  page({ slug: 'mcp', title: 'MCP', titleKey: 'settings.page.mcp.title', group: 'pi', kind: 'split', icon: 'mcp', order: 46, keywords: ['mcp', 'model context protocol', 'pi-mcp-adapter', 'servers', 'tools', 'resources', 'oauth', 'remote', 'stdio'] }, { isAvailable: (ctx) => ctx.mcpInstalled, renderContent: () => <McpPage />, renderSidebar: (options) => <McpSidebar onItemSelect={options.onItemSelect} /> }),
   page({ slug: 'plugins', title: 'Pi Packages', titleKey: 'settings.page.plugins.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 47, keywords: ['pi', 'package', 'packages', 'plugin', 'plugins', 'extensions', 'npm', 'git', 'local path'] }, { renderContent: () => <PluginsPage /> }),
-  page({ slug: 'plugin-settings', title: 'Plugin Settings', titleKey: 'settings.page.pluginSettings.title', group: 'pi', kind: 'split', icon: 'settings-3', order: 48, keywords: ['pi', 'plugin', 'settings', 'configuration', 'subagents', 'magic context', 'web access', 'workspace history', 'wtf'] }, { renderContent: () => <PluginSettingsPage />, renderSidebar: (options) => <PluginSettingsSidebar onItemSelect={options.onItemSelect} /> }),
+  page({ slug: 'extensions', title: 'Piarium Extensions', titleKey: 'settings.page.extensions.title', group: 'pi', kind: 'single', icon: 'plug-2', order: 49, keywords: ['piarium', 'extension', 'extensions', 'enable', 'disable', 'capabilities'] }, { renderContent: () => <ExtensionsPage /> }),
   page({ slug: 'magic-prompts', title: 'Magic Prompts', titleKey: 'settings.page.magicPrompts.title', group: 'content', kind: 'split', icon: 'ai-generate-2', order: 60, keywords: ['prompts', 'templates', 'git', 'github', 'review', 'commit', 'pull request'] }, { isAvailable: notVSCode, renderContent: () => <MagicPromptsPage />, renderSidebar: (options) => <MagicPromptsSidebar onItemSelect={options.onItemSelect} /> }),
   page({ slug: 'snippets', title: 'Snippets', titleKey: 'settings.page.snippets.title', group: 'content', kind: 'split', icon: 'chat-thread', order: 61, keywords: ['prompt', 'templates', 'multi-run', 'strategy', 'approach'] }, { renderContent: () => <SnippetsPage />, renderSidebar: (options) => <SnippetsSidebar onItemSelect={options.onItemSelect} /> }),
 ];

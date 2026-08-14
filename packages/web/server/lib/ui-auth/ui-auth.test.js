@@ -214,6 +214,19 @@ describe('ui auth client credential seam', () => {
     });
     expect(extensionAssetCalled).toBe(true);
 
+    const extensionEnabledReq = {
+      method: 'PATCH',
+      path: '/api/piarium/extensions/v1/extensions/piarium.builtin.pi-agents/enabled',
+      url: '/api/piarium/extensions/v1/extensions/piarium.builtin.pi-agents/enabled',
+      headers: { 'x-piarium-application-token': urlToken },
+    };
+    const extensionEnabledRes = createResponse();
+    let extensionEnabledCalled = false;
+    await auth.requireAuth(extensionEnabledReq, extensionEnabledRes, () => {
+      extensionEnabledCalled = true;
+    });
+    expect(extensionEnabledCalled).toBe(true);
+
     const unrelatedHeaderReq = {
       method: 'POST',
       path: '/api/fs/raw',

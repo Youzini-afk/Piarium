@@ -63,9 +63,9 @@ test("brokered Host storage, migration rollback, services, and crash isolation p
     dataDir,
   });
   try {
-    await runtime.start();
+    const started = await runtime.start();
     const installed = await runtime.installOrStage({
-      expectedRevision: 0,
+      expectedRevision: started.catalog.revision,
       source: { display: "Broker v1", kind: "local", specifier: v1 },
     });
     assert.equal(installed.extensions[0]?.selectedVersion, "1.0.0");
@@ -107,9 +107,9 @@ test("trusted-native Host updates remain on the prior generation until applicati
   await writeHostExtension(v2, "2.0.0", 1, "ok", "native");
   const brokerScript = fileURLToPath(new URL("../broker/broker-child.mjs", import.meta.url));
   const first = await ApplicationExtensionRuntime.create({ brokerScript, dataDir });
-  await first.start();
+  const started = await first.start();
   const installed = await first.installOrStage({
-    expectedRevision: 0,
+    expectedRevision: started.catalog.revision,
     source: { display: "Native v1", kind: "local", specifier: v1 },
   });
   assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");

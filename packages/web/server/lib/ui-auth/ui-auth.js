@@ -274,6 +274,7 @@ const getUrlAuthTokenFromRequest = (req) => {
 
 const isApplicationTokenWritePath = (pathname) => (
   /^\/api\/piarium\/extensions\/v1\/extensions\/[^/]+\/activate$/.test(pathname)
+  || /^\/api\/piarium\/extensions\/v1\/extensions\/[^/]+\/enabled$/.test(pathname)
   || pathname === '/api/piarium/extensions/v1/assets/read'
   || pathname === '/api/piarium/extensions/v1/entrypoints/read'
   || pathname === '/api/piarium/extensions/v1/candidates/prepare'
@@ -336,7 +337,7 @@ const canUseUrlAuthTokenForRequest = (req) => {
   if (isWebSocketUpgrade(req)) {
     return isUrlAuthWebSocketPath(pathname);
   }
-  if (method === 'POST' && isApplicationTokenWritePath(pathname)) return true;
+  if ((method === 'POST' || method === 'PATCH') && isApplicationTokenWritePath(pathname)) return true;
   return method === 'GET' && isUrlAuthReadableHttpPath(pathname);
 };
 

@@ -16,7 +16,7 @@
     "dev": "bun run build:watch",
     "dev:server": "bun run prepare:pi-runtime && bun server/index.js",
     "dev:server:watch": "bun run prepare:pi-runtime && nodemon --watch server --ext js --exec \"bun server/index.js\"",
-    "build": "vite build",
+    "build": "bun run --cwd ../extension-builtins build && vite build",
     "build:watch": "vite build --watch",
     "type-check": "tsc --noEmit",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",

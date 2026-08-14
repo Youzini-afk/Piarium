@@ -46,6 +46,9 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   selectCandidate: async (request) => parsePiariumExtensionCatalogSnapshot(
     await sendBridgeMessage('api:extensions:candidate:select', request),
   ),
+  setEnabled: async (extensionId, enabled, expectedRevision) => parsePiariumExtensionCatalogSnapshot(
+    await sendBridgeMessage('api:extensions:set-enabled', { enabled, expectedRevision, extensionId }),
+  ),
   setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
     await sendBridgeMessage('api:extensions:service:select', request),
   ),

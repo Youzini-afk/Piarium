@@ -12,6 +12,23 @@ const {
   piariumSurfaceRuntime,
   setBuiltinSettingsContributionsEnabled,
 } = await import('./surface-registry');
+const { BUILTIN_PI_INTEGRATION_DEFINITIONS, activateBuiltinPiIntegration } = await import('@/lib/extensions/builtin-pi-integrations');
+
+await ensureBuiltinSettingsContributions();
+for (const [index, definition] of BUILTIN_PI_INTEGRATION_DEFINITIONS.entries()) {
+  if (!definition.manifest.contributions?.some((contribution) => contribution.kind === 'settings-page')) continue;
+  await piariumSurfaceRuntime.activate({
+    owner: {
+      desiredRevision: 1,
+      entrypointId: 'main',
+      extensionId: definition.manifest.id,
+      extensionVersion: definition.manifest.version,
+      generation: 1,
+      hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+      realmId: `builtins-test-${index}`,
+    },
+  }, activateBuiltinPiIntegration(definition));
+}
 
 const runtimeContext = (mcpInstalled: boolean): SettingsRuntimeContext => ({
   isDesktop: false,
@@ -44,6 +61,7 @@ describe('settings metadata', () => {
     expect(slugs).toContain('mcp');
     expect(slugs).toContain('plugins');
     expect(slugs).toContain('plugin-settings');
+    expect(slugs).toContain('extensions');
     expect(metadata.find((page) => page.slug === 'providers')?.group).toBe('pi');
     expect(metadata.find((page) => page.slug === 'agents')?.group).toBe('pi');
     expect(metadata.find((page) => page.slug === 'fleet')?.group).toBe('pi');
@@ -123,7 +141,8 @@ describe('settings metadata', () => {
     expect(getSettingsPageMeta('general')).not.toBe(null);
 
     await setBuiltinSettingsContributionsEnabled(false);
-    expect(getSettingsPageMetadata()).toEqual([]);
+    expect(getSettingsPageMeta('general')).toBe(null);
+    expect(getSettingsPageMeta('agents')).not.toBe(null);
 
     await setBuiltinSettingsContributionsEnabled(true);
     expect(getSettingsPageMeta('general')).not.toBe(null);

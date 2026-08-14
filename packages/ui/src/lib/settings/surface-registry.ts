@@ -8,6 +8,7 @@ import {
   createBuiltinSurfaceController,
   piariumSurfaceRuntime,
 } from '@/lib/extensions/surface-runtime';
+import { startBuiltinPiariumExtensions } from '@/lib/extensions/builtin-surface-manager';
 import { BUILTIN_SETTINGS_EXTENSION_ID, registerBuiltinSettingsContributions } from './builtin-settings-contributions';
 import type { SettingsPageImplementation, SettingsPageMeta, SettingsPageRegistration } from './page-types';
 
@@ -20,7 +21,11 @@ const builtinSettingsController = createBuiltinSurfaceController({
 });
 
 export const ensureBuiltinSettingsContributions = (): Promise<void> => {
-  return builtinSettingsController.ensure().catch((error) => {
+  return builtinSettingsController.ensure().then(() => {
+    void startBuiltinPiariumExtensions().catch((error) => {
+      console.error('[Piarium Extensions] Failed to load built-in integration state:', error);
+    });
+  }).catch((error) => {
     console.error('[Piarium Extensions] Failed to activate built-in settings contributions:', error);
     throw error;
   });

@@ -128,6 +128,19 @@ export const handleExtensionsBridgeMessage = async (
       return { data: await runtime.reviewCandidateCapabilities(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:candidate:select':
       return { data: await runtime.selectCandidate(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:set-enabled': {
+      const payload = payloadRecord(request.payload);
+      const expectedRevision = Number(payload.expectedRevision);
+      if (typeof payload.enabled !== 'boolean' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        throw new Error('enabled and expectedRevision are required');
+      }
+      return {
+        data: await runtime.setEnabled(String(payload.extensionId ?? ''), payload.enabled, expectedRevision),
+        id: request.id,
+        success: true,
+        type: request.type,
+      };
+    }
     case 'api:extensions:host-state':
       return { data: await runtime.state(), id: request.id, success: true, type: request.type };
     case 'api:extensions:host-state:wait': {

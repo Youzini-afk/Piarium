@@ -7,7 +7,10 @@ mock.module('@/hooks/useProviderLogo', () => ({
 }));
 
 const { buildSettingsSearchResults } = await import('./search');
-const { ensureBuiltinSettingsContributions } = await import('./surface-registry');
+const { getSettingsPageMeta } = await import('./metadata');
+const { ensureBuiltinSettingsContributions, piariumSurfaceRuntime } = await import('./surface-registry');
+const { PIARIUM_BUILTIN_MCP_EXTENSION } = await import('@piarium/extension-builtins');
+const { activateBuiltinPiIntegration } = await import('@/lib/extensions/builtin-pi-integrations');
 
 const runtimeContext = (mcpInstalled: boolean): SettingsSearchAvailabilityContext => ({
   isDesktop: false,
@@ -25,6 +28,17 @@ const runtimeContext = (mcpInstalled: boolean): SettingsSearchAvailabilityContex
 describe('settings search availability', () => {
   test('does not expose MCP search targets until pi-mcp-adapter is installed', async () => {
     await ensureBuiltinSettingsContributions();
+    if (!getSettingsPageMeta('mcp')) await piariumSurfaceRuntime.activate({
+      owner: {
+        desiredRevision: 1,
+        entrypointId: 'main',
+        extensionId: PIARIUM_BUILTIN_MCP_EXTENSION.manifest.id,
+        extensionVersion: PIARIUM_BUILTIN_MCP_EXTENSION.manifest.version,
+        generation: 1,
+        hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+        realmId: 'mcp-search-test',
+      },
+    }, activateBuiltinPiIntegration(PIARIUM_BUILTIN_MCP_EXTENSION));
     const build = (mcpInstalled: boolean) => buildSettingsSearchResults({
       getPageTitle: (slug) => slug,
       query: 'mcp',

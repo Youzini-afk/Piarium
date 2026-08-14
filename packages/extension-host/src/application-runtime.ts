@@ -18,6 +18,10 @@ import {
   type PiariumExtensionServiceInvocationRequest,
   type PiariumExtensionServiceSelectionRequest,
 } from "@piarium/extension-contract";
+import {
+  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+  PIARIUM_BUILTIN_EXTENSION_PREFIX,
+} from "@piarium/extension-builtins";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
 import { HostCapabilityRegistry } from "./capability-registry.js";
@@ -76,7 +80,14 @@ export class ApplicationExtensionRuntime {
   }
 
   async start(): Promise<PiariumExtensionHostStateSnapshot> {
-    await this.reconcile();
+    await this.#mutate(async () => {
+      const snapshot = await this.catalog.reconcileBuiltins(
+        PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+        PIARIUM_BUILTIN_EXTENSION_PREFIX,
+      );
+      await this.supervisor.reconcile(snapshot);
+      this.#publish();
+    });
     return this.state();
   }
 

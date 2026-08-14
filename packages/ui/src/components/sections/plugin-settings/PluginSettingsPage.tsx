@@ -1,28 +1,18 @@
 import React from 'react';
-import type { PackageDescriptor, RuntimeContextTarget } from '@piarium/protocol';
+import type { RuntimeContextTarget } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
-import type { IconName } from '@/components/icon/icons';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
-import { Button } from '@/components/ui/button';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { consumePluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import {
-  consumePluginSettingsTarget,
-  pluginSettingsIntegrationForPluginId,
-  type PluginSettingsIntegrationId,
-} from '@/lib/settings/plugin-settings-navigation';
+  pluginSettingsAdapterForPackage,
+  usePiPluginSettingsAdapters,
+} from '@/lib/extensions/pi-integration-registry';
 import { AdvancedPluginConfigEditor } from './AdvancedPluginConfigEditor';
-import { MagicContextSettings } from './MagicContextSettings';
-import { ObservationalMemorySettings } from './ObservationalMemorySettings';
-import { OpenAICodexCompatSettings } from './OpenAICodexCompatSettings';
-import { SubagentsSettings } from './SubagentsSettings';
-import { WebAccessSettings } from './WebAccessSettings';
-import { WorkspaceHistorySettings } from './WorkspaceHistorySettings';
-import { WtfSettings } from './WtfSettings';
 import {
   pluginSettingsPackageIdentity,
   preferPluginSettingsPackage,
@@ -30,31 +20,8 @@ import {
   usePluginSettingsCatalogState,
 } from './plugin-settings-store';
 
-interface PluginIntegration {
-  icon: IconName;
-  id: Exclude<PluginSettingsIntegrationId, 'mcp'>;
-  packageName: string;
-}
-
-const PLUGIN_INTEGRATIONS: readonly PluginIntegration[] = [
-  { icon: 'robot-2', id: 'subagents', packageName: 'pi-subagents' },
-  { icon: 'brain', id: 'magic-context', packageName: '@cortexkit/pi-magic-context' },
-  { icon: 'global', id: 'web-access', packageName: 'pi-web-access' },
-  { icon: 'history', id: 'workspace-history', packageName: 'pi-workspace-history' },
-  { icon: 'arrow-go-back', id: 'wtf', packageName: 'pi-wtf' },
-  { icon: 'code-box', id: 'openai-codex-compat', packageName: 'pi-openai-codex-compat' },
-  { icon: 'brain', id: 'observational-memory', packageName: 'pi-observational-memory' },
-] as const;
-
-const integrationForPackage = (entry: PackageDescriptor): PluginIntegration | null => {
-  const integrationId = pluginSettingsIntegrationForPluginId(entry.name)
-    ?? pluginSettingsIntegrationForPluginId(entry.source);
-  return PLUGIN_INTEGRATIONS.find((candidate) => candidate.id === integrationId) ?? null;
-};
-
 export const PluginSettingsPage: React.FC = () => {
   const { t } = useI18n();
-  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const activeSessionId = usePiSessionStore((state) => {
     const sessionId = state.currentSessionId;
@@ -65,6 +32,7 @@ export const PluginSettingsPage: React.FC = () => {
   ), [activeSessionId, currentDirectory]);
   const runtimeTargetKey = `${getRuntimeKey()}:${activeSessionId ? `session:${activeSessionId}` : `cwd:${currentDirectory}`}`;
   const catalog = usePluginSettingsCatalogState();
+  const adapters = usePiPluginSettingsAdapters();
   const [navigationTarget] = React.useState(() => consumePluginSettingsTarget());
   const [visited, setVisited] = React.useState<ReadonlySet<string>>(() => new Set());
 
@@ -94,14 +62,12 @@ export const PluginSettingsPage: React.FC = () => {
       {catalog.packages.map((entry) => {
         const identity = pluginSettingsPackageIdentity(entry);
         if (!visited.has(identity) && identity !== selectedIdentity) return null;
-        const integration = integrationForPackage(entry);
-        const integrationId = pluginSettingsIntegrationForPluginId(entry.name)
-          ?? pluginSettingsIntegrationForPluginId(entry.source);
+        const adapter = pluginSettingsAdapterForPackage(entry, adapters);
         return (
           <div key={identity} hidden={identity !== selectedIdentity} className="h-full">
             <SettingsPageLayout
               title={entry.name}
-              titleLeading={<Icon name={integrationId === 'mcp' ? 'server' : integration?.icon ?? 'code-box'} className="size-5 text-muted-foreground" />}
+              titleLeading={<Icon name={adapter?.icon ?? 'code-box'} className="size-5 text-muted-foreground" />}
               description={entry.source}
               showSaveStatus={false}
             >
@@ -113,28 +79,14 @@ export const PluginSettingsPage: React.FC = () => {
                   {entry.version ? <span>v{entry.version}</span> : null}
                   {entry.resolvedPath ? <code className="break-all">{entry.resolvedPath}</code> : null}
                 </div>
-                {integrationId === 'mcp' ? (
-                  <Button type="button" variant="outline" size="sm" onClick={() => setSettingsPage('mcp')}>
-                    {t('settings.piarium.pluginSettings.mcp.open')}
-                  </Button>
-                ) : integration?.id === 'subagents' ? (
-                  <SubagentsSettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
-                ) : integration?.id === 'magic-context' ? (
-                  <MagicContextSettings
-                    initialPanel={navigationTarget?.section === 'agents' ? 'agents' : undefined}
-                    runtimeTarget={runtimeTarget}
-                    targetKey={`${runtimeTargetKey}:${identity}`}
-                  />
-                ) : integration?.id === 'web-access' ? (
-                  <WebAccessSettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
-                ) : integration?.id === 'workspace-history' ? (
-                  <WorkspaceHistorySettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
-                ) : integration?.id === 'wtf' ? (
-                  <WtfSettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
-                ) : integration?.id === 'openai-codex-compat' ? (
-                  <OpenAICodexCompatSettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
-                ) : integration?.id === 'observational-memory' ? (
-                  <ObservationalMemorySettings runtimeTarget={runtimeTarget} targetKey={`${runtimeTargetKey}:${identity}`} />
+                {adapter ? (
+                  adapter.implementation.render({
+                    activeSessionId,
+                    currentDirectory,
+                    navigationSection: navigationTarget?.section,
+                    runtimeTarget,
+                    targetKey: `${runtimeTargetKey}:${identity}`,
+                  })
                 ) : (
                   <AdvancedPluginConfigEditor
                     key={`${runtimeTargetKey}:${identity}`}

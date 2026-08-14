@@ -290,7 +290,7 @@ export const registerExtensionRoutes = (app, {
 
   app.patch(
     '/api/piarium/extensions/v1/extensions/:extensionId/enabled',
-    uiAuthController.requireSessionAuth,
+    uiAuthController.requireAuth,
     async (req, res) => {
       const revision = expectedRevision(req.body);
       if (revision === null || typeof req.body?.enabled !== 'boolean') {

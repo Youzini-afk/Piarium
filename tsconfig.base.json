@@ -6,6 +6,7 @@
     "baseUrl": ".",
     "paths": {
       "@piarium/extension-contract": ["packages/extension-contract/src/index.ts"],
+      "@piarium/extension-builtins": ["packages/extension-builtins/src/index.ts"],
       "@piarium/extension-host": ["packages/extension-host/src/index.ts"],
       "@piarium/extension-loader": ["packages/extension-loader/src/index.ts"],
       "@piarium/extension-react": ["packages/extension-react/src/index.ts"],

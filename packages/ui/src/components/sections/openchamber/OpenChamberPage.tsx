@@ -3,7 +3,6 @@ import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { CheckpointSettings } from './CheckpointSettings';
-import { RecoverySettings } from './RecoverySettings';
 import { PasskeySettings } from './PasskeySettings';
 import { DefaultsSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
@@ -19,6 +18,7 @@ import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRunti
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { PiSettingsContributionSlot } from '@/lib/extensions/pi-integration-registry';
 import type { OpenChamberSection } from './types';
 
 const useRuntimeEndpointEpoch = (): number => {
@@ -53,7 +53,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 <DefaultsSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 <SessionRetentionSettings />
-                <RecoverySettings />
+                <PiSettingsContributionSlot slot="settings.sessions.panels" />
                 {isVSCode && <CheckpointSettings />}
                 {isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp() && <PasskeySettings />}
                 {showAbout && <AboutSettings />}
@@ -221,7 +221,7 @@ const SessionsSectionContent: React.FC = () => {
         <>
             <DefaultsSettings />
             <SessionRetentionSettings />
-            <RecoverySettings />
+            <PiSettingsContributionSlot slot="settings.sessions.panels" />
             {isVSCode && <CheckpointSettings />}
         </>
     );

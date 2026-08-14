@@ -1,12 +1,11 @@
 {
-  "name": "@piarium/extension-host",
+  "name": "@piarium/extension-builtins",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
-  "description": "Trusted application-host catalog and persistence for Piarium extensions.",
+  "description": "Browser-safe manifests for Piarium's built-in integration extensions.",
   "files": [
-    "broker",
     "dist"
   ],
   "main": "./dist/index.js",
@@ -18,18 +17,14 @@
     }
   },
   "scripts": {
-    "build:dependencies": "bun run --cwd ../extension-contract build && bun run --cwd ../extension-builtins build",
+    "build:dependencies": "bun run --cwd ../extension-contract build",
     "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
-    "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-builtins": "0.1.0",
-    "@piarium/extension-contract": "0.1.0",
-    "esbuild": "^0.28.1",
-    "tar": "^7.5.22"
+    "@piarium/extension-contract": "0.1.0"
   },
   "engines": {
     "node": ">=22.19.0"

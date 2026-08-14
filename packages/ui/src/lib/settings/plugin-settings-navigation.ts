@@ -6,6 +6,7 @@ export type PluginSettingsIntegrationId =
   | 'wtf'
   | 'openai-codex-compat'
   | 'observational-memory'
+  | 'context-mode'
   | 'mcp';
 
 export interface PluginSettingsNavigationTarget {
@@ -22,6 +23,7 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-mcp-adapter': 'mcp',
   'pi-observational-memory': 'observational-memory',
   'pi-openai-codex-compat': 'openai-codex-compat',
+  'context-mode': 'context-mode',
   'pi-subagents': 'subagents',
   'pi-web-access': 'web-access',
   'pi-workspace-history': 'workspace-history',
@@ -40,6 +42,7 @@ const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, str
   'mcp': 'pi-mcp-adapter',
   'observational-memory': 'pi-observational-memory',
   'openai-codex-compat': 'pi-openai-codex-compat',
+  'context-mode': 'context-mode',
   'subagents': 'pi-subagents',
   'web-access': 'pi-web-access',
   'workspace-history': 'pi-workspace-history',

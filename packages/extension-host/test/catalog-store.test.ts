@@ -5,6 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 import type { PiariumExtensionInstallationRecord } from "@piarium/extension-contract";
 import {
+  PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+  PIARIUM_BUILTIN_EXTENSION_PREFIX,
+} from "@piarium/extension-builtins";
+import {
   ApplicationExtensionCatalog,
   ExtensionCatalogRevisionConflictError,
   ExtensionCatalogStorageError,
@@ -106,6 +110,32 @@ test("serializes mutations and rejects a stale expected revision", async () => {
   const stored = JSON.parse(await readFile(catalog.store.catalogPath, "utf8")) as { revision: number };
   assert.equal(stored.revision, first.revision);
   assert.equal((await catalog.snapshot()).extensions[0]?.desired.enabled, false);
+});
+
+test("reconciles Piarium-owned built-ins while preserving their desired state", async () => {
+  const catalog = new ApplicationExtensionCatalog({ dataDir: await temporaryDirectory() });
+  const seeded = await catalog.reconcileBuiltins(
+    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  );
+  assert.equal(seeded.extensions.length, PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.length);
+  assert.ok(seeded.extensions.every((entry) => entry.source.kind === "builtin"));
+
+  const extensionId = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS[0]?.manifest.id;
+  assert.ok(extensionId);
+  const disabled = await catalog.setEnabled(extensionId, false, seeded.revision);
+  const reconciled = await catalog.reconcileBuiltins(
+    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS,
+    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  );
+  assert.equal(reconciled.revision, disabled.revision);
+  assert.equal(reconciled.extensions.find((entry) => entry.manifest.id === extensionId)?.desired.enabled, false);
+
+  const trimmed = await catalog.reconcileBuiltins(
+    PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.slice(1),
+    PIARIUM_BUILTIN_EXTENSION_PREFIX,
+  );
+  assert.equal(trimmed.extensions.some((entry) => entry.manifest.id === extensionId), false);
 });
 
 test("candidate capability deltas require explicit decisions and carry unchanged decisions forward", async () => {

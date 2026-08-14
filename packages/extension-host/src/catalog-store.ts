@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import {
   PIARIUM_EXTENSION_CATALOG_SCHEMA_VERSION,
   PiariumExtensionContractError,
+  parsePiariumExtensionManifest,
   parsePiariumExtensionCatalogDocument,
   parsePiariumExtensionHostIdentityDocument,
   parsePiariumExtensionInstallationRecord,
@@ -17,6 +18,7 @@ import {
   type PiariumExtensionManifest,
   type PiariumExtensionPreparedArtifact,
 } from "@piarium/extension-contract";
+import type { PiariumBuiltinExtensionDefinition } from "@piarium/extension-builtins";
 import {
   ExtensionCatalogRevisionConflictError,
   ExtensionCatalogStorageError,
@@ -229,6 +231,74 @@ export class ExtensionCatalogStore {
     });
   }
 
+  reconcileBuiltins(
+    definitions: readonly PiariumBuiltinExtensionDefinition[],
+    ownedPrefix: string,
+  ): Promise<CatalogReadState> {
+    const manifests = definitions.map((definition) => ({
+      definition,
+      manifest: parsePiariumExtensionManifest(definition.manifest),
+    }));
+    const desiredIds = new Set(manifests.map(({ manifest }) => manifest.id));
+    return this.#mutateCurrent((document, now) => {
+      let changed = false;
+      for (const [extensionId, record] of Object.entries(document.extensions)) {
+        if (
+          record.source.kind === "builtin"
+          && record.source.specifier.startsWith(ownedPrefix)
+          && !desiredIds.has(extensionId)
+        ) {
+          delete document.extensions[extensionId];
+          changed = true;
+        }
+      }
+      for (const { definition, manifest } of manifests) {
+        const existing = document.extensions[manifest.id];
+        if (!existing) {
+          document.extensions[manifest.id] = {
+            capabilityGrants: [],
+            desired: { enabled: definition.enabledByDefault, revision: 1, updatedAt: now },
+            installedAt: now,
+            manifest: structuredClone(manifest),
+            resolvedVersion: manifest.version,
+            selectedVersion: manifest.version,
+            source: { display: "Piarium", kind: "builtin", specifier: manifest.id },
+            updatedAt: now,
+          };
+          changed = true;
+          continue;
+        }
+        if (existing.source.kind !== "builtin" || existing.source.specifier !== manifest.id) {
+          throw new Error(`Piarium built-in extension ID is already owned by another source: ${manifest.id}`);
+        }
+        const nextManifest = JSON.stringify(manifest);
+        if (
+          JSON.stringify(existing.manifest) === nextManifest
+          && existing.resolvedVersion === manifest.version
+          && existing.selectedVersion === manifest.version
+          && existing.source.display === "Piarium"
+          && existing.candidate === undefined
+          && existing.integrity === undefined
+          && existing.resolvedPath === undefined
+        ) continue;
+        existing.manifest = structuredClone(manifest);
+        existing.resolvedVersion = manifest.version;
+        existing.selectedVersion = manifest.version;
+        existing.source = { display: "Piarium", kind: "builtin", specifier: manifest.id };
+        existing.capabilityGrants = existing.capabilityGrants.filter((grant) => (
+          grant.manifestVersion === manifest.version
+          && (manifest.capabilities?.[grant.realm] ?? []).includes(grant.capability)
+        ));
+        delete existing.candidate;
+        delete existing.integrity;
+        delete existing.resolvedPath;
+        existing.updatedAt = now;
+        changed = true;
+      }
+      return changed;
+    });
+  }
+
   setCapabilityGrant(
     extensionId: string,
     grant: PiariumExtensionCapabilityGrant,
@@ -374,6 +444,35 @@ export class ExtensionCatalogStore {
         if (document.revision !== expectedRevision) {
           throw new ExtensionCatalogRevisionConflictError(expectedRevision, document.revision);
         }
+        const now = new Date().toISOString();
+        const changed = mutator(document, now);
+        if (changed) {
+          document.revision += 1;
+          document.updatedAt = now;
+          await atomicWrite(this.catalogPath, document);
+        }
+        this.#lastValid = {
+          document: cloneDocument(document),
+          fingerprint: fingerprint(document),
+          storageState: strictRead.storageState === "ready" || changed ? "ready" : "missing",
+        };
+        return this.#stateFromLastValid();
+      } finally {
+        await release();
+      }
+    });
+  }
+
+  async #mutateCurrent(
+    mutator: (document: PiariumExtensionCatalogDocument, now: string) => boolean,
+  ): Promise<CatalogReadState> {
+    return this.#serialize(async () => {
+      await mkdir(this.directory, { mode: 0o700, recursive: true });
+      await this.#readOrCreateIdentity();
+      const release = await acquireLock(this.#lockPath);
+      try {
+        const strictRead = await this.#readStrictForMutation();
+        const document = strictRead.document;
         const now = new Date().toISOString();
         const changed = mutator(document, now);
         if (changed) {

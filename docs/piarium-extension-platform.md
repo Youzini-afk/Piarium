@@ -1060,6 +1060,31 @@ desktop capability implementations even when a persisted grant exists.
 Acceptance: disabling a UI adapter does not disable its Pi package; disabling the Pi package does not
 remove unrelated Piarium extension state; adapters rebind correctly after Pi runtime switching.
 
+Implementation status (2026-08-14): complete. Piarium now publishes browser-safe, versioned built-in
+manifests for Agents, Fleet, MCP, Pi Plugin Settings, Recovery, and every maintained Plugin Settings
+adapter. The application host reconciles those owned records into the same atomic catalog used by
+external extensions, preserves each desired enabled state across restarts and built-in manifest
+updates, and removes only obsolete records in Piarium's own built-in namespace. Their entrypoints are
+declarative and statically linked, so the generic external loader does not invent an artifact or file
+path for code that ships inside Piarium.
+
+A catalog-driven Surface manager binds each enabled built-in record to public settings-page or panel
+contributions and reports the resulting actual state back to the application host. Disable withdraws
+the contribution in place; enable restores it without a document reload. Agents/Fleet, MCP, Pi Plugin
+Settings, and the Recovery panel no longer live in the core Settings contribution generation. The
+small core Settings extension remains the recovery kernel and now owns a distinct Piarium Extensions
+page with revision-checked enable switches, actual-state reporting, diagnostics, and candidate
+capability review. Pi Packages remains the Pi PackageManager lifecycle page and Pi Plugin Settings
+remains the native-file configuration page.
+
+Plugin Settings resolves adapted forms from live `pi-plugin-settings-adapter/v1` panel
+contributions. Disabling an adapter therefore falls back to the complete native JSON/JSONC editor for
+the still-installed Pi package; it never disables or rewrites that package. Conversely, Pi package
+enable state only gates package-owned runtime surfaces such as MCP and does not erase Piarium's
+separately persisted adapter state. All adapter components continue to derive their target from the
+current public Pi runtime context, so an endpoint, project, or session switch rebinds the same enabled
+Piarium contribution rather than carrying configuration state from the prior runtime.
+
 ### Phase G — Replaceable workbench and profiles
 
 - Migrate navigator, panels, chat renderer/composer seams, and shell ownership points.

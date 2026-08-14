@@ -92,6 +92,7 @@ const MOBILE_SETTINGS_PAGES = [
   'mcp',
   'plugins',
   'plugin-settings',
+  'extensions',
   'providers',
   'agents',
   'fleet',

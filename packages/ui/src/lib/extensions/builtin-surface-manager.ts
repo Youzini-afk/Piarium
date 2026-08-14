@@ -1,0 +1,158 @@
+import type {
+  PiariumExtensionActualState,
+  PiariumExtensionCatalogEntry,
+} from '@piarium/extension-contract';
+import type { SurfaceOwnerIdentity } from '@piarium/extension-surface';
+import {
+  BUILTIN_PI_INTEGRATION_DEFINITIONS,
+  activateBuiltinPiIntegration,
+} from './builtin-pi-integrations';
+import {
+  getPiariumExtensionCatalogState,
+  startPiariumExtensionCatalog,
+  subscribePiariumExtensionCatalog,
+} from './catalog-store';
+import { piariumSurfaceRuntime } from './surface-runtime';
+
+interface ControllerState {
+  active: boolean;
+  generation: number;
+  hostId: string | null;
+  lastDesiredRevision: number;
+  lastEnabled: boolean | null;
+  owner: SurfaceOwnerIdentity | null;
+}
+
+const realmId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+  ? crypto.randomUUID()
+  : `builtin-surface-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const controllers = new Map<string, ControllerState>();
+let startPromise: Promise<void> | null = null;
+let unsubscribe: (() => void) | null = null;
+let reconcileQueue: Promise<void> = Promise.resolve();
+
+const controllerFor = (extensionId: string): ControllerState => {
+  const current = controllers.get(extensionId);
+  if (current) return current;
+  const created: ControllerState = {
+    active: false,
+    generation: 0,
+    hostId: null,
+    lastDesiredRevision: 0,
+    lastEnabled: null,
+    owner: null,
+  };
+  controllers.set(extensionId, created);
+  return created;
+};
+
+const extensionsApi = () => (
+  typeof window === 'undefined' ? undefined : window.__PIARIUM_RUNTIME_APIS__?.extensions
+);
+
+const reportActual = async (entry: PiariumExtensionCatalogEntry): Promise<void> => {
+  const hostId = getPiariumExtensionCatalogState().snapshot?.catalog.hostId;
+  const actual = piariumSurfaceRuntime.getSnapshot().actual.find((state) => (
+    state.extensionId === entry.manifest.id
+    && state.realmId === realmId
+    && state.entrypointId === 'main'
+    && state.hostId === hostId
+  ));
+  if (!actual) return;
+  const state: PiariumExtensionActualState = {
+    desiredRevision: actual.desiredRevision,
+    diagnostics: actual.diagnostics,
+    entrypointId: actual.entrypointId,
+    generation: actual.generation,
+    hostId: actual.hostId,
+    realmId: actual.realmId,
+    realmKind: actual.realmKind,
+    status: actual.status,
+    updatedAt: actual.updatedAt,
+  };
+  await extensionsApi()?.reportActualState(entry.manifest.id, state).catch(() => undefined);
+};
+
+const reconcileEntry = async (entry: PiariumExtensionCatalogEntry): Promise<void> => {
+  const definition = BUILTIN_PI_INTEGRATION_DEFINITIONS.find((candidate) => (
+    candidate.manifest.id === entry.manifest.id
+  ));
+  if (!definition) return;
+  const controller = controllerFor(entry.manifest.id);
+  const hostId = getPiariumExtensionCatalogState().snapshot?.catalog.hostId;
+  if (!hostId) return;
+  if (
+    controller.hostId === hostId
+    && controller.lastDesiredRevision === entry.desired.revision
+    && controller.lastEnabled === entry.desired.enabled
+  ) return;
+
+  if (controller.owner && controller.hostId !== hostId) {
+    controller.generation += 1;
+    await piariumSurfaceRuntime.deactivate({
+      ...controller.owner,
+      desiredRevision: controller.owner.desiredRevision + 1,
+      generation: controller.generation,
+    });
+    controller.active = false;
+    controller.owner = null;
+  }
+
+  controller.generation += 1;
+  const owner: SurfaceOwnerIdentity = {
+    desiredRevision: entry.desired.revision,
+    entrypointId: 'main',
+    extensionId: entry.manifest.id,
+    extensionVersion: entry.manifest.version,
+    generation: controller.generation,
+    hostId,
+    realmId,
+  };
+  controller.hostId = hostId;
+  controller.lastDesiredRevision = entry.desired.revision;
+  controller.lastEnabled = entry.desired.enabled;
+  controller.owner = owner;
+  try {
+    if (entry.desired.enabled) {
+      await piariumSurfaceRuntime.activate({ owner }, activateBuiltinPiIntegration(definition));
+      controller.active = true;
+    } else {
+      await piariumSurfaceRuntime.deactivate(owner);
+      controller.active = false;
+    }
+  } finally {
+    await reportActual(entry);
+  }
+};
+
+const reconcile = (): Promise<void> => {
+  const operation = async () => {
+    const snapshot = getPiariumExtensionCatalogState().snapshot?.catalog;
+    if (!snapshot?.authoritative) return;
+    for (const definition of BUILTIN_PI_INTEGRATION_DEFINITIONS) {
+      const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === definition.manifest.id);
+      if (entry) await reconcileEntry(entry);
+    }
+  };
+  const result = reconcileQueue.then(operation, operation);
+  reconcileQueue = result.catch(() => undefined);
+  return result;
+};
+
+export const startBuiltinPiariumExtensions = (): Promise<void> => {
+  if (startPromise) return startPromise;
+  if (typeof window === 'undefined' || !window.__PIARIUM_RUNTIME_APIS__?.extensions) return Promise.resolve();
+  unsubscribe ??= subscribePiariumExtensionCatalog(() => {
+    void reconcile().catch((error) => {
+      console.error('[Piarium Extensions] Failed to reconcile a built-in integration:', error);
+    });
+  });
+  startPromise = startPiariumExtensionCatalog()
+    .then(() => reconcile())
+    .catch((error) => {
+      startPromise = null;
+      throw error;
+    });
+  return startPromise;
+};

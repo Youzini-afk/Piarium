@@ -428,6 +428,7 @@ export class SurfaceExtensionLoader {
     const desiredKeys = new Set<string>();
 
     for (const entry of snapshot.extensions) {
+      if (entry.source.kind === "builtin") continue;
       const selected = publicCandidateSelection(entry);
       const entrypoints = selected ? compatibleExecutableEntrypoints(selected.manifest, this.#surface) : [];
       if (!entry.desired.enabled || !selected) continue;
@@ -441,6 +442,7 @@ export class SurfaceExtensionLoader {
     }
 
     for (const entry of snapshot.extensions) {
+      if (entry.source.kind === "builtin") continue;
       if (!entry.desired.enabled) continue;
       const selected = publicCandidateSelection(entry);
       if (!selected) {

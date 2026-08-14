@@ -8,6 +8,7 @@ import {
   type PiariumExtensionInstallationRecord,
   type PiariumExtensionPreparedArtifact,
 } from "@piarium/extension-contract";
+import type { PiariumBuiltinExtensionDefinition } from "@piarium/extension-builtins";
 import { ExtensionCatalogStaleStateError } from "./errors.js";
 import { ExtensionCatalogStore, type CatalogReadState } from "./catalog-store.js";
 
@@ -57,6 +58,17 @@ export class ApplicationExtensionCatalog {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.setAllEnabled(enabled, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
+  async reconcileBuiltins(
+    definitions: readonly PiariumBuiltinExtensionDefinition[],
+    ownedPrefix: string,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.reconcileBuiltins(definitions, ownedPrefix),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
   }

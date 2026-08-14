@@ -43,6 +43,7 @@ const applicationHostRequest = async (
   path: string,
   body: unknown,
   signal?: AbortSignal,
+  method = 'POST',
 ): Promise<Response> => {
   const origin = applicationHostOrigin();
   const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
@@ -54,7 +55,7 @@ const applicationHostRequest = async (
     body: JSON.stringify(body),
     credentials: 'include',
     headers,
-    method: 'POST',
+    method,
     signal,
   });
 };
@@ -162,6 +163,16 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
   selectCandidate: async (request: PiariumExtensionCandidateSelectionRequest) => {
     const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/candidates/select', request));
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension candidate response is malformed');
+    return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  },
+  setEnabled: async (extensionId, enabled, expectedRevision) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest(
+      `/api/piarium/extensions/v1/extensions/${encodeURIComponent(extensionId)}/enabled`,
+      { enabled, expectedRevision },
+      undefined,
+      'PATCH',
+    ));
+    if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension enabled response is malformed');
     return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
   setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
