@@ -108,6 +108,10 @@ const start = async (): Promise<void> => {
     ? await requestEmbeddedSessionRuntimeBootstrap()
     : null;
   window.__PIARIUM_RUNTIME_APIS__ = createConfiguredWebAPIs(embeddedBootstrap);
+  const { startManagedSurfaceExtensions } = await import('@piarium/ui/lib/extensions/managed-runtime');
+  void startManagedSurfaceExtensions().catch((error) => {
+    console.error('[Piarium Extensions] Managed Surface startup failed:', error);
+  });
 
   if (hostedSurface === 'mobile') {
     const { renderMobileApp } = await import('@piarium/ui/apps/renderMobileApp');

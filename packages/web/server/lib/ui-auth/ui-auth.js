@@ -257,6 +257,9 @@ const getBearerTokenFromRequest = (req) => {
 };
 
 const getUrlAuthTokenFromRequest = (req) => {
+  const headerToken = req?.headers?.['x-piarium-application-token'];
+  const normalizedHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
+  if (typeof normalizedHeader === 'string' && normalizedHeader.trim()) return normalizedHeader.trim();
   const queryToken = req?.query?.piarium_url_token;
   let token = Array.isArray(queryToken) ? queryToken[0] : queryToken;
   if (typeof token !== 'string' && typeof req?.url === 'string') {
@@ -268,6 +271,14 @@ const getUrlAuthTokenFromRequest = (req) => {
   }
   return typeof token === 'string' && token.trim() ? token.trim() : null;
 };
+
+const isApplicationTokenWritePath = (pathname) => (
+  pathname === '/api/piarium/extensions/v1/assets/read'
+  || pathname === '/api/piarium/extensions/v1/entrypoints/read'
+  || pathname === '/api/piarium/extensions/v1/candidates/select'
+  || pathname === '/api/piarium/extensions/v1/actual'
+  || pathname === '/api/piarium/extensions/v1/install'
+);
 
 const getRequestPathname = (req) => {
   const rawUrl = req?.originalUrl || req?.url;
@@ -293,6 +304,7 @@ const isWebSocketUpgrade = (req) => {
 
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/piarium/events'
+    || pathname === '/api/piarium/extensions/v1/catalog'
     || pathname === '/api/piarium/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
@@ -316,6 +328,7 @@ const canUseUrlAuthTokenForRequest = (req) => {
   if (isWebSocketUpgrade(req)) {
     return isUrlAuthWebSocketPath(pathname);
   }
+  if (method === 'POST' && isApplicationTokenWritePath(pathname)) return true;
   return method === 'GET' && isUrlAuthReadableHttpPath(pathname);
 };
 

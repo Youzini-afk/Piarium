@@ -7,6 +7,10 @@ import {
   type PiariumExtensionActivationEvent,
   type PiariumExtensionActualState,
   type PiariumExtensionActualStatus,
+  type PiariumExtensionAssetPayload,
+  type PiariumExtensionAssetRequest,
+  type PiariumExtensionCandidateRecord,
+  type PiariumExtensionCandidateSelectionRequest,
   type PiariumExtensionCatalogAvailability,
   type PiariumExtensionCatalogDocument,
   type PiariumExtensionCatalogEntry,
@@ -19,7 +23,10 @@ import {
   type PiariumExtensionHostIdentityDocument,
   type PiariumExtensionInstallationRecord,
   type PiariumExtensionManifest,
+  type PiariumExtensionManagedEntrypointPayload,
+  type PiariumExtensionManagedEntrypointRequest,
   type PiariumExtensionPackageSource,
+  type PiariumExtensionPackageInstallRequest,
   type PiariumExtensionServiceProvision,
   type PiariumExtensionServiceRequirement,
   type PiariumExtensionStaticContribution,
@@ -29,6 +36,7 @@ import {
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 const SEMVER_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const ENTRY_PATH_PATTERN = /^(?!\/)(?![A-Za-z]:[\\/])(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)(?!.*\0).+$/;
+const INTEGRITY_PATTERN = /^sha256-[0-9a-f]{64}$/;
 
 const HOST_MODES = new Set(["brokered", "native"]);
 const SURFACE_MODES = new Set(["declarative", "isolated", "managed", "native"]);
@@ -112,6 +120,24 @@ function identifier(value: unknown, path: string, issues: string[]): string {
   const normalized = text(value);
   if (!normalized || !ID_PATTERN.test(normalized)) {
     issues.push(`${path} must be a lowercase namespaced identifier`);
+    return "invalid";
+  }
+  return normalized;
+}
+
+function integrity(value: unknown, path: string, issues: string[]): string {
+  const normalized = text(value);
+  if (!normalized || !INTEGRITY_PATTERN.test(normalized)) {
+    issues.push(`${path} must be a lowercase sha256 integrity value`);
+    return `sha256-${"0".repeat(64)}`;
+  }
+  return normalized;
+}
+
+function entryPath(value: unknown, path: string, issues: string[]): string {
+  const normalized = text(value);
+  if (!normalized || !ENTRY_PATH_PATTERN.test(normalized)) {
+    issues.push(`${path} must be a forward-slash relative path without parent traversal`);
     return "invalid";
   }
   return normalized;
@@ -498,6 +524,33 @@ function parseGrants(value: unknown, path: string, issues: string[]): PiariumExt
   return result;
 }
 
+function parseCandidateRecord(value: unknown, path: string, issues: string[]): PiariumExtensionCandidateRecord | undefined {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object`);
+    return undefined;
+  }
+  let manifest: PiariumExtensionManifest;
+  try {
+    manifest = parsePiariumExtensionManifest(value.manifest);
+  } catch (error) {
+    if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `${path}.manifest.${issue}`));
+    manifest = { schemaVersion: 1, id: "invalid", version: "0.0.0", engines: { piarium: "*" } };
+  }
+  const resolvedVersion = text(value.resolvedVersion) ?? "0.0.0";
+  if (!SEMVER_PATTERN.test(resolvedVersion)) issues.push(`${path}.resolvedVersion must be SemVer`);
+  if (resolvedVersion !== manifest.version) issues.push(`${path}.resolvedVersion must match manifest.version`);
+  const resolvedPath = text(value.resolvedPath);
+  if (!resolvedPath) issues.push(`${path}.resolvedPath must be a non-empty string`);
+  return {
+    integrity: integrity(value.integrity, `${path}.integrity`, issues),
+    manifest,
+    preparedAt: timestamp(value.preparedAt, `${path}.preparedAt`, issues),
+    resolvedPath: resolvedPath ?? "invalid",
+    resolvedVersion,
+    source: parseSource(value.source, `${path}.source`, issues),
+  };
+}
+
 export function parsePiariumExtensionInstallationRecord(value: unknown, path = "installation"): PiariumExtensionInstallationRecord {
   const issues: string[] = [];
   if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension installation is invalid", [`${path} must be an object`]);
@@ -519,8 +572,16 @@ export function parsePiariumExtensionInstallationRecord(value: unknown, path = "
   if (!SEMVER_PATTERN.test(selectedVersion)) issues.push(`${path}.selectedVersion must be SemVer`);
   if (resolvedVersion !== manifest.version) issues.push(`${path}.resolvedVersion must match manifest.version`);
   if (selectedVersion !== resolvedVersion) issues.push(`${path}.selectedVersion must match resolvedVersion until candidate updates are supported`);
-  const integrity = text(value.integrity);
+  const selectedIntegrity = value.integrity === undefined
+    ? undefined
+    : integrity(value.integrity, `${path}.integrity`, issues);
   const resolvedPath = text(value.resolvedPath);
+  const candidate = value.candidate === undefined
+    ? undefined
+    : parseCandidateRecord(value.candidate, `${path}.candidate`, issues);
+  if (candidate && candidate.manifest.id !== manifest.id) {
+    issues.push(`${path}.candidate.manifest.id must match selected manifest.id`);
+  }
   throwIssues("Piarium extension installation", issues);
   return {
     manifest,
@@ -531,8 +592,9 @@ export function parsePiariumExtensionInstallationRecord(value: unknown, path = "
     updatedAt,
     resolvedVersion,
     selectedVersion,
-    ...(integrity ? { integrity } : {}),
+    ...(selectedIntegrity ? { integrity: selectedIntegrity } : {}),
     ...(resolvedPath ? { resolvedPath } : {}),
+    ...(candidate ? { candidate } : {}),
   };
 }
 
@@ -673,7 +735,47 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
   if (!SEMVER_PATTERN.test(selectedVersion)) issues.push(`${path}.selectedVersion must be SemVer`);
   if (resolvedVersion !== manifest.version) issues.push(`${path}.resolvedVersion must match manifest.version`);
   if (selectedVersion !== resolvedVersion) issues.push(`${path}.selectedVersion must match resolvedVersion`);
-  const integrity = text(value.integrity);
+  const selectedIntegrity = value.integrity === undefined
+    ? undefined
+    : integrity(value.integrity, `${path}.integrity`, issues);
+  let candidate: PiariumExtensionCatalogEntry["candidate"];
+  if (value.candidate !== undefined) {
+    if (!isRecord(value.candidate)) {
+      issues.push(`${path}.candidate must be an object`);
+    } else {
+      let candidateManifest: PiariumExtensionManifest;
+      try {
+        candidateManifest = parsePiariumExtensionManifest(value.candidate.manifest);
+      } catch (error) {
+        if (error instanceof PiariumExtensionContractError) {
+          issues.push(...error.issues.map((issue) => `${path}.candidate.manifest.${issue}`));
+        }
+        candidateManifest = { schemaVersion: 1, id: "invalid", version: "0.0.0", engines: { piarium: "*" } };
+      }
+      const candidateSource = isRecord(value.candidate.source) ? value.candidate.source : {};
+      if (!isRecord(value.candidate.source)) issues.push(`${path}.candidate.source must be an object`);
+      const candidateKind = text(candidateSource.kind);
+      const candidateDisplay = text(candidateSource.display);
+      if (!candidateKind || !SOURCE_KINDS.has(candidateKind)) issues.push(`${path}.candidate.source.kind is unsupported`);
+      if (!candidateDisplay) issues.push(`${path}.candidate.source.display must be a non-empty string`);
+      const candidateVersion = text(value.candidate.resolvedVersion) ?? "0.0.0";
+      if (!SEMVER_PATTERN.test(candidateVersion)) issues.push(`${path}.candidate.resolvedVersion must be SemVer`);
+      if (candidateVersion !== candidateManifest.version) issues.push(`${path}.candidate.resolvedVersion must match candidate manifest.version`);
+      if (candidateManifest.id !== manifest.id) issues.push(`${path}.candidate.manifest.id must match selected manifest.id`);
+      candidate = {
+        integrity: integrity(value.candidate.integrity, `${path}.candidate.integrity`, issues),
+        manifest: candidateManifest,
+        preparedAt: timestamp(value.candidate.preparedAt, `${path}.candidate.preparedAt`, issues),
+        resolvedVersion: candidateVersion,
+        source: {
+          kind: SOURCE_KINDS.has(candidateKind ?? "")
+            ? candidateKind as PiariumExtensionCatalogEntry["source"]["kind"]
+            : "local",
+          display: candidateDisplay ?? "Invalid source",
+        },
+      };
+    }
+  }
   return {
     manifest,
     source: {
@@ -687,7 +789,8 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
     capabilityGrants: parseGrants(value.capabilityGrants, `${path}.capabilityGrants`, issues),
     installedAt: timestamp(value.installedAt, `${path}.installedAt`, issues),
     updatedAt: timestamp(value.updatedAt, `${path}.updatedAt`, issues),
-    ...(integrity ? { integrity } : {}),
+    ...(selectedIntegrity ? { integrity: selectedIntegrity } : {}),
+    ...(candidate ? { candidate } : {}),
   };
 }
 
@@ -778,4 +881,129 @@ export function parsePiariumExtensionCatalogAvailability(value: unknown): Piariu
 
 export function isPiariumExtensionId(value: string): boolean {
   return ID_PATTERN.test(value);
+}
+
+const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function parseArtifactSlot(value: unknown, path: string, issues: string[]): "candidate" | "selected" {
+  if (value !== "candidate" && value !== "selected") {
+    issues.push(`${path} must be candidate or selected`);
+    return "selected";
+  }
+  return value;
+}
+
+export function parsePiariumExtensionAssetRequest(value: unknown): PiariumExtensionAssetRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension asset request is invalid", ["request must be an object"]);
+  const result: PiariumExtensionAssetRequest = {
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+    integrity: integrity(value.integrity, "integrity", issues),
+    path: entryPath(value.path, "path", issues),
+    slot: parseArtifactSlot(value.slot, "slot", issues),
+  };
+  throwIssues("Piarium extension asset request", issues);
+  return result;
+}
+
+export function parsePiariumExtensionManagedEntrypointRequest(value: unknown): PiariumExtensionManagedEntrypointRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension entrypoint request is invalid", ["request must be an object"]);
+  const result: PiariumExtensionManagedEntrypointRequest = {
+    entrypointId: identifier(value.entrypointId, "entrypointId", issues),
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+    integrity: integrity(value.integrity, "integrity", issues),
+    slot: parseArtifactSlot(value.slot, "slot", issues),
+  };
+  throwIssues("Piarium extension entrypoint request", issues);
+  return result;
+}
+
+function parseAssetPayload(value: unknown, path: string, issues: string[]): PiariumExtensionAssetPayload {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object`);
+    return {
+      artifactIntegrity: `sha256-${"0".repeat(64)}`,
+      bytesBase64: "",
+      contentType: "application/octet-stream",
+      integrity: `sha256-${"0".repeat(64)}`,
+      path: "invalid",
+    };
+  }
+  const bytesBase64 = typeof value.bytesBase64 === "string" ? value.bytesBase64 : "";
+  if (typeof value.bytesBase64 !== "string" || !BASE64_PATTERN.test(bytesBase64)) {
+    issues.push(`${path}.bytesBase64 must be base64 data`);
+  }
+  const contentType = text(value.contentType);
+  if (!contentType) issues.push(`${path}.contentType must be a non-empty string`);
+  return {
+    artifactIntegrity: integrity(value.artifactIntegrity, `${path}.artifactIntegrity`, issues),
+    bytesBase64,
+    contentType: contentType ?? "application/octet-stream",
+    integrity: integrity(value.integrity, `${path}.integrity`, issues),
+    path: entryPath(value.path, `${path}.path`, issues),
+  };
+}
+
+export function parsePiariumExtensionAssetPayload(value: unknown): PiariumExtensionAssetPayload {
+  const issues: string[] = [];
+  const result = parseAssetPayload(value, "asset", issues);
+  throwIssues("Piarium extension asset payload", issues);
+  return result;
+}
+
+export function parsePiariumExtensionManagedEntrypointPayload(value: unknown): PiariumExtensionManagedEntrypointPayload {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension entrypoint payload is invalid", ["payload must be an object"]);
+  const styles = Array.isArray(value.styles)
+    ? value.styles.map((style, index) => parseAssetPayload(style, `styles[${index}]`, issues))
+    : (issues.push("styles must be an array"), []);
+  const result: PiariumExtensionManagedEntrypointPayload = {
+    artifactIntegrity: integrity(value.artifactIntegrity, "artifactIntegrity", issues),
+    entrypointId: identifier(value.entrypointId, "entrypointId", issues),
+    module: parseAssetPayload(value.module, "module", issues),
+    styles,
+  };
+  if (result.module.artifactIntegrity !== result.artifactIntegrity || styles.some((style) => style.artifactIntegrity !== result.artifactIntegrity)) {
+    issues.push("entrypoint assets must belong to the declared artifact integrity");
+  }
+  throwIssues("Piarium extension entrypoint payload", issues);
+  return result;
+}
+
+export function parsePiariumExtensionCandidateSelectionRequest(value: unknown): PiariumExtensionCandidateSelectionRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension candidate selection request is invalid", ["request must be an object"]);
+  const result: PiariumExtensionCandidateSelectionRequest = {
+    candidateIntegrity: integrity(value.candidateIntegrity, "candidateIntegrity", issues),
+    expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+  };
+  throwIssues("Piarium extension candidate selection request", issues);
+  return result;
+}
+
+export function parsePiariumExtensionPackageSource(value: unknown): PiariumExtensionPackageSource {
+  const issues: string[] = [];
+  const result = parseSource(value, "source", issues);
+  throwIssues("Piarium extension package source", issues);
+  return result;
+}
+
+export function parsePiariumExtensionPackageInstallRequest(value: unknown): PiariumExtensionPackageInstallRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension install request is invalid", ["request must be an object"]);
+  const result = {
+    expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
+    source: parseSource(value.source, "source", issues),
+  };
+  throwIssues("Piarium extension install request", issues);
+  return result;
+}
+
+export function parsePiariumExtensionActualState(value: unknown): PiariumExtensionActualState {
+  const issues: string[] = [];
+  const states = parseActualStates([value], "actual", issues);
+  throwIssues("Piarium extension actual state", issues);
+  return states[0] as PiariumExtensionActualState;
 }

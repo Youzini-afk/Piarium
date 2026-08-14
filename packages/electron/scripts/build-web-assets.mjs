@@ -78,7 +78,7 @@ const copyDir = async (src, dst) => {
 const bunExe = resolveBun();
 
 console.log('[electron] building web UI dist...');
-run(bunExe, ['run', 'build'], webDir);
+run(bunExe, ['run', 'build:web'], repoRoot);
 
 console.log('[electron] staging packaged resources...');
 await fs.mkdir(resourcesDir, { recursive: true });

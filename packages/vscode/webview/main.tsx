@@ -346,6 +346,10 @@ onCommand('showNotification', (payload) => {
 });
 
 const bootstrap = async () => {
+  const { startManagedSurfaceExtensions } = await import('@piarium/ui/lib/extensions/managed-runtime');
+  void startManagedSurfaceExtensions().catch((error) => {
+    console.error('[Piarium Extensions] Managed Surface startup failed:', error);
+  });
   const folders = configuredWorkspaceFolders();
   if (folders.length > 0) await syncVSCodeWorkspaceProjects(folders);
   const { renderVSCodeApp } = await import('@piarium/ui/apps/renderVSCodeApp');

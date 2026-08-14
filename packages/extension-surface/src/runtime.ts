@@ -263,76 +263,120 @@ export class SurfaceExtensionRuntime {
   };
 
   activate(options: SurfaceActivationOptions, activation: SurfaceActivation): Promise<SurfaceOwnerHandle> {
-    validateOwner(options.owner);
-    const key = ownerKey(options.owner);
-    this.#markLatest(key, options.owner);
-    return this.#enqueue(options.owner.extensionId, async () => {
-      this.#assertLatest(key, options.owner);
-      const previous = this.#activeOwners.get(key);
-      this.#setActual(key, actual(options.owner, previous ? "updating" : "activating"));
-      const scope = new SurfaceOwnerScope();
-      const stagedContributions: SurfaceContribution[] = [];
-      const stagedServices: SurfaceService[] = [];
-      const granted = new Set(options.grantedCapabilities ?? []);
-      const requirements = normalizeRequirements(options.owner, options.requirements ?? []);
-      const context: SurfaceActivationContext = {
-        signal: scope.signal,
-        contribute: (descriptor, implementation) => {
-          const normalized = normalizeContribution(options.owner, descriptor);
-          if (!normalized.supports.includes(this.surface)) {
-            throw new SurfaceRegistryConflictError(
-              `Contribution ${normalized.id} does not support ${this.surface}`,
-              [normalized.id],
-            );
-          }
-          const missing = (normalized.requiresCapabilities ?? []).filter((capability) => !granted.has(capability));
-          if (missing.length > 0) {
-            throw new SurfaceRegistryConflictError(`Contribution ${normalized.id} lacks capability grants`, missing);
-          }
-          stagedContributions.push({ descriptor: normalized, implementation, owner: { ...options.owner } });
-        },
-        provide: (descriptor, implementation) => {
-          stagedServices.push({ descriptor: validateService(descriptor), implementation, owner: { ...options.owner } });
-        },
-        onDispose: (disposer) => scope.onDispose(disposer),
-        useService: (id, version) => this.getService(id, version),
-        useServices: (id, version) => this.getServices(id, version),
-      };
+    return this.activateWithCommit(options, activation, async () => undefined);
+  }
+
+  activateWithCommit(
+    options: SurfaceActivationOptions,
+    activation: SurfaceActivation,
+    commit: () => void | Promise<void>,
+  ): Promise<SurfaceOwnerHandle> {
+    return this.activateBatchWithCommit([{ activation, options }], commit)
+      .then((handles) => handles[0] as SurfaceOwnerHandle);
+  }
+
+  activateBatchWithCommit(
+    requests: readonly { activation: SurfaceActivation; options: SurfaceActivationOptions }[],
+    commit: () => void | Promise<void>,
+  ): Promise<SurfaceOwnerHandle[]> {
+    if (requests.length === 0) return Promise.resolve([]);
+    const extensionId = requests[0]?.options.owner.extensionId as string;
+    const keys = new Set<string>();
+    for (const request of requests) {
+      validateOwner(request.options.owner);
+      if (request.options.owner.extensionId !== extensionId) {
+        throw new Error("A transactional Surface activation batch must belong to one extension");
+      }
+      const key = ownerKey(request.options.owner);
+      if (keys.has(key)) throw new Error(`Duplicate Surface owner in activation batch: ${request.options.owner.entrypointId}`);
+      keys.add(key);
+      this.#markLatest(key, request.options.owner);
+    }
+    return this.#enqueue(extensionId, async () => {
+      const previous = new Map<string, ActiveOwner | undefined>();
+      const candidates = new Map<string, ActiveOwner>();
+      for (const request of requests) {
+        const key = ownerKey(request.options.owner);
+        this.#assertLatest(key, request.options.owner);
+        previous.set(key, this.#activeOwners.get(key));
+        this.#actual.set(key, actual(request.options.owner, previous.get(key) ? "updating" : "activating"));
+      }
+      this.#publish();
 
       try {
-        await activation(context);
-        this.#assertLatest(key, options.owner);
-        const candidate: ActiveOwner = {
-          contributions: stagedContributions,
-          owner: { ...options.owner },
-          requirements,
-          scope,
-          services: stagedServices,
-        };
-        this.#validateCandidate(key, candidate);
-        this.#activeOwners.set(key, candidate);
-        this.#actual.set(key, actual(options.owner, "active"));
-        this.#publish();
-        if (previous) {
-          await previous.scope.dispose("Surface owner generation replaced").catch((error) => {
-            const state = this.#actual.get(key);
-            if (state) {
-              state.diagnostics = [diagnostic(options.owner, "previous_generation_cleanup_failed", error instanceof Error ? error.message : String(error))];
-              this.#publish();
-            }
+        for (const request of requests) {
+          const owner = request.options.owner;
+          const key = ownerKey(owner);
+          const scope = new SurfaceOwnerScope();
+          const stagedContributions: SurfaceContribution[] = [];
+          const stagedServices: SurfaceService[] = [];
+          const granted = new Set(request.options.grantedCapabilities ?? []);
+          const requirements = normalizeRequirements(owner, request.options.requirements ?? []);
+          const context: SurfaceActivationContext = {
+            signal: scope.signal,
+            contribute: (descriptor, implementation) => {
+              const normalized = normalizeContribution(owner, descriptor);
+              if (!normalized.supports.includes(this.surface)) {
+                throw new SurfaceRegistryConflictError(
+                  `Contribution ${normalized.id} does not support ${this.surface}`,
+                  [normalized.id],
+                );
+              }
+              const missing = (normalized.requiresCapabilities ?? []).filter((capability) => !granted.has(capability));
+              if (missing.length > 0) {
+                throw new SurfaceRegistryConflictError(`Contribution ${normalized.id} lacks capability grants`, missing);
+              }
+              stagedContributions.push({ descriptor: normalized, implementation, owner: { ...owner } });
+            },
+            provide: (descriptor, implementation) => {
+              stagedServices.push({ descriptor: validateService(descriptor), implementation, owner: { ...owner } });
+            },
+            onDispose: (disposer) => scope.onDispose(disposer),
+            useService: (id, version) => this.getService(id, version),
+            useServices: (id, version) => this.getServices(id, version),
+          };
+          try {
+            await request.activation(context);
+          } catch (error) {
+            await scope.dispose(error).catch(() => undefined);
+            throw error;
+          }
+          this.#assertLatest(key, owner);
+          candidates.set(key, {
+            contributions: stagedContributions,
+            owner: { ...owner },
+            requirements,
+            scope,
+            services: stagedServices,
           });
         }
-        return this.#handle(options.owner);
+        this.#validateCandidates(candidates);
+        await commit();
+        for (const request of requests) this.#assertLatest(ownerKey(request.options.owner), request.options.owner);
+        for (const [key, candidate] of candidates) {
+          this.#activeOwners.set(key, candidate);
+          this.#actual.set(key, actual(candidate.owner, "active"));
+        }
+        this.#publish();
+        for (const [key, oldOwner] of previous) {
+          if (!oldOwner) continue;
+          await oldOwner.scope.dispose("Surface owner generation replaced").catch((error) => {
+            const state = this.#actual.get(key);
+            if (state) state.diagnostics = [diagnostic(state, "previous_generation_cleanup_failed", error instanceof Error ? error.message : String(error))];
+          });
+        }
+        this.#publish();
+        return requests.map((request) => this.#handle(request.options.owner));
       } catch (error) {
-        await scope.dispose(error).catch(() => undefined);
-        if (previous) {
-          this.#actual.set(key, actual(previous.owner, "active", [
-            diagnostic(options.owner, "candidate_activation_failed", error instanceof Error ? error.message : String(error)),
-          ]));
-        } else {
-          this.#actual.set(key, actual(options.owner, error instanceof SurfaceActivationStaleError ? "inactive" : "failed", [
-            diagnostic(options.owner, error instanceof SurfaceActivationStaleError ? "activation_superseded" : "activation_failed", error instanceof Error ? error.message : String(error)),
-          ]));
+        for (const candidate of candidates.values()) await candidate.scope.dispose(error).catch(() => undefined);
+        for (const request of requests) {
+          const key = ownerKey(request.options.owner);
+          const oldOwner = previous.get(key);
+          this.#actual.set(key, oldOwner
+            ? actual(oldOwner.owner, "active", [diagnostic(request.options.owner, "candidate_activation_failed", error instanceof Error ? error.message : String(error))])
+            : actual(request.options.owner, error instanceof SurfaceActivationStaleError ? "inactive" : "failed", [
+              diagnostic(request.options.owner, error instanceof SurfaceActivationStaleError ? "activation_superseded" : "activation_failed", error instanceof Error ? error.message : String(error)),
+            ]));
         }
         this.#publish();
         throw error;
@@ -454,12 +498,9 @@ export class SurfaceExtensionRuntime {
       .sort((left, right) => left.owner.extensionId.localeCompare(right.owner.extensionId));
   }
 
-  #validateCandidate(
-    key: string,
-    candidate: ActiveOwner,
-  ): void {
+  #validateCandidates(candidates: ReadonlyMap<string, ActiveOwner>): void {
     const candidateOwners = new Map(this.#activeOwners);
-    candidateOwners.set(key, candidate);
+    for (const [key, candidate] of candidates) candidateOwners.set(key, candidate);
     const allContributions = [...candidateOwners.values()].flatMap((owner) => owner.contributions);
     const duplicateContributions = allContributions
       .map((item) => item.descriptor.id)
@@ -515,11 +556,6 @@ export class SurfaceExtensionRuntime {
     if (!latest || compareRequest(request, latest) !== 0) {
       throw new SurfaceActivationStaleError("Surface activation was superseded by a newer desired generation");
     }
-  }
-
-  #setActual(key: string, state: SurfaceActualState): void {
-    this.#actual.set(key, state);
-    this.#publish();
   }
 
   #publish(): void {

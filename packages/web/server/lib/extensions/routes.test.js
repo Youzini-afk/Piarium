@@ -25,12 +25,16 @@ const snapshot = (enabled = true, revision = 1) => ({
   }],
 });
 
-const createApp = (extensionCatalog) => {
+const createApp = (extensionCatalog, extensionPackages = {}) => {
   const app = express();
   app.use(express.json());
   registerExtensionRoutes(app, {
     extensionCatalog,
+    extensionPackages,
     uiAuthController: {
+      requireAuth: (req, res, next) => req.headers['x-test-session'] === 'yes'
+        ? next()
+        : res.status(401).json({ error: 'Authentication required' }),
       requireSessionAuth: (req, res, next) => req.headers['x-test-session'] === 'yes'
         ? next()
         : res.status(401).json({ error: 'Session authentication required' }),
@@ -69,5 +73,26 @@ describe('Piarium extension recovery routes', () => {
       .send({ enabled: false, expectedRevision: 1 })
       .expect(409);
     expect(conflict.body.error).toMatchObject({ code: 'revision_conflict', actualRevision: 2, expectedRevision: 1 });
+  });
+
+  it('serves managed entrypoint bytes only through an authenticated POST', async () => {
+    const entrypoint = {
+      artifactIntegrity: `sha256-${'a'.repeat(64)}`,
+      entrypointId: 'main',
+      module: {
+        artifactIntegrity: `sha256-${'a'.repeat(64)}`,
+        bytesBase64: 'bW9kdWxlLmV4cG9ydHM9e307',
+        contentType: 'text/javascript',
+        integrity: `sha256-${'b'.repeat(64)}`,
+        path: 'runtime/surface/main/module.cjs',
+      },
+      styles: [],
+    };
+    const extensionPackages = { readManagedEntrypoint: vi.fn(async () => entrypoint) };
+    const app = createApp({ snapshot: vi.fn(async () => snapshot()) }, extensionPackages);
+    const path = '/api/piarium/extensions/v1/entrypoints/read';
+    await request(app).post(path).send({}).expect(401);
+    const response = await request(app).post(path).set('x-test-session', 'yes').send({}).expect(200);
+    expect(response.body).toEqual(entrypoint);
   });
 });

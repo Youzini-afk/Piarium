@@ -283,8 +283,17 @@ superseded candidate leaves the prior generation active, and deactivation withdr
 before asynchronous cleanup. Retained layout references, replacement selection, ordering, and
 per-realm actual state live in the registry. Settings pages/sidebars/search and primary Command
 Palette commands are now statically linked built-in extensions using that same lifecycle rather than
-hard-coded render switches. This proves in-place enable/disable but still does not load external
-Surface artifacts; managed asset loading belongs to the next platform slice.
+hard-coded render switches.
+
+The third slice adds `@piarium/extension-sdk`, `@piarium/extension-react`,
+`@piarium/extension-loader`, and the content-addressed artifact layer in
+`@piarium/extension-host`. npm, Git, local, and built-in sources produce immutable browser bundles;
+the application host returns authenticated bytes rather than credential-bearing module URLs. A
+Surface verifies those bytes, stages every compatible entrypoint plus its styles and object URLs, and
+uses one revision-checked candidate-selection transaction. Activation or catalog-commit failure keeps
+the previous selected version and active generation. Web, bundled Electron, and VS Code use the same
+loader contract; VS Code owns its catalog in extension global storage and retains its no-blob-script
+CSP.
 
 The target platform makes built-in pages and workflows replaceable above a narrow recovery kernel,
 supports declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and

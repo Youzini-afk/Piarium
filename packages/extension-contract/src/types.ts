@@ -178,6 +178,7 @@ export interface PiariumExtensionActualState {
 }
 
 export interface PiariumExtensionInstallationRecord {
+  candidate?: PiariumExtensionCandidateRecord;
   capabilityGrants: PiariumExtensionCapabilityGrant[];
   desired: PiariumExtensionDesiredState;
   installedAt: string;
@@ -190,8 +191,26 @@ export interface PiariumExtensionInstallationRecord {
   updatedAt: string;
 }
 
+export interface PiariumExtensionCandidateRecord {
+  integrity: string;
+  manifest: PiariumExtensionManifest;
+  preparedAt: string;
+  resolvedPath: string;
+  resolvedVersion: string;
+  source: PiariumExtensionPackageSource;
+}
+
+export interface PiariumExtensionPublicCandidate {
+  integrity: string;
+  manifest: PiariumExtensionManifest;
+  preparedAt: string;
+  resolvedVersion: string;
+  source: PiariumExtensionPublicPackageSource;
+}
+
 export interface PiariumExtensionCatalogEntry {
   actual: PiariumExtensionActualState[];
+  candidate?: PiariumExtensionPublicCandidate;
   capabilityGrants: PiariumExtensionCapabilityGrant[];
   desired: PiariumExtensionDesiredState;
   installedAt: string;
@@ -201,6 +220,48 @@ export interface PiariumExtensionCatalogEntry {
   selectedVersion: string;
   source: PiariumExtensionPublicPackageSource;
   updatedAt: string;
+}
+
+export type PiariumExtensionArtifactSlot = "candidate" | "selected";
+
+export interface PiariumExtensionAssetRequest {
+  extensionId: string;
+  integrity: string;
+  path: string;
+  slot: PiariumExtensionArtifactSlot;
+}
+
+export interface PiariumExtensionAssetPayload {
+  artifactIntegrity: string;
+  bytesBase64: string;
+  contentType: string;
+  integrity: string;
+  path: string;
+}
+
+export interface PiariumExtensionManagedEntrypointRequest {
+  entrypointId: string;
+  extensionId: string;
+  integrity: string;
+  slot: PiariumExtensionArtifactSlot;
+}
+
+export interface PiariumExtensionManagedEntrypointPayload {
+  artifactIntegrity: string;
+  entrypointId: string;
+  module: PiariumExtensionAssetPayload;
+  styles: PiariumExtensionAssetPayload[];
+}
+
+export interface PiariumExtensionCandidateSelectionRequest {
+  candidateIntegrity: string;
+  expectedRevision: number;
+  extensionId: string;
+}
+
+export interface PiariumExtensionPackageInstallRequest {
+  expectedRevision: number;
+  source: PiariumExtensionPackageSource;
 }
 
 export type PiariumExtensionCatalogStorageState = "missing" | "ready" | "stale";

@@ -1,0 +1,33 @@
+{
+  "name": "@piarium/extension-sdk",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "Framework-neutral authoring SDK for Piarium Surface extensions.",
+  "files": ["dist"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    }
+  },
+  "scripts": {
+    "build:dependencies": "bun run --cwd ../extension-contract build && bun run --cwd ../extension-surface build",
+    "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@piarium/extension-contract": "0.1.0",
+    "@piarium/extension-surface": "0.1.0"
+  },
+  "engines": { "node": ">=22.19.0" }
+}

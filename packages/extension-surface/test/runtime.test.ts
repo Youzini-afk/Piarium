@@ -63,6 +63,38 @@ test("failed candidate activation preserves the previous active generation", asy
   assert.equal(runtime.getSnapshot().actual[0]?.diagnostics[0]?.code, "candidate_activation_failed");
 });
 
+test("a failed persistent candidate commit preserves every previous entrypoint generation", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const secondary = { ...owner("dev.example.alpha", 1, 1), entrypointId: "secondary" };
+  await runtime.activateBatchWithCommit([
+    {
+      options: { owner: owner("dev.example.alpha", 1, 1) },
+      activation: (context) => context.contribute(page("dev.example.alpha.main"), { version: 1 }),
+    },
+    {
+      options: { owner: secondary },
+      activation: (context) => context.contribute(page("dev.example.alpha.secondary"), { version: 1 }),
+    },
+  ], () => undefined);
+
+  await assert.rejects(() => runtime.activateBatchWithCommit([
+    {
+      options: { owner: owner("dev.example.alpha", 1, 2) },
+      activation: (context) => context.contribute(page("dev.example.alpha.main"), { version: 2 }),
+    },
+    {
+      options: { owner: { ...secondary, generation: 2 } },
+      activation: (context) => context.contribute(page("dev.example.alpha.secondary"), { version: 2 }),
+    },
+  ], () => { throw new Error("catalog revision changed"); }), /catalog revision changed/);
+
+  assert.deepEqual(
+    runtime.getSnapshot().visibleContributions.map((item) => (item.implementation as { version: number }).version),
+    [1, 1],
+  );
+  assert.equal(runtime.getSnapshot().actual.every((state) => state.status === "active"), true);
+});
+
 test("a newer disable supersedes in-flight activation before it can publish", async () => {
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   let release!: () => void;

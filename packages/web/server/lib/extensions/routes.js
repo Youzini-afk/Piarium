@@ -2,6 +2,10 @@ import {
   ExtensionCatalogRevisionConflictError,
   ExtensionCatalogStorageError,
 } from '@piarium/extension-host';
+import {
+  parsePiariumExtensionActualState,
+  parsePiariumExtensionPackageSource,
+} from '@piarium/extension-contract';
 import { renderExtensionRecoveryPage } from './recovery-page.js';
 
 const catalogError = (error) => ({
@@ -48,7 +52,7 @@ const sendMutationError = (res, error) => {
   });
 };
 
-export const registerExtensionRoutes = (app, { extensionCatalog, uiAuthController }) => {
+export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackages, uiAuthController }) => {
   app.get('/extensions/recovery', uiAuthController.requireSessionAuth, (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.type('html').send(renderExtensionRecoveryPage());
@@ -63,6 +67,85 @@ export const registerExtensionRoutes = (app, { extensionCatalog, uiAuthControlle
       res.status(500).json(catalogError(error));
     }
   });
+
+  app.post(
+    '/api/piarium/extensions/v1/assets/read',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      try {
+        return res.json(await extensionPackages.readAsset(req.body));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const status = message.includes('not installed') || message.includes('does not contain') ? 404 : 400;
+        return res.status(status).json({ error: { code: 'asset_unavailable', message, retryable: false } });
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/entrypoints/read',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      try {
+        return res.json(await extensionPackages.readManagedEntrypoint(req.body));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const status = message.includes('not installed') || message.includes('not present') ? 404 : 400;
+        return res.status(status).json({ error: { code: 'entrypoint_unavailable', message, retryable: false } });
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/candidates/select',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      try {
+        return res.json({ snapshot: await extensionPackages.selectCandidate(req.body) });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/actual',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      try {
+        const extensionId = typeof req.body?.extensionId === 'string' ? req.body.extensionId : '';
+        const state = parsePiariumExtensionActualState(req.body?.state);
+        await extensionPackages.reportActualState(extensionId, state);
+        return res.status(204).end();
+      } catch (error) {
+        return res.status(409).json({
+          error: {
+            code: 'actual_state_rejected',
+            message: error instanceof Error ? error.message : String(error),
+            retryable: true,
+          },
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/install',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      const revision = expectedRevision(req.body);
+      if (revision === null) {
+        return res.status(400).json({ error: { code: 'invalid_request', message: 'expectedRevision is required', retryable: false } });
+      }
+      try {
+        const source = parsePiariumExtensionPackageSource(req.body?.source);
+        const snapshot = await extensionPackages.installOrStage(source, revision, req.signal);
+        return res.json({ snapshot });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
 
   app.patch(
     '/api/piarium/extensions/v1/extensions/:extensionId/enabled',

@@ -7,6 +7,9 @@
     "paths": {
       "@piarium/extension-contract": ["packages/extension-contract/src/index.ts"],
       "@piarium/extension-host": ["packages/extension-host/src/index.ts"],
+      "@piarium/extension-loader": ["packages/extension-loader/src/index.ts"],
+      "@piarium/extension-react": ["packages/extension-react/src/index.ts"],
+      "@piarium/extension-sdk": ["packages/extension-sdk/src/index.ts"],
       "@piarium/extension-surface": ["packages/extension-surface/src/index.ts"],
       "@piarium/pi-host": ["packages/pi-host/src/index.ts"],
       "@piarium/pi-host/discovery": ["packages/pi-host/src/runtime-discovery.ts"],

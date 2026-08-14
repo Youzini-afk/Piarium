@@ -11,7 +11,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
-import { ApplicationExtensionCatalog } from '@piarium/extension-host';
+import { ApplicationExtensionCatalog, ExtensionPackageManager } from '@piarium/extension-host';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -554,6 +554,10 @@ async function main(options = {}) {
   console.log(`Starting Piarium on port ${port === 0 ? 'auto' : port}`);
   const app = express();
   const extensionCatalog = options.extensionCatalog || new ApplicationExtensionCatalog({ dataDir: PIARIUM_DATA_DIR });
+  const extensionPackages = options.extensionPackages || new ExtensionPackageManager({
+    catalog: extensionCatalog,
+    dataDir: PIARIUM_DATA_DIR,
+  });
   app.set('trust proxy', true);
   app.use((_req, res, next) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -567,7 +571,7 @@ async function main(options = {}) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Piarium-Directory,X-Piarium-Directory-Encoding');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-Piarium-Application-Token,X-Piarium-Directory,X-Piarium-Directory-Encoding');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') return res.status(204).end();
@@ -853,6 +857,7 @@ async function main(options = {}) {
     getPiariumEventClients: () => uiPiariumEventClients,
     writeSseEvent,
     extensionCatalog,
+    extensionPackages,
     uiAuthController,
     reloadRuntimeConfiguration: async () => { await piRuntimeBroker.warmup(); },
   });

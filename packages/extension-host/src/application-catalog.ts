@@ -3,6 +3,7 @@ import {
   type PiariumExtensionActualState,
   type PiariumExtensionCatalogEntry,
   type PiariumExtensionCatalogSnapshot,
+  type PiariumExtensionCandidateRecord,
   type PiariumExtensionCapabilityGrant,
   type PiariumExtensionInstallationRecord,
 } from "@piarium/extension-contract";
@@ -71,6 +72,38 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
+  async stageCandidate(candidate: PiariumExtensionCandidateRecord, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.stageCandidate(candidate, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
+  async selectCandidate(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
+  async discardCandidate(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.discardCandidate(extensionId, candidateIntegrity, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
   async reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void> {
     const snapshot = await this.snapshot();
     if (state.hostId !== snapshot.hostId) throw new ExtensionCatalogStaleStateError("Actual state belongs to another application host");
@@ -101,6 +134,18 @@ export class ApplicationExtensionCatalog {
           .sort((left, right) => left.realmId.localeCompare(right.realmId) || left.entrypointId.localeCompare(right.entrypointId));
         return {
           actual,
+          ...(record.candidate ? {
+            candidate: {
+              integrity: record.candidate.integrity,
+              manifest: structuredClone(record.candidate.manifest),
+              preparedAt: record.candidate.preparedAt,
+              resolvedVersion: record.candidate.resolvedVersion,
+              source: {
+                display: record.candidate.source.display,
+                kind: record.candidate.source.kind,
+              },
+            },
+          } : {}),
           capabilityGrants: structuredClone(record.capabilityGrants),
           desired: structuredClone(record.desired),
           installedAt: record.installedAt,

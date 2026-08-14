@@ -9,6 +9,7 @@ import { createVSCodeActionsAPI } from './vscode';
 import { createVSCodeGitHubAPI } from './github';
 import { createVSCodeNotificationsAPI } from './notifications';
 import { createVSCodeWorkspaceAPI } from './workspace';
+import { createVSCodeExtensionsAPI } from './extensions';
 
 const terminalUnsupported = async (): Promise<never> => {
   throw new Error('Terminal is not supported in the VS Code runtime');
@@ -36,12 +37,7 @@ export const createVSCodeAPIs = (): RuntimeAPIs => ({
   permissions: createVSCodePermissionsAPI(),
   notifications: createVSCodeNotificationsAPI(),
   github: createVSCodeGitHubAPI(),
-  extensions: {
-    catalog: async () => ({
-      supported: false,
-      reason: 'Piarium extension hosting is not available in the VS Code surface yet.',
-    }),
-  },
+  extensions: createVSCodeExtensionsAPI(),
   tools: createVSCodeToolsAPI(),
   editor: createVSCodeEditorAPI(),
   vscode: createVSCodeActionsAPI(),

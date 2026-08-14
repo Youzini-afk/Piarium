@@ -201,6 +201,33 @@ describe('ui auth client credential seam', () => {
     expect(await auth.ensureSessionToken(urlReq, urlRes)).toBe('client:device-1');
     expect(await auth.resolveAuthContext(urlReq, urlRes, { allowUrlToken: false })).toBe(null);
 
+    const extensionAssetReq = {
+      method: 'POST',
+      path: '/api/piarium/extensions/v1/assets/read',
+      url: '/api/piarium/extensions/v1/assets/read',
+      headers: { 'x-piarium-application-token': urlToken },
+    };
+    const extensionAssetRes = createResponse();
+    let extensionAssetCalled = false;
+    await auth.requireAuth(extensionAssetReq, extensionAssetRes, () => {
+      extensionAssetCalled = true;
+    });
+    expect(extensionAssetCalled).toBe(true);
+
+    const unrelatedHeaderReq = {
+      method: 'POST',
+      path: '/api/fs/raw',
+      url: '/api/fs/raw',
+      headers: { 'x-piarium-application-token': urlToken },
+    };
+    const unrelatedHeaderRes = createResponse();
+    let unrelatedHeaderCalled = false;
+    await auth.requireAuth(unrelatedHeaderReq, unrelatedHeaderRes, () => {
+      unrelatedHeaderCalled = true;
+    });
+    expect(unrelatedHeaderCalled).toBe(false);
+    expect(unrelatedHeaderRes.statusCode).toBe(401);
+
     const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const serveRes = createResponse();
     let serveCalled = false;

@@ -4,6 +4,8 @@ import {
   PiariumExtensionContractError,
   parsePiariumExtensionCatalogAvailability,
   parsePiariumExtensionCatalogDocument,
+  parsePiariumExtensionAssetPayload,
+  parsePiariumExtensionManagedEntrypointRequest,
   parsePiariumExtensionManifest,
 } from "../src/index.js";
 
@@ -29,6 +31,34 @@ const manifest = () => ({
     data: { route: "memory" },
   }],
   integrates: { piPackages: ["pi-observational-memory"] },
+});
+
+test("validates content-addressed managed entrypoint requests and asset bytes", () => {
+  const integrity = `sha256-${"a".repeat(64)}`;
+  assert.deepEqual(parsePiariumExtensionManagedEntrypointRequest({
+    entrypointId: "main",
+    extensionId: "dev.example.memory-workbench",
+    integrity,
+    slot: "candidate",
+  }), {
+    entrypointId: "main",
+    extensionId: "dev.example.memory-workbench",
+    integrity,
+    slot: "candidate",
+  });
+  assert.equal(parsePiariumExtensionAssetPayload({
+    artifactIntegrity: integrity,
+    bytesBase64: "aGVsbG8=",
+    contentType: "text/plain",
+    integrity,
+    path: "package/hello.txt",
+  }).path, "package/hello.txt");
+  assert.throws(() => parsePiariumExtensionManagedEntrypointRequest({
+    entrypointId: "main",
+    extensionId: "../escape",
+    integrity: "sha256-not-a-digest",
+    slot: "selected",
+  }), PiariumExtensionContractError);
 });
 
 test("normalizes a complete Piarium extension manifest", () => {

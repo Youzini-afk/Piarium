@@ -122,6 +122,41 @@
       "version": "0.1.0",
       "dependencies": {
         "@piarium/extension-contract": "0.1.0",
+        "esbuild": "^0.28.1",
+        "tar": "^7.5.22",
+      },
+    },
+    "packages/extension-loader": {
+      "name": "@piarium/extension-loader",
+      "version": "0.1.0",
+      "dependencies": {
+        "@piarium/extension-contract": "0.1.0",
+        "@piarium/extension-sdk": "0.1.0",
+        "@piarium/extension-surface": "0.1.0",
+      },
+    },
+    "packages/extension-react": {
+      "name": "@piarium/extension-react",
+      "version": "0.1.0",
+      "dependencies": {
+        "@piarium/extension-sdk": "0.1.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19.2.18",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+      },
+    },
+    "packages/extension-sdk": {
+      "name": "@piarium/extension-sdk",
+      "version": "0.1.0",
+      "dependencies": {
+        "@piarium/extension-contract": "0.1.0",
+        "@piarium/extension-surface": "0.1.0",
       },
     },
     "packages/extension-surface": {
@@ -226,6 +261,7 @@
         "@dnd-kit/utilities": "^3.2.2",
         "@lezer/highlight": "^1.2.3",
         "@piarium/extension-contract": "workspace:*",
+        "@piarium/extension-loader": "workspace:*",
         "@piarium/extension-surface": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-client": "workspace:*",
@@ -302,6 +338,8 @@
       "name": "piarium",
       "version": "0.1.0",
       "dependencies": {
+        "@piarium/extension-contract": "workspace:*",
+        "@piarium/extension-host": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-broker": "workspace:*",
         "@piarium/runtime-client": "workspace:*",
@@ -1219,6 +1257,12 @@
     "@piarium/extension-contract": ["@piarium/extension-contract@workspace:packages/extension-contract"],
 
     "@piarium/extension-host": ["@piarium/extension-host@workspace:packages/extension-host"],
+
+    "@piarium/extension-loader": ["@piarium/extension-loader@workspace:packages/extension-loader"],
+
+    "@piarium/extension-react": ["@piarium/extension-react@workspace:packages/extension-react"],
+
+    "@piarium/extension-sdk": ["@piarium/extension-sdk@workspace:packages/extension-sdk"],
 
     "@piarium/extension-surface": ["@piarium/extension-surface@workspace:packages/extension-surface"],
 

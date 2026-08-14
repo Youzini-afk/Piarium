@@ -17,6 +17,10 @@ export default defineConfig(({ mode }) => ({
   ],
   resolve: {
     alias: [
+      { find: '@piarium/extension-contract', replacement: path.resolve(__dirname, '../extension-contract/src/index.ts') },
+      { find: '@piarium/extension-loader', replacement: path.resolve(__dirname, '../extension-loader/src/index.ts') },
+      { find: '@piarium/extension-sdk', replacement: path.resolve(__dirname, '../extension-sdk/src/index.ts') },
+      { find: '@piarium/extension-surface', replacement: path.resolve(__dirname, '../extension-surface/src/index.ts') },
       { find: '@piarium/ui', replacement: path.resolve(__dirname, '../ui/src') },
       { find: '@vscode', replacement: path.resolve(__dirname, './webview') },
       { find: '@', replacement: path.resolve(__dirname, '../ui/src') },

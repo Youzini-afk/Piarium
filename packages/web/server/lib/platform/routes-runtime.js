@@ -75,10 +75,11 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       writeSseEvent,
       reloadRuntimeConfiguration = async () => {},
       extensionCatalog,
+      extensionPackages,
       uiAuthController,
     } = dependencies;
 
-    registerExtensionRoutes(app, { extensionCatalog, uiAuthController });
+    registerExtensionRoutes(app, { extensionCatalog, extensionPackages, uiAuthController });
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,

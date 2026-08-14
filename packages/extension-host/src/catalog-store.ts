@@ -8,6 +8,7 @@ import {
   parsePiariumExtensionHostIdentityDocument,
   parsePiariumExtensionInstallationRecord,
   type PiariumExtensionCatalogDocument,
+  type PiariumExtensionCandidateRecord,
   type PiariumExtensionCapabilityGrant,
   type PiariumExtensionDiagnostic,
   type PiariumExtensionHostIdentityDocument,
@@ -241,6 +242,60 @@ export class ExtensionCatalogStore {
       ));
       if (index >= 0) record.capabilityGrants[index] = next;
       else record.capabilityGrants.push(next);
+      record.updatedAt = now;
+      return true;
+    });
+  }
+
+  stageCandidate(candidate: PiariumExtensionCandidateRecord, expectedRevision: number): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[candidate.manifest.id];
+      if (!record) throw new Error(`Piarium extension is not installed: ${candidate.manifest.id}`);
+      if (record.candidate?.integrity === candidate.integrity) return false;
+      record.candidate = structuredClone(candidate);
+      record.updatedAt = now;
+      return true;
+    });
+  }
+
+  selectCandidate(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[extensionId];
+      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      const candidate = record.candidate;
+      if (!candidate || candidate.integrity !== candidateIntegrity) {
+        throw new Error(`Piarium extension candidate is no longer current: ${extensionId}`);
+      }
+      record.manifest = structuredClone(candidate.manifest);
+      record.source = structuredClone(candidate.source);
+      record.integrity = candidate.integrity;
+      record.resolvedPath = candidate.resolvedPath;
+      record.resolvedVersion = candidate.resolvedVersion;
+      record.selectedVersion = candidate.resolvedVersion;
+      record.capabilityGrants = record.capabilityGrants.filter((grant) => (
+        grant.manifestVersion === candidate.manifest.version
+        && (candidate.manifest.capabilities?.[grant.realm] ?? []).includes(grant.capability)
+      ));
+      delete record.candidate;
+      record.updatedAt = now;
+      return true;
+    });
+  }
+
+  discardCandidate(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[extensionId];
+      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (!record.candidate || record.candidate.integrity !== candidateIntegrity) return false;
+      delete record.candidate;
       record.updatedAt = now;
       return true;
     });

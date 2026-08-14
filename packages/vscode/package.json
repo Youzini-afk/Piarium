@@ -216,15 +216,16 @@
   },
   "scripts": {
     "vscode:prepublish": "bun run build",
-    "build": "bun run prepare:pi-runtime && bun run build:extension && bun run build:webview",
+    "build": "bun run prepare:pi-runtime && bun run prepare:extension-host && bun run build:extension && bun run build:webview",
     "prepare:pi-runtime": "bun run --cwd ../runtime-broker build && node scripts/prepare-pi-runtime.mjs",
+    "prepare:extension-host": "bun run --cwd ../extension-host build && bun run --cwd ../extension-loader build",
     "test:pi-runtime": "node scripts/test-pi-runtime.mjs",
     "verify:pi-runtime": "bun run prepare:pi-runtime && bun run test:pi-runtime",
-    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --main-fields=module,main",
+    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:esbuild --format=cjs --platform=node --minify --main-fields=module,main",
     "build:webview": "vite build",
     "dev": "concurrently -n \"ext,web\" -c \"cyan,magenta\" \"bun run watch:extension\" \"bun run dev:webview\"",
     "dev:webview": "vite --host localhost --port 5173 --strictPort",
-    "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
+    "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:esbuild --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
     "watch:webview": "vite build --watch",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
     "lint": "bun x eslint --ext .ts,.tsx src webview",
@@ -240,6 +241,8 @@
     "vite": "^7.1.2"
   },
   "dependencies": {
+    "@piarium/extension-contract": "workspace:*",
+    "@piarium/extension-host": "workspace:*",
     "@piarium/ui": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",

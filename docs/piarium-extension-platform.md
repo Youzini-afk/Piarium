@@ -961,6 +961,26 @@ being implied by this in-process Surface slice.
 Acceptance: a local/npm/Git test extension installs, activates, deactivates, updates, and rolls back
 across Web, bundled Electron, and VS Code without leaking contributions or credentials.
 
+Implementation status (2026-08-14): complete. `@piarium/extension-host` now materializes local, npm,
+Git, and registered built-in sources without package lifecycle scripts, rejects mutable package-tree
+links, bundles managed browser entrypoints, and stores immutable SHA-256 artifacts. The selected
+artifact and one staged candidate are separate catalog records. Candidate selection is revisioned and
+preserves version-bound capability grants only when the same declared capability remains valid.
+
+`@piarium/extension-loader` obtains modules, styles, and extension assets through authenticated
+Runtime API byte requests, verifies both artifact and file integrity, and never embeds a credential in
+a module/resource URL. All compatible entrypoints of one extension are staged and validated as one
+Surface transaction; only then is the host candidate selected and the new contributions published.
+Activation or selection failure leaves the old selected artifact, active generation, layout, styles,
+and services in place. Owner cleanup removes styles and object URLs on update or disable.
+
+The framework-neutral `@piarium/extension-sdk` exposes activation, owned assets/styles, and a
+conformance harness. `@piarium/extension-react` is an optional React 19 peer adapter; external bundles
+do not inherit the workbench React singleton. Web and hosted surfaces use the application-host API,
+bundled Electron stages that Web build, and VS Code now owns the same host catalog/artifacts under its
+global storage and bridges authenticated bytes to the webview. Managed CommonJS evaluation uses the
+already-declared trusted managed realm and preserves VS Code's prohibition on blob scripts.
+
 ### Phase D — Host services, storage, and dependencies
 
 - Implement brokered host entrypoints, capability RPC, extension storage, migrations, versioned

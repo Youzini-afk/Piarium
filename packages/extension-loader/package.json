@@ -1,0 +1,31 @@
+{
+  "name": "@piarium/extension-loader",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "description": "Authenticated managed Surface module loader for Piarium extensions.",
+  "files": ["dist"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build:dependencies": "bun run --cwd ../extension-contract build && bun run --cwd ../extension-surface build && bun run --cwd ../extension-sdk build",
+    "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@piarium/extension-contract": "0.1.0",
+    "@piarium/extension-sdk": "0.1.0",
+    "@piarium/extension-surface": "0.1.0"
+  },
+  "engines": { "node": ">=22.19.0" }
+}

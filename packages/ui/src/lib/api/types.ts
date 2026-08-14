@@ -1,6 +1,16 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
-import type { PiariumExtensionCatalogAvailability } from '@piarium/extension-contract';
+import type {
+  PiariumExtensionActualState,
+  PiariumExtensionAssetPayload,
+  PiariumExtensionAssetRequest,
+  PiariumExtensionCandidateSelectionRequest,
+  PiariumExtensionCatalogAvailability,
+  PiariumExtensionCatalogSnapshot,
+  PiariumExtensionManagedEntrypointPayload,
+  PiariumExtensionManagedEntrypointRequest,
+  PiariumExtensionPackageInstallRequest,
+} from '@piarium/extension-contract';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -1597,6 +1607,11 @@ export interface SmartSearchAPI {
 
 export interface ExtensionsAPI {
   catalog(): Promise<PiariumExtensionCatalogAvailability>;
+  install(request: PiariumExtensionPackageInstallRequest): Promise<PiariumExtensionCatalogSnapshot>;
+  readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
+  readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
+  reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
+  selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
 }
 
 export interface RuntimeAPIs {
