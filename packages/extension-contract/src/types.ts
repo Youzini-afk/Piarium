@@ -107,6 +107,13 @@ export interface PiariumExtensionManifest {
   integrates?: {
     piPackages?: string[];
   };
+  metadata?: {
+    description?: string;
+    homepage?: string;
+    icon?: string;
+    keywords?: string[];
+    repository?: string;
+  };
   provides?: {
     services?: PiariumExtensionServiceProvision[];
   };
@@ -212,6 +219,7 @@ export interface PiariumExtensionInstallationRecord {
 }
 
 export interface PiariumExtensionCandidateRecord {
+  applyRequested: boolean;
   capabilitiesReviewed: boolean;
   capabilityDelta: PiariumExtensionCapabilityDelta;
   capabilityGrants: PiariumExtensionCapabilityGrant[];
@@ -233,6 +241,7 @@ export interface PiariumExtensionPreparedArtifact {
 }
 
 export interface PiariumExtensionPublicCandidate {
+  applyRequested: boolean;
   capabilitiesReviewed: boolean;
   capabilityDelta: PiariumExtensionCapabilityDelta;
   capabilityGrants: PiariumExtensionCapabilityGrant[];
@@ -301,9 +310,20 @@ export interface PiariumExtensionCandidateCapabilityReviewRequest {
   extensionId: string;
 }
 
+export interface PiariumExtensionCapabilityReviewRequest {
+  decisions: PiariumExtensionCapabilityDecision[];
+  expectedRevision: number;
+  extensionId: string;
+}
+
 export interface PiariumExtensionPackageInstallRequest {
   expectedRevision: number;
   source: PiariumExtensionPackageSource;
+}
+
+export interface PiariumExtensionRemoveRequest {
+  expectedRevision: number;
+  extensionId: string;
 }
 
 export type PiariumExtensionServiceProviderStatus = "active" | "candidate" | "draining";

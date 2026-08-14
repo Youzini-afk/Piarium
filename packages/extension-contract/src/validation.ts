@@ -18,6 +18,8 @@ import {
   type PiariumExtensionCatalogEntry,
   type PiariumExtensionCatalogSnapshot,
   type PiariumExtensionCapabilityDelta,
+  type PiariumExtensionCapabilityDecision,
+  type PiariumExtensionCapabilityReviewRequest,
   type PiariumExtensionCapabilityGrant,
   type PiariumExtensionCapabilityReference,
   type PiariumExtensionContributionKind,
@@ -33,6 +35,7 @@ import {
   type PiariumExtensionManagedEntrypointRequest,
   type PiariumExtensionPackageSource,
   type PiariumExtensionPackageInstallRequest,
+  type PiariumExtensionRemoveRequest,
   type PiariumExtensionServiceProvision,
   type PiariumExtensionServiceCatalogSnapshot,
   type PiariumExtensionServiceInvocationRequest,
@@ -447,6 +450,16 @@ export function parsePiariumExtensionManifest(value: unknown): PiariumExtensionM
   if (value.integrates !== undefined && !isRecord(value.integrates)) issues.push("integrates must be an object");
   const piPackages = uniqueStrings(rawIntegrates.piPackages, "integrates.piPackages", issues);
   const contributions = parseContributions(value.contributions, "contributions", issues);
+  const rawMetadata = isRecord(value.metadata) ? value.metadata : {};
+  if (value.metadata !== undefined && !isRecord(value.metadata)) issues.push("metadata must be an object");
+  const metadataDescription = text(rawMetadata.description);
+  const metadataHomepage = text(rawMetadata.homepage);
+  const metadataIcon = rawMetadata.icon === undefined ? undefined : entryPath(rawMetadata.icon, "metadata.icon", issues);
+  const metadataKeywords = uniqueStrings(rawMetadata.keywords, "metadata.keywords", issues);
+  const metadataRepository = text(rawMetadata.repository);
+  if (rawMetadata.description !== undefined && !metadataDescription) issues.push("metadata.description must be a non-empty string");
+  if (rawMetadata.homepage !== undefined && !metadataHomepage) issues.push("metadata.homepage must be a non-empty string");
+  if (rawMetadata.repository !== undefined && !metadataRepository) issues.push("metadata.repository must be a non-empty string");
   let storageSchemaVersion: number | undefined;
   if (value.storage !== undefined) {
     if (!isRecord(value.storage)) issues.push("storage must be an object");
@@ -486,6 +499,15 @@ export function parsePiariumExtensionManifest(value: unknown): PiariumExtensionM
       },
     } : {}),
     ...(piPackages.length > 0 ? { integrates: { piPackages } } : {}),
+    ...(metadataDescription || metadataHomepage || metadataIcon || metadataKeywords.length > 0 || metadataRepository ? {
+      metadata: {
+        ...(metadataDescription ? { description: metadataDescription } : {}),
+        ...(metadataHomepage ? { homepage: metadataHomepage } : {}),
+        ...(metadataIcon ? { icon: metadataIcon } : {}),
+        ...(metadataKeywords.length > 0 ? { keywords: metadataKeywords } : {}),
+        ...(metadataRepository ? { repository: metadataRepository } : {}),
+      },
+    } : {}),
     ...(contributions ? { contributions } : {}),
     ...(storageSchemaVersion !== undefined ? { storage: { schemaVersion: storageSchemaVersion } } : {}),
   };
@@ -641,7 +663,12 @@ function parseCandidateRecord(value: unknown, path: string, issues: string[]): P
   const resolvedPath = text(value.resolvedPath);
   if (!resolvedPath) issues.push(`${path}.resolvedPath must be a non-empty string`);
   if (typeof value.capabilitiesReviewed !== "boolean") issues.push(`${path}.capabilitiesReviewed must be boolean`);
+  if (typeof value.applyRequested !== "boolean") issues.push(`${path}.applyRequested must be boolean`);
+  if (value.applyRequested === true && value.capabilitiesReviewed !== true) {
+    issues.push(`${path}.applyRequested requires completed capability review`);
+  }
   return {
+    applyRequested: value.applyRequested === true,
     capabilitiesReviewed: value.capabilitiesReviewed === true,
     capabilityDelta: parseCapabilityDelta(value.capabilityDelta, `${path}.capabilityDelta`, issues),
     capabilityGrants: parseGrants(value.capabilityGrants, `${path}.capabilityGrants`, issues),
@@ -879,6 +906,12 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
       if (typeof value.candidate.capabilitiesReviewed !== "boolean") {
         issues.push(`${path}.candidate.capabilitiesReviewed must be boolean`);
       }
+      if (typeof value.candidate.applyRequested !== "boolean") {
+        issues.push(`${path}.candidate.applyRequested must be boolean`);
+      }
+      if (value.candidate.applyRequested === true && value.candidate.capabilitiesReviewed !== true) {
+        issues.push(`${path}.candidate.applyRequested requires completed capability review`);
+      }
       const candidateDelta = parseCapabilityDelta(
         value.candidate.capabilityDelta,
         `${path}.candidate.capabilityDelta`,
@@ -899,6 +932,7 @@ function parsePublicCatalogEntry(value: unknown, path: string, issues: string[])
         issues,
       );
       candidate = {
+        applyRequested: value.candidate.applyRequested === true,
         capabilitiesReviewed: value.candidate.capabilitiesReviewed === true,
         capabilityDelta: candidateDelta,
         capabilityGrants: candidateGrants,
@@ -1129,8 +1163,20 @@ export function parsePiariumExtensionCandidateCapabilityReviewRequest(
   if (!isRecord(value)) {
     throw new PiariumExtensionContractError("Piarium extension candidate capability review is invalid", ["request must be an object"]);
   }
-  const decisions = Array.isArray(value.decisions) ? value.decisions.flatMap((raw, index) => {
-    const itemPath = `decisions[${index}]`;
+  const decisions = parseCapabilityDecisions(value.decisions, "decisions", issues);
+  const result: PiariumExtensionCandidateCapabilityReviewRequest = {
+    candidateIntegrity: integrity(value.candidateIntegrity, "candidateIntegrity", issues),
+    decisions,
+    expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+  };
+  throwIssues("Piarium extension candidate capability review", issues);
+  return result;
+}
+
+function parseCapabilityDecisions(value: unknown, path: string, issues: string[]): PiariumExtensionCapabilityDecision[] {
+  const decisions = Array.isArray(value) ? value.flatMap((raw, index) => {
+    const itemPath = `${path}[${index}]`;
     if (!isRecord(raw)) {
       issues.push(`${itemPath} must be an object`);
       return [];
@@ -1141,16 +1187,25 @@ export function parsePiariumExtensionCandidateCapabilityReviewRequest(
     if (typeof raw.granted !== "boolean") issues.push(`${itemPath}.granted must be boolean`);
     const normalizedRealm: "host" | "surface" = realm ?? "surface";
     return [{ capability, granted: raw.granted === true, realm: normalizedRealm }];
-  }) : (issues.push("decisions must be an array"), []);
-  const decisionKeys = decisions.map(capabilityKey);
-  if (new Set(decisionKeys).size !== decisionKeys.length) issues.push("decisions contains duplicate capabilities");
-  const result: PiariumExtensionCandidateCapabilityReviewRequest = {
-    candidateIntegrity: integrity(value.candidateIntegrity, "candidateIntegrity", issues),
-    decisions,
+  }) : (issues.push(`${path} must be an array`), []);
+  const keys = decisions.map(capabilityKey);
+  if (new Set(keys).size !== keys.length) issues.push(`${path} contains duplicate capabilities`);
+  return decisions;
+}
+
+export function parsePiariumExtensionCapabilityReviewRequest(
+  value: unknown,
+): PiariumExtensionCapabilityReviewRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) {
+    throw new PiariumExtensionContractError("Piarium extension capability review is invalid", ["request must be an object"]);
+  }
+  const result: PiariumExtensionCapabilityReviewRequest = {
+    decisions: parseCapabilityDecisions(value.decisions, "decisions", issues),
     expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
     extensionId: identifier(value.extensionId, "extensionId", issues),
   };
-  throwIssues("Piarium extension candidate capability review", issues);
+  throwIssues("Piarium extension capability review", issues);
   return result;
 }
 
@@ -1169,6 +1224,17 @@ export function parsePiariumExtensionPackageInstallRequest(value: unknown): Piar
     source: parseSource(value.source, "source", issues),
   };
   throwIssues("Piarium extension install request", issues);
+  return result;
+}
+
+export function parsePiariumExtensionRemoveRequest(value: unknown): PiariumExtensionRemoveRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension remove request is invalid", ["request must be an object"]);
+  const result = {
+    expectedRevision: positiveRevision(value.expectedRevision, "expectedRevision", issues, true),
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+  };
+  throwIssues("Piarium extension remove request", issues);
   return result;
 }
 

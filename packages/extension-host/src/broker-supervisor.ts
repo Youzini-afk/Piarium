@@ -333,6 +333,13 @@ export class BrokeredHostSupervisor {
     });
   }
 
+  deactivateExtension(extensionId: string): Promise<void> {
+    return this.#enqueue(async () => {
+      const snapshot = await this.#catalog.snapshot();
+      await this.#deactivateWithDependents(extensionId, snapshot);
+    });
+  }
+
   activateForService(requestValue: PiariumExtensionServiceInvocationRequest | unknown): Promise<void> {
     const request = parsePiariumExtensionServiceInvocationRequest(requestValue);
     return this.#enqueue(async () => {
@@ -497,22 +504,36 @@ export class BrokeredHostSupervisor {
       }
     }
     for (const entry of enabled.values()) {
-      if (!entry.manifest.entrypoints?.host) continue;
-      if (entry.candidate?.capabilitiesReviewed
-        && entry.candidate.manifest.entrypoints?.host?.mode === "native"
+      if (entry.candidate?.applyRequested
+        && entry.candidate.manifest.entrypoints?.host
+        && (entry.candidate.manifest.entrypoints?.surfaces ?? []).length === 0
         && !this.#active.has(entry.manifest.id)) {
-        if ((entry.candidate.manifest.entrypoints.surfaces ?? []).length === 0) {
+        try {
           const current = await this.#catalog.snapshot();
-          const selected = await this.#packages.selectCandidate({
-            candidateIntegrity: entry.candidate.integrity,
-            expectedRevision: current.revision,
-            extensionId: entry.manifest.id,
-          });
+          const candidate = current.extensions.find((value) => value.manifest.id === entry.manifest.id)?.candidate;
+          if (!candidate?.applyRequested || candidate.integrity !== entry.candidate.integrity) continue;
+          const selected = candidate.manifest.entrypoints?.host?.mode === "native"
+            ? await this.#packages.selectCandidate({
+              candidateIntegrity: candidate.integrity,
+              expectedRevision: current.revision,
+              extensionId: entry.manifest.id,
+            })
+            : await this.#selectCandidate(entry.manifest.id, candidate.integrity, current.revision);
           const selectedEntry = selected.extensions.find((value) => value.manifest.id === entry.manifest.id);
           if (selectedEntry) await this.#ensureSelectedActive(selectedEntry, selected, []);
+        } catch (error) {
+          await this.#reportActual(entry.manifest.id, diagnosticState(
+            snapshot.hostId,
+            entry.desired.revision,
+            0,
+            "failed",
+            "requested_candidate_activation_failed",
+            error instanceof Error ? error.message : String(error),
+          )).catch(() => undefined);
         }
         continue;
       }
+      if (!entry.manifest.entrypoints?.host) continue;
       const activation = entry.manifest.entrypoints.host.activation ?? [];
       const startsWithApplication = activation.length === 0
         || activation.includes("application-startup")
@@ -531,13 +552,6 @@ export class BrokeredHostSupervisor {
       }
       try {
         await this.#ensureSelectedActive(entry, snapshot, []);
-        if (entry.candidate?.capabilitiesReviewed && (entry.candidate.manifest.entrypoints?.surfaces ?? []).length === 0) {
-          const current = await this.#catalog.snapshot();
-          const candidate = current.extensions.find((value) => value.manifest.id === entry.manifest.id)?.candidate;
-          if (!candidate || candidate.integrity !== entry.candidate.integrity) continue;
-          await this.#prepareCandidate(entry.manifest.id, candidate.integrity);
-          await this.#selectCandidate(entry.manifest.id, candidate.integrity, current.revision);
-        }
       } catch (error) {
         const native = entry.manifest.entrypoints.host.mode === "native";
         if (native) this.#nativeRestartRequired.add(entry.manifest.id);

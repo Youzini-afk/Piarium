@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { cp, mkdir, realpath, rm } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { access, cp, mkdir, realpath, rm } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { x as extractTar } from "tar";
 import type {
   PiariumExtensionPackageSource,
@@ -22,6 +22,77 @@ export type ExtensionSourceCommandRunner = (
   args: readonly string[],
   options: { cwd: string; signal?: AbortSignal },
 ) => Promise<ExtensionSourceCommandResult>;
+
+export interface NpmLaunchTarget {
+  argsPrefix: string[];
+  executable: string;
+}
+
+const pathValue = (environment: NodeJS.ProcessEnv): string => (
+  environment.PATH ?? environment.Path ?? environment.path ?? ""
+);
+
+const existingPath = async (candidate: string): Promise<string | null> => {
+  if (!candidate) return null;
+  try {
+    await access(candidate);
+    return await realpath(candidate);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Resolve the real Node + npm CLI pair instead of assuming the current executable is Node.
+ * Piarium's host is also exercised under Bun and embedded by Electron, where process.execPath
+ * points at bun.exe or electron.exe and has no adjacent npm installation.
+ */
+export const resolveNpmLaunchTarget = async (options: {
+  env?: NodeJS.ProcessEnv;
+  execPath?: string;
+  platform?: NodeJS.Platform;
+} = {}): Promise<NpmLaunchTarget> => {
+  const environment = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const execPath = options.execPath ?? process.execPath;
+  const pathDirectories = pathValue(environment)
+    .split(platform === "win32" ? ";" : ":")
+    .map((entry) => entry.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+  const nodeName = platform === "win32" ? "node.exe" : "node";
+  const nodeCandidates = [
+    environment.PIARIUM_NODE_PATH,
+    basename(execPath).toLowerCase() === nodeName ? execPath : undefined,
+    ...pathDirectories.map((directory) => join(directory, nodeName)),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  let nodePath: string | null = null;
+  for (const candidate of nodeCandidates) {
+    nodePath = await existingPath(candidate);
+    if (nodePath) break;
+  }
+
+  const npmCliCandidates = new Set<string>();
+  if (environment.npm_execpath && basename(environment.npm_execpath).toLowerCase() === "npm-cli.js") {
+    npmCliCandidates.add(environment.npm_execpath);
+  }
+  for (const nodeCandidate of nodeCandidates) {
+    const directory = dirname(nodeCandidate);
+    npmCliCandidates.add(join(directory, "node_modules", "npm", "bin", "npm-cli.js"));
+    npmCliCandidates.add(resolve(directory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
+  }
+  for (const directory of pathDirectories) {
+    npmCliCandidates.add(join(directory, "node_modules", "npm", "bin", "npm-cli.js"));
+    npmCliCandidates.add(resolve(directory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
+  }
+  let npmCli: string | null = null;
+  for (const candidate of npmCliCandidates) {
+    npmCli = await existingPath(candidate);
+    if (npmCli) break;
+  }
+  if (nodePath && npmCli) return { argsPrefix: [npmCli], executable: nodePath };
+  if (platform !== "win32") return { argsPrefix: [], executable: "npm" };
+  throw new Error("npm could not be resolved. Install Node.js with npm or set PIARIUM_NODE_PATH to its node.exe executable.");
+};
 
 export const runExtensionSourceCommand: ExtensionSourceCommandRunner = (executable, args, options) => new Promise((resolveCommand, reject) => {
   const child = spawn(executable, [...args], {
@@ -93,11 +164,8 @@ export class NpmExtensionPackageSourceResolver implements PiariumExtensionPackag
   async materialize(source: PiariumExtensionPackageSource, destination: string, signal?: AbortSignal): Promise<void> {
     const staging = join(dirname(destination), ".npm-pack");
     await mkdir(staging, { recursive: true });
-    const executable = process.platform === "win32" ? process.execPath : "npm";
-    const npmArgs = process.platform === "win32"
-      ? [join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
-      : [];
-    const result = await this.#run(executable, [...npmArgs,
+    const npm = await resolveNpmLaunchTarget();
+    const result = await this.#run(npm.executable, [...npm.argsPrefix,
       "pack",
       source.specifier,
       "--json",

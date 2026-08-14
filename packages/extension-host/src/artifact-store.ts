@@ -26,6 +26,7 @@ import {
 } from "@piarium/extension-contract";
 import {
   createDefaultExtensionPackageSourceRegistry,
+  resolveNpmLaunchTarget,
   runExtensionSourceCommand,
   type ExtensionSourceCommandRunner,
   type PiariumExtensionPackageSourceRegistry,
@@ -205,11 +206,8 @@ export class ExtensionArtifactStore {
       await assertSafeTree(sourceRoot);
       const manifest = await readManifest(sourceRoot);
       if (!(await exists(join(sourceRoot, "node_modules"))) && await hasDependencies(sourceRoot)) {
-        const npm = process.platform === "win32" ? process.execPath : "npm";
-        const npmArgs = process.platform === "win32"
-          ? [join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")]
-          : [];
-        await this.#run(npm, [...npmArgs, "install", "--ignore-scripts", "--no-audit", "--no-fund"], {
+        const npm = await resolveNpmLaunchTarget();
+        await this.#run(npm.executable, [...npm.argsPrefix, "install", "--ignore-scripts", "--no-audit", "--no-fund"], {
           cwd: sourceRoot,
           ...(signal ? { signal } : {}),
         });

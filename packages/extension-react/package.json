@@ -13,6 +13,15 @@
       "import": "./dist/index.js"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Youzini-afk/Piarium.git",
+    "directory": "packages/extension-react"
+  },
+  "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-react",
+  "bugs": "https://github.com/Youzini-afk/Piarium/issues",
+  "publishConfig": { "access": "public" },
+  "sideEffects": false,
   "scripts": {
     "build:dependencies": "bun run --cwd ../extension-sdk build",
     "build": "bun run build:dependencies && tsc -p tsconfig.build.json",

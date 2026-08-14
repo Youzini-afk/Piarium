@@ -43,11 +43,16 @@ export class ExtensionPackageManager {
       return this.catalog.stageCandidate(candidate, expectedRevision);
     }
     const installed = current.document.extensions[candidate.manifest.id];
+    if (installed?.source.kind === "builtin" && candidate.source.kind !== "builtin") {
+      throw new Error(`Built-in Piarium extensions are managed by the distribution: ${candidate.manifest.id}`);
+    }
     if (installed) return this.catalog.stageCandidate(candidate, expectedRevision);
     const now = new Date().toISOString();
+    const requestsCapabilities = (candidate.manifest.capabilities?.host?.length ?? 0) > 0
+      || (candidate.manifest.capabilities?.surface?.length ?? 0) > 0;
     const record: PiariumExtensionInstallationRecord = {
       capabilityGrants: [],
-      desired: { enabled: true, revision: 1, updatedAt: now },
+      desired: { enabled: !requestsCapabilities, revision: 1, updatedAt: now },
       installedAt: now,
       integrity: candidate.integrity,
       manifest: candidate.manifest,

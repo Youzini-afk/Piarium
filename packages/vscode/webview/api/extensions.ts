@@ -15,12 +15,18 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   activateExtension: async (extensionId) => {
     await sendBridgeMessage('api:extensions:activate', { extensionId });
   },
+  applyWorkbenchProfile: async (request) => parsePiariumExtensionCatalogSnapshot(
+    await sendBridgeMessage('api:extensions:workbench:profile:apply', request),
+  ),
   catalog: async () => parsePiariumExtensionCatalogAvailability(
     await sendBridgeMessage('api:extensions:catalog'),
   ),
   discardPreparedCandidate: async (extensionId, candidateIntegrity) => {
     await sendBridgeMessage('api:extensions:candidate:discard-prepared', { candidateIntegrity, extensionId });
   },
+  discardCandidate: async (request) => parsePiariumExtensionCatalogSnapshot(
+    await sendBridgeMessage('api:extensions:candidate:discard', request),
+  ),
   hostState: async () => parsePiariumExtensionHostStateSnapshot(
     await sendBridgeMessage('api:extensions:host-state'),
   ),
@@ -33,6 +39,9 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
       await sendBridgeMessage('api:extensions:candidate:prepare', { candidateIntegrity, extensionId }),
     );
   },
+  requestCandidateApplication: async (request) => parsePiariumExtensionCatalogSnapshot(
+    await sendBridgeMessage('api:extensions:candidate:request-application', request),
+  ),
   readAsset: async (request) => parsePiariumExtensionAssetPayload(
     await sendBridgeMessage('api:extensions:asset', request),
   ),
@@ -42,6 +51,9 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   reportActualState: async (extensionId, state) => {
     await sendBridgeMessage('api:extensions:actual', { extensionId, state });
   },
+  reviewCapabilities: async (request) => parsePiariumExtensionCatalogSnapshot(
+    await sendBridgeMessage('api:extensions:review-capabilities', request),
+  ),
   reviewCandidateCapabilities: async (request) => parsePiariumExtensionCatalogSnapshot(
     await sendBridgeMessage('api:extensions:candidate:review-capabilities', request),
   ),
@@ -59,6 +71,9 @@ export const createVSCodeExtensionsAPI = (): ExtensionsAPI => ({
   ),
   removeServiceRoutingRule: async (request) => parsePiariumExtensionServiceRoutingSnapshot(
     await sendBridgeMessage('api:extensions:service:routing:remove', request),
+  ),
+  removeExtension: async (request) => parsePiariumExtensionCatalogSnapshot(
+    await sendBridgeMessage('api:extensions:remove', request),
   ),
   updateWorkbenchLayout: async (request) => parsePiariumWorkbenchProfileSnapshot(
     await sendBridgeMessage('api:extensions:workbench:layout', request),

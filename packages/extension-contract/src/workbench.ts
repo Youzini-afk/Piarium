@@ -76,6 +76,11 @@ export interface PiariumWorkbenchProfileRemoveRequest {
   profileId: string;
 }
 
+export interface PiariumWorkbenchProfileApplyRequest {
+  expectedCatalogRevision: number;
+  profileId: string;
+}
+
 export interface PiariumWorkbenchResolutionContext {
   surface: PiariumApplicationSurface;
   userId: string;
@@ -292,6 +297,15 @@ export const parsePiariumWorkbenchProfileRemoveRequest = (value: unknown): Piari
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile remove request must be an object");
   return { expectedRevision: revision(raw.expectedRevision, "expectedRevision"), profileId: profileId(raw.profileId, "profileId") };
+};
+
+export const parsePiariumWorkbenchProfileApplyRequest = (value: unknown): PiariumWorkbenchProfileApplyRequest => {
+  const raw = record(value);
+  if (!raw) throw new Error("Workbench profile apply request must be an object");
+  return {
+    expectedCatalogRevision: revision(raw.expectedCatalogRevision, "expectedCatalogRevision"),
+    profileId: profileId(raw.profileId, "profileId"),
+  };
 };
 
 export const defaultPiariumWorkbenchProfileDocument = (): PiariumWorkbenchProfileDocument => ({

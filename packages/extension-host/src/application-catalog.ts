@@ -5,6 +5,7 @@ import {
   type PiariumExtensionCatalogSnapshot,
   type PiariumExtensionCandidateCapabilityReviewRequest,
   type PiariumExtensionCapabilityGrant,
+  type PiariumExtensionCapabilityReviewRequest,
   type PiariumExtensionInstallationRecord,
   type PiariumExtensionPreparedArtifact,
 } from "@piarium/extension-contract";
@@ -62,6 +63,14 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
+  async setEnabledSet(extensionIds: readonly string[], expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.setEnabledSet(extensionIds, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
   async reconcileBuiltins(
     definitions: readonly PiariumBuiltinExtensionDefinition[],
     ownedPrefix: string,
@@ -81,6 +90,16 @@ export class ApplicationExtensionCatalog {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.setCapabilityGrant(extensionId, grant, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
+  async reviewCapabilities(
+    request: PiariumExtensionCapabilityReviewRequest,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.reviewCapabilities(request.extensionId, request.decisions, request.expectedRevision),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
   }
@@ -116,6 +135,18 @@ export class ApplicationExtensionCatalog {
     const [identity, read] = await Promise.all([
       this.store.getHostIdentity(),
       this.store.selectCandidate(extensionId, candidateIntegrity, expectedRevision),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
+  async requestCandidateApplication(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.requestCandidateApplication(extensionId, candidateIntegrity, expectedRevision),
     ]);
     return this.#publicSnapshot(identity.hostId, read);
   }
@@ -164,6 +195,7 @@ export class ApplicationExtensionCatalog {
           actual,
           ...(record.candidate ? {
             candidate: {
+              applyRequested: record.candidate.applyRequested,
               capabilitiesReviewed: record.candidate.capabilitiesReviewed,
               capabilityDelta: structuredClone(record.candidate.capabilityDelta),
               capabilityGrants: structuredClone(record.candidate.capabilityGrants),

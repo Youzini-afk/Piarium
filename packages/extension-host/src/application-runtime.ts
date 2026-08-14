@@ -2,20 +2,25 @@ import {
   parsePiariumExtensionActualState,
   parsePiariumExtensionCandidateCapabilityReviewRequest,
   parsePiariumExtensionCandidateSelectionRequest,
+  parsePiariumExtensionCapabilityReviewRequest,
   parsePiariumExtensionHostStateWaitRequest,
   parsePiariumExtensionPackageInstallRequest,
+  parsePiariumExtensionRemoveRequest,
   parsePiariumExtensionServiceInvocationRequest,
   parsePiariumExtensionServiceSelectionRequest,
+  parsePiariumWorkbenchProfileApplyRequest,
   resolvePiariumExtensionServiceRouting,
   type JsonValue,
   type PiariumExtensionActualState,
   type PiariumExtensionCandidateCapabilityReviewRequest,
   type PiariumExtensionCandidateSelectionRequest,
+  type PiariumExtensionCapabilityReviewRequest,
   type PiariumExtensionCandidatePreparationResult,
   type PiariumExtensionCatalogSnapshot,
   type PiariumExtensionHostStateSnapshot,
   type PiariumExtensionHostStateWaitRequest,
   type PiariumExtensionPackageInstallRequest,
+  type PiariumExtensionRemoveRequest,
   type PiariumExtensionServiceInvocationRequest,
   type PiariumExtensionServiceRoutingRuleRemoveRequest,
   type PiariumExtensionServiceRoutingRuleUpdateRequest,
@@ -23,6 +28,7 @@ import {
   type PiariumExtensionServiceSelectionRequest,
   type PiariumWorkbenchLayoutUpdateRequest,
   type PiariumWorkbenchProfileRemoveRequest,
+  type PiariumWorkbenchProfileApplyRequest,
   type PiariumWorkbenchProfileSelectionRequest,
   type PiariumWorkbenchProfileSnapshot,
   type PiariumWorkbenchProfileUpsertRequest,
@@ -180,6 +186,31 @@ export class ApplicationExtensionRuntime {
     });
   }
 
+  removeExtension(
+    requestValue: PiariumExtensionRemoveRequest | unknown,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumExtensionRemoveRequest(requestValue);
+    return this.#mutateCatalog(async () => {
+      const current = await this.catalog.snapshot();
+      if (current.revision !== request.expectedRevision) {
+        return this.catalog.remove(request.extensionId, request.expectedRevision);
+      }
+      const entry = current.extensions.find((candidate) => candidate.manifest.id === request.extensionId);
+      if (!entry) throw new Error(`Piarium extension is not installed: ${request.extensionId}`);
+      if (entry.source.kind === "builtin") throw new Error(`Built-in Piarium extensions are managed by the distribution: ${request.extensionId}`);
+      if (entry.desired.enabled) throw new Error(`Disable the Piarium extension before removing it: ${request.extensionId}`);
+      await this.supervisor.deactivateExtension(request.extensionId);
+      try {
+        const removed = await this.catalog.remove(request.extensionId, request.expectedRevision);
+        await this.supervisor.reconcile(removed);
+        return removed;
+      } catch (error) {
+        await this.supervisor.reconcile(await this.catalog.snapshot()).catch(() => undefined);
+        throw error;
+      }
+    });
+  }
+
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
     return this.#mutateCatalog(async () => {
       const snapshot = await this.catalog.setEnabled(extensionId, enabled, expectedRevision);
@@ -218,6 +249,35 @@ export class ApplicationExtensionRuntime {
     });
   }
 
+  discardCandidate(
+    requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
+    return this.#mutateCatalog(async () => {
+      const current = await this.catalog.snapshot();
+      if (current.revision !== request.expectedRevision) {
+        return this.catalog.discardCandidate(
+          request.extensionId,
+          request.candidateIntegrity,
+          request.expectedRevision,
+        );
+      }
+      await this.supervisor.discardPreparedCandidate(request.extensionId, request.candidateIntegrity);
+      try {
+        const snapshot = await this.catalog.discardCandidate(
+          request.extensionId,
+          request.candidateIntegrity,
+          request.expectedRevision,
+        );
+        await this.supervisor.reconcile(snapshot);
+        return snapshot;
+      } catch (error) {
+        await this.supervisor.reconcile(await this.catalog.snapshot()).catch(() => undefined);
+        throw error;
+      }
+    });
+  }
+
   selectCandidate(
     requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
   ): Promise<PiariumExtensionCatalogSnapshot> {
@@ -233,12 +293,34 @@ export class ApplicationExtensionRuntime {
     });
   }
 
+  requestCandidateApplication(
+    requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
+    return this.#mutateCatalog(() => this.catalog.requestCandidateApplication(
+      request.extensionId,
+      request.candidateIntegrity,
+      request.expectedRevision,
+    ));
+  }
+
   reviewCandidateCapabilities(
     requestValue: PiariumExtensionCandidateCapabilityReviewRequest | unknown,
   ): Promise<PiariumExtensionCatalogSnapshot> {
     const request = parsePiariumExtensionCandidateCapabilityReviewRequest(requestValue);
     return this.#mutateCatalog(async () => {
       const reviewed = await this.catalog.reviewCandidateCapabilities(request);
+      await this.supervisor.reconcile(reviewed);
+      return this.catalog.snapshot();
+    });
+  }
+
+  reviewCapabilities(
+    requestValue: PiariumExtensionCapabilityReviewRequest | unknown,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumExtensionCapabilityReviewRequest(requestValue);
+    return this.#mutateCatalog(async () => {
+      const reviewed = await this.catalog.reviewCapabilities(request);
       await this.supervisor.reconcile(reviewed);
       return this.catalog.snapshot();
     });
@@ -330,6 +412,22 @@ export class ApplicationExtensionRuntime {
     return this.#mutate(async () => {
       const snapshot = await this.workbench.removeProfile(request);
       this.#publish();
+      return snapshot;
+    });
+  }
+
+  applyWorkbenchProfile(
+    requestValue: PiariumWorkbenchProfileApplyRequest | unknown,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumWorkbenchProfileApplyRequest(requestValue);
+    return this.#mutateCatalog(async () => {
+      const workbench = await this.workbench.read();
+      if (!workbench.authoritative) throw new Error("Cannot apply a stale workbench profile");
+      const profile = workbench.document.profiles.find((candidate) => candidate.id === request.profileId);
+      if (!profile) throw new Error(`Workbench profile is not installed: ${request.profileId}`);
+      if (!profile.extensionIds) throw new Error(`Workbench profile does not define an extension set: ${request.profileId}`);
+      const snapshot = await this.catalog.setEnabledSet(profile.extensionIds, request.expectedCatalogRevision);
+      await this.supervisor.reconcile(snapshot);
       return snapshot;
     });
   }

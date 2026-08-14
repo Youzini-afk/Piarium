@@ -314,7 +314,7 @@ Acceptance: every adopted capability names its authoritative owner, preserves fo
 it is still required, and has no production dependency on OpenCode or a duplicate compatibility
 implementation.
 
-## Phase 9 — Piarium extension platform (active)
+## Phase 9 — Piarium extension platform (complete)
 
 The complete target architecture is specified in
 [piarium-extension-platform.md](piarium-extension-platform.md). Piarium extensions are a separate
@@ -330,18 +330,24 @@ Delivery is split into complete platform slices without reducing the target cust
 2. Implemented Surface slice: owner-scoped lifecycle, atomic contribution/service registries,
    replacement and provider selection, retained layout references, and the Settings workbench plus
    primary Command Palette commands migrated from hard-coded switches;
-3. authenticated external Surface artifacts, managed dynamic activation, candidate update, and
-   rollback;
-4. brokered Host entrypoints, extension storage/migrations, versioned dependencies, and
-   multi-window coordination;
-5. isolated iframe/Worker and explicitly trusted-native modes with truthful physical-unload and
-   restart semantics;
-6. maintained Pi integration adapters migrated into separate built-in Piarium extensions while Pi
-   Packages and Pi Plugin Settings remain independent;
-7. replaceable navigator, chat, panel, layout, and workbench shell contributions plus distribution
-   profiles;
-8. later workspace/session/agent/model/invocation service routing, followed by ecosystem authoring
-   and distribution tooling.
+3. Implemented external Surface slice: authenticated content-addressed artifacts, managed dynamic
+   activation, candidate update, capability review, rollback, and Web/Electron/VS Code parity;
+4. Implemented Host slice: brokered entrypoints, revisioned storage and migration, versioned service
+   dependencies, provider selection, crash isolation, and multi-window host state;
+5. Implemented isolated iframe/Worker and explicitly trusted-native modes with truthful physical
+   unload, capability boundaries, and restart semantics;
+6. Implemented maintained Pi integration adapters as separate built-in Piarium extensions while Pi
+   Packages and Pi Plugin Settings retain independent lifecycle and native authority;
+7. Implemented replaceable navigator, chat, panel, layout, and workbench shell contributions plus
+   revisioned workbench/distribution profiles and the fixed recovery path;
+8. Implemented stable multi-provider service routing across distribution, profile, user, workspace,
+   project, runtime, session, agent, model, and invocation scope;
+9. Implemented ecosystem delivery: public contract/Surface/SDK/React/CLI packages and schemas,
+   managed/isolated/Host conformance harnesses, arbitrary npm/Git/local install and transactional
+   update/discard/remove workflows, a public-state Extension Inspector, explicit profile extension
+   sets, and optional discovery metadata that never acts as an allowlist. Capability-bearing first
+   installs remain disabled for explicit decisions; candidate review and the persistent apply request
+   are separate, so reviewed updates never execute until the user applies them.
 
 Acceptance: managed or isolated extensions enable and disable without a document reload; failed
 activation/update leaves no partial effects and preserves the previous generation; Pi package and

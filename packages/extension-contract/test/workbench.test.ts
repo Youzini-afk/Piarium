@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   defaultPiariumWorkbenchProfileDocument,
+  parsePiariumWorkbenchProfileApplyRequest,
   parsePiariumWorkbenchProfileDocument,
   resolvePiariumWorkbenchLayout,
 } from "../src/index.js";
@@ -64,4 +65,28 @@ test("workbench profile documents reject duplicate layer and contribution identi
   };
   document.layouts = [layer as never];
   assert.throws(() => parsePiariumWorkbenchProfileDocument(document), /duplicate contribution IDs/);
+});
+
+test("workbench profiles retain explicit extension sets and validate apply revisions", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  document.profiles[0] = {
+    ...document.profiles[0]!,
+    extensionIds: ["dev.example.alpha", "dev.example.beta"],
+  };
+  const parsed = parsePiariumWorkbenchProfileDocument(document);
+  assert.deepEqual(parsed.profiles[0]?.extensionIds, ["dev.example.alpha", "dev.example.beta"]);
+  assert.deepEqual(parsePiariumWorkbenchProfileApplyRequest({
+    expectedCatalogRevision: 7,
+    profileId: "default",
+  }), {
+    expectedCatalogRevision: 7,
+    profileId: "default",
+  });
+  assert.throws(
+    () => parsePiariumWorkbenchProfileDocument({
+      ...document,
+      profiles: [{ ...document.profiles[0], extensionIds: ["dev.example.alpha", "dev.example.alpha"] }],
+    }),
+    /duplicates/,
+  );
 });

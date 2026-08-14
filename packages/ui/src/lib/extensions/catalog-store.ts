@@ -1,11 +1,14 @@
 import React, { useSyncExternalStore } from 'react';
 import type {
   PiariumExtensionCandidateCapabilityReviewRequest,
+  PiariumExtensionCapabilityReviewRequest,
   PiariumExtensionCatalogSnapshot,
   PiariumExtensionHostStateSnapshot,
+  PiariumExtensionPackageSource,
   PiariumExtensionServiceRoutingContext,
 } from '@piarium/extension-contract';
 import { serviceRoutingRuleKey } from '@piarium/extension-contract';
+import { refreshSurfaceExtensions, surfaceExtensionLoader } from './managed-runtime';
 
 export interface PiariumExtensionCatalogStoreState {
   busyExtensionId: string | null;
@@ -114,10 +117,12 @@ const runMutation = (
     try {
       const catalog = await mutate(current.catalog);
       if (requestGeneration !== generation || state.snapshot?.catalog.hostId !== catalog.hostId) return;
-      publish({
-        ...state,
-        snapshot: state.snapshot ? { ...state.snapshot, catalog } : state.snapshot,
-      });
+      if (!state.snapshot || catalog.revision >= state.snapshot.catalog.revision) {
+        publish({
+          ...state,
+          snapshot: state.snapshot ? { ...state.snapshot, catalog } : state.snapshot,
+        });
+      }
       const refreshed = await extensionsApi().hostState();
       acceptSnapshot(refreshed, requestGeneration);
     } catch (error) {
@@ -144,10 +149,47 @@ export const setPiariumExtensionEnabled = (
   extensionsApi().setEnabled(extensionId, enabled, catalog.revision)
 ));
 
+export const installPiariumExtension = (
+  source: PiariumExtensionPackageSource,
+): Promise<void> => runMutation('__install__', (catalog) => (
+  extensionsApi().install({ expectedRevision: catalog.revision, source })
+));
+
+export const selectPiariumExtensionCandidate = (
+  extensionId: string,
+  candidateIntegrity: string,
+): Promise<void> => runMutation(extensionId, (catalog) => (
+  surfaceExtensionLoader.applyCandidate(extensionId, candidateIntegrity, catalog.revision)
+));
+
+export const discardPiariumExtensionCandidate = (
+  extensionId: string,
+  candidateIntegrity: string,
+): Promise<void> => runMutation(extensionId, (catalog) => (
+  extensionsApi().discardCandidate({ candidateIntegrity, expectedRevision: catalog.revision, extensionId })
+));
+
+export const removePiariumExtension = (
+  extensionId: string,
+): Promise<void> => runMutation(extensionId, async (catalog) => {
+  const entry = catalog.extensions.find((candidate) => candidate.manifest.id === extensionId);
+  const disabled = entry?.desired.enabled
+    ? await extensionsApi().setEnabled(extensionId, false, catalog.revision)
+    : catalog;
+  await refreshSurfaceExtensions();
+  return extensionsApi().removeExtension({ expectedRevision: disabled.revision, extensionId });
+});
+
 export const reviewPiariumExtensionCandidateCapabilities = (
   request: Omit<PiariumExtensionCandidateCapabilityReviewRequest, 'expectedRevision'>,
 ): Promise<void> => runMutation(request.extensionId, (catalog) => (
   extensionsApi().reviewCandidateCapabilities({ ...request, expectedRevision: catalog.revision })
+));
+
+export const reviewPiariumExtensionCapabilities = (
+  request: Omit<PiariumExtensionCapabilityReviewRequest, 'expectedRevision'>,
+): Promise<void> => runMutation(request.extensionId, (catalog) => (
+  extensionsApi().reviewCapabilities({ ...request, expectedRevision: catalog.revision })
 ));
 
 export const setPiariumExtensionServiceRoute = (

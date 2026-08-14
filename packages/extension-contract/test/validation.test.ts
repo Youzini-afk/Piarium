@@ -5,6 +5,7 @@ import {
   parsePiariumExtensionCatalogAvailability,
   parsePiariumExtensionCatalogDocument,
   parsePiariumExtensionCandidateCapabilityReviewRequest,
+  parsePiariumExtensionCapabilityReviewRequest,
   parsePiariumExtensionAssetPayload,
   parsePiariumExtensionManagedEntrypointRequest,
   parsePiariumExtensionManifest,
@@ -71,6 +72,19 @@ test("validates explicit candidate capability decisions", () => {
   });
   assert.equal(request.decisions[0]?.granted, false);
   assert.throws(() => parsePiariumExtensionCandidateCapabilityReviewRequest({
+    ...request,
+    decisions: [request.decisions[0], request.decisions[0]],
+  }), PiariumExtensionContractError);
+});
+
+test("validates explicit selected-version capability decisions", () => {
+  const request = parsePiariumExtensionCapabilityReviewRequest({
+    decisions: [{ capability: "commands", granted: true, realm: "surface" }],
+    expectedRevision: 2,
+    extensionId: "dev.example.memory-workbench",
+  });
+  assert.equal(request.decisions[0]?.granted, true);
+  assert.throws(() => parsePiariumExtensionCapabilityReviewRequest({
     ...request,
     decisions: [request.decisions[0], request.decisions[0]],
   }), PiariumExtensionContractError);

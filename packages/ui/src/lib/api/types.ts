@@ -5,6 +5,7 @@ import type {
   PiariumExtensionAssetPayload,
   PiariumExtensionAssetRequest,
   PiariumExtensionCandidateCapabilityReviewRequest,
+  PiariumExtensionCapabilityReviewRequest,
   PiariumExtensionCandidateSelectionRequest,
   PiariumExtensionCandidatePreparationResult,
   PiariumExtensionCatalogAvailability,
@@ -14,6 +15,7 @@ import type {
   PiariumExtensionManagedEntrypointPayload,
   PiariumExtensionManagedEntrypointRequest,
   PiariumExtensionPackageInstallRequest,
+  PiariumExtensionRemoveRequest,
   PiariumExtensionServiceInvocationRequest,
   PiariumExtensionServiceRoutingRuleRemoveRequest,
   PiariumExtensionServiceRoutingRuleUpdateRequest,
@@ -21,6 +23,7 @@ import type {
   PiariumExtensionServiceSelectionRequest,
   PiariumWorkbenchLayoutUpdateRequest,
   PiariumWorkbenchProfileRemoveRequest,
+  PiariumWorkbenchProfileApplyRequest,
   PiariumWorkbenchProfileSelectionRequest,
   PiariumWorkbenchProfileSnapshot,
   PiariumWorkbenchProfileUpsertRequest,
@@ -1624,23 +1627,28 @@ export interface ExtensionsAPI {
   activateExtension(extensionId: string): Promise<void>;
   catalog(): Promise<PiariumExtensionCatalogAvailability>;
   discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
+  discardCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
   hostState(): Promise<PiariumExtensionHostStateSnapshot>;
   install(request: PiariumExtensionPackageInstallRequest): Promise<PiariumExtensionCatalogSnapshot>;
   invokeService(request: PiariumExtensionServiceInvocationRequest): Promise<JsonValue>;
   prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<PiariumExtensionCandidatePreparationResult>;
+  requestCandidateApplication(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
   readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
   readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
   reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
+  reviewCapabilities(request: PiariumExtensionCapabilityReviewRequest): Promise<PiariumExtensionCatalogSnapshot>;
   reviewCandidateCapabilities(request: PiariumExtensionCandidateCapabilityReviewRequest): Promise<PiariumExtensionCatalogSnapshot>;
   selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
   setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot>;
   setServiceSelection(request: PiariumExtensionServiceSelectionRequest): Promise<PiariumExtensionHostStateSnapshot>;
   upsertServiceRoutingRule(request: PiariumExtensionServiceRoutingRuleUpdateRequest): Promise<PiariumExtensionServiceRoutingSnapshot>;
   removeServiceRoutingRule(request: PiariumExtensionServiceRoutingRuleRemoveRequest): Promise<PiariumExtensionServiceRoutingSnapshot>;
+  removeExtension(request: PiariumExtensionRemoveRequest): Promise<PiariumExtensionCatalogSnapshot>;
   updateWorkbenchLayout(request: PiariumWorkbenchLayoutUpdateRequest): Promise<PiariumWorkbenchProfileSnapshot>;
   selectWorkbenchProfile(request: PiariumWorkbenchProfileSelectionRequest): Promise<PiariumWorkbenchProfileSnapshot>;
   upsertWorkbenchProfile(request: PiariumWorkbenchProfileUpsertRequest): Promise<PiariumWorkbenchProfileSnapshot>;
   removeWorkbenchProfile(request: PiariumWorkbenchProfileRemoveRequest): Promise<PiariumWorkbenchProfileSnapshot>;
+  applyWorkbenchProfile(request: PiariumWorkbenchProfileApplyRequest): Promise<PiariumExtensionCatalogSnapshot>;
   waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;
 }
 

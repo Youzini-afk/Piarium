@@ -36,6 +36,7 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
     hostState: () => runtimeExtensions().hostState(),
     invokeService: (request) => runtimeExtensions().invokeService(request),
     prepareCandidate: (extensionId, candidateIntegrity) => runtimeExtensions().prepareCandidate(extensionId, candidateIntegrity),
+    requestCandidateApplication: (request) => runtimeExtensions().requestCandidateApplication(request),
     readAsset: (request) => runtimeExtensions().readAsset(request),
     readManagedEntrypoint: (request) => runtimeExtensions().readManagedEntrypoint(request),
     reportActualState: (extensionId, state) => runtimeExtensions().reportActualState(extensionId, state),

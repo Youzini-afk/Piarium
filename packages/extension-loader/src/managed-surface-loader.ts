@@ -21,7 +21,6 @@ import {
   type PiariumExtensionManifest,
   type PiariumExtensionHostStateSnapshot,
   type PiariumExtensionHostStateWaitRequest,
-  type PiariumExtensionPublicCandidate,
   type PiariumExtensionSurfaceEntrypoint,
   type PiariumExtensionServiceInvocationRequest,
   type PiariumExtensionServiceProviderSnapshot,
@@ -55,6 +54,7 @@ export interface SurfaceExtensionHost {
   hostState(): Promise<PiariumExtensionHostStateSnapshot>;
   invokeService(request: PiariumExtensionServiceInvocationRequest): Promise<JsonValue>;
   prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<PiariumExtensionCandidatePreparationResult>;
+  requestCandidateApplication(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
   readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
   readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
   reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
@@ -266,16 +266,6 @@ class ModuleResourceScope {
 }
 
 const publicCandidateSelection = (entry: PiariumExtensionCatalogEntry): ArtifactSelection | null => {
-  const candidate: PiariumExtensionPublicCandidate | undefined = entry.candidate;
-  if (candidate?.capabilitiesReviewed) {
-    return {
-      capabilityGrants: candidate.capabilityGrants,
-      integrity: candidate.integrity,
-      manifest: candidate.manifest,
-      slot: "candidate",
-      version: candidate.resolvedVersion,
-    };
-  }
   if (!entry.integrity) return null;
   return {
     capabilityGrants: entry.capabilityGrants,
@@ -283,6 +273,26 @@ const publicCandidateSelection = (entry: PiariumExtensionCatalogEntry): Artifact
     manifest: entry.manifest,
     slot: "selected",
     version: entry.selectedVersion,
+  };
+};
+
+const explicitCandidateSelection = (
+  entry: PiariumExtensionCatalogEntry,
+  integrity: string,
+): ArtifactSelection => {
+  const candidate = entry.candidate;
+  if (!candidate || candidate.integrity !== integrity) {
+    throw new Error(`Piarium extension candidate is no longer current: ${entry.manifest.id}`);
+  }
+  if (!candidate.capabilitiesReviewed) {
+    throw new Error(`Piarium extension candidate capability changes require review: ${entry.manifest.id}`);
+  }
+  return {
+    capabilityGrants: candidate.capabilityGrants,
+    integrity: candidate.integrity,
+    manifest: candidate.manifest,
+    slot: "candidate",
+    version: candidate.resolvedVersion,
   };
 };
 
@@ -389,6 +399,85 @@ export class SurfaceExtensionLoader {
     return result;
   }
 
+  applyCandidate(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const operation = async (): Promise<PiariumExtensionCatalogSnapshot> => {
+      const state = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+      let snapshot = state.catalog;
+      if (!snapshot.authoritative) throw new Error("Cannot apply a candidate from a stale extension catalog");
+      if (snapshot.revision !== expectedRevision) {
+        throw new Error(`Extension catalog revision conflict: expected ${expectedRevision}, actual ${snapshot.revision}`);
+      }
+      let entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
+      if (!entry) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      explicitCandidateSelection(entry, candidateIntegrity);
+      snapshot = parsePiariumExtensionCatalogSnapshot(await this.#host.requestCandidateApplication({
+        candidateIntegrity,
+        expectedRevision,
+        extensionId,
+      }));
+      entry = snapshot.extensions.find((candidate) => candidate.manifest.id === extensionId);
+      if (!entry) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      const selection = explicitCandidateSelection(entry, candidateIntegrity);
+      const entrypoints = compatibleExecutableEntrypoints(selection.manifest, this.#surface);
+      let committed: PiariumExtensionCatalogSnapshot | null = null;
+      try {
+        if (!entry.desired.enabled) {
+          committed = parsePiariumExtensionCatalogSnapshot(await this.#host.selectCandidate({
+            candidateIntegrity,
+            expectedRevision: snapshot.revision,
+            extensionId,
+          }));
+        } else if (entrypoints.length > 0) {
+          committed = await this.#activateEntryPoints(entry, selection, entrypoints, snapshot);
+        } else {
+          await this.#host.prepareCandidate(extensionId, candidateIntegrity);
+          committed = parsePiariumExtensionCatalogSnapshot(await this.#host.selectCandidate({
+            candidateIntegrity,
+            expectedRevision: snapshot.revision,
+            extensionId,
+          }));
+        }
+        if (!committed) throw new Error(`Piarium extension candidate was not committed: ${extensionId}`);
+        const retained = new Set(entrypoints.map((entrypoint) => keyFor(extensionId, entrypoint.id)));
+        for (const [key, active] of [...this.#active]) {
+          if (active.owner.extensionId === extensionId && !retained.has(key)) {
+            await this.#deactivate(active, entry.desired.revision);
+          }
+        }
+        this.#failedCandidates.delete(`${extensionId}\0${candidateIntegrity}`);
+        this.#revision = committed.revision;
+        this.#publish();
+        return committed;
+      } catch (error) {
+        if (
+          selection.manifest.entrypoints?.host?.mode === "native"
+          && error instanceof Error
+          && error.message.includes("requires an application-host restart")
+        ) {
+          this.#revision = snapshot.revision;
+          this.#publish();
+          return snapshot;
+        }
+        await this.#host.discardPreparedCandidate(extensionId, candidateIntegrity).catch(() => undefined);
+        this.#diagnose(
+          extensionId,
+          "candidate_application_failed",
+          error instanceof Error ? error.message : String(error),
+          { integrity: candidateIntegrity },
+        );
+        this.#publish();
+        throw error;
+      }
+    };
+    const result = this.#queue.then(operation, operation);
+    this.#queue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
   async start(): Promise<void> {
     if (this.#watchController) return;
     await this.reconcile();
@@ -436,7 +525,7 @@ export class SurfaceExtensionLoader {
     }
     for (const [key, active] of [...this.#active]) {
       const entry = snapshot.extensions.find((candidate) => candidate.manifest.id === active.owner.extensionId);
-      if (!entry || !entry.desired.enabled || (!entry.candidate && !desiredKeys.has(key))) {
+      if (!entry || !entry.desired.enabled || !desiredKeys.has(key)) {
         await this.#deactivate(active, entry?.desired.revision ?? active.owner.desiredRevision + 1);
       }
     }

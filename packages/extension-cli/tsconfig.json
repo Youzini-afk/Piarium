@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
+    "noEmit": true,
+    "paths": {
+      "@piarium/extension-contract": ["packages/extension-contract/src/index.ts"],
+      "@piarium/extension-sdk": ["packages/extension-sdk/src/index.ts"],
+      "@piarium/extension-sdk/testing": ["packages/extension-sdk/src/testing.ts"],
+      "@piarium/extension-surface": ["packages/extension-surface/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

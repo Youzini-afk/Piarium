@@ -8,3 +8,7 @@ before running reverse-order cleanup. The registry also resolves explicit replac
 multiple service providers, ordered contributions, and retained layout references for contributions
 that are temporarily absent. Actual state remains attributed to extension, entrypoint, realm, and
 generation. This package does not import React or load external bundles.
+
+Most extension authors use `@piarium/extension-sdk`; this lower-level package is public for alternate
+Surface hosts and advanced lifecycle tests. See the
+[authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

@@ -2,11 +2,11 @@
   "name": "@piarium/extension-contract",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
-  "private": true,
   "type": "module",
   "description": "Browser-safe contracts for Piarium extensions and extension-host catalogs.",
   "files": [
-    "dist"
+    "dist",
+    "schema"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,8 +14,19 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./schema/manifest": "./schema/piarium.extension.schema.json",
+    "./schema/discovery": "./schema/piarium.discovery-catalog.schema.json"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Youzini-afk/Piarium.git",
+    "directory": "packages/extension-contract"
+  },
+  "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-contract",
+  "bugs": "https://github.com/Youzini-afk/Piarium/issues",
+  "publishConfig": { "access": "public" },
+  "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",

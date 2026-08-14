@@ -102,6 +102,24 @@ test("brokered Host storage, migration rollback, services, and crash isolation p
     assert.equal(staged.extensions[0]?.selectedVersion, "1.0.0");
     assert.equal(staged.extensions[0]?.candidate?.resolvedVersion, "2.0.0");
     assert.equal(await runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }), "persisted");
+    const candidateIntegrity = staged.extensions[0]?.candidate?.integrity;
+    assert.ok(candidateIntegrity);
+    await assert.rejects(
+      runtime.discardCandidate({
+        candidateIntegrity,
+        expectedRevision: installed.revision,
+        extensionId,
+      }),
+      /revision/i,
+    );
+    assert.equal((await runtime.state()).catalog.extensions[0]?.candidate?.integrity, candidateIntegrity);
+    const discarded = await runtime.discardCandidate({
+      candidateIntegrity,
+      expectedRevision: staged.revision,
+      extensionId,
+    });
+    assert.equal(discarded.extensions[0]?.candidate, undefined);
+    assert.equal(await runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }), "persisted");
 
     const failed = new Promise<void>((resolveFailed) => {
       const unsubscribe = runtime.subscribe(() => {
@@ -140,8 +158,19 @@ test("trusted-native Host updates remain on the prior generation until applicati
     source: { display: "Native v2", kind: "local", specifier: v2 },
   });
   assert.equal(staged.extensions[0]?.selectedVersion, "1.0.0");
-  assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "restart-required");
+  assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "active");
   assert.equal(await first.invokeService({ args: [], method: "generation", serviceId, version: 1 }), "1.0.0");
+  const requested = await first.requestCandidateApplication({
+    candidateIntegrity: staged.extensions[0]?.candidate?.integrity,
+    expectedRevision: staged.revision,
+    extensionId,
+  });
+  assert.equal(requested.extensions[0]?.candidate?.applyRequested, true);
+  await assert.rejects(
+    () => first.prepareCandidate(extensionId, staged.extensions[0]?.candidate?.integrity ?? ""),
+    /requires an application-host restart/,
+  );
+  assert.equal((await first.state()).catalog.extensions[0]?.actual.find((state) => state.realmKind === "host")?.status, "restart-required");
   await first.stop();
 
   const restarted = await ApplicationExtensionRuntime.create({ brokerScript, dataDir });
@@ -219,6 +248,29 @@ test("persistent routes select different real providers by session and isolate p
     assert.equal(await runtime.invokeService({
       args: [], method: "read", routing: { sessionId: "session-beta" }, serviceId, version: 1,
     }), "beta");
+
+    const beforeProfile = await runtime.state();
+    await runtime.upsertWorkbenchProfile({
+      expectedRevision: beforeProfile.workbench.document.revision,
+      profile: { extensionIds: ["dev.example.beta"], id: "beta-only", label: "Beta only" },
+    });
+    const applied = await runtime.applyWorkbenchProfile({
+      expectedCatalogRevision: (await runtime.state()).catalog.revision,
+      profileId: "beta-only",
+    });
+    assert.equal(applied.extensions.find((entry) => entry.manifest.id === "dev.example.alpha")?.desired.enabled, false);
+    assert.equal(applied.extensions.find((entry) => entry.manifest.id === "dev.example.beta")?.desired.enabled, true);
+
+    const disabledBeta = await runtime.setEnabled(
+      "dev.example.beta",
+      false,
+      (await runtime.state()).catalog.revision,
+    );
+    const removed = await runtime.removeExtension({
+      expectedRevision: disabledBeta.revision,
+      extensionId: "dev.example.beta",
+    });
+    assert.equal(removed.extensions.some((entry) => entry.manifest.id === "dev.example.beta"), false);
   } finally {
     await runtime.stop();
   }

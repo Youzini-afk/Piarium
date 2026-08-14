@@ -1,6 +1,6 @@
 # Piarium extension platform
 
-Status: target architecture; implementation complete through Phase B
+Status: implemented through Phase I
 
 Last updated: 2026-08-14
 
@@ -197,7 +197,7 @@ The exact package names may be finalized during implementation, but ownership re
 | `@piarium/extension-host` | Installation records, desired-state store, supervisor, host entrypoints, asset catalog, and migrations |
 | `@piarium/extension-surface` | Surface supervisor, owner scopes, contribution registry, module/iframe lifecycle, and layout resolution |
 | `@piarium/extension-sdk` | Framework-neutral extension author API and build-time types |
-| `@piarium/react` | Optional React/design-system adapter; not the core contract |
+| `@piarium/extension-react` | Optional React 19 adapter; not the core contract |
 
 `@piarium/protocol` remains the Pi worker/surface contract. Piarium extension contracts are not
 renamed Pi extension messages and do not make Pi workers aware of Piarium UI modules.
@@ -387,15 +387,20 @@ Updates use candidate activation rather than destructive in-place replacement:
 
 1. Download/resolve the candidate into a content-addressed installation directory.
 2. Validate the manifest, integrity, compatibility, and capability delta.
-3. Prepare configuration/data migration against a staged state snapshot.
-4. Activate candidate host and Surface instances in staging.
-5. Atomically switch services and contributions to the candidate generation.
-6. Deactivate the old generation.
-7. Commit the selected version and migrated state.
+3. Record capability decisions, then persist a separate explicit application request from the user.
+4. Prepare configuration/data migration and candidate Host/Surface instances against staged state.
+5. Validate all compatible entrypoints in the initiating Surface before the persistent commit boundary.
+6. Commit selected version, migration, Host services, and the staged Surface generation without a
+   fallible operation after the persistent selection.
+7. Deactivate the old generation. A superseding queued lifecycle request then reconciles normally.
 
 If candidate activation fails, the old version remains selected and active. Extension-owned
 external migrations that cannot be reversed must declare that fact and receive focused confirmation;
 the platform does not mislabel them as transactional.
+
+Capability review and application intent are independent facts. Finishing review never executes a
+candidate. Trusted-native Host updates persist the application request and complete it only after the
+application host restarts; merely staging or reviewing that candidate cannot select it.
 
 ### 8.6 Logical and physical unload
 
@@ -842,8 +847,10 @@ Trusted-native code has ambient access that cannot be reduced to the same claim.
 mode and its capability delta explicitly. Project-local executable extensions also require the
 existing project trust boundary.
 
+Capability requests on a first external install are reviewed before the extension can be enabled.
 Capability changes on update are reviewed before candidate activation. Ordinary updates that do not
-change capability needs are not blocked by repeated generic warnings.
+change capability needs are not blocked by repeated generic warnings, but still require the separate
+explicit apply action.
 
 ## 21. Compatibility and versioning
 
@@ -1046,10 +1053,13 @@ Native Surface activation or cleanup failure reports `restart-required` and is n
 same realm; native Host updates keep the prior generation active and select the candidate only after
 the application host restarts. The catalog never claims physical unload for same-realm code.
 
-Candidate records now carry an exact host/surface capability delta, candidate-version decisions, and
-a review-complete flag. Unchanged decisions carry forward to the new manifest version; removed
+Candidate records now carry an exact host/surface capability delta, candidate-version decisions, a
+review-complete flag, and a separate persistent application request. Unchanged decisions carry
+forward to the new manifest version; removed
 capabilities disappear; newly requested capabilities require an explicit grant or denial before any
-candidate code is prepared or activated. The same revision-checked review request is exposed by Web,
+candidate code is prepared or activated, and completing review never applies the candidate. A first
+external installation with requested capabilities remains disabled until every requested capability
+has an explicit grant or denial. The same revision-checked review request is exposed by Web,
 Electron, and VS Code application hosts. Surface capability implementations declare whether they are
 remote-safe, local-only, project-trust-dependent, and Surface-compatible. The active Pi runtime's
 public project-trust state is owner-checked before it changes the capability context, so a runtime
@@ -1156,6 +1166,30 @@ session continues without any Pi package or plugin-native configuration mutation
 Acceptance: an external author can build, test, install, diagnose, update, and remove a Piarium
 extension without depending on repository-private UI code.
 
+Implementation status (2026-08-14): complete. The browser-safe contract, Surface substrate,
+framework-neutral SDK, optional React adapter, JSON schemas, and author CLI are public packages with
+explicit repository, license, engine, and public-publish metadata. `piarium-extension init` creates a
+standalone managed extension; `check` validates the manifest, version agreement, paths, and artifacts;
+`build` produces Node Host and browser Surface modules in the exact manifest locations, while the
+application host remains the sole owner of final isolated IIFE materialization; `test` executes the public managed, isolated, and brokered-Host lifecycle conformance
+harnesses. The complete external workflow and ownership rules are documented in
+[piarium-extension-authoring.md](piarium-extension-authoring.md).
+
+Web/Electron-hosted Web and VS Code expose the same authenticated install/stage, selected and
+candidate capability review, persistent candidate-application request, apply/discard, disable,
+remove, profile, and diagnostic state through the application-host
+extension API. Removal deactivates first, rejects distribution-owned built-ins, removes the selected
+catalog record, and retains extension storage and immutable cache material as separate authorities.
+The Extensions page accepts arbitrary npm, Git, and local sources; shows selected/candidate versions,
+first-install and update capability review, owner realms, live contributions/services, dependencies, artifacts, and attributed
+diagnostics; and never imports an extension's private UI code.
+
+Workbench profiles now persist explicit extension ID sets separately from layout selection. Editing a
+set has no hidden lifecycle effect; an explicit revision-checked apply changes desired state atomically
+and reconciles the host. The public discovery-catalog contract carries ordinary source specifiers and
+presentation metadata, so catalogs can offer installation shortcuts without becoming an allowlist or
+granting capabilities.
+
 Each completed phase is independently validated, committed, and pushed. Validation follows the
 owning packages and affected runtimes rather than running unrelated repository checks by ritual.
 
@@ -1194,12 +1228,9 @@ Settled by this design:
 - Native/plugin data remains authoritative and is not mirrored to make a GUI easier.
 - Cordis is a reference, not a dependency or public abstraction.
 
-Items to finalize during Phase A without changing the architecture:
-
-- exact manifest field names and service/contribution ID grammar;
-- the private asset-delivery implementation for managed and isolated Surface artifacts;
-- the initial set of capability identifiers and grant persistence shape;
-- exact application/profile/workspace configuration layering;
-- which existing built-in settings and command seams form the first migration commit;
-- whether brokered Host entrypoints use a child process or worker thread on each application host,
-  based on measured startup, crash, and native-module behavior.
+The pre-release implementation decisions that were intentionally left open in Phase A are now
+resolved in the public contract and owning runtimes: the manifest and identifier grammar are versioned
+in `@piarium/extension-contract`; assets are authenticated and content addressed; capability decisions
+are version- and realm-bound; workbench profiles and service routing have revisioned scope models;
+built-ins use ordinary contribution owners; and brokered Host entrypoints use a supervisor-owned Node
+child process while trusted-native Host code keeps explicit restart semantics.

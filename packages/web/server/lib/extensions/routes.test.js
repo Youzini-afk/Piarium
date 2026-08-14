@@ -76,6 +76,27 @@ describe('Piarium extension recovery routes', () => {
     expect(conflict.body.error).toMatchObject({ code: 'revision_conflict', actualRevision: 2, expectedRevision: 1 });
   });
 
+  it('reports capability review as an actionable activation conflict', async () => {
+    const extensionCatalog = {
+      snapshot: vi.fn(async () => snapshot(false)),
+      setEnabled: vi.fn(async () => {
+        throw new Error('Piarium extension capabilities require review before activation: dev.example.extension');
+      }),
+    };
+    const app = createApp(extensionCatalog);
+    const response = await request(app)
+      .patch('/api/piarium/extensions/v1/extensions/dev.example.extension/enabled')
+      .set('x-test-session', 'yes')
+      .send({ enabled: true, expectedRevision: 1 })
+      .expect(409);
+
+    expect(response.body.error).toMatchObject({
+      code: 'extension_capability_review_required',
+      retryable: false,
+    });
+    expect(response.body.error.message).toContain('capabilities require review');
+  });
+
   it('serves managed entrypoint bytes only through an authenticated POST', async () => {
     const entrypoint = {
       artifactIntegrity: `sha256-${'a'.repeat(64)}`,
@@ -125,10 +146,15 @@ describe('Piarium extension recovery routes', () => {
       state: vi.fn(async () => state),
       waitForState: vi.fn(async () => state),
       prepareCandidate: vi.fn(async (extensionId, integrity) => ({ extensionId, integrity, providers: [] })),
+      requestCandidateApplication: vi.fn(async () => snapshot()),
+      discardCandidate: vi.fn(async () => snapshot()),
+      reviewCapabilities: vi.fn(async () => snapshot()),
       reviewCandidateCapabilities: vi.fn(async () => snapshot()),
       invokeService: vi.fn(async () => 'service-result'),
+      removeExtension: vi.fn(async () => snapshot()),
       upsertServiceRoutingRule: vi.fn(async () => state.routing),
       removeServiceRoutingRule: vi.fn(async () => state.routing),
+      applyWorkbenchProfile: vi.fn(async () => snapshot()),
       updateWorkbenchLayout: vi.fn(async () => state.workbench),
     };
     const app = createApp({ snapshot: vi.fn(async () => snapshot()) }, {}, extensionRuntime);
@@ -140,6 +166,16 @@ describe('Piarium extension recovery routes', () => {
       .send({ extensionId: 'dev.example.extension', candidateIntegrity: `sha256-${'a'.repeat(64)}` })
       .expect(200);
     expect(prepared.body.providers).toEqual([]);
+    const requested = await request(app)
+      .post('/api/piarium/extensions/v1/candidates/request-application')
+      .set('x-test-session', 'yes')
+      .send({
+        candidateIntegrity: `sha256-${'a'.repeat(64)}`,
+        expectedRevision: 1,
+        extensionId: 'dev.example.extension',
+      })
+      .expect(200);
+    expect(requested.body.snapshot.revision).toBe(1);
     await request(app).post('/api/piarium/extensions/v1/candidates/review-capabilities').send({}).expect(401);
     const reviewed = await request(app)
       .post('/api/piarium/extensions/v1/candidates/review-capabilities')
@@ -152,6 +188,16 @@ describe('Piarium extension recovery routes', () => {
       })
       .expect(200);
     expect(reviewed.body.snapshot.revision).toBe(1);
+    const selectedReview = await request(app)
+      .post('/api/piarium/extensions/v1/review-capabilities')
+      .set('x-test-session', 'yes')
+      .send({
+        decisions: [{ capability: 'workspace.files', granted: false, realm: 'host' }],
+        expectedRevision: 1,
+        extensionId: 'dev.example.extension',
+      })
+      .expect(200);
+    expect(selectedReview.body.snapshot.revision).toBe(1);
     const invoked = await request(app)
       .post('/api/piarium/extensions/v1/services/invoke')
       .set('x-test-session', 'yes')
@@ -169,6 +215,17 @@ describe('Piarium extension recovery routes', () => {
       .post('/api/piarium/extensions/v1/services/routing/remove')
       .set('x-test-session', 'yes')
       .send({ expectedRevision: 0, scope: {}, serviceId: 'dev.example.service', version: 1 })
+      .expect(200);
+    await request(app).delete('/api/piarium/extensions/v1/extensions/dev.example.extension').send({}).expect(401);
+    await request(app)
+      .delete('/api/piarium/extensions/v1/extensions/dev.example.extension')
+      .set('x-test-session', 'yes')
+      .send({ expectedRevision: 1 })
+      .expect(200);
+    await request(app)
+      .post('/api/piarium/extensions/v1/workbench/profiles/apply')
+      .set('x-test-session', 'yes')
+      .send({ expectedCatalogRevision: 1, profileId: 'default' })
       .expect(200);
     await request(app).patch('/api/piarium/extensions/v1/workbench/layout').send({}).expect(401);
     const workbench = await request(app)

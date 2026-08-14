@@ -4,10 +4,13 @@ import {
   ExtensionStorageRevisionConflictError,
 } from '@piarium/extension-host';
 import {
+  PiariumExtensionContractError,
   parsePiariumExtensionActualState,
   parsePiariumExtensionCandidateCapabilityReviewRequest,
+  parsePiariumExtensionCapabilityReviewRequest,
   parsePiariumExtensionHostStateWaitRequest,
   parsePiariumExtensionPackageSource,
+  parsePiariumExtensionRemoveRequest,
 } from '@piarium/extension-contract';
 import { renderExtensionRecoveryPage } from './recovery-page.js';
 
@@ -43,13 +46,33 @@ const sendMutationError = (res, error) => {
   if (error instanceof ExtensionCatalogStorageError) {
     return res.status(500).json({ error: { code: error.code, message: error.message, retryable: error.retryable } });
   }
+  if (error instanceof PiariumExtensionContractError) {
+    return res.status(400).json({
+      error: { code: 'invalid_request', details: error.issues, message: error.message, retryable: false },
+    });
+  }
   const message = error instanceof Error ? error.message : String(error);
-  const status = message.includes('not installed') ? 404 : 500;
+  const notInstalled = message.includes('not installed');
+  const managedByDistribution = message.includes('managed by the distribution');
+  const mustDisable = message.includes('before removing it');
+  const capabilityReviewRequired = message.includes('capabilities require review before activation');
+  const status = notInstalled
+    ? 404
+    : managedByDistribution || mustDisable || capabilityReviewRequired
+      ? 409
+      : 500;
+  let code = 'mutation_failed';
+  if (notInstalled) code = 'extension_not_found';
+  else if (managedByDistribution) code = 'extension_managed_by_distribution';
+  else if (mustDisable) code = 'extension_must_be_disabled';
+  else if (capabilityReviewRequired) code = 'extension_capability_review_required';
   if (status === 500) console.error('[Piarium Extensions] Failed to mutate extension catalog:', error);
   return res.status(status).json({
     error: {
-      code: status === 404 ? 'extension_not_found' : 'mutation_failed',
-      message: status === 404 ? message : 'Failed to update Piarium extension catalog',
+      code,
+      message: notInstalled || managedByDistribution || mustDisable || capabilityReviewRequired
+        ? message
+        : 'Failed to update Piarium extension catalog',
       retryable: false,
     },
   });
@@ -181,6 +204,34 @@ export const registerExtensionRoutes = (app, {
   );
 
   app.post(
+    '/api/piarium/extensions/v1/candidates/discard',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        return res.json({ snapshot: await extensionRuntime.discardCandidate(req.body) });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/review-capabilities',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      try {
+        const request = parsePiariumExtensionCapabilityReviewRequest(req.body);
+        return res.json({ snapshot: await (extensionRuntime
+          ? extensionRuntime.reviewCapabilities(request)
+          : extensionCatalog.reviewCapabilities(request)) });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
     '/api/piarium/extensions/v1/candidates/review-capabilities',
     uiAuthController.requireAuth,
     async (req, res) => {
@@ -189,6 +240,19 @@ export const registerExtensionRoutes = (app, {
         return res.json({ snapshot: await (extensionRuntime
           ? extensionRuntime.reviewCandidateCapabilities(request)
           : extensionCatalog.reviewCandidateCapabilities(request)) });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/candidates/request-application',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        return res.json({ snapshot: await extensionRuntime.requestCandidateApplication(req.body) });
       } catch (error) {
         return sendMutationError(res, error);
       }
@@ -331,6 +395,19 @@ export const registerExtensionRoutes = (app, {
     workbenchMutation('selectWorkbenchProfile'),
   );
 
+  app.post(
+    '/api/piarium/extensions/v1/workbench/profiles/apply',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        return res.json({ snapshot: await extensionRuntime.applyWorkbenchProfile(req.body) });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
   app.put(
     '/api/piarium/extensions/v1/workbench/profiles',
     uiAuthController.requireAuth,
@@ -356,6 +433,23 @@ export const registerExtensionRoutes = (app, {
           ? await extensionRuntime.setEnabled(req.params.extensionId, req.body.enabled, revision)
           : await extensionCatalog.setEnabled(req.params.extensionId, req.body.enabled, revision);
         return res.json({ snapshot });
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.delete(
+    '/api/piarium/extensions/v1/extensions/:extensionId',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        const request = parsePiariumExtensionRemoveRequest({
+          ...req.body,
+          extensionId: req.params.extensionId,
+        });
+        return res.json({ snapshot: await extensionRuntime.removeExtension(request) });
       } catch (error) {
         return sendMutationError(res, error);
       }

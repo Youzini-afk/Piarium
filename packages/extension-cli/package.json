@@ -1,0 +1,47 @@
+{
+  "name": "@piarium/extension-cli",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "Author tooling for building and testing Piarium extensions.",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Youzini-afk/Piarium.git",
+    "directory": "packages/extension-cli"
+  },
+  "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-cli",
+  "bugs": "https://github.com/Youzini-afk/Piarium/issues",
+  "publishConfig": { "access": "public" },
+  "sideEffects": false,
+  "bin": {
+    "piarium-extension": "./dist/cli.js"
+  },
+  "scripts": {
+    "build:dependencies": "bun run --cwd ../extension-sdk build",
+    "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "type-check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@piarium/extension-contract": "0.1.0",
+    "@piarium/extension-sdk": "0.1.0",
+    "@piarium/extension-surface": "0.1.0",
+    "esbuild": "^0.28.1"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

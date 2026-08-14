@@ -1,7 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import React from 'react';
 import type { ComponentType } from 'react';
-import type { PiariumExtensionContributionKind, PiariumWorkbenchLayoutLayer } from '@piarium/extension-contract';
+import type {
+  PiariumExtensionContributionKind,
+  PiariumWorkbenchDistributionProfile,
+  PiariumWorkbenchLayoutLayer,
+} from '@piarium/extension-contract';
 import { resolvePiariumWorkbenchLayout } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -229,6 +233,38 @@ export const selectActiveWorkbenchProfile = async (
     profileId,
     scope: workspaceId ? 'workspace' : 'user',
     scopeId: workspaceId ?? 'default',
+  });
+  await refreshPiariumExtensionCatalog();
+};
+
+export const upsertWorkbenchProfile = async (
+  profile: PiariumWorkbenchDistributionProfile,
+): Promise<void> => {
+  const snapshot = getPiariumExtensionCatalogState().snapshot?.workbench;
+  if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
+  await window.__PIARIUM_RUNTIME_APIS__?.extensions.upsertWorkbenchProfile({
+    expectedRevision: snapshot.document.revision,
+    profile,
+  });
+  await refreshPiariumExtensionCatalog();
+};
+
+export const removeWorkbenchProfile = async (profileId: string): Promise<void> => {
+  const snapshot = getPiariumExtensionCatalogState().snapshot?.workbench;
+  if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
+  await window.__PIARIUM_RUNTIME_APIS__?.extensions.removeWorkbenchProfile({
+    expectedRevision: snapshot.document.revision,
+    profileId,
+  });
+  await refreshPiariumExtensionCatalog();
+};
+
+export const applyWorkbenchProfile = async (profileId: string): Promise<void> => {
+  const snapshot = getPiariumExtensionCatalogState().snapshot;
+  if (!snapshot?.workbench.authoritative) throw new Error('Workbench profile state is unavailable');
+  await window.__PIARIUM_RUNTIME_APIS__?.extensions.applyWorkbenchProfile({
+    expectedCatalogRevision: snapshot.catalog.revision,
+    profileId,
   });
   await refreshPiariumExtensionCatalog();
 };

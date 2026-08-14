@@ -52,9 +52,11 @@ export const defineSurfaceExtension = (
 export const resolveSurfaceExtensionModule = (
   module: PiariumManagedSurfaceModule,
 ): PiariumManagedSurfaceExtension => {
-  const candidate = module.default ?? module.activate;
+  const candidate = module.default ?? module;
   if (typeof candidate === "function") return { activate: candidate };
-  if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") return candidate;
+  if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") {
+    return { activate: candidate.activate.bind(candidate) };
+  }
   throw new Error("Managed Piarium Surface module must export activate or a default extension definition");
 };
 
@@ -94,6 +96,17 @@ export type PiariumIsolatedSurfaceModule = {
 export const defineIsolatedExtension = (
   extension: PiariumIsolatedSurfaceActivation | PiariumIsolatedSurfaceExtension,
 ): PiariumIsolatedSurfaceExtension => typeof extension === "function" ? { activate: extension } : extension;
+
+export const resolveIsolatedExtensionModule = (
+  module: PiariumIsolatedSurfaceModule,
+): PiariumIsolatedSurfaceExtension => {
+  const candidate = module.default ?? module;
+  if (typeof candidate === "function") return { activate: candidate };
+  if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") {
+    return { activate: candidate.activate.bind(candidate) };
+  }
+  throw new Error("Isolated Piarium Surface module must export activate or a default extension definition");
+};
 
 export interface PiariumHostCapabilityClient {
   call(capability: string, method: string, params: JsonValue): Promise<JsonValue>;
@@ -146,3 +159,18 @@ export type PiariumBrokeredHostModule = {
 export const defineHostExtension = (
   extension: PiariumBrokeredHostExtension | PiariumBrokeredHostExtension["activate"],
 ): PiariumBrokeredHostExtension => typeof extension === "function" ? { activate: extension } : extension;
+
+export const resolveHostExtensionModule = (
+  module: PiariumBrokeredHostModule,
+): PiariumBrokeredHostExtension => {
+  const candidate = module.default ?? module;
+  if (typeof candidate === "function") return { activate: candidate, ...(module.migrate ? { migrate: module.migrate } : {}) };
+  if (candidate && typeof candidate === "object" && typeof candidate.activate === "function") {
+    const migrate = candidate.migrate?.bind(candidate) ?? module.migrate;
+    return {
+      activate: candidate.activate.bind(candidate),
+      ...(migrate ? { migrate } : {}),
+    };
+  }
+  throw new Error("Brokered Piarium Host module must export activate or a default extension definition");
+};

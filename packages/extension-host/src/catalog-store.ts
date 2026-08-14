@@ -144,6 +144,20 @@ function manifestCapabilities(manifest: PiariumExtensionManifest): PiariumExtens
   ));
 }
 
+function capabilitiesReviewed(record: PiariumExtensionInstallationRecord): boolean {
+  if (record.source.kind === "builtin") return true;
+  const decided = new Set(record.capabilityGrants
+    .filter((grant) => grant.manifestVersion === record.manifest.version)
+    .map(capabilityKey));
+  return manifestCapabilities(record.manifest).every((reference) => decided.has(capabilityKey(reference)));
+}
+
+function assertCanEnable(record: PiariumExtensionInstallationRecord): void {
+  if (!capabilitiesReviewed(record)) {
+    throw new Error(`Piarium extension capabilities require review before activation: ${record.manifest.id}`);
+  }
+}
+
 async function atomicWrite(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
@@ -212,6 +226,7 @@ export class ExtensionCatalogStore {
       const record = document.extensions[extensionId];
       if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
       if (record.desired.enabled === enabled) return false;
+      if (enabled) assertCanEnable(record);
       record.desired = { enabled, revision: record.desired.revision + 1, updatedAt: now };
       record.updatedAt = now;
       return true;
@@ -223,6 +238,23 @@ export class ExtensionCatalogStore {
       let changed = false;
       for (const record of Object.values(document.extensions)) {
         if (record.desired.enabled === enabled) continue;
+        if (enabled) assertCanEnable(record);
+        record.desired = { enabled, revision: record.desired.revision + 1, updatedAt: now };
+        record.updatedAt = now;
+        changed = true;
+      }
+      return changed;
+    });
+  }
+
+  setEnabledSet(extensionIds: readonly string[], expectedRevision: number): Promise<CatalogReadState> {
+    const selected = new Set(extensionIds);
+    return this.#mutate(expectedRevision, (document, now) => {
+      let changed = false;
+      for (const [extensionId, record] of Object.entries(document.extensions)) {
+        const enabled = selected.has(extensionId);
+        if (record.desired.enabled === enabled) continue;
+        if (enabled) assertCanEnable(record);
         record.desired = { enabled, revision: record.desired.revision + 1, updatedAt: now };
         record.updatedAt = now;
         changed = true;
@@ -328,6 +360,35 @@ export class ExtensionCatalogStore {
     });
   }
 
+  reviewCapabilities(
+    extensionId: string,
+    decisions: readonly PiariumExtensionCapabilityDecision[],
+    expectedRevision: number,
+  ): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[extensionId];
+      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      if (record.source.kind === "builtin") {
+        throw new Error(`Built-in Piarium extensions are managed by the distribution: ${extensionId}`);
+      }
+      const requested = new Set(manifestCapabilities(record.manifest).map(capabilityKey));
+      for (const decision of decisions) {
+        const key = capabilityKey(decision);
+        if (!requested.has(key)) throw new Error(`Capability was not requested by ${extensionId}: ${key}`);
+        const next: PiariumExtensionCapabilityGrant = {
+          ...decision,
+          manifestVersion: record.manifest.version,
+          updatedAt: now,
+        };
+        const index = record.capabilityGrants.findIndex((grant) => capabilityKey(grant) === key);
+        if (index >= 0) record.capabilityGrants[index] = next;
+        else record.capabilityGrants.push(next);
+      }
+      if (decisions.length > 0) record.updatedAt = now;
+      return decisions.length > 0;
+    });
+  }
+
   stageCandidate(candidate: PiariumExtensionPreparedArtifact, expectedRevision: number): Promise<CatalogReadState> {
     return this.#mutate(expectedRevision, (document, now) => {
       const record = document.extensions[candidate.manifest.id];
@@ -343,6 +404,7 @@ export class ExtensionCatalogStore {
         .map((grant) => ({ ...grant, manifestVersion: candidate.manifest.version, updatedAt: now }));
       record.candidate = {
         ...structuredClone(candidate),
+        applyRequested: false,
         capabilitiesReviewed: added.length === 0,
         capabilityDelta: { added, removed },
         capabilityGrants,
@@ -402,6 +464,9 @@ export class ExtensionCatalogStore {
       if (!candidate.capabilitiesReviewed) {
         throw new Error(`Piarium extension candidate capability changes require review: ${extensionId}`);
       }
+      if (!candidate.applyRequested) {
+        throw new Error(`Piarium extension candidate application was not requested: ${extensionId}`);
+      }
       record.manifest = structuredClone(candidate.manifest);
       record.source = structuredClone(candidate.source);
       record.integrity = candidate.integrity;
@@ -410,6 +475,28 @@ export class ExtensionCatalogStore {
       record.selectedVersion = candidate.resolvedVersion;
       record.capabilityGrants = structuredClone(candidate.capabilityGrants);
       delete record.candidate;
+      record.updatedAt = now;
+      return true;
+    });
+  }
+
+  requestCandidateApplication(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<CatalogReadState> {
+    return this.#mutate(expectedRevision, (document, now) => {
+      const record = document.extensions[extensionId];
+      if (!record) throw new Error(`Piarium extension is not installed: ${extensionId}`);
+      const candidate = record.candidate;
+      if (!candidate || candidate.integrity !== candidateIntegrity) {
+        throw new Error(`Piarium extension candidate is no longer current: ${extensionId}`);
+      }
+      if (!candidate.capabilitiesReviewed) {
+        throw new Error(`Piarium extension candidate capability changes require review: ${extensionId}`);
+      }
+      if (candidate.applyRequested) return false;
+      candidate.applyRequested = true;
       record.updatedAt = now;
       return true;
     });

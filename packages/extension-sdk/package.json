@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Framework-neutral authoring SDK for Piarium Surface extensions.",
+  "description": "Framework-neutral authoring SDK for Piarium Surface and Host extensions.",
   "files": ["dist"],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,6 +17,15 @@
       "import": "./dist/testing.js"
     }
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Youzini-afk/Piarium.git",
+    "directory": "packages/extension-sdk"
+  },
+  "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-sdk",
+  "bugs": "https://github.com/Youzini-afk/Piarium/issues",
+  "publishConfig": { "access": "public" },
+  "sideEffects": false,
   "scripts": {
     "build:dependencies": "bun run --cwd ../extension-contract build && bun run --cwd ../extension-surface build",
     "build": "bun run build:dependencies && tsc -p tsconfig.build.json",

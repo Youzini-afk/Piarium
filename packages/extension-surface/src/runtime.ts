@@ -365,8 +365,12 @@ export class SurfaceExtensionRuntime {
           });
         }
         this.#validateCandidates(candidates);
-        await commit();
         for (const request of requests) this.#assertLatest(ownerKey(request.options.owner), request.options.owner);
+        await commit();
+        // The external commit is the transaction boundary. A newer queued lifecycle request may
+        // arrive while it is in flight; publish this committed generation first, then let that
+        // queued request replace or deactivate it without turning a successful catalog commit
+        // into a partial rollback.
         for (const [key, candidate] of candidates) {
           this.#activeOwners.set(key, candidate);
           this.#actual.set(key, actual(candidate.owner, "active"));

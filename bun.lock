@@ -120,6 +120,19 @@
         "@piarium/extension-contract": "0.1.0",
       },
     },
+    "packages/extension-cli": {
+      "name": "@piarium/extension-cli",
+      "version": "0.1.0",
+      "bin": {
+        "piarium-extension": "./dist/cli.js",
+      },
+      "dependencies": {
+        "@piarium/extension-contract": "0.1.0",
+        "@piarium/extension-sdk": "0.1.0",
+        "@piarium/extension-surface": "0.1.0",
+        "esbuild": "^0.28.1",
+      },
+    },
     "packages/extension-contract": {
       "name": "@piarium/extension-contract",
       "version": "0.1.0",
@@ -1264,6 +1277,8 @@
     "@piarium/electron": ["@piarium/electron@workspace:packages/electron"],
 
     "@piarium/extension-builtins": ["@piarium/extension-builtins@workspace:packages/extension-builtins"],
+
+    "@piarium/extension-cli": ["@piarium/extension-cli@workspace:packages/extension-cli"],
 
     "@piarium/extension-contract": ["@piarium/extension-contract@workspace:packages/extension-contract"],
 

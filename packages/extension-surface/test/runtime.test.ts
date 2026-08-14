@@ -112,6 +112,29 @@ test("a newer disable supersedes in-flight activation before it can publish", as
   assert.equal(runtime.getSnapshot().actual[0]?.status, "inactive");
 });
 
+test("a newer disable queued during an external commit runs after the committed generation", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  let releaseCommit!: () => void;
+  let commitStarted!: () => void;
+  const committing = new Promise<void>((resolve) => { commitStarted = resolve; });
+  const commitGate = new Promise<void>((resolve) => { releaseCommit = resolve; });
+  const activating = runtime.activateWithCommit(
+    { owner: owner("dev.example.alpha", 1, 1) },
+    (context) => context.contribute(page("dev.example.alpha.settings"), {}),
+    async () => {
+      commitStarted();
+      await commitGate;
+    },
+  );
+  await committing;
+  const disabling = runtime.deactivate(owner("dev.example.alpha", 2, 2));
+  releaseCommit();
+  await activating;
+  await disabling;
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+  assert.equal(runtime.getSnapshot().actual[0]?.status, "inactive");
+});
+
 test("replacement selection and ordering update without a document refresh", async () => {
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {

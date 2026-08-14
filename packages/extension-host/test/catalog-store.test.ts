@@ -112,6 +112,34 @@ test("serializes mutations and rejects a stale expected revision", async () => {
   assert.equal((await catalog.snapshot()).extensions[0]?.desired.enabled, false);
 });
 
+test("external extensions cannot be enabled until every selected capability has a decision", async () => {
+  const catalog = new ApplicationExtensionCatalog({ dataDir: await temporaryDirectory() });
+  const record = installation("dev.example.review");
+  record.manifest.capabilities = { host: ["workspace.files"], surface: ["desktop.clipboard"] };
+  record.desired.enabled = false;
+  const installed = await catalog.upsert(record, 0);
+  await assert.rejects(
+    () => catalog.setEnabled("dev.example.review", true, installed.revision),
+    /capabilities require review/,
+  );
+  const partial = await catalog.reviewCapabilities({
+    decisions: [{ capability: "workspace.files", granted: false, realm: "host" }],
+    expectedRevision: installed.revision,
+    extensionId: "dev.example.review",
+  });
+  await assert.rejects(
+    () => catalog.setEnabled("dev.example.review", true, partial.revision),
+    /capabilities require review/,
+  );
+  const reviewed = await catalog.reviewCapabilities({
+    decisions: [{ capability: "desktop.clipboard", granted: true, realm: "surface" }],
+    expectedRevision: partial.revision,
+    extensionId: "dev.example.review",
+  });
+  const enabled = await catalog.setEnabled("dev.example.review", true, reviewed.revision);
+  assert.equal(enabled.extensions[0]?.desired.enabled, true);
+});
+
 test("reconciles Piarium-owned built-ins while preserving their desired state", async () => {
   const catalog = new ApplicationExtensionCatalog({ dataDir: await temporaryDirectory() });
   const seeded = await catalog.reconcileBuiltins(
@@ -168,7 +196,16 @@ test("candidate capability deltas require explicit decisions and carry unchanged
     extensionId: "dev.example.extension",
   });
   assert.equal(reviewed.extensions[0]?.candidate?.capabilitiesReviewed, true);
-  const selected = await catalog.selectCandidate("dev.example.extension", `sha256-${"1".repeat(64)}`, reviewed.revision);
+  await assert.rejects(
+    () => catalog.selectCandidate("dev.example.extension", `sha256-${"1".repeat(64)}`, reviewed.revision),
+    /application was not requested/,
+  );
+  const requested = await catalog.requestCandidateApplication(
+    "dev.example.extension",
+    `sha256-${"1".repeat(64)}`,
+    reviewed.revision,
+  );
+  const selected = await catalog.selectCandidate("dev.example.extension", `sha256-${"1".repeat(64)}`, requested.revision);
   assert.deepEqual(selected.extensions[0]?.capabilityGrants.map(({ capability, granted, manifestVersion, realm }) => ({ capability, granted, manifestVersion, realm })), [{
     capability: "workspace.files",
     granted: false,
@@ -185,5 +222,6 @@ test("candidate capability deltas require explicit decisions and carry unchanged
     source: { kind: "npm", specifier: "npm:dev.example.extension", display: "npm:dev.example.extension" },
   }, selected.revision);
   assert.equal(unchanged.extensions[0]?.candidate?.capabilitiesReviewed, true);
+  assert.equal(unchanged.extensions[0]?.candidate?.applyRequested, false);
   assert.equal(unchanged.extensions[0]?.candidate?.capabilityGrants[0]?.manifestVersion, "3.0.0");
 });

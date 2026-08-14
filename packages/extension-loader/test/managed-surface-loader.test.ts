@@ -150,6 +150,15 @@ test("managed candidate activation, rollback, style ownership, and disable are r
       hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async (request) => {
+        const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
+        assert.equal(entry.candidate?.integrity, request.candidateIntegrity);
+        current = snapshot(current.revision + 1, {
+          ...entry,
+          candidate: entry.candidate ? { ...entry.candidate, applyRequested: true } : undefined,
+        });
+        return current;
+      },
       readAsset: async () => { throw new Error("unexpected asset read"); },
       readManagedEntrypoint: async (request): Promise<PiariumExtensionManagedEntrypointPayload> => {
         const source = code.get(request.integrity);
@@ -195,6 +204,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   current = snapshot(2, {
     ...current.extensions[0] as PiariumExtensionCatalogEntry,
     candidate: {
+      applyRequested: false,
       capabilitiesReviewed: true,
       capabilityDelta: { added: [], removed: [] },
       capabilityGrants: [],
@@ -209,10 +219,18 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: string }).version, "v1");
   assert.equal(selections, 0);
   assert.equal(committedStyles, 1);
+  await assert.rejects(
+    () => loader.applyCandidate("dev.example.managed", failedIntegrity, current.revision),
+    /candidate module failed/,
+  );
+  assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: string }).version, "v1");
+  assert.equal(selections, 0);
+  assert.equal(committedStyles, 1);
 
   current = snapshot(3, {
     ...current.extensions[0] as PiariumExtensionCatalogEntry,
     candidate: {
+      applyRequested: false,
       capabilitiesReviewed: true,
       capabilityDelta: { added: [], removed: [] },
       capabilityGrants: [],
@@ -224,6 +242,9 @@ test("managed candidate activation, rollback, style ownership, and disable are r
     },
   });
   await loader.reconcile();
+  assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: string }).version, "v1");
+  assert.equal(selections, 0);
+  await loader.applyCandidate("dev.example.managed", v3Integrity, current.revision);
   assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: string }).version, "v3");
   assert.equal(selections, 1);
   assert.equal(committedStyles, 1);
@@ -249,6 +270,7 @@ test("candidate code does not execute before added capabilities are reviewed", a
   const entry: PiariumExtensionCatalogEntry = {
     ...catalogEntry("1.0.0", selectedIntegrity),
     candidate: {
+      applyRequested: false,
       capabilitiesReviewed: false,
       capabilityDelta: { added: [{ capability: "desktop.files", realm: "surface" }], removed: [] },
       capabilityGrants: [],
@@ -275,6 +297,7 @@ test("candidate code does not execute before added capabilities are reviewed", a
       hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => { prepared += 1; return { extensionId, integrity, providers: [] }; },
+      requestCandidateApplication: async () => current,
       readAsset: async () => { throw new Error("unexpected asset read"); },
       readManagedEntrypoint: async (request) => ({
         artifactIntegrity: request.integrity,
@@ -337,6 +360,7 @@ test("withdrawn Host services tear down dependent Surface owners", async () => {
       hostState: async () => hostState(current, stateRevision, providers),
       invokeService: async () => "host-value",
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
       readAsset: async () => { throw new Error("unexpected asset read"); },
       readManagedEntrypoint: async (request) => ({
         artifactIntegrity: request.integrity,
@@ -396,6 +420,7 @@ test("isolated Surface realms contribute transactionally and are physically disp
       hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
       readAsset: async () => { throw new Error("unexpected asset read"); },
       readManagedEntrypoint: async (request) => ({
         artifactIntegrity: request.integrity,
@@ -454,6 +479,7 @@ test("trusted-native Surface activation failure requires a Surface reload and is
       hostState: async () => hostState(current),
       invokeService: async () => { throw new Error("unexpected service invocation"); },
       prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
       readAsset: async () => { throw new Error("unexpected asset read"); },
       readManagedEntrypoint: async (request) => ({
         artifactIntegrity: request.integrity,

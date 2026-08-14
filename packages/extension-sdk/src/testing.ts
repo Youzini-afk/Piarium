@@ -3,6 +3,19 @@ import {
   type SurfaceActivation,
   type SurfaceOwnerIdentity,
 } from "@piarium/extension-surface";
+import type {
+  JsonObject,
+  PiariumExtensionAssetPayload,
+  PiariumExtensionServiceProvision,
+  PiariumExtensionStaticContribution,
+  PiariumExtensionStorageSnapshot,
+} from "@piarium/extension-contract";
+import type {
+  PiariumBrokeredHostContext,
+  PiariumBrokeredHostExtension,
+  PiariumHostServiceHandler,
+  PiariumIsolatedSurfaceExtension,
+} from "./index.js";
 
 export interface SurfaceConformanceResult {
   activeContributionIds: string[];
@@ -36,4 +49,146 @@ export const runSurfaceExtensionConformance = async (options: {
     throw new Error("Surface extension leaked services after deactivation");
   }
   return { activeContributionIds, activeServiceIds, finalRevision: inactive.revision };
+};
+
+export interface HostConformanceResult {
+  finalStorage: PiariumExtensionStorageSnapshot;
+  providedServiceIds: string[];
+  registeredDisposers: number;
+}
+
+export interface IsolatedConformanceResult {
+  contributionIds: string[];
+  registeredDisposers: number;
+}
+
+export const runIsolatedExtensionConformance = async (options: {
+  activation: PiariumIsolatedSurfaceExtension["activate"];
+  grantedCapabilities?: readonly string[];
+}): Promise<IsolatedConformanceResult> => {
+  const controller = new AbortController();
+  const contributions = new Map<string, PiariumExtensionStaticContribution>();
+  const disposers: Array<() => void | Promise<void>> = [];
+  const grantedCapabilities = new Set(options.grantedCapabilities ?? []);
+  const emptyIntegrity = `sha256-${"0".repeat(64)}`;
+  const returned = await options.activation({
+    assets: {
+      read: async (path): Promise<PiariumExtensionAssetPayload> => ({
+        artifactIntegrity: emptyIntegrity,
+        bytesBase64: "",
+        contentType: "application/octet-stream",
+        integrity: emptyIntegrity,
+        path,
+      }),
+    },
+    capabilities: {
+      call: async (capability, method) => {
+        throw new Error(`Conformance capability is not provided: ${capability}.${method}`);
+      },
+      has: (capability) => grantedCapabilities.has(capability),
+    },
+    contribute: (descriptor) => {
+      if (contributions.has(descriptor.id)) throw new Error(`Isolated contribution provided more than once: ${descriptor.id}`);
+      contributions.set(descriptor.id, descriptor);
+    },
+    effect: (disposer) => { disposers.push(disposer); },
+    services: {
+      use: (id, version) => new Proxy({}, {
+        get: (_target, property) => property === "then" || typeof property !== "string"
+          ? undefined
+          : () => { throw new Error(`Conformance dependency is not provided: ${id}@${version}.${property}`); },
+      }) as never,
+    },
+    signal: controller.signal,
+  });
+  if (typeof returned === "function") disposers.push(returned);
+  const contributionIds = [...contributions.keys()].sort();
+  const registeredDisposers = disposers.length;
+  controller.abort("Isolated extension conformance deactivation");
+  const cleanupErrors: string[] = [];
+  while (disposers.length > 0) {
+    try { await disposers.pop()?.(); }
+    catch (error) { cleanupErrors.push(error instanceof Error ? error.message : String(error)); }
+  }
+  contributions.clear();
+  if (cleanupErrors.length > 0) throw new Error(`Isolated extension cleanup failed: ${cleanupErrors.join("; ")}`);
+  return { contributionIds, registeredDisposers };
+};
+
+export const runHostExtensionConformance = async (options: {
+  activation: PiariumBrokeredHostExtension["activate"];
+  extensionId: string;
+  initialData?: JsonObject;
+  storageSchemaVersion?: number;
+}): Promise<HostConformanceResult> => {
+  const controller = new AbortController();
+  const disposers: Array<() => void | Promise<void>> = [];
+  const services = new Map<string, PiariumHostServiceHandler>();
+  let storage: PiariumExtensionStorageSnapshot = {
+    address: { extensionId: options.extensionId, key: "host", scope: "application" },
+    authoritative: true,
+    diagnostics: [],
+    document: {
+      data: structuredClone(options.initialData ?? {}),
+      revision: 0,
+      schemaVersion: options.storageSchemaVersion ?? 1,
+      updatedAt: new Date(0).toISOString(),
+    },
+    exists: options.initialData !== undefined,
+    storageState: options.initialData === undefined ? "missing" : "ready",
+  };
+  const context: PiariumBrokeredHostContext = {
+    capabilities: {
+      call: async (capability, method) => {
+        throw new Error(`Conformance capability is not provided: ${capability}.${method}`);
+      },
+    },
+    effect: (disposer) => { disposers.push(disposer); },
+    services: {
+      provide: (descriptor: PiariumExtensionServiceProvision, handler: PiariumHostServiceHandler) => {
+        const key = `${descriptor.id}@${descriptor.version}`;
+        if (services.has(key)) throw new Error(`Host service provided more than once: ${key}`);
+        services.set(key, handler);
+      },
+      use: (id, version) => ({
+        call: async (method: string) => {
+          throw new Error(`Conformance dependency is not provided: ${id}@${version}.${method}`);
+        },
+      }),
+    },
+    signal: controller.signal,
+    storage: {
+      get snapshot() { return structuredClone(storage); },
+      update: async (data, expectedRevision = storage.document.revision) => {
+        if (expectedRevision !== storage.document.revision) {
+          throw new Error(`Conformance storage revision conflict: expected ${expectedRevision}, current ${storage.document.revision}`);
+        }
+        storage = {
+          ...storage,
+          document: {
+            ...storage.document,
+            data: structuredClone(data),
+            revision: storage.document.revision + 1,
+            updatedAt: new Date().toISOString(),
+          },
+          exists: true,
+          storageState: "ready",
+        };
+        return structuredClone(storage);
+      },
+    },
+  };
+  const returned = await options.activation(context);
+  if (typeof returned === "function") disposers.push(returned);
+  const providedServiceIds = [...services.keys()].sort();
+  const registeredDisposers = disposers.length;
+  controller.abort("Host extension conformance deactivation");
+  const cleanupErrors: string[] = [];
+  while (disposers.length > 0) {
+    try { await disposers.pop()?.(); }
+    catch (error) { cleanupErrors.push(error instanceof Error ? error.message : String(error)); }
+  }
+  services.clear();
+  if (cleanupErrors.length > 0) throw new Error(`Host extension cleanup failed: ${cleanupErrors.join("; ")}`);
+  return { finalStorage: structuredClone(storage), providedServiceIds, registeredDisposers };
 };

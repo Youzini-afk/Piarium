@@ -119,13 +119,19 @@ export const handleExtensionsBridgeMessage = async (
         type: request.type,
       };
     }
+    case 'api:extensions:candidate:request-application':
+      return { data: await runtime.requestCandidateApplication(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:candidate:discard-prepared': {
       const payload = payloadRecord(request.payload);
       await runtime.discardPreparedCandidate(String(payload.extensionId ?? ''), String(payload.candidateIntegrity ?? ''));
       return { id: request.id, success: true, type: request.type };
     }
+    case 'api:extensions:candidate:discard':
+      return { data: await runtime.discardCandidate(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:candidate:review-capabilities':
       return { data: await runtime.reviewCandidateCapabilities(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:review-capabilities':
+      return { data: await runtime.reviewCapabilities(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:candidate:select':
       return { data: await runtime.selectCandidate(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:set-enabled': {
@@ -141,6 +147,8 @@ export const handleExtensionsBridgeMessage = async (
         type: request.type,
       };
     }
+    case 'api:extensions:remove':
+      return { data: await runtime.removeExtension(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:host-state':
       return { data: await runtime.state(), id: request.id, success: true, type: request.type };
     case 'api:extensions:host-state:wait': {
@@ -174,6 +182,8 @@ export const handleExtensionsBridgeMessage = async (
       return { data: await runtime.updateWorkbenchLayout(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:workbench:profile:select':
       return { data: await runtime.selectWorkbenchProfile(request.payload), id: request.id, success: true, type: request.type };
+    case 'api:extensions:workbench:profile:apply':
+      return { data: await runtime.applyWorkbenchProfile(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:workbench:profile:upsert':
       return { data: await runtime.upsertWorkbenchProfile(request.payload), id: request.id, success: true, type: request.type };
     case 'api:extensions:workbench:profile:remove':
