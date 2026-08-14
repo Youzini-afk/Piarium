@@ -4,6 +4,7 @@ import { handleGitConflictBridgeMessage } from './bridge-git-conflict-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleNativeVSCodeBridgeMessage } from './bridge-vscode-runtime';
 import { handleExtensionsBridgeMessage } from './bridge-extensions-runtime';
+import type { VSCodePiRuntime } from './piRuntime';
 import {
   DEFAULT_GITHUB_CLIENT_ID,
   DEFAULT_GITHUB_SCOPES,
@@ -67,6 +68,7 @@ export interface BridgeResponse {
 
 export interface BridgeContext {
   context?: vscode.ExtensionContext;
+  piRuntime?: VSCodePiRuntime;
 }
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -439,7 +441,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     const nativeResponse = await handleNativeVSCodeBridgeMessage({ id, type, payload }, ctx);
     if (nativeResponse) return nativeResponse;
 
-    const extensionsResponse = await handleExtensionsBridgeMessage({ id, type, payload }, ctx?.context);
+    const extensionsResponse = await handleExtensionsBridgeMessage({ id, type, payload }, ctx?.context, ctx?.piRuntime);
     if (extensionsResponse) return extensionsResponse;
 
     const githubResponse = await handleGitHubBridgeMessage({ id, type, payload }, ctx);

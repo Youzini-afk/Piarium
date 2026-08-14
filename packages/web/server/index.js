@@ -11,7 +11,11 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
-import { ApplicationExtensionCatalog, ExtensionPackageManager } from '@piarium/extension-host';
+import {
+  ApplicationExtensionCatalog,
+  ApplicationExtensionRuntime,
+  ExtensionPackageManager,
+} from '@piarium/extension-host';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -553,11 +557,17 @@ async function main(options = {}) {
 
   console.log(`Starting Piarium on port ${port === 0 ? 'auto' : port}`);
   const app = express();
-  const extensionCatalog = options.extensionCatalog || new ApplicationExtensionCatalog({ dataDir: PIARIUM_DATA_DIR });
-  const extensionPackages = options.extensionPackages || new ExtensionPackageManager({
+  const extensionCatalog = options.extensionCatalog
+    || options.extensionRuntime?.catalog
+    || new ApplicationExtensionCatalog({ dataDir: PIARIUM_DATA_DIR });
+  const extensionPackages = options.extensionPackages
+    || options.extensionRuntime?.packages
+    || new ExtensionPackageManager({
     catalog: extensionCatalog,
     dataDir: PIARIUM_DATA_DIR,
   });
+  let extensionRuntime = options.extensionRuntime || null;
+  const ownsExtensionRuntime = !extensionRuntime;
   app.set('trust proxy', true);
   app.use((_req, res, next) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -717,6 +727,38 @@ async function main(options = {}) {
     recordStartupPerformance('pi-runtime.warmup.error');
     throw error;
   }
+  if (!extensionRuntime) {
+    extensionRuntime = await ApplicationExtensionRuntime.create({
+      brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.resolve('@piarium/extension-host'))),
+      catalog: extensionCatalog,
+      dataDir: PIARIUM_DATA_DIR,
+      packages: extensionPackages,
+    });
+  }
+  const unregisterPiRuntimeCapability = extensionRuntime.capabilities.register('pi-runtime', async (method, value) => {
+    if (method !== 'request' || !value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('The pi-runtime capability expects a request object');
+    }
+    const request = value;
+    const target = request.target && typeof request.target === 'object' && !Array.isArray(request.target)
+      ? request.target
+      : {};
+    const hostMethod = typeof request.method === 'string' ? request.method : '';
+    const params = request.params && typeof request.params === 'object' && !Array.isArray(request.params)
+      ? request.params
+      : {};
+    let result;
+    if (target.kind === 'catalog') result = await piRuntimeBroker.requestCatalog(hostMethod, params);
+    else if (target.kind === 'workspace' && typeof target.cwd === 'string') {
+      result = await piRuntimeBroker.requestForWorkspace(target.cwd, hostMethod, params);
+    } else if (target.kind === 'session' && typeof target.sessionId === 'string') {
+      result = await piRuntimeBroker.requestForSession(target.sessionId, hostMethod, params);
+    } else throw new Error('The pi-runtime capability target is invalid');
+    return result ?? null;
+  });
+  await extensionRuntime.start().catch((error) => {
+    console.warn('[Piarium Extensions] Host reconciliation failed:', error?.message || error);
+  });
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
   const sessionNames = new Map();
   const sessionSnapshots = new Map();
@@ -858,6 +900,7 @@ async function main(options = {}) {
     writeSseEvent,
     extensionCatalog,
     extensionPackages,
+    extensionRuntime,
     uiAuthController,
     reloadRuntimeConfiguration: async () => { await piRuntimeBroker.warmup(); },
   });
@@ -940,6 +983,8 @@ async function main(options = {}) {
     stop: async (shutdownOptions = {}) => {
       piSessionAutomation.stop();
       brokerUnsubscribe();
+      if (ownsExtensionRuntime) await extensionRuntime.stop();
+      unregisterPiRuntimeCapability();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeBroker.dispose();
       realtimeProxyRuntime.stop();

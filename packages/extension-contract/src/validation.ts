@@ -10,6 +10,7 @@ import {
   type PiariumExtensionAssetPayload,
   type PiariumExtensionAssetRequest,
   type PiariumExtensionCandidateRecord,
+  type PiariumExtensionCandidatePreparationResult,
   type PiariumExtensionCandidateSelectionRequest,
   type PiariumExtensionCatalogAvailability,
   type PiariumExtensionCatalogDocument,
@@ -21,6 +22,8 @@ import {
   type PiariumExtensionDiagnostic,
   type PiariumExtensionHostEntrypoint,
   type PiariumExtensionHostIdentityDocument,
+  type PiariumExtensionHostStateSnapshot,
+  type PiariumExtensionHostStateWaitRequest,
   type PiariumExtensionInstallationRecord,
   type PiariumExtensionManifest,
   type PiariumExtensionManagedEntrypointPayload,
@@ -28,8 +31,15 @@ import {
   type PiariumExtensionPackageSource,
   type PiariumExtensionPackageInstallRequest,
   type PiariumExtensionServiceProvision,
+  type PiariumExtensionServiceCatalogSnapshot,
+  type PiariumExtensionServiceInvocationRequest,
+  type PiariumExtensionServiceProviderSnapshot,
+  type PiariumExtensionServiceSelectionRequest,
   type PiariumExtensionServiceRequirement,
   type PiariumExtensionStaticContribution,
+  type PiariumExtensionStorageAddress,
+  type PiariumExtensionStorageDocument,
+  type PiariumExtensionStorageSnapshot,
   type PiariumExtensionSurfaceEntrypoint,
 } from "./types.js";
 
@@ -422,6 +432,11 @@ export function parsePiariumExtensionManifest(value: unknown): PiariumExtensionM
   if (value.integrates !== undefined && !isRecord(value.integrates)) issues.push("integrates must be an object");
   const piPackages = uniqueStrings(rawIntegrates.piPackages, "integrates.piPackages", issues);
   const contributions = parseContributions(value.contributions, "contributions", issues);
+  let storageSchemaVersion: number | undefined;
+  if (value.storage !== undefined) {
+    if (!isRecord(value.storage)) issues.push("storage must be an object");
+    else storageSchemaVersion = positiveRevision(value.storage.schemaVersion, "storage.schemaVersion", issues);
+  }
   const surfaceById = new Map((surfaces ?? []).map((surface) => [surface.id, surface]));
   for (const contribution of contributions ?? []) {
     if (!contribution.id.startsWith(`${id}.`)) issues.push(`contribution ${contribution.id} must be qualified by extension ID ${id}`);
@@ -457,6 +472,7 @@ export function parsePiariumExtensionManifest(value: unknown): PiariumExtensionM
     } : {}),
     ...(piPackages.length > 0 ? { integrates: { piPackages } } : {}),
     ...(contributions ? { contributions } : {}),
+    ...(storageSchemaVersion !== undefined ? { storage: { schemaVersion: storageSchemaVersion } } : {}),
   };
 }
 
@@ -1006,4 +1022,204 @@ export function parsePiariumExtensionActualState(value: unknown): PiariumExtensi
   const states = parseActualStates([value], "actual", issues);
   throwIssues("Piarium extension actual state", issues);
   return states[0] as PiariumExtensionActualState;
+}
+
+function parseServiceProvider(value: unknown, path: string, issues: string[]): PiariumExtensionServiceProviderSnapshot | undefined {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object`);
+    return undefined;
+  }
+  const descriptor = parseServices<PiariumExtensionServiceProvision>([value.descriptor], `${path}.descriptor`, issues, "provide")?.[0];
+  const status = value.status === "active" || value.status === "candidate" || value.status === "draining" ? value.status : undefined;
+  if (!status) issues.push(`${path}.status must be active, candidate, or draining`);
+  const providerId = text(value.providerId);
+  if (!providerId) issues.push(`${path}.providerId must be a non-empty string`);
+  const extensionVersion = text(value.extensionVersion) ?? "0.0.0";
+  if (!SEMVER_PATTERN.test(extensionVersion)) issues.push(`${path}.extensionVersion must be SemVer`);
+  if (!descriptor) return undefined;
+  return {
+    descriptor,
+    entrypointId: identifier(value.entrypointId, `${path}.entrypointId`, issues),
+    extensionId: identifier(value.extensionId, `${path}.extensionId`, issues),
+    extensionVersion,
+    generation: positiveRevision(value.generation, `${path}.generation`, issues, true),
+    providerId: providerId ?? "invalid",
+    status: status ?? "draining",
+  };
+}
+
+export function parsePiariumExtensionCandidatePreparationResult(value: unknown): PiariumExtensionCandidatePreparationResult {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension candidate preparation is invalid", ["result must be an object"]);
+  const providers = Array.isArray(value.providers)
+    ? value.providers.flatMap((provider, index) => {
+      const parsed = parseServiceProvider(provider, `providers[${index}]`, issues);
+      if (parsed && parsed.status !== "candidate") issues.push(`providers[${index}].status must be candidate`);
+      return parsed ? [parsed] : [];
+    })
+    : (issues.push("providers must be an array"), []);
+  const integrity = text(value.integrity);
+  if (!integrity) issues.push("integrity must be a non-empty string");
+  const result: PiariumExtensionCandidatePreparationResult = {
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+    integrity: integrity ?? "invalid",
+    providers,
+  };
+  throwIssues("Piarium extension candidate preparation", issues);
+  return result;
+}
+
+export function parsePiariumExtensionServiceCatalogSnapshot(value: unknown): PiariumExtensionServiceCatalogSnapshot {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension service catalog is invalid", ["catalog must be an object"]);
+  const providers = Array.isArray(value.providers)
+    ? value.providers.flatMap((provider, index) => {
+      const parsed = parseServiceProvider(provider, `providers[${index}]`, issues);
+      return parsed ? [parsed] : [];
+    })
+    : (issues.push("providers must be an array"), []);
+  const providerIds = new Set<string>();
+  for (const provider of providers) {
+    if (providerIds.has(provider.providerId)) issues.push(`providers contains duplicate provider ${provider.providerId}`);
+    providerIds.add(provider.providerId);
+  }
+  const selections: Record<string, string> = {};
+  if (!isRecord(value.selections)) issues.push("selections must be an object");
+  else {
+    for (const [service, provider] of Object.entries(value.selections)) {
+      const selected = text(provider);
+      if (!selected) issues.push(`selections.${service} must be a non-empty provider ID`);
+      else selections[service] = selected;
+    }
+  }
+  const result = {
+    hostId: hostId(value.hostId, "hostId", issues),
+    providers,
+    revision: positiveRevision(value.revision, "revision", issues, true),
+    selections,
+  };
+  throwIssues("Piarium extension service catalog", issues);
+  return result;
+}
+
+export function parsePiariumExtensionServiceInvocationRequest(value: unknown): PiariumExtensionServiceInvocationRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension service invocation is invalid", ["request must be an object"]);
+  const method = text(value.method);
+  if (!method) issues.push("method must be a non-empty string");
+  const args = Array.isArray(value.args)
+    ? value.args.map((arg, index) => jsonValue(arg, `args[${index}]`, issues))
+    : (issues.push("args must be an array"), []);
+  const providerId = value.providerId === undefined ? undefined : text(value.providerId);
+  if (value.providerId !== undefined && !providerId) issues.push("providerId must be a non-empty string");
+  const result: PiariumExtensionServiceInvocationRequest = {
+    args,
+    method: method ?? "invalid",
+    serviceId: identifier(value.serviceId, "serviceId", issues),
+    version: positiveRevision(value.version, "version", issues),
+    ...(providerId ? { providerId } : {}),
+  };
+  throwIssues("Piarium extension service invocation", issues);
+  return result;
+}
+
+export function parsePiariumExtensionServiceSelectionRequest(value: unknown): PiariumExtensionServiceSelectionRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension service selection is invalid", ["request must be an object"]);
+  const providerId = value.providerId === null ? null : text(value.providerId);
+  if (value.providerId !== null && !providerId) issues.push("providerId must be a non-empty string or null");
+  const result: PiariumExtensionServiceSelectionRequest = {
+    providerId: providerId ?? null,
+    serviceId: identifier(value.serviceId, "serviceId", issues),
+    version: positiveRevision(value.version, "version", issues),
+  };
+  throwIssues("Piarium extension service selection", issues);
+  return result;
+}
+
+export function parsePiariumExtensionHostStateWaitRequest(value: unknown): PiariumExtensionHostStateWaitRequest {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension host-state wait request is invalid", ["request must be an object"]);
+  const result = {
+    hostId: hostId(value.hostId, "hostId", issues),
+    revision: positiveRevision(value.revision, "revision", issues, true),
+  };
+  throwIssues("Piarium extension host-state wait request", issues);
+  return result;
+}
+
+export function parsePiariumExtensionHostStateSnapshot(value: unknown): PiariumExtensionHostStateSnapshot {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension host-state snapshot is invalid", ["snapshot must be an object"]);
+  let catalog: PiariumExtensionCatalogSnapshot | undefined;
+  let services: PiariumExtensionServiceCatalogSnapshot | undefined;
+  try { catalog = parsePiariumExtensionCatalogSnapshot(value.catalog); }
+  catch (error) { if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `catalog.${issue}`)); else throw error; }
+  try { services = parsePiariumExtensionServiceCatalogSnapshot(value.services); }
+  catch (error) { if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `services.${issue}`)); else throw error; }
+  if (catalog && services && catalog.hostId !== services.hostId) issues.push("catalog and services must belong to the same application host");
+  const revision = positiveRevision(value.revision, "revision", issues, true);
+  throwIssues("Piarium extension host-state snapshot", issues);
+  return { catalog: catalog as PiariumExtensionCatalogSnapshot, revision, services: services as PiariumExtensionServiceCatalogSnapshot };
+}
+
+const STORAGE_SCOPES = new Set(["application", "profile", "session", "surface", "workspace"]);
+
+export function parsePiariumExtensionStorageAddress(value: unknown): PiariumExtensionStorageAddress {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension storage address is invalid", ["address must be an object"]);
+  const key = text(value.key);
+  if (!key) issues.push("key must be a non-empty string");
+  const scope = text(value.scope);
+  if (!scope || !STORAGE_SCOPES.has(scope)) issues.push("scope is unsupported");
+  const result: PiariumExtensionStorageAddress = {
+    extensionId: identifier(value.extensionId, "extensionId", issues),
+    key: key ?? "invalid",
+    scope: STORAGE_SCOPES.has(scope ?? "") ? scope as PiariumExtensionStorageAddress["scope"] : "application",
+  };
+  throwIssues("Piarium extension storage address", issues);
+  return result;
+}
+
+function parseStorageDocument(value: unknown, path: string, issues: string[]): PiariumExtensionStorageDocument {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object`);
+    return { data: {}, revision: 0, schemaVersion: 0, updatedAt: new Date(0).toISOString() };
+  }
+  const data = isRecord(value.data) ? jsonValue(value.data, `${path}.data`, issues) as JsonObject : {};
+  if (!isRecord(value.data)) issues.push(`${path}.data must be an object`);
+  return {
+    data,
+    revision: positiveRevision(value.revision, `${path}.revision`, issues, true),
+    schemaVersion: positiveRevision(value.schemaVersion, `${path}.schemaVersion`, issues, true),
+    updatedAt: timestamp(value.updatedAt, `${path}.updatedAt`, issues),
+  };
+}
+
+export function parsePiariumExtensionStorageSnapshot(value: unknown): PiariumExtensionStorageSnapshot {
+  const issues: string[] = [];
+  if (!isRecord(value)) throw new PiariumExtensionContractError("Piarium extension storage snapshot is invalid", ["snapshot must be an object"]);
+  const storageState = value.storageState === "missing" || value.storageState === "ready" || value.storageState === "stale"
+    ? value.storageState
+    : undefined;
+  if (!storageState) issues.push("storageState is unsupported");
+  if (typeof value.authoritative !== "boolean") issues.push("authoritative must be boolean");
+  if (typeof value.exists !== "boolean") issues.push("exists must be boolean");
+  if (storageState === "stale" && value.authoritative !== false) issues.push("stale storage cannot be authoritative");
+  const result: PiariumExtensionStorageSnapshot = {
+    address: (() => {
+      try { return parsePiariumExtensionStorageAddress(value.address); }
+      catch (error) {
+        if (error instanceof PiariumExtensionContractError) issues.push(...error.issues.map((issue) => `address.${issue}`));
+        return { extensionId: "invalid", key: "invalid", scope: "application" };
+      }
+    })(),
+    authoritative: value.authoritative === true,
+    diagnostics: parseDiagnostics(value.diagnostics, "diagnostics", issues),
+    document: parseStorageDocument(value.document, "document", issues),
+    exists: value.exists === true,
+    storageState: storageState ?? "stale",
+  };
+  throwIssues("Piarium extension storage snapshot", issues);
+  return result;
 }

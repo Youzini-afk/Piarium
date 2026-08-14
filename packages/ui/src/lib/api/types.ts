@@ -5,11 +5,17 @@ import type {
   PiariumExtensionAssetPayload,
   PiariumExtensionAssetRequest,
   PiariumExtensionCandidateSelectionRequest,
+  PiariumExtensionCandidatePreparationResult,
   PiariumExtensionCatalogAvailability,
   PiariumExtensionCatalogSnapshot,
+  PiariumExtensionHostStateSnapshot,
+  PiariumExtensionHostStateWaitRequest,
   PiariumExtensionManagedEntrypointPayload,
   PiariumExtensionManagedEntrypointRequest,
   PiariumExtensionPackageInstallRequest,
+  PiariumExtensionServiceInvocationRequest,
+  PiariumExtensionServiceSelectionRequest,
+  JsonValue,
 } from '@piarium/extension-contract';
 
 type RuntimePlatform = 'web' | 'desktop' | 'vscode';
@@ -1606,12 +1612,19 @@ export interface SmartSearchAPI {
 }
 
 export interface ExtensionsAPI {
+  activateExtension(extensionId: string): Promise<void>;
   catalog(): Promise<PiariumExtensionCatalogAvailability>;
+  discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
+  hostState(): Promise<PiariumExtensionHostStateSnapshot>;
   install(request: PiariumExtensionPackageInstallRequest): Promise<PiariumExtensionCatalogSnapshot>;
+  invokeService(request: PiariumExtensionServiceInvocationRequest): Promise<JsonValue>;
+  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<PiariumExtensionCandidatePreparationResult>;
   readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
   readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
   reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
   selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
+  setServiceSelection(request: PiariumExtensionServiceSelectionRequest): Promise<PiariumExtensionHostStateSnapshot>;
+  waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;
 }
 
 export interface RuntimeAPIs {

@@ -6,6 +6,7 @@
   "type": "module",
   "description": "Trusted application-host catalog and persistence for Piarium extensions.",
   "files": [
+    "broker",
     "dist"
   ],
   "main": "./dist/index.js",

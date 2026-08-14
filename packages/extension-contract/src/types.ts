@@ -112,6 +112,9 @@ export interface PiariumExtensionManifest {
     services?: PiariumExtensionServiceRequirement[];
   };
   schemaVersion: typeof PIARIUM_EXTENSION_MANIFEST_SCHEMA_VERSION;
+  storage?: {
+    schemaVersion: number;
+  };
   version: string;
 }
 
@@ -262,6 +265,80 @@ export interface PiariumExtensionCandidateSelectionRequest {
 export interface PiariumExtensionPackageInstallRequest {
   expectedRevision: number;
   source: PiariumExtensionPackageSource;
+}
+
+export type PiariumExtensionServiceProviderStatus = "active" | "candidate" | "draining";
+
+export interface PiariumExtensionServiceProviderSnapshot {
+  descriptor: PiariumExtensionServiceProvision;
+  entrypointId: string;
+  extensionId: string;
+  extensionVersion: string;
+  generation: number;
+  providerId: string;
+  status: PiariumExtensionServiceProviderStatus;
+}
+
+export interface PiariumExtensionServiceCatalogSnapshot {
+  hostId: string;
+  providers: PiariumExtensionServiceProviderSnapshot[];
+  revision: number;
+  selections: Record<string, string>;
+}
+
+export interface PiariumExtensionServiceInvocationRequest {
+  args: JsonValue[];
+  method: string;
+  providerId?: string;
+  serviceId: string;
+  version: number;
+}
+
+export interface PiariumExtensionServiceSelectionRequest {
+  providerId: string | null;
+  serviceId: string;
+  version: number;
+}
+
+export interface PiariumExtensionCandidatePreparationResult {
+  extensionId: string;
+  integrity: string;
+  providers: PiariumExtensionServiceProviderSnapshot[];
+}
+
+export interface PiariumExtensionHostStateSnapshot {
+  catalog: PiariumExtensionCatalogSnapshot;
+  revision: number;
+  services: PiariumExtensionServiceCatalogSnapshot;
+}
+
+export interface PiariumExtensionHostStateWaitRequest {
+  hostId: string;
+  revision: number;
+}
+
+export type PiariumExtensionStorageScope = "application" | "profile" | "session" | "surface" | "workspace";
+
+export interface PiariumExtensionStorageAddress {
+  extensionId: string;
+  key: string;
+  scope: PiariumExtensionStorageScope;
+}
+
+export interface PiariumExtensionStorageDocument {
+  data: JsonObject;
+  revision: number;
+  schemaVersion: number;
+  updatedAt: string;
+}
+
+export interface PiariumExtensionStorageSnapshot {
+  address: PiariumExtensionStorageAddress;
+  authoritative: boolean;
+  diagnostics: PiariumExtensionDiagnostic[];
+  document: PiariumExtensionStorageDocument;
+  exists: boolean;
+  storageState: "missing" | "ready" | "stale";
 }
 
 export type PiariumExtensionCatalogStorageState = "missing" | "ready" | "stale";

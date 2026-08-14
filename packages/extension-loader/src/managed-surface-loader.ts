@@ -2,12 +2,15 @@ import {
   parsePiariumExtensionAssetPayload,
   parsePiariumExtensionCatalogAvailability,
   parsePiariumExtensionCatalogSnapshot,
+  parsePiariumExtensionCandidatePreparationResult,
+  parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
   type PiariumApplicationSurface,
   type PiariumExtensionActualState,
   type PiariumExtensionAssetPayload,
   type PiariumExtensionAssetRequest,
   type PiariumExtensionCandidateSelectionRequest,
+  type PiariumExtensionCandidatePreparationResult,
   type PiariumExtensionCatalogAvailability,
   type PiariumExtensionCatalogEntry,
   type PiariumExtensionCatalogSnapshot,
@@ -15,8 +18,13 @@ import {
   type PiariumExtensionManagedEntrypointPayload,
   type PiariumExtensionManagedEntrypointRequest,
   type PiariumExtensionManifest,
+  type PiariumExtensionHostStateSnapshot,
+  type PiariumExtensionHostStateWaitRequest,
   type PiariumExtensionPublicCandidate,
   type PiariumExtensionSurfaceEntrypoint,
+  type PiariumExtensionServiceInvocationRequest,
+  type PiariumExtensionServiceProviderSnapshot,
+  type JsonValue,
 } from "@piarium/extension-contract";
 import {
   resolveSurfaceExtensionModule,
@@ -33,11 +41,17 @@ import {
 } from "@piarium/extension-surface";
 
 export interface ManagedSurfaceExtensionHost {
+  activateExtension(extensionId: string): Promise<void>;
   catalog(): Promise<PiariumExtensionCatalogAvailability>;
+  discardPreparedCandidate(extensionId: string, candidateIntegrity: string): Promise<void>;
+  hostState(): Promise<PiariumExtensionHostStateSnapshot>;
+  invokeService(request: PiariumExtensionServiceInvocationRequest): Promise<JsonValue>;
+  prepareCandidate(extensionId: string, candidateIntegrity: string): Promise<PiariumExtensionCandidatePreparationResult>;
   readAsset(request: PiariumExtensionAssetRequest): Promise<PiariumExtensionAssetPayload>;
   readManagedEntrypoint(request: PiariumExtensionManagedEntrypointRequest): Promise<PiariumExtensionManagedEntrypointPayload>;
   reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void>;
   selectCandidate(request: PiariumExtensionCandidateSelectionRequest): Promise<PiariumExtensionCatalogSnapshot>;
+  waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;
 }
 
 export interface ManagedSurfaceModuleEvaluator {
@@ -85,6 +99,7 @@ interface ActiveEntrypoint {
   artifactIntegrity: string;
   moduleGeneration: number;
   owner: SurfaceOwnerIdentity;
+  serviceBindings: string;
 }
 
 interface ArtifactSelection {
@@ -287,6 +302,8 @@ export class ManagedSurfaceExtensionLoader {
   #hostId: string | null = null;
   #queue: Promise<void> = Promise.resolve();
   #revision = 0;
+  #hostStateRevision = 0;
+  #watchController: AbortController | null = null;
 
   constructor(options: ManagedSurfaceExtensionLoaderOptions) {
     this.#evaluate = options.evaluateModule ?? evaluateManagedSurfaceModule;
@@ -317,15 +334,41 @@ export class ManagedSurfaceExtensionLoader {
 
   reconcile(availability?: PiariumExtensionCatalogAvailability): Promise<void> {
     const operation = async () => {
+      if (!availability) {
+        const state = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+        await this.#reconcileSnapshot(state.catalog, state);
+        return;
+      }
       const result = availability
         ? parsePiariumExtensionCatalogAvailability(availability)
         : parsePiariumExtensionCatalogAvailability(await this.#host.catalog());
       if (result.supported !== true || result.status !== "ready") return;
-      await this.#reconcileSnapshot(result.snapshot);
+      const state = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+      await this.#reconcileSnapshot(result.snapshot, state);
     };
     const result = this.#queue.then(operation, operation);
     this.#queue = result.then(() => undefined, () => undefined);
     return result;
+  }
+
+  async start(): Promise<void> {
+    if (this.#watchController) return;
+    await this.reconcile();
+    const controller = new AbortController();
+    this.#watchController = controller;
+    void this.#watch(controller).catch((error) => {
+      if (!controller.signal.aborted) {
+        this.#diagnose("piarium.extensions", "host_state_watch_failed", error instanceof Error ? error.message : String(error));
+        this.#publish();
+      }
+      if (this.#watchController === controller) this.#watchController = null;
+    });
+  }
+
+  async stop(): Promise<void> {
+    this.#watchController?.abort("Managed Surface extension loader stopped");
+    this.#watchController = null;
+    await this.deactivateAll();
   }
 
   async deactivateAll(): Promise<void> {
@@ -334,11 +377,15 @@ export class ManagedSurfaceExtensionLoader {
     this.#publish();
   }
 
-  async #reconcileSnapshot(snapshotValue: PiariumExtensionCatalogSnapshot): Promise<void> {
+  async #reconcileSnapshot(
+    snapshotValue: PiariumExtensionCatalogSnapshot,
+    hostState: PiariumExtensionHostStateSnapshot,
+  ): Promise<void> {
     let snapshot = parsePiariumExtensionCatalogSnapshot(snapshotValue);
     if (!snapshot.authoritative) return;
     if (this.#hostId && this.#hostId !== snapshot.hostId) await this.deactivateAll();
     this.#hostId = snapshot.hostId;
+    this.#hostStateRevision = hostState.revision;
     this.#revision = snapshot.revision;
     const desiredKeys = new Set<string>();
 
@@ -366,8 +413,22 @@ export class ManagedSurfaceExtensionLoader {
       if (entrypoints.length === 0) continue;
       const failedKey = `${entry.manifest.id}\0${selected.integrity}`;
       if (selected.slot === "candidate" && this.#failedCandidates.has(failedKey)) continue;
+      const expectedBindings = selected.slot === "selected"
+        ? this.#serviceBindingSignature(this.#resolveExternalProviders(selected, hostState, null))
+        : null;
+      const currentEntrypoints = entrypoints
+        .map((entrypoint) => this.#active.get(keyFor(entry.manifest.id, entrypoint.id)))
+        .filter((value): value is ActiveEntrypoint => value !== undefined);
+      if (currentEntrypoints.length > 0 && selected.slot === "selected"
+        && !this.#requirementsSatisfied(selected, hostState)) {
+        for (const active of currentEntrypoints) await this.#deactivate(active, entry.desired.revision);
+        this.#diagnose(entry.manifest.id, "required_service_withdrawn", "A required extension service is no longer available");
+        continue;
+      }
       const allCurrent = entrypoints.every((entrypoint) => (
         this.#active.get(keyFor(entry.manifest.id, entrypoint.id))?.artifactIntegrity === selected.integrity
+        && (expectedBindings === null
+          || this.#active.get(keyFor(entry.manifest.id, entrypoint.id))?.serviceBindings === expectedBindings)
       ));
       if (allCurrent) continue;
       try {
@@ -383,6 +444,9 @@ export class ManagedSurfaceExtensionLoader {
         }
       } catch (error) {
         if (selected.slot === "candidate") this.#failedCandidates.add(failedKey);
+        if (selected.slot === "candidate") {
+          await this.#host.discardPreparedCandidate(entry.manifest.id, selected.integrity).catch(() => undefined);
+        }
         this.#diagnose(
           entry.manifest.id,
           selected.slot === "candidate" ? "candidate_module_activation_failed" : "module_activation_failed",
@@ -404,6 +468,18 @@ export class ManagedSurfaceExtensionLoader {
     const resources: ModuleResourceScope[] = [];
     const requests: Array<{ activation: SurfaceActivation; options: SurfaceActivationOptions }> = [];
     const activated: ActiveEntrypoint[] = [];
+    let prepared: PiariumExtensionCandidatePreparationResult | null = null;
+    if (selection.slot === "candidate") {
+      prepared = parsePiariumExtensionCandidatePreparationResult(
+        await this.#host.prepareCandidate(entry.manifest.id, selection.integrity),
+      );
+    } else {
+      await this.#host.activateExtension(entry.manifest.id);
+    }
+    const currentHostState = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
+    const externalProviders = this.#resolveExternalProviders(selection, currentHostState, prepared);
+    const externalServices = this.#externalServices(externalProviders);
+    const serviceBindings = this.#serviceBindingSignature(externalProviders);
     for (const entrypoint of entrypoints) {
       const key = keyFor(entry.manifest.id, entrypoint.id);
       const moduleGeneration = (this.#generations.get(key) ?? 0) + 1;
@@ -449,12 +525,13 @@ export class ManagedSurfaceExtensionLoader {
             .filter((grant) => grant.realm === "surface" && grant.granted && grant.manifestVersion === selection.version)
             .map((grant) => grant.capability),
           owner,
+          ...(externalServices.length > 0 ? { externalServices } : {}),
           ...(selection.manifest.requires?.services
             ? { requirements: selection.manifest.requires.services }
             : {}),
         },
       });
-      activated.push({ artifactIntegrity: selection.integrity, moduleGeneration, owner });
+      activated.push({ artifactIntegrity: selection.integrity, moduleGeneration, owner, serviceBindings });
     }
 
     let committedSnapshot: PiariumExtensionCatalogSnapshot | null = null;
@@ -476,6 +553,98 @@ export class ManagedSurfaceExtensionLoader {
       await this.#reportActual(entry.manifest.id);
       throw error;
     }
+  }
+
+  async #watch(controller: AbortController): Promise<void> {
+    for (;;) {
+      if (controller.signal.aborted || !this.#hostId) return;
+      const state = parsePiariumExtensionHostStateSnapshot(await this.#host.waitForHostState({
+        hostId: this.#hostId,
+        revision: this.#hostStateRevision,
+      }, controller.signal));
+      if (controller.signal.aborted) return;
+      const operation = () => this.#reconcileSnapshot(state.catalog, state);
+      const result = this.#queue.then(operation, operation);
+      this.#queue = result.then(() => undefined, () => undefined);
+      await result;
+    }
+  }
+
+  #resolveExternalProviders(
+    selection: ArtifactSelection,
+    state: PiariumExtensionHostStateSnapshot,
+    prepared: PiariumExtensionCandidatePreparationResult | null,
+  ): PiariumExtensionServiceProviderSnapshot[] {
+    const requirements = selection.manifest.requires?.services ?? [];
+    const preparedProviders = prepared?.providers ?? [];
+    const selectedProviders: PiariumExtensionServiceProviderSnapshot[] = [];
+    for (const requirement of requirements) {
+      const candidateKeys = new Set(preparedProviders
+        .filter((provider) => provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version)
+        .map((provider) => `${provider.extensionId}\0${provider.descriptor.id}\0${provider.descriptor.version}`));
+      const active = state.services.providers.filter((provider) => (
+        provider.status === "active"
+        && provider.descriptor.id === requirement.id
+        && provider.descriptor.version === requirement.version
+        && !candidateKeys.has(`${provider.extensionId}\0${provider.descriptor.id}\0${provider.descriptor.version}`)
+      ));
+      const candidates = preparedProviders.filter((provider) => (
+        provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version
+      ));
+      const matches = [...active, ...candidates];
+      const binding = requirement.binding ?? "single";
+      if (binding === "all") selectedProviders.push(...matches);
+      else if (binding === "selected") {
+        const selectedId = state.services.selections[`${requirement.id}@${requirement.version}`];
+        const selected = matches.find((provider) => provider.providerId === selectedId)
+          ?? (candidates.length === 1 && state.services.providers.some((provider) => (
+            provider.providerId === selectedId && provider.extensionId === candidates[0]?.extensionId
+          )) ? candidates[0] : undefined);
+        if (selected) selectedProviders.push(selected);
+      } else if (matches.length === 1) selectedProviders.push(matches[0] as PiariumExtensionServiceProviderSnapshot);
+    }
+    return [...new Map(selectedProviders.map((provider) => [provider.providerId, provider])).values()];
+  }
+
+  #externalServices(
+    providers: PiariumExtensionServiceProviderSnapshot[],
+  ): NonNullable<SurfaceActivationOptions["externalServices"]> {
+    return providers.map((provider) => ({
+      descriptor: { ...provider.descriptor },
+      implementation: new Proxy({}, {
+        get: (_target, property) => property === "then" || typeof property !== "string"
+          ? undefined
+          : (...args: JsonValue[]) => this.#host.invokeService({
+            args,
+            method: property,
+            providerId: provider.providerId,
+            serviceId: provider.descriptor.id,
+            version: provider.descriptor.version,
+          }),
+      }),
+      providerId: provider.providerId,
+    }));
+  }
+
+  #requirementsSatisfied(selection: ArtifactSelection, state: PiariumExtensionHostStateSnapshot): boolean {
+    const external = this.#resolveExternalProviders(selection, state, null);
+    return (selection.manifest.requires?.services ?? []).every((requirement) => {
+      if (requirement.optional) return true;
+      const externalCount = external.filter((provider) => (
+        provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version
+      )).length;
+      const localCount = this.#surfaceRuntime.getServices(requirement.id, requirement.version).length;
+      const count = externalCount + localCount;
+      if ((requirement.binding ?? "single") === "single") return count === 1;
+      if (requirement.binding === "selected") {
+        return externalCount > 0 || this.#surfaceRuntime.getService(requirement.id, requirement.version) !== undefined;
+      }
+      return count > 0;
+    });
+  }
+
+  #serviceBindingSignature(providers: PiariumExtensionServiceProviderSnapshot[]): string {
+    return providers.map((provider) => provider.providerId).sort().join("\0");
   }
 
   async #deactivate(active: ActiveEntrypoint, desiredRevision: number): Promise<void> {

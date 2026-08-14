@@ -2,6 +2,8 @@ import {
   parsePiariumExtensionCatalogAvailability,
   parsePiariumExtensionAssetPayload,
   parsePiariumExtensionCatalogSnapshot,
+  parsePiariumExtensionCandidatePreparationResult,
+  parsePiariumExtensionHostStateSnapshot,
   parsePiariumExtensionManagedEntrypointPayload,
   type PiariumExtensionActualState,
   type PiariumExtensionAssetRequest,
@@ -9,6 +11,7 @@ import {
   type PiariumExtensionCatalogAvailability,
   type PiariumExtensionManagedEntrypointRequest,
   type PiariumExtensionPackageInstallRequest,
+  type PiariumExtensionHostStateWaitRequest,
 } from '@piarium/extension-contract';
 import type { ExtensionsAPI } from '@piarium/ui/lib/api/types';
 import { refreshLocalRuntimeUrlAuthToken } from '@piarium/ui/lib/runtime-auth';
@@ -38,6 +41,7 @@ const errorResult = (message: string, retryable: boolean): PiariumExtensionCatal
 const applicationHostRequest = async (
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> => {
   const origin = applicationHostOrigin();
   const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
@@ -50,6 +54,19 @@ const applicationHostRequest = async (
     credentials: 'include',
     headers,
     method: 'POST',
+    signal,
+  });
+};
+
+const applicationHostRead = async (path: string): Promise<Response> => {
+  const origin = applicationHostOrigin();
+  const target = origin ? new URL(path, `${origin}/`) : new URL(path, window.location.href);
+  if (origin && origin !== currentOrigin()) {
+    target.searchParams.set('piarium_url_token', await refreshLocalRuntimeUrlAuthToken(origin));
+  }
+  return fetchWithoutRuntimeRouting(target, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
   });
 };
 
@@ -64,6 +81,10 @@ const readJsonOrThrow = async (response: Response): Promise<unknown> => {
 };
 
 export const createWebExtensionsAPI = (): ExtensionsAPI => ({
+  activateExtension: async (extensionId) => {
+    const response = await applicationHostRequest(`/api/piarium/extensions/v1/extensions/${encodeURIComponent(extensionId)}/activate`, {});
+    if (!response.ok) await readJsonOrThrow(response);
+  },
   catalog: async () => {
     try {
       const origin = applicationHostOrigin();
@@ -93,10 +114,26 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
       return errorResult(error instanceof Error ? error.message : String(error), true);
     }
   },
+  discardPreparedCandidate: async (extensionId, candidateIntegrity) => {
+    const response = await applicationHostRequest('/api/piarium/extensions/v1/candidates/discard-prepared', { candidateIntegrity, extensionId });
+    if (!response.ok) await readJsonOrThrow(response);
+  },
+  hostState: async () => parsePiariumExtensionHostStateSnapshot(
+    await readJsonOrThrow(await applicationHostRead('/api/piarium/extensions/v1/host-state')),
+  ),
   install: async (request: PiariumExtensionPackageInstallRequest) => {
     const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/install', request));
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension install response is malformed');
     return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
+  },
+  invokeService: async (request) => {
+    const payload = await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/invoke', request));
+    if (!payload || typeof payload !== 'object' || !('result' in payload)) throw new Error('Piarium Host service response is malformed');
+    return JSON.parse(JSON.stringify((payload as { result: unknown }).result));
+  },
+  prepareCandidate: async (extensionId, candidateIntegrity) => {
+    const response = await applicationHostRequest('/api/piarium/extensions/v1/candidates/prepare', { candidateIntegrity, extensionId });
+    return parsePiariumExtensionCandidatePreparationResult(await readJsonOrThrow(response));
   },
   readAsset: async (request: PiariumExtensionAssetRequest) => (
     parsePiariumExtensionAssetPayload(await readJsonOrThrow(
@@ -121,4 +158,12 @@ export const createWebExtensionsAPI = (): ExtensionsAPI => ({
     if (!payload || typeof payload !== 'object' || !('snapshot' in payload)) throw new Error('Piarium extension candidate response is malformed');
     return parsePiariumExtensionCatalogSnapshot((payload as { snapshot: unknown }).snapshot);
   },
+  setServiceSelection: async (request) => parsePiariumExtensionHostStateSnapshot(
+    await readJsonOrThrow(await applicationHostRequest('/api/piarium/extensions/v1/services/select', request)),
+  ),
+  waitForHostState: async (request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal) => (
+    parsePiariumExtensionHostStateSnapshot(await readJsonOrThrow(
+      await applicationHostRequest('/api/piarium/extensions/v1/host-state/wait', request, signal),
+    ))
+  ),
 });

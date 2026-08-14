@@ -9,7 +9,12 @@ import { handleExtensionsBridgeMessage } from './bridge-extensions-runtime';
 test('VS Code owns an application-host extension catalog in global storage', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'piarium-vscode-extension-host-'));
   try {
-    const context = { globalStorageUri: { fsPath: dataDir } } as vscode.ExtensionContext;
+    const subscriptions: Array<{ dispose(): unknown }> = [];
+    const context = {
+      extensionUri: { fsPath: process.cwd() },
+      globalStorageUri: { fsPath: dataDir },
+      subscriptions,
+    } as unknown as vscode.ExtensionContext;
     const response = await handleExtensionsBridgeMessage({
       id: 'catalog-1',
       type: 'api:extensions:catalog',
@@ -17,6 +22,8 @@ test('VS Code owns an application-host extension catalog in global storage', asy
     assert.equal(response?.success, true);
     assert.match(String((response?.data as { snapshot?: { hostId?: string } }).snapshot?.hostId), /^[0-9a-f-]{36}$/i);
     assert.equal((response?.data as { snapshot?: { storageState?: string } }).snapshot?.storageState, 'missing');
+    const hostState = await handleExtensionsBridgeMessage({ id: 'state-1', type: 'api:extensions:host-state' }, context);
+    assert.equal((hostState?.data as { services?: { hostId?: string } }).services?.hostId, (response?.data as { snapshot?: { hostId?: string } }).snapshot?.hostId);
 
     const source = join(dataDir, 'fixture');
     await mkdir(source, { recursive: true });
@@ -52,6 +59,7 @@ test('VS Code owns an application-host extension catalog in global storage', asy
     }, context);
     assert.equal(entrypoint?.success, true);
     assert.equal((entrypoint?.data as { module?: { bytesBase64?: string } }).module?.bytesBase64, Buffer.from('module.exports={activate(){}};').toString('base64'));
+    for (const disposable of subscriptions) await disposable.dispose();
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }

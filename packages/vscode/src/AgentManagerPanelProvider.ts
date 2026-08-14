@@ -62,7 +62,7 @@ export class AgentManagerPanelProvider implements vscode.Disposable {
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
       if (this._piRuntimeBridge?.handleMessage(message)) return;
-      void panel.webview.postMessage(await handleBridgeMessage(message, { context: this._context }));
+      void panel.webview.postMessage(await handleBridgeMessage(message, { context: this._context, piRuntime: this._piRuntime }));
     }, null, this._context.subscriptions);
   }
 

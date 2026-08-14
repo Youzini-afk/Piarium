@@ -16,6 +16,7 @@ import type {
   SurfaceActivationContext,
   SurfaceActivationOptions,
   SurfaceContribution,
+  SurfaceExternalService,
   SurfaceExtensionRuntimeOptions,
   SurfaceLayoutReference,
   SurfaceOwnerHandle,
@@ -26,6 +27,7 @@ import type {
 
 interface ActiveOwner {
   contributions: SurfaceContribution[];
+  externalServices: SurfaceExternalService[];
   owner: SurfaceOwnerIdentity;
   requirements: PiariumExtensionServiceRequirement[];
   scope: SurfaceOwnerScope;
@@ -237,7 +239,7 @@ export class SurfaceExtensionRuntime {
   readonly #latestRequests = new Map<string, RequestVersion>();
   readonly #listeners = new Set<() => void>();
   readonly #layoutReferences = new Map<string, SurfaceLayoutReference>();
-  readonly #queues = new Map<string, Promise<void>>();
+  #lifecycleQueue: Promise<void> = Promise.resolve();
   readonly #replacementSelections = new Map<string, string>();
   readonly #serviceSelections = new Map<string, string>();
   #snapshot: SurfaceRegistrySnapshot = {
@@ -312,6 +314,11 @@ export class SurfaceExtensionRuntime {
           const stagedServices: SurfaceService[] = [];
           const granted = new Set(request.options.grantedCapabilities ?? []);
           const requirements = normalizeRequirements(owner, request.options.requirements ?? []);
+          const externalServices = [...(request.options.externalServices ?? [])].map((service) => ({
+            descriptor: validateService(service.descriptor),
+            implementation: service.implementation,
+            providerId: service.providerId,
+          }));
           const context: SurfaceActivationContext = {
             signal: scope.signal,
             contribute: (descriptor, implementation) => {
@@ -332,8 +339,17 @@ export class SurfaceExtensionRuntime {
               stagedServices.push({ descriptor: validateService(descriptor), implementation, owner: { ...owner } });
             },
             onDispose: (disposer) => scope.onDispose(disposer),
-            useService: (id, version) => this.getService(id, version),
-            useServices: (id, version) => this.getServices(id, version),
+            useService: <TImplementation = unknown>(id: string, version: number): TImplementation | undefined => {
+              const external = externalServices.filter((service) => service.descriptor.id === id && service.descriptor.version === version);
+              if (external.length === 1) return external[0]?.implementation as TImplementation;
+              return this.getService<TImplementation>(id, version);
+            },
+            useServices: <TImplementation = unknown>(id: string, version: number): TImplementation[] => [
+              ...this.getServices<TImplementation>(id, version),
+              ...externalServices
+                .filter((service) => service.descriptor.id === id && service.descriptor.version === version)
+                .map((service) => service.implementation as TImplementation),
+            ],
           };
           try {
             await request.activation(context);
@@ -344,6 +360,7 @@ export class SurfaceExtensionRuntime {
           this.#assertLatest(key, owner);
           candidates.set(key, {
             contributions: stagedContributions,
+            externalServices,
             owner: { ...owner },
             requirements,
             scope,
@@ -396,17 +413,7 @@ export class SurfaceExtensionRuntime {
         this.#publish();
         return;
       }
-      this.#actual.set(key, actual(owner, "deactivating"));
-      this.#activeOwners.delete(key);
-      this.#publish();
-      let diagnostics: PiariumExtensionDiagnostic[] = [];
-      try {
-        await active.scope.dispose("Surface extension disabled");
-      } catch (error) {
-        diagnostics = [diagnostic(owner, "deactivation_cleanup_failed", error instanceof Error ? error.message : String(error))];
-      }
-      this.#actual.set(key, actual(owner, "inactive", diagnostics));
-      this.#publish();
+      await this.#deactivateTree(key, owner, new Set());
     });
   }
 
@@ -491,11 +498,68 @@ export class SurfaceExtensionRuntime {
     };
   }
 
-  #matchingServices(id: string, version: number, owners = this.#activeOwners): SurfaceService[] {
+  #matchingServices(
+    id: string,
+    version: number,
+    owners: ReadonlyMap<string, ActiveOwner> = this.#activeOwners,
+  ): SurfaceService[] {
     return [...owners.values()]
       .flatMap((owner) => owner.services)
       .filter((service) => service.descriptor.id === id && service.descriptor.version === version)
       .sort((left, right) => left.owner.extensionId.localeCompare(right.owner.extensionId));
+  }
+
+  async #deactivateTree(
+    key: string,
+    requestedOwner: SurfaceOwnerIdentity,
+    visited: Set<string>,
+  ): Promise<void> {
+    if (visited.has(key)) return;
+    visited.add(key);
+    const active = this.#activeOwners.get(key);
+    if (!active) return;
+    const withoutProvider = new Map(this.#activeOwners);
+    withoutProvider.delete(key);
+    for (const [dependentKey, dependent] of [...withoutProvider]) {
+      if (this.#requirementsSatisfied(dependent, withoutProvider)) continue;
+      const dependentOwner = {
+        ...dependent.owner,
+        generation: dependent.owner.generation + 1,
+      };
+      await this.#deactivateTree(dependentKey, dependentOwner, visited);
+      this.#actual.set(dependentKey, actual(dependentOwner, "inactive", [
+        diagnostic(dependentOwner, "required_service_withdrawn", "A required Surface service was withdrawn"),
+      ]));
+      withoutProvider.delete(dependentKey);
+    }
+    this.#actual.set(key, actual(requestedOwner, "deactivating"));
+    this.#activeOwners.delete(key);
+    this.#publish();
+    let diagnostics: PiariumExtensionDiagnostic[] = [];
+    try {
+      await active.scope.dispose("Surface extension disabled");
+    } catch (error) {
+      diagnostics = [diagnostic(requestedOwner, "deactivation_cleanup_failed", error instanceof Error ? error.message : String(error))];
+    }
+    this.#actual.set(key, actual(requestedOwner, "inactive", diagnostics));
+    this.#publish();
+  }
+
+  #requirementsSatisfied(owner: ActiveOwner, owners: ReadonlyMap<string, ActiveOwner>): boolean {
+    return owner.requirements.every((requirement) => {
+      if (requirement.optional) return true;
+      const local = this.#matchingServices(requirement.id, requirement.version, owners);
+      const external = owner.externalServices.filter((service) => (
+        service.descriptor.id === requirement.id && service.descriptor.version === requirement.version
+      ));
+      const count = local.length + external.length;
+      if (requirement.binding === "selected") {
+        const selected = this.#serviceSelections.get(`${requirement.id}@${requirement.version}`);
+        return external.length > 0 || Boolean(selected && local.some((service) => service.owner.extensionId === selected));
+      }
+      if ((requirement.binding ?? "single") === "single") return count === 1;
+      return count > 0;
+    });
   }
 
   #validateCandidates(candidates: ReadonlyMap<string, ActiveOwner>): void {
@@ -528,16 +592,24 @@ export class SurfaceExtensionRuntime {
         if (requirement.optional) continue;
         const serviceKey = `${requirement.id}@${requirement.version}`;
         const providers = serviceGroups.get(serviceKey) ?? [];
-        if (providers.length === 0) {
+        const externalProviders = activeOwner.externalServices.filter((service) => (
+          service.descriptor.id === requirement.id && service.descriptor.version === requirement.version
+        ));
+        const providerCount = providers.length + externalProviders.length;
+        if (providerCount === 0) {
           throw new SurfaceRegistryConflictError(`Required Surface service is unavailable: ${serviceKey}`, [requirement.id]);
         }
         if (requirement.binding === "selected") {
           const selected = this.#serviceSelections.get(serviceKey);
-          if (!selected || !providers.some((provider) => provider.owner.extensionId === selected)) {
+          const selectedLocal = selected && providers.some((provider) => provider.owner.extensionId === selected);
+          if (!selectedLocal && externalProviders.length === 0) {
             throw new SurfaceRegistryConflictError(`Selected Surface service provider is unavailable: ${serviceKey}`, [requirement.id]);
           }
-        } else if ((requirement.binding ?? "single") === "single" && providers.length !== 1) {
-          throw new SurfaceRegistryConflictError(`Required Surface service is ambiguous: ${serviceKey}`, providers.map((provider) => provider.owner.extensionId));
+        } else if ((requirement.binding ?? "single") === "single" && providerCount !== 1) {
+          throw new SurfaceRegistryConflictError(`Required Surface service is ambiguous: ${serviceKey}`, [
+            ...providers.map((provider) => provider.owner.extensionId),
+            ...externalProviders.map((provider) => provider.providerId),
+          ]);
         }
       }
     }
@@ -579,14 +651,9 @@ export class SurfaceExtensionRuntime {
     for (const listener of this.#listeners) listener();
   }
 
-  #enqueue<T>(extensionId: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.#queues.get(extensionId) ?? Promise.resolve();
-    const result = previous.then(operation, operation);
-    const tracked = result.then(() => undefined, () => undefined);
-    this.#queues.set(extensionId, tracked);
-    void tracked.finally(() => {
-      if (this.#queues.get(extensionId) === tracked) this.#queues.delete(extensionId);
-    });
+  #enqueue<T>(_extensionId: string, operation: () => Promise<T>): Promise<T> {
+    const result = this.#lifecycleQueue.then(operation, operation);
+    this.#lifecycleQueue = result.then(() => undefined, () => undefined);
     return result;
   }
 }

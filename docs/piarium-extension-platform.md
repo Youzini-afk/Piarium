@@ -991,6 +991,31 @@ already-declared trusted managed realm and preserves VS Code's prohibition on bl
 Acceptance: required-service withdrawal orders teardown correctly; failed host or migration
 activation preserves the prior generation and state; a host crash cannot crash the Surface.
 
+Implementation status (2026-08-14): complete. Brokered Host entrypoints now run in a
+supervisor-owned Node child process. The child receives only versioned capability, service, and
+extension-storage clients from the Piarium SDK; terminating or crashing it cancels captured
+capability work and cannot terminate a Web, Electron, or VS Code Surface. This boundary remains an
+API/lifecycle boundary rather than an OS sandbox. Access to Pi continues through the existing typed
+runtime broker and an explicit `pi-runtime` capability grant.
+
+The application host owns revisioned, namespaced storage below `PIARIUM_DATA_DIR/extensions/storage`,
+distinguishes missing/ready/stale data, preserves the last valid read, and stages schema migration
+with candidate activation. Candidate Host services and storage writes remain private until the
+Surface candidate succeeds; failed module activation, migration, or catalog selection disposes the
+candidate and restores the prior storage and active generation. The versioned Host service registry
+supports single, selected, and all-provider bindings, candidate-scoped calls, explicit selection,
+lazy `service-request` activation, atomic generation replacement, in-flight draining, and
+dependency-ordered teardown. Surface-local services now use the same dependent-first withdrawal
+rule.
+
+`ApplicationExtensionRuntime` coordinates desired catalog state, Host actual state, service state,
+candidate preparation/selection, and monotonic long-poll snapshots. Managed Surfaces resolve Host
+services as scoped proxies, reactivate when provider bindings change, and deactivate when a required
+provider disappears. Web/hosted/Electron expose the authenticated v1 Host-state, service, activation,
+and candidate routes; VS Code owns the same runtime in global storage, includes the broker artifact,
+and cancels abandoned webview waits. Per-window Surface diagnostics remain separate while all windows
+converge on the same application-host desired and service state.
+
 ### Phase E — Isolated and trusted-native modes
 
 - Add iframe/Worker Surface sessions, MessagePort capability handshake, and physical realm teardown.

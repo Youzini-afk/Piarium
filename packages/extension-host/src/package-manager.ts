@@ -14,6 +14,7 @@ import {
 } from "@piarium/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
 import { ExtensionArtifactStore } from "./artifact-store.js";
+import type { BrokeredHostEntrypointArtifact } from "./artifact-store.js";
 
 export interface ExtensionPackageManagerOptions {
   artifacts?: ExtensionArtifactStore;
@@ -84,6 +85,15 @@ export class ExtensionPackageManager {
 
   reportActualState(extensionId: string, state: PiariumExtensionActualState): Promise<void> {
     return this.catalog.reportActualState(extensionId, state);
+  }
+
+  async resolveBrokeredHostEntrypoint(
+    extensionId: string,
+    slot: "candidate" | "selected",
+    integrity: string,
+  ): Promise<BrokeredHostEntrypointArtifact> {
+    const artifact = await this.#artifact(extensionId, slot, integrity);
+    return this.artifacts.resolveBrokeredHostEntrypoint(artifact.resolvedPath, integrity);
   }
 
   async #artifact(

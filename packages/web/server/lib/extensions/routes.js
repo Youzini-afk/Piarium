@@ -4,6 +4,7 @@ import {
 } from '@piarium/extension-host';
 import {
   parsePiariumExtensionActualState,
+  parsePiariumExtensionHostStateWaitRequest,
   parsePiariumExtensionPackageSource,
 } from '@piarium/extension-contract';
 import { renderExtensionRecoveryPage } from './recovery-page.js';
@@ -52,7 +53,12 @@ const sendMutationError = (res, error) => {
   });
 };
 
-export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackages, uiAuthController }) => {
+export const registerExtensionRoutes = (app, {
+  extensionCatalog,
+  extensionPackages,
+  extensionRuntime,
+  uiAuthController,
+}) => {
   app.get('/extensions/recovery', uiAuthController.requireSessionAuth, (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.type('html').send(renderExtensionRecoveryPage());
@@ -67,6 +73,49 @@ export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackag
       res.status(500).json(catalogError(error));
     }
   });
+
+  app.get('/api/piarium/extensions/v1/host-state', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+    try {
+      return res.json(await extensionRuntime.state());
+    } catch (error) {
+      return res.status(500).json(catalogError(error));
+    }
+  });
+
+  app.post(
+    '/api/piarium/extensions/v1/host-state/wait',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      const controller = new AbortController();
+      const abort = () => { if (!res.writableEnded) controller.abort(new Error('Extension host-state client disconnected')); };
+      res.once('close', abort);
+      try {
+        return res.json(await extensionRuntime.waitForState(parsePiariumExtensionHostStateWaitRequest(req.body), controller.signal));
+      } catch (error) {
+        if (controller.signal.aborted) return undefined;
+        return res.status(400).json({ error: { code: 'host_state_wait_failed', message: error instanceof Error ? error.message : String(error), retryable: true } });
+      } finally {
+        res.off('close', abort);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/extensions/:extensionId/activate',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        await extensionRuntime.activateExtension(req.params.extensionId);
+        return res.status(204).end();
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
 
   app.post(
     '/api/piarium/extensions/v1/assets/read',
@@ -97,11 +146,46 @@ export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackag
   );
 
   app.post(
+    '/api/piarium/extensions/v1/candidates/prepare',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        const extensionId = typeof req.body?.extensionId === 'string' ? req.body.extensionId : '';
+        const integrity = typeof req.body?.candidateIntegrity === 'string' ? req.body.candidateIntegrity : '';
+        if (!extensionId || !integrity) throw new Error('extensionId and candidateIntegrity are required');
+        return res.json(await extensionRuntime.prepareCandidate(extensionId, integrity));
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/candidates/discard-prepared',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        const extensionId = typeof req.body?.extensionId === 'string' ? req.body.extensionId : '';
+        const integrity = typeof req.body?.candidateIntegrity === 'string' ? req.body.candidateIntegrity : '';
+        if (!extensionId || !integrity) throw new Error('extensionId and candidateIntegrity are required');
+        await extensionRuntime.discardPreparedCandidate(extensionId, integrity);
+        return res.status(204).end();
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
     '/api/piarium/extensions/v1/candidates/select',
     uiAuthController.requireAuth,
     async (req, res) => {
       try {
-        return res.json({ snapshot: await extensionPackages.selectCandidate(req.body) });
+        return res.json({ snapshot: await (extensionRuntime
+          ? extensionRuntime.selectCandidate(req.body)
+          : extensionPackages.selectCandidate(req.body)) });
       } catch (error) {
         return sendMutationError(res, error);
       }
@@ -115,7 +199,9 @@ export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackag
       try {
         const extensionId = typeof req.body?.extensionId === 'string' ? req.body.extensionId : '';
         const state = parsePiariumExtensionActualState(req.body?.state);
-        await extensionPackages.reportActualState(extensionId, state);
+        await (extensionRuntime
+          ? extensionRuntime.reportActualState(extensionId, state)
+          : extensionPackages.reportActualState(extensionId, state));
         return res.status(204).end();
       } catch (error) {
         return res.status(409).json({
@@ -139,10 +225,49 @@ export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackag
       }
       try {
         const source = parsePiariumExtensionPackageSource(req.body?.source);
-        const snapshot = await extensionPackages.installOrStage(source, revision, req.signal);
+        const snapshot = extensionRuntime
+          ? await extensionRuntime.installOrStage({ expectedRevision: revision, source }, req.signal)
+          : await extensionPackages.installOrStage(source, revision, req.signal);
         return res.json({ snapshot });
       } catch (error) {
         return sendMutationError(res, error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/services/invoke',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      const controller = new AbortController();
+      const abort = () => { if (!res.writableEnded) controller.abort(new Error('Host service client disconnected')); };
+      res.once('close', abort);
+      try {
+        return res.json({ result: await extensionRuntime.invokeService(req.body, controller.signal) });
+      } catch (error) {
+        return res.status(400).json({
+          error: {
+            code: 'service_invocation_failed',
+            message: error instanceof Error ? error.message : String(error),
+            retryable: true,
+          },
+        });
+      } finally {
+        res.off('close', abort);
+      }
+    },
+  );
+
+  app.post(
+    '/api/piarium/extensions/v1/services/select',
+    uiAuthController.requireAuth,
+    async (req, res) => {
+      if (!extensionRuntime) return res.status(501).json({ error: { code: 'host_runtime_unavailable', retryable: true } });
+      try {
+        return res.json(await extensionRuntime.setServiceSelection(req.body));
+      } catch (error) {
+        return res.status(400).json({ error: { code: 'service_selection_failed', message: error instanceof Error ? error.message : String(error), retryable: false } });
       }
     },
   );
@@ -156,7 +281,9 @@ export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackag
         return res.status(400).json({ error: { code: 'invalid_request', message: 'enabled and expectedRevision are required', retryable: false } });
       }
       try {
-        const snapshot = await extensionCatalog.setEnabled(req.params.extensionId, req.body.enabled, revision);
+        const snapshot = extensionRuntime
+          ? await extensionRuntime.setEnabled(req.params.extensionId, req.body.enabled, revision)
+          : await extensionCatalog.setEnabled(req.params.extensionId, req.body.enabled, revision);
         return res.json({ snapshot });
       } catch (error) {
         return sendMutationError(res, error);
@@ -173,7 +300,9 @@ export const registerExtensionRoutes = (app, { extensionCatalog, extensionPackag
         return res.status(400).json({ error: { code: 'invalid_request', message: 'expectedRevision is required', retryable: false } });
       }
       try {
-        const snapshot = await extensionCatalog.setAllEnabled(false, revision);
+        const snapshot = extensionRuntime
+          ? await extensionRuntime.setAllEnabled(false, revision)
+          : await extensionCatalog.setAllEnabled(false, revision);
         return res.json({ snapshot });
       } catch (error) {
         return sendMutationError(res, error);

@@ -1,0 +1,259 @@
+import {
+  parsePiariumExtensionActualState,
+  parsePiariumExtensionCandidateSelectionRequest,
+  parsePiariumExtensionHostStateWaitRequest,
+  parsePiariumExtensionPackageInstallRequest,
+  parsePiariumExtensionServiceInvocationRequest,
+  parsePiariumExtensionServiceSelectionRequest,
+  type JsonValue,
+  type PiariumExtensionActualState,
+  type PiariumExtensionCandidateSelectionRequest,
+  type PiariumExtensionCandidatePreparationResult,
+  type PiariumExtensionCatalogSnapshot,
+  type PiariumExtensionHostStateSnapshot,
+  type PiariumExtensionHostStateWaitRequest,
+  type PiariumExtensionPackageInstallRequest,
+  type PiariumExtensionServiceInvocationRequest,
+  type PiariumExtensionServiceSelectionRequest,
+} from "@piarium/extension-contract";
+import { ApplicationExtensionCatalog } from "./application-catalog.js";
+import { BrokeredHostSupervisor, type BrokeredHostTransportFactory } from "./broker-supervisor.js";
+import { HostCapabilityRegistry } from "./capability-registry.js";
+import { ExtensionPackageManager } from "./package-manager.js";
+import { HostServiceRegistry } from "./service-registry.js";
+import { ExtensionStorageStore } from "./storage-store.js";
+
+export interface ApplicationExtensionRuntimeOptions {
+  brokerScript: string;
+  capabilities?: HostCapabilityRegistry;
+  catalog?: ApplicationExtensionCatalog;
+  dataDir: string;
+  packages?: ExtensionPackageManager;
+  services?: HostServiceRegistry;
+  storage?: ExtensionStorageStore;
+  transportFactory?: BrokeredHostTransportFactory;
+}
+
+export class ApplicationExtensionRuntime {
+  readonly capabilities: HostCapabilityRegistry;
+  readonly catalog: ApplicationExtensionCatalog;
+  readonly packages: ExtensionPackageManager;
+  readonly services: HostServiceRegistry;
+  readonly storage: ExtensionStorageStore;
+  readonly supervisor: BrokeredHostSupervisor;
+  readonly #listeners = new Set<() => void>();
+  readonly #serviceUnsubscribe: () => void;
+  #revision = 0;
+  #mutationQueue: Promise<void> = Promise.resolve();
+  #stopped = false;
+
+  private constructor(options: ApplicationExtensionRuntimeOptions, hostId: string) {
+    this.catalog = options.catalog ?? new ApplicationExtensionCatalog({ dataDir: options.dataDir });
+    this.packages = options.packages ?? new ExtensionPackageManager({ catalog: this.catalog, dataDir: options.dataDir });
+    this.capabilities = options.capabilities ?? new HostCapabilityRegistry();
+    this.services = options.services ?? new HostServiceRegistry(hostId);
+    if (this.services.hostId !== hostId) throw new Error("Extension service registry belongs to another application host");
+    this.storage = options.storage ?? new ExtensionStorageStore(options.dataDir);
+    this.supervisor = new BrokeredHostSupervisor({
+      brokerScript: options.brokerScript,
+      capabilities: this.capabilities,
+      catalog: this.catalog,
+      onStateChange: () => this.#publish(),
+      packages: this.packages,
+      services: this.services,
+      storage: this.storage,
+      ...(options.transportFactory ? { transportFactory: options.transportFactory } : {}),
+    });
+    this.#serviceUnsubscribe = this.services.subscribe(() => this.#publish());
+  }
+
+  static async create(options: ApplicationExtensionRuntimeOptions): Promise<ApplicationExtensionRuntime> {
+    const catalog = options.catalog ?? new ApplicationExtensionCatalog({ dataDir: options.dataDir });
+    const identity = await catalog.store.getHostIdentity();
+    return new ApplicationExtensionRuntime({ ...options, catalog }, identity.hostId);
+  }
+
+  async start(): Promise<PiariumExtensionHostStateSnapshot> {
+    await this.reconcile();
+    return this.state();
+  }
+
+  async state(): Promise<PiariumExtensionHostStateSnapshot> {
+    for (;;) {
+      const before = this.#revision;
+      const catalog = await this.catalog.snapshot();
+      const services = this.services.getSnapshot();
+      const after = this.#revision;
+      if (before === after) return { catalog, revision: after, services };
+    }
+  }
+
+  subscribe(listener: () => void): () => void {
+    if (this.#stopped) throw new Error("Application extension runtime is stopped");
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  async waitForState(
+    requestValue: PiariumExtensionHostStateWaitRequest | unknown,
+    signal?: AbortSignal,
+  ): Promise<PiariumExtensionHostStateSnapshot> {
+    const request = parsePiariumExtensionHostStateWaitRequest(requestValue);
+    const current = await this.state();
+    if (request.hostId !== current.catalog.hostId || request.revision !== current.revision) return current;
+    return new Promise((resolveWait, rejectWait) => {
+      let disposed = false;
+      const finish = (callback: () => void) => {
+        if (disposed) return;
+        disposed = true;
+        unsubscribe();
+        signal?.removeEventListener("abort", onAbort);
+        callback();
+      };
+      const onAbort = () => finish(() => rejectWait(signal?.reason ?? new Error("Extension host-state wait aborted")));
+      const onChange = () => {
+        void this.state().then(
+          (next) => finish(() => resolveWait(next)),
+          (error) => finish(() => rejectWait(error)),
+        );
+      };
+      const unsubscribe = this.subscribe(onChange);
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+      if (this.#revision !== request.revision) onChange();
+    });
+  }
+
+  reconcile(snapshot?: PiariumExtensionCatalogSnapshot): Promise<void> {
+    return this.#mutate(async () => {
+      await this.supervisor.reconcile(snapshot);
+      this.#publish();
+    });
+  }
+
+  installOrStage(
+    requestValue: PiariumExtensionPackageInstallRequest | unknown,
+    signal?: AbortSignal,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumExtensionPackageInstallRequest(requestValue);
+    return this.#mutateCatalog(async () => {
+      const snapshot = await this.packages.installOrStage(request.source, request.expectedRevision, signal);
+      await this.supervisor.reconcile(snapshot);
+      return this.catalog.snapshot();
+    });
+  }
+
+  setEnabled(extensionId: string, enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+    return this.#mutateCatalog(async () => {
+      const snapshot = await this.catalog.setEnabled(extensionId, enabled, expectedRevision);
+      await this.supervisor.reconcile(snapshot);
+      return this.catalog.snapshot();
+    });
+  }
+
+  setAllEnabled(enabled: boolean, expectedRevision: number): Promise<PiariumExtensionCatalogSnapshot> {
+    return this.#mutateCatalog(async () => {
+      const snapshot = await this.catalog.setAllEnabled(enabled, expectedRevision);
+      await this.supervisor.reconcile(snapshot);
+      return this.catalog.snapshot();
+    });
+  }
+
+  prepareCandidate(extensionId: string, integrity: string): Promise<PiariumExtensionCandidatePreparationResult> {
+    return this.#mutate(async () => {
+      const prepared = await this.supervisor.prepareCandidate(extensionId, integrity);
+      this.#publish();
+      return prepared;
+    });
+  }
+
+  activateExtension(extensionId: string): Promise<void> {
+    return this.#mutate(async () => {
+      await this.supervisor.activateExtension(extensionId);
+      this.#publish();
+    });
+  }
+
+  discardPreparedCandidate(extensionId: string, integrity: string): Promise<void> {
+    return this.#mutate(async () => {
+      await this.supervisor.discardPreparedCandidate(extensionId, integrity);
+      this.#publish();
+    });
+  }
+
+  selectCandidate(
+    requestValue: PiariumExtensionCandidateSelectionRequest | unknown,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    const request = parsePiariumExtensionCandidateSelectionRequest(requestValue);
+    return this.#mutateCatalog(() => this.supervisor.selectCandidate(
+      request.extensionId,
+      request.candidateIntegrity,
+      request.expectedRevision,
+    ));
+  }
+
+  reportActualState(extensionId: string, stateValue: PiariumExtensionActualState | unknown): Promise<void> {
+    const state = parsePiariumExtensionActualState(stateValue);
+    return this.#mutate(async () => {
+      await this.catalog.reportActualState(extensionId, state);
+      this.#publish();
+    });
+  }
+
+  invokeService(request: PiariumExtensionServiceInvocationRequest | unknown, signal?: AbortSignal): Promise<JsonValue> {
+    const parsed = parsePiariumExtensionServiceInvocationRequest(request);
+    const providerId = parsed.providerId;
+    if (typeof providerId === "string" && this.supervisor.hasStagedProvider(providerId)) {
+      return this.supervisor.invokeStagedService(parsed, signal);
+    }
+    const providers = this.services.getSnapshot().providers.filter((provider) => (
+      provider.status === "active"
+      && provider.descriptor.id === parsed.serviceId
+      && provider.descriptor.version === parsed.version
+      && (!providerId || provider.providerId === providerId)
+    ));
+    if (providers.length > 0) return this.services.invoke(parsed, signal);
+    return this.#mutate(async () => {
+      await this.supervisor.activateForService(parsed);
+      this.#publish();
+      return this.services.invoke(parsed, signal);
+    });
+  }
+
+  setServiceSelection(requestValue: PiariumExtensionServiceSelectionRequest | unknown): Promise<PiariumExtensionHostStateSnapshot> {
+    const request = parsePiariumExtensionServiceSelectionRequest(requestValue);
+    return this.#mutate(async () => {
+      this.services.setSelection(request.serviceId, request.version, request.providerId);
+      this.#publish();
+      return this.state();
+    });
+  }
+
+  async stop(): Promise<void> {
+    if (this.#stopped) return;
+    this.#stopped = true;
+    await this.#mutate(() => this.supervisor.shutdown());
+    this.#serviceUnsubscribe();
+    this.#publish();
+    this.#listeners.clear();
+  }
+
+  #mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#mutationQueue.then(operation, operation);
+    this.#mutationQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  #mutateCatalog(operation: () => Promise<PiariumExtensionCatalogSnapshot>): Promise<PiariumExtensionCatalogSnapshot> {
+    return this.#mutate(async () => {
+      const snapshot = await operation();
+      this.#publish();
+      return snapshot;
+    });
+  }
+
+  #publish(): void {
+    this.#revision += 1;
+    for (const listener of this.#listeners) listener();
+  }
+}

@@ -25,12 +25,13 @@ const snapshot = (enabled = true, revision = 1) => ({
   }],
 });
 
-const createApp = (extensionCatalog, extensionPackages = {}) => {
+const createApp = (extensionCatalog, extensionPackages = {}, extensionRuntime) => {
   const app = express();
   app.use(express.json());
   registerExtensionRoutes(app, {
     extensionCatalog,
     extensionPackages,
+    extensionRuntime,
     uiAuthController: {
       requireAuth: (req, res, next) => req.headers['x-test-session'] === 'yes'
         ? next()
@@ -94,5 +95,34 @@ describe('Piarium extension recovery routes', () => {
     await request(app).post(path).send({}).expect(401);
     const response = await request(app).post(path).set('x-test-session', 'yes').send({}).expect(200);
     expect(response.body).toEqual(entrypoint);
+  });
+
+  it('coordinates Host state, candidate preparation, and service invocation through authenticated routes', async () => {
+    const state = {
+      catalog: snapshot(),
+      revision: 4,
+      services: { hostId: snapshot().hostId, providers: [], revision: 2, selections: {} },
+    };
+    const extensionRuntime = {
+      state: vi.fn(async () => state),
+      waitForState: vi.fn(async () => state),
+      prepareCandidate: vi.fn(async (extensionId, integrity) => ({ extensionId, integrity, providers: [] })),
+      invokeService: vi.fn(async () => 'service-result'),
+    };
+    const app = createApp({ snapshot: vi.fn(async () => snapshot()) }, {}, extensionRuntime);
+    expect((await request(app).get('/api/piarium/extensions/v1/host-state').expect(200)).body).toEqual(state);
+    await request(app).post('/api/piarium/extensions/v1/candidates/prepare').send({}).expect(401);
+    const prepared = await request(app)
+      .post('/api/piarium/extensions/v1/candidates/prepare')
+      .set('x-test-session', 'yes')
+      .send({ extensionId: 'dev.example.extension', candidateIntegrity: `sha256-${'a'.repeat(64)}` })
+      .expect(200);
+    expect(prepared.body.providers).toEqual([]);
+    const invoked = await request(app)
+      .post('/api/piarium/extensions/v1/services/invoke')
+      .set('x-test-session', 'yes')
+      .send({ serviceId: 'dev.example.service', version: 1, method: 'read', args: [] })
+      .expect(200);
+    expect(invoked.body.result).toBe('service-result');
   });
 });

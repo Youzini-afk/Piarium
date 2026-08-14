@@ -68,7 +68,7 @@ export class SettingsPanelProvider implements vscode.Disposable {
 
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
       if (this._piRuntimeBridge?.handleMessage(message)) return;
-      const response = await handleBridgeMessage(message, { context: this._context });
+      const response = await handleBridgeMessage(message, { context: this._context, piRuntime: this._piRuntime });
       void panel.webview.postMessage(response);
       if (message.type === 'api:settings:save' && response.success) {
         void vscode.commands.executeCommand('piarium.internal.settingsSynced', response.data);

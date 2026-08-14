@@ -48,7 +48,14 @@ interface ArtifactIndex {
   artifactIntegrity: string;
   entrypoints: Record<string, ArtifactEntrypointRecord>;
   files: Record<string, ArtifactFileRecord>;
+  host?: { module: string };
   schemaVersion: 1;
+}
+
+export interface BrokeredHostEntrypointArtifact {
+  artifactIntegrity: string;
+  integrity: string;
+  modulePath: string;
 }
 
 export interface ExtensionArtifactStoreOptions {
@@ -261,6 +268,31 @@ export class ExtensionArtifactStore {
         };
       }
 
+      let host: ArtifactIndex["host"];
+      const hostEntrypoint = manifest.entrypoints?.host;
+      if (hostEntrypoint?.mode === "brokered") {
+        const outputDirectory = join(artifactRoot, "runtime", "host");
+        const modulePath = join(outputDirectory, "module.cjs");
+        await mkdir(outputDirectory, { recursive: true });
+        if (hostEntrypoint.file.endsWith(".cjs")) {
+          await cp(resolve(sourceRoot, hostEntrypoint.file), modulePath);
+        } else {
+          const result = await this.#build({
+            absWorkingDir: sourceRoot,
+            bundle: true,
+            entryPoints: [resolve(sourceRoot, hostEntrypoint.file)],
+            format: "cjs",
+            metafile: true,
+            outfile: modulePath,
+            platform: "node",
+            sourcemap: "external",
+            target: ["node22"],
+          });
+          if (!result.metafile) throw new Error("Brokered Host entrypoint build returned no metadata");
+        }
+        host = { module: toLogicalPath(relative(artifactRoot, modulePath)) };
+      }
+
       const files: Record<string, ArtifactFileRecord> = {};
       for (const logicalPath of await walkFiles(artifactRoot)) {
         if (logicalPath === INDEX_FILE) continue;
@@ -270,7 +302,7 @@ export class ExtensionArtifactStore {
       const artifactIntegrity = sha256(Object.entries(files)
         .map(([path, file]) => `${path}\0${file.integrity}\0${file.contentType}\n`)
         .join(""));
-      const index: ArtifactIndex = { artifactIntegrity, entrypoints, files, schemaVersion: 1 };
+      const index: ArtifactIndex = { artifactIntegrity, entrypoints, files, ...(host ? { host } : {}), schemaVersion: 1 };
       await writeFile(join(artifactRoot, INDEX_FILE), `${JSON.stringify(index, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 
       const finalPath = join(this.directory, artifactIntegrity.slice("sha256-".length));
@@ -334,6 +366,21 @@ export class ExtensionArtifactStore {
       Promise.all(entrypoint.styles.map((path) => this.readAsset(root, artifactIntegrity, path))),
     ]);
     return { artifactIntegrity, entrypointId, module, styles };
+  }
+
+  async resolveBrokeredHostEntrypoint(
+    artifactRoot: string,
+    artifactIntegrity: string,
+  ): Promise<BrokeredHostEntrypointArtifact> {
+    const root = await this.#assertArtifactRoot(artifactRoot, artifactIntegrity);
+    const index = parseIndex(JSON.parse(await readFile(join(root, INDEX_FILE), "utf8")) as unknown);
+    if (!index.host) throw new Error("Brokered Host entrypoint is not present in the artifact");
+    const record = index.files[index.host.module];
+    if (!record) throw new Error("Brokered Host entrypoint file is missing from the artifact index");
+    const modulePath = resolve(root, ...index.host.module.split("/"));
+    const bytes = await readFile(modulePath);
+    if (sha256(bytes) !== record.integrity) throw new Error("Brokered Host entrypoint integrity failed");
+    return { artifactIntegrity, integrity: record.integrity, modulePath };
   }
 
   async #assertArtifactRoot(artifactRoot: string, artifactIntegrity: string): Promise<string> {

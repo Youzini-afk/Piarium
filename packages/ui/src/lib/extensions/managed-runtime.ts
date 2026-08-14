@@ -9,11 +9,17 @@ const runtimeExtensions = () => {
 
 export const managedSurfaceExtensionLoader = new ManagedSurfaceExtensionLoader({
   host: {
+    activateExtension: (extensionId) => runtimeExtensions().activateExtension(extensionId),
     catalog: () => runtimeExtensions().catalog(),
+    discardPreparedCandidate: (extensionId, candidateIntegrity) => runtimeExtensions().discardPreparedCandidate(extensionId, candidateIntegrity),
+    hostState: () => runtimeExtensions().hostState(),
+    invokeService: (request) => runtimeExtensions().invokeService(request),
+    prepareCandidate: (extensionId, candidateIntegrity) => runtimeExtensions().prepareCandidate(extensionId, candidateIntegrity),
     readAsset: (request) => runtimeExtensions().readAsset(request),
     readManagedEntrypoint: (request) => runtimeExtensions().readManagedEntrypoint(request),
     reportActualState: (extensionId, state) => runtimeExtensions().reportActualState(extensionId, state),
     selectCandidate: (request) => runtimeExtensions().selectCandidate(request),
+    waitForHostState: (request, signal) => runtimeExtensions().waitForHostState(request, signal),
   },
   surface: piariumSurfaceRuntime.surface,
   surfaceRuntime: piariumSurfaceRuntime,
@@ -22,7 +28,7 @@ export const managedSurfaceExtensionLoader = new ManagedSurfaceExtensionLoader({
 let initialReconcile: Promise<void> | null = null;
 
 export const startManagedSurfaceExtensions = (): Promise<void> => {
-  initialReconcile ??= managedSurfaceExtensionLoader.reconcile().catch((error) => {
+  initialReconcile ??= managedSurfaceExtensionLoader.start().catch((error) => {
     initialReconcile = null;
     throw error;
   });

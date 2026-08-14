@@ -32,3 +32,27 @@ export class ExtensionCatalogStaleStateError extends Error {
     this.name = "ExtensionCatalogStaleStateError";
   }
 }
+
+export class ExtensionStorageError extends Error {
+  readonly code: "storage_invalid" | "storage_read_failed";
+  readonly retryable: boolean;
+
+  constructor(code: ExtensionStorageError["code"], message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ExtensionStorageError";
+    this.code = code;
+    this.retryable = code === "storage_read_failed";
+  }
+}
+
+export class ExtensionStorageRevisionConflictError extends Error {
+  readonly actualRevision: number;
+  readonly expectedRevision: number;
+
+  constructor(expectedRevision: number, actualRevision: number) {
+    super(`Piarium extension storage changed: expected revision ${expectedRevision}, actual revision ${actualRevision}`);
+    this.name = "ExtensionStorageRevisionConflictError";
+    this.actualRevision = actualRevision;
+    this.expectedRevision = expectedRevision;
+  }
+}

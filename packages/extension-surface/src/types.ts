@@ -28,6 +28,12 @@ export interface SurfaceService<TImplementation = unknown> {
   owner: SurfaceOwnerIdentity;
 }
 
+export interface SurfaceExternalService<TImplementation = unknown> {
+  descriptor: PiariumExtensionServiceProvision;
+  implementation: TImplementation;
+  providerId: string;
+}
+
 export interface SurfaceActualState extends PiariumExtensionActualState {
   extensionId: string;
   extensionVersion: string;
@@ -53,6 +59,7 @@ export interface SurfaceRegistrySnapshot {
 }
 
 export interface SurfaceActivationOptions {
+  externalServices?: readonly SurfaceExternalService[];
   grantedCapabilities?: Iterable<string>;
   owner: SurfaceOwnerIdentity;
   requirements?: PiariumExtensionServiceRequirement[];

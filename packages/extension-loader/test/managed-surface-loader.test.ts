@@ -114,7 +114,16 @@ test("managed candidate activation, rollback, style ownership, and disable are r
       },
     }),
     host: {
+      activateExtension: async () => undefined,
       catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => ({
+        catalog: current,
+        revision: current.revision,
+        services: { hostId, providers: [], revision: 0, selections: {} },
+      }),
+      invokeService: async () => { throw new Error("unexpected service invocation"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
       readAsset: async () => { throw new Error("unexpected asset read"); },
       readManagedEntrypoint: async (request): Promise<PiariumExtensionManagedEntrypointPayload> => {
         const source = code.get(request.integrity);
@@ -145,6 +154,7 @@ test("managed candidate activation, rollback, style ownership, and disable are r
         });
         return current;
       },
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
     },
     realmId,
     styleHost,
@@ -195,4 +205,72 @@ test("managed candidate activation, rollback, style ownership, and disable are r
   assert.equal(committedStyles, 0);
   assert.equal(reported.some((state) => state.status === "active"), true);
   assert.equal(reported.some((state) => state.status === "inactive"), true);
+});
+
+test("withdrawn Host services tear down dependent Surface owners", async () => {
+  const artifactIntegrity = integrityFor("service-artifact");
+  const serviceManifest: PiariumExtensionManifest = {
+    ...manifest("1.0.0"),
+    requires: { services: [{ id: "dev.example.host-service", version: 1 }] },
+  };
+  let current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest });
+  let stateRevision = 1;
+  let providers = [{
+    descriptor: { id: "dev.example.host-service", version: 1 },
+    entrypointId: "host",
+    extensionId: "dev.example.provider",
+    extensionVersion: "1.0.0",
+    generation: 1,
+    providerId: "dev.example.provider:host:1:dev.example.host-service@1",
+    status: "active" as const,
+  }];
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new ManagedSurfaceExtensionLoader({
+    evaluateModule: () => ({
+      default: {
+        activate: async (context) => {
+          const service = context.useService<{ read(): Promise<string> }>("dev.example.host-service", 1);
+          context.contribute({
+            contractVersion: 1,
+            data: {},
+            id: "dev.example.managed.service-page",
+            kind: "page",
+            supports: ["web"],
+          }, { value: await service?.read() });
+        },
+      },
+    }),
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => ({
+        catalog: current,
+        revision: stateRevision,
+        services: { hostId, providers, revision: stateRevision, selections: {} },
+      }),
+      invokeService: async () => "host-value",
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({
+        artifactIntegrity: request.integrity,
+        entrypointId: request.entrypointId,
+        module: asset("service", request.integrity, "runtime/surface/main/module.cjs"),
+        styles: [],
+      }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+  await loader.reconcile();
+  assert.deepEqual(runtime.getSnapshot().visibleContributions[0]?.implementation, { value: "host-value" });
+  providers = [];
+  stateRevision += 1;
+  current = { ...current, revision: current.revision + 1 };
+  await loader.reconcile();
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
 });

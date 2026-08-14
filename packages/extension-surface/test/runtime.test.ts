@@ -163,6 +163,28 @@ test("multiple service providers require an explicit single-provider selection",
   assert.equal(runtime.getService("dev.example.shared", 1), "beta");
 });
 
+test("required-service withdrawal tears down dependents before their provider", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const cleanup: string[] = [];
+  const provider = await runtime.activate({ owner: owner("dev.example.provider", 1, 1) }, (context) => {
+    context.provide({ id: "dev.example.required", version: 1 }, { read: () => "ok" });
+    context.contribute(page("dev.example.provider.page"), "provider");
+    context.onDispose(() => { cleanup.push("provider"); });
+  });
+  await runtime.activate({
+    owner: owner("dev.example.consumer", 1, 1),
+    requirements: [{ id: "dev.example.required", version: 1 }],
+  }, (context) => {
+    assert.equal(context.useService<{ read(): string }>("dev.example.required", 1)?.read(), "ok");
+    context.contribute(page("dev.example.consumer.page"), "consumer");
+    context.onDispose(() => { cleanup.push("consumer"); });
+  });
+  await provider.deactivate(2, 2);
+  assert.deepEqual(cleanup, ["consumer", "provider"]);
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 0);
+  assert.equal(runtime.getSnapshot().actual.find((state) => state.extensionId === "dev.example.consumer")?.diagnostics[0]?.code, "required_service_withdrawn");
+});
+
 test("layout references hide and reorder live contributions while preserving missing IDs", async () => {
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {

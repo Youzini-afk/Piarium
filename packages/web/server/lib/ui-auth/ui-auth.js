@@ -273,9 +273,15 @@ const getUrlAuthTokenFromRequest = (req) => {
 };
 
 const isApplicationTokenWritePath = (pathname) => (
-  pathname === '/api/piarium/extensions/v1/assets/read'
+  /^\/api\/piarium\/extensions\/v1\/extensions\/[^/]+\/activate$/.test(pathname)
+  || pathname === '/api/piarium/extensions/v1/assets/read'
   || pathname === '/api/piarium/extensions/v1/entrypoints/read'
+  || pathname === '/api/piarium/extensions/v1/candidates/prepare'
+  || pathname === '/api/piarium/extensions/v1/candidates/discard-prepared'
   || pathname === '/api/piarium/extensions/v1/candidates/select'
+  || pathname === '/api/piarium/extensions/v1/host-state/wait'
+  || pathname === '/api/piarium/extensions/v1/services/invoke'
+  || pathname === '/api/piarium/extensions/v1/services/select'
   || pathname === '/api/piarium/extensions/v1/actual'
   || pathname === '/api/piarium/extensions/v1/install'
 );
@@ -305,6 +311,7 @@ const isWebSocketUpgrade = (req) => {
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/piarium/events'
     || pathname === '/api/piarium/extensions/v1/catalog'
+    || pathname === '/api/piarium/extensions/v1/host-state'
     || pathname === '/api/piarium/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
