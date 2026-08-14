@@ -313,3 +313,35 @@ source rather than copied over the Pi-native engine.
 Acceptance: every adopted capability names its authoritative owner, preserves fork behavior where
 it is still required, and has no production dependency on OpenCode or a duplicate compatibility
 implementation.
+
+## Phase 9 — Piarium extension platform (planned)
+
+The complete target architecture is specified in
+[piarium-extension-platform.md](piarium-extension-platform.md). Piarium extensions are a separate
+product/runtime from Pi packages: the former extend the workbench and application host, while the
+latter continue to extend Pi through Pi's own `PackageManager` and extension runner.
+
+Delivery is split into complete platform slices without reducing the target customization model:
+
+1. extension contract, application-host catalog, desired/actual state, capability grants, and
+   protected fallback manager;
+2. owner-scoped Surface lifecycle, contribution/service registries, layout references, and the
+   first statically linked built-ins migrated from hard-coded switches;
+3. authenticated external Surface artifacts, managed dynamic activation, candidate update, and
+   rollback;
+4. brokered Host entrypoints, extension storage/migrations, versioned dependencies, and
+   multi-window coordination;
+5. isolated iframe/Worker and explicitly trusted-native modes with truthful physical-unload and
+   restart semantics;
+6. maintained Pi integration adapters migrated into separate built-in Piarium extensions while Pi
+   Packages and Pi Plugin Settings remain independent;
+7. replaceable navigator, chat, panel, layout, and workbench shell contributions plus distribution
+   profiles;
+8. later workspace/session/agent/model/invocation service routing, followed by ecosystem authoring
+   and distribution tooling.
+
+Acceptance: managed or isolated extensions enable and disable without a document reload; failed
+activation/update leaves no partial effects and preserves the previous generation; Pi package and
+Piarium extension lifecycle/configuration remain independent; every shared contract has explicit
+Web, Electron, VS Code, hosted-mobile, Capacitor, and headless behavior; the recovery kernel can
+always enter safe mode with non-kernel extensions disabled.

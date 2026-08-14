@@ -37,6 +37,19 @@ package's current schema, commands, public events, and documented lifecycle.
    bind, cookie access, executable configuration, and credential sources receive focused warnings;
    ordinary settings are not hidden behind blanket restrictions.
 
+### 2.1 Pi packages versus Piarium extensions
+
+This document describes graphical integration for Pi packages. It does not make those packages
+Piarium extensions. Pi packages remain owned by Pi's `PackageManager` and extension runner; the
+future Piarium extension platform has a separate application-host manager, lifecycle, manifest,
+state, and Surface contribution model.
+
+The current first-class adapters are built into Piarium. During the migration defined by
+[piarium-extension-platform.md](piarium-extension-platform.md), they may become built-in Piarium
+integration extensions that consume the same public Pi contracts. Disabling such a UI integration
+must not disable, remove, reconfigure, or take ownership of its Pi package, and changing the Pi
+package must not silently mutate the Piarium extension's installation or layout state.
+
 ## 3. Information architecture
 
 | Surface | Responsibility | Must not own |

@@ -29,7 +29,8 @@ execution into an untrusted renderer.
 
 - Reimplementing Pi's model/provider stack.
 - Parsing terminal escape sequences as an application protocol.
-- Running third-party extensions in Electron's renderer.
+- Running third-party Pi extensions in Electron's renderer or treating arbitrary UI modules as Pi
+  packages.
 - Treating a tool allowlist or plan mode as an operating-system sandbox.
 - Editing Pi session JSONL for ordinary navigation, rename, archive, or branching.
 - Bundling arbitrary local extension working trees into a release without an explicit manifest.
@@ -56,8 +57,10 @@ Pi session worker (Node >=22.19)
 ### 4.1 Renderer
 
 The renderer contains presentation and local view state only. It never imports Pi packages, reads
-credential files, spawns commands, or loads extension code. Every native operation crosses a
-typed preload or Pi runtime capability. OpenCode SDK types are removed from feature code rather
+credential files, or spawns commands. Current production roots do not load third-party Piarium
+Surface modules; the separately designed Piarium extension platform will add declared managed,
+isolated, and explicitly trusted Surface entrypoints without moving Pi extension execution into the
+renderer. Every native operation crosses a typed preload or runtime capability. OpenCode SDK types are removed from feature code rather
 than preserved behind a compatibility facade. The former SDK client, sync stores, optimistic
 session graph, old chat composer/turn projection, and old session sidebar have no parallel copy:
 their unreachable source and tests were deleted after all four production roots passed type,
@@ -204,8 +207,9 @@ accepted. UI disables unavailable actions instead of guessing from runtime versi
 | Subagent lifecycle | Extension event bus + artifacts | Normalize into parent/child task projections |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
+| Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
 
-## 7. Extension architecture
+## 7. Pi extension integration architecture
 
 ### 7.1 Generic bridge
 
@@ -258,6 +262,20 @@ The page boundaries, native authorities, risk treatment, and adapter acceptance 
 defined in [plugin-gui-design.md](plugin-gui-design.md). The imported Magic Context, OpenAgent, and
 Agent Orchestration screens have been retired; their capability disposition remains documented
 there rather than leaving an OpenCode compatibility surface in production code.
+
+### 7.3 Separate Piarium extension platform
+
+Piarium's future product/workbench extensions are not Pi packages. They have a separate application-
+host manager, manifest, lifecycle, state, asset, contribution, and service model. Pi integration
+adapters consume the existing typed Piarium protocol while leaving the Pi package independently
+installable, configurable, enabled, and usable from the Pi CLI.
+
+The target platform makes built-in pages and workflows replaceable above a narrow recovery kernel,
+supports declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and
+defines truthful dynamic-disable guarantees for each mode. Its full target architecture and phased
+migration are specified in [piarium-extension-platform.md](piarium-extension-platform.md). None of
+those future entrypoints authorize loading Pi extension code or private plugin state in the
+renderer.
 
 ## 8. Recovery model
 
