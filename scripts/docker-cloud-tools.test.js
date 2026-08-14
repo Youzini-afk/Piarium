@@ -35,26 +35,19 @@ const getAptInstallPackages = () => {
 };
 
 const aptInstallPackages = getAptInstallPackages();
+const workspacePackageDirectories = fs.readdirSync(path.join(repoRoot, 'packages'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(repoRoot, 'packages', entry.name, 'package.json')))
+  .map((entry) => entry.name)
+  .sort();
 
 describe('Piarium cloud container runtime', () => {
-  it('builds the canonical four-package runtime tree before the target-platform install', () => {
+  it('copies every workspace manifest before the frozen builder install', () => {
     const runtimeArg = 'ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-base:main';
     expect(appDockerfile.indexOf(runtimeArg)).toBeGreaterThanOrEqual(0);
     expect(appDockerfile.indexOf('FROM ')).toBeGreaterThan(appDockerfile.indexOf(runtimeArg));
     expect(appDockerfile).toContain('FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder');
 
-    for (const packageDirectory of [
-      'extension-builtins',
-      'extension-contract',
-      'extension-host',
-      'extension-loader',
-      'extension-sdk',
-      'extension-surface',
-      'protocol',
-      'pi-host',
-      'runtime-broker',
-      'web',
-    ]) {
+    for (const packageDirectory of workspacePackageDirectories) {
       expect(appDockerfile).toContain(`COPY packages/${packageDirectory}/package.json ./packages/${packageDirectory}/package.json`);
     }
 

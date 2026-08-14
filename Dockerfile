@@ -13,9 +13,11 @@ COPY patches ./patches
 COPY fix-deprecation.js ./
 COPY packages/electron/package.json ./packages/electron/package.json
 COPY packages/extension-builtins/package.json ./packages/extension-builtins/package.json
+COPY packages/extension-cli/package.json ./packages/extension-cli/package.json
 COPY packages/extension-contract/package.json ./packages/extension-contract/package.json
 COPY packages/extension-host/package.json ./packages/extension-host/package.json
 COPY packages/extension-loader/package.json ./packages/extension-loader/package.json
+COPY packages/extension-react/package.json ./packages/extension-react/package.json
 COPY packages/extension-sdk/package.json ./packages/extension-sdk/package.json
 COPY packages/extension-surface/package.json ./packages/extension-surface/package.json
 COPY packages/mobile/package.json ./packages/mobile/package.json
