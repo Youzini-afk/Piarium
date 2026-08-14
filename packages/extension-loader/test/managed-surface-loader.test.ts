@@ -153,9 +153,11 @@ test("managed candidate activation, rollback, style ownership, and disable are r
       requestCandidateApplication: async (request) => {
         const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
         assert.equal(entry.candidate?.integrity, request.candidateIntegrity);
+        const candidate = entry.candidate;
+        assert.ok(candidate);
         current = snapshot(current.revision + 1, {
           ...entry,
-          candidate: entry.candidate ? { ...entry.candidate, applyRequested: true } : undefined,
+          candidate: { ...candidate, applyRequested: true },
         });
         return current;
       },
