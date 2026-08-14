@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -61,6 +61,8 @@ test("resolves npm from PATH when the embedding executable is Bun or Electron", 
   await mkdir(join(runtime, "node_modules", "npm", "bin"), { recursive: true });
   await writeFile(nodePath, "fixture", "utf8");
   await writeFile(npmCli, "fixture", "utf8");
+  const canonicalNodePath = await realpath(nodePath);
+  const canonicalNpmCli = await realpath(npmCli);
 
   for (const executable of ["bun.exe", "electron.exe"]) {
     const resolved = await resolveNpmLaunchTarget({
@@ -68,8 +70,8 @@ test("resolves npm from PATH when the embedding executable is Bun or Electron", 
       execPath: join(runtime, executable),
       platform: "win32",
     });
-    assert.equal(resolved.executable, nodePath);
-    assert.deepEqual(resolved.argsPrefix, [npmCli]);
+    assert.equal(resolved.executable, canonicalNodePath);
+    assert.deepEqual(resolved.argsPrefix, [canonicalNpmCli]);
   }
 });
 
