@@ -62,6 +62,12 @@ curl --fail http://127.0.0.1:3000/health
 
 `http://127.0.0.1:3000`을 열고 생성된 비밀번호를 사용하세요. 인터넷에 노출되는 배포 앞에는 TLS 리버스 프록시 또는 승인된 터널을 두세요. 프로덕션에서는 `PIARIUM_IMAGE`를 `:latest`가 아니라 검증된 digest로 고정하세요.
 
+Compose는 기본적으로 슬림 이미지 `ghcr.io/youzini-afk/piarium-slim:latest`를 사용합니다(서버 실행에 필요한 Bun, Node, Git, SSH, cloudflared). 컨테이너 안에서 Python, Java, Go, Rust를 컴파일해야 하면 툴벨트 오버레이를 겹치세요:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
+```
+
 ## VS Code
 
 이 저장소에서 `bun run vscode:build` / `bun run vscode:package`로 확장을 빌드하세요. Marketplace에는 아직 게시되지 않았습니다.

@@ -16,28 +16,33 @@ of being copied from the developer machine.
 
 ## Container images
 
-The Docker workflow publishes two images to GHCR:
+The Docker workflow publishes four images to GHCR:
 
-- `ghcr.io/youzini-afk/piarium-runtime-base` contains the cloud development/runtime toolbelt;
-- `ghcr.io/youzini-afk/piarium` contains the canonical Piarium server runtime.
+| Image | Role |
+| --- | --- |
+| `ghcr.io/youzini-afk/piarium-slim` | Application on the slim runtime. Compose default. |
+| `ghcr.io/youzini-afk/piarium` | Application on the language-toolbelt runtime. |
+| `ghcr.io/youzini-afk/piarium-runtime-slim` | Slim base: Bun, Node, Git, SSH, cloudflared, and the compilers needed to install native production modules. |
+| `ghcr.io/youzini-afk/piarium-runtime-base` | Toolbelt base: the slim runtime plus Python, Java/Maven, Go/gopls, Rust/rust-analyzer, LSPs, GitHub CLI, ripgrep, daemonless BuildKit, and Chrome on amd64. |
 
-Both images are built for `linux/amd64` and `linux/arm64`. Main builds receive `main`, `latest`, and
-`sha-*` tags; version tags also receive semantic-version tags. The application build consumes the
-runtime-base manifest digest produced by the same workflow, so it cannot silently pick up a newer
-floating base halfway through a build. Images include provenance and SBOM attestations.
+All four images are built for `linux/amd64` and `linux/arm64`. Main builds receive `main`, `latest`,
+and `sha-*` tags; version tags also receive semantic-version tags. Each application build consumes
+the matching base manifest digest produced by the same workflow, so it cannot silently pick up a
+newer floating base halfway through a build. Images include provenance and SBOM attestations.
 
-Builds first publish uniquely named candidate manifests. CI pulls the application by digest, starts
-the amd64 container, checks `/health`, and imports the bundled broker and Pi host. Only that verified
-digest is promoted to `main`, `latest`, `sha-*`, or semantic-version tags; a failed or cancelled
-candidate leaves the previously verified installable tags untouched. Pull requests build the
-coupled base and application images against a private runner-local registry and run the same health
-and host smoke without publishing to GHCR. A manually supplied base tag is resolved to its manifest
-digest before the application build begins.
+Builds first publish uniquely named candidate manifests. CI pulls both application images by digest,
+starts each amd64 container, checks `/health`, and imports the bundled broker and Pi host. Only those
+verified digests are promoted to `main`, `latest`, `sha-*`, or semantic-version tags; a failed or
+cancelled candidate leaves the previously verified installable tags untouched. Pull requests build
+the coupled slim and toolbelt image pairs against a private runner-local registry and run the same
+health and host smoke without publishing to GHCR. A manually supplied slim or toolbelt base tag is
+resolved to its manifest digest before the matching application build begins.
 
-The runtime base preserves the maintainer fork's cloud toolbelt: Bun and Node, Python, Java/Maven,
-Go/gopls, Rust/rust-analyzer/rustfmt, GitHub CLI, ripgrep, TypeScript language tooling, daemonless
-rootless BuildKit, and cloudflared. Chrome/Playwright is installed on amd64; the arm64 image keeps
-the rest of the toolbelt and reports the intentional Chrome omission during the image build.
+The slim runtime is enough to run the Piarium server, Git, SSH, and tunnels. The toolbelt base
+preserves the maintainer fork's cloud development toolbox: Python, Java/Maven, Go/gopls,
+Rust/rust-analyzer/rustfmt, GitHub CLI, ripgrep, TypeScript language tooling, daemonless rootless
+BuildKit, and cloudflared. Chrome/Playwright is installed on amd64; the arm64 toolbelt image keeps
+the rest of the toolbox and reports the intentional Chrome omission during the image build.
 
 ### Docker Compose
 
@@ -48,6 +53,13 @@ mkdir -p data/piarium data/ssh data/cloudflared workspaces
 sudo chown -R 1000:1000 data workspaces
 export PIARIUM_UI_PASSWORD="$(openssl rand -base64 24)"
 docker compose up -d
+```
+
+Compose pulls `ghcr.io/youzini-afk/piarium-slim:latest` by default. To run the language-toolbelt
+image instead:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
 The persistent paths are:

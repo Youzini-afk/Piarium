@@ -1,13 +1,13 @@
 services:
   piarium:
-    image: ${PIARIUM_IMAGE:-ghcr.io/youzini-afk/piarium:latest}
+    image: ${PIARIUM_IMAGE:-ghcr.io/youzini-afk/piarium-slim:latest}
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        # Build Dockerfile.base as piarium-runtime-base:local and override this
-        # variable when a completely local image chain is preferred.
-        RUNTIME_BASE_IMAGE: ${PIARIUM_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/piarium-runtime-base:main}
+        # Slim by default. Use docker-compose.toolbelt.yml for the language
+        # toolbelt, or build Dockerfile.base --target slim as a local base.
+        RUNTIME_BASE_IMAGE: ${PIARIUM_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/piarium-runtime-slim:main}
     container_name: piarium
     init: true
     user: "1000:1000"

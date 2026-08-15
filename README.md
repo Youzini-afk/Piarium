@@ -111,7 +111,7 @@ NSIS 安装包、更新元数据和 blockmap 会输出到 `packages/electron/dis
 
 ## 运行云端镜像
 
-Compose 默认使用 `ghcr.io/youzini-afk/piarium:latest`。在 Linux Docker 主机上运行：
+Compose 默认使用精简镜像 `ghcr.io/youzini-afk/piarium-slim:latest`。在 Linux Docker 主机上运行：
 
 ```bash
 mkdir -p data/piarium data/ssh data/cloudflared workspaces
@@ -124,6 +124,12 @@ curl --fail http://127.0.0.1:3000/health
 
 打开 `http://127.0.0.1:3000`，使用刚生成的密码登录。任何面向公网的部署都应置于 TLS 反向代理
 或经过审核的隧道之后。生产环境请将 `PIARIUM_IMAGE` 固定为已验证的不可变摘要，不要依赖浮动标签。
+
+若智能体要在容器里编译 Python、Java、Go 或 Rust，叠加工具链覆盖层：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
+```
 
 镜像同时发布 `linux/amd64` 和 `linux/arm64` 版本，并带有 provenance 与 SBOM 证明。持久化路径、
 环境变量、容器及 SSH 回滚的完整约定见[云端部署](docs/cloud-deployment.md)。
@@ -178,8 +184,8 @@ bun run build
 bun run test:pi:dist
 ```
 
-CI 会在 Windows 和 Ubuntu 上分别运行。云端/运行时输入发生变化时，还会构建配套的运行时基础镜像
-与应用镜像，通过不可变摘要启动候选镜像并完成烟测后，才会提升可安装标签。
+CI 会在 Windows 和 Ubuntu 上分别运行。云端/运行时输入发生变化时，还会构建配套的精简与工具链
+基础镜像及应用镜像，分别通过不可变摘要启动候选镜像并完成烟测后，才会提升可安装标签。
 
 参与贡献前，请阅读[贡献指南](CONTRIBUTING.md)和仓库专用规则 [AGENTS.md](AGENTS.md)。
 

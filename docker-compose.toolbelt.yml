@@ -1,0 +1,10 @@
+# Overlay for the full language-toolbelt image.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
+services:
+  piarium:
+    image: ${PIARIUM_IMAGE:-ghcr.io/youzini-afk/piarium:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUNTIME_BASE_IMAGE: ${PIARIUM_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/piarium-runtime-base:main}

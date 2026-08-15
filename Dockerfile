@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-base:main
+ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-slim:main
 
 FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder
 WORKDIR /app

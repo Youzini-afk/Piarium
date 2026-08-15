@@ -137,8 +137,10 @@ retained before engine surgery begins.
 - Implemented: cloud delivery now builds one canonical production workspace containing Web,
   protocol, runtime broker, and the bundled Pi host. The application image installs native
   dependencies on its target architecture and runs on a Piarium-owned multi-architecture runtime
-  base with the fork's complete development toolbelt. CI publishes digest-linked base/application
-  images and performs a real bundled-host health smoke. Compose uses Piarium-owned paths and state.
+  base with the fork's complete development toolbelt, plus a slim runtime without language
+  toolchains. CI publishes digest-linked slim and toolbelt base/application images and performs a
+  real bundled-host health smoke on both. Compose defaults to the slim image and uses Piarium-owned
+  paths and state.
   SSH deployment verifies a content-addressed archive, installs into an immutable release, switches
   `current` atomically, waits for a ready bundled Pi runtime, and automatically restores the last
   healthy release on failure. No cloud path installs, configures, or probes an OpenCode runtime.

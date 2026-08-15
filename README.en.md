@@ -118,7 +118,8 @@ code-signing credentials the installer is intentionally unsigned. See the
 
 ## Run the cloud image
 
-The Compose file uses `ghcr.io/youzini-afk/piarium:latest` by default. On a Linux Docker host:
+The Compose file uses the slim image `ghcr.io/youzini-afk/piarium-slim:latest` by default. On a Linux
+Docker host:
 
 ```bash
 mkdir -p data/piarium data/ssh data/cloudflared workspaces
@@ -132,6 +133,13 @@ curl --fail http://127.0.0.1:3000/health
 Open `http://127.0.0.1:3000` and use the generated password. Put a TLS reverse proxy or an approved
 tunnel in front of any Internet-facing deployment. For production, set `PIARIUM_IMAGE` to a tested
 immutable digest instead of relying on a floating tag.
+
+If the agent needs to compile Python, Java, Go, or Rust inside the container, apply the toolbelt
+overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
+```
 
 Images are published for `linux/amd64` and `linux/arm64` with provenance and SBOM attestations. The
 complete persistent-path, environment, container, and SSH rollback contract is documented in
@@ -190,8 +198,8 @@ bun run test:pi:dist
 ```
 
 CI runs on both Windows and Ubuntu. Changes to cloud/runtime inputs additionally build the coupled
-runtime-base and application images, smoke the application by immutable digest, and promote tags
-only after the candidate passes.
+slim and toolbelt base/application images, smoke both applications by immutable digest, and promote
+tags only after both candidates pass.
 
 Before contributing, read [CONTRIBUTING.en.md](CONTRIBUTING.en.md) and the repository-specific rules in
 [AGENTS.md](AGENTS.md).

@@ -62,6 +62,12 @@ curl --fail http://127.0.0.1:3000/health
 
 Otwórz `http://127.0.0.1:3000` i użyj wygenerowanego hasła. Przed każdym wdrożeniem wystawionym do Internetu umieść reverse proxy TLS albo zatwierdzony tunel. W produkcji przypnij `PIARIUM_IMAGE` do przetestowanego digestu zamiast `:latest`.
 
+Compose domyślnie pobiera szczupły obraz `ghcr.io/youzini-afk/piarium-slim:latest` (wystarczy do serwera: Bun, Node, Git, SSH i cloudflared). Jeśli agent ma kompilować Python, Java, Go lub Rust w kontenerze, nałóż warstwę narzędziową:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
+```
+
 ## VS Code
 
 Zbuduj rozszerzenie z tego repozytorium poleceniami `bun run vscode:build` / `bun run vscode:package`. Nie jest jeszcze opublikowane w Marketplace.

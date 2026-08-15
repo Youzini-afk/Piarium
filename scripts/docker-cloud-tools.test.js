@@ -10,13 +10,19 @@ const runtimeBaseDockerfile = readRepoFile('Dockerfile.base');
 const dockerBuildOnlyWrapper = readRepoFile('scripts/docker-build-only-wrapper.sh');
 const dockerEntrypoint = readRepoFile('scripts/docker-entrypoint.sh');
 const dockerCompose = readRepoFile('docker-compose.yml');
+const dockerComposeToolbelt = readRepoFile('docker-compose.toolbelt.yml');
 const dockerIgnore = readRepoFile('.dockerignore');
 const dockerWorkflow = readRepoFile('.github/workflows/docker.yml');
+const slimStage = runtimeBaseDockerfile.split('FROM slim AS runtime-base')[0] ?? '';
+const toolbeltStage = runtimeBaseDockerfile.includes('FROM slim AS runtime-base')
+  ? runtimeBaseDockerfile.slice(runtimeBaseDockerfile.indexOf('FROM slim AS runtime-base'))
+  : '';
 
 const containerSources = {
   Dockerfile: appDockerfile,
   'Dockerfile.base': runtimeBaseDockerfile,
   'docker-compose.yml': dockerCompose,
+  'docker-compose.toolbelt.yml': dockerComposeToolbelt,
   '.dockerignore': dockerIgnore,
   'scripts/docker-build-only-wrapper.sh': dockerBuildOnlyWrapper,
   'scripts/docker-entrypoint.sh': dockerEntrypoint,
@@ -42,7 +48,7 @@ const workspacePackageDirectories = fs.readdirSync(path.join(repoRoot, 'packages
 
 describe('Piarium cloud container runtime', () => {
   it('copies every workspace manifest before the frozen builder install', () => {
-    const runtimeArg = 'ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-base:main';
+    const runtimeArg = 'ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-slim:main';
     expect(appDockerfile.indexOf(runtimeArg)).toBeGreaterThanOrEqual(0);
     expect(appDockerfile.indexOf('FROM ')).toBeGreaterThan(appDockerfile.indexOf(runtimeArg));
     expect(appDockerfile).toContain('FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder');
@@ -105,8 +111,27 @@ describe('Piarium cloud container runtime', () => {
     expect(withoutCanonicalPassword).not.toContain('UI_PASSWORD');
   });
 
+  it('keeps language toolchains out of the slim runtime stage', () => {
+    expect(slimStage).toContain('FROM oven/bun:1.3.14 AS slim');
+    expect(slimStage).toContain('ARG NODE_VERSION=24.15.0');
+    expect(slimStage).toContain('COPY --from=cloudflare/cloudflared@sha256:');
+    expect(slimStage).toContain('RUN cloudflared --version');
+    expect(slimStage).not.toContain('default-jdk-headless');
+    expect(slimStage).not.toContain('maven');
+    expect(slimStage).not.toContain('python3-pip');
+    expect(slimStage).not.toContain('ripgrep');
+    expect(slimStage).not.toContain('https://cli.github.com/packages');
+    expect(slimStage).not.toContain('ARG GO_VERSION=');
+    expect(slimStage).not.toContain('https://sh.rustup.rs');
+    expect(slimStage).not.toContain('playwright install --with-deps chrome');
+    expect(slimStage).not.toContain('moby/buildkit@sha256:');
+    expect(slimStage).not.toContain('typescript-language-server');
+    expect(slimStage).not.toContain('PIARIUM_VALIDATION_NODE_MODULES');
+  });
+
   it('retains the complete multi-architecture cloud toolbelt', () => {
-    expect(runtimeBaseDockerfile).toContain('FROM oven/bun:1.3.14 AS runtime-base');
+    expect(runtimeBaseDockerfile).toContain('FROM slim AS runtime-base');
+    expect(toolbeltStage).toContain('FROM slim AS runtime-base');
 
     for (const packageName of [
       'build-essential',
@@ -160,8 +185,10 @@ describe('Piarium cloud container runtime', () => {
   });
 
   it('provides persistent Piarium data, SSH, workspace, and tunnel configuration in Compose', () => {
-    expect(dockerCompose).toContain('image: ${PIARIUM_IMAGE:-ghcr.io/youzini-afk/piarium:latest}');
-    expect(dockerCompose).toContain('RUNTIME_BASE_IMAGE: ${PIARIUM_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/piarium-runtime-base:main}');
+    expect(dockerCompose).toContain('image: ${PIARIUM_IMAGE:-ghcr.io/youzini-afk/piarium-slim:latest}');
+    expect(dockerCompose).toContain('RUNTIME_BASE_IMAGE: ${PIARIUM_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/piarium-runtime-slim:main}');
+    expect(dockerComposeToolbelt).toContain('image: ${PIARIUM_IMAGE:-ghcr.io/youzini-afk/piarium:latest}');
+    expect(dockerComposeToolbelt).toContain('RUNTIME_BASE_IMAGE: ${PIARIUM_RUNTIME_BASE_IMAGE:-ghcr.io/youzini-afk/piarium-runtime-base:main}');
     expect(dockerCompose).toContain('user: "1000:1000"');
     expect(dockerCompose).toContain('./data/piarium:/home/piarium/.config/piarium');
     expect(dockerCompose).toContain('./data/ssh:/home/piarium/.ssh');
@@ -207,44 +234,61 @@ describe('Piarium container publication', () => {
 
     expect(dockerWorkflows).toEqual(['docker.yml']);
     expect(dockerWorkflow).toContain('quality-gate:');
+    expect(dockerWorkflow).toContain('build-runtime-slim:');
     expect(dockerWorkflow).toContain('build-runtime-base:');
+    expect(dockerWorkflow).toContain('build-app-slim:');
+    expect(dockerWorkflow).toContain('target: slim');
+    expect(dockerWorkflow).toContain('target: runtime-base');
+    expect(dockerWorkflow).toContain('- docker-compose.toolbelt.yml');
     expect(dockerWorkflow).toContain('needs: [quality-gate, build-runtime-base]');
+    expect(dockerWorkflow).toContain('needs: [quality-gate, build-runtime-slim]');
     expect(dockerWorkflow).toContain('digest: ${{ steps.build.outputs.digest }}');
     expect(dockerWorkflow).toContain('BASE_DIGEST: ${{ needs.build-runtime-base.outputs.digest }}');
     expect(dockerWorkflow).toContain('image=${REGISTRY}/${BASE_IMAGE_NAME}@${BASE_DIGEST}');
+    expect(dockerWorkflow).toContain('image=${REGISTRY}/${SLIM_BASE_IMAGE_NAME}@${BASE_DIGEST}');
     expect(dockerWorkflow).toContain('- scripts/cloud-runtime.bun.lock');
+    expect(dockerWorkflow).toContain('SLIM_APP_IMAGE_NAME: youzini-afk/piarium-slim');
+    expect(dockerWorkflow).toContain('SLIM_BASE_IMAGE_NAME: youzini-afk/piarium-runtime-slim');
   });
 
   it('builds multi-architecture candidates and promotes main, latest, sha, and semver tags with GHA caches', () => {
-    expect(dockerWorkflow.match(/platforms: linux\/amd64,linux\/arm64/g)).toHaveLength(2);
+    expect(dockerWorkflow.match(/platforms: linux\/amd64,linux\/arm64/g)).toHaveLength(4);
     expect(dockerWorkflow).toContain('type=raw,value=main');
     expect(dockerWorkflow).toContain('type=raw,value=latest');
     expect(dockerWorkflow).toContain('type=sha,format=short,prefix=sha-');
     expect(dockerWorkflow).toContain('type=semver,pattern={{version}}');
     expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-runtime-base');
     expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-runtime-base,mode=max');
+    expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-runtime-slim');
+    expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-runtime-slim,mode=max');
     expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-app');
     expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-app,mode=max');
-    expect(dockerWorkflow.match(/provenance: mode=max/g)).toHaveLength(2);
-    expect(dockerWorkflow.match(/sbom: true/g)).toHaveLength(2);
+    expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-app-slim');
+    expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-app-slim,mode=max');
+    expect(dockerWorkflow.match(/provenance: mode=max/g)).toHaveLength(4);
+    expect(dockerWorkflow.match(/sbom: true/g)).toHaveLength(4);
     expect(dockerWorkflow).toContain(':candidate-${{ github.run_id }}-${{ github.run_attempt }}');
     expect(dockerWorkflow).toContain('promote:');
-    expect(dockerWorkflow.match(/docker buildx imagetools create/g)).toHaveLength(2);
+    expect(dockerWorkflow.match(/docker buildx imagetools create/g)).toHaveLength(4);
   });
 
   it('supports a manual base override without passing runtime secrets as build arguments', () => {
     expect(dockerWorkflow).toContain('workflow_dispatch:');
     expect(dockerWorkflow).toContain('runtime_base_image:');
+    expect(dockerWorkflow).toContain('runtime_slim_image:');
     expect(dockerWorkflow).toContain("inputs.runtime_base_image == ''");
+    expect(dockerWorkflow).toContain("inputs.runtime_slim_image == ''");
     expect(dockerWorkflow).toContain('docker buildx imagetools inspect "$BASE_OVERRIDE"');
     expect(dockerWorkflow).toContain('image=${base_repository}@${resolved_digest}');
     expect(dockerWorkflow).toContain('RUNTIME_BASE_IMAGE=${{ steps.runtime-base.outputs.image }}');
+    expect(dockerWorkflow).toContain('RUNTIME_BASE_IMAGE=${{ steps.runtime-slim.outputs.image }}');
     expect(dockerWorkflow).not.toContain('PIARIUM_UI_PASSWORD=${{ secrets.');
     expect(dockerWorkflow).not.toContain('PIARIUM_TUNNEL_TOKEN=${{ secrets.');
   });
 
   it('smokes the immutable amd64 candidate before promoting any installable tag', () => {
     expect(dockerWorkflow).toContain('smoke-amd64:');
+    expect(dockerWorkflow).toContain('smoke-amd64-slim:');
     expect(dockerWorkflow).toContain('docker pull --platform linux/amd64');
     expect(dockerWorkflow).toContain('docker run --detach');
     expect(dockerWorkflow).toContain('curl --fail --silent --show-error http://127.0.0.1:3000/health');
@@ -255,14 +299,19 @@ describe('Piarium container publication', () => {
     expect(dockerWorkflow).toContain('EXPECTED_RELEASE_ID: image-${{ github.sha }}');
     expect(dockerWorkflow).toContain('health.releaseId!==process.env.EXPECTED_RELEASE_ID');
     expect(dockerWorkflow.indexOf('smoke-amd64:')).toBeLessThan(dockerWorkflow.indexOf('promote:'));
+    expect(dockerWorkflow.indexOf('smoke-amd64-slim:')).toBeLessThan(dockerWorkflow.indexOf('promote:'));
     expect(dockerWorkflow).toContain("needs.smoke-amd64.result == 'success'");
+    expect(dockerWorkflow).toContain("needs.smoke-amd64-slim.result == 'success'");
+    expect(dockerWorkflow).toContain('ghcr.io/youzini-afk/piarium-slim@${{ needs.build-app-slim.outputs.digest }}');
   });
 
   it('builds and smokes the coupled base and app images on pull requests without publishing to GHCR', () => {
     expect(dockerWorkflow).toContain('pull_request:');
     expect(dockerWorkflow).toContain('verify-pr-image:');
-    expect(dockerWorkflow).toContain('localhost:5000/piarium-runtime-base:pr-${{ github.sha }}');
-    expect(dockerWorkflow).toContain('piarium:pr-${{ github.sha }}');
+    expect(dockerWorkflow).toContain('localhost:5000/${{ matrix.base_image }}:pr-${{ github.sha }}');
+    expect(dockerWorkflow).toContain('${{ matrix.app_image }}:pr-${{ github.sha }}');
+    expect(dockerWorkflow).toContain('base_target: slim');
+    expect(dockerWorkflow).toContain('base_target: runtime-base');
     expect(dockerWorkflow).toContain("github.event_name == 'pull_request'");
   });
 });
