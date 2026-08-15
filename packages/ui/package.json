@@ -105,7 +105,7 @@
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "cors": "^2.8.5",
-    "cross-env": "^7.0.3",
+    "cross-env": "^10.1.0",
     "eslint": "^9.33.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.5.0",
