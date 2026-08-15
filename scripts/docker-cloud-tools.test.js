@@ -157,6 +157,8 @@ describe('Piarium cloud container runtime', () => {
     expect(runtimeBaseDockerfile).toContain('ARG NODE_VERSION=24.15.0');
     expect(runtimeBaseDockerfile).toContain('ARG NODE_TYPES_VERSION=24.12.4');
     expect(runtimeBaseDockerfile).toContain('ARG VITEST_VERSION=4.1.6');
+    expect(toolbeltStage).toContain('export HOME=/root NPM_CONFIG_PREFIX=/root/.npm-global;');
+    expect(toolbeltStage).toContain('/home/piarium/.cache/go-build');
     expect(runtimeBaseDockerfile).toContain('npm install -g pnpm tsx typescript typescript-language-server yarn');
     expect(runtimeBaseDockerfile).toContain('https://sh.rustup.rs');
     expect(runtimeBaseDockerfile).toContain('rustup component add rust-analyzer rustfmt');

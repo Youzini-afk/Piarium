@@ -91,6 +91,7 @@ COPY --from=moby/buildkit@sha256:0ffa2fcf6b8757c47d569b3ef0f03f9d5eb3b9ff5ce68d8
 COPY --chmod=0755 scripts/docker-build-only-wrapper.sh /usr/local/bin/docker
 
 RUN set -eux; \
+  export HOME=/root NPM_CONFIG_PREFIX=/root/.npm-global; \
   apt-get update && apt-get install -y --no-install-recommends \
   cmake \
   default-jdk-headless \
@@ -156,7 +157,7 @@ ENV PIARIUM_VALIDATION_NODE_MODULES=/home/piarium/.piarium-validation/node_modul
 ENV NODE_PATH=${PIARIUM_VALIDATION_NODE_MODULES}
 ENV PATH=/home/piarium/app/node_modules/.bin:${PIARIUM_VALIDATION_NODE_MODULES}/.bin:${NPM_CONFIG_PREFIX}/bin:${GOPATH}/bin:${CARGO_HOME}/bin:/usr/local/go/bin:${PATH}
 
-RUN mkdir -p /home/piarium/go /home/piarium/.cargo /home/piarium/.rustup /home/piarium/.piarium-validation && \
+RUN mkdir -p /home/piarium/go /home/piarium/.cache/go-build /home/piarium/.cargo /home/piarium/.rustup /home/piarium/.piarium-validation && \
   curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
   rustup component add rust-analyzer rustfmt && \
   rustc --version && cargo --version && \
