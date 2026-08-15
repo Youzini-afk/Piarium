@@ -84,7 +84,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.4",
     "cors": "^2.8.5",
     "cross-env": "^7.0.3",
     "eslint": "^9.33.0",
