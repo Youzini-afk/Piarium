@@ -297,18 +297,28 @@ an integration smoke test without exposing credentials.
 Acceptance: install on a clean Windows user profile, run the Phase 5–6 smoke journey, restart with
 active history intact, upgrade in place, and uninstall without deleting user projects or sessions.
 
-## Phase 8 — OpenChamber upstream capability absorption (active)
+## Phase 8 — OpenChamber upstream capability absorption (complete)
 
 The reviewed fork/upstream reconciliation and capability-by-capability disposition live in
 [openchamber-upstream-20260813.md](openchamber-upstream-20260813.md). The merge is used as an audit
-source rather than copied over the Pi-native engine.
+source rather than copied over the Pi-native engine. Every capability in that ledger now carries a
+final disposition: adopted at its Pi owner, supplemented beyond the upstream implementation, or
+reviewed and deliberately not copied.
 
-- In progress: directly portable Markdown, terminal-output, and layout fixes.
+- Implemented: directly portable rendering and terminal hardening. Raw Markdown HTML stays inert
+  text, `script` and `style` are forbidden again at the sanitization boundary, final Pi bash output
+  resolves ANSI styling, carriage-return progress, cursor movement, and line erasure under an
+  explicit allocation budget, and code line-number cells stay on one line.
 - Implemented: retained relay request-body integrity and mobile transient reconnect behavior.
-- Planned as Pi-native features: Work Status, guided code walkthroughs, and Markdown loop discovery
-  for the existing scheduler.
+- Implemented as Pi-native features: the Work Status wide-chat panel, guided
+  diff/branch/pull-request walkthroughs, and Markdown task loops for the existing scheduler. Each
+  names its authoritative Pi data source and left no duplicate owner behind.
+- Implemented: the remaining adopted upstream fixes across provider configuration and OAuth, Git
+  worktree and base-branch resolution, pairing/relay reachability, desktop file and window behavior,
+  Electron 43 with self-healing installation, native directory permission recovery, first-use bundle
+  loading, and the session-settling contract for an unexpected Pi worker exit.
 - OpenCode session sync, provider routes, MCP ownership, and lifecycle code remain excluded; only a
-  reproducible underlying invariant may be reimplemented at its Pi owner.
+  reproducible underlying invariant was reimplemented at its Pi owner.
 
 Acceptance: every adopted capability names its authoritative owner, preserves fork behavior where
 it is still required, and has no production dependency on OpenCode or a duplicate compatibility
