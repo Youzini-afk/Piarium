@@ -1,138 +1,90 @@
 ---
 title: Змінні середовища
-description: Налаштуйте інтеграцію OpenChamber і OpenCode через змінні середовища.
+description: Налаштуйте сервер Piarium, термінали, Git, голос і тунелі за допомогою змінних середовища.
 ---
 
 # Змінні середовища
 
-OpenChamber читає ці змінні під час запуску. Для startup-сервісів `openchamber startup enable` типово зберігає snapshot поточного середовища, тому після змін перезапустіть цю команду.
+Piarium читає ці змінні середовища під час запуску. Для служб автозапуску `piarium startup enable` за замовчуванням зберігає знімок поточного середовища, тож запустіть її знову після зміни змінних, які має використовувати служба.
 
-## Сервер OpenChamber
+Piarium вбудовує runtime Pi. Окремого сервера OpenCode немає, і змінних інтеграції `OPENCODE_*` теж немає.
+
+## Сервер Piarium
 
 ### `PIARIUM_HOST`
 
-Адреса, на якій слухає web-сервер OpenChamber. Використовуйте `0.0.0.0`, щоб відкрити доступ з інших машин.
+Адреса прив’язки вебсервера Piarium. Використовуйте `0.0.0.0`, щоб дозволити доступ з інших машин.
 
 ### `PIARIUM_UI_PASSWORD`
 
-Пароль для browser UI. Використовуйте його для доступу не лише з localhost, тунелів або reverse proxy.
+Пароль браузерного UI. Використовуйте його, коли прив’язуєте поза localhost, користуєтеся тунелями або працюєте за зворотним проксі.
 
 ### `PIARIUM_API_ONLY`
 
-Запускає OpenChamber у headless mode, якщо встановлено `true` або `1`. API routes залишаються доступними для desktop і mobile clients, але browser UI не віддається.
+Запускає Piarium у headless-режимі, коли встановлено `true` або `1`. Маршрути API лишаються доступними для десктопних і мобільних клієнтів, але браузерний UI не віддається.
 
 ### `PIARIUM_DATA_DIR`
 
-Перевизначає директорію даних OpenChamber. Типово це `~/.config/openchamber`.
+Перевизначає каталог даних Piarium. Типове значення — `~/.config/piarium`.
 
 ### `PIARIUM_COMPRESS_API`
 
-Керує стисненням API-відповідей. `true` або `1` вмикає, `false` або `0` вимикає.
+Керує стисненням відповідей API. Використовуйте `true` або `1`, щоб примусово ввімкнути, `false` або `0` — щоб примусово вимкнути.
 
 ### `PIARIUM_SKIP_API_COMPRESSION`
 
-Вимикає стиснення API-відповідей, якщо встановлено `true` або `1`. Має пріоритет над `PIARIUM_COMPRESS_API`.
+Вимикає стиснення відповідей API, коли встановлено `true` або `1`. Це має пріоритет над `PIARIUM_COMPRESS_API`.
 
 ### `PIARIUM_VERBOSE_REQUEST_LOGS`
 
-Вмикає детальні HTTP request logs, якщо встановлено `true` або `1`.
+Вмикає докладні журнали HTTP-запитів, коли встановлено `true` або `1`.
 
 ### `PIARIUM_UPDATE_API_URL`
 
-Перевизначає endpoint для перевірки оновлень. Більшості користувачів це не потрібно.
+Перевизначає кінцеву точку API перевірки оновлень. Більшості користувачів варто лишити це невстановленим.
 
 ### `PIARIUM_PACKAGE_MANAGER`
 
-Примусово задає package manager для оновлень, якщо auto-detection помилився.
+Примусово задає менеджер пакетів для операцій оновлення, коли автовизначення помиляється.
 
-## Сервер OpenCode
-
-### `OPENCODE_HOST`
-
-Підключає OpenChamber до вже запущеного OpenCode server. Значення має бути `http` або `https` origin з явним портом і без path, query або hash. `OPENCODE_HOST` має пріоритет над `OPENCODE_PORT`.
-
-### `OPENCODE_PORT`
-
-Задає порт OpenCode server. Для managed OpenCode це бажаний порт; з `OPENCODE_SKIP_START=true` OpenChamber підключається до зовнішнього сервера на цьому порту.
-
-### `OPENCODE_SKIP_START`
-
-Не дає OpenChamber запускати власний OpenCode server, якщо встановлено `true`.
-
-### `PIARIUM_OPENCODE_HOSTNAME`
-
-Hostname для OpenCode server, яким керує OpenChamber. Типово `127.0.0.1`.
-
-### `OPENCODE_BINARY`
-
-Шлях до executable `opencode`, який має запускати OpenChamber.
-
-### `OPENCODE_CONFIG`
-
-Шлях до конкретного config-файлу OpenCode.
-
-### `OPENCODE_CONFIG_DIR`
-
-Шлях до директорії config OpenCode для agents, skills, snippets і config discovery.
-
-### `OPENCODE_DATA_DIR`
-
-Власна директорія даних для managed OpenCode server.
-
-### `OPENCODE_WSL_DISTRO`
-
-Вибирає WSL distro для інтеграції OpenCode на Windows.
-
-### `PIARIUM_OPENCODE_WSL_DISTRO`
-
-OpenChamber-specific alias для вибору WSL distro. `OPENCODE_WSL_DISTRO` має пріоритет, якщо задані обидві змінні.
-
-### `OPENCODE_JWT_SECRET`
-
-Secret для підпису UI auth tokens. Для постійних service deployments використовуйте довге випадкове значення.
-
-## Terminal і Git
+## Термінал і Git
 
 ### `PIARIUM_TERMINAL_SHELL`
 
-Shell executable для terminal sessions в OpenChamber.
+Виконуваний файл оболонки для термінальних сесій Piarium.
 
 ### `PIARIUM_GIT_BINARY`
 
-Git executable для Git-функцій OpenChamber.
+Виконуваний файл Git, який використовують функції Git у Piarium.
 
 ### `GIT_BINARY`
 
-Альтернативний override для Git executable. Для OpenChamber-specific налаштувань краще використовуйте `PIARIUM_GIT_BINARY`.
+Альтернативне перевизначення виконуваного файлу Git. Для конфігурації саме Piarium надавайте перевагу `PIARIUM_GIT_BINARY`.
 
 ### `PIARIUM_GIT_READ_CACHE_TTL_MS`
 
-TTL у мілісекундах для cached Git-backed file reads. Встановіть `0`, щоб вимкнути cache під час debugging.
+Час життя, у мілісекундах, кешованих читань файлів через Git. Встановіть `0`, щоб вимкнути цей кеш під час налагодження.
 
-## Voice і tunnels
+## Голос і тунелі
 
 ### `OPENAI_API_KEY`
 
-API key для voice-функцій OpenChamber, які викликають OpenAI-compatible services.
+Ключ API, який використовують голосові функції Piarium, що викликають сервіси, сумісні з OpenAI.
 
 ### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
-Дозволяє remote OpenAI-compatible base URLs для voice-функцій, якщо встановлено `true` або `1`.
+Дозволяє віддалені базові URL, сумісні з OpenAI, для голосових функцій, коли встановлено `true` або `1`.
 
 ### `NGROK_AUTHTOKEN`
 
-ngrok auth token для tunnel-команд OpenChamber. Також можна налаштувати ngrok через `ngrok config add-authtoken <token>`.
+Токен автентифікації ngrok для команд тунелів Piarium. ngrok також можна налаштувати командою `ngrok config add-authtoken <token>`.
 
-## Runtime helpers
+## Допоміжні змінні runtime
 
 ### `BUN_BINARY`
 
-Bun executable, який OpenChamber має використовувати для запуску daemon processes.
+Виконуваний файл Bun, який Piarium має використовувати, запускаючи процеси-демони.
 
 ### `BUN_INSTALL`
 
-Корінь інсталяції Bun. OpenChamber використовує його, щоб знайти `bin/bun` для daemon startup і updates.
-
-### `VITE_OPENCODE_URL`
-
-Build-time API base URL для Vite-built web app. Для звичайного CLI або desktop usage більшості користувачів це не потрібно.
+Корінь встановлення Bun. Piarium використовує його, щоб знайти `bin/bun` для запуску демона та оновлень.

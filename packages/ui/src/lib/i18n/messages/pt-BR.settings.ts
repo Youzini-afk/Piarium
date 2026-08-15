@@ -32,14 +32,14 @@ export const settingsDict = {
   "settings.view.home.cards.mcp.title": "MCP",
   "settings.view.home.cards.mcp.description": "Configure servidores e conexões MCP",
   'settings.view.home.cards.plugins.title': 'Plugins',
-  'settings.view.home.cards.plugins.description': 'Manage opencode plugins',
+
   "settings.view.home.cards.usage.title": "Uso",
   "settings.view.home.cards.usage.description": "Cota + visibilidade dos gastos",
   "settings.view.unavailable.title": "Indisponível",
   "settings.view.unavailable.description": "Esta página de configurações não está disponível neste ambiente de execução.",
   "settings.view.badge.beta": "beta",
-  "settings.view.actions.reloadOpenCode": "Recarregar OpenCode",
-  "settings.view.actions.reloadOpenCodeTooltip": "Reiniciar OpenCode e recarregar suas configurações.",
+
+
   "settings.view.actions.backToSettings": "Voltar às configurações",
   "settings.view.actions.closeSettings": "Fechar configurações",
   "settings.view.actions.openSectionList": "Abrir lista de seções",

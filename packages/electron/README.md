@@ -115,7 +115,7 @@ When these variables are absent, the build falls back to an unsigned NSIS instal
 
 ### Smoke Builds
 
-The `release-desktop-smoke.yml` workflow can build Windows artifacts on demand. Enable the `build_windows` input to produce installer artifacts for testing without creating a release.
+There is no on-demand `release-desktop-smoke.yml` workflow yet. Build and smoke Windows artifacts locally with `bun run electron:build:win` and `bun run electron:smoke:win`.
 
 Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 

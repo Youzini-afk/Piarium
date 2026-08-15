@@ -1820,7 +1820,7 @@ export const dict = {
   'chat.pendingChanges.changedInWorkspace': 'changed in workspace',
   'chat.changedFiles.title': 'Changed files',
   'chat.changedFiles.actions.openFileTitle': 'Open {path}',
-  'chat.emptyState.opencodeUnreachable': 'OpenCode is not reachable',
+
   'chat.emptyState.startNewChat': 'Start a new chat',
   'chat.emptyState.draftTitle': 'What are we working on?',
   'chat.emptyState.draftTitleWithProject': 'What are we working on in {project}?',

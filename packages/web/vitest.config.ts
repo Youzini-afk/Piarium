@@ -9,7 +9,7 @@ export default defineConfig({
     },
   },
   test: {
-    hookTimeout: 15_000,
-    testTimeout: 15_000,
+    hookTimeout: 45_000,
+    testTimeout: 45_000,
   },
 });

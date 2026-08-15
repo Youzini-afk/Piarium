@@ -1,0 +1,55 @@
+name: Bug report
+description: Something is broken or behaves incorrectly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for a report. Search existing issues first. Do not include secrets, prompt bodies, or private file contents.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Web
+        - Desktop
+        - VS Code
+        - Mobile
+        - CLI / Docker
+        - Unsure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.1.0 or a git SHA
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: OS, Node/Bun version, how you installed Piarium

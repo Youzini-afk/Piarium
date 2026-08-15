@@ -35,14 +35,14 @@ export const settingsDict = {
   'settings.view.home.cards.mcp.title': 'MCP',
   'settings.view.home.cards.mcp.description': 'MCP サーバーと接続を設定',
   'settings.view.home.cards.plugins.title': 'プラグイン',
-  'settings.view.home.cards.plugins.description': 'opencode のプラグインを管理',
+
   'settings.view.home.cards.usage.title': '使用量',
   'settings.view.home.cards.usage.description': '割り当てと支出の表示',
   'settings.view.unavailable.title': '利用できません',
   'settings.view.unavailable.description': 'このランタイムではこの設定ページは利用できません。',
   'settings.view.badge.beta': 'ベータ',
-  'settings.view.actions.reloadOpenCode': 'OpenCode を再読み込み',
-  'settings.view.actions.reloadOpenCodeTooltip': 'OpenCode を再起動して設定を再読み込みします。',
+
+
   'settings.view.actions.backToSettings': '設定に戻る',
   'settings.view.actions.closeSettings': '設定を閉じる',
   'settings.view.actions.openSectionList': 'セクション一覧を開く',

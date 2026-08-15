@@ -1,17 +1,19 @@
-# OpenChamber Mobile
+# Piarium Mobile
 
-Capacitor shell for the dedicated OpenChamber mobile web surface.
+Capacitor shell for the dedicated Piarium mobile web surface.
 
 The mobile package reuses the web build, then rewrites `mobile.html` to `index.html` in `packages/mobile/dist` so native iOS/Android always launch `MobileApp` instead of the hosted surface selector.
 
+Native bundle IDs still use the inherited `com.openchamber.app` identity. Changing them is a store-facing follow-up, not part of this source checkout.
+
 ## Runtime Model
 
-- The native app bundles the mobile UI only; it does not embed the OpenChamber web server or OpenCode server.
-- On first launch in Capacitor, the app shows a connection screen for an existing OpenChamber server.
+- The native app bundles the mobile UI only; it does not embed the Piarium web server or Pi runtime.
+- On first launch in Capacitor, the app shows a connection screen for an existing Piarium server.
 - Connections are saved locally in the app and can be managed from the mobile overflow menu under `Instances`.
 - The connection screen and `Instances` menu item are Capacitor-only. Hosted `mobile.html` in a normal browser keeps the regular web behavior.
-- Password-protected OpenChamber servers can be unlocked from the mobile app. The app stores the issued client token with the saved connection.
-- The Terminal workspace surface runs its PTY on the active OpenChamber server over the shared authenticated runtime transport; it never opens a local shell on the phone or tablet. Closing the surface detaches the renderer while the server session remains available for reattachment. On touch devices, dragging scrolls the buffer while long-pressing and dragging selects terminal text.
+- Password-protected Piarium servers can be unlocked from the mobile app. The app stores the issued client token with the saved connection.
+- The Terminal workspace surface runs its PTY on the active Piarium server over the shared authenticated runtime transport; it never opens a local shell on the phone or tablet. Closing the surface detaches the renderer while the server session remains available for reattachment. On touch devices, dragging scrolls the buffer while long-pressing and dragging selects terminal text.
 
 ## Commands
 
@@ -66,7 +68,7 @@ Required local tools:
 - If Android builds fail with `Unable to locate a Java Runtime` or `source release: 21`, install/use JDK 21 and set `JAVA_HOME` accordingly.
 - If Android SDK packages are missing, install `platform-tools`, `platforms;android-35`, and `build-tools;35.0.0`, then accept SDK licenses.
 - If CocoaPods cannot find Capacitor pods after reinstalling dependencies, run `bun install` from the workspace root, then rerun `bun run sync`.
-- If connecting to a remote OpenChamber server fails from the app while `/health` works in curl, check that the server build includes the packaged-client CORS allowlist for `capacitor://localhost` and local dev origins.
+- If connecting to a remote Piarium server fails from the app while `/health` works in curl, check that the server build includes the packaged-client CORS allowlist for `capacitor://localhost` and local dev origins.
 - If `serve-sim` preview says the stream is not producing frames, check the raw MJPEG stream before assuming the simulator stopped. In prior testing the raw stream worked while the browser preview UI stayed stale.
 
 ## Generated Assets

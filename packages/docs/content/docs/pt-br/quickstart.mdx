@@ -1,26 +1,27 @@
 ---
 title: Início rápido
-description: Inicie o OpenChamber rapidamente e escolha a plataforma certa para a tarefa.
+description: Inicie o Piarium rapidamente e escolha o app certo para a tarefa.
 ---
 
 # Início rápido
 
 ## Caminho mais rápido
 
-1. Instale o [OpenCode](https://opencode.ai).
-2. Instale a CLI do OpenChamber (veja [Instalação](/pt-br/install/) para o comando de uma linha).
-3. Execute `openchamber --ui-password be-creative-here`.
-4. Abra a URL que a CLI imprime (geralmente `http://localhost:3000`).
-5. Para usar pelo celular, inicie um [túnel](/pt-br/tunnels/) e escaneie o QR code.
+1. Clone o [Piarium](https://github.com/Youzini-afk/Piarium) e instale as dependências com Bun (veja [Instalação](/pt-br/install/)).
+2. Execute `bun run dev`.
+3. Abra a URL do Vite impressa no terminal.
+4. Para usar no celular, inicie um [túnel](/pt-br/tunnels/) e escaneie o QR code.
 
-Você deve ver a lista de sessões do OpenChamber no navegador. Se ela carregar, está tudo funcionando.
+Você deve ver a lista de sessões do Piarium no navegador. Se ela carregar, está tudo pronto.
 
-Use uma senha de UI forte, principalmente se pretende expor a instância à internet.
+Se preferir um container, use o caminho Docker em [Instalação](/pt-br/install/) e abra `http://127.0.0.1:3000` com o `PIARIUM_UI_PASSWORD` gerado.
 
-Se a página não carregar, confira a [Solução de problemas](/pt-br/troubleshooting/).
+Use uma senha de UI forte, principalmente se pretende abrir a instância para a internet.
 
-## Qual plataforma devo usar?
+Se a página não carregar, veja [Solução de problemas](/pt-br/troubleshooting/).
 
-- use **desktop** para o uso diário no macOS
-- use **web** para acesso remoto e revisão pelo celular
-- use **VS Code** para sessões ao lado do seu código
+## Qual app eu devo usar?
+
+- use o **desktop** para o trabalho local do dia a dia (`bun run electron:dev`)
+- use a **web** para acesso remoto e revisão no celular
+- use o **VS Code** para sessões ao lado do seu código (compile a extensão a partir do código-fonte)

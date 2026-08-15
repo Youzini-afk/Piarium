@@ -32,14 +32,14 @@ export const settingsDict = {
   'settings.view.home.cards.mcp.title': 'MCP',
   'settings.view.home.cards.mcp.description': 'MCP 서버 연결을 설정하세요',
   'settings.view.home.cards.plugins.title': 'Plugins',
-  'settings.view.home.cards.plugins.description': 'Manage opencode plugins',
+
   'settings.view.home.cards.usage.title': '사용량',
   'settings.view.home.cards.usage.description': '할당량 및 지출 현황',
   'settings.view.unavailable.title': '사용할 수 없음',
   'settings.view.unavailable.description': '이 설정 페이지는 현재 런타임에서 사용할 수 없습니다.',
   'settings.view.badge.beta': 'beta',
-  'settings.view.actions.reloadOpenCode': 'OpenCode 다시 로드',
-  'settings.view.actions.reloadOpenCodeTooltip': 'OpenCode를 재시작하고 설정을 다시 불러옵니다.',
+
+
   'settings.view.actions.backToSettings': '설정으로 돌아가기',
   'settings.view.actions.closeSettings': '설정 닫기',
   'settings.view.actions.openSectionList': '섹션 목록 열기',

@@ -16,6 +16,7 @@
 
 ## 开始之前
 
+- 请阅读[行为准则](CODE_OF_CONDUCT.md)。
 - 在 [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) 中报告可复现的缺陷、提出功能
   建议或展开聚焦的技术讨论。
 - 漏洞请通过[安全策略](SECURITY.zh-CN.md)中的私密流程报告。不要把利用细节发布到 Issue、
@@ -146,6 +147,7 @@ bun run build
 | VS Code 运行时 | `bun run --cwd packages/vscode verify:pi-runtime`，并运行相应构建/打包命令 |
 | 导入、导出或删除 | `bun run dead-code`，并生产构建每个受影响的产品端 |
 | 文档站 | `bun run docs:validate`，并手动检查改动过的本地链接 |
+| 工作区 `package.json` 或根 lockfile | 运行 `bun run update:cloud-runtime-lock`，保持 `scripts/cloud-runtime.bun.lock` 与冻结安装一致 |
 
 CI 会在 Windows 和 Ubuntu 上重复主要质量门槛。云端/运行时改动还会构建并烟测候选容器，只有通过后
 才提升可安装标签。

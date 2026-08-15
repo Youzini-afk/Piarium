@@ -10,7 +10,7 @@ description: Use when implementing, fixing, refactoring, or otherwise modifying 
 1. Read `AGENTS.md`, the nearest package `README.md`/`DOCUMENTATION.md` that exists, and every other matching skill.
 2. Inspect nearby implementation, callers, and tests before introducing a new pattern.
 3. Identify the owning package, affected runtimes, persisted data, public contracts, and failure behavior.
-4. Treat `D:\project\opencr\openchamber*` as read-only reference material, never as current authority.
+4. Treat a local OpenChamber checkout outside this repository as read-only reference material, never as current authority.
 
 ## Product boundary
 

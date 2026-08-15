@@ -1,37 +1,38 @@
 ---
 title: Solução de problemas
-description: Problemas comuns de configuração e execução com soluções rápidas.
+description: Problemas comuns de configuração e execução, com correções rápidas.
 ---
 
 # Solução de problemas
 
-Topou com um problema? Encontre o sintoma abaixo e tente a solução.
+Deu ruim? Encontre o sintoma abaixo e tente a correção.
 
-## O comando OpenChamber encerra ou não inicia
+## O comando do Piarium sai ou não inicia
 
-- confirme o Node.js `>=22`
-- execute `openchamber --version`
-- reinstale a CLI mais recente se necessário
+- confirme Node.js `>=22.19` (Node.js 24 é a linha de base de desenvolvimento suportada)
+- a partir de um checkout de código-fonte, execute `bun run dev` ou `bun run start:web`
+- se você tiver uma CLI publicada, execute `piarium --version` e reinstale se precisar
 
 ## A UI web não está acessível
 
-- verifique os logs do servidor com `openchamber logs`
-- confira a porta ativa (padrão `3000`)
-- abra `http://localhost:3000` diretamente primeiro, antes de testar links de túnel
+- a partir de um checkout de código-fonte, leia o terminal que iniciou `bun run dev`
+- se você tiver uma CLI publicada, verifique os logs do servidor com `piarium logs`
+- verifique a porta ativa (o desenvolvimento usa a URL do Vite; o padrão do servidor é `3000`)
+- abra `http://localhost:3000` diretamente primeiro antes de testar links de túnel
 
-## O link remoto/de túnel não funciona
+## O link remoto/túnel não funciona
 
-- execute `openchamber tunnel status --all`
+- execute `piarium tunnel status --all` quando a CLI estiver instalada
 - reinicie o túnel a partir da mesma instância/porta
-- gere um novo link de conexão se o token anterior já tiver sido usado
+- regenere o link de conexão se o token anterior já tiver sido usado
 
-Veja [Túneis](/pt-br/tunnels/) para a configuração completa e [Proxy reverso](/pt-br/reverse-proxy/) se você usar um.
+Veja [Túneis](/pt-br/tunnels/) para a configuração completa, e [Proxy reverso](/pt-br/reverse-proxy/) se você usar um.
 
 ## A extensão do VS Code não conecta
 
-- confirme que o servidor do OpenChamber está em execução
-- verifique se a extensão está atualizada
-- recarregue a janela do VS Code e tente conectar de novo
+- confirme que o servidor do Piarium está em execução
+- reconstrua ou atualize a extensão a partir deste repositório
+- recarregue a janela do VS Code e tente a conexão de novo
 
 ## Relacionado
 

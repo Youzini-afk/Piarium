@@ -1,33 +1,71 @@
 ---
 title: インストール
-description: デスクトップ、Web、VS Code 向けに OpenChamber をインストールします。
+description: ソースまたは Docker から、デスクトップ、Web、VS Code 向けに Piarium をインストールします。
 ---
 
 # インストール
 
-OpenChamber を実行する方法は 3 つあります。
+Piarium は pre-1.0 です。現在サポートされている実行方法は**ソースから**と **Docker を使う**ことだけです。パッケージ化された npm と GitHub Release のダウンロードはまだ公開されていません。
 
-- macOS 用のデスクトップアプリ
-- CLI がホストする Web アプリ。スマートフォンアプリのようにインストールできます（PWA）
-- VS Code 拡張機能
+製品面は 3 つあります。
+
+- デスクトップアプリ（Electron）
+- ローカルサーバーがホストする Web アプリ。スマホアプリのようにインストールできます（PWA）
+- VS Code 拡張
 
 ## 前提条件
 
-先に [OpenCode](https://opencode.ai) をインストールしてください。OpenChamber はその上で動作します。
+- Node.js 22.19 以降（開発の基準は Node.js 24）
+- [Bun](https://bun.sh) 1.3.14
+- Git
+- Windows で Pi のシェルツールを動かす場合は Git for Windows と Git Bash
 
-## Web + PWA
+別途 OpenCode や Pi CLI をインストールする必要は**ありません**。パッケージ化されたデスクトップビルドとコンテナビルドには、固定された Pi ランタイムが含まれます。
+
+## ソースから（Web）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
-openchamber --ui-password be-creative-here
+git clone https://github.com/Youzini-afk/Piarium.git
+cd Piarium
+bun install --frozen-lockfile
+bun run dev
 ```
 
-CLI が表示する URL（通常は `http://localhost:3000`）を開きます。OpenChamber のセッション一覧が表示されるはずです。すぐ使えるようにしておくには、ブラウザのアドレスバーにある「インストール」オプションでアプリとして追加します。
+ターミナルに表示された Vite URL を開きます。Piarium は UI と信頼できる API/ランタイムサービスを一緒に起動します。
 
-## デスクトップ
+## ソースから（デスクトップ）
 
-GitHub releases ページまたは OpenChamber ダウンロードページから最新のデスクトップビルドをダウンロードします。開いたら、普段の OpenCode ワークフローにサインインします。
+```bash
+bun run electron:dev
+```
+
+パッケージビルドにより近い形：
+
+```bash
+bun run electron:dev:bundled
+```
+
+Windows インストーラーは `bun run electron:build:win` でローカルにビルドできます。署名用の認証情報が設定されるまでは、未署名のインストーラーが想定どおりです。
+
+## Docker
+
+Linux の Docker ホスト上で：
+
+```bash
+mkdir -p data/piarium data/ssh data/cloudflared workspaces
+sudo chown -R 1000:1000 data workspaces
+umask 077
+printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+docker compose up -d
+curl --fail http://127.0.0.1:3000/health
+```
+
+`http://127.0.0.1:3000` を開き、生成されたパスワードを使います。インターネットに公開するデプロイの前には、TLS リバースプロキシか承認済みのトンネルを置いてください。本番では `PIARIUM_IMAGE` を `:latest` ではなく、検証済みの digest に固定してください。
 
 ## VS Code
 
-VS Code Marketplace からインストールし、普段の OpenCode ワークフローにサインインします。その後、OpenChamber ビューがサイドバーに開きます。
+このリポジトリから `bun run vscode:build` / `bun run vscode:package` で拡張をビルドします。Marketplace にはまだ公開されていません。
+
+## CLI ワンライナー（未公開）
+
+`scripts/install.sh` と `npx @piarium/web` は `@piarium/web` npm パッケージを対象にしています。そのパッケージはまだ公開レジストリにないため、リリースが公開されるまで curl インストーラーは失敗します。それまではソースまたは Docker を使ってください。

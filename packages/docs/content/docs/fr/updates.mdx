@@ -1,31 +1,30 @@
 ---
 title: Mises à jour
-description: Gardez OpenChamber à jour sur desktop, web et VS Code.
+description: Gardez Piarium à jour sur desktop, web et VS Code.
 ---
 
 # Mises à jour
 
-La façon de mettre OpenChamber à jour dépend de votre méthode d’installation. Dans tous les cas, vous pouvez vérifier votre version actuelle dans **Paramètres → OpenChamber → À propos**.
+La façon de mettre à jour Piarium dépend de la façon dont vous l’avez installé. Dans tous les cas, vous pouvez vérifier votre version actuelle dans **Settings → About**.
 
 ## Application desktop
 
-L’application desktop vérifie les mises à jour via les releases GitHub. Quand une mise à jour est disponible, OpenChamber vous le signale, la télécharge lorsque vous le choisissez et l’installe au prochain redémarrage. Vous gardez toujours le contrôle — rien ne s’installe sans votre accord.
+L’application desktop vérifie les mises à jour par rapport aux GitHub releases. Quand une est disponible, Piarium vous le dit, la télécharge quand vous le choisissez, et l’installe au prochain redémarrage. Vous gardez toujours le contrôle — rien ne s’installe sans votre accord.
+
+Les GitHub Releases ne sont pas encore publiées. En attendant, mettez à jour une copie source avec `git pull` et reconstruisez, ou épinglez un digest de conteneur testé.
 
 ## Web / CLI
 
-Si vous avez installé la CLI, mettez-la à jour depuis **À propos** avec les boutons de vérification et de mise à jour, ou depuis le terminal :
+Si vous avez installé une CLI publiée, mettez-la à jour depuis **About** avec les boutons de vérification et de mise à jour, ou depuis le terminal :
 
 ```bash
-openchamber update
+piarium update
 ```
 
-OpenChamber détecte comment il a été installé (npm, pnpm, yarn ou bun) et lance la bonne mise à jour pour vous.
+Piarium détecte comment il a été installé (npm, pnpm, yarn ou bun) et lance la bonne mise à jour. Le paquet `@piarium/web` n’est pas encore sur le registre npm public, donc ce chemin ne s’applique qu’après la publication d’une release.
 
-## Le serveur OpenCode
-
-OpenChamber et OpenCode se mettent à jour séparément. Quand une nouvelle version d’OpenCode est disponible, OpenChamber propose de la mettre à jour puis redémarre le serveur. Voir [Serveur OpenCode](/opencode-server/) pour comprendre comment ce serveur est géré.
+Les copies source se mettent à jour avec Git. Les déploiements Docker se mettent à jour en tirant un nouveau digest d’image.
 
 ## Pages liées
 
 - [Installation](/install/) — comment chaque application est installée au départ
-- [Serveur OpenCode](/opencode-server/) — mettre à jour le serveur sous-jacent

@@ -1,26 +1,27 @@
 ---
 title: Szybki start
-description: Szybko uruchom OpenChamber i wybierz platformę odpowiednią do zadania.
+description: Uruchom Piarium szybko i wybierz odpowiednią aplikację do zadania.
 ---
 
 # Szybki start
 
-## Najszybsza droga
+## Najszybsza ścieżka
 
-1. Zainstaluj [OpenCode](https://opencode.ai).
-2. Zainstaluj CLI OpenChamber (jednowierszowe polecenie znajdziesz w sekcji [Instalacja](/pl/install/)).
-3. Uruchom `openchamber --ui-password be-creative-here`.
-4. Otwórz adres URL wypisany przez CLI (zwykle `http://localhost:3000`).
-5. Aby korzystać z telefonu, uruchom [tunel](/pl/tunnels/) i zeskanuj kod QR.
+1. Sklonuj [Piarium](https://github.com/Youzini-afk/Piarium) i zainstaluj zależności za pomocą Bun (zobacz [Instalacja](/pl/install/)).
+2. Uruchom `bun run dev`.
+3. Otwórz adres Vite wypisany w terminalu.
+4. Aby używać z telefonu, uruchom [tunel](/pl/tunnels/) i zeskanuj kod QR.
 
-W przeglądarce powinna pojawić się lista sesji OpenChamber. Jeśli się załadowała, wszystko działa.
+W przeglądarce powinna pojawić się lista sesji Piarium. Jeśli się ładuje, wszystko działa.
 
-Używaj silnego hasła UI, zwłaszcza jeśli planujesz udostępnić instancję w internecie.
+Jeśli wolisz kontener, użyj ścieżki Docker w [Instalacja](/pl/install/) i otwórz `http://127.0.0.1:3000` z wygenerowanym `PIARIUM_UI_PASSWORD`.
 
-Jeśli strona się nie ładuje, zajrzyj do [Rozwiązywania problemów](/pl/troubleshooting/).
+Używaj silnego hasła UI, zwłaszcza jeśli planujesz otworzyć instancję na internet.
 
-## Której platformy użyć?
+Jeśli strona się nie ładuje, sprawdź [Rozwiązywanie problemów](/pl/troubleshooting/).
 
-- użyj **komputera** do codziennej pracy na macOS
-- użyj **przeglądarki** do zdalnego dostępu i przeglądania na telefonie
-- użyj **VS Code** do sesji tuż obok Twojego kodu
+## Której aplikacji użyć?
+
+- używaj **komputera** do codziennej pracy lokalnej (`bun run electron:dev`)
+- używaj **weba** do zdalnego dostępu i przeglądu z telefonu
+- używaj **VS Code** do sesji tuż obok kodu (zbuduj rozszerzenie ze źródeł)

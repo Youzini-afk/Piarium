@@ -1,31 +1,30 @@
 ---
 title: 更新
-description: デスクトップ、Web、VS Code の OpenChamber を最新に保ちます。
+description: デスクトップ、Web、VS Code で Piarium を最新に保ちます。
 ---
 
 # 更新
 
-OpenChamber の更新方法は、インストール方法によって異なります。どの場合でも、現在のバージョンは **Settings → OpenChamber → About** で確認できます。
+Piarium の更新方法は、インストール方法によって異なります。どの場合でも、現在のバージョンは **Settings → About** で確認できます。
 
 ## デスクトップアプリ
 
-デスクトップアプリは GitHub releases を確認して更新を探します。更新がある場合、OpenChamber が知らせ、あなたが選んだときにダウンロードし、次回再起動時にインストールします。常にあなたが制御します。勝手にインストールされることはありません。
+デスクトップアプリは GitHub releases に対して更新を確認します。利用可能な更新があると Piarium が知らせ、あなたが選んだときにダウンロードし、次回の再起動でインストールします。常にあなたが制御します。承諾なしにインストールされることはありません。
+
+GitHub Releases はまだ公開されていません。公開されるまでは、ソースチェックアウトを `git pull` して再ビルドするか、検証済みのコンテナ digest を固定してください。
 
 ## Web / CLI
 
-CLI をインストールした場合は、**About** の確認・更新ボタンから、またはターミナルから更新できます。
+公開済みの CLI をインストールしている場合は、**About** の確認と更新ボタンから、またはターミナルから更新できます。
 
 ```bash
-openchamber update
+piarium update
 ```
 
-OpenChamber はインストール方法（npm、pnpm、yarn、bun）を検出し、適切な更新を実行します。
+Piarium はインストール方法（npm、pnpm、yarn、または bun）を検出し、適切な更新を実行します。`@piarium/web` パッケージはまだ公開 npm レジストリにないため、この経路はリリース公開後にのみ適用されます。
 
-## OpenCode サーバー
-
-OpenChamber と OpenCode は別々に更新されます。新しい OpenCode バージョンが利用可能な場合、OpenChamber は更新を提案し、その後サーバーを再起動します。そのサーバーの管理方法は [OpenCode サーバー](/opencode-server/) を参照してください。
+ソースチェックアウトは Git で更新します。Docker デプロイは新しいイメージ digest を pull して更新します。
 
 ## 関連
 
-- [インストール](/install/) — 各アプリのインストール方法
-- [OpenCode サーバー](/opencode-server/) — 下層サーバーの更新
+- [インストール](/install/) — 各アプリの最初のインストール方法

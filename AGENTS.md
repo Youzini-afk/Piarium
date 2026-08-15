@@ -3,8 +3,8 @@
 ## Product and source boundary
 
 - Piarium is a Pi-native direct refactor of the maintainer's OpenChamber fork.
-- `D:\project\opencr\openchamber*` is read-only source material. Never edit, switch branches,
-  commit, or push there for Piarium work.
+- A local read-only OpenChamber checkout outside this repository is source material only.
+  Never edit, switch branches, commit, or push there for Piarium work.
 - All imports, deletions, rewrites, commits, and pushes happen in this repository.
 - Do not preserve OpenCode contracts as a permanent compatibility layer. Replace them with one
   canonical set of Piarium-owned Pi types and services, then delete obsolete code.

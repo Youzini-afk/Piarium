@@ -1,36 +1,37 @@
 ---
 title: Dépannage
-description: Problèmes courants d’installation et d’exécution, avec corrections rapides.
+description: Problèmes courants d’installation et d’exécution, avec des correctifs rapides.
 ---
 
 # Dépannage
 
-Vous êtes bloqué ? Trouvez le symptôme ci-dessous et essayez la correction.
+Un accroc ? Trouvez le symptôme ci-dessous et essayez le correctif.
 
-## La commande OpenChamber se ferme ou ne démarre pas
+## La commande Piarium quitte ou ne démarre pas
 
-- confirmez que Node.js est en version `>=22`
-- lancez `openchamber --version`
-- réinstallez la dernière CLI si nécessaire
+- confirmez Node.js `>=22.19` (Node.js 24 est la base de développement prise en charge)
+- depuis une copie source, exécutez `bun run dev` ou `bun run start:web`
+- si vous avez une CLI publiée, exécutez `piarium --version` et réinstallez si besoin
 
 ## L’UI web n’est pas joignable
 
-- consultez les logs serveur avec `openchamber logs`
-- vérifiez le port actif (par défaut `3000`)
+- depuis une copie source, lisez le terminal qui a lancé `bun run dev`
+- si vous avez une CLI publiée, consultez les journaux serveur avec `piarium logs`
+- vérifiez le port actif (le développement utilise l’URL Vite ; le serveur par défaut est `3000`)
 - ouvrez d’abord `http://localhost:3000` directement avant de tester les liens de tunnel
 
-## Le lien distant/tunnel ne fonctionne pas
+## Le lien distant / tunnel ne fonctionne pas
 
-- lancez `openchamber tunnel status --all`
-- redémarrez le tunnel depuis la même instance/le même port
-- régénérez le lien de connexion si le token précédent a déjà été utilisé
+- exécutez `piarium tunnel status --all` quand la CLI est installée
+- redémarrez le tunnel depuis la même instance / le même port
+- régénérez le lien de connexion si le jeton précédent a déjà été utilisé
 
 Voir [Tunnels](/tunnels/) pour la configuration complète, et [Reverse proxy](/reverse-proxy/) si vous en utilisez un.
 
 ## L’extension VS Code ne se connecte pas
 
-- confirmez que le serveur OpenChamber tourne
-- vérifiez que l’extension est à jour
+- confirmez que le serveur Piarium tourne
+- reconstruisez ou mettez à jour l’extension depuis ce dépôt
 - rechargez la fenêtre VS Code et réessayez la connexion
 
 ## Pages liées

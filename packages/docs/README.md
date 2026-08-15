@@ -1,6 +1,6 @@
-# OpenChamber Docs Source
+# Piarium Docs Source
 
-This package is the source-of-truth for OpenChamber public docs content.
+This package is the source-of-truth for Piarium public docs content.
 
 ## Layout
 
@@ -9,7 +9,7 @@ This package is the source-of-truth for OpenChamber public docs content.
   (e.g. `uk/`, `zh-cn/`, `pt-br/`, `fr/`); see `CONTRIBUTING.md` → Localization
 - `sidebar.config.json` - docs navigation structure for Starlight sidebar
 - `CONTRIBUTING.md` - authoring guide for adding pages, sections, and translations
-- `DEPLOYMENT.md` - release/manual packaging and sync trigger model
+- `DEPLOYMENT.md` - how this source is validated and what is not automated yet
 
 ## Local validation
 
@@ -24,10 +24,10 @@ This validates:
 - frontmatter (`title`, `description`) exists for every MDX page
 - sidebar links resolve to existing MDX routes
 
+It does not check branding, translation quality, or whether commands still match the code.
+
 ## Deployment model
 
-This repo owns docs content.
-
-Website rendering/deployment happens in `openchamber-website` (`apps/docs`).
-
-Use `.github/workflows/docs-source.yml` to package docs source on release or manual trigger.
+This repository owns the docs source. There is no separate website workflow in
+`.github/workflows` yet. Until a docs site is published, treat these pages as
+the canonical content for GitHub and any future Starlight renderer.

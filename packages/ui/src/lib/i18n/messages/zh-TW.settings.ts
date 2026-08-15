@@ -36,8 +36,8 @@ export const settingsDict = {
   'settings.view.unavailable.title': '無法使用',
   'settings.view.unavailable.description': '此設定頁面在目前執行環境中無法使用。',
   'settings.view.badge.beta': 'beta',
-  'settings.view.actions.reloadOpenCode': '重新載入 OpenCode',
-  'settings.view.actions.reloadOpenCodeTooltip': '重新啟動 OpenCode 並重新載入其設定。',
+
+
   'settings.view.actions.backToSettings': '返回設定頁',
   'settings.view.actions.closeSettings': '關閉設定',
   'settings.view.actions.openSectionList': '開啟群組清單',
@@ -1750,7 +1750,7 @@ export const settingsDict = {
   'settings.openchamber.desktopPassword.field.passwordPlaceholder': '不需要密碼',
   'settings.page.plugins.title': 'Pi 外掛',
   'settings.usage.sidebar.field.showPredictions': '顯示預測',
-  'settings.view.home.cards.plugins.description': '管理 opencode 外掛',
+
   'settings.view.home.cards.plugins.title': '外掛',
   'settings.github.page.actions.configureGitAuthor': 'Configure Git Author',
   'settings.github.page.actions.syncTerminal': 'Sync to Terminal',

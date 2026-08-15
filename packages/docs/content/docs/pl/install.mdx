@@ -1,33 +1,71 @@
 ---
 title: Instalacja
-description: Zainstaluj OpenChamber na komputer, do przeglądarki lub do VS Code.
+description: Zainstaluj Piarium na komputer, w przeglądarce lub w VS Code ze źródeł albo z Dockerem.
 ---
 
 # Instalacja
 
-OpenChamber można uruchomić na trzy sposoby:
+Piarium jest w wersji pre-1.0. Obsługiwane sposoby uruchomienia to dziś **ze źródeł** i **z Dockerem**. Spakowane pobrania npm i GitHub Release nie są jeszcze opublikowane.
 
-- aplikacja na komputer dla macOS
-- aplikacja webowa hostowana przez CLI, którą możesz zainstalować jak aplikację na telefonie (jako PWA)
-- rozszerzenie do VS Code
+Są trzy powierzchnie produktu:
 
-## Wymaganie wstępne
+- aplikacja na komputer (Electron)
+- aplikacja webowa hostowana przez lokalny serwer, którą możesz zainstalować jak aplikację na telefon (PWA)
+- rozszerzenie VS Code
 
-Najpierw zainstaluj [OpenCode](https://opencode.ai) — OpenChamber działa na jego bazie.
+## Wymagania wstępne
 
-## Przeglądarka + PWA
+- Node.js 22.19 lub nowszy (linią bazową rozwoju jest Node.js 24)
+- [Bun](https://bun.sh) 1.3.14
+- Git
+- Git for Windows i Git Bash przy uruchamianiu narzędzi powłoki Pi w Windows
+
+**Nie** potrzebujesz osobnej instalacji OpenCode ani CLI Pi. Spakowane buildy desktopowe i kontenerowe zawierają przypięte środowisko uruchomieniowe Pi.
+
+## Ze źródeł (web)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
-openchamber --ui-password be-creative-here
+git clone https://github.com/Youzini-afk/Piarium.git
+cd Piarium
+bun install --frozen-lockfile
+bun run dev
 ```
 
-Otwórz adres URL wypisany przez CLI (zwykle `http://localhost:3000`). Powinna pojawić się lista sesji OpenChamber. Aby mieć ją zawsze pod ręką, użyj opcji „Zainstaluj” w pasku adresu przeglądarki, aby dodać ją jako aplikację.
+Otwórz adres Vite wypisany w terminalu. Piarium uruchamia UI i zaufaną usługę API/runtime razem.
 
-## Komputer
+## Ze źródeł (komputer)
 
-Pobierz najnowszą kompilację na komputer ze strony wydań na GitHubie lub ze strony pobierania OpenChamber. Otwórz ją i zaloguj się do swojego zwykłego procesu pracy OpenCode.
+```bash
+bun run electron:dev
+```
+
+Bliżej spakowanego builda:
+
+```bash
+bun run electron:dev:bundled
+```
+
+Instalator Windows można zbudować lokalnie poleceniem `bun run electron:build:win`. Niepodpisane instalatory są oczekiwane, dopóki nie skonfigurujesz poświadczeń podpisu.
+
+## Docker
+
+Na hoście Docker w Linuxie:
+
+```bash
+mkdir -p data/piarium data/ssh data/cloudflared workspaces
+sudo chown -R 1000:1000 data workspaces
+umask 077
+printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+docker compose up -d
+curl --fail http://127.0.0.1:3000/health
+```
+
+Otwórz `http://127.0.0.1:3000` i użyj wygenerowanego hasła. Przed każdym wdrożeniem wystawionym do Internetu umieść reverse proxy TLS albo zatwierdzony tunel. W produkcji przypnij `PIARIUM_IMAGE` do przetestowanego digestu zamiast `:latest`.
 
 ## VS Code
 
-Zainstaluj z VS Code Marketplace i zaloguj się do swojego zwykłego procesu pracy OpenCode. Widok OpenChamber otworzy się wtedy na pasku bocznym.
+Zbuduj rozszerzenie z tego repozytorium poleceniami `bun run vscode:build` / `bun run vscode:package`. Nie jest jeszcze opublikowane w Marketplace.
+
+## Jednolinijkowiec CLI (nieopublikowany)
+
+`scripts/install.sh` i `npx @piarium/web` celują w pakiet npm `@piarium/web`. Ten pakiet nie jest jeszcze w publicznym rejestrze, więc instalator curl będzie kończył się niepowodzeniem do czasu publikacji wydania. Do tego czasu używaj źródeł albo Dockera.

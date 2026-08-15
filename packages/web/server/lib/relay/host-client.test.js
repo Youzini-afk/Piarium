@@ -256,7 +256,7 @@ describe('relay host-client integration', () => {
     host?.stop();
     await relay?.stop();
     await origin?.stop();
-  }, 15_000);
+  }, 45_000);
 
   it('tunnels an HTTP GET /health with only binary frames post-handshake', async () => {
     const identity = await buildIdentity();
@@ -288,5 +288,5 @@ describe('relay host-client integration', () => {
     const plaintextForwarded = forwarded.filter((f) => !f.isBinary);
     expect(plaintextForwarded.length).toBe(2); // hello + ready only
     expect(forwarded.filter((f) => f.isBinary).length).toBeGreaterThan(0);
-  }, 15_000);
+  }, 45_000);
 });

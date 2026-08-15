@@ -5,25 +5,25 @@ description: Połącz dostawców AI, wybierz modele i skonfiguruj agentów.
 
 # Dostawcy, modele i agenci
 
-Zanim OpenChamber cokolwiek zrobi, potrzebuje co najmniej jednego połączonego dostawcy AI. Ta strona opisuje łączenie dostawcy, wybór modelu i dostosowywanie agentów.
+Zanim Piarium cokolwiek zrobi, potrzebuje co najmniej jednego połączonego dostawcy AI. Ta strona opisuje łączenie dostawcy, wybór modelu i dostosowanie agentów.
 
 ## Połącz dostawcę
 
 1. Otwórz **Settings → Providers**.
 2. Otwórz menu **Add provider** i wybierz dostawcę, który nie jest jeszcze połączony.
-3. Zaloguj się na jeden z dwóch sposobów, zależnie od dostawcy:
-   - **Klucz API** — wklej swój klucz i zapisz.
-   - **Logowanie (device flow)** — OpenChamber pokazuje link i krótki kod. Otwórz link, wpisz kod i zatwierdź. OpenChamber sam dokończy łączenie.
+3. Zaloguj się na jeden z dwóch sposobów, w zależności od dostawcy:
+   - **API key** — wklej klucz i zapisz.
+   - **Sign-in (device flow)** — Piarium pokazuje link i krótki kod. Otwórz link, wpisz kod i zatwierdź. Piarium dokończy połączenie samodzielnie.
 
-Gdy dostawca pokazuje się jako połączony, jego modele stają się dostępne w czacie.
+Gdy dostawca jest oznaczony jako połączony, jego modele stają się dostępne na czacie.
 
-Aby się rozłączyć, otwórz dostawcę i wybierz usunięcie jego logowania.
+Aby odłączyć, otwórz dostawcę i wybierz usunięcie logowania.
 
 ## Wybierz model
 
 Model wybierasz tam, gdzie pracujesz:
 
-- w czacie użyj selektora modelu w pasku wiadomości, aby ustawić dostawcę i model dla tej sesji
+- na czacie użyj selektora modelu na pasku wiadomości, aby ustawić dostawcę i model dla tej sesji
 - dla agenta ustaw model domyślny (poniżej)
 
 ## Skonfiguruj agentów
@@ -31,19 +31,21 @@ Model wybierasz tam, gdzie pracujesz:
 Agent to nazwana konfiguracja — model, osobowość i to, co wolno mu robić.
 
 1. Otwórz **Settings → Agents**.
-2. Wybierz agenta lub utwórz nowego.
-3. Edytuj dowolne z poniższych:
+2. Wybierz agenta albo utwórz nowego.
+3. Edytuj dowolne z:
    - **description** — do czego służy agent
-   - **model** — jego domyślny model
-   - **temperature** — jak kreatywne są jego odpowiedzi
+   - **model** — jego model domyślny
+   - **temperature** — jak kreatywne są odpowiedzi
    - **prompt** — stałe instrukcje, których zawsze przestrzega
-   - **tool rules** — których narzędzi może używać
+   - **tool rules** — z których narzędzi może korzystać
 
-## Gdzie są przechowywane Twoje logowania
+## Gdzie żyją Twoje logowania
 
-Logowania dostawców są przechowywane przez OpenCode, a nie OpenChamber, więc są współdzielone z OpenCode CLI. Jeśli ustawisz tego samego dostawcę w więcej niż jednym miejscu, wygrywa ustawienie najbardziej szczegółowe: ustawienie dla projektu nadpisuje Twoje osobiste.
+Logowania dostawców przechowuje `AuthStorage` Pi, nie renderer. Klucze API i tokeny OAuth nigdy nie pojawiają się w metadanych dostawcy wysyłanych do UI. Warstwy `models.json` użytkownika, projektu i operatora zostają w swoich natywnych plikach.
+
+Jeśli ustawisz tego samego dostawcę w więcej niż jednym miejscu, wygrywa ustawienie najbardziej szczegółowe: zaufana warstwa projektu nadpisuje osobistą.
 
 ## Powiązane
 
-- [Serwery MCP](/pl/mcp/) — dodaj agentom dodatkowe narzędzia
-- [Zużycie i limity](/pl/usage/) — śledź, ile już wykorzystałeś
+- [Serwery MCP](/pl/mcp/) — dodaj dodatkowe narzędzia dla agentów
+- [Zużycie i limity](/pl/usage/) — śledź, ile zużyłeś

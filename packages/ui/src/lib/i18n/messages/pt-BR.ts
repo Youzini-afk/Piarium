@@ -1965,7 +1965,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.changedFiles.actions.viewDiffTitle": "Ver diff de {path}",
   "chat.changedFiles.actions.revertFile": "Reverter alterações",
   "chat.changedFiles.actions.revertFileTitle": "Reverter {path}",
-  "chat.emptyState.opencodeUnreachable": "OpenCode não está acessível",
+
   "chat.emptyState.startNewChat": "Iniciar uma nova conversa",
   "chat.emptyState.draftTitle": "Em que vamos trabalhar?",
   "chat.emptyState.draftTitleWithProject": "Em que vamos trabalhar no projeto {project}?",

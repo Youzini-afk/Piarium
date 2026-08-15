@@ -1,7 +1,7 @@
 {
   "name": "piarium-monorepo",
   "version": "0.1.0",
-  "description": "Pi-native desktop, web, mobile, and editor workspace derived from OpenChamber.",
+  "description": "Pi-native desktop, web, mobile, and editor workspace for coding agents.",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
@@ -19,7 +19,7 @@
     "piarium",
     "cli"
   ],
-  "author": "Youzini-afk and OpenChamber contributors",
+  "author": "Youzini-afk and Piarium contributors",
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "node ./scripts/dev-web-hmr.mjs",

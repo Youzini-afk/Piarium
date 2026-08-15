@@ -56,20 +56,6 @@
           }
         },
         {
-          "label": "OpenCode Server",
-          "link": "/opencode-server/",
-          "translations": {
-            "uk": "Сервер OpenCode",
-            "zh-CN": "OpenCode 服务器",
-            "es": "Servidor OpenCode",
-            "pt-BR": "Servidor OpenCode",
-            "ko": "OpenCode 서버",
-            "pl": "Serwer OpenCode",
-            "fr": "Serveur OpenCode",
-            "ja": "OpenCode サーバー"
-          }
-        },
-        {
           "label": "Environment Variables",
           "link": "/environment/",
           "translations": {
@@ -285,16 +271,16 @@
       ]
     },
     {
-      "label": "OpenCode setup",
+      "label": "Pi setup",
       "translations": {
-        "uk": "Налаштування OpenCode",
-        "zh-CN": "OpenCode 设置",
-        "es": "Configuración de OpenCode",
-        "pt-BR": "Configuração do OpenCode",
-        "ko": "OpenCode 설정",
-        "pl": "Konfiguracja OpenCode",
-        "fr": "Configuration OpenCode",
-        "ja": "OpenCode 設定"
+        "uk": "Налаштування Pi",
+        "zh-CN": "Pi 设置",
+        "es": "Configuración de Pi",
+        "pt-BR": "Configuração do Pi",
+        "ko": "Pi 설정",
+        "pl": "Konfiguracja Pi",
+        "fr": "Configuration Pi",
+        "ja": "Pi 設定"
       },
       "items": [
         {
@@ -663,20 +649,6 @@
             "pl": "Rozwiązywanie problemów",
             "fr": "Dépannage",
             "ja": "トラブルシューティング"
-          }
-        },
-        {
-          "label": "OpenCode Connection",
-          "link": "/troubleshooting/opencode-connection/",
-          "translations": {
-            "uk": "Підключення до OpenCode",
-            "zh-CN": "OpenCode 连接",
-            "es": "Conexión con OpenCode",
-            "pt-BR": "Conexão com o OpenCode",
-            "ko": "OpenCode 연결",
-            "pl": "Połączenie z OpenCode",
-            "fr": "Connexion à OpenCode",
-            "ja": "OpenCode 接続"
           }
         },
         {

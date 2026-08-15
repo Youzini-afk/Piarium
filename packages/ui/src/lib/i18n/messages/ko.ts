@@ -1823,7 +1823,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.pendingChanges.changedInWorkspace': '워크스페이스에서 변경됨',
   'chat.changedFiles.title': '변경된 파일',
   'chat.changedFiles.actions.openFileTitle': '{path} 열기',
-  'chat.emptyState.opencodeUnreachable': 'OpenCode에 연결할 수 없음',
+
   'chat.emptyState.startNewChat': '새 채팅 시작',
   'chat.emptyState.draftTitle': '무엇을 작업할까요?',
   'chat.emptyState.draftTitleWithProject': '{project}에서 무엇을 작업할까요?',

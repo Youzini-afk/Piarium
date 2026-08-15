@@ -1,31 +1,30 @@
 ---
 title: 업데이트
-description: 데스크톱, 웹, VS Code에서 OpenChamber를 최신 상태로 유지하세요.
+description: 데스크톱, 웹, VS Code에서 Piarium를 최신 상태로 유지하세요.
 ---
 
 # 업데이트
 
-OpenChamber를 업데이트하는 방법은 설치 방식에 따라 다릅니다. 어떤 경우든 **Settings → OpenChamber → About**에서 현재 버전을 확인할 수 있습니다.
+Piarium를 업데이트하는 방법은 설치 방식에 따라 다릅니다. 어떤 경우든 **Settings → About**에서 현재 버전을 확인할 수 있습니다.
 
 ## 데스크톱 앱
 
-데스크톱 앱은 GitHub 릴리스를 기준으로 업데이트를 확인합니다. 업데이트가 있으면 OpenChamber가 알려주고, 선택하면 다운로드한 뒤 다음 재시작 때 설치합니다. 항상 사용자가 제어하며, 동의 없이는 아무것도 설치되지 않습니다.
+데스크톱 앱은 GitHub releases를 기준으로 업데이트를 확인합니다. 업데이트가 있으면 Piarium가 알려 주고, 사용자가 선택할 때 다운로드하며, 다음 재시작 때 설치합니다. 항상 사용자가 제어합니다. 동의 없이 설치되지 않습니다.
+
+GitHub Releases는 아직 게시되지 않았습니다. 게시되기 전까지는 소스 체크아웃을 `git pull`한 뒤 다시 빌드하거나, 검증된 컨테이너 digest를 고정하세요.
 
 ## 웹 / CLI
 
-CLI를 설치했다면 **About**의 확인 및 업데이트 버튼으로 업데이트하거나, 터미널에서 업데이트합니다.
+게시된 CLI를 설치했다면 **About**의 확인 및 업데이트 버튼으로, 또는 터미널에서 업데이트하세요.
 
 ```bash
-openchamber update
+piarium update
 ```
 
-OpenChamber는 설치 방식(npm, pnpm, yarn 또는 bun)을 감지하여 알맞은 업데이트를 실행합니다.
+Piarium는 설치 방식(npm, pnpm, yarn, 또는 bun)을 감지하고 알맞은 업데이트를 실행합니다. `@piarium/web` 패키지는 아직 공개 npm 레지스트리에 없으므로, 이 경로는 릴리스가 게시된 뒤에만 적용됩니다.
 
-## OpenCode 서버
-
-OpenChamber와 OpenCode는 별도로 업데이트됩니다. 새 OpenCode 버전이 있으면 OpenChamber가 업데이트를 제안하고, 이후 서버를 재시작합니다. 그 서버가 관리되는 방식은 [OpenCode Server](/ko/opencode-server/)를 참고하세요.
+소스 체크아웃은 Git으로 업데이트합니다. Docker 배포는 새 이미지 digest를 pull하여 업데이트합니다.
 
 ## 관련 항목
 
-- [Install](/ko/install/) — 각 앱이 처음에 설치되는 방법
-- [OpenCode Server](/ko/opencode-server/) — 기반 서버 업데이트
+- [설치](/ko/install/) — 각 앱이 처음 설치되는 방식

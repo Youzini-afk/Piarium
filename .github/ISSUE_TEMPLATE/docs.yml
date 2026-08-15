@@ -1,0 +1,22 @@
+name: Documentation
+description: A docs page is wrong, missing, or still uses old branding
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      description: Path under packages/docs/content/docs/ or a sidebar title
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is wrong
+    validations:
+      required: true
+  - type: textarea
+    id: suggested
+    attributes:
+      label: Suggested correction

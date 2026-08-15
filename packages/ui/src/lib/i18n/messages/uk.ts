@@ -1968,7 +1968,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.changedFiles.actions.viewDiffTitle": "Переглянути diff для {path}",
   "chat.changedFiles.actions.revertFile": "Скасувати зміни",
   "chat.changedFiles.actions.revertFileTitle": "Скасувати {path}",
-  "chat.emptyState.opencodeUnreachable": "OpenCode недоступний",
+
   "chat.emptyState.startNewChat": "Почніть новий чат",
   "chat.emptyState.draftTitle": "Над чим працюємо?",
   "chat.emptyState.draftTitleWithProject": "Над чим працюємо в {project}?",

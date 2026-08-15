@@ -686,7 +686,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.pendingChanges.changedInWorkspace': 'zmienione w przestrzeni roboczej',
   'chat.changedFiles.title': 'Zmienione pliki',
   'chat.changedFiles.actions.openFileTitle': 'Otwórz {path}',
-  'chat.emptyState.opencodeUnreachable': 'OpenCode jest nieosiągalny',
+
   'chat.emptyState.startNewChat': 'Rozpocznij nowy czat',
   'chat.emptyState.draftTitle': 'Nad czym pracujemy?',
   'chat.emptyState.draftTitleWithProject': 'Nad czym pracujemy w projekcie {project}?',

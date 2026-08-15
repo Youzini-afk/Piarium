@@ -9,8 +9,8 @@ describe('Pi package identity', () => {
   });
 
   test('recognizes local Windows and file URL working copies', () => {
-    expect(piPackageNameFromSource('D:\\project\\opencr\\pi-wtf')).toBe('pi-wtf');
-    expect(piPackageNameFromSource('file:///D:/project/opencr/pi-workspace-history.git')).toBe('pi-workspace-history');
+    expect(piPackageNameFromSource('D:\\tmp\\pi-wtf')).toBe('pi-wtf');
+    expect(piPackageNameFromSource('file:///D:/tmp/pi-workspace-history.git')).toBe('pi-workspace-history');
     expect(piPackageNameFromSource('https://github.com/Youzini-afk/pi-mcp-adapter.git')).toBe('pi-mcp-adapter');
   });
 
@@ -18,7 +18,7 @@ describe('Pi package identity', () => {
     expect(isPiPackageUpdatable('npm:pi-wtf')).toBe(true);
     expect(isPiPackageUpdatable('https://github.com/example/pi-plugin.git')).toBe(true);
     expect(isPiPackageUpdatable('git@example.com:example/pi-plugin.git')).toBe(true);
-    expect(isPiPackageUpdatable('D:\\project\\opencr\\pi-wtf')).toBe(false);
+    expect(isPiPackageUpdatable('D:\\tmp\\pi-wtf')).toBe(false);
     expect(isPiPackageUpdatable('../../extensions/pi-wtf')).toBe(false);
   });
 
@@ -29,11 +29,11 @@ describe('Pi package identity', () => {
         installed: true,
         name: 'pi-wtf',
         scope: 'project',
-        source: 'D:\\project\\opencr\\pi-wtf',
+        source: 'D:\\tmp\\pi-wtf',
         structured: false,
       },
     ], 'pi-wtf');
-    expect(configured?.source).toBe('D:\\project\\opencr\\pi-wtf');
+    expect(configured?.source).toBe('D:\\tmp\\pi-wtf');
     expect(findPiPackage([configured!], 'pi-wtf', 'global')).toBeUndefined();
     expect(findPiPackage([configured!], 'pi-wtf', 'project')).toBe(configured);
   });

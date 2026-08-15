@@ -1,26 +1,27 @@
 ---
 title: Démarrage rapide
-description: Lancez OpenChamber rapidement et choisissez la bonne application pour la tâche.
+description: Démarrez Piarium rapidement et choisissez l’application adaptée à la tâche.
 ---
 
 # Démarrage rapide
 
 ## Chemin le plus rapide
 
-1. Installez [OpenCode](https://opencode.ai).
-2. Installez la CLI OpenChamber (voir [Installation](/install/) pour la commande en une ligne).
-3. Lancez `openchamber --ui-password be-creative-here`.
-4. Ouvrez l’URL affichée par la CLI (souvent `http://localhost:3000`).
-5. Pour l’utiliser depuis votre téléphone, démarrez un [tunnel](/tunnels/) et scannez le QR code.
+1. Clonez [Piarium](https://github.com/Youzini-afk/Piarium) et installez les dépendances avec Bun (voir [Installation](/install/)).
+2. Exécutez `bun run dev`.
+3. Ouvrez l’URL Vite affichée dans le terminal.
+4. Pour l’utiliser depuis votre téléphone, démarrez un [tunnel](/tunnels/) et scannez le QR code.
 
-Vous devriez voir la liste des sessions OpenChamber dans votre navigateur. Si elle se charge, tout est prêt.
+Vous devriez voir la liste des sessions Piarium dans votre navigateur. Si elle se charge, vous êtes opérationnel.
 
-Utilisez un mot de passe UI robuste, surtout si vous prévoyez d’ouvrir l’instance à internet.
+Si vous préférez un conteneur, utilisez le chemin Docker de [Installation](/install/) et ouvrez `http://127.0.0.1:3000` avec le `PIARIUM_UI_PASSWORD` généré.
+
+Utilisez un mot de passe UI fort, surtout si vous prévoyez d’ouvrir l’instance à Internet.
 
 Si la page ne se charge pas, consultez le [dépannage](/troubleshooting/).
 
 ## Quelle application utiliser ?
 
-- utilisez **desktop** pour le travail quotidien sur macOS
-- utilisez **web** pour l’accès distant et la revue depuis votre téléphone
-- utilisez **VS Code** pour garder les sessions juste à côté de votre code
+- utilisez le **desktop** pour le travail local au quotidien (`bun run electron:dev`)
+- utilisez le **web** pour l’accès distant et la relecture depuis votre téléphone
+- utilisez **VS Code** pour des sessions juste à côté de votre code (construisez l’extension depuis les sources)

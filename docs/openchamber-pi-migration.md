@@ -15,7 +15,7 @@ Piarium adopts the maintainer's OpenChamber fork, not a pristine upstream checko
 
 Every OpenChamber source worktree is read-only for this project. Imports are produced from the
 specified commit tree; all copies, deletions, rewrites, branches, commits, and pushes happen only in
-`D:\project\opencr\Piarium`. Tracked `.env`, tool-specific agent directories, stale CI/release
+this repository. Tracked `.env`, tool-specific agent directories, stale CI/release
 identity, and OpenChamber/OpenCode branding are not blindly copied into release artifacts.
 
 ## Non-regression contract

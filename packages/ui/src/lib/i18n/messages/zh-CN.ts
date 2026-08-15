@@ -1956,7 +1956,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.changedFiles.actions.viewDiffTitle': '查看 {path} 的差异',
   'chat.changedFiles.actions.revertFile': '回退更改',
   'chat.changedFiles.actions.revertFileTitle': '回退 {path}',
-  'chat.emptyState.opencodeUnreachable': '无法连接 OpenCode',
+
   'chat.emptyState.startNewChat': '开始新的聊天',
   'chat.emptyState.draftTitle': '我们要做什么？',
   'chat.emptyState.draftTitleWithProject': '我们要在 {project} 中做什么？',

@@ -111,7 +111,7 @@ run_with_act() {
 
     # Build act command
     local ACT_CMD="act workflow_dispatch"
-    ACT_CMD+=" -W .github/workflows/release.yml"
+    ACT_CMD+=" -W .github/workflows/ci.yml"
     ACT_CMD+=" --input version=0.0.0-test"
     ACT_CMD+=" --input dry_run=true"
     ACT_CMD+=" --container-architecture linux/amd64"
@@ -310,7 +310,7 @@ fi
 echo ""
 log_success "Release build test completed!"
 echo ""
-log_info "This script mirrors the build steps in .github/workflows/release.yml"
+log_info "This script mirrors the local desktop packaging path. There is no release.yml workflow yet."
 log_info "Note: Signing and notarization are skipped (require Apple secrets)"
 echo ""
 log_info "Next steps:"

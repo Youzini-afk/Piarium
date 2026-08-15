@@ -20,6 +20,7 @@ language.
 
 ## Before you begin
 
+- Read the [Code of Conduct](CODE_OF_CONDUCT.md).
 - Use [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) for reproducible bugs, feature
   proposals, and focused technical discussions.
 - Send vulnerabilities through the private process in [SECURITY.md](SECURITY.md). Do not publish
@@ -163,6 +164,7 @@ Run these when the affected boundary applies:
 | VS Code runtime | `bun run --cwd packages/vscode verify:pi-runtime` plus the relevant build/package command |
 | Imports, exports, or deletion | `bun run dead-code` and a production build of each affected surface |
 | Documentation site | `bun run docs:validate` and manual checking of changed local links |
+| Workspace `package.json` or root lockfile | `bun run update:cloud-runtime-lock` so `scripts/cloud-runtime.bun.lock` stays frozen |
 
 CI repeats the main quality gates on Windows and Ubuntu. Cloud/runtime changes also build and smoke
 candidate containers before any installable tags are promoted.

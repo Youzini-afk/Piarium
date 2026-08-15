@@ -32,14 +32,14 @@ export const settingsDict = {
   "settings.view.home.cards.mcp.title": "MCP",
   "settings.view.home.cards.mcp.description": "Налаштування MCP серверів і підключень",
   'settings.view.home.cards.plugins.title': 'Plugins',
-  'settings.view.home.cards.plugins.description': 'Manage opencode plugins',
+
   "settings.view.home.cards.usage.title": "Використання",
   "settings.view.home.cards.usage.description": "Квота + видимість витрат",
   "settings.view.unavailable.title": "Недоступно",
   "settings.view.unavailable.description": "Ця сторінка налаштувань недоступна в цьому середовищі виконання.",
   "settings.view.badge.beta": "бета-версія",
-  "settings.view.actions.reloadOpenCode": "Перезавантажити OpenCode",
-  "settings.view.actions.reloadOpenCodeTooltip": "Перезапустити OpenCode і перезавантажити його конфігурацію.",
+
+
   "settings.view.actions.backToSettings": "Назад до налаштувань",
   "settings.view.actions.closeSettings": "Закрити налаштування",
   "settings.view.actions.openSectionList": "Відкрити список розділів",

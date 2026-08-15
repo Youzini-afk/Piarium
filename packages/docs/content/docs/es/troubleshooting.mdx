@@ -1,27 +1,28 @@
 ---
 title: Resolución de problemas
-description: Problemas comunes de configuración y ejecución con soluciones rápidas.
+description: Problemas habituales de configuración y ejecución, con soluciones rápidas.
 ---
 
 # Resolución de problemas
 
-¿Te topaste con un problema? Busca el síntoma abajo y prueba la solución.
+¿Un contratiempo? Encuentra el síntoma abajo e intenta la solución.
 
-## El comando OpenChamber se cierra o no arranca
+## El comando de Piarium sale o no arranca
 
-- confirma que Node.js es `>=22`
-- ejecuta `openchamber --version`
-- reinstala la última CLI si hace falta
+- confirma Node.js `>=22.19` (Node.js 24 es la línea base de desarrollo compatible)
+- desde una copia del código fuente, ejecuta `bun run dev` o `bun run start:web`
+- si tienes una CLI publicada, ejecuta `piarium --version` y reinstala si hace falta
 
-## No se puede acceder a la UI web
+## La UI web no es accesible
 
-- revisa los logs del servidor con `openchamber logs`
-- verifica el puerto activo (por defecto `3000`)
+- desde una copia del código fuente, lee el terminal que inició `bun run dev`
+- si tienes una CLI publicada, revisa los registros del servidor con `piarium logs`
+- verifica el puerto activo (el desarrollo usa la URL de Vite; el valor predeterminado del servidor es `3000`)
 - abre primero `http://localhost:3000` directamente antes de probar enlaces de túnel
 
-## El enlace remoto/de túnel no funciona
+## El enlace remoto/túnel no funciona
 
-- ejecuta `openchamber tunnel status --all`
+- ejecuta `piarium tunnel status --all` cuando la CLI esté instalada
 - reinicia el túnel desde la misma instancia/puerto
 - regenera el enlace de conexión si el token anterior ya se usó
 
@@ -29,8 +30,8 @@ Consulta [Túneles](/es/tunnels/) para la configuración completa, y [Proxy inve
 
 ## La extensión de VS Code no se conecta
 
-- confirma que el servidor de OpenChamber está en marcha
-- verifica que la extensión está actualizada
+- confirma que el servidor de Piarium está en ejecución
+- vuelve a compilar o actualiza la extensión desde este repositorio
 - recarga la ventana de VS Code y reintenta la conexión
 
 ## Relacionado

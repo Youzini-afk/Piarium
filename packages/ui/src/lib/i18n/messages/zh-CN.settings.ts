@@ -32,14 +32,14 @@ export const settingsDict = {
   'settings.view.home.cards.mcp.title': 'MCP',
   'settings.view.home.cards.mcp.description': '配置 MCP 服务器和连接',
   'settings.view.home.cards.plugins.title': 'Plugins',
-  'settings.view.home.cards.plugins.description': 'Manage opencode plugins',
+
   'settings.view.home.cards.usage.title': '用量',
   'settings.view.home.cards.usage.description': '配额和花费可见性',
   'settings.view.unavailable.title': '不可用',
   'settings.view.unavailable.description': '此设置页面在当前运行环境中不可用。',
   'settings.view.badge.beta': '测试版',
-  'settings.view.actions.reloadOpenCode': '重新加载 OpenCode',
-  'settings.view.actions.reloadOpenCodeTooltip': '重启 OpenCode 并重新加载其配置。',
+
+
   'settings.view.actions.backToSettings': '返回设置',
   'settings.view.actions.closeSettings': '关闭设置',
   'settings.view.actions.openSectionList': '打开分组列表',

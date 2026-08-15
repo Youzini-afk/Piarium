@@ -1630,8 +1630,8 @@ export const settingsDict = {
   'settings.view.actions.closeSettings': 'Zamknij ustawienia',
   'settings.view.actions.closeSettingsWithShortcut': 'Zamknij ustawienia ({shortcut}+,)',
   'settings.view.actions.openSectionList': 'Otwórz listę sekcji',
-  'settings.view.actions.reloadOpenCode': 'Przeładuj OpenCode',
-  'settings.view.actions.reloadOpenCodeTooltip': 'Uruchom ponownie OpenCode i przeładuj jego konfigurację.',
+
+
   'settings.view.actions.resizeNavigation': 'Zmień rozmiar nawigacji',
   'settings.view.search.placeholder': 'Szukaj ustawień',
   'settings.view.search.aria': 'Szukaj ustawień',
@@ -1647,7 +1647,7 @@ export const settingsDict = {
   'settings.view.home.cards.mcp.description': 'Skonfiguruj serwery MCP + połączenia',
   'settings.view.home.cards.mcp.title': 'MCP',
   'settings.view.home.cards.plugins.title': 'Plugins',
-  'settings.view.home.cards.plugins.description': 'Manage opencode plugins',
+
   'settings.view.home.cards.providers.description': 'Połącz modele + dane uwierzytelniające',
   'settings.view.home.cards.providers.title': 'Dostawcy',
   'settings.view.home.cards.skillsCatalog.description': 'Zainstaluj skille z katalogów',

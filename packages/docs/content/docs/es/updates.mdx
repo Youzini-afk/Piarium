@@ -1,31 +1,30 @@
 ---
 title: Actualizaciones
-description: Mantén OpenChamber actualizado en escritorio, web y VS Code.
+description: Mantén Piarium al día en escritorio, web y VS Code.
 ---
 
 # Actualizaciones
 
-Cómo actualizas OpenChamber depende de cómo lo instalaste. En todos los casos puedes comprobar tu versión actual en **Settings → OpenChamber → About**.
+Cómo actualizas Piarium depende de cómo lo instalaste. En todos los casos puedes ver tu versión actual en **Settings → About**.
 
 ## App de escritorio
 
-La app de escritorio busca actualizaciones contra las releases de GitHub. Cuando hay una disponible, OpenChamber te avisa, la descarga cuando lo eliges y la instala en el siguiente reinicio. Siempre tienes el control: nada se instala sin tu aprobación.
+La app de escritorio comprueba actualizaciones frente a GitHub releases. Cuando hay una disponible, Piarium te avisa, la descarga cuando tú lo eliges y la instala en el siguiente reinicio. Siempre tienes el control: no se instala nada sin tu consentimiento.
+
+Aún no se publican GitHub Releases. Hasta entonces, actualiza una copia del código fuente con `git pull` y vuelve a compilar, o fija un digest de contenedor probado.
 
 ## Web / CLI
 
-Si instalaste la CLI, actualízala desde **About** con los botones de comprobar y actualizar, o desde la terminal:
+Si instalaste una CLI publicada, actualízala desde **About** con los botones de comprobar y actualizar, o desde el terminal:
 
 ```bash
-openchamber update
+piarium update
 ```
 
-OpenChamber detecta cómo se instaló (npm, pnpm, yarn o bun) y ejecuta la actualización correcta por ti.
+Piarium detecta cómo se instaló (npm, pnpm, yarn o bun) y ejecuta la actualización correcta. El paquete `@piarium/web` aún no está en el registro público de npm, así que este camino solo aplica después de publicar una versión.
 
-## El servidor de OpenCode
-
-OpenChamber y OpenCode se actualizan por separado. Cuando hay una nueva versión de OpenCode disponible, OpenChamber se ofrece a actualizarla y reinicia el servidor después. Consulta [OpenCode Server](/es/opencode-server/) para saber cómo se gestiona ese servidor.
+Las copias del código fuente se actualizan con Git. Los despliegues Docker se actualizan al extraer un nuevo digest de imagen.
 
 ## Relacionado
 
 - [Instalación](/es/install/) — cómo se instala cada app en primer lugar
-- [OpenCode Server](/es/opencode-server/) — actualizar el servidor subyacente
