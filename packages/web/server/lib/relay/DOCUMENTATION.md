@@ -56,6 +56,8 @@ The host dispatcher restricts tunneled traffic to explicit path allowlists (one 
 
 1. **Pairing.** The host issues a pairing-v2 link (QR / deep link) carrying a one-time secret and a list of transport candidates. When the relay is enabled, one candidate is the relay transport (its endpoint, routing id, and encryption public key — the E2EE trust anchor). The client redeems the secret over the first reachable candidate; over the relay candidate it opens the E2EE tunnel first, then redeems through it, and stores the connection.
 2. **Presence.** When the relay is enabled, the host opens one outbound control connection and waits.
+   The host reports `connected` only after it receives the relay's initial `sync`; a local WebSocket
+   `open` event alone does not prove that the relay has registered the control connection.
 3. **Connect.** The client connects for a given routing id; the relay notifies the host over the control connection; the host opens a matching per-client data connection.
 4. **Handshake.** Over that connection pair, client and host run the E2EE handshake and derive a shared encrypted channel the relay cannot read.
 5. **Traffic.** All normal app traffic is multiplexed and encrypted through that channel. On the host, decrypted requests are dispatched to the local server over loopback with the actual loopback origin, so normal origin checks still apply without trusting client-supplied origin metadata; responses stream back encrypted. Reconnects re-establish a fresh channel and the app's existing retry machinery recovers.

@@ -41,6 +41,16 @@ const startFakeRelay = () => {
     relayFrames: [], // observed forwarded frames (for plaintext assertions)
   };
 
+  const sendControlSync = () => {
+    const control = state.control;
+    if (!control || control.readyState !== WebSocket.OPEN) return false;
+    control.send(JSON.stringify({ type: 'sync', connectionIds: [...state.clients.keys()] }));
+    for (const id of state.clients.keys()) {
+      control.send(JSON.stringify({ type: 'connected', connectionId: id }));
+    }
+    return true;
+  };
+
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url, 'http://localhost');
     const role = url.searchParams.get('role');
@@ -48,11 +58,6 @@ const startFakeRelay = () => {
 
     if (role === 'host-control') {
       state.control = ws;
-      // Announce any already-waiting clients.
-      ws.send(JSON.stringify({ type: 'sync', connectionIds: [...state.clients.keys()] }));
-      for (const id of state.clients.keys()) {
-        ws.send(JSON.stringify({ type: 'connected', connectionId: id }));
-      }
       return;
     }
 
@@ -97,6 +102,7 @@ const startFakeRelay = () => {
       resolve({
         wsUrl: `ws://127.0.0.1:${port}`,
         state,
+        sendControlSync,
         stop: () => new Promise((r) => {
           wss.close();
           server.close(() => r());
@@ -277,8 +283,12 @@ describe('relay host-client integration', () => {
       logger: { warn: () => {} },
     });
 
-    // Windows CI runners can take longer than a fixed 200ms sleep to open the
-    // control socket. Wait for the host's own connected status instead.
+    // A local WebSocket upgrade is not proof that the relay registered this
+    // host. Keep the public state connecting until the relay sends its sync.
+    const socketReady = await waitFor(() => relay.state.control?.readyState === WebSocket.OPEN);
+    expect(socketReady).toBe(true);
+    expect(host.getStatus().state).toBe('connecting');
+    expect(relay.sendControlSync()).toBe(true);
     const controlReady = await waitFor(() => host.getStatus().state === 'connected');
     expect(controlReady).toBe(true);
 

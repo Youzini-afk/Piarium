@@ -247,6 +247,11 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     }
     if (!message || typeof message !== 'object') return;
     if (message.type === 'sync' && Array.isArray(message.connectionIds)) {
+      // The WebSocket `open` event only proves that the local transport completed
+      // its upgrade. The relay's first sync is the authoritative registration
+      // acknowledgement: only now may callers advertise the host as connected.
+      consecutiveFailures = 0;
+      setState('connected', null);
       const wanted = new Set(message.connectionIds.filter((id) => typeof id === 'string' && id.length > 0));
       for (const connectionId of [...dataSockets.keys()]) {
         if (!wanted.has(connectionId)) teardownDataSocket(connectionId);
@@ -315,9 +320,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
 
     socket.on('open', () => {
       if (controlSocket !== socket) return;
-      consecutiveFailures = 0;
       lastAliveAt = Date.now();
-      setState('connected', null);
     });
     socket.on('pong', () => {
       lastAliveAt = Date.now();
