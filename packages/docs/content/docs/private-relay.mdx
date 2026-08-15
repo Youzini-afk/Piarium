@@ -1,44 +1,44 @@
 ---
 title: Private Relay
-description: Reach your Piarium server from anywhere over an end-to-end encrypted relay — no ports, no tunnels, no setup.
+description: 通过端到端加密的中继，从任何地方访问你的 Piarium 服务器 — 无需端口、隧道或任何配置。
 ---
 
 # Private Relay
 
-The Piarium Private Relay lets your paired devices reach your server from anywhere — cellular, a café network, another city — without opening ports, setting up a tunnel, or exposing your machine to the internet. It manages itself: pairing a device with **Anywhere** in [Connect a Device](/connect-devices/) is all it takes.
+Piarium Private Relay 让你已配对的设备可以从任何地方访问你的服务器 — 蜂窝网络、咖啡馆的 Wi-Fi、另一座城市 — 无需开放端口、搭建隧道，也不会把你的机器暴露到互联网上。它会自行管理：只需在 [连接设备](/connect-devices/) 中用 **任何地方** 配对设备即可。
 
-## How it works
+## 工作原理
 
-Your server opens an outbound connection to Piarium's relay infrastructure and keeps it alive. When one of your devices is away from your network, it connects to the relay too, and the relay passes encrypted traffic between the two. Nothing on your machine listens for incoming connections from the internet.
+你的服务器向 Piarium 的中继基础设施发起一条出站连接并保持存活。当你的某台设备不在你的网络中时，它也连接到中继，中继在两者之间转发加密流量。你的机器上没有任何东西在监听来自互联网的入站连接。
 
-When a direct connection is available — you're back home on the same Wi-Fi — your devices prefer it and skip the relay entirely.
+当直接连接可用时 — 比如你回到家、处于同一个 Wi-Fi — 你的设备会优先直连，完全跳过中继。
 
-## What the relay can and cannot see
+## 中继能看到什么、看不到什么
 
-The relay is a blind courier, not a middleman:
+中继是一个“盲信使”，而不是中间人：
 
-- **End-to-end encrypted.** Your device and your server agree on encryption keys directly with each other. The relay forwards sealed traffic it has no keys for — it cannot read your code, your prompts, or your passwords.
-- **Only your devices can connect.** A device must hold a token issued by *your* server through [one-time pairing](/connect-devices/). Nobody can discover your server through the relay or connect to it without a token you created — and you can revoke any token at any time.
-- **Pairing links are single-use.** A pairing QR code works exactly once and expires if unused, so a leaked old link is worthless.
-- **Nothing is shared until you opt in.** The relay stays off until you enable it or pair a device over it, and you can disable it at any time — devices connected through it are cut off immediately.
+- **端到端加密。** 你的设备和服务器直接协商加密密钥。中继只转发它没有密钥的密封流量 — 它无法读取你的代码、提示词或密码。
+- **只有你的设备能连接。** 设备必须持有*你的*服务器通过 [一次性配对](/connect-devices/) 签发的令牌。没有人能通过中继发现你的服务器，也无法在没有你创建的令牌的情况下连接它 — 而且你可以随时撤销任何令牌。
+- **配对链接只能使用一次。** 配对二维码只能生效一次，未使用也会过期，所以泄露的旧链接毫无价值。
+- **在你选择开启之前，什么都不会共享。** 在你启用中继或通过它配对设备之前，中继保持关闭；你可以随时停用它 — 通过它连接的设备会立即断开。
 
-## When it runs
+## 何时运行
 
-The relay manages its own lifecycle — there is no switch to remember:
+中继自行管理生命周期 — 没有需要你记住的开关：
 
-- **It starts on demand.** Creating an **Anywhere** pairing turns the relay on, and it comes back after a restart for as long as any paired device still relies on it.
-- **It stops on its own.** Once no device or pending pairing uses the relay — for example after you revoke the last relay-paired device — it shuts down automatically.
+- **按需启动。** 创建一个 **任何地方** 配对就会开启中继；只要还有已配对设备依赖它，服务器重启后它也会自动恢复。
+- **自动停止。** 一旦没有任何设备或待完成的配对在使用中继 — 比如你撤销了最后一台通过中继配对的设备 — 它会自动关闭。
 
-**Settings → Remote Instances → Piarium Relay** shows the live state (Connected, Reconnecting, …) and how many devices are connected through it right now. You can also press **Disable** there to cut relay access off immediately; devices on your local network are unaffected.
+**Settings → Remote Instances → Piarium Relay** 会显示实时状态（已连接、重新连接中……），以及当前通过它连接的设备数量。你也可以在那里按 **停用** 立即切断中继访问；本地网络上的设备不受影响。
 
-## Relay or a tunnel?
+## 用中继还是隧道？
 
-- Use the **relay** to reach your own server from your own paired devices. It's zero-setup and nothing is exposed publicly.
-- Use a [tunnel](/tunnels/) when you need a plain **public URL** — for example to open Piarium in an ordinary browser on a machine you can't pair, or to share access behind a [UI password](/security/).
+- 用**中继**来让你自己已配对的设备访问你自己的服务器。零配置，且不对外暴露任何内容。
+- 当你需要一个普通的**公开 URL**时使用 [隧道](/tunnels/) — 比如在一台无法配对的机器上用普通浏览器打开 Piarium，或者在 [UI 密码](/security/) 保护下共享访问。
 
-## Related
+## 相关内容
 
-- [Connect a Device](/connect-devices/) — pair a device with a one-time QR code
-- [Mobile Apps](/mobile/) — install the iOS or Android app
-- [Security](/security/) — passwords, passkeys, and exposure basics
-- [Remote access](/troubleshooting/remote-access/) — when a connection won't complete
+- [连接设备](/connect-devices/) — 用一次性二维码配对设备
+- [移动应用](/mobile/) — 安装 iOS 或 Android 应用
+- [安全](/security/) — 密码、passkey 与暴露基础知识
+- [远程访问](/troubleshooting/remote-access/) — 当连接无法完成时

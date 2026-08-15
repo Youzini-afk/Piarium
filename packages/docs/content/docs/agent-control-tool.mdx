@@ -1,39 +1,39 @@
 ---
-title: Agent Control Tool
-description: Let an agent manage Piarium sessions, worktrees, and scheduled tasks from chat.
+title: 智能体控制工具
+description: 让智能体从聊天中管理 Piarium 会话、worktree 和计划任务。
 ---
 
-# Agent Control Tool
+# 智能体控制工具
 
-Use the Piarium agent-control tool to manage work in the app directly from chat. It is available on desktop and web when Piarium is running its local Pi runtime. There is no separate tool to install or shell command to run.
+使用 Piarium 智能体控制工具，直接从聊天中管理应用内的工作。当 Piarium 运行自己的本地 Pi 运行时时，此工具在桌面端和 Web 上可用。无需安装单独的工具，也无需运行 shell 命令。
 
-## What you can ask
+## 可以提出哪些请求
 
-Ask the agent in plain language. For example:
+用自然语言告诉智能体即可。例如：
 
-- "Create a new Piarium session in this project, use the `openai/gpt-5.6-sol` model, and send it this prompt: review the authentication flow."
-- "Create a new Piarium session for this task in a separate worktree, and ask it to add tests for the login flow."
-- "Use Piarium to list my 10 most recent sessions and include their current status."
-- "Create a Piarium scheduled task named Weekday review that sends this prompt at 09:00 every weekday: review changes since the last run."
-- "Run the Piarium scheduled task named Weekday review now."
-- "Check the Piarium session named Authentication review and show me its latest assistant response."
+- “在此项目中创建一个新的 Piarium 会话，使用 `openai/gpt-5.6-sol` 模型，并向它发送此提示：审查身份验证流程。”
+- “在单独的 worktree 中为此任务创建一个新的 Piarium 会话，并让它为登录流程添加测试。”
+- “使用 Piarium 列出我最近的 10 个会话，并包含它们的当前状态。”
+- “在 Piarium 中创建名为 Weekday review 的计划任务，每个工作日 09:00 发送此提示：审查自上次运行以来的更改。”
+- “立即运行名为 Weekday review 的 Piarium 计划任务。”
+- “检查名为 Authentication review 的 Piarium 会话，并显示最新的助手回复。”
 
-The tool can list projects and model preferences, create and follow up on sessions, fork a session, create isolated worktree sessions, and manage scheduled tasks. Sessions started this way appear in Piarium like any other session, so you can open them and continue the work yourself.
+该工具可以列出项目和模型偏好、创建和继续会话、分叉会话、创建隔离的 worktree 会话，以及管理计划任务。以这种方式启动的会话会像普通会话一样显示在 Piarium 中，因此你可以打开并自行继续工作。
 
-## Keep in mind
+## 注意事项
 
-- New session prompts return immediately by default. Follow the session in Piarium, or ask the agent to check it later.
-- A separate worktree is only created when you ask for one. Uncommitted changes from your current worktree are not copied into it.
-- The tool cannot delete sessions or worktrees, register project paths, run arbitrary shell commands, or call arbitrary URLs.
+- 新会话提示默认会立即返回。请在 Piarium 中跟进会话，或稍后让智能体检查结果。
+- 只有在你明确要求时才会创建单独的 worktree。当前 worktree 中未提交的更改不会复制过去。
+- 该工具不能删除会话或 worktree、注册项目路径、运行任意 shell 命令或调用任意 URL。
 
-## Turn the tool on or off
+## 开启或关闭工具
 
-Open **Settings**, change **Agent control tool**, then save. The setting applies to the current Piarium runtime.
+打开 **Settings**，更改 **Agent control tool**，然后保存。该设置应用于当前的 Piarium 运行时。
 
-The tool is not available inside the VS Code extension.
+此工具在 VS Code 扩展中不可用。
 
-## Related
+## 相关内容
 
-- [Scheduled Tasks](/scheduled-tasks/)
-- [Worktree Sessions](/worktrees/)
-- [Session Goals](/session-goals/)
+- [计划任务](/scheduled-tasks/)
+- [Worktree 会话](/worktrees/)
+- [会话目标](/session-goals/)

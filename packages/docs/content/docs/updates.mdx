@@ -1,30 +1,30 @@
 ---
-title: Updates
-description: Keep Piarium up to date on desktop, web, and VS Code.
+title: 更新
+description: 在桌面端、网页端和 VS Code 上保持 Piarium 最新。
 ---
 
-# Updates
+# 更新
 
-How you update Piarium depends on how you installed it. In every case you can check your current version at **Settings → About**.
+你如何更新 Piarium 取决于你如何安装它。在任何情况下，你都可以在 **Settings → About** 查看当前版本。
 
-## Desktop app
+## 桌面应用
 
-The desktop app checks for updates against GitHub releases. When one is available, Piarium tells you, downloads it when you choose, and installs it on the next restart. You're always in control — nothing installs without your say-so.
+桌面应用会对照 GitHub releases 检查更新。当有可用更新时，Piarium 会告诉你，在你选择时下载它，并在下次重启时安装它。一切都由你掌控 — 没有你的同意不会安装任何东西。
 
-GitHub Releases are not published yet. Until they are, update a source checkout with `git pull` and rebuild, or pin a tested container digest.
+GitHub Releases 尚未发布。在发布之前，请用 `git pull` 更新源码检出并重新构建，或固定到已测试的容器 digest。
 
 ## Web / CLI
 
-If you installed a published CLI, update it from **About** with the check and update buttons, or from the terminal:
+如果你安装的是已发布的 CLI，可以从 **About** 用检查和更新按钮更新它，或从终端更新：
 
 ```bash
 piarium update
 ```
 
-Piarium detects how it was installed (npm, pnpm, yarn, or bun) and runs the right update for you. The `@piarium/web` package is not on the public npm registry yet, so this path applies only after a release is published.
+Piarium 会检测它是如何安装的（npm、pnpm、yarn 或 bun），并为你运行正确的更新。`@piarium/web` 包尚未上架公共 npm registry，因此这条路径仅在发布之后才适用。
 
-Source checkouts update with Git. Docker deployments update by pulling a new image digest.
+源码检出用 Git 更新。Docker 部署通过拉取新的镜像 digest 来更新。
 
-## Related
+## 相关内容
 
-- [Install](/install/) — how each app is installed in the first place
+- [安装](/install/) — 每个应用最初是如何安装的

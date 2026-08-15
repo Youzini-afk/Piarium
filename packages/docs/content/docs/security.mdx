@@ -1,44 +1,44 @@
 ---
-title: Security
-description: Protect the UI with a password and passkeys before exposing it.
+title: 安全
+description: 在公开 UI 之前，用密码和 passkey 保护它。
 ---
 
-# Security
+# 安全
 
-Piarium gives access to your machine and your code, so lock it down before anyone but you can reach it. This page covers the UI password, passkeys, and what to know before exposing Piarium to a network.
+Piarium 让外界可以访问你的机器和代码，所以在除你之外的任何人能够访问它之前，请把它锁好。本页介绍 UI 密码、passkey，以及在将 Piarium 暴露到网络之前需要了解的内容。
 
-## Set a UI password
+## 设置 UI 密码
 
-Start Piarium with a password and the browser UI asks for it:
+带密码启动 Piarium，浏览器 UI 就会要求输入它：
 
 ```bash
 piarium --ui-password be-creative-here
 ```
 
-You can also set it with the `PIARIUM_UI_PASSWORD` environment variable instead of putting it on the command line. After signing in, Piarium remembers the device for a while so you're not asked every time.
+你也可以用 `PIARIUM_UI_PASSWORD` 环境变量来设置它，而不是把它放在命令行上。登录后，Piarium 会记住该设备一段时间，这样你就不必每次都输入。
 
-Always set a password if the instance is reachable by anyone else — especially over a [tunnel](/tunnels/) or the public internet.
+如果实例可以被其他任何人访问，请务必设置密码 — 尤其是通过 [隧道](/tunnels/) 或公共互联网时。
 
-## Passkeys
+## Passkey
 
-Once a password is set, you can add passkeys (Face ID, Touch ID, a security key) for quicker sign-in. Add them at **Settings → Piarium → Passkeys**.
+设置密码后，你可以添加 passkey（Face ID、Touch ID、安全密钥）以便更快登录。在 **Settings → Piarium → Passkeys** 中添加它们。
 
-Passkeys are tied to the current password. If you change or remove the password, saved passkeys are cleared and you'll add them again.
+passkey 与当前密码绑定。如果你更改或移除密码，已保存的 passkey 会被清除，你需要重新添加它们。
 
-## Device tokens
+## 设备令牌
 
-Devices paired through [Connect a Device](/connect-devices/) authenticate with their own per-device tokens, not the UI password. Pairing links are single-use and expire if unused; every paired device is listed at **Settings → Remote Instances → Connect to this server**, where you can revoke any of them at any time. Away-from-home connections go through the [Private Relay](/private-relay/), which is end-to-end encrypted and cannot read your traffic.
+通过 [连接设备](/connect-devices/) 配对的设备使用各自独立的设备令牌进行认证，而不是 UI 密码。配对链接只能使用一次，未使用也会过期；每台已配对的设备都会列在 **Settings → Remote Instances → 连接到此服务器** 中，你可以随时撤销任何一台。外出时的连接经由 [Private Relay](/private-relay/) 传输，它是端到端加密的，无法读取你的流量。
 
-## Before you expose it
+## 在暴露它之前
 
-- By default Piarium only listens on your own machine (`127.0.0.1`). It takes a deliberate change to listen more widely, and you should set a password first.
-- For your own devices, prefer [pairing](/connect-devices/) with the [Private Relay](/private-relay/) — nothing is exposed publicly at all.
-- If you need a public URL, prefer a [tunnel](/tunnels/) or a private network (like a VPN) over opening a port to the internet.
-- If you put Piarium behind your own HTTPS server, see [Reverse Proxy](/reverse-proxy/).
+- 默认情况下 Piarium 只监听你自己的机器（`127.0.0.1`）。需要一次刻意的更改才能更广泛地监听，并且你应该先设置密码。
+- 对于你自己的设备，优先使用 [配对](/connect-devices/) 加 [Private Relay](/private-relay/) — 完全不对外暴露任何内容。
+- 如果你需要一个公开 URL，相比向互联网开放一个端口，更推荐使用 [隧道](/tunnels/) 或专用网络（比如 VPN）。
+- 如果你把 Piarium 放在你自己的 HTTPS 服务器后面，请参阅 [反向代理](/reverse-proxy/)。
 
-## Related
+## 相关内容
 
-- [Connect a Device](/connect-devices/) — one-time pairing and per-device tokens
-- [Private Relay](/private-relay/) — end-to-end encrypted access from anywhere
-- [Tunnels](/tunnels/) — expose a public URL when you need one
-- [Reverse Proxy](/reverse-proxy/) — run Piarium behind your own server
+- [连接设备](/connect-devices/) — 一次性配对与设备级令牌
+- [Private Relay](/private-relay/) — 从任何地方进行端到端加密访问
+- [隧道](/tunnels/) — 需要时开放一个公开 URL
+- [反向代理](/reverse-proxy/) — 在你自己的服务器后面运行 Piarium

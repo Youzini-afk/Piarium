@@ -1,152 +1,124 @@
-English | [简体中文](SECURITY.zh-CN.md)
+[English](SECURITY.en.md) | 简体中文
 
-# Piarium security policy
+# Piarium 安全策略
 
-Piarium handles source code, terminal access, Git and SSH operations, model-provider credentials,
-Pi session history, extension configuration, and remote connections. A defect at one of these
-boundaries can have consequences beyond the application UI, so private and reproducible reports are
-appreciated.
+Piarium 会接触源码、终端权限、Git 与 SSH 操作、模型提供商凭据、Pi 会话历史、扩展配置和远程连接。
+这些边界上的缺陷可能产生超出应用 UI 的影响，因此我们非常重视私密且可复现的安全报告。
 
-The implementation threat model and release gates are documented separately in
-[docs/security.md](docs/security.md).
+实现层面的威胁模型和发布门槛另见 [docs/security.md](docs/security.md)。
 
-## Supported versions
+## 支持的版本
 
-Piarium is currently pre-1.0 and does not maintain LTS branches.
+Piarium 目前仍处于 1.0 之前的开发阶段，不维护 LTS 分支。
 
-| Channel | Security support |
+| 渠道 | 安全支持 |
 | --- | --- |
-| Latest published release | Supported |
-| Current `main` | Best-effort fixes during active development |
-| Older releases, images, and arbitrary commits | No backport guarantee |
+| 最新发布版本 | 支持 |
+| 当前 `main` | 活跃开发期间尽力修复 |
+| 更旧的版本、镜像和任意历史提交 | 不保证回移安全修复 |
 
-When reporting a problem, include the exact version, Git commit, container digest, or desktop build
-whenever possible. A floating `latest` tag is not sufficient to identify affected code.
+报告问题时，请尽量提供准确的版本、Git 提交、容器摘要或桌面构建信息。浮动的 `latest` 标签不足以
+确定受影响代码。
 
-## Report a vulnerability privately
+## 私密报告漏洞
 
-Do not disclose a suspected vulnerability in a public issue, discussion, pull request, screenshot,
-terminal log, or chat transcript.
+不要在公开 Issue、Discussion、Pull Request、截图、终端日志或聊天记录中披露疑似漏洞。
 
-1. Prefer GitHub's
-   [private vulnerability reporting form](https://github.com/Youzini-afk/Piarium/security/advisories/new)
-   when the repository exposes it to reporters.
-2. If GitHub does not offer the private form,
-   [open a minimal contact issue](https://github.com/Youzini-afk/Piarium/issues/new?title=Private%20security%20report%20requested)
-   titled **`Private security report requested`** with no technical details, secrets, affected
-   paths, or proof of concept. A maintainer will establish a private channel before you send the
-   report.
+1. 当仓库向报告者开放时，优先使用 GitHub 的
+   [私密漏洞报告表单](https://github.com/Youzini-afk/Piarium/security/advisories/new)。
+2. 如果 GitHub 没有显示私密表单，请创建一个
+   [最小联系 Issue](https://github.com/Youzini-afk/Piarium/issues/new?title=Private%20security%20report%20requested)，
+   标题为 **`Private security report requested`**。其中不要包含技术细节、密钥、受影响路径或
+   PoC。维护者会先建立私密通道，再请你发送报告。
 
-Please include in the private report:
+私密报告请包含：
 
-- a concise description and the security boundary that is crossed;
-- affected version/commit/image digest and product surface;
-- operating system, architecture, deployment topology, and relevant non-secret configuration;
-- minimal, deterministic reproduction steps or a proof of concept;
-- observed and potential impact;
-- whether the issue is already public or has a disclosure deadline;
-- a suggested fix or mitigation, if you have one;
-- the name or handle you would like credited, or a request to remain anonymous.
+- 简明的问题描述，以及被突破的安全边界；
+- 受影响的版本/提交/镜像摘要和产品端；
+- 操作系统、CPU 架构、部署拓扑和相关的非敏感配置；
+- 最小且确定的复现步骤或 PoC；
+- 已观察到的影响和潜在影响；
+- 问题是否已经公开，以及是否存在披露期限；
+- 如果有，提供建议修复或缓解方式；
+- 希望公开致谢的姓名/账号，或者保持匿名的请求。
 
-Remove real credentials, private prompts, source files, SSH keys, session data, and unrelated user
-information. If a secret was exposed during testing, revoke it before sending the report and use a
-redacted replacement in the reproduction.
+请移除真实凭据、私有提示词、源码文件、SSH 密钥、会话数据和无关用户信息。如果测试中已经暴露密钥，
+请先撤销该密钥，并在复现材料中使用经过脱敏的替代值。
 
-Piarium does not yet provide a contractual response-time SLA or a bug-bounty program. Maintainers
-will aim to acknowledge a complete report promptly, confirm scope, agree on disclosure timing, and
-provide material status changes through the private thread.
+Piarium 目前不提供有合同约束力的响应 SLA，也没有漏洞赏金计划。维护者会尽快确认内容完整的报告、
+核定范围、协调披露时间，并通过私密线程同步重要进展。
 
-## Security scope
+## 安全范围
 
-Reports are especially useful when they demonstrate a violation of an intended boundary in:
+能够证明以下预期边界被突破的报告尤其有价值：
 
-- Electron main/preload IPC, window origin checks, deep links, updater, or packaged resources;
-- the Pi host, runtime broker, worker lifecycle, protocol parser, or cross-session event routing;
-- Web authentication, cookies/tokens, pairing, Origin checks, WebSocket authorization, relay, or
-  tunnel handling;
-- filesystem containment, symlink/junction resolution, file grants, worktrees, Git, terminal, PTY,
-  subprocess, SSH, or remote-host operations;
-- project trust, package installation, extension loading, MCP command approval, or capability
-  escalation before consent;
-- model/provider authentication, credential storage, discovery redirects, or secret redaction;
-- Pi session recovery, workspace-history delegation, concurrent writes, rollback, or data deletion;
-- cloud archives, Docker images, deployment locks, health validation, rollback, release identity,
-  dependency installation, or build provenance;
-- leakage of prompts, source files, environment values, credentials, or private provider responses
-  through logs, diagnostics, URLs, notifications, or renderer state.
+- Electron main/preload IPC、窗口 Origin 校验、Deep Link、更新器或打包资源；
+- Pi host、runtime broker、工作进程生命周期、协议解析器或跨会话事件路由；
+- Web 认证、Cookie/Token、配对、Origin 校验、WebSocket 授权、Relay 或隧道处理；
+- 文件系统包含关系、符号链接/Junction 解析、文件授权、工作树、Git、终端、PTY、子进程、SSH 或
+  远程主机操作；
+- 项目信任、包安装、扩展加载、MCP 命令审批，或者未经同意发生的能力提升；
+- 模型/提供商认证、凭据存储、模型发现重定向或敏感信息脱敏；
+- Pi 会话恢复、工作区历史委托、并发写入、回滚或数据删除；
+- 云端归档、Docker 镜像、部署锁、健康校验、回滚、发布身份、依赖安装或构建 provenance；
+- 提示词、源码、环境变量、凭据或私有提供商响应通过日志、诊断、URL、通知或渲染器状态泄露。
 
-Vulnerabilities in Pi or a third-party extension should normally be reported to that project. Still
-report the issue to Piarium when its integration bypasses a Piarium trust boundary, activates code
-before approval, exposes data beyond the capability shown to the user, or prevents an upstream fix
-from taking effect.
+Pi 或第三方扩展本身的漏洞通常应报告给对应项目。但如果 Piarium 的集成绕过了自己的信任边界、在
+批准前执行代码、暴露了超出界面声明能力的数据，或阻止上游修复生效，仍请同时报告给 Piarium。
 
-## Trust model and expected behavior
+## 信任模型与预期行为
 
-The following facts are important when deciding whether behavior is a Piarium vulnerability:
+判断某项行为是否属于 Piarium 漏洞时，需要理解以下事实：
 
-- **Pi packages are trusted executable code.** They run with the user's operating-system
-  permissions in an isolated worker process. Capability labels support an informed trust decision;
-  they are not a claim of a complete OS sandbox. A malicious package using permissions the user
-  explicitly granted is different from package code running before trust or escaping the stated
-  boundary.
-- **Projects can contain executable configuration.** Project-local Pi resources, MCP commands,
-  credential commands, hooks, and extension settings remain disabled until the trusted host accepts
-  the relevant project grant.
-- **The renderer is untrusted relative to native hosts.** UI state alone never grants local file,
-  process, credential, update, or SSH authority.
-- **Remote clients have explicit capabilities.** Being authenticated to the Web UI does not
-  automatically make a remote client equivalent to a local desktop renderer.
-- **Providers and research services are external recipients.** Sending an approved prompt or tool
-  request to the selected provider is expected; sending unrelated workspace or credential data is
-  not.
-- **Local administrators control the machine.** Piarium does not attempt to protect its data from an
-  operating-system administrator who can read the user's files and process memory.
+- **Pi 包是受信任的可执行代码。** 它们在隔离工作进程中运行，但仍拥有当前用户的操作系统权限。
+  能力标签用于帮助用户作出知情的信任选择，并不代表完整的操作系统沙箱。恶意包使用用户明确授权的
+  权限，与包在授权前执行或突破声明边界，是不同的问题。
+- **项目可以包含可执行配置。** 项目内 Pi 资源、MCP 命令、凭据命令、Hook 和扩展设置，在可信宿主
+  接受相应项目授权前都应保持禁用。
+- **相对于原生宿主，渲染器是不受信任的。** 仅有 UI 状态绝不能授予本地文件、进程、凭据、更新或
+  SSH 权限。
+- **远程客户端只有明确授予的能力。** 通过 Web UI 认证，并不自动等同于本地桌面渲染器。
+- **提供商和研究服务是外部数据接收方。** 将用户批准的提示词或工具请求发送给所选提供商属于预期
+  行为；发送无关工作区数据或凭据则不是。
+- **本机管理员控制操作系统。** Piarium 不试图保护数据免受能够读取用户文件和进程内存的系统
+  管理员访问。
 
-If you are unsure whether observed behavior crosses one of these boundaries, report it privately and
-let the maintainers triage it.
+如果无法确定观察到的行为是否突破上述边界，请仍然私密报告，由维护者进行分级判断。
 
-## Safe research and coordinated disclosure
+## 安全研究与协调披露
 
-When testing Piarium:
+测试 Piarium 时：
 
-- use systems, workspaces, accounts, credentials, and remote instances you own or are authorized to
-  test;
-- minimize data access and stop after proving the boundary violation;
-- do not persist access, exfiltrate unrelated data, degrade shared services, or use social
-  engineering;
-- avoid publishing technical details until a fix or mitigation is available and a disclosure date
-  has been coordinated;
-- preserve enough non-sensitive evidence for maintainers to reproduce and verify the fix.
+- 只使用你拥有或明确获准测试的系统、工作区、账号、凭据和远程实例；
+- 尽量减少数据访问，并在证明边界突破后立即停止；
+- 不要维持持久访问、导出无关数据、影响共享服务，或使用社会工程；
+- 在修复或缓解措施可用且披露日期协调完成前，不要公开技术细节；
+- 保留足够且不含敏感数据的证据，帮助维护者复现并验证修复。
 
-After validation, maintainers will prepare a focused fix and regression test, evaluate affected
-releases and deployment guidance, and publish a GitHub Security Advisory when appropriate. Credit is
-given according to the reporter's preference.
+确认问题后，维护者会准备聚焦的修复和回归测试，评估受影响的发布版本及部署建议，并在适当时发布
+GitHub Security Advisory。是否公开致谢遵循报告者意愿。
 
-## Deployment and user hardening
+## 部署与用户加固
 
-- Do not bind the Web service beyond loopback without a strong `PIARIUM_UI_PASSWORD`.
-- Use TLS through a trusted reverse proxy or an approved tunnel for traffic leaving the machine.
-- Treat every Pi package and project-local executable resource as code; review its source and
-  requested capabilities before approval.
-- Keep Piarium, Pi, maintained extensions, and the host operating system updated.
-- Keep persistent Piarium data, workspaces, SSH material, and deployment environment files outside
-  immutable release directories and protect them with appropriate filesystem permissions.
-- Pin production containers by digest, retain a known-good deployment, and verify `/health` reports
-  a ready bundled Pi runtime and the expected release identity.
-- Do not place passwords, provider keys, tunnel tokens, or SSH material in images, build arguments,
-  repositories, command histories, screenshots, or issue reports.
+- 未设置强随机 `PIARIUM_UI_PASSWORD` 时，不要让 Web 服务监听在 loopback 之外。
+- 流量离开本机时，应使用可信 TLS 反向代理或经过审核的隧道。
+- 将每个 Pi 包和项目内可执行资源都视为代码；批准前检查其来源和请求的能力。
+- 及时更新 Piarium、Pi、已维护扩展和宿主操作系统。
+- 将 Piarium 持久化数据、工作区、SSH 材料和部署环境文件放在不可变发布目录之外，并设置合适的
+  文件系统权限。
+- 生产容器固定到镜像摘要，保留已知可用的部署，并验证 `/health` 返回就绪的内置 Pi 运行时和
+  预期发布身份。
+- 不要把密码、提供商密钥、隧道 Token 或 SSH 材料放入镜像、构建参数、仓库、命令历史、截图或
+  Issue 报告。
 
-See [Cloud deployment](docs/cloud-deployment.md) for persistent paths, secret-file permissions,
-container attestations, immutable releases, and rollback behavior.
+持久化路径、密钥文件权限、容器证明、不可变发布和回滚行为见
+[云端部署](docs/cloud-deployment.md)。
 
-## Build and release integrity
+## 构建与发布完整性
 
-Repository CI performs frozen dependency installation, dependency audits, Pi dependency checks,
-type checking, linting, tests, production builds, cloud-layout verification, and packaged-host smoke
-tests. Container candidates are built for `linux/amd64` and `linux/arm64` with provenance and SBOM
-attestations; installable tags are promoted only after an immutable application digest passes its
-runtime smoke test.
+仓库 CI 会执行冻结依赖安装、依赖审计、Pi 依赖校验、类型检查、lint、测试、生产构建、云端布局
+验证和打包宿主烟测。容器候选会为 `linux/amd64` 与 `linux/arm64` 构建，并生成 provenance 和
+SBOM 证明；只有不可变的应用镜像摘要通过运行时烟测后，可安装标签才会被提升。
 
-Desktop signing is conditional. A locally built or CI smoke Windows installer is unsigned when
-signing credentials are not configured. Verify the source revision and build provenance before
-running an unsigned artifact.
+桌面签名是条件式能力。没有配置签名凭据时，本地构建或 CI 烟测生成的 Windows 安装包不会签名。
+运行未签名产物前，请核对源码提交和构建来源。

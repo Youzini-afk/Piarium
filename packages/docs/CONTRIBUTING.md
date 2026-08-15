@@ -1,173 +1,154 @@
-# Docs Authoring Guide
+[English](CONTRIBUTING.en.md) | 简体中文
 
-This package is docs content source-of-truth for Piarium.
+# 文档编写指南
 
-## Voice & style
+本包是 Piarium 公开文档的源码。**先写简体中文，再补译本。**
 
-Write for someone trying to get something done — not for an engineer reading a
-spec. Assume the reader may be non-technical. A page should feel quick to read,
-never like a separate chore just to get through one screen.
+## 语气与风格
 
-These rules describe how we already write the docs. Follow them so the style
-stays the same no matter who is writing.
+写给想把事情做完的人，而不是在读规格的工程师。假定读者不一定懂技术。一页应该很快读完，
+不要像额外作业。
 
-### Who you're writing for
+下面这些规则就是现有文档的写法。按它们写，风格才不会因人而异。
 
-- Assume curiosity, not expertise. The reader knows what they want to do, not
-  how Piarium works inside.
-- One page = one job. If a page is answering two unrelated questions, split it.
+### 写给谁
 
-### Keep it short
+- 假定读者有好奇心，而不是已经懂内部实现。他们知道自己想做什么，不知道 Piarium 里面怎么跑。
+- 一页只做一件事。如果一页在回答两个不相关的问题，就拆开。
 
-- Lead with the task, not background. The first line should say what the page is
-  for ("Use `piarium tunnel` to expose a running Piarium instance.").
-- Cut anything that doesn't change what the reader does next.
-- A basic page should fit in a screen or two. Long, dense reference pages (like
-  Reverse Proxy) are the exception — and they say so in their first line ("Use
-  this page if you run Piarium behind...").
+### 写短
 
-### Steps
+- 先写任务，再写背景。第一句就说明这一页是干什么的（「用 `piarium tunnel` 把正在运行的
+  Piarium 暴露出去。」）。
+- 删掉不会改变读者下一步动作的内容。
+- 普通页面应在一两屏内读完。像「反向代理」这样的长参考页是例外——它们会在第一句说清楚
+  （「如果你在……后面运行 Piarium，请使用本页。」）。
 
-- Number sequential actions; use bullets for options or unordered notes.
-- Start each step with a verb: "Run", "Open", "Pick".
-- End a procedure by telling the reader what success looks like, so they know
-  they did it right.
+### 步骤
+
+- 有先后顺序的动作用数字；选项或无序说明用列表。
+- 每一步用动词开头：「运行」「打开」「选择」。
+- 流程结束时告诉读者成功长什么样，好确认自己做对了。
 
 ```mdx
-3. Run `piarium --ui-password be-creative-here`.
-4. Open the printed URL (usually `http://localhost:3000`).
+3. 运行 `piarium --ui-password be-creative-here`。
+4. 打开打印出的 URL（通常是 `http://localhost:3000`）。
 
-You should land on the Piarium session list. If you see it, the server is
-running.
+你应该看到 Piarium 会话列表。如果看到了，说明服务已在运行。
 ```
 
-### Plain language
+### 用白话
 
-- Explain a term the first time it appears, in parentheses, in everyday words:
-  - good: start a tunnel (a public link to your local Piarium)
-  - bad: start a tunnel — the reader doesn't know what that is yet
-- Prefer common words over internal ones. "App", "version", "page" beat
-  "surface", "instance", "route" when the meaning is the same. If an internal
-  term is unavoidable, define it once.
-- Don't reach for `SSE`, `WebSocket`, `buffering`, or header names unless the
-  page is explicitly an advanced/operator page.
+- 术语第一次出现时，用括号、日常说法解释：
+  - 好：启动一条隧道（指向本机 Piarium 的公开链接）
+  - 差：启动一条隧道——读者还不知道那是什么
+- 能用常见词就不用内部词。「应用」「版本」「页面」优于「surface」「instance」「route」。
+  内部词避不开时，解释一次。
+- 除非这一页明确是给运维/进阶读者的，否则不要写 `SSE`、`WebSocket`、`buffering` 或请求头名字。
 
-### Bullets and sentences
+### 列表和句子
 
-- Be consistent within a single list. Either all short fragments (lowercase, no
-  period) or all full sentences (capital letter, period) — don't mix the two in
-  one list.
-- Use fragments for quick option lists; use full sentences for rules, warnings,
-  or anything the reader must not misread.
+- 同一列表里保持一致：要么全是短片段（不用句号），要么全是完整句子（有句号）——不要混用。
+- 快速选项用片段；规则、警告、不能读错的内容用完整句子。
 
-### Link out instead of re-explaining
+### 能链出去就不要重写
 
-- Where a step can realistically fail, link to
-  [Troubleshooting](/troubleshooting/) right there, not only at the bottom.
-- Don't re-document something another page owns — link to it. (Quickstart points
-  at Install for the actual install command instead of copying it.)
+- 某一步很可能失败时，当场链到[问题排查](/troubleshooting/)，不要只放在文末。
+- 别的页面已经写过的内容，链接过去，不要再写一遍。（快速开始链到安装页拿安装命令，而不是复制一遍。）
 
-### Show, don't only tell
+### 能展示就不要只讲
 
-- A screenshot beats a paragraph for anything visual (where a button is, what a
-  screen looks like). See [Images](#images) for how to add one.
-- Always pair a screenshot with one line of text — the image supports the step,
-  it isn't the whole step.
+- 按钮在哪、屏幕长什么样，一张截图比一段话有用。加图方式见[图片](#图片)。
+- 截图必须配一句说明——图是在帮步骤，不是整步只有图。
 
-### Commands and code
+### 命令和代码
 
-- Make code blocks copy-paste-ready: real, working values. Only use a
-  `<placeholder>` when the value is genuinely user-specific, and make that
-  obvious (e.g. `app.example.com`, `~/.secrets/cf-token`).
-- One command per idea. Don't chain unrelated commands just to look compact.
+- 代码块要能直接复制：用真实能跑的值。只有值确实因人而异时才用 `<占位符>`，并写清楚
+  （例如 `app.example.com`、`~/.secrets/cf-token`）。
+- 一个想法一条命令。不要为了看起来紧凑而把无关命令串在一起。
 
-## Add a new docs page
+## 新增文档页
 
-1. Create a new file in `packages/docs/content/docs/`.
-   - Example: `packages/docs/content/docs/remote-access.mdx`
-2. Add frontmatter at top:
+1. 在 `packages/docs/content/docs/` 创建中文源文件。
+   - 例如：`packages/docs/content/docs/remote-access.mdx`
+2. 文件顶部加 frontmatter：
 
    ```mdx
    ---
-   title: Remote Access
-   description: Access Piarium from outside your local network.
+   title: 远程访问
+   description: 从本机网络之外访问 Piarium。
    ---
    ```
 
-3. Use route-safe naming:
+3. 使用对路由安全的命名：
    - `foo.mdx` -> `/foo/`
    - `folder/index.mdx` -> `/folder/`
    - `folder/bar.mdx` -> `/folder/bar/`
-4. Add translations for the page — see [Localization](#localization). New pages
-   must include translated files for every supported locale before they ship.
-5. If the page is linked from the sidebar, add its localized labels too — see
-   [Translate the sidebar](#translate-the-sidebar).
-6. Run validation:
+4. 补齐译本——见[本地化](#本地化)。新页面上线前必须包含所有支持语种。
+5. 如果侧边栏要链到这一页，同时补侧边栏译文——见[翻译侧边栏](#翻译侧边栏)。
+6. 跑校验：
 
    ```bash
    bun run docs:validate
    ```
 
-## Add a new sidebar section
+## 新增侧边栏分组
 
-Edit `packages/docs/sidebar.config.json`.
+编辑 `packages/docs/sidebar.config.json`。
 
-Example:
+示例：
 
 ```json
 {
-  "label": "Advanced",
-  "items": [{ "label": "Remote Access", "link": "/remote-access/" }]
+  "label": "进阶",
+  "translations": {
+    "en": "Advanced"
+  },
+  "items": [{ "label": "远程访问", "link": "/remote-access/", "translations": { "en": "Remote Access" } }]
 }
 ```
 
-Rules:
+规则：
 
-- use trailing slash in links (`/page/`)
-- every sidebar link must map to an existing MDX file
-- keep section labels short and task-oriented
+- 链接带尾部斜杠（`/page/`）
+- 每个侧边栏链接都必须对应已有的中文 MDX 文件
+- 分组标题要短，并且面向任务
 
-## Images
+## 图片
 
-Images live inside the docs content tree so they sync to the website with the
-pages (the sync copies all of `content/docs/`, not just `.mdx`). Reference them
-with a **relative path**; Astro optimizes them at build time.
+图片放在文档内容树里，才会和页面一起同步（同步会复制整个 `content/docs/`，不只是 `.mdx`）。
+用**相对路径**引用；Astro 会在构建时优化。
 
 ```
 content/docs/
-  install.mdx          ->  ![Desktop app](./images/desktop.png)
+  install.mdx          ->  ![桌面应用](./images/desktop.png)
   images/
     desktop.png
 ```
 
-Rules:
+规则：
 
-- co-locate images under `content/docs/` (e.g. `content/docs/images/`); a
-  relative `./images/...` reference is resolved and optimized at build
-- always set meaningful `alt` text (and translate it in localized pages)
-- do **not** put docs images in the website repo's `public/` — it is not the
-  source of truth and the sync will not pick them up
-- keep originals reasonably sized; the build generates responsive variants
+- 图片和文档放在一起（例如 `content/docs/images/`）；相对路径 `./images/...` 会在构建时解析并优化
+- 必须写有意义的 `alt`（并在各语种页面里翻译）
+- **不要**把文档图片放到网站仓库的 `public/`——那不是权威源，同步也不会带走
+- 原图保持合理大小；构建会生成响应式变体
 
-For translations, reuse the same shared image when it carries no text. If a
-screenshot contains localized UI text, add a per-locale copy under that locale's
-folder (e.g. `uk/images/...`) and point the translated page at it.
+译本在图片没有文字时复用同一张共享图。截图里有本地化 UI 文字时，把该语种的图放进对应
+locale 目录（例如 `en/images/...`），并让译本指向它。
 
-`docs:validate` only checks `.mdx`, so images never block validation.
+`docs:validate` 只检查 `.mdx`，图片不会挡住校验。
 
-### Light / dark variants
+### 浅色 / 深色变体
 
-To show a different screenshot per theme, add a `-light` / `-dark` pair and tag
-each with `oc-light-only` / `oc-dark-only`. The website ships CSS for these
-classes (keyed on Starlight's `data-theme`), so the right one shows and follows
-the in-page theme toggle.
+要按主题显示不同截图时，准备 `-light` / `-dark` 一对，并分别加上 `oc-light-only` /
+`oc-dark-only`。网站已有对应 CSS（跟着 Starlight 的 `data-theme`），正确的那张会显示，
+并跟随页内主题切换。
 
-Use the `<Image>` component so the images stay optimized while taking a class.
-Add the imports right under the frontmatter:
+用 `<Image>` 组件，这样图片仍会被优化，同时能加 class。把 import 写在 frontmatter 下面：
 
 ```mdx
 ---
-title: Install
+title: 安装
 description: ...
 ---
 
@@ -175,95 +156,85 @@ import { Image } from "astro:assets";
 import desktopLight from "./images/desktop-light.png";
 import desktopDark from "./images/desktop-dark.png";
 
-<Image src={desktopLight} alt="Desktop app" class="oc-light-only" />
-<Image src={desktopDark} alt="Desktop app" class="oc-dark-only" />
+<Image src={desktopLight} alt="桌面应用" class="oc-light-only" />
+<Image src={desktopDark} alt="桌面应用" class="oc-dark-only" />
 ```
 
-Notes:
+说明：
 
-- both files live under `content/docs/` like any other image and sync normally
-- give both the same `alt` (and translate it in localized pages)
-- if you only have one image, just use the normal `![alt](./path.png)` form
+- 两张图都和其他文档图片一样放在 `content/docs/`，同步方式相同
+- 两张图用同一句 `alt`（并在译本里翻译）
+- 只有一张图时，用普通的 `![alt](./path.png)` 即可
 
-## Localization
+## 本地化
 
-The docs are translated into the same languages the Piarium app ships in.
-English is the source of truth and lives at the root of `content/docs/`. Every
-other language mirrors the English files under a locale folder.
+文档翻译成与 Piarium 应用相同的语言。**简体中文是源语言，放在 `content/docs/` 根目录。**
+其他语言（包括英文）在各自的 locale 目录里镜像同一组文件名。
 
-### Supported locales
+### 支持的语种
 
-| Language | Content folder | Sidebar `translations` key |
+| 语言 | 内容目录 | 侧边栏 `translations` 键 |
 | --- | --- | --- |
-| English | _(root, no folder)_ | `en` |
-| Ukrainian | `uk/` | `uk` |
-| Chinese (Simplified) | `zh-cn/` | `zh-CN` |
-| Spanish | `es/` | `es` |
-| Brazilian Portuguese | `pt-br/` | `pt-BR` |
-| Korean | `ko/` | `ko` |
-| Polish | `pl/` | `pl` |
-| French | `fr/` | `fr` |
-| Japanese | `ja/` | `ja` |
+| 简体中文 | _（根目录，无文件夹）_ | _（写在 `label`，不要写 `zh-CN`）_ |
+| English | `en/` | `en` |
+| Українська | `uk/` | `uk` |
+| Español | `es/` | `es` |
+| Português (Brasil) | `pt-br/` | `pt-BR` |
+| 한국어 | `ko/` | `ko` |
+| Polski | `pl/` | `pl` |
+| Français | `fr/` | `fr` |
+| 日本語 | `ja/` | `ja` |
 
 > [!IMPORTANT]
-> The **content folder** uses the lowercase locale key (`zh-cn`, `pt-br`); the
-> **sidebar `translations`** key uses the BCP-47 language tag (`zh-CN`, `pt-BR`).
-> They look similar but are not interchangeable — Starlight resolves them with
-> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `ja`, `en`) is identical
-> in both columns.
+> **内容目录**用小写 locale 键（`en`、`pt-br`）；**侧边栏 `translations`** 用 BCP-47
+> （`en`、`pt-BR`）。`pt-br` / `pt-BR` 看起来像，但不能互换——Starlight 用不同规则解析。
+> 其余语种（`uk`、`es`、`ko`、`pl`、`fr`、`ja`、`en`）两列相同。
 
-This locale set is mirrored in the website at
-`the Piarium docs site/apps/docs/astro.config.mjs` (`locales`). If a language is
-added or removed, update both places.
+以后文档站的 `astro.config.mjs` `locales` 必须与此表一致，并且根 locale 为简体中文。
+增删语言时两边一起改。
 
-### Translate a page
+### 翻译一页
 
-Mirror the English file under each locale folder, keeping the **exact same
-filename and path**. Starlight matches a translation to its English page by path.
+在每个 locale 目录下镜像中文文件，**文件名和相对路径必须完全相同**。Starlight 靠路径匹配译本。
 
 ```
 content/docs/
-  install.mdx              # English (source of truth)
-  uk/install.mdx           # Ukrainian
-  zh-cn/install.mdx        # Chinese (Simplified)
-  es/install.mdx           # Spanish
-  pt-br/install.mdx        # Brazilian Portuguese
-  ko/install.mdx           # Korean
-  pl/install.mdx           # Polish
-  fr/install.mdx           # French
-  ja/install.mdx           # Japanese
+  install.mdx              # 简体中文（源语言）
+  en/install.mdx           # English
+  uk/install.mdx           # Українська
+  es/install.mdx           # Español
+  pt-br/install.mdx        # Português (Brasil)
+  ko/install.mdx           # 한국어
+  pl/install.mdx           # Polski
+  fr/install.mdx           # Français
+  ja/install.mdx           # 日本語
 
-  guides/tunnels.mdx       # nested English page
-  uk/guides/tunnels.mdx    # its Ukrainian translation
+  guides/tunnels.mdx       # 嵌套的中文页
+  en/guides/tunnels.mdx    # 对应英文译本
 ```
 
-Each translated file needs its **own translated frontmatter** (`title` and
-`description` are required by validation):
+每个译本都要有**自己的译文 frontmatter**（校验要求 `title` 和 `description`）：
 
 ```mdx
 ---
-title: Встановлення
-description: Встановіть Piarium для десктопа, вебу або VS Code.
+title: Install
+description: Install Piarium for desktop, web, or VS Code.
 ---
 ```
 
-Every new page must include translated files for all supported locales before it
-ships. Starlight can fall back to English when a translation is missing, but do
-not rely on that fallback for new docs pages.
+新页面上线前必须补齐所有支持语种。Starlight 在缺译本时可能回退到中文，但新文档页不要依赖这个回退。
 
-### Translate the sidebar
+### 翻译侧边栏
 
-Do **not** create separate sidebar entries per language and do **not** add a
-locale prefix to `link` — Starlight prefixes the active locale automatically.
-Instead, add a `translations` map (keyed by the BCP-47 tag from the table above)
-to each section and item in `sidebar.config.json`:
+**不要**为每种语言单独建侧边栏条目，也**不要**在 `link` 上加 locale 前缀——Starlight 会自动加。
+在 `sidebar.config.json` 里给每个分组和条目加 `translations`（键用上表的 BCP-47）：
 
 ```json
 {
-  "label": "Start here",
+  "label": "从这里开始",
   "translations": {
+    "en": "Start here",
     "uk": "Почніть тут",
-    "zh-CN": "从这里开始",
     "es": "Empieza aquí",
     "pt-BR": "Comece aqui",
     "ko": "여기서 시작",
@@ -273,11 +244,11 @@ to each section and item in `sidebar.config.json`:
   },
   "items": [
     {
-      "label": "Install",
+      "label": "安装",
       "link": "/install/",
       "translations": {
+        "en": "Install",
         "uk": "Встановлення",
-        "zh-CN": "安装",
         "es": "Instalación",
         "pt-BR": "Instalação",
         "ko": "설치",
@@ -290,27 +261,22 @@ to each section and item in `sidebar.config.json`:
 }
 ```
 
-A label with no translation for the active locale falls back to the English
-`label`.
+当前语种没有译文时，会回退到中文 `label`。
 
-### What not to translate
+### 不要翻译这些
 
-- brand and product nouns: Piarium, Pi, VS Code, PWA, GitHub, Discord,
-  macOS, SSH. Keep `OpenCode Go` only when documenting that third-party quota
-  product. Do not reintroduce OpenChamber or an OpenCode server.
-- code blocks, shell commands, file paths, flags, and config keys
-- the page filename and the sidebar `link` (these stay identical across locales)
+- 品牌和产品名：Piarium、Pi、VS Code、PWA、GitHub、Discord、macOS、SSH。只有在写第三方
+  配额产品时才保留 `OpenCode Go`。不要重新引入 OpenChamber 或 OpenCode 服务器。
+- 代码块、shell 命令、文件路径、flag 和配置键
+- 页面文件名和侧边栏 `link`（各语种保持相同）
 
-### Validate
+### 校验
 
-`bun run docs:validate` walks every `.mdx` under `content/docs/` — **including
-translations** — and fails if any page is missing `title` or `description`
-frontmatter, or if a sidebar `link` does not resolve to an English page. Run it
-after adding or translating pages.
+`bun run docs:validate` 会遍历 `content/docs/` 下每一个 `.mdx`——**包括译本**——如果缺
+`title` 或 `description`，或侧边栏 `link` 对不上默认（中文）页面，就会失败。加页或翻译后请运行它。
 
-## Publishing
+## 发布
 
-There is no separate docs-site repository or `docs-source.yml` workflow yet.
-Keep this package accurate; `bun run docs:validate` is the current gate. When a
-renderer is added, copy `content/docs/*` and `sidebar.config.json` into that
-site and document the path in `DEPLOYMENT.md`.
+目前还没有独立的文档站仓库或 `docs-source.yml` 工作流。先保证本包准确；`bun run docs:validate`
+是当前门禁。以后加渲染器时，把 `content/docs/*` 和 `sidebar.config.json` 拷进去，并在
+[DEPLOYMENT.md](DEPLOYMENT.md) 写明路径。

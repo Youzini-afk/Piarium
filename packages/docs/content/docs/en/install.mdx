@@ -1,0 +1,71 @@
+---
+title: Install
+description: Install Piarium for desktop, web, or VS Code from source or Docker.
+---
+
+# Install
+
+Piarium is pre-1.0. The supported ways to run it today are **from source** and **with Docker**. Packaged npm and GitHub Release downloads are not published yet.
+
+There are three product surfaces:
+
+- desktop app (Electron)
+- web app hosted by the local server, which you can install like a phone app (a PWA)
+- VS Code extension
+
+## Prerequisites
+
+- Node.js 22.19 or newer (Node.js 24 is the development baseline)
+- [Bun](https://bun.sh) 1.3.14
+- Git
+- Git for Windows and Git Bash when running Pi shell tools on Windows
+
+You do **not** need a separate OpenCode or Pi CLI install. Packaged desktop and container builds include the pinned Pi runtime.
+
+## From source (web)
+
+```bash
+git clone https://github.com/Youzini-afk/Piarium.git
+cd Piarium
+bun install --frozen-lockfile
+bun run dev
+```
+
+Open the Vite URL printed in the terminal. Piarium starts the UI and the trusted API/runtime service together.
+
+## From source (desktop)
+
+```bash
+bun run electron:dev
+```
+
+Closer to a packaged build:
+
+```bash
+bun run electron:dev:bundled
+```
+
+A Windows installer can be built locally with `bun run electron:build:win`. Unsigned installers are expected until signing credentials are configured.
+
+## Docker
+
+On a Linux Docker host:
+
+```bash
+mkdir -p data/piarium data/ssh data/cloudflared workspaces
+sudo chown -R 1000:1000 data workspaces
+umask 077
+printf 'PIARIUM_UI_PASSWORD=%s\n' "$(openssl rand -base64 24)" > .env
+docker compose up -d
+curl --fail http://127.0.0.1:3000/health
+```
+
+Open `http://127.0.0.1:3000` and use the generated password. Put a TLS reverse proxy or an approved tunnel in front of any Internet-facing deployment. For production, pin `PIARIUM_IMAGE` to a tested digest instead of `:latest`.
+
+## VS Code
+
+Build the extension from this repository with `bun run vscode:build` / `bun run vscode:package`. It is not published to the Marketplace yet.
+
+## CLI one-liner (not published)
+
+`scripts/install.sh` and `npx @piarium/web` target the `@piarium/web` npm package. That package is not on the public registry yet, so the curl installer will fail until a release is published. Use source or Docker until then.

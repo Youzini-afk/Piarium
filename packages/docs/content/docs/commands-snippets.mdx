@@ -1,39 +1,39 @@
 ---
-title: Commands & Snippets
-description: Make reusable slash commands and text snippets for chat.
+title: 命令与代码片段
+description: 为聊天创建可复用的斜杠命令和文本片段。
 ---
 
-# Commands & Snippets
+# 命令与代码片段
 
-Commands and snippets both save you from retyping the same thing. Commands are whole prompts you trigger with `/`; snippets are bits of text you drop into a message with `#`.
+命令和代码片段都能让你免于重复输入相同的内容。命令是你用 `/` 触发的完整提示词；代码片段是你用 `#` 插入到消息中的文本片段。
 
-## Commands
+## 命令
 
-A command is a saved prompt you run with a slash, like `/review`. Manage them at **Settings → Commands**.
+命令是你用斜杠运行的已保存提示词，比如 `/review`。在 **Settings → Commands** 中管理它们。
 
-1. Open **Settings → Commands** and create a command.
-2. Give it a name, a description, and the prompt text it should send.
-3. Optionally pin it to a specific agent or model.
-4. Choose personal or project scope.
+1. 打开 **Settings → Commands** 并创建一个命令。
+2. 给它一个名称、一段描述，以及它应发送的提示词文本。
+3. 可选地将它固定到特定的智能体或模型。
+4. 选择个人或项目范围。
 
-In chat, type `/` as the **first** character of the message to bring up commands, then pick one. Your text can use placeholders:
+在聊天中，将 `/` 作为消息的**第一个**字符即可调出命令，然后选择一个。你的文本可以使用占位符：
 
-- `$ARGUMENTS` — whatever you type after the command
-- `@filename` — drops in the contents of a file
-- `` !`command` `` — drops in the output of a shell command
+- `$ARGUMENTS` — 你在命令后输入的任何内容
+- `@filename` — 插入某个文件的内容
+- `` !`command` `` — 插入某个 shell 命令的输出
 
-The built-in `init` and `review` commands can be reset but not deleted.
+内置的 `init` 和 `review` 命令可以重置，但不能删除。
 
-## Snippets
+## 代码片段
 
-A snippet is reusable text you reference inline with a hashtag, like `#signoff`. Manage them at **Settings → Snippets**.
+代码片段是你用井号在行内引用的可复用文本，比如 `#signoff`。在 **Settings → Snippets** 中管理它们。
 
-1. Open **Settings → Snippets** and create a snippet.
-2. Give it a name and the text it stands for. Add aliases if you want more than one trigger.
-3. Choose personal or project scope.
+1. 打开 **Settings → Snippets** 并创建一个代码片段。
+2. 给它一个名称以及它所代表的文本。如果你想要多个触发词，可以添加别名。
+3. 选择个人或项目范围。
 
-In chat, type `#` and pick a snippet. Piarium swaps in the full text before sending.
+在聊天中，输入 `#` 并选择一个代码片段。Piarium 会在发送前替换为完整文本。
 
-## Related
+## 相关内容
 
-- [Skills](/skills/) — load larger instruction sets on demand
+- [Skills](/skills/) — 按需加载更大的指令集

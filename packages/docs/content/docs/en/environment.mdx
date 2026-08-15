@@ -1,0 +1,90 @@
+---
+title: Environment Variables
+description: Configure the Piarium server, terminals, Git, voice, and tunnels with environment variables.
+---
+
+# Environment Variables
+
+Piarium reads these environment variables at startup. For startup services, `piarium startup enable` snapshots the current environment by default, so rerun it after changing variables you want the service to use.
+
+Piarium embeds the Pi runtime. There is no separate OpenCode server and no `OPENCODE_*` integration variables.
+
+## Piarium server
+
+### `PIARIUM_HOST`
+
+Bind address for the Piarium web server. Use `0.0.0.0` to allow access from other machines.
+
+### `PIARIUM_UI_PASSWORD`
+
+Password for the browser UI. Use this when binding outside localhost, using tunnels, or running behind a reverse proxy.
+
+### `PIARIUM_API_ONLY`
+
+Starts Piarium in headless mode when set to `true` or `1`. API routes stay available for desktop and mobile clients, but the browser UI is not served.
+
+### `PIARIUM_DATA_DIR`
+
+Overrides the Piarium data directory. The default is `~/.config/piarium`.
+
+### `PIARIUM_COMPRESS_API`
+
+Controls API response compression. Use `true` or `1` to force it on, `false` or `0` to force it off.
+
+### `PIARIUM_SKIP_API_COMPRESSION`
+
+Disables API response compression when set to `true` or `1`. This takes precedence over `PIARIUM_COMPRESS_API`.
+
+### `PIARIUM_VERBOSE_REQUEST_LOGS`
+
+Enables verbose HTTP request logs when set to `true` or `1`.
+
+### `PIARIUM_UPDATE_API_URL`
+
+Overrides the update-check API endpoint. Most users should leave this unset.
+
+### `PIARIUM_PACKAGE_MANAGER`
+
+Forces the package manager used by update operations when auto-detection is wrong.
+
+## Terminal and Git
+
+### `PIARIUM_TERMINAL_SHELL`
+
+Shell executable used for Piarium terminal sessions.
+
+### `PIARIUM_GIT_BINARY`
+
+Git executable used by Piarium Git features.
+
+### `GIT_BINARY`
+
+Alternative Git executable override. Prefer `PIARIUM_GIT_BINARY` for Piarium-specific configuration.
+
+### `PIARIUM_GIT_READ_CACHE_TTL_MS`
+
+Time-to-live, in milliseconds, for cached Git-backed file reads. Set `0` to disable this cache while debugging.
+
+## Voice and tunnels
+
+### `OPENAI_API_KEY`
+
+API key used by Piarium voice features that call OpenAI-compatible services.
+
+### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+Allows remote OpenAI-compatible base URLs for voice features when set to `true` or `1`.
+
+### `NGROK_AUTHTOKEN`
+
+ngrok auth token used by Piarium tunnel commands. You can also configure ngrok with `ngrok config add-authtoken <token>`.
+
+## Runtime helpers
+
+### `BUN_BINARY`
+
+Bun executable Piarium should use when spawning daemon processes.
+
+### `BUN_INSTALL`
+
+Bun installation root. Piarium uses it to find `bin/bun` for daemon startup and updates.

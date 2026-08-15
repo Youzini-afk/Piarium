@@ -1,55 +1,55 @@
 ---
-title: Reverse Proxy
-description: Configure Piarium correctly behind Nginx, Nginx Proxy Manager, or another reverse proxy.
+title: 反向代理
+description: 在 Nginx、Nginx Proxy Manager 或其他反向代理后正确配置 Piarium。
 ---
 
-# Reverse Proxy
+# 反向代理
 
-Use this page if you run Piarium behind Nginx, Nginx Proxy Manager, Caddy, Cloudflare, or another reverse proxy.
+如果你在 Nginx、Nginx Proxy Manager、Caddy、Cloudflare 或其他反向代理后运行 Piarium，请使用本页。
 
-## Before you proxy it
+## 在代理之前
 
-1. Confirm Piarium works directly first.
-2. Open `http://<server-ip>:3000` or your custom port from the same network.
-3. Only add the reverse proxy after the direct connection works.
+1. 先确认 Piarium 可以直接工作。
+2. 从同一网络打开 `http://<server-ip>:3000` 或你的自定义端口。
+3. 只有在直接连接可用之后，才添加反向代理。
 
-## What the proxy must support
+## 代理必须支持的内容
 
-- WebSockets for live message transport:
+- 用于实时消息传输的 WebSocket：
   - `/api/event/ws`
   - `/api/global/event/ws`
   - `/api/terminal/ws`
-- SSE without buffering:
+- 不带缓冲的 SSE：
   - `/api/event`
   - `/api/global/event`
   - `/api/notifications/stream`
   - `/api/piarium/events`
   - `/api/terminal/:sessionId/stream`
-- Large request bodies for attachments and file operations
-- Long-lived read timeouts for live streams and terminal sessions
+- 用于附件和文件操作的大请求体
+- 用于实时流和终端会话的长读取超时
 
-## Rules that matter
+## 重要规则
 
-- Enable WebSocket proxying.
-- Disable buffering on SSE routes.
-- Disable gzip on the proxy if Piarium is already compressing responses.
-- Keep compression enabled in only one layer.
-- Forward normal proxy headers such as `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`.
-- Increase body size limits if users upload files.
+- 启用 WebSocket 代理。
+- 在 SSE 路由上禁用缓冲。
+- 如果 Piarium 已经压缩响应，请在代理上禁用 gzip。
+- 仅在一层中保持压缩开启。
+- 转发常规代理标头，例如 `Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
+- 如果用户上传文件，请增大请求体大小限制。
 
-## Quick checklist
+## 快速检查清单
 
-- Piarium reachable directly on LAN
-- WebSockets enabled in the proxy
-- SSE routes have buffering off
-- `gzip off` on the proxy host, or proxy compression disabled another way
-- `client_max_body_size` large enough for attachments
-- `proxy_read_timeout` long enough for streams
+- Piarium 可在 LAN 内直接访问
+- 代理中已启用 WebSocket
+- SSE 路由已关闭缓冲
+- 代理主机上 `gzip off`，或以其他方式禁用代理压缩
+- `client_max_body_size` 足够大以容纳附件
+- `proxy_read_timeout` 足够长以容纳流
 
-## Example: Nginx
+## 示例：Nginx
 
 <details>
-<summary>Show example config</summary>
+<summary>显示示例配置</summary>
 
 ```nginx
 client_max_body_size 50M;
@@ -135,10 +135,10 @@ location / {
 
 </details>
 
-## Example: Nginx Proxy Manager
+## 示例：Nginx Proxy Manager
 
 <details>
-<summary>Show Advanced tab example</summary>
+<summary>显示 Advanced 选项卡示例</summary>
 
 ```nginx
 client_max_body_size 50M;
@@ -272,33 +272,33 @@ location / {
 
 </details>
 
-Also enable `Websockets Support` in Nginx Proxy Manager for this host.
+另外，请在 Nginx Proxy Manager 中为此主机启用 `Websockets Support`。
 
-## Common failure signs
+## 常见故障迹象
 
-### Page loads, but sending messages fails
+### 页面能加载，但发送消息失败
 
-- WebSockets are not enabled in the proxy
-- `/api/event/ws` or `/api/global/event/ws` is not passing through correctly
+- 代理中未启用 WebSocket
+- `/api/event/ws` 或 `/api/global/event/ws` 未正确传递
 
-### Notifications or live status do not update
+### 通知或实时状态不更新
 
-- one of the SSE routes is buffered or cached
-- `X-Accel-Buffering "no"` is missing
+- 某个 SSE 路由被缓冲或缓存
+- 缺少 `X-Accel-Buffering "no"`
 
-### File uploads fail
+### 文件上传失败
 
-- `client_max_body_size` is too small
+- `client_max_body_size` 太小
 
-### Everything works locally, but breaks only behind the proxy
+### 本地一切正常，但仅在代理后出问题
 
-- the proxy is compressing and buffering live traffic
-- the proxy is missing WebSocket support
+- 代理正在压缩和缓冲实时流量
+- 代理缺少 WebSocket 支持
 
-## Example: Caddy
+## 示例：Caddy
 
 <details>
-<summary>Show example config</summary>
+<summary>显示示例配置</summary>
 
 ```caddy
 reverse_proxy 127.0.0.1:3000 {
@@ -323,25 +323,25 @@ reverse_proxy 127.0.0.1:3000 {
 
 </details>
 
-Caddy handles WebSocket upgrades automatically — no extra configuration needed. The `flush_interval -1` directive ensures SSE chunks are forwarded immediately without buffering.
+Caddy 会自动处理 WebSocket 升级 — 无需额外配置。`flush_interval -1` 指令可确保 SSE 数据块立即转发，不带缓冲。
 
-## CDN and double-compression warning
+## CDN 与双重压缩警告
 
-If you place a CDN (such as Cloudflare) in front of your reverse proxy, be aware of double compression:
+如果你在反向代理前面放置 CDN（例如 Cloudflare），请注意双重压缩：
 
-- Piarium compresses HTTP responses with gzip (threshold 1 KB).
-- Cloudflare and other CDNs also compress responses by default.
-- This can cause double-compressed responses or incorrect `Content-Encoding` headers.
+- Piarium 使用 gzip 压缩 HTTP 响应（阈值 1 KB）。
+- Cloudflare 和其他 CDN 默认也会压缩响应。
+- 这可能导致响应被双重压缩或 `Content-Encoding` 标头不正确。
 
-To avoid this, disable compression at **one** layer:
+为避免这种情况，请在**一**层中禁用压缩：
 
-- **Cloudflare:** Rules → Compression → disable (or use "Passthrough" mode).
-- **Nginx:** `gzip off` (already shown in the examples above).
-- **Caddy:** Caddy does not re-compress by default if the upstream already sends compressed content.
+- **Cloudflare：** Rules → Compression → disable（或使用 "Passthrough" 模式）。
+- **Nginx：** `gzip off`（上面的示例已展示）。
+- **Caddy：** 如果上游已发送压缩内容，Caddy 默认不会重新压缩。
 
-SSE streaming routes are excluded from compression by Piarium, but the CDN may still buffer them. Check your CDN documentation for how to disable buffering on SSE paths.
+SSE 流式路由已被 Piarium 排除在压缩之外，但 CDN 仍可能缓冲它们。请查阅你的 CDN 文档，了解如何在 SSE 路径上禁用缓冲。
 
-## Related
+## 相关
 
-- [Tunnels](/tunnels/)
-- [Troubleshooting](/troubleshooting/)
+- [隧道](/tunnels/)
+- [问题排查](/troubleshooting/)

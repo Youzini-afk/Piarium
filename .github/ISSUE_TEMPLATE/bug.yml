@@ -1,29 +1,29 @@
-name: Bug report
-description: Something is broken or behaves incorrectly
+name: 缺陷报告
+description: 功能坏了，或行为和预期不符
 title: "[Bug]: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for a report. Search existing issues first. Do not include secrets, prompt bodies, or private file contents.
+        感谢报告。请先搜索已有 Issue。不要包含密钥、提示词正文或私人文件内容。
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened
-      description: What did you see?
+      label: 实际发生了什么
+      description: 你看到了什么？
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: What you expected
+      label: 你期望发生什么
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps to reproduce
+      label: 复现步骤
       placeholder: |
         1.
         2.
@@ -33,23 +33,23 @@ body:
   - type: dropdown
     id: surface
     attributes:
-      label: Surface
+      label: 产品端
       options:
         - Web
-        - Desktop
+        - 桌面端
         - VS Code
-        - Mobile
+        - 移动端
         - CLI / Docker
-        - Unsure
+        - 不确定
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: Version or commit
-      placeholder: 0.1.0 or a git SHA
+      label: 版本或提交
+      placeholder: 0.1.0 或 git SHA
   - type: textarea
     id: environment
     attributes:
-      label: Environment
-      placeholder: OS, Node/Bun version, how you installed Piarium
+      label: 环境
+      placeholder: 操作系统、Node/Bun 版本、安装方式

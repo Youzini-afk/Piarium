@@ -1,18 +1,18 @@
-## Summary
+## 摘要
 
-<!-- What changed and why. -->
+<!-- 改了什么，为什么改。 -->
 
-## Validation
+## 校验
 
-Follow [CONTRIBUTING.md](../CONTRIBUTING.md). Check what you ran:
+请遵循 [CONTRIBUTING.md](../CONTRIBUTING.md)。勾选你实际跑过的项：
 
 - [ ] `bun run type-check`
 - [ ] `bun run lint`
-- [ ] `bun run check:pi` (Pi host / protocol / broker / runtime)
-- [ ] `bun run --cwd packages/web test` (web server or transport)
-- [ ] `bun run docs:validate` (docs)
-- [ ] `bun run dead-code` (added, deleted, or renamed exports)
+- [ ] `bun run check:pi`（Pi host / 协议 / broker / 运行时）
+- [ ] `bun run --cwd packages/web test`（Web 服务或传输）
+- [ ] `bun run docs:validate`（文档）
+- [ ] `bun run dead-code`（新增、删除或重命名了导出）
 
-## Notes
+## 备注
 
-<!-- Surfaces affected (Web / Desktop / VS Code / Mobile). Residual risk. -->
+<!-- 受影响的产品端（Web / 桌面 / VS Code / 移动端）。残留风险。 -->

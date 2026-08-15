@@ -1,68 +1,68 @@
 ---
-title: Connect a Device
-description: Pair your phone, desktop, or another browser with your Piarium server using a one-time QR code.
+title: 连接设备
+description: 通过一次性二维码，把你的手机、桌面应用或另一个浏览器与 Piarium 服务器配对。
 ---
 
-# Connect a Device
+# 连接设备
 
-Pair another device — the mobile app, the desktop app, or a browser on another machine — with your Piarium server by scanning a one-time QR code. This is the recommended way to connect devices; there are no ports to open and no addresses to type.
+通过扫描一次性二维码，把另一台设备 — 移动应用、桌面应用，或另一台机器上的浏览器 — 与你的 Piarium 服务器配对。这是连接设备的推荐方式；无需开放端口，也无需输入地址。
 
-## Pair a device
+## 配对设备
 
-1. On the machine running Piarium, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
-2. Give the device a name (e.g. *My iPhone*) so you can recognize it later.
-3. Pick where you'll use the device:
-   - **This computer only** — for apps running on this same machine
-   - **Home network only** — connects directly over your Wi-Fi; does not work away from this network
-   - **Anywhere** — works at home and away; away traffic goes through the [Private Relay](/private-relay/), an end-to-end encrypted tunnel with no setup needed
-4. Press **Create QR code**.
-5. On the other device, scan the code:
-   - **mobile app** — tap **Scan QR code** on the connect screen (or in the instances list)
-   - **desktop app** — copy the connection link instead and paste it in **Settings → Remote Instances → Other Piarium servers → Import Link**
+1. 在运行 Piarium 的机器上，打开 **Settings → Remote Instances → 连接到此服务器**，然后按 **添加设备**。
+2. 给设备起一个名字（例如 *My iPhone*），方便你以后辨认。
+3. 选择你会在哪里使用这台设备：
+   - **仅本机** — 供同一台电脑上的应用使用
+   - **仅家庭网络** — 通过 Wi-Fi 直接连接；离开此网络后无法使用
+   - **任何地方** — 在家和外出都可用；外出时流量经由 [Private Relay](/private-relay/) 传输，这是一条端到端加密的隧道，无需任何配置
+4. 按 **创建二维码**。
+5. 在另一台设备上扫描该二维码：
+   - **移动应用** — 在连接页面（或实例列表中）点击 **扫描二维码**
+   - **桌面应用** — 改为复制连接链接，并在 **Settings → Remote Instances → 其他 Piarium 服务器 → 导入链接** 中粘贴
 
-The dialog closes on its own as soon as the device connects, and the device appears in the list with a live status. That's it — you're paired.
+设备一连上，对话框就会自动关闭，设备也会出现在列表中并显示实时状态。就这么简单 — 配对完成。
 
-## How pairing stays safe
+## 配对为何安全
 
-- **The QR code is single-use.** It stops working the moment a device redeems it, and it expires on its own if never used.
-- **Each device gets its own token.** Scanning a code never exposes your UI password, and one device's token can't be used to impersonate another.
-- **You stay in control.** Every paired device is listed with its name, platform, and connection status — revoke any of them at any time.
-- **Away-from-home traffic is end-to-end encrypted.** With **Anywhere**, traffic outside your network rides the [Private Relay](/private-relay/), which cannot read what passes through it.
+- **二维码只能使用一次。** 一旦被某台设备兑换就立即失效；从未使用也会自行过期。
+- **每台设备都有自己的令牌。** 扫码不会暴露你的 UI 密码，一台设备的令牌也无法用来冒充另一台设备。
+- **控制权始终在你手上。** 每台已配对的设备都会显示名称、平台和连接状态 — 你可以随时撤销任何一台。
+- **外出流量端到端加密。** 使用 **任何地方** 时，网络之外的流量经由 [Private Relay](/private-relay/) 传输，中继无法读取任何经过它的内容。
 
-## Manage paired devices
+## 管理已配对的设备
 
-**Settings → Remote Instances → Connect to this server** lists every device that can reach this server, with a green dot when it's online and whether it's connected over the local network or the relay.
+**Settings → Remote Instances → 连接到此服务器** 会列出所有可以访问此服务器的设备，在线时显示绿点，并标明它是通过本地网络还是中继连接的。
 
-- **Revoke** cuts a device off immediately. Pair it again with a new QR code if you change your mind.
-- **Clear revoked** tidies up the list.
+- **撤销** 会立即切断该设备的访问。如果你改变主意，用新的二维码重新配对即可。
+- **清除已撤销** 用来整理列表。
 
-The same physical device keeps one entry even if it signs in again later — you won't collect duplicates.
+同一台物理设备即使日后重新登录也只保留一个条目 — 不会积累重复项。
 
-## Connect from the command line
+## 从命令行连接
 
-If the server runs headless (no UI open), create a connection link from a terminal on that machine.
+如果服务器以 headless 方式运行（没有打开 UI），可以在那台机器的终端里创建连接链接。
 
-For a device on the same network:
+针对同一网络中的设备：
 
 ```bash
 piarium connect-url --port 3000 --qr
 ```
 
-For a device that should connect from **anywhere** — the equivalent of picking **Anywhere** in the dialog:
+针对需要从**任何地方**连接的设备 — 相当于在对话框中选择 **任何地方**：
 
 ```bash
 piarium connect-url --relay --qr
 ```
 
-A `--relay` link carries both routes, just like the dialog: the device connects directly over your local network when it can reach the server, and falls back to the [Private Relay](/private-relay/) when away. The relay starts on its own: a running instance picks the link up within a minute, a stopped one on its next launch.
+`--relay` 链接与对话框一样同时携带两条路由：当设备能访问服务器时，通过你的本地网络直接连接；外出时则回退到 [Private Relay](/private-relay/)。中继会自行启动：正在运行的实例会在一分钟内接管该链接，已停止的实例则会在下次启动时接管。
 
-> The direct route only works if the server actually listens on your network. By default Piarium listens on the machine itself only — start it with `--lan` to make it reachable over Wi-Fi. The command warns you (`[LAN_UNREACHABLE]`) when the link's direct route won't be usable from other devices; a `--relay` link still works then, just always through the relay.
+> 直连路由只有在服务器确实监听你的网络时才有效。默认情况下 Piarium 只监听本机 — 用 `--lan` 启动它，才能通过 Wi-Fi 访问。当链接的直连路由无法被其他设备使用时，命令会发出警告（`[LAN_UNREACHABLE]`）；此时 `--relay` 链接仍然可用，只是始终通过中继连接。
 
-The printed link and QR code work exactly like the ones from the settings dialog — single-use, expiring, revocable.
+打印出的链接和二维码与设置对话框里生成的完全一样 — 一次性使用、会过期、可撤销。
 
-## Related
+## 相关内容
 
-- [Private Relay](/private-relay/) — how "Anywhere" connections work and what the relay can and cannot see
-- [Mobile Apps](/mobile/) — install the iOS or Android app
-- [Remote Instances](/remote-instances/) — connect the desktop app to servers over SSH or links
-- [Remote access](/troubleshooting/remote-access/) — when a device won't connect
+- [Private Relay](/private-relay/) — “任何地方”连接的工作原理，以及中继能看到和看不到什么
+- [移动应用](/mobile/) — 安装 iOS 或 Android 应用
+- [远程实例](/remote-instances/) — 让桌面应用通过 SSH 或链接连接到服务器
+- [远程访问](/troubleshooting/remote-access/) — 当设备无法连接时

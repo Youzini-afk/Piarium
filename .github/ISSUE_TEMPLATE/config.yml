@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security report
+  - name: 安全报告
     url: https://github.com/Youzini-afk/Piarium/security/advisories/new
-    about: Report a vulnerability privately. Do not file a public issue.
-  - name: Documentation
+    about: 请私密报告漏洞，不要开公开 Issue。
+  - name: 文档
     url: https://github.com/Youzini-afk/Piarium/tree/main/packages/docs/content/docs
-    about: Read the current docs source before asking a setup question.
+    about: 提问安装或使用问题前，先阅读当前中文文档源码。

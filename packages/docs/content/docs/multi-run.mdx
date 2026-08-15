@@ -1,34 +1,34 @@
 ---
 title: Multi-run
-description: Run the same prompt across several models or sessions at once.
+description: 一次性在多个模型或会话上运行相同的提示词。
 ---
 
 # Multi-run
 
-Multi-run launches several sessions from one form — handy for trying the same task with different models and comparing the results. Open it from the button at the top of the session sidebar.
+Multi-run 从一个表单启动多个会话 — 适合用不同的模型尝试同一个任务并比较结果。从会话侧边栏顶部的按钮打开它。
 
-## Start a multi-run
+## 启动一次 multi-run
 
-1. Open the multi-run launcher.
-2. Pick the project and name the run group.
-3. Write the prompt and pick the models to run it with (up to five per group).
-4. Choose whether to **isolate runs**.
-5. Launch.
+1. 打开 multi-run 启动器。
+2. 选择项目并为运行组命名。
+3. 编写提示词并选择要用来运行它的模型（每组最多五个）。
+4. 选择是否 **isolate runs**。
+5. 启动。
 
-Each model gets its own session, and they all start with your prompt.
+每个模型都会获得自己的会话，它们都以你的提示词开始。
 
-## Isolated runs
+## 隔离运行
 
-Turn on **isolate runs** to give every run its own [worktree](/worktrees/) and branch, so they never touch the same files. This needs a git repo — it's turned off automatically for folders that aren't one. Pick the branch the runs start from.
+开启 **isolate runs** 可以为每次运行提供它自己的 [worktree](/worktrees/) 和分支，这样它们就绝不会触碰相同的文件。这需要一个 git 仓库 — 对于不是 git 仓库的文件夹，它会自动关闭。选择运行从哪个分支开始。
 
-With isolation off, every run is a plain session in the project folder.
+关闭隔离后，每次运行都是项目文件夹中的一个普通会话。
 
-## Comparing results
+## 比较结果
 
-Each run is a normal session you can open, read, and keep or discard. If you started runs to compare approaches, review them side by side and carry the best one forward.
+每次运行都是一个普通会话，你可以打开、阅读，并保留或丢弃它。如果你启动多个运行是为了比较不同方案，可以并排审阅它们，并把最好的那个推进下去。
 
-If a single run fails to start, the others still launch — you'll just see fewer sessions than you asked for.
+如果单次运行启动失败，其余的仍会启动 — 你只会看到比请求数量更少的会话。
 
-## Related
+## 相关内容
 
-- [Worktree Sessions](/worktrees/) — how isolation works under the hood
+- [Worktree 会话](/worktrees/) — 隔离在底层如何工作

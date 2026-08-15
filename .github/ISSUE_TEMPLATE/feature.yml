@@ -1,27 +1,27 @@
-name: Feature request
-description: Propose a user-facing change
+name: 功能建议
+description: 提出面向用户的改动
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Describe the user outcome, not an implementation. Large architecture changes should start as a discussion of boundaries (Pi host, renderer, plugin ownership).
+        请写用户结果，不要写实现方案。较大的架构改动应先讨论边界（Pi host、渲染器、插件归属）。
   - type: textarea
     id: problem
     attributes:
-      label: Problem
-      description: What is hard or missing today?
+      label: 问题
+      description: 现在缺什么，或什么很难做？
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed outcome
-      description: What should a user be able to do?
+      label: 期望结果
+      description: 用户应该能做成什么？
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives you considered
+      label: 你考虑过的其他方案

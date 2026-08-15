@@ -1,33 +1,45 @@
-# Piarium Docs Source
+[English](README.en.md) | 简体中文
 
-This package is the source-of-truth for Piarium public docs content.
+# Piarium 文档源码
 
-## Layout
+本包是 Piarium 公开文档的源码。**简体中文是默认语言和源语言。**
 
-- `content/docs/*.mdx` - English docs pages (source of truth)
-- `content/docs/<locale>/*.mdx` - translations, mirroring the English filenames
-  (e.g. `uk/`, `zh-cn/`, `pt-br/`, `fr/`); see `CONTRIBUTING.md` → Localization
-- `sidebar.config.json` - docs navigation structure for Starlight sidebar
-- `CONTRIBUTING.md` - authoring guide for adding pages, sections, and translations
-- `DEPLOYMENT.md` - how this source is validated and what is not automated yet
+## 目录
 
-## Local validation
+- `content/docs/*.mdx` — 简体中文文档页（源语言，无前缀路径）
+- `content/docs/en/*.mdx` — 英文译本
+- `content/docs/<locale>/*.mdx` — 其他语种译本（如 `uk/`、`pt-br/`、`fr/`）；见 [CONTRIBUTING.md](CONTRIBUTING.md) 的「本地化」
+- `sidebar.config.json` — Starlight 侧边栏；`label` 为中文，其他语种写在 `translations`
+- `CONTRIBUTING.md` — 中文编写指南
+- `CONTRIBUTING.en.md` — 英文编写指南
+- `DEPLOYMENT.md` — 校验与尚未自动化的发布说明
 
-Run from repo root:
+未来的 Starlight 站点应把根 locale 配成简体中文：
+
+```js
+locales: {
+  root: { label: "简体中文", lang: "zh-CN" },
+  en: { label: "English", lang: "en" },
+  // ...
+}
+```
+
+## 本地校验
+
+在仓库根目录运行：
 
 ```bash
 bun run docs:validate
 ```
 
-This validates:
+会检查：
 
-- frontmatter (`title`, `description`) exists for every MDX page
-- sidebar links resolve to existing MDX routes
+- 每个 MDX 页都有 `title`、`description` frontmatter
+- 侧边栏链接能对应到默认（中文）路由
 
-It does not check branding, translation quality, or whether commands still match the code.
+它不检查品牌、翻译质量，也不检查命令是否仍与代码一致。
 
-## Deployment model
+## 发布模型
 
-This repository owns the docs source. There is no separate website workflow in
-`.github/workflows` yet. Until a docs site is published, treat these pages as
-the canonical content for GitHub and any future Starlight renderer.
+文档源码在本仓库。`.github/workflows` 里还没有独立的文档站工作流。在公开站点上线前，
+这些页面就是 GitHub 和未来 Starlight 渲染器的权威内容。
