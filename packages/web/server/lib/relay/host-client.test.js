@@ -242,6 +242,15 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
   return done;
 };
 
+const waitFor = async (predicate, timeoutMs = 10_000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return predicate();
+};
+
 describe('relay host-client integration', () => {
   let relay;
   let origin;
@@ -268,8 +277,10 @@ describe('relay host-client integration', () => {
       logger: { warn: () => {} },
     });
 
-    // Give the control socket a moment to connect before the client arrives.
-    await new Promise((r) => setTimeout(r, 200));
+    // Windows CI runners can take longer than a fixed 200ms sleep to open the
+    // control socket. Wait for the host's own connected status instead.
+    const controlReady = await waitFor(() => host.getStatus().state === 'connected');
+    expect(controlReady).toBe(true);
 
     const result = await runScriptedClient({
       relayUrl: relay.wsUrl,
