@@ -83,9 +83,9 @@ describe('Piarium cloud container runtime', () => {
   it('applies repository patches before building', () => {
     expect(appDockerfile).toContain('COPY bun-patches ./bun-patches');
     expect(appDockerfile).toContain('COPY patches ./patches');
-    expect(appDockerfile).toContain('COPY fix-deprecation.js ./');
+    expect(appDockerfile).toContain('COPY scripts/fix-deprecation.js ./scripts/fix-deprecation.js');
     expect(appDockerfile).toContain('bun install --frozen-lockfile --ignore-scripts');
-    expect(appDockerfile).toContain('node ./fix-deprecation.js');
+    expect(appDockerfile).toContain('node ./scripts/fix-deprecation.js');
     expect(appDockerfile).toContain('node ./node_modules/patch-package/index.js');
     expect(appDockerfile).not.toContain('repair-pi-shrinkwrap');
   });

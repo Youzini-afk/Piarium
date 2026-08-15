@@ -14,7 +14,7 @@ on:
       - package.json
       - bun-patches/**
       - patches/**
-      - fix-deprecation.js
+      - scripts/fix-deprecation.js
       - packages/**
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime.bun.lock
@@ -32,7 +32,7 @@ on:
       - package.json
       - bun-patches/**
       - patches/**
-      - fix-deprecation.js
+      - scripts/fix-deprecation.js
       - packages/**
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime.bun.lock

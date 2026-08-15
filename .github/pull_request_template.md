@@ -4,7 +4,7 @@
 
 ## 校验
 
-请遵循 [CONTRIBUTING.md](../CONTRIBUTING.md)。勾选你实际跑过的项：
+请遵循 [CONTRIBUTING.md](CONTRIBUTING.md)。勾选你实际跑过的项：
 
 - [ ] `bun run type-check`
 - [ ] `bun run lint`

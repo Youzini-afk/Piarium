@@ -12,13 +12,31 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function findRepoRoot(startDir) {
+  let current = startDir;
+  while (true) {
+    if (
+      fs.existsSync(path.join(current, 'package.json'))
+      && fs.existsSync(path.join(current, 'bun.lock'))
+    ) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return startDir;
+    }
+    current = parent;
+  }
+}
+
 function fixHttpProxyDeprecation() {
   try {
+    const repoRoot = findRepoRoot(__dirname);
     const candidateDirs = [
-      path.join(__dirname, 'node_modules', 'http-proxy', 'lib', 'http-proxy'),
+      path.join(repoRoot, 'node_modules', 'http-proxy', 'lib', 'http-proxy'),
     ];
 
-    const bunStoreDir = path.join(__dirname, 'node_modules', '.bun');
+    const bunStoreDir = path.join(repoRoot, 'node_modules', '.bun');
     if (fs.existsSync(bunStoreDir)) {
       for (const entry of fs.readdirSync(bunStoreDir, { withFileTypes: true })) {
         if (!entry.isDirectory() || !entry.name.startsWith('http-proxy@')) continue;

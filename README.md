@@ -151,7 +151,7 @@ Pi 工作进程异常也不会让渲染器一同崩溃。跨进程传输的是 P
 
 第三方 Pi 包是拥有当前用户操作系统权限的可执行代码。Piarium 会展示观察到的能力，并对项目内
 可执行资源设置授权门槛，但不会把受信任扩展宣传成完整的沙箱。在公开远程实例或安装陌生代码之前，
-请阅读[安全策略](SECURITY.md)和[安全模型](docs/security.md)。
+请阅读[安全策略](.github/SECURITY.md)和[安全模型](docs/security.md)。
 
 ## 仓库结构
 
@@ -187,7 +187,7 @@ bun run test:pi:dist
 CI 会在 Windows 和 Ubuntu 上分别运行。云端/运行时输入发生变化时，还会构建配套的精简与工具链
 基础镜像及应用镜像，分别通过不可变摘要启动候选镜像并完成烟测后，才会提升可安装标签。
 
-参与贡献前，请阅读[贡献指南](CONTRIBUTING.md)和仓库专用规则 [AGENTS.md](AGENTS.md)。
+参与贡献前，请阅读[贡献指南](.github/CONTRIBUTING.md)和仓库专用规则 [AGENTS.md](AGENTS.md)。
 
 ## 设计与运维文档
 

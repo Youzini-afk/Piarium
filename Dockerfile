@@ -10,7 +10,7 @@ ARG PIARIUM_SOURCE_REVISION
 COPY package.json bun.lock ./
 COPY bun-patches ./bun-patches
 COPY patches ./patches
-COPY fix-deprecation.js ./
+COPY scripts/fix-deprecation.js ./scripts/fix-deprecation.js
 COPY packages/electron/package.json ./packages/electron/package.json
 COPY packages/extension-builtins/package.json ./packages/extension-builtins/package.json
 COPY packages/extension-cli/package.json ./packages/extension-cli/package.json
@@ -30,7 +30,7 @@ COPY packages/vscode/package.json ./packages/vscode/package.json
 COPY packages/vscode/runtime/package.json ./packages/vscode/runtime/package.json
 COPY packages/web/package.json ./packages/web/package.json
 RUN bun install --frozen-lockfile --ignore-scripts \
-  && node ./fix-deprecation.js \
+  && node ./scripts/fix-deprecation.js \
   && node ./node_modules/patch-package/index.js
 
 COPY . .

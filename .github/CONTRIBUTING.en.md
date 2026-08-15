@@ -6,7 +6,7 @@ Thank you for helping improve Piarium. Contributions are welcome across the Pi r
 desktop and remote surfaces, extension integrations, documentation, testing, accessibility, and
 platform support.
 
-This guide describes the public contribution workflow. [AGENTS.md](AGENTS.md), the nearest package
+This guide describes the public contribution workflow. [AGENTS.md](../AGENTS.md), the nearest package
 README, and owning architecture documents contain the detailed repository rules for implementation
 work.
 
@@ -60,8 +60,8 @@ one current pre-release runtime contract.
 7. **Keep failures truthful.** An authoritative failure is not a successful empty response. Make
    cancellation, partial failure, cleanup, retry, rollback, and unavailable capabilities visible.
 
-Read [Architecture](docs/architecture.md), [Plugin GUI design](docs/plugin-gui-design.md),
-[Recovery](docs/recovery.md), and [Security model](docs/security.md) when those boundaries apply.
+Read [Architecture](../docs/architecture.md), [Plugin GUI design](../docs/plugin-gui-design.md),
+[Recovery](../docs/recovery.md), and [Security model](../docs/security.md) when those boundaries apply.
 
 ## Development setup
 
@@ -243,5 +243,5 @@ You can also help by:
 ## License
 
 By submitting a contribution, you agree that it may be distributed under Piarium's
-[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`) and that imported third-party
-material retains the notices required by [Third-party notices](THIRD_PARTY_NOTICES.md).
+[GNU Affero General Public License v3.0](../LICENSE) (`AGPL-3.0-only`) and that imported third-party
+material retains the notices required by [Third-party notices](../THIRD_PARTY_NOTICES.md).

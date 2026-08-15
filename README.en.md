@@ -162,7 +162,7 @@ boundary; SDK callbacks, credential objects, and extension implementation detail
 
 Third-party Pi packages are executable code with the user's operating-system permissions. Piarium
 shows observed capabilities and gates project-local executable resources, but it does not claim to
-turn trusted extensions into a complete sandbox. Read the [security policy](SECURITY.en.md) and
+turn trusted extensions into a complete sandbox. Read the [security policy](.github/SECURITY.en.md) and
 [security model](docs/security.md) before exposing a remote instance or installing unfamiliar code.
 
 ## Repository layout
@@ -201,7 +201,7 @@ CI runs on both Windows and Ubuntu. Changes to cloud/runtime inputs additionally
 slim and toolbelt base/application images, smoke both applications by immutable digest, and promote
 tags only after both candidates pass.
 
-Before contributing, read [CONTRIBUTING.en.md](CONTRIBUTING.en.md) and the repository-specific rules in
+Before contributing, read [CONTRIBUTING.en.md](.github/CONTRIBUTING.en.md) and the repository-specific rules in
 [AGENTS.md](AGENTS.md).
 
 ## Design and operations documentation

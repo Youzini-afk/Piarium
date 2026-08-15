@@ -14,6 +14,8 @@ First public source snapshot of the Pi-native workspace.
 - Cloud image and Compose path with digest-linked promotion
 - Slim and toolbelt container images: Compose defaults to `piarium-slim`; overlay
   `docker-compose.toolbelt.yml` for the language toolbox
+- Community files and Renovate config live under `.github/`; install-time patches
+  and shadcn config sit with their owners
 - Piarium extension platform (contract, host, surface, SDK, CLI)
 - OpenChamber upstream capability absorption, including Work Status,
   walkthroughs, and Markdown task loops
