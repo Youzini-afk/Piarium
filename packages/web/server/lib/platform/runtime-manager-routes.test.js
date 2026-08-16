@@ -5,6 +5,7 @@ import { registerRuntimeManagerRoutes } from './runtime-manager-routes.js';
 
 const snapshot = {
   installations: [],
+  revision: 1,
   status: 'missing',
 };
 

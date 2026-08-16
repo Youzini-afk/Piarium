@@ -348,9 +348,12 @@ is no version ceiling, downgrade action, or silent upgrade. Cloud and headless W
 ready runtime before the server finishes starting.
 
 Onboarding and Settings activate or install through `RuntimeAPIs.piRuntime`. After a successful
-probe the lifecycle creates a broker without restarting the app. Existing sessions stay on the
-broker generation they started with; workers that use the user-global install are stopped before
-that install is overwritten.
+probe the lifecycle creates a broker without restarting the app and publishes `ready` only after
+that broker completes its Host handshake. Runtime snapshots carry a monotonic revision so a delayed
+HTTP snapshot cannot overwrite a newer live event. HTTP and WebSocket surfaces use the lifecycle
+facade: existing sessions and interactive worker replies stay on their owning generation while new
+catalog and session work uses the current generation. Workers that use the user-global install are
+stopped before that install is overwritten.
 
 When PATH has no usable Pi, the same manager plans a one-click user-global install. It prefers the
 owning package manager of an existing install, otherwise the first detected npm, bun, or pnpm, and

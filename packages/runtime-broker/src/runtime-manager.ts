@@ -83,6 +83,7 @@ export class PiRuntimeManager {
   #installPlan: PiRuntimeInstallPlan | undefined;
   #issue: string | undefined;
   #operationId: string | undefined;
+  #revision = 0;
   #selectedId: string | undefined;
   #status: PiRuntimeManagerStatus = "discovering";
 
@@ -99,6 +100,7 @@ export class PiRuntimeManager {
 
   get snapshot(): PiRuntimeSnapshot {
     return {
+      revision: this.#revision,
       status: this.#status,
       installations: this.#installations,
       ...(this.#selectedId === undefined ? {} : { selectedId: this.#selectedId }),
@@ -364,6 +366,7 @@ export class PiRuntimeManager {
   }
 
   #emit(): void {
+    this.#revision += 1;
     const snapshot = this.snapshot;
     for (const listener of this.#listeners) listener(snapshot);
   }

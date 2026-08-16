@@ -604,6 +604,9 @@ async function main(options = {}) {
   let tunnelRuntimeContext = null;
   let realtimeProxyRuntime = { stop: () => {} };
   let dictationRuntime = null;
+  const currentPiRuntimeHandshake = () => (
+    piRuntimeLifecycle ? piRuntimeLifecycle.handshake : piRuntimeHandshake
+  );
 
   const activePort = () => tunnelRuntimeContext?.getActivePort() || port;
   const resolvePairingTransports = (req) => {
@@ -648,22 +651,25 @@ async function main(options = {}) {
     runtimeName: process.env.PIARIUM_RUNTIME || 'web',
     serverStartedAt,
     gracefulShutdown,
-    getHealthSnapshot: () => ({
-      apiOnly,
-      ...(process.env.PIARIUM_RELEASE_ID?.trim()
-        ? { releaseId: process.env.PIARIUM_RELEASE_ID.trim() }
-        : {}),
-      piRuntime: {
-        ready: Boolean(piRuntimeHandshake),
-        capabilities: piRuntimeHandshake?.capabilities ?? null,
-        hostVersion: piRuntimeHandshake?.hostVersion ?? null,
-        nodeVersion: piRuntimeHandshake?.runtime?.nodeVersion ?? null,
-        piVersion: piRuntimeHandshake?.runtime?.piVersion ?? null,
-        protocolVersion: piRuntimeHandshake?.protocolVersion ?? null,
-        source: piRuntimeHandshake?.runtime?.source ?? null,
-        manager: piRuntimeLifecycle?.snapshot ?? null,
-      },
-    }),
+    getHealthSnapshot: () => {
+      const handshake = currentPiRuntimeHandshake();
+      return {
+        apiOnly,
+        ...(process.env.PIARIUM_RELEASE_ID?.trim()
+          ? { releaseId: process.env.PIARIUM_RELEASE_ID.trim() }
+          : {}),
+        piRuntime: {
+          ready: Boolean(handshake),
+          capabilities: handshake?.capabilities ?? null,
+          hostVersion: handshake?.hostVersion ?? null,
+          nodeVersion: handshake?.runtime?.nodeVersion ?? null,
+          piVersion: handshake?.runtime?.piVersion ?? null,
+          protocolVersion: handshake?.protocolVersion ?? null,
+          source: handshake?.runtime?.source ?? null,
+          manager: piRuntimeLifecycle?.snapshot ?? null,
+        },
+      };
+    },
     verboseRequestLogs: isEnvFlagEnabled(process.env.PIARIUM_VERBOSE_REQUEST_LOGS),
     uiPassword,
     tunnelAuthController,
@@ -740,6 +746,10 @@ async function main(options = {}) {
   });
   const ownsPiRuntimeBroker = !options.piRuntimeBroker && !options.piRuntimeLifecycle;
   const piRuntimeBroker = options.piRuntimeBroker || piRuntimeLifecycle.asBroker();
+  const getReadyPiRuntimeBroker = () => (
+    options.piRuntimeBroker
+    || (piRuntimeLifecycle?.currentBroker ? piRuntimeBroker : null)
+  );
   const startPiRuntime = async () => {
     recordStartupPerformance('pi-runtime.warmup.start');
     try {
@@ -866,7 +876,7 @@ async function main(options = {}) {
   const piRuntimeGateway = createPiRuntimeGateway({
     server,
     broker: piRuntimeBroker,
-    getBroker: () => piRuntimeLifecycle?.currentBroker || (options.piRuntimeBroker ?? null),
+    getBroker: getReadyPiRuntimeBroker,
     uiAuthController,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
@@ -934,7 +944,7 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     scheduledTaskService,
     piRuntimeBroker,
-    getPiRuntimeBroker: () => piRuntimeLifecycle?.currentBroker || options.piRuntimeBroker || piRuntimeBroker,
+    getPiRuntimeBroker: getReadyPiRuntimeBroker,
     piRuntimeLifecycle,
     ...(typeof options.pickPiPackageRoot === 'function' ? { pickPiPackageRoot: options.pickPiPackageRoot } : {}),
     ...(typeof options.openFilesystemPath === 'function' ? { openFilesystemPath: options.openFilesystemPath } : {}),
@@ -961,7 +971,7 @@ async function main(options = {}) {
     process,
     __dirname,
     express,
-    listRecentSessions: () => (piRuntimeLifecycle?.currentBroker || options.piRuntimeBroker)?.listSessions?.() ?? [],
+    listRecentSessions: () => getReadyPiRuntimeBroker()?.listSessions?.() ?? [],
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
     normalizePwaOrientation,
@@ -1021,7 +1031,7 @@ async function main(options = {}) {
       tunnel: { active: Boolean(tunnelService.getPublicUrl()) },
       scheduledTasks: scheduledTasksRuntime.getStatus(),
     }),
-    isReady: () => Boolean(piRuntimeHandshake),
+    isReady: () => Boolean(currentPiRuntimeHandshake()),
     stop: async (shutdownOptions = {}) => {
       piSessionAutomation.stop();
       brokerUnsubscribe();

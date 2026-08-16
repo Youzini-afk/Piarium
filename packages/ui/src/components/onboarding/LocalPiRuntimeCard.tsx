@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
+import { shouldApplyPiRuntimeSnapshot } from '@/lib/pi-runtime/snapshot-order';
 import { piRuntimeSourceLabelKey } from '@/lib/pi-runtime/source-label';
 import { cn } from '@/lib/utils';
 
@@ -26,58 +27,86 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
   const { piRuntime } = useRuntimeAPIs();
   const [snapshot, setSnapshot] = React.useState<PiRuntimeSnapshot>({
     installations: [],
+    revision: 0,
     status: 'discovering',
   });
+  const [actionError, setActionError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [customPath, setCustomPath] = React.useState('');
   const [showCustomPath, setShowCustomPath] = React.useState(false);
   const mountedRef = React.useRef(true);
+  const receivedSnapshotRef = React.useRef(false);
+  const revisionRef = React.useRef(0);
+  const runtimeGenerationRef = React.useRef(0);
 
   const applySnapshot = React.useCallback((next: PiRuntimeSnapshot) => {
-    if (mountedRef.current) setSnapshot(next);
+    if (!mountedRef.current || !shouldApplyPiRuntimeSnapshot(revisionRef.current, next)) return;
+    revisionRef.current = next.revision;
+    receivedSnapshotRef.current = true;
+    setActionError(null);
+    setSnapshot(next);
   }, []);
 
   React.useEffect(() => {
+    runtimeGenerationRef.current += 1;
+    const runtimeGeneration = runtimeGenerationRef.current;
+    let cancelled = false;
+    const applyCurrentSnapshot = (next: PiRuntimeSnapshot) => {
+      if (!cancelled && runtimeGenerationRef.current === runtimeGeneration) applySnapshot(next);
+    };
     mountedRef.current = true;
+    receivedSnapshotRef.current = false;
+    revisionRef.current = 0;
+    setActionError(null);
+    setBusy(false);
+    setSnapshot({ installations: [], revision: 0, status: 'discovering' });
     if (!piRuntime) {
-      applySnapshot({
+      applyCurrentSnapshot({
         installations: [],
         issue: t('onboarding.localSetup.errors.managerUnavailable'),
+        revision: 0,
         status: 'failed',
       });
       return () => {
+        cancelled = true;
         mountedRef.current = false;
       };
     }
-    const unsubscribe = piRuntime.subscribe(applySnapshot);
-    void piRuntime.getSnapshot().then(applySnapshot).catch((error) => {
-      applySnapshot({
-        installations: [],
-        issue: errorMessage(error),
-        status: 'failed',
-      });
+    const unsubscribe = piRuntime.subscribe(applyCurrentSnapshot);
+    void piRuntime.getSnapshot().then(applyCurrentSnapshot).catch((error) => {
+      if (cancelled || runtimeGenerationRef.current !== runtimeGeneration) return;
+      if (!receivedSnapshotRef.current) {
+        setActionError(errorMessage(error));
+        setSnapshot({
+          installations: [],
+          issue: errorMessage(error),
+          revision: 0,
+          status: 'failed',
+        });
+      }
     });
     return () => {
+      cancelled = true;
       mountedRef.current = false;
       unsubscribe();
     };
   }, [applySnapshot, piRuntime, t]);
 
   const runAction = React.useCallback(async (work: () => Promise<PiRuntimeSnapshot | void>) => {
+    const runtimeGeneration = runtimeGenerationRef.current;
     setBusy(true);
+    setActionError(null);
     try {
       const next = await work();
-      if (next) applySnapshot(next);
+      if (next && runtimeGenerationRef.current === runtimeGeneration) applySnapshot(next);
     } catch (error) {
-      applySnapshot({
-        ...snapshot,
-        issue: errorMessage(error),
-        status: 'failed',
-      });
+      if (mountedRef.current && runtimeGenerationRef.current === runtimeGeneration) {
+        setActionError(errorMessage(error));
+      }
     } finally {
-      if (mountedRef.current) setBusy(false);
+      if (mountedRef.current && runtimeGenerationRef.current === runtimeGeneration) setBusy(false);
     }
-  }, [applySnapshot, snapshot]);
+  }, [applySnapshot]);
 
   const installation = discoveredInstall(snapshot);
   const status = snapshot.status;
@@ -115,7 +144,7 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
             targetVersion: snapshot.installPlan?.targetVersion ?? '',
           })
         : status === 'failed'
-          ? snapshot.issue ?? t('onboarding.localSetup.status.failed')
+          ? actionError ?? snapshot.issue ?? t('onboarding.localSetup.status.failed')
           : snapshot.installPlan?.reason || t('onboarding.localSetup.status.checkingDetail');
 
   const handleUseThisPi = React.useCallback(async () => {
@@ -211,6 +240,9 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
               ? ` ${t('onboarding.localSetup.installPlan.location', { location: snapshot.installPlan.location })}`
               : ''}
           </p>
+        ) : null}
+        {actionError && status !== 'failed' ? (
+          <p className="mt-3 typography-meta text-destructive">{actionError}</p>
         ) : null}
       </div>
 

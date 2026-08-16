@@ -3,11 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { HostHandshakeResult } from "@piarium/protocol";
+import type { HostHandshakeResult, SessionSnapshot, SessionSummary } from "@piarium/protocol";
 import type { RuntimeCandidate } from "@piarium/pi-host/discovery";
 import { PiRuntimeNotReadyError } from "../src/errors.js";
+import { dispatchRuntimeRequest } from "../src/runtime-dispatcher.js";
 import { PiRuntimeLifecycle } from "../src/runtime-lifecycle.js";
-import type { PiRuntimeBroker } from "../src/runtime-broker.js";
+import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from "../src/runtime-broker.js";
 
 const SYSTEM_ROOT = "C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent";
 const CUSTOM_ROOT = "D:\\other\\pi-coding-agent";
@@ -74,6 +75,84 @@ const fakeBroker = (
   },
 } as unknown as PiRuntimeBroker);
 
+const sessionSnapshot = (sessionId: string): SessionSnapshot => ({
+  activeTools: [],
+  busy: false,
+  cwd: "C:\\workspace",
+  features: {
+    pinnedContext: [],
+    revision: 0,
+    schemaVersion: 1,
+  },
+  followUp: [],
+  followUpMode: "all",
+  isCompacting: false,
+  isStreaming: false,
+  leafId: null,
+  pendingMessageCount: 0,
+  retryAttempt: 0,
+  sessionFile: `C:\\sessions\\${sessionId}.jsonl`,
+  sessionId,
+  steering: [],
+  steeringMode: "all",
+  thinkingLevel: "off",
+});
+
+const sessionSummary = (sessionId: string): SessionSummary => ({
+  allMessagesText: "",
+  createdAt: "2026-08-16T00:00:00.000Z",
+  cwd: "C:\\workspace",
+  firstMessage: "",
+  id: sessionId,
+  messageCount: 0,
+  persisted: true,
+  sessionFile: `C:\\sessions\\${sessionId}.jsonl`,
+  updatedAt: "2026-08-16T00:00:00.000Z",
+});
+
+const recordingBroker = (
+  label: string,
+  packageRoot: string,
+  activeSessionIds: string[],
+  calls: string[],
+): { broker: PiRuntimeBroker; emit: (event: PiRuntimeBrokerEvent) => void } => {
+  let listener: ((event: PiRuntimeBrokerEvent) => void) | undefined;
+  const record = <T>(operation: string, result: T): T => {
+    calls.push(`${label}:${operation}`);
+    return result;
+  };
+  const broker = {
+    activeSessionIds,
+    catalogStarted: true,
+    packageRoot,
+    workerCount: activeSessionIds.length + 1,
+    subscribe(next: (event: PiRuntimeBrokerEvent) => void) {
+      listener = next;
+      return () => {
+        if (listener === next) listener = undefined;
+      };
+    },
+    warmup: async () => handshakeFor(packageRoot, packageRoot === CUSTOM_ROOT ? "custom" : "system"),
+    listSessions: async () => record("list", activeSessionIds.map(sessionSummary)),
+    createSession: async () => record("create", sessionSnapshot(`${label}-new`)),
+    openSession: async (input: { sessionId?: string }) => record("open", sessionSnapshot(input.sessionId ?? `${label}-opened`)),
+    closeSession: async () => record("close", { closed: true }),
+    forkSession: async () => record("fork", { snapshot: sessionSnapshot(`${label}-fork`) }),
+    renameSession: async (sessionId: string, name: string) => record("rename", { name, sessionId }),
+    archiveSession: async (sessionId: string) => record("archive", sessionSummary(sessionId)),
+    deleteSession: async (sessionId: string) => record("delete", { deleted: true, sessionId }),
+    respondToExtensionUi: async () => record("extension-ui", true),
+    respondToProviderAuth: async () => record("provider-auth", true),
+    respondToProjectTrust: async () => record("project-trust", true),
+    requestForSession: async () => record("request", {}),
+    dispose: async () => {},
+  } as unknown as PiRuntimeBroker;
+  return {
+    broker,
+    emit: (event) => listener?.(event),
+  };
+};
+
 test("starts without a broker when Pi is missing", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
   try {
@@ -124,10 +203,55 @@ test("creates a broker after a successful probe without restarting the process",
         sessionCreated: false,
       }),
     });
+    const observed: Array<{ revision: number; status: string }> = [];
+    lifecycle.subscribe((snapshot) => observed.push({ revision: snapshot.revision, status: snapshot.status }));
     const result = await lifecycle.start();
     assert.equal(result?.runtime.source, "system");
     assert.deepEqual(created, [SYSTEM_ROOT]);
     assert.equal(lifecycle.requireBroker().packageRoot, SYSTEM_ROOT);
+    assert.equal(observed.at(-1)?.status, "ready");
+    assert.ok(observed.some((snapshot) => snapshot.status === "probing"));
+    assert.ok(observed.every((snapshot, index) => index === 0 || snapshot.revision > observed[index - 1]!.revision));
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
+test("reports broker activation failure instead of publishing a false ready state", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  try {
+    let disposed = false;
+    const lifecycle = new PiRuntimeLifecycle({
+      dataDir,
+      createBroker: () => ({
+        activeSessionIds: [],
+        dispose: async () => {
+          disposed = true;
+        },
+        packageRoot: SYSTEM_ROOT,
+        subscribe: () => () => {},
+        warmup: async () => {
+          throw new Error("broker warmup failed");
+        },
+        workerCount: 0,
+      } as unknown as PiRuntimeBroker),
+      discover: async () => [systemCandidate],
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
+      probe: async () => ({
+        handshake: handshakeFor(SYSTEM_ROOT, "system"),
+        sessionCreated: false,
+      }),
+    });
+    await assert.rejects(lifecycle.start(), /broker warmup failed/);
+    assert.equal(disposed, true);
+    assert.equal(lifecycle.snapshot.status, "failed");
+    assert.match(lifecycle.snapshot.issue ?? "", /broker warmup failed/);
+    assert.throws(() => lifecycle.requireBroker(), PiRuntimeNotReadyError);
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }
@@ -163,6 +287,81 @@ test("keeps the previous broker generation after activating another install", as
     assert.equal(lifecycle.brokerForSession("session-old"), first);
     assert.equal(lifecycle.requireBroker(), second);
     assert.equal(created.length, 2);
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
+test("routes old-session and worker operations to their owning generation", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
+  try {
+    const calls: string[] = [];
+    const first = recordingBroker("old", SYSTEM_ROOT, ["session-old"], calls);
+    const second = recordingBroker("current", CUSTOM_ROOT, [], calls);
+    const lifecycle = new PiRuntimeLifecycle({
+      dataDir,
+      createBroker: (options) => options.packageRoot === CUSTOM_ROOT ? second.broker : first.broker,
+      discover: async () => [systemCandidate, customCandidate],
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
+      probe: async (options) => ({
+        handshake: handshakeFor(
+          options.packageRoot ?? SYSTEM_ROOT,
+          options.packageRoot === CUSTOM_ROOT ? "custom" : "system",
+        ),
+        sessionCreated: false,
+      }),
+    });
+    await lifecycle.start();
+    first.emit({
+      envelope: {} as never,
+      kind: "host",
+      role: "session",
+      sessionId: "session-old",
+      workerId: "worker-old",
+    });
+    await lifecycle.activate("custom:other");
+
+    const facade = lifecycle.asBroker();
+    assert.equal(facade.catalogStarted, true);
+    await dispatchRuntimeRequest(facade, "session.open", { sessionId: "session-old" });
+    await dispatchRuntimeRequest(facade, "session.rename", { name: "Renamed", sessionId: "session-old" });
+    await dispatchRuntimeRequest(facade, "session.archive", { sessionId: "session-old" });
+    await dispatchRuntimeRequest(facade, "session.fork", { entryId: "entry-1", sessionId: "session-old" });
+    await dispatchRuntimeRequest(facade, "provider.auth.respond", {
+      response: { requestId: "auth-1", value: "secret" },
+      sessionId: "session-old",
+    });
+    await dispatchRuntimeRequest(facade, "extension.ui.respond", {
+      response: { requestId: "ui-1", value: true },
+      sessionId: "session-old",
+    });
+    await dispatchRuntimeRequest(facade, "project.trust.respond", {
+      remember: false,
+      requestId: "trust-1",
+      trusted: true,
+      workerId: "worker-old",
+    });
+    await dispatchRuntimeRequest(facade, "session.close", { sessionId: "session-old" });
+    const summaries = await facade.listSessions();
+
+    assert.deepEqual(calls, [
+      "old:open",
+      "old:rename",
+      "old:archive",
+      "old:fork",
+      "old:provider-auth",
+      "old:extension-ui",
+      "old:project-trust",
+      "old:close",
+      "old:list",
+      "current:list",
+    ]);
+    assert.deepEqual(summaries.map((summary) => summary.id), ["session-old"]);
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }

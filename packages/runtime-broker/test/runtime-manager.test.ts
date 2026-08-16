@@ -68,12 +68,16 @@ test("probes a discovered system install and records the real handshake source",
         };
       },
     });
+    const revisions: number[] = [];
+    manager.subscribe((snapshot) => revisions.push(snapshot.revision));
     const snapshot = await manager.refresh();
     assert.equal(snapshot.status, "ready");
     assert.equal(snapshot.active?.source, "system");
     assert.equal(snapshot.active?.packageRoot, systemReady.packageRoot);
     assert.equal(snapshot.active?.state, "ready");
     assert.equal("compatible" in (snapshot.active ?? {}), false);
+    assert.equal(snapshot.revision, revisions.at(-1));
+    assert.ok(revisions.every((revision, index) => index === 0 || revision > revisions[index - 1]!));
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }
