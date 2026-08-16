@@ -2,7 +2,7 @@
 
 Status: Pi-native engine cutover complete; plugin product surfaces and Windows release in progress
 
-Last updated: 2026-08-04
+Last updated: 2026-08-16
 
 ## 1. Context
 
@@ -341,12 +341,26 @@ See [security.md](security.md) for the threat model and release gates.
 
 ## 10. Runtime selection
 
-Development and diagnostics support:
+Desktop discovers a user-global Pi before it creates a broker. PATH `pi` is resolved to a command
+path, Node executable, and package root through shims, shebangs, and package-manager layouts. The
+Runtime Manager then probes that install: Node starts, the three Pi SDK packages resolve, and the
+Host handshake must succeed. A newer Pi is used as-is. An older Pi is upgrade-required only. There
+is no version ceiling, downgrade action, or silent upgrade.
 
-1. bundled and pinned Pi runtime;
-2. system-installed Pi runtime;
-3. explicit developer source checkout;
-4. explicit custom Node/module path.
+When PATH has no usable Pi, the same manager plans a one-click user-global install. It prefers the
+owning package manager of an existing install, otherwise the first detected npm, bun, or pnpm, and
+otherwise a verified standalone payload that lands in the user-level Pi program directory
+(`%LOCALAPPDATA%\Pi` on Windows, `~/.local/share/pi/runtime` plus a user `bin` entry on
+macOS/Linux). Runtime code stays out of `~/.pi/agent`; plugins, configuration, and sessions keep
+using that data directory.
+
+Development and diagnostics still enumerate:
+
+1. a workspace or cloud-bundled Pi runtime when those packages are present;
+2. system-installed Pi on PATH;
+3. a standalone user-global payload;
+4. an explicit developer source checkout;
+5. an explicit custom Node/module path.
 
 The selected source, Pi version, Node version, package root, agent directory, and Git Bash path are
 always visible. A source mismatch is a diagnostic state, never silently repaired.

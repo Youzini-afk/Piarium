@@ -86,6 +86,93 @@ describe("discoverPiRuntimes", () => {
     }
   });
 
+  it("resolves commandPath, nodePath, and packageRoot from a real system shim", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-system-layout-"));
+    try {
+      const codingAgent = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
+      await mkdir(join(codingAgent, "dist"), { recursive: true });
+      await writeFile(
+        join(codingAgent, "package.json"),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.84.1" }),
+      );
+      const nodePath = join(root, "node.exe");
+      const command = join(root, "pi.cmd");
+      await writeFile(nodePath, "");
+      await writeFile(
+        command,
+        [
+          "@ECHO off",
+          `endLocal & "${nodePath}"  "${join(codingAgent, "dist", "cli.js")}" %*`,
+          "",
+        ].join("\r\n"),
+      );
+      const candidates = await discoverPiRuntimes({
+        commandRunner: async (invoked) => {
+          if (invoked === "where.exe") {
+            return { exitCode: 0, stderr: "", stdout: `${command}\r\n` };
+          }
+          return { exitCode: 0, stderr: "", stdout: "0.84.1\n" };
+        },
+        env: {},
+        includeBundled: false,
+        platform: "win32",
+      });
+      assert.equal(candidates[0]?.id, "system");
+      assert.equal(candidates[0]?.command, command);
+      assert.equal(candidates[0]?.nodePath, nodePath);
+      assert.equal(candidates[0]?.packageRoot, codingAgent);
+      assert.equal(candidates[0]?.version, "0.84.1");
+      const installation = toRuntimeInstallation(candidates[0]!);
+      assert.equal(installation.commandPath, command);
+      assert.equal(installation.nodePath, nodePath);
+      assert.equal(installation.packageRoot, codingAgent);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("classifies a user-global standalone layout separately from PATH system installs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-standalone-layout-"));
+    try {
+      const localAppData = join(root, "AppData", "Local");
+      const codingAgent = join(
+        localAppData,
+        "Pi",
+        "runtime",
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent",
+      );
+      await mkdir(join(codingAgent, "dist"), { recursive: true });
+      await writeFile(
+        join(codingAgent, "package.json"),
+        JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.84.1" }),
+      );
+      const command = join(localAppData, "Pi", "bin", "pi.cmd");
+      await mkdir(join(localAppData, "Pi", "bin"), { recursive: true });
+      await writeFile(
+        command,
+        `"node.exe" "${join(codingAgent, "dist", "cli.js")}" %*\r\n`,
+      );
+      const candidates = await discoverPiRuntimes({
+        commandRunner: async (invoked) => {
+          if (invoked === "where.exe") {
+            return { exitCode: 0, stderr: "", stdout: `${command}\r\n` };
+          }
+          return { exitCode: 0, stderr: "", stdout: "0.84.1\n" };
+        },
+        env: { LOCALAPPDATA: localAppData },
+        includeBundled: false,
+        platform: "win32",
+      });
+      assert.equal(candidates[0]?.id, "standalone");
+      assert.equal(candidates[0]?.source, "standalone");
+      assert.equal(candidates[0]?.packageRoot, codingAgent);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("returns diagnostic candidates instead of throwing", async () => {
     const candidates = await discoverPiRuntimes({
       commandRunner: async () => ({ exitCode: 1, stderr: "not found", stdout: "" }),
