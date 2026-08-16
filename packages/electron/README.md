@@ -115,7 +115,11 @@ When these variables are absent, the build falls back to an unsigned NSIS instal
 
 ### Smoke Builds
 
-There is no on-demand `release-desktop-smoke.yml` workflow yet. Build and smoke Windows artifacts locally with `bun run electron:build:win` and `bun run electron:smoke:win`.
+Run the `Windows Desktop Build` workflow on demand to package and smoke an unsigned Windows x64
+installer on GitHub's Windows runner. The successful run publishes the installer, blockmap, and
+`latest.yml` as one downloadable artifact. Build and smoke the same artifacts locally with
+`bun run electron:build:win` and `bun run electron:smoke:win` when Visual Studio C++ Build Tools are
+available.
 
 Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 

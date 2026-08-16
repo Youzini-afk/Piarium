@@ -178,6 +178,7 @@
     "lodash": "4.18.1",
     "markdown-it": "14.3.0",
     "nanoid": "5.1.16",
+    "node-abi": "4.33.0",
     "path-to-regexp": "8.4.2",
     "picomatch": "4.0.5",
     "postcss": "8.5.25",
