@@ -14,6 +14,7 @@ import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerPiRuntimeHttpRoute } from './pi-runtime-http-route.js';
+import { registerRuntimeManagerRoutes } from './runtime-manager-routes.js';
 
 export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
   let quotaProviders = null;
@@ -71,6 +72,10 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       scheduledTasksRuntime,
       scheduledTaskService,
       piRuntimeBroker,
+      getPiRuntimeBroker,
+      piRuntimeLifecycle,
+      pickPiPackageRoot,
+      openFilesystemPath,
       getPiariumEventClients,
       writeSseEvent,
       reloadRuntimeConfiguration = async () => {},
@@ -88,7 +93,17 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       clientReloadDelayMs,
     });
 
-    registerPiRuntimeHttpRoute(app, { piRuntimeBroker });
+    registerPiRuntimeHttpRoute(app, {
+      piRuntimeBroker,
+      ...(typeof getPiRuntimeBroker === 'function' ? { getPiRuntimeBroker } : {}),
+    });
+    if (piRuntimeLifecycle) {
+      registerRuntimeManagerRoutes(app, {
+        lifecycle: piRuntimeLifecycle,
+        ...(typeof pickPiPackageRoot === 'function' ? { pickPiPackageRoot } : {}),
+        ...(typeof openFilesystemPath === 'function' ? { openFilesystemPath } : {}),
+      });
+    }
 
     app.get('/api/config/settings', async (_req, res) => {
       try {

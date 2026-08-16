@@ -305,6 +305,19 @@ describe('ui auth client credential seam', () => {
     expect(dictationHttpCalled).toBe(false);
     expect(dictationHttpRes.statusCode).toBe(401);
 
+    const runtimeManagerSseReq = {
+      method: 'GET',
+      path: '/api/piarium/runtime-manager/events',
+      url: `/api/piarium/runtime-manager/events?piarium_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'text/event-stream' },
+    };
+    const runtimeManagerSseRes = createResponse();
+    let runtimeManagerSseCalled = false;
+    await auth.requireAuth(runtimeManagerSseReq, runtimeManagerSseRes, () => {
+      runtimeManagerSseCalled = true;
+    });
+    expect(runtimeManagerSseCalled).toBe(true);
+
     const arbitraryGetReq = { method: 'GET', path: '/api/config/settings', url: `/api/config/settings?piarium_url_token=${encodeURIComponent(urlToken)}`, headers: { accept: 'application/json' } };
     const arbitraryGetRes = createResponse();
     let arbitraryGetCalled = false;

@@ -5,6 +5,7 @@ const PROXY_WS_PATH = '/api/piarium/realtime-proxy/ws';
 
 const isAllowedSsePath = (pathname) => {
   return pathname === '/api/piarium/events'
+    || pathname === '/api/piarium/runtime-manager/events'
     || pathname === '/api/notifications/stream';
 };
 

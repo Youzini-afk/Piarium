@@ -67,6 +67,7 @@ import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
+import { PiRuntimeLifecycle } from '@piarium/runtime-broker';
 import { createWebPiRuntimeBroker } from './lib/pi-runtime/broker.js';
 import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
@@ -161,6 +162,7 @@ const shouldSkipApiCompression = () => {
 const SSE_PATHS = new Set([
   '/api/notifications/stream',
   '/api/piarium/events',
+  '/api/piarium/runtime-manager/events',
   '/api/piarium/realtime-proxy/sse',
 ]);
 
@@ -597,6 +599,7 @@ async function main(options = {}) {
   server = http.createServer(app);
   const serverStartedAt = new Date().toISOString();
   let piRuntimeHandshake = null;
+  let piRuntimeLifecycle = null;
   let relayServiceInstance = null;
   let tunnelRuntimeContext = null;
   let realtimeProxyRuntime = { stop: () => {} };
@@ -658,6 +661,7 @@ async function main(options = {}) {
         piVersion: piRuntimeHandshake?.runtime?.piVersion ?? null,
         protocolVersion: piRuntimeHandshake?.protocolVersion ?? null,
         source: piRuntimeHandshake?.runtime?.source ?? null,
+        manager: piRuntimeLifecycle?.snapshot ?? null,
       },
     }),
     verboseRequestLogs: isEnvFlagEnabled(process.env.PIARIUM_VERBOSE_REQUEST_LOGS),
@@ -715,20 +719,50 @@ async function main(options = {}) {
     isRequestOriginAllowed,
   });
 
-  const ownsPiRuntimeBroker = !options.piRuntimeBroker;
-  const piRuntimeBroker = options.piRuntimeBroker || createWebPiRuntimeBroker({
+  const requirePiRuntime = options.requirePiRuntime ?? process.env.PIARIUM_RUNTIME !== 'desktop';
+  const createPiRuntimeBroker = options.createPiRuntimeBroker || ((brokerOptions) => createWebPiRuntimeBroker({
     agentDir: process.env.PIARIUM_AGENT_DIR,
     clientVersion: PIARIUM_VERSION,
     cwd: process.cwd(),
+    ...brokerOptions,
+  }));
+  piRuntimeLifecycle = options.piRuntimeLifecycle || new PiRuntimeLifecycle({
+    dataDir: PIARIUM_DATA_DIR,
+    createBroker: (brokerOptions) => createPiRuntimeBroker(brokerOptions),
+    ...(options.hostEntry ? { hostEntry: options.hostEntry } : {}),
+    ...(options.standalonePayloadDir || process.env.PIARIUM_PI_STANDALONE_PAYLOAD
+      ? {
+          installer: {
+            standalonePayloadDir: options.standalonePayloadDir || process.env.PIARIUM_PI_STANDALONE_PAYLOAD,
+          },
+        }
+      : {}),
   });
-  recordStartupPerformance('pi-runtime.warmup.start');
-  try {
-    piRuntimeHandshake = await piRuntimeBroker.warmup();
-    recordStartupPerformance('pi-runtime.warmup.ready');
-  } catch (error) {
-    recordStartupPerformance('pi-runtime.warmup.error');
-    throw error;
-  }
+  const ownsPiRuntimeBroker = !options.piRuntimeBroker && !options.piRuntimeLifecycle;
+  const piRuntimeBroker = options.piRuntimeBroker || piRuntimeLifecycle.asBroker();
+  const startPiRuntime = async () => {
+    recordStartupPerformance('pi-runtime.warmup.start');
+    try {
+      piRuntimeHandshake = await piRuntimeLifecycle.start() ?? null;
+      if (piRuntimeHandshake) {
+        recordStartupPerformance('pi-runtime.warmup.ready');
+        return;
+      }
+      if (requirePiRuntime) {
+        recordStartupPerformance('pi-runtime.warmup.error');
+        throw new Error('Pi runtime is not ready');
+      }
+    } catch (error) {
+      recordStartupPerformance('pi-runtime.warmup.error');
+      if (requirePiRuntime) throw error;
+      console.warn('[PiRuntime] Deferred runtime start:', error?.message || error);
+    }
+  };
+  piRuntimeLifecycle.subscribe((snapshot) => {
+    if (snapshot.status === 'ready') piRuntimeHandshake = piRuntimeLifecycle.handshake ?? piRuntimeHandshake;
+  });
+  if (requirePiRuntime) await startPiRuntime();
+  else void startPiRuntime();
   if (!extensionRuntime) {
     extensionRuntime = await ApplicationExtensionRuntime.create({
       brokerScript: fileURLToPath(new URL('../broker/broker-child.mjs', import.meta.resolve('@piarium/extension-host'))),
@@ -832,6 +866,7 @@ async function main(options = {}) {
   const piRuntimeGateway = createPiRuntimeGateway({
     server,
     broker: piRuntimeBroker,
+    getBroker: () => piRuntimeLifecycle?.currentBroker || (options.piRuntimeBroker ?? null),
     uiAuthController,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
@@ -899,13 +934,17 @@ async function main(options = {}) {
     scheduledTasksRuntime,
     scheduledTaskService,
     piRuntimeBroker,
+    getPiRuntimeBroker: () => piRuntimeLifecycle?.currentBroker || options.piRuntimeBroker || piRuntimeBroker,
+    piRuntimeLifecycle,
+    ...(typeof options.pickPiPackageRoot === 'function' ? { pickPiPackageRoot: options.pickPiPackageRoot } : {}),
+    ...(typeof options.openFilesystemPath === 'function' ? { openFilesystemPath: options.openFilesystemPath } : {}),
     getPiariumEventClients: () => uiPiariumEventClients,
     writeSseEvent,
     extensionCatalog,
     extensionPackages,
     extensionRuntime,
     uiAuthController,
-    reloadRuntimeConfiguration: async () => { await piRuntimeBroker.warmup(); },
+    reloadRuntimeConfiguration: async () => { await piRuntimeLifecycle.ensureActiveBroker(); },
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({ crypto, URL, createProxyMiddleware, responseInterceptor });
@@ -922,7 +961,7 @@ async function main(options = {}) {
     process,
     __dirname,
     express,
-    listRecentSessions: () => piRuntimeBroker.listSessions(),
+    listRecentSessions: () => (piRuntimeLifecycle?.currentBroker || options.piRuntimeBroker)?.listSessions?.() ?? [],
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
     normalizePwaOrientation,
@@ -989,7 +1028,7 @@ async function main(options = {}) {
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
       await piRuntimeGateway.stop();
-      if (ownsPiRuntimeBroker) await piRuntimeBroker.dispose();
+      if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       relayService.stop();

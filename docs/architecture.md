@@ -341,11 +341,16 @@ See [security.md](security.md) for the threat model and release gates.
 
 ## 10. Runtime selection
 
-Desktop discovers a user-global Pi before it creates a broker. PATH `pi` is resolved to a command
-path, Node executable, and package root through shims, shebangs, and package-manager layouts. The
-Runtime Manager then probes that install: Node starts, the three Pi SDK packages resolve, and the
+Desktop and the local Web UI start without forcing a Pi warmup. The Runtime Manager discovers PATH
+`pi` first and then probes that install: Node starts, the three Pi SDK packages resolve, and the
 Host handshake must succeed. A newer Pi is used as-is. An older Pi is upgrade-required only. There
-is no version ceiling, downgrade action, or silent upgrade.
+is no version ceiling, downgrade action, or silent upgrade. Cloud and headless Web still require a
+ready runtime before the server finishes starting.
+
+Onboarding and Settings activate or install through `RuntimeAPIs.piRuntime`. After a successful
+probe the lifecycle creates a broker without restarting the app. Existing sessions stay on the
+broker generation they started with; workers that use the user-global install are stopped before
+that install is overwritten.
 
 When PATH has no usable Pi, the same manager plans a one-click user-global install. It prefers the
 owning package manager of an existing install, otherwise the first detected npm, bun, or pnpm, and

@@ -1,3 +1,4 @@
+import type { PiRuntimeSnapshot } from '@piarium/protocol';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type {
@@ -1655,8 +1656,28 @@ export interface ExtensionsAPI {
   waitForHostState(request: PiariumExtensionHostStateWaitRequest, signal?: AbortSignal): Promise<PiariumExtensionHostStateSnapshot>;
 }
 
+export interface PiRuntimeManagementCapabilities {
+  install: boolean;
+  openLocation: boolean;
+  pickPackageRoot: boolean;
+}
+
+export interface PiRuntimeManagementAPI {
+  activate(id: string): Promise<PiRuntimeSnapshot>;
+  activateCustom(packageRoot: string, nodePath?: string): Promise<PiRuntimeSnapshot>;
+  capabilities: PiRuntimeManagementCapabilities;
+  getSnapshot(): Promise<PiRuntimeSnapshot>;
+  install(): Promise<PiRuntimeSnapshot>;
+  openLocation(targetPath: string): Promise<void>;
+  pickPackageRoot(): Promise<string | null>;
+  refresh(): Promise<PiRuntimeSnapshot>;
+  subscribe(listener: (snapshot: PiRuntimeSnapshot) => void): () => void;
+  upgrade(): Promise<PiRuntimeSnapshot>;
+}
+
 export interface RuntimeAPIs {
   runtime: RuntimeDescriptor;
+  piRuntime?: PiRuntimeManagementAPI;
   terminal: TerminalAPI;
   git: GitAPI;
   workspace?: WorkspaceAPI;

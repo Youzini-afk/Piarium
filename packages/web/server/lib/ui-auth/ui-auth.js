@@ -312,6 +312,7 @@ const isWebSocketUpgrade = (req) => {
 
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/piarium/events'
+    || pathname === '/api/piarium/runtime-manager/events'
     || pathname === '/api/piarium/extensions/v1/catalog'
     || pathname === '/api/piarium/extensions/v1/host-state'
     || pathname === '/api/piarium/realtime-proxy/sse'

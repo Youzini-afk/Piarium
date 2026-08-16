@@ -1,5 +1,14 @@
 import type { JsonValue } from "@piarium/protocol";
 
+export class PiRuntimeNotReadyError extends Error {
+  readonly code = "runtime_not_ready";
+
+  constructor(message = "Pi runtime is not ready") {
+    super(message);
+    this.name = "PiRuntimeNotReadyError";
+  }
+}
+
 export class PiRuntimeBrokerError extends Error {
   readonly code: string;
   readonly details: JsonValue | undefined;

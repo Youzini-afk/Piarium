@@ -20,6 +20,7 @@ import { createWebMobileAPI } from './mobile';
 import { createWebSmartSearchAPI } from './smart-search';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebExtensionsAPI } from './extensions';
+import { createWebPiRuntimeAPI } from './piRuntime';
 
 export interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -42,6 +43,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
 
   return {
     runtime: { platform: 'web', isDesktop: false, isVSCode: false, label: 'web' },
+    piRuntime: createWebPiRuntimeAPI(),
     terminal: createWebTerminalAPI(),
     git: createWebGitAPI(),
     workspace: createWebWorkspaceAPI(),

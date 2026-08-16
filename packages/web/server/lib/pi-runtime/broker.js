@@ -5,6 +5,10 @@ export function createWebPiRuntimeBroker({
   clientVersion,
   cwd,
   emit = () => {},
+  hostEntry,
+  nodePath,
+  packageRoot,
+  runtimeSource,
 } = {}) {
   return new PiRuntimeBroker({
     ...(typeof agentDir === 'string' && agentDir.trim() ? { agentDir: agentDir.trim() } : {}),
@@ -15,6 +19,9 @@ export function createWebPiRuntimeBroker({
     },
     ...(typeof cwd === 'string' && cwd ? { cwd } : {}),
     emit,
-    hostEntry: resolveBundledPiHostEntry(),
+    hostEntry: hostEntry || resolveBundledPiHostEntry(),
+    ...(nodePath ? { nodePath } : {}),
+    ...(packageRoot ? { packageRoot } : {}),
+    ...(runtimeSource ? { runtimeSource } : {}),
   });
 }

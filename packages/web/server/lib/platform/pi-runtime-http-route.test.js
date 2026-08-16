@@ -36,6 +36,19 @@ describe('Pi runtime HTTP route', () => {
     expect(response.body.code).toBe('unsupported_method');
   });
 
+  it('returns 503 when no Pi runtime broker is available', async () => {
+    const app = express();
+    registerPiRuntimeHttpRoute(app, {
+      getPiRuntimeBroker: () => null,
+    });
+
+    const response = await request(app)
+      .post('/api/piarium/runtime/request')
+      .send({ method: 'session.list', params: {} })
+      .expect(503);
+    expect(response.body.code).toBe('runtime_not_ready');
+  });
+
   it('accepts only the matching CLI workspace trust request', async () => {
     let listener;
     const unsubscribe = vi.fn();

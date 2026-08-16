@@ -174,6 +174,26 @@ describe('realtime proxy', () => {
     }
   });
 
+  it('streams runtime-manager SSE through the same allowlist as other runtime events', async () => {
+    const upstream = await startSseUpstream({ path: '/api/piarium/runtime-manager/events' });
+    const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
+
+    try {
+      const response = await fetch(buildRealtimeProxySseUrl(origin, `${upstream.origin}/api/piarium/runtime-manager/events`), {
+        headers: {
+          Accept: 'text/event-stream',
+          Origin: 'piarium-ui://app',
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe('data: first\n\ndata: second\n\n');
+      expect(upstream.requests).toHaveLength(1);
+    } finally {
+      runtime.stop();
+    }
+  });
+
   it('rejects targets outside the realtime path allowlist', async () => {
     const upstream = await startSseUpstream({ path: '/api/config/settings' });
     const { origin, runtime } = await startProxyServer({ apiBaseUrl: upstream.origin });
