@@ -67,6 +67,7 @@ export interface PiRuntimeInstallPlan {
 }
 
 export interface PiRuntimeSnapshot {
+  revision: number;
   status: PiRuntimeManagerStatus;
   installations: PiRuntimeInstallation[];
   selectedId?: string;

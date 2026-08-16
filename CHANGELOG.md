@@ -17,7 +17,9 @@ First public source snapshot of the Pi-native workspace.
 - Runtime Manager discovers user-global Pi installs, plans upgrade-only package
   manager or standalone installs, and never silently upgrades or downgrades Pi
 - Desktop starts without a bundled Pi warmup; onboarding and Settings activate,
-  install, or upgrade the user-global runtime without restarting the app
+  install, or upgrade the user-global runtime without restarting the app; runtime
+  state is published monotonically, and sessions already running stay routed to
+  the Pi generation that owns them while a newly selected runtime takes over
 - Slim and toolbelt container images: Compose defaults to `piarium-slim`; overlay
   `docker-compose.toolbelt.yml` for the language toolbox
 - Community files and Renovate config live under `.github/`; install-time patches
