@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CLOUD_RUNTIME_PACKAGE_DIRS,
   CLOUD_RUNTIME_SCHEMA_VERSION,
+  CLOUD_RUNTIME_TRUSTED_DEPENDENCIES,
   verifyCloudRuntimeLayout,
   verifyCloudRuntimeIdentity,
 } from './build-cloud-runtime.mjs';
@@ -106,6 +107,8 @@ describe('Piarium cloud runtime layout', () => {
     expect(builderSource).toContain("['--frozen-lockfile']");
     expect(builderSource).toContain("case '--update-lock'");
     expect(builderSource).toContain('pruneNonRuntimeFiles');
+    expect(builderSource).toContain("require('better-sqlite3')");
+    expect(CLOUD_RUNTIME_TRUSTED_DEPENDENCIES).toEqual(['node-pty']);
   });
 
   it('builds every compiled browser dependency before the Web bundle', () => {

@@ -98,7 +98,6 @@
     },
   },
   "trustedDependencies": [
-    "better-sqlite3",
     "node-pty",
   ],
   "overrides": {
