@@ -5,6 +5,7 @@ export * from "./runtime-dispatcher.js";
 export * from "./runtime-broker.js";
 export * from "./runtime-install-plan.js";
 export * from "./runtime-installer.js";
+export * from "./runtime-lifecycle.js";
 export * from "./runtime-manager.js";
 export * from "./runtime-probe.js";
 export * from "./runtime-selection-store.js";

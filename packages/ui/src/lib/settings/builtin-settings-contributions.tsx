@@ -11,6 +11,7 @@ import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
 import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
+import { PiRuntimeSettingsPage } from '@/components/sections/runtime/PiRuntimeSettingsPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
@@ -59,6 +60,7 @@ export const BUILTIN_SETTINGS_PAGES: readonly BuiltinPageDefinition[] = [
   page({ slug: 'remote-instances', title: 'Remote Instances', titleKey: 'settings.page.remoteInstances.title', group: 'projects', kind: 'single', icon: 'computer', order: 21, keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'] }, { isAvailable: notVSCode, renderContent: () => <RemoteInstancesPage /> }),
   page({ slug: 'tunnel', title: 'External Tunnel', titleKey: 'settings.page.tunnel.title', group: 'projects', kind: 'single', icon: 'home-office', order: 22, badgeKey: 'settings.view.badge.beta', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'] }, { ...openChamberPage('tunnel'), isAvailable: notVSCode }),
   page({ slug: 'git', title: 'Git', titleKey: 'settings.page.git.title', group: 'projects', kind: 'single', icon: 'git-branch', order: 23, keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'] }, { isAvailable: notVSCode, renderContent: () => <GitPage /> }),
+  page({ slug: 'runtime', title: 'Runtime', titleKey: 'settings.page.runtime.title', group: 'pi', kind: 'single', icon: 'terminal-box', order: 39, keywords: ['pi', 'runtime', 'install', 'upgrade', 'node', 'path', 'package root'] }, { renderContent: () => <PiRuntimeSettingsPage /> }),
   page({ slug: 'providers', title: 'Providers', titleKey: 'settings.page.providers.title', group: 'pi', kind: 'split', icon: 'cloud', order: 40, keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'] }, { renderContent: () => <ProvidersPage />, renderSidebar: (options) => <ProvidersSidebar onItemSelect={options.onItemSelect} /> }),
   page({ slug: 'commands', title: 'Commands', titleKey: 'settings.page.commands.title', group: 'pi', kind: 'single', icon: 'command', order: 43, keywords: ['pi', 'command', 'commands', 'slash command', 'extension command', 'prompt command', 'skill command'] }, { renderContent: () => <CommandsPage /> }),
   page({ slug: 'prompts', title: 'Prompts', titleKey: 'settings.page.prompts.title', group: 'pi', kind: 'split', icon: 'file-text', order: 44, keywords: ['pi', 'prompt', 'prompts', 'template', 'templates', 'markdown', '.md', 'argument hint'] }, { renderContent: () => <PromptsPage />, renderSidebar: (options) => <PromptsSidebar onItemSelect={options.onItemSelect} /> }),

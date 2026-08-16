@@ -132,6 +132,10 @@ export class PiRuntimeBroker {
     return this.#clients.size;
   }
 
+  get packageRoot(): string | undefined {
+    return this.#options.packageRoot;
+  }
+
   subscribe(listener: (event: PiRuntimeBrokerEvent) => void): () => void {
     if (this.#disposed) throw new Error("Pi runtime broker is disposed");
     this.#listeners.add(listener);

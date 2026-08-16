@@ -48,11 +48,15 @@ const sendFrame = (socket, frame) => {
 export function createPiRuntimeGateway({
   server,
   broker,
+  getBroker,
   uiAuthController,
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
 }) {
-  if (!server || !broker) throw new Error('Pi runtime gateway requires server and broker');
+  const resolveBroker = typeof getBroker === 'function' ? getBroker : () => broker;
+  if (!server || (typeof getBroker !== 'function' && !broker)) {
+    throw new Error('Pi runtime gateway requires server and broker');
+  }
   if (typeof uiAuthController?.resolveWebSocketAuthContext !== 'function') {
     throw new Error('Pi runtime gateway requires WebSocket authentication');
   }
@@ -67,10 +71,18 @@ export function createPiRuntimeGateway({
   let stopped = false;
 
   wsServer.on('connection', (socket, req) => {
+    const currentBroker = resolveBroker();
+    if (!currentBroker) {
+      try {
+        socket.close(1013, 'Pi runtime is not ready');
+      } catch {
+      }
+      return;
+    }
     socket.isAlive = true;
     socket.authContext = req.piariumAuthContext || null;
     const connection = new PiRuntimeSurfaceConnection({
-      broker,
+      broker: currentBroker,
       maxPendingRequests: MAX_PENDING_REQUESTS,
       onClose: (reason) => {
         try {

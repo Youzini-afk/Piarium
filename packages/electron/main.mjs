@@ -1601,11 +1601,6 @@ const spawnLocalServer = async () => {
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
-  await ensurePiRuntime();
-  if (!state.piRuntimeBroker) {
-    throw new Error('Pi runtime broker is unavailable after startup');
-  }
-
   const { startWebUiServer } = await import('@piarium/web/server/index.js');
 
   const handle = await startWebUiServer({
@@ -1615,7 +1610,27 @@ const spawnLocalServer = async () => {
     attachSignals: false,
     exitOnShutdown: false,
     apiOnly: false,
-    piRuntimeBroker: state.piRuntimeBroker,
+    requirePiRuntime: false,
+    createPiRuntimeBroker: (brokerOptions) => createDesktopPiRuntimeBroker({
+      ...(typeof process.env.PIARIUM_AGENT_DIR === 'string' && process.env.PIARIUM_AGENT_DIR.trim()
+        ? { agentDir: process.env.PIARIUM_AGENT_DIR.trim() }
+        : {}),
+      clientVersion: APP_VERSION,
+      emit: emitPiRuntimeEvent,
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      ...brokerOptions,
+    }),
+    pickPiPackageRoot: async () => {
+      const result = await dialog.showOpenDialog(state.mainWindow || undefined, {
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      return result.canceled ? null : result.filePaths[0] || null;
+    },
+    openFilesystemPath: async (targetPath) => {
+      const errorMessage = await shell.openPath(targetPath);
+      if (errorMessage) throw new Error(errorMessage);
+    },
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
@@ -2963,7 +2978,7 @@ const resolveInitialUrl = async () => {
       ? hmrApiUrl
       : await spawnLocalServer();
 
-  if (localUrl) await ensurePiRuntime();
+  // Local server owns Pi discovery and activation. Do not block the window on a Pi worker.
 
   const localUiUrl = usePackagedUi
     ? buildPackagedUiUrl('/index.html')

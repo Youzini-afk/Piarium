@@ -10,6 +10,7 @@ import { createVSCodeGitHubAPI } from './github';
 import { createVSCodeNotificationsAPI } from './notifications';
 import { createVSCodeWorkspaceAPI } from './workspace';
 import { createVSCodeExtensionsAPI } from './extensions';
+import { createVSCodePiRuntimeAPI } from './piRuntime';
 
 const terminalUnsupported = async (): Promise<never> => {
   throw new Error('Terminal is not supported in the VS Code runtime');
@@ -29,6 +30,7 @@ const createStubTerminalAPI = (): TerminalAPI => ({
 
 export const createVSCodeAPIs = (): RuntimeAPIs => ({
   runtime: { platform: 'vscode', isDesktop: false, isVSCode: true, label: 'VS Code Extension' },
+  piRuntime: createVSCodePiRuntimeAPI(),
   terminal: createStubTerminalAPI(),
   git: createVSCodeGitAPI(),
   workspace: createVSCodeWorkspaceAPI(),

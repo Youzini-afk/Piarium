@@ -728,6 +728,43 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['markdown', 'prompt', 'template'],
   },
   {
+    id: 'runtime.current',
+    page: 'runtime',
+    titleKey: 'settings.runtime.section.current',
+    descriptionKey: 'settings.page.runtime.description',
+    keywords: ['pi', 'runtime', 'version', 'path', 'node'],
+  },
+  {
+    id: 'runtime.status',
+    page: 'runtime',
+    titleKey: 'settings.runtime.field.status',
+    keywords: ['ready', 'missing', 'upgrade', 'failed'],
+  },
+  {
+    id: 'runtime.version',
+    page: 'runtime',
+    titleKey: 'settings.runtime.field.version',
+    keywords: ['pi version', 'sdk'],
+  },
+  {
+    id: 'runtime.commandPath',
+    page: 'runtime',
+    titleKey: 'settings.runtime.field.commandPath',
+    keywords: ['path', 'executable', 'pi.cmd'],
+  },
+  {
+    id: 'runtime.packageRoot',
+    page: 'runtime',
+    titleKey: 'settings.runtime.field.packageRoot',
+    keywords: ['package', 'module', 'node_modules'],
+  },
+  {
+    id: 'runtime.actions',
+    page: 'runtime',
+    titleKey: 'settings.runtime.section.actions',
+    keywords: ['install', 'upgrade', 'rediscover', 'detect', 'choose'],
+  },
+  {
     id: 'providers.connect',
     page: 'providers',
     titleKey: 'settings.providers.page.connect.title',

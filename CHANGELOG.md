@@ -16,6 +16,8 @@ First public source snapshot of the Pi-native workspace.
   of a permanently bundled SDK; cloud images still stage those packages
 - Runtime Manager discovers user-global Pi installs, plans upgrade-only package
   manager or standalone installs, and never silently upgrades or downgrades Pi
+- Desktop starts without a bundled Pi warmup; onboarding and Settings activate,
+  install, or upgrade the user-global runtime without restarting the app
 - Slim and toolbelt container images: Compose defaults to `piarium-slim`; overlay
   `docker-compose.toolbelt.yml` for the language toolbox
 - Community files and Renovate config live under `.github/`; install-time patches

@@ -1,4 +1,4 @@
-import { dispatchRuntimeRequest, RuntimeDispatchError } from '@piarium/runtime-broker';
+import { dispatchRuntimeRequest, PiRuntimeNotReadyError, RuntimeDispatchError } from '@piarium/runtime-broker';
 import express from 'express';
 import path from 'node:path';
 
@@ -26,18 +26,26 @@ const trustProjectRequestsFor = (piRuntimeBroker, cwd) => {
   });
 };
 
-export const registerPiRuntimeHttpRoute = (app, { piRuntimeBroker }) => {
+export const registerPiRuntimeHttpRoute = (app, { piRuntimeBroker, getPiRuntimeBroker }) => {
+  const resolveBroker = () => (typeof getPiRuntimeBroker === 'function' ? getPiRuntimeBroker() : piRuntimeBroker);
   app.post('/api/piarium/runtime/request', express.json({ limit: '2mb' }), async (req, res) => {
     const method = typeof req.body?.method === 'string' ? req.body.method.trim() : '';
     if (!method) return res.status(400).json({ error: 'method is required' });
+    const broker = resolveBroker();
+    if (!broker) {
+      return res.status(503).json({ error: 'Pi runtime is not ready', code: 'runtime_not_ready' });
+    }
     const params = req.body?.params ?? {};
     const unsubscribeTrust = req.body?.trustProject === true
-      ? trustProjectRequestsFor(piRuntimeBroker, params?.cwd)
+      ? trustProjectRequestsFor(broker, params?.cwd)
       : () => {};
     try {
-      const result = await dispatchRuntimeRequest(piRuntimeBroker, method, params);
+      const result = await dispatchRuntimeRequest(broker, method, params);
       return res.json({ result });
     } catch (error) {
+      if (error instanceof PiRuntimeNotReadyError) {
+        return res.status(503).json({ error: error.message, code: error.code });
+      }
       if (error instanceof RuntimeDispatchError) {
         return res.status(400).json({ error: error.message, code: error.code, retryable: error.retryable });
       }

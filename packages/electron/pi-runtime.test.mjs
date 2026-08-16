@@ -84,11 +84,12 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
 
 test('Electron startup and shutdown own the Pi runtime lifecycle', async () => {
   const main = await source('./main.mjs');
-  assert.match(main, /await ensurePiRuntime\(\)/);
+  assert.match(main, /requirePiRuntime: false/);
+  assert.match(main, /createPiRuntimeBroker:/);
+  assert.doesNotMatch(main, /await ensurePiRuntime\(\);[\s\S]*startWebUiServer/);
   assert.match(
     main,
     /await killSidecar\(\);[\s\S]*await shutdownPiRuntime\(\);/,
   );
-  assert.match(main, /await ensurePiRuntime\(\);[\s\S]*piRuntimeBroker: state\.piRuntimeBroker/);
   assert.match(main, /await shutdownBackgroundServices\(\);[\s\S]*app\.exit\(1\)/);
 });
