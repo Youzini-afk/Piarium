@@ -5,6 +5,7 @@ module.exports = (context) => {
   const resourcesPath = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
+  const unpackedNodeModulesPath = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules');
   const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
   const targetArchitecture = process.env.PIARIUM_TARGET_ARCH || process.arch;
   const betterSqlitePrebuildName = `${context.electronPlatformName}-${targetArchitecture}.node`;
@@ -13,9 +14,7 @@ module.exports = (context) => {
     throw new Error(`Missing better-sqlite3 prebuild at ${betterSqliteBinary}`);
   }
   const packagedBetterSqliteBinary = path.join(
-    resourcesPath,
-    'app.asar.unpacked',
-    'node_modules',
+    unpackedNodeModulesPath,
     'better-sqlite3',
     'prebuilds',
     betterSqlitePrebuildName,
@@ -23,9 +22,29 @@ module.exports = (context) => {
   fs.mkdirSync(path.dirname(packagedBetterSqliteBinary), { recursive: true });
   fs.copyFileSync(betterSqliteBinary, packagedBetterSqliteBinary);
 
+  const packagedBetterSqliteDir = path.join(unpackedNodeModulesPath, 'better-sqlite3');
+  for (const entry of fs.readdirSync(path.join(packagedBetterSqliteDir, 'prebuilds'))) {
+    if (entry !== betterSqlitePrebuildName) {
+      fs.rmSync(path.join(packagedBetterSqliteDir, 'prebuilds', entry), { recursive: true, force: true });
+    }
+  }
+  for (const buildOnlyPath of ['build', 'deps', 'src', 'binding.gyp']) {
+    fs.rmSync(path.join(packagedBetterSqliteDir, buildOnlyPath), { recursive: true, force: true });
+  }
+
+  const packagedWebDistPath = path.join(resourcesPath, 'web-dist');
+  if (!fs.existsSync(path.join(packagedWebDistPath, 'index.html'))) {
+    throw new Error(`Missing packaged web UI at ${packagedWebDistPath}`);
+  }
+  fs.rmSync(
+    path.join(unpackedNodeModulesPath, '@piarium', 'web', 'dist'),
+    { recursive: true, force: true },
+  );
+
   const requiredPiRuntimeFiles = [
     path.join('node_modules', '@piarium', 'pi-host', 'dist', 'main.js'),
     path.join('node_modules', '@piarium', 'runtime-broker', 'dist', 'index.js'),
+    path.join('node_modules', '@piarium', 'extension-host', 'dist', 'index.js'),
   ];
   for (const relativePath of requiredPiRuntimeFiles) {
     const packagedPath = path.join(resourcesPath, 'app.asar.unpacked', relativePath);

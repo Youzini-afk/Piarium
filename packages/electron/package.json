@@ -65,6 +65,18 @@
     "asarUnpack": [
       "node_modules/**/*"
     ],
+    "electronLanguages": [
+      "en-US",
+      "es",
+      "fr",
+      "ja",
+      "ko",
+      "pl",
+      "pt-BR",
+      "uk",
+      "zh-CN",
+      "zh-TW"
+    ],
     "extraResources": [
       {
         "from": "resources/web-dist",

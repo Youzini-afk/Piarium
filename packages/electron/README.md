@@ -68,9 +68,11 @@ That runs, in order:
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
 2. `prepare:pi-runtime` to compile the Pi host and runtime broker.
 3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
-4. `rebuild:native` to rebuild `better-sqlite3` for Electron and verify the published Windows
-   `node-pty` prebuild by loading it and starting a PTY under Electron's Node ABI.
-5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the rebuilt `better-sqlite3` binary that Electron Builder's Bun dependency collector otherwise omits.
+4. `rebuild:native` to verify the bundled N-API `better-sqlite3` binary and the published Windows
+   `node-pty` prebuild under Electron's Node ABI.
+5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the target `better-sqlite3`
+   binary, removes its other-platform/build-only files, and removes the duplicate dependency copy of
+   the already staged Web UI.
 
 Build output goes to `packages/electron/dist`.
 
@@ -146,6 +148,7 @@ own executable in Node mode, so Piarium does not download or bundle an OpenCode 
 require a separate Node installation at runtime. Production `node_modules` are unpacked as one
 coherent dependency tree because the ordinary Node worker cannot resolve modules from Electron's
 `app.asar`; keeping only a hand-maintained package subset would break whenever Pi adds a dependency.
+The package keeps Chromium locale files only for Piarium's supported interface languages.
 
 ## Common Env Vars
 
