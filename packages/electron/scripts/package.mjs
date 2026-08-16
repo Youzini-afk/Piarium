@@ -6,6 +6,7 @@ import { resolveTargetArchitecture } from './target-architecture.mjs';
 const env = { ...process.env };
 const builderArgs = process.argv.slice(2);
 const targetArchitecture = resolveTargetArchitecture({ environment: env, builderArgs });
+env.PIARIUM_TARGET_ARCH = targetArchitecture.node;
 
 if (process.platform === 'win32' && env.WINDOWS_CSC_LINK && !env.WIN_CSC_LINK) {
   env.WIN_CSC_LINK = env.WINDOWS_CSC_LINK;

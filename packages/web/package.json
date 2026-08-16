@@ -34,7 +34,7 @@
     "@piarium/runtime-broker": "workspace:*",
     "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.6.0",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^13.0.3",
     "bun-pty": "^0.4.5",
     "compression": "^1.8.1",
     "cron-parser": "^4.9.0",

@@ -17,6 +17,7 @@ const require = createRequire(import.meta.url);
 
 const electronPkg = require('electron/package.json');
 const electronVersion = electronPkg.version;
+const electronExecutable = require('electron');
 const targetArchitecture = resolveTargetArchitecture();
 
 const copyDirectory = async (src, dst) => {
@@ -143,7 +144,6 @@ const verifyWindowsNodePtyPrebuild = () => {
     }
   }
 
-  const electronExecutable = require('electron');
   const verificationScript = `
 const pty = require('node-pty');
 const child = pty.spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'exit 0'], {
@@ -167,20 +167,38 @@ child.onExit(({ exitCode }) => {
   console.log(`[electron] verified node-pty win32-${targetArchitecture.electronBuilder} prebuild against Electron ${electronVersion}`);
 };
 
+const verifyBetterSqlitePrebuild = () => {
+  const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
+  const prebuildName = `${process.platform}-${targetArchitecture.node}.node`;
+  const betterSqlitePrebuild = path.join(betterSqliteDir, 'prebuilds', prebuildName);
+  if (!existsSync(betterSqlitePrebuild)) {
+    throw new Error(`better-sqlite3 prebuild is missing ${betterSqlitePrebuild}`);
+  }
+
+  if (targetArchitecture.node !== process.arch) {
+    console.log(`[electron] found better-sqlite3 ${prebuildName}; cross-architecture loading is deferred to packaged smoke`);
+    return;
+  }
+
+  const verificationScript = `
+const Database = require('better-sqlite3');
+const database = new Database(':memory:');
+const row = database.prepare('SELECT 42 AS answer').get();
+database.close();
+if (row?.answer !== 42) process.exit(8);
+`;
+  execFileSync(electronExecutable, ['-e', verificationScript], {
+    cwd: electronDir,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'inherit',
+    timeout: 15_000,
+  });
+  console.log(`[electron] verified better-sqlite3 ${prebuildName} against Electron ${electronVersion}`);
+};
+
 console.log(`[electron] rebuilding native modules against Electron ${electronVersion}...`);
 
-await rebuild({
-  buildPath: electronDir,
-  electronVersion,
-  force: true,
-  arch: targetArchitecture.electronBuilder,
-  onlyModules: ['better-sqlite3'],
-});
-const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
-const betterSqliteBinary = path.join(betterSqliteDir, 'build', 'Release', 'better_sqlite3.node');
-if (!existsSync(betterSqliteBinary)) {
-  throw new Error(`better-sqlite3 rebuild did not produce ${betterSqliteBinary}`);
-}
+verifyBetterSqlitePrebuild();
 
 // node-pty publishes N-API Windows binaries and validates them in its own
 // install script. Loading and spawning through Electron is a stronger check

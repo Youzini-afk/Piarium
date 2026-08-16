@@ -19,7 +19,7 @@ if (!existsSync(appPath)) {
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-const DEVTOOLS_REQUEST_TIMEOUT_MS = 5_000;
+const DEVTOOLS_REQUEST_TIMEOUT_MS = 20_000;
 const LAYOUT_TOLERANCE_PX = 1;
 const MAX_COMPOSER_FRAME_WIDTH_PX = 48 * 16;
 

@@ -6,18 +6,19 @@ module.exports = (context) => {
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
   const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
-  const betterSqliteBinary = path.join(betterSqliteDir, 'build', 'Release', 'better_sqlite3.node');
+  const targetArchitecture = process.env.PIARIUM_TARGET_ARCH || process.arch;
+  const betterSqlitePrebuildName = `${context.electronPlatformName}-${targetArchitecture}.node`;
+  const betterSqliteBinary = path.join(betterSqliteDir, 'prebuilds', betterSqlitePrebuildName);
   if (!fs.existsSync(betterSqliteBinary)) {
-    throw new Error(`Missing rebuilt better-sqlite3 binary at ${betterSqliteBinary}`);
+    throw new Error(`Missing better-sqlite3 prebuild at ${betterSqliteBinary}`);
   }
   const packagedBetterSqliteBinary = path.join(
     resourcesPath,
     'app.asar.unpacked',
     'node_modules',
     'better-sqlite3',
-    'build',
-    'Release',
-    'better_sqlite3.node',
+    'prebuilds',
+    betterSqlitePrebuildName,
   );
   fs.mkdirSync(path.dirname(packagedBetterSqliteBinary), { recursive: true });
   fs.copyFileSync(betterSqliteBinary, packagedBetterSqliteBinary);
