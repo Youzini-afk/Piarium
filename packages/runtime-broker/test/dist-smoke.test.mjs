@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
 import { PiRuntimeBroker } from "../dist/index.js";
 
-const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/dist/main.js");
+const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/dist/host-bootstrap.js");
 
 test("compiled broker handshakes with and disposes the compiled Pi host", async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "piarium-runtime-broker-dist-"));

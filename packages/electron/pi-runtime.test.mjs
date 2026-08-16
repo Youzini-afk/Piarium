@@ -25,7 +25,7 @@ test('resolves the unpacked Pi host entry in packaged apps', async () => {
     '@piarium',
     'pi-host',
     'dist',
-    'main.js',
+    'host-bootstrap.js',
   );
   await fs.mkdir(path.dirname(unpackedEntry), { recursive: true });
   await fs.writeFile(unpackedEntry, 'export {};\n');
@@ -40,7 +40,7 @@ test('resolves the unpacked Pi host entry in packaged apps', async () => {
         '@piarium',
         'pi-host',
         'dist',
-        'main.js',
+        'host-bootstrap.js',
       ),
     });
     assert.equal(resolved, unpackedEntry);
@@ -68,7 +68,7 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
     clientVersion: '0.1.0-test',
     emit: (event) => events.push(event),
     packaged: false,
-    resolvedEntry: fileURLToPath(new URL('../pi-host/dist/main.js', import.meta.url)),
+    resolvedEntry: fileURLToPath(new URL('../pi-host/dist/host-bootstrap.js', import.meta.url)),
     resourcesPath: '',
   });
   try {

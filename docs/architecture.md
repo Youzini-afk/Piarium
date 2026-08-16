@@ -17,7 +17,10 @@ execution into an untrusted renderer.
 
 ## 2. Goals
 
-1. Discover and run a bundled, system-installed, or developer Pi runtime.
+1. Discover and run a user-global, standalone, custom, or developer Pi runtime.
+   Desktop loads the selected Pi package root through a Host bootstrap resolver
+   instead of a permanently bundled SDK. Cloud images still ship a self-contained
+   Pi runtime.
 2. Provide first-class session, model, provider, settings, and package management.
 3. Render streaming messages, tools, commands, queues, compaction, retries, and extension UI.
 4. Make subagent work visible and controllable from its parent session.
@@ -141,9 +144,12 @@ Dead owners are reclaimed by process identity; deployments may opt into a wait b
 
 ### 4.3 Session workers
 
-Each hot top-level session runs in its own Node worker process and embeds the public Pi SDK. This
-matches the single-active-session assumptions made by several Pi extensions while allowing
-multiple background sessions. Idle sessions are persisted by Pi and need no live worker.
+Each hot top-level session runs in its own Node worker process and loads the public Pi SDK from the
+selected installation. The Host process stays Piarium-owned; only
+`@earendil-works/pi-coding-agent`, `@earendil-works/pi-agent-core`, and `@earendil-works/pi-ai` are
+resolved from the chosen package root. This matches the single-active-session assumptions made by
+several Pi extensions while allowing multiple background sessions. Idle sessions are persisted by Pi
+and need no live worker.
 
 Opened sessions stay live until explicitly closed or the application exits. An optional hot-worker
 budget and idle eviction remain a later deployment optimization; eviction must be graceful: stop

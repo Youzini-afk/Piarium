@@ -14,6 +14,7 @@
       "@piarium/extension-surface": ["packages/extension-surface/src/index.ts"],
       "@piarium/pi-host": ["packages/pi-host/src/index.ts"],
       "@piarium/pi-host/discovery": ["packages/pi-host/src/runtime-discovery.ts"],
+      "@piarium/pi-host/sdk": ["packages/pi-host/src/pi-sdk-packages.ts"],
       "@piarium/protocol": ["packages/protocol/src/index.ts"],
       "@piarium/recovery": ["packages/recovery/src/index.ts"],
       "@piarium/runtime-client": ["packages/runtime-client/src/index.ts"]

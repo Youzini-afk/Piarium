@@ -42,7 +42,7 @@ module.exports = (context) => {
   );
 
   const requiredPiRuntimeFiles = [
-    path.join('node_modules', '@piarium', 'pi-host', 'dist', 'main.js'),
+    path.join('node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js'),
     path.join('node_modules', '@piarium', 'runtime-broker', 'dist', 'index.js'),
     path.join('node_modules', '@piarium', 'extension-host', 'dist', 'index.js'),
   ];

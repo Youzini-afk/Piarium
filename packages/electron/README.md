@@ -66,7 +66,7 @@ bun run electron:build
 That runs, in order:
 
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
-2. `prepare:pi-runtime` to compile the Pi host and runtime broker.
+2. `prepare:pi-runtime` to compile the Pi host bootstrap and runtime broker.
 3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
 4. `rebuild:native` to verify the bundled N-API `better-sqlite3` binary and the published Windows
    `node-pty` prebuild under Electron's Node ABI.

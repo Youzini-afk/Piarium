@@ -13,7 +13,7 @@ const hostEntry = path.join(
   '@piarium',
   'pi-host',
   'dist',
-  'main.js',
+  'host-bootstrap.js',
 );
 await access(hostEntry);
 

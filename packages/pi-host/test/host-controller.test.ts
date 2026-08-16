@@ -540,4 +540,39 @@ describe("HostController", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("reports the selected runtime source and package root in the handshake", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-host-runtime-"));
+    const packageRoot = join(root, "external-pi");
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({
+      agentDir: join(root, "agent"),
+      packageRoot,
+      runtimeSource: "custom",
+      transport,
+    });
+    controller.start();
+    try {
+      transport.receive(
+        createRequest("handshake", "host.handshake", {
+          clientName: "host-test",
+          clientVersion: "0.0.0",
+          mode: "test",
+          protocolVersions: [PIARIUM_PROTOCOL_VERSION],
+        }),
+      );
+      const handshake = await transport.waitFor((entry) => isResponse(entry, "handshake"));
+      assert.ok(handshake.kind === "response" && handshake.ok);
+      const runtime = (
+        handshake.result as {
+          runtime: { packageRoot?: string; source: string };
+        }
+      ).runtime;
+      assert.equal(runtime.source, "custom");
+      assert.equal(runtime.packageRoot, packageRoot);
+    } finally {
+      await controller.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

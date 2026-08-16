@@ -7,7 +7,7 @@ const PI_HOST_PACKAGE_ENTRY = path.join(
   '@piarium',
   'pi-host',
   'dist',
-  'main.js',
+  'host-bootstrap.js',
 );
 
 export const resolveElectronPiHostEntry = ({
@@ -51,9 +51,12 @@ export const createDesktopPiRuntimeBroker = ({
   agentDir,
   clientVersion,
   emit,
+  nodePath,
   packaged,
+  packageRoot,
   resolvedEntry,
   resourcesPath,
+  runtimeSource,
 }) => new PiRuntimeBroker({
   ...(agentDir ? { agentDir } : {}),
   client: {
@@ -67,4 +70,7 @@ export const createDesktopPiRuntimeBroker = ({
     resourcesPath,
     ...(resolvedEntry ? { resolvedEntry } : {}),
   }),
+  ...(nodePath ? { nodePath } : {}),
+  ...(packageRoot ? { packageRoot } : {}),
+  ...(runtimeSource ? { runtimeSource } : {}),
 });

@@ -4,22 +4,36 @@ import { readFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import type { RuntimeSourceKind } from "@piarium/protocol";
+import type {
+  PiRuntimeInstallation,
+  PiRuntimeInstallationSource,
+  RuntimeSourceKind,
+} from "@piarium/protocol";
+import { resolvePiPackageFromCommand } from "./pi-sdk-packages.js";
+import {
+  meetsMinimumNodeVersion,
+  meetsMinimumPiVersion,
+  parseVersion,
+} from "./pi-version.js";
 
 const execFileAsync = promisify(execFile);
-const MINIMUM_PI_VERSION = "0.82.1";
-const MINIMUM_NODE_VERSION = "22.19.0";
 const PACKAGE_MANIFEST = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-) as { dependencies?: Record<string, string> };
-const readBundledPiVersion = (): string => {
-  const version = PACKAGE_MANIFEST.dependencies?.["@earendil-works/pi-coding-agent"];
+) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+
+export function readPinnedPiVersion(
+  manifest: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } = PACKAGE_MANIFEST,
+): string {
+  const version =
+    manifest.devDependencies?.["@earendil-works/pi-coding-agent"]
+    ?? manifest.dependencies?.["@earendil-works/pi-coding-agent"];
   if (!version) {
     throw new Error("Pi host package manifest does not pin @earendil-works/pi-coding-agent");
   }
   return version;
-};
-const BUNDLED_PI_VERSION = readBundledPiVersion();
+}
+
+const BUNDLED_PI_VERSION = readPinnedPiVersion();
 
 export interface RuntimeCandidate {
   available: boolean;
@@ -50,50 +64,20 @@ export interface RuntimeDiscoveryOptions {
   commandRunner?: (command: string, args: string[]) => Promise<CommandResult>;
   customRuntimes?: CustomRuntimeConfig[];
   env?: NodeJS.ProcessEnv;
+  includeBundled?: boolean;
   platform?: NodeJS.Platform;
   sourcePaths?: string[];
 }
 
-function parseVersion(value: string): string | undefined {
-  return value.match(/(?:^|[^0-9])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/)?.[1];
-}
-
-function compareVersions(left: string, right: string): number {
-  const [leftCore = "", leftPrerelease] = left.split("-", 2);
-  const [rightCore = "", rightPrerelease] = right.split("-", 2);
-  const leftParts = leftCore.split(".").map(Number);
-  const rightParts = rightCore.split(".").map(Number);
-  for (let index = 0; index < 3; index++) {
-    const delta = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-    if (delta !== 0) return delta;
+function isWorkspaceSdkResolvable(): boolean {
+  try {
+    import.meta.resolve("@earendil-works/pi-coding-agent");
+    import.meta.resolve("@earendil-works/pi-agent-core");
+    import.meta.resolve("@earendil-works/pi-ai");
+    return true;
+  } catch {
+    return false;
   }
-  if (leftPrerelease === undefined && rightPrerelease !== undefined) return 1;
-  if (leftPrerelease !== undefined && rightPrerelease === undefined) return -1;
-  if (leftPrerelease === rightPrerelease) return 0;
-  const leftIdentifiers = leftPrerelease?.split(".") ?? [];
-  const rightIdentifiers = rightPrerelease?.split(".") ?? [];
-  for (let index = 0; index < Math.max(leftIdentifiers.length, rightIdentifiers.length); index++) {
-    const leftIdentifier = leftIdentifiers[index];
-    const rightIdentifier = rightIdentifiers[index];
-    if (leftIdentifier === undefined) return -1;
-    if (rightIdentifier === undefined) return 1;
-    if (leftIdentifier === rightIdentifier) continue;
-    const leftNumber = /^\d+$/.test(leftIdentifier) ? Number(leftIdentifier) : undefined;
-    const rightNumber = /^\d+$/.test(rightIdentifier) ? Number(rightIdentifier) : undefined;
-    if (leftNumber !== undefined && rightNumber !== undefined) return leftNumber - rightNumber;
-    if (leftNumber !== undefined) return -1;
-    if (rightNumber !== undefined) return 1;
-    return leftIdentifier.localeCompare(rightIdentifier, "en");
-  }
-  return 0;
-}
-
-function isCompatible(version: string | undefined): boolean {
-  return version !== undefined && compareVersions(version, MINIMUM_PI_VERSION) >= 0;
-}
-
-function isNodeCompatible(version: string | undefined): boolean {
-  return version !== undefined && compareVersions(version, MINIMUM_NODE_VERSION) >= 0;
 }
 
 async function defaultCommandRunner(
@@ -200,14 +184,20 @@ async function inspectSystemPi(
   const [executable, args] = buildVersionInvocation(command, platform);
   const result = await runner(executable, args);
   const version = parseVersion(`${result.stdout}\n${result.stderr}`);
+  const resolved = existsSync(command) ? resolvePiPackageFromCommand(command) : {};
+  const available = result.exitCode === 0 && version !== undefined;
+  const issues = [
+    result.exitCode === 0 && version ? undefined : result.stderr.trim() || "Pi version could not be detected",
+    resolved.issue,
+  ].filter((issue): issue is string => issue !== undefined);
   return {
-    available: result.exitCode === 0 && version !== undefined,
+    available,
     command,
-    compatible: isCompatible(version),
+    compatible: meetsMinimumPiVersion(version),
     id: "system",
-    ...(result.exitCode === 0 && version
-      ? {}
-      : { issue: result.stderr.trim() || "Pi version could not be detected" }),
+    ...(issues.length === 0 ? {} : { issue: issues.join("; ") }),
+    ...(resolved.nodePath === undefined ? {} : { nodePath: resolved.nodePath }),
+    ...(resolved.packageRoot === undefined ? {} : { packageRoot: resolved.packageRoot }),
     source: "system",
     ...(version === undefined ? {} : { version }),
   };
@@ -225,7 +215,7 @@ async function inspectSourcePi(sourcePath: string, index: number): Promise<Runti
       nodeVersion: process.versions.node,
       issue: "packages/coding-agent/package.json was not found",
       packageRoot,
-      source: "source",
+      source: "development",
     };
   }
   try {
@@ -233,12 +223,12 @@ async function inspectSourcePi(sourcePath: string, index: number): Promise<Runti
     const version = typeof parsed.version === "string" ? parsed.version : undefined;
     return {
       available: version !== undefined,
-      compatible: isCompatible(version) && isNodeCompatible(process.versions.node),
+      compatible: meetsMinimumPiVersion(version) && meetsMinimumNodeVersion(process.versions.node),
       id: `source:${index}`,
       nodePath: process.execPath,
       nodeVersion: process.versions.node,
       packageRoot,
-      source: "source",
+      source: "development",
       ...(version === undefined ? { issue: "Pi source manifest has no version" } : { version }),
     };
   } catch (error) {
@@ -250,7 +240,7 @@ async function inspectSourcePi(sourcePath: string, index: number): Promise<Runti
       nodePath: process.execPath,
       nodeVersion: process.versions.node,
       packageRoot,
-      source: "source",
+      source: "development",
     };
   }
 }
@@ -307,7 +297,7 @@ async function inspectCustomPi(
   ].filter((issue): issue is string => issue !== undefined);
   return {
     available: version !== undefined && nodeResult.exitCode === 0 && nodeVersion !== undefined,
-    compatible: isCompatible(version) && isNodeCompatible(nodeVersion),
+    compatible: meetsMinimumPiVersion(version) && meetsMinimumNodeVersion(nodeVersion),
     id: `custom:${config.id ?? index}`,
     ...(issues.length === 0 ? {} : { issue: issues.join("; ") }),
     nodePath,
@@ -315,6 +305,23 @@ async function inspectCustomPi(
     packageRoot,
     source: "custom",
     ...(version === undefined ? {} : { version }),
+  };
+}
+
+function inspectBundledPi(): RuntimeCandidate {
+  const available = isWorkspaceSdkResolvable();
+  return {
+    available,
+    compatible: available && meetsMinimumPiVersion(BUNDLED_PI_VERSION) && meetsMinimumNodeVersion(process.versions.node),
+    id: "bundled",
+    ...(available
+      ? {}
+      : { issue: "Pi SDK is not present in this Piarium installation" }),
+    nodePath: process.execPath,
+    nodeVersion: process.versions.node,
+    packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
+    source: "bundled",
+    version: BUNDLED_PI_VERSION,
   };
 }
 
@@ -342,22 +349,39 @@ export async function discoverPiRuntimes(
         ]
       : []),
   ];
-  const bundled: RuntimeCandidate = {
-    available: true,
-    compatible: isCompatible(BUNDLED_PI_VERSION) && isNodeCompatible(process.versions.node),
-    id: "bundled",
-    nodePath: process.execPath,
-    nodeVersion: process.versions.node,
-    packageRoot: resolve(dirname(fileURLToPath(import.meta.url)), ".."),
-    source: "bundled",
-    version: BUNDLED_PI_VERSION,
-  };
+  const includeBundled = options.includeBundled ?? true;
   return [
-    bundled,
+    ...(includeBundled ? [inspectBundledPi()] : []),
     await inspectSystemPi(platform, runner),
     ...(await Promise.all(uniqueSourcePaths.map(inspectSourcePi))),
     ...(await Promise.all(
       customRuntimes.map((config, index) => inspectCustomPi(config, index, runner)),
     )),
   ];
+}
+
+export function toRuntimeInstallation(candidate: RuntimeCandidate): PiRuntimeInstallation {
+  const source: PiRuntimeInstallationSource = candidate.source === "source"
+    ? "development"
+    : candidate.source;
+  let state: PiRuntimeInstallation["state"];
+  if (!candidate.available) {
+    state = "missing";
+  } else if (!meetsMinimumPiVersion(candidate.version)) {
+    state = "upgrade-required";
+  } else if (candidate.issue && !candidate.packageRoot && candidate.source !== "bundled") {
+    state = "failed";
+  } else {
+    state = "ready";
+  }
+  return {
+    id: candidate.id,
+    source,
+    state,
+    ...(candidate.version === undefined ? {} : { version: candidate.version }),
+    ...(candidate.command === undefined ? {} : { commandPath: candidate.command }),
+    ...(candidate.nodePath === undefined ? {} : { nodePath: candidate.nodePath }),
+    ...(candidate.packageRoot === undefined ? {} : { packageRoot: candidate.packageRoot }),
+    ...(candidate.issue === undefined || state === "ready" ? {} : { issue: candidate.issue }),
+  };
 }

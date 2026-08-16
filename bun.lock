@@ -220,17 +220,17 @@
       "name": "@piarium/pi-host",
       "version": "0.1.0",
       "bin": {
-        "piarium-host": "./dist/main.js",
+        "piarium-host": "./dist/host-bootstrap.js",
       },
       "dependencies": {
-        "@earendil-works/pi-agent-core": "0.84.1",
-        "@earendil-works/pi-ai": "0.84.1",
-        "@earendil-works/pi-coding-agent": "0.84.1",
         "@piarium/protocol": "0.1.0",
         "jsonc-parser": "^3.3.1",
         "proper-lockfile": "4.1.2",
       },
       "devDependencies": {
+        "@earendil-works/pi-agent-core": "0.84.1",
+        "@earendil-works/pi-ai": "0.84.1",
+        "@earendil-works/pi-coding-agent": "0.84.1",
         "@types/proper-lockfile": "4.1.4",
       },
     },

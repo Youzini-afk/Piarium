@@ -11,7 +11,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "piarium-host": "./dist/main.js"
+    "piarium-host": "./dist/host-bootstrap.js"
   },
   "exports": {
     ".": {
@@ -22,7 +22,11 @@
       "types": "./dist/runtime-discovery.d.ts",
       "import": "./dist/runtime-discovery.js"
     },
-    "./host": "./dist/main.js"
+    "./sdk": {
+      "types": "./dist/pi-sdk-packages.d.ts",
+      "import": "./dist/pi-sdk-packages.js"
+    },
+    "./host": "./dist/host-bootstrap.js"
   },
   "scripts": {
     "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
@@ -34,14 +38,14 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.84.1",
-    "@earendil-works/pi-ai": "0.84.1",
-    "@earendil-works/pi-coding-agent": "0.84.1",
     "@piarium/protocol": "0.1.0",
     "jsonc-parser": "^3.3.1",
     "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
     "@types/proper-lockfile": "4.1.4"
   },
   "engines": {

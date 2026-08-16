@@ -13,7 +13,61 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 
 export type HostMode = "desktop" | "headless" | "mobile" | "test" | "vscode" | "web";
 
-export type RuntimeSourceKind = "bundled" | "system" | "source" | "custom";
+export type RuntimeSourceKind =
+  | "bundled"
+  | "system"
+  | "standalone"
+  | "custom"
+  | "development"
+  | "source";
+
+export type PiRuntimeInstallationSource =
+  | "bundled"
+  | "system"
+  | "standalone"
+  | "custom"
+  | "development";
+
+export type PiRuntimeInstallationState = "ready" | "missing" | "upgrade-required" | "failed";
+
+export interface PiRuntimeInstallation {
+  id: string;
+  source: PiRuntimeInstallationSource;
+  version?: string;
+  commandPath?: string;
+  nodePath?: string;
+  packageRoot?: string;
+  state: PiRuntimeInstallationState;
+  issue?: string;
+}
+
+export type PiRuntimeManagerStatus =
+  | "discovering"
+  | "missing"
+  | "installing"
+  | "probing"
+  | "ready"
+  | "upgrade-required"
+  | "upgrading"
+  | "failed";
+
+export interface PiRuntimeSnapshot {
+  status: PiRuntimeManagerStatus;
+  installations: PiRuntimeInstallation[];
+  selectedId?: string;
+  active?: PiRuntimeInstallation;
+  operationId?: string;
+  issue?: string;
+}
+
+export const RUNTIME_SOURCE_KINDS = [
+  "bundled",
+  "system",
+  "standalone",
+  "custom",
+  "development",
+  "source",
+] as const satisfies readonly RuntimeSourceKind[];
 
 export const THINKING_LEVELS = [
   "off",

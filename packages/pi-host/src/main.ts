@@ -1,34 +1,8 @@
 #!/usr/bin/env node
 
 import { HostController } from "./host-controller.js";
+import { parseHostArguments, resolveHostRuntimeOptions } from "./host-arguments.js";
 import { createProcessTransport } from "./transport.js";
-
-interface HostArguments {
-  agentDir?: string;
-  forceStdio: boolean;
-  projectTrustOverride?: boolean;
-}
-
-function parseArguments(argv: string[]): HostArguments {
-  const result: HostArguments = { forceStdio: false };
-  for (let index = 0; index < argv.length; index++) {
-    const argument = argv[index];
-    if (argument === "--stdio") {
-      result.forceStdio = true;
-    } else if (argument === "--trust-project") {
-      result.projectTrustOverride = true;
-    } else if (argument === "--deny-project") {
-      result.projectTrustOverride = false;
-    } else if (argument === "--agent-dir") {
-      const value = argv[++index];
-      if (!value) throw new Error("--agent-dir requires a path");
-      result.agentDir = value;
-    } else {
-      throw new Error(`Unknown argument: ${argument}`);
-    }
-  }
-  return result;
-}
 
 function redirectConsoleToStderr(): void {
   const write = (...values: unknown[]) => {
@@ -40,7 +14,8 @@ function redirectConsoleToStderr(): void {
 }
 
 async function run(): Promise<void> {
-  const args = parseArguments(process.argv.slice(2));
+  const args = parseHostArguments(process.argv.slice(2));
+  const runtime = resolveHostRuntimeOptions(args);
   if (args.forceStdio) redirectConsoleToStderr();
   if (args.agentDir !== undefined) process.env.PI_CODING_AGENT_DIR = args.agentDir;
   const controller = new HostController({
@@ -48,6 +23,7 @@ async function run(): Promise<void> {
     ...(args.projectTrustOverride === undefined
       ? {}
       : { projectTrustOverride: args.projectTrustOverride }),
+    ...runtime,
     transport: createProcessTransport(args.forceStdio),
   });
   controller.start();

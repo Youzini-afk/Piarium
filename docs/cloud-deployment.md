@@ -10,9 +10,11 @@ closure:
 - `@piarium/web`.
 
 These packages remain one workspace because the broker resolves the bundled host through package
-exports and Pi loads runtime resources from the installed package tree. The cloud builder creates a
-dedicated production `bun.lock`; native dependencies are installed on the target OS and CPU instead
-of being copied from the developer machine.
+exports and Pi loads runtime resources from the installed package tree. Desktop Host workers bind a
+selected Pi package root at process start; the cloud builder still copies the pinned
+`@earendil-works/pi-*` packages into the staged `pi-host` production graph so images stay
+self-contained. The cloud builder creates a dedicated production `bun.lock`; native dependencies are
+installed on the target OS and CPU instead of being copied from the developer machine.
 
 ## Container images
 

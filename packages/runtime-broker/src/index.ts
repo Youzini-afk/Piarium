@@ -3,4 +3,7 @@ export * from "./host-client.js";
 export * from "./host-entry.js";
 export * from "./runtime-dispatcher.js";
 export * from "./runtime-broker.js";
+export * from "./runtime-manager.js";
+export * from "./runtime-probe.js";
+export * from "./runtime-selection-store.js";
 export * from "./runtime-surface-connection.js";

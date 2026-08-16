@@ -3,9 +3,29 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { type CommandResult, discoverPiRuntimes } from "../src/runtime-discovery.js";
+import {
+  type CommandResult,
+  discoverPiRuntimes,
+  readPinnedPiVersion,
+  toRuntimeInstallation,
+} from "../src/runtime-discovery.js";
 
 describe("discoverPiRuntimes", () => {
+  it("reads the pinned Pi version from development or production dependencies", () => {
+    assert.equal(
+      readPinnedPiVersion({
+        devDependencies: { "@earendil-works/pi-coding-agent": "0.84.1" },
+      }),
+      "0.84.1",
+    );
+    assert.equal(
+      readPinnedPiVersion({
+        dependencies: { "@earendil-works/pi-coding-agent": "0.84.1" },
+      }),
+      "0.84.1",
+    );
+  });
+
   it("reports bundled, system, and source runtimes with compatibility", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-runtime-"));
     try {
@@ -57,6 +77,10 @@ describe("discoverPiRuntimes", () => {
       assert.equal(candidates[3]?.compatible, true);
       assert.equal(candidates[3]?.packageRoot, custom);
       assert.equal(candidates[3]?.nodePath, customNode);
+      assert.equal(candidates[2]?.source, "development");
+      const installation = toRuntimeInstallation(candidates[3]!);
+      assert.equal(installation.state, "ready");
+      assert.equal("compatible" in installation, false);
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -92,6 +116,7 @@ describe("discoverPiRuntimes", () => {
       });
       assert.equal(candidates[2]?.available, true);
       assert.equal(candidates[2]?.compatible, false);
+      assert.equal(toRuntimeInstallation(candidates[2]!).state, "upgrade-required");
     } finally {
       await rm(root, { force: true, recursive: true });
     }

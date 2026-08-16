@@ -10,6 +10,7 @@ import type {
   HostMethodResult,
   ProviderAuthResponse,
   ProjectTrustRequest,
+  RuntimeSourceKind,
   SessionSnapshot,
   SessionSummary,
 } from "@piarium/protocol";
@@ -61,7 +62,9 @@ export interface PiRuntimeBrokerOptions {
   execArgv?: string[];
   hostEntry: string;
   nodePath?: string;
+  packageRoot?: string;
   projectTrustOverride?: boolean;
+  runtimeSource?: RuntimeSourceKind;
   promptForProjectTrust?(request: ProjectTrustRequest): Promise<ProjectTrustDecision>;
 }
 
@@ -517,6 +520,10 @@ export class PiRuntimeBroker {
       handshake: this.#options.client,
       hostEntry: this.#options.hostEntry,
       ...(this.#options.nodePath === undefined ? {} : { nodePath: this.#options.nodePath }),
+      ...(this.#options.packageRoot === undefined ? {} : { packageRoot: this.#options.packageRoot }),
+      ...(this.#options.runtimeSource === undefined
+        ? {}
+        : { runtimeSource: this.#options.runtimeSource }),
       onDiagnostic: (level, message) => {
         this.#emit({ kind: "diagnostic", level, message, role, workerId: client.id });
       },

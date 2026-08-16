@@ -24,6 +24,7 @@ import {
   type PiResourceScope,
   type PiPackageScope,
   type RuntimeDescriptor,
+  type RuntimeSourceKind,
   THINKING_LEVELS,
   type ThinkingLevel,
   type WireEnvelope,
@@ -58,7 +59,9 @@ const OUT_OF_BAND_METHODS = new Set([
 
 export interface HostControllerOptions {
   agentDir?: string;
+  packageRoot?: string;
   projectTrustOverride?: boolean;
+  runtimeSource?: RuntimeSourceKind;
   transport: HostTransport;
 }
 
@@ -163,6 +166,8 @@ function readProviderDeleteScope(value: string): ProviderConfigDeleteScope {
 
 export class HostController {
   readonly #agentDir: string;
+  readonly #packageRoot: string | undefined;
+  readonly #runtimeSource: RuntimeSourceKind;
   readonly #sessionHost: SessionHost;
   readonly #transport: HostTransport;
   #disposed = false;
@@ -172,6 +177,8 @@ export class HostController {
 
   constructor(options: HostControllerOptions) {
     this.#agentDir = resolve(options.agentDir ?? getAgentDir());
+    this.#packageRoot = options.packageRoot ? resolve(options.packageRoot) : undefined;
+    this.#runtimeSource = options.runtimeSource ?? (this.#packageRoot ? "custom" : "bundled");
     this.#transport = options.transport;
     this.#sessionHost = new SessionHost({
       agentDir: this.#agentDir,
@@ -187,8 +194,9 @@ export class HostController {
       agentDir: this.#agentDir,
       nodePath: process.execPath,
       nodeVersion: process.versions.node,
+      ...(this.#packageRoot === undefined ? {} : { packageRoot: this.#packageRoot }),
       piVersion: VERSION,
-      source: "bundled",
+      source: this.#runtimeSource,
     };
   }
 

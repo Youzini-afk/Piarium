@@ -125,6 +125,18 @@ describe('Piarium cloud runtime layout', () => {
     expect(webBuild).toBeGreaterThan(clientBuild);
   });
 
+  it('reinstalls Pi SDK packages into the staged cloud pi-host production graph', () => {
+    const hostManifest = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
+    expect(hostManifest.dependencies?.['@earendil-works/pi-coding-agent']).toBeUndefined();
+    expect(hostManifest.devDependencies?.['@earendil-works/pi-coding-agent']).toBe('0.84.1');
+    const builderSource = fs.readFileSync(
+      path.join(repoRoot, 'scripts', 'build-cloud-runtime.mjs'),
+      'utf8',
+    );
+    expect(builderSource).toContain('readPiSdkRuntimeDependencies');
+    expect(builderSource).toContain("directory === 'pi-host'");
+  });
+
   it('contains the complete private Pi runtime dependency closure', () => {
     const packageNames = new Set(CLOUD_RUNTIME_PACKAGE_DIRS.map((directory) => (
       readJson(path.join(repoRoot, 'packages', directory, 'package.json')).name

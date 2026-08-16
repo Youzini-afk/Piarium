@@ -12,6 +12,7 @@ import {
   type HostMethodResult,
   PIARIUM_PROTOCOL_VERSION,
   type ResponseEnvelope,
+  type RuntimeSourceKind,
   type WireEnvelope,
 } from "@piarium/protocol";
 
@@ -34,6 +35,8 @@ export interface PiHostClientOptions {
   handshake: Omit<HostHandshakeParams, "protocolVersions">;
   hostEntry: string;
   nodePath?: string;
+  packageRoot?: string;
+  runtimeSource?: RuntimeSourceKind;
   onDiagnostic?(level: "error" | "info", message: string): void;
   onEvent?(event: EventEnvelope): void;
   onExit?(exit: PiHostExit): void;
@@ -126,6 +129,8 @@ export class PiHostClient {
       ...(this.#options.execArgv ?? []),
       this.#options.hostEntry,
       ...(this.#options.agentDir ? ["--agent-dir", this.#options.agentDir] : []),
+      ...(this.#options.packageRoot ? ["--package-root", this.#options.packageRoot] : []),
+      ...(this.#options.runtimeSource ? ["--runtime-source", this.#options.runtimeSource] : []),
       ...(this.#options.projectTrustOverride === true ? ["--trust-project"] : []),
       ...(this.#options.projectTrustOverride === false ? ["--deny-project"] : []),
     ];
@@ -139,6 +144,12 @@ export class PiHostClient {
         ...(this.#options.agentDir === undefined
           ? {}
           : { PI_CODING_AGENT_DIR: this.#options.agentDir }),
+        ...(this.#options.packageRoot === undefined
+          ? {}
+          : { PIARIUM_PI_PACKAGE_ROOT: this.#options.packageRoot }),
+        ...(this.#options.runtimeSource === undefined
+          ? {}
+          : { PIARIUM_RUNTIME_SOURCE: this.#options.runtimeSource }),
       },
       serialization: "json",
       stdio: ["ignore", "pipe", "pipe", "ipc"],

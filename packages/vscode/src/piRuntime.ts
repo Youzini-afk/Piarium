@@ -106,7 +106,9 @@ export const resolvePiNodeExecutable = (): string => {
 
 export const resolveVSCodePiHostEntry = (extensionPath: string): string => {
   const candidates = [
+    join(extensionPath, 'dist', 'pi-runtime', 'node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js'),
     join(extensionPath, 'dist', 'pi-runtime', 'node_modules', '@piarium', 'pi-host', 'dist', 'main.js'),
+    join(extensionPath, '..', 'pi-host', 'dist', 'host-bootstrap.js'),
     join(extensionPath, '..', 'pi-host', 'dist', 'main.js'),
   ];
   const entry = candidates.find((candidate) => existsSync(candidate));

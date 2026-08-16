@@ -89,7 +89,25 @@ const packageFiles = Object.freeze({
   },
 });
 
+const PI_SDK_PACKAGE_NAMES = Object.freeze([
+  '@earendil-works/pi-agent-core',
+  '@earendil-works/pi-ai',
+  '@earendil-works/pi-coding-agent',
+]);
+
 const readJson = (filePath) => JSON.parse(readFileSync(filePath, 'utf8'));
+
+const readPiSdkRuntimeDependencies = (manifest) => {
+  const dependencies = {};
+  for (const name of PI_SDK_PACKAGE_NAMES) {
+    const version = manifest.devDependencies?.[name] ?? manifest.dependencies?.[name];
+    if (!version) {
+      throw new Error(`Pi host manifest does not pin ${name} for the cloud runtime.`);
+    }
+    dependencies[name] = version;
+  }
+  return dependencies;
+};
 
 const run = (command, args, { cwd = repoRoot, env, json = false, label } = {}) => {
   const result = spawnSync(command, args, {
@@ -370,7 +388,16 @@ const stageRuntimeTree = (outputDir) => {
 
     const stagedManifestPath = path.join(destinationRoot, 'package.json');
     const stagedManifest = readJson(stagedManifestPath);
+    const piSdkDependencies = directory === 'pi-host'
+      ? readPiSdkRuntimeDependencies(stagedManifest)
+      : null;
     delete stagedManifest.devDependencies;
+    if (piSdkDependencies) {
+      stagedManifest.dependencies = {
+        ...stagedManifest.dependencies,
+        ...piSdkDependencies,
+      };
+    }
     stagedManifest.private = true;
     writeFileSync(stagedManifestPath, `${JSON.stringify(stagedManifest, null, 2)}\n`);
   }
