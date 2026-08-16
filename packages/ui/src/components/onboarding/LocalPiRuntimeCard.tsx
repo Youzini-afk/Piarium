@@ -148,6 +148,7 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
         type="button"
         size="lg"
         className="w-full"
+        data-pi-local-runtime-continue="true"
         disabled={readiness.kind === 'checking' || isContinuing}
         onClick={() => void handlePrimaryAction()}
       >

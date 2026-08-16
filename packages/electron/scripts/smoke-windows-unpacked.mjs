@@ -124,6 +124,7 @@ const waitForRenderer = async (userDataDir) => {
   const devTools = await connectDevTools(target.webSocketDebuggerUrl);
   try {
     let lastState;
+    let continuedFromOnboarding = false;
     for (let attempt = 0; attempt < 80; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => {
         const readElement = (selector) => {
@@ -150,6 +151,7 @@ const waitForRenderer = async (userDataDir) => {
             composerShell: readElement('[data-pi-composer-shell="true"]'),
             innerHeight: window.innerHeight,
             innerWidth: window.innerWidth,
+            localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
             pendingDraft: document.querySelector('[data-pi-pending-draft="true"]') !== null,
           },
           ready: window.__piariumAppReady === true,
@@ -162,6 +164,18 @@ const waitForRenderer = async (userDataDir) => {
       if (lastState?.ready === true) {
         const layoutReady = lastState.layout?.closeControl && lastState.layout?.composerShell && lastState.layout?.composerFrame;
         if (layoutReady) return lastState;
+        if (!continuedFromOnboarding && lastState.layout?.localRuntimeContinueReady === true) {
+          const continuation = await devTools.evaluate(`(() => {
+            const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
+            if (!(action instanceof HTMLButtonElement)) return false;
+            action.click();
+            return true;
+          })()`);
+          if (continuation?.exceptionDetails) {
+            throw new Error(`Packaged onboarding continuation failed: ${continuation.exceptionDetails.text}`);
+          }
+          continuedFromOnboarding = continuation?.result?.value === true;
+        }
       }
       if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
         throw new Error(`Packaged renderer entered its error boundary.\n${lastState.bodyText}`);
