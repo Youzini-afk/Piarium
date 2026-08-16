@@ -30,6 +30,11 @@ test("probes a discovered system install and records the real handshake source",
       dataDir,
       discover: async () => [systemReady],
       hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
       probe: async (options) => {
         assert.equal(options.packageRoot, systemReady.packageRoot);
         assert.equal(options.runtimeSource, "system");
@@ -83,6 +88,12 @@ test("does not probe or recommend a downgrade when the installed Pi is newer", a
       dataDir,
       discover: async () => [newer],
       hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "keep-newer",
+        currentVersion: "0.99.0",
+        reason: "keep newer",
+        targetVersion: "0.84.1",
+      }),
       probe: async () => {
         probed = true;
         return {
@@ -133,6 +144,15 @@ test("marks an older install as upgrade-required without a version ceiling", asy
       dataDir,
       discover: async () => [systemOld],
       hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "upgrade",
+        currentVersion: "0.80.0",
+        manager: "npm",
+        executable: "npm.cmd",
+        args: ["install", "-g", "@earendil-works/pi-coding-agent@0.84.1"],
+        reason: "upgrade",
+        targetVersion: "0.84.1",
+      }),
       probe: async () => {
         probed = true;
         throw new Error("should not probe an upgrade-required install");
@@ -154,6 +174,11 @@ test("returns the missing module name when an external package root cannot load"
       dataDir,
       discover: async () => [systemReady],
       hostEntry: join(dataDir, "host-bootstrap.js"),
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
       probe: async () => {
         throw new Error("Pi package root is missing required modules: @earendil-works/pi-ai");
       },
@@ -161,6 +186,234 @@ test("returns the missing module name when an external package root cannot load"
     const snapshot = await manager.refresh();
     assert.equal(snapshot.status, "failed");
     assert.match(snapshot.issue ?? "", /@earendil-works\/pi-ai/);
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
+test("does not download or install when PATH already has a usable Pi", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  try {
+    let installed = false;
+    const manager = new PiRuntimeManager({
+      dataDir,
+      discover: async () => [systemReady],
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      installer: {
+        runCommand: async () => {
+          installed = true;
+          return { exitCode: 0, stderr: "", stdout: "" };
+        },
+      },
+      planInstall: () => ({
+        action: "none",
+        reason: "already installed",
+        targetVersion: "0.84.1",
+      }),
+      probe: async () => ({
+        handshake: {
+          capabilities: {
+            agentProviders: true,
+            extensionUi: true,
+            fleet: true,
+            models: true,
+            packages: true,
+            providerConfiguration: true,
+            recovery: true,
+            resources: true,
+            sessionFeatures: true,
+            sessions: true,
+            settings: true,
+          },
+          hostVersion: "0.1.0",
+          protocolVersion: 1,
+          runtime: {
+            agentDir: dataDir,
+            nodePath: "C:\\tools\\node.exe",
+            nodeVersion: "22.19.0",
+            packageRoot: "C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent",
+            piVersion: "0.84.1",
+            source: "system",
+          },
+        },
+        sessionCreated: false,
+      }),
+    });
+    await manager.refresh();
+    await manager.install();
+    assert.equal(installed, false);
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
+test("upgrades an older Pi then probes the rediscovered install", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  try {
+    const calls: string[][] = [];
+    let discoverCount = 0;
+    const manager = new PiRuntimeManager({
+      dataDir,
+      discover: async () => {
+        discoverCount += 1;
+        return discoverCount === 1 ? [systemOld] : [systemReady];
+      },
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      installer: {
+        runCommand: async (_executable, args) => {
+          calls.push(args);
+          return { exitCode: 0, stderr: "", stdout: "upgraded" };
+        },
+      },
+      planInstall: () => ({
+        action: "upgrade",
+        args: ["install", "-g", "@earendil-works/pi-coding-agent@0.84.1"],
+        currentVersion: "0.80.0",
+        executable: "npm.cmd",
+        manager: "npm",
+        reason: "upgrade",
+        targetVersion: "0.84.1",
+      }),
+      probe: async () => ({
+        handshake: {
+          capabilities: {
+            agentProviders: true,
+            extensionUi: true,
+            fleet: true,
+            models: true,
+            packages: true,
+            providerConfiguration: true,
+            recovery: true,
+            resources: true,
+            sessionFeatures: true,
+            sessions: true,
+            settings: true,
+          },
+          hostVersion: "0.1.0",
+          protocolVersion: 1,
+          runtime: {
+            agentDir: dataDir,
+            nodePath: "C:\\tools\\node.exe",
+            nodeVersion: "22.19.0",
+            packageRoot: "C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent",
+            piVersion: "0.84.1",
+            source: "system",
+          },
+        },
+        sessionCreated: false,
+      }),
+    });
+    await manager.refresh();
+    const snapshot = await manager.upgrade();
+    assert.deepEqual(calls, [["install", "-g", "@earendil-works/pi-coding-agent@0.84.1"]]);
+    assert.equal(snapshot.status, "ready");
+    assert.equal(snapshot.active?.version, "0.84.1");
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
+test("keeps the real rediscovered state when an upgrade command fails", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  try {
+    const manager = new PiRuntimeManager({
+      dataDir,
+      discover: async () => [systemOld],
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      installer: {
+        runCommand: async () => ({
+          exitCode: 1,
+          stderr: "npm ERR! network timeout",
+          stdout: "",
+        }),
+      },
+      planInstall: () => ({
+        action: "upgrade",
+        args: ["install", "-g", "@earendil-works/pi-coding-agent@0.84.1"],
+        currentVersion: "0.80.0",
+        executable: "npm.cmd",
+        manager: "npm",
+        reason: "upgrade",
+        targetVersion: "0.84.1",
+      }),
+      probe: async () => {
+        throw new Error("should not probe after a failed upgrade");
+      },
+    });
+    await manager.refresh();
+    const snapshot = await manager.upgrade();
+    assert.equal(snapshot.status, "failed");
+    assert.match(snapshot.issue ?? "", /network timeout/);
+    assert.equal(snapshot.installations[0]?.version, "0.80.0");
+  } finally {
+    await rm(dataDir, { force: true, recursive: true });
+  }
+});
+
+test("installs a missing Pi then probes the rediscovered runtime", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-runtime-manager-"));
+  try {
+    const calls: Array<{ executable: string; args: string[] }> = [];
+    let discoverCount = 0;
+    const manager = new PiRuntimeManager({
+      dataDir,
+      discover: async () => {
+        discoverCount += 1;
+        return discoverCount === 1 ? [] : [systemReady];
+      },
+      hostEntry: join(dataDir, "host-bootstrap.js"),
+      installer: {
+        runCommand: async (executable, args) => {
+          calls.push({ executable, args });
+          return { exitCode: 0, stderr: "", stdout: "added 1 package" };
+        },
+      },
+      planInstall: () => ({
+        action: "install",
+        args: ["install", "-g", "@earendil-works/pi-coding-agent@0.84.1"],
+        executable: "npm.cmd",
+        manager: "npm",
+        reason: "install",
+        targetVersion: "0.84.1",
+      }),
+      probe: async () => ({
+        handshake: {
+          capabilities: {
+            agentProviders: true,
+            extensionUi: true,
+            fleet: true,
+            models: true,
+            packages: true,
+            providerConfiguration: true,
+            recovery: true,
+            resources: true,
+            sessionFeatures: true,
+            sessions: true,
+            settings: true,
+          },
+          hostVersion: "0.1.0",
+          protocolVersion: 1,
+          runtime: {
+            agentDir: dataDir,
+            nodePath: "C:\\tools\\node.exe",
+            nodeVersion: "22.19.0",
+            packageRoot: "C:\\tools\\node_modules\\@earendil-works\\pi-coding-agent",
+            piVersion: "0.84.1",
+            source: "system",
+          },
+        },
+        sessionCreated: false,
+      }),
+    });
+    const missing = await manager.refresh();
+    assert.equal(missing.status, "missing");
+    const snapshot = await manager.install();
+    assert.deepEqual(calls, [{
+      executable: "npm.cmd",
+      args: ["install", "-g", "@earendil-works/pi-coding-agent@0.84.1"],
+    }]);
+    assert.equal(snapshot.status, "ready");
+    assert.equal(snapshot.active?.packageRoot, systemReady.packageRoot);
   } finally {
     await rm(dataDir, { force: true, recursive: true });
   }

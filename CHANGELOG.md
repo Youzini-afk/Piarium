@@ -14,6 +14,8 @@ First public source snapshot of the Pi-native workspace.
 - Cloud image and Compose path with digest-linked promotion
 - Pi host loads the selected Pi installation through a bootstrap resolver instead
   of a permanently bundled SDK; cloud images still stage those packages
+- Runtime Manager discovers user-global Pi installs, plans upgrade-only package
+  manager or standalone installs, and never silently upgrades or downgrades Pi
 - Slim and toolbelt container images: Compose defaults to `piarium-slim`; overlay
   `docker-compose.toolbelt.yml` for the language toolbox
 - Community files and Renovate config live under `.github/`; install-time patches

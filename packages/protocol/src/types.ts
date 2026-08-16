@@ -51,6 +51,21 @@ export type PiRuntimeManagerStatus =
   | "upgrading"
   | "failed";
 
+export type PiRuntimeInstallAction = "none" | "install" | "upgrade" | "keep-newer";
+
+export type PiRuntimeInstallManager = "npm" | "bun" | "pnpm" | "standalone";
+
+export interface PiRuntimeInstallPlan {
+  action: PiRuntimeInstallAction;
+  targetVersion: string;
+  manager?: PiRuntimeInstallManager;
+  executable?: string;
+  args?: string[];
+  location?: string;
+  currentVersion?: string;
+  reason: string;
+}
+
 export interface PiRuntimeSnapshot {
   status: PiRuntimeManagerStatus;
   installations: PiRuntimeInstallation[];
@@ -58,6 +73,7 @@ export interface PiRuntimeSnapshot {
   active?: PiRuntimeInstallation;
   operationId?: string;
   issue?: string;
+  installPlan?: PiRuntimeInstallPlan;
 }
 
 export const RUNTIME_SOURCE_KINDS = [

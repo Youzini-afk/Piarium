@@ -9,12 +9,22 @@ import type {
   PiRuntimeInstallationSource,
   RuntimeSourceKind,
 } from "@piarium/protocol";
-import { resolvePiPackageFromCommand } from "./pi-sdk-packages.js";
+import { isStandalonePiLayout, resolvePiCommandLayout } from "./pi-command-layout.js";
 import {
   meetsMinimumNodeVersion,
   meetsMinimumPiVersion,
   parseVersion,
 } from "./pi-version.js";
+
+export { compareVersions, meetsMinimumPiVersion, parseVersion } from "./pi-version.js";
+export {
+  detectOwningPackageManager,
+  detectPackageManagers,
+  globalInstallArguments,
+  inferGlobalPrefix,
+} from "./pi-package-managers.js";
+export type { DetectedPackageManager, PiPackageManagerKind } from "./pi-package-managers.js";
+export { isStandalonePiLayout, resolvePiCommandLayout } from "./pi-command-layout.js";
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_MANIFEST = JSON.parse(
@@ -105,7 +115,7 @@ async function defaultCommandRunner(
   }
 }
 
-async function findCommands(
+export async function findCommands(
   name: string,
   platform: NodeJS.Platform,
   runner: (command: string, args: string[]) => Promise<CommandResult>,
@@ -164,6 +174,7 @@ function windowsCommandPriority(command: string): number {
 async function inspectSystemPi(
   platform: NodeJS.Platform,
   runner: (command: string, args: string[]) => Promise<CommandResult>,
+  env: NodeJS.ProcessEnv,
 ): Promise<RuntimeCandidate> {
   const commands = await findCommands("pi", platform, runner);
   const command =
@@ -184,21 +195,24 @@ async function inspectSystemPi(
   const [executable, args] = buildVersionInvocation(command, platform);
   const result = await runner(executable, args);
   const version = parseVersion(`${result.stdout}\n${result.stderr}`);
-  const resolved = existsSync(command) ? resolvePiPackageFromCommand(command) : {};
+  const resolved = existsSync(command) ? resolvePiCommandLayout(command) : { commandPath: command };
   const available = result.exitCode === 0 && version !== undefined;
   const issues = [
     result.exitCode === 0 && version ? undefined : result.stderr.trim() || "Pi version could not be detected",
     resolved.issue,
   ].filter((issue): issue is string => issue !== undefined);
+  const source = resolved.packageRoot && isStandalonePiLayout(resolved.packageRoot, env)
+    ? "standalone"
+    : "system";
   return {
     available,
     command,
     compatible: meetsMinimumPiVersion(version),
-    id: "system",
+    id: source === "standalone" ? "standalone" : "system",
     ...(issues.length === 0 ? {} : { issue: issues.join("; ") }),
     ...(resolved.nodePath === undefined ? {} : { nodePath: resolved.nodePath }),
     ...(resolved.packageRoot === undefined ? {} : { packageRoot: resolved.packageRoot }),
-    source: "system",
+    source,
     ...(version === undefined ? {} : { version }),
   };
 }
@@ -352,7 +366,7 @@ export async function discoverPiRuntimes(
   const includeBundled = options.includeBundled ?? true;
   return [
     ...(includeBundled ? [inspectBundledPi()] : []),
-    await inspectSystemPi(platform, runner),
+    await inspectSystemPi(platform, runner, env),
     ...(await Promise.all(uniqueSourcePaths.map(inspectSourcePi))),
     ...(await Promise.all(
       customRuntimes.map((config, index) => inspectCustomPi(config, index, runner)),

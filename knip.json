@@ -77,6 +77,17 @@
         "test/**/*.{ts,mjs}"
       ]
     },
+    "packages/runtime-broker": {
+      "entry": [
+        "src/index.ts",
+        "src/core.ts",
+        "test/**/*.{test,spec}.{ts,mjs}"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "test/**/*.{ts,mjs}"
+      ]
+    },
     "packages/mobile": {
       "entry": [
         "scripts/**/*.mjs"
