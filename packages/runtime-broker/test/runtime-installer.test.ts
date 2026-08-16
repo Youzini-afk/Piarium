@@ -74,7 +74,12 @@ test("installs a standalone payload to the user-global location and skips a newe
         reason: "test",
         targetVersion: "0.84.1",
       },
-      { env, platform: "win32", standalonePayloadDir: payload },
+      {
+        env,
+        platform: "win32",
+        runCommand: async () => ({ exitCode: 0, stderr: "", stdout: "" }),
+        standalonePayloadDir: payload,
+      },
     );
     assert.equal(first.exitCode, 0);
     const locations = standaloneRuntimeLocations("win32", env);

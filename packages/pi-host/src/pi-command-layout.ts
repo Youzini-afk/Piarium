@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { resolvePiPackageFromCommand } from "./pi-sdk-packages.js";
 
 export interface ResolvedPiCommand {
@@ -59,8 +59,11 @@ function expandShimVariables(value: string, commandPath: string): string {
 }
 
 function resolveMaybeRelative(value: string, commandPath: string): string {
-  const expanded = expandShimVariables(value.replaceAll("/", "\\"), commandPath);
-  return isAbsolute(expanded) ? resolve(expanded) : resolve(dirname(commandPath), expanded);
+  const expanded = expandShimVariables(value, commandPath);
+  const nativePath = sep === "\\"
+    ? expanded.replaceAll("/", "\\")
+    : expanded.replaceAll("\\", "/");
+  return isAbsolute(nativePath) ? resolve(nativePath) : resolve(dirname(commandPath), nativePath);
 }
 
 function readTextHeader(path: string): string | undefined {
