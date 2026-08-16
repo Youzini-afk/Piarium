@@ -30,6 +30,12 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'web',
 ]);
 
+// better-sqlite3 13 ships platform prebuilds. Trusting it makes Bun run its
+// implicit node-gyp fallback instead of using those binaries in slim images.
+export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([
+  'node-pty',
+]);
+
 export const CLOUD_RUNTIME_FORBIDDEN_UPDATE_IDENTITIES = Object.freeze([
   'api.openchamber.dev/v1/update/check',
   'github.com/openchamber/openchamber/releases',
@@ -185,10 +191,7 @@ const createRuntimeRootPackage = (rootPackage) => ({
   scripts: {
     start: 'node packages/web/bin/cli.js serve --foreground',
   },
-  trustedDependencies: [
-    'better-sqlite3',
-    'node-pty',
-  ],
+  trustedDependencies: [...CLOUD_RUNTIME_TRUSTED_DEPENDENCIES],
   overrides: rootPackage.overrides,
 });
 
@@ -328,7 +331,7 @@ export const installCloudRuntimeDependencies = (
   run('node', [
     '--input-type=module',
     '-e',
-    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); const pty = require('node-pty'); if (typeof pty.spawn !== 'function') throw new Error('node-pty is unavailable'); require.resolve('sherpa-onnx-node'); console.log(entry);",
+    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); const Database = require('better-sqlite3'); const database = new Database(':memory:'); database.close(); const pty = require('node-pty'); if (typeof pty.spawn !== 'function') throw new Error('node-pty is unavailable'); require.resolve('sherpa-onnx-node'); console.log(entry);",
   ], {
     cwd: resolvedOutput,
     json,

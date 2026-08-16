@@ -64,6 +64,8 @@ describe('Piarium cloud container runtime', () => {
     expect(appDockerfile).toContain('bun install --production --frozen-lockfile');
     expect(appDockerfile).toContain("import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js')");
     expect(appDockerfile).toContain("typeof broker.resolveBundledPiHostEntry !== 'function'");
+    expect(appDockerfile).toContain("require('better-sqlite3')");
+    expect(appDockerfile).toContain("new Database(':memory:')");
     expect(appDockerfile).not.toMatch(/COPY --from=(?:deps|builder) \/app\/node_modules/);
   });
 
