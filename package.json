@@ -25,7 +25,7 @@
     "dev": "node ./scripts/dev-web-hmr.mjs",
     "oc-dev": "node scripts/oc-dev.mjs",
     "build": "bun run --sequential --filter '!@piarium/mobile' build && bun run --cwd packages/mobile build:assets",
-    "build:web": "bun run --cwd packages/extension-loader build && bun run --cwd packages/web build",
+    "build:web": "bun run --cwd packages/extension-loader build && bun run --cwd packages/runtime-client build && bun run --cwd packages/web build",
     "build:cloud-runtime": "node scripts/build-cloud-runtime.mjs",
     "update:cloud-runtime-lock": "node scripts/build-cloud-runtime.mjs --skip-build --no-archive --update-lock",
     "build:ui": "bun run --cwd packages/ui build",
