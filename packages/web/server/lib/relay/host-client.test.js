@@ -103,9 +103,15 @@ const startFakeRelay = () => {
         wsUrl: `ws://127.0.0.1:${port}`,
         state,
         sendControlSync,
-        stop: () => new Promise((r) => {
+        stop: () => new Promise((resolveStop) => {
+          for (const socket of wss.clients) socket.terminate();
           wss.close();
-          server.close(() => r());
+          if (!server.listening) {
+            resolveStop();
+            return;
+          }
+          server.closeAllConnections?.();
+          server.close(() => resolveStop());
         }),
       });
     });
@@ -168,8 +174,6 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
   url.searchParams.set('role', 'client');
   url.searchParams.set('serverId', serverId);
   url.searchParams.set('connectionId', connectionId);
-  const ws = new WebSocket(url.toString());
-
   const hostPub = await globalThis.crypto.subtle.importKey(
     'jwk',
     { kty: hostEncPubJwk.kty, crv: hostEncPubJwk.crv, x: hostEncPubJwk.x, y: hostEncPubJwk.y, ext: true },
@@ -179,22 +183,42 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
   );
   const ephemeral = await generateEcdhKeyPair();
   const nonce = generateHandshakeNonce();
+  const ws = new WebSocket(url.toString());
 
   let channel = null;
   const responseChunks = [];
   let responseStatus = null;
   let resolveDone;
-  const done = new Promise((resolve) => {
+  let rejectDone;
+  let settled = false;
+  const done = new Promise((resolve, reject) => {
     resolveDone = resolve;
+    rejectDone = reject;
   });
+  const finish = (value) => {
+    if (settled) return;
+    settled = true;
+    resolveDone(value);
+  };
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    rejectDone(error instanceof Error ? error : new Error(String(error)));
+  };
 
-  ws.on('open', async () => {
-    ws.send(JSON.stringify({
-      t: 'hello',
-      v: RELAY_PROTOCOL_VERSION,
-      clientPubJwk: await exportPublicKeyJwk(ephemeral.publicKey),
-      nonce: bytesToBase64Url(nonce),
-    }));
+  ws.on('open', () => {
+    void exportPublicKeyJwk(ephemeral.publicKey).then((clientPubJwk) => {
+      ws.send(JSON.stringify({
+        t: 'hello',
+        v: RELAY_PROTOCOL_VERSION,
+        clientPubJwk,
+        nonce: bytesToBase64Url(nonce),
+      }));
+    }).catch(fail);
+  });
+  ws.on('error', fail);
+  ws.on('close', () => {
+    if (!settled) fail(new Error('Scripted relay client closed before the tunneled response completed.'));
   });
 
   // Serialize message handling: an async ws handler runs per-message tasks
@@ -237,12 +261,12 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
         body.set(c, off);
         off += c.length;
       }
-      resolveDone({ status: responseStatus, body: JSON.parse(new TextDecoder().decode(body)) });
+      finish({ status: responseStatus, body: JSON.parse(new TextDecoder().decode(body)) });
       ws.close();
     }
   };
   ws.on('message', (data, isBinary) => {
-    processing = processing.then(() => handleMessage(data, isBinary));
+    processing = processing.then(() => handleMessage(data, isBinary)).catch(fail);
   });
 
   return done;

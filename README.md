@@ -180,14 +180,16 @@ Pi 工作进程异常也不会让渲染器一同崩溃。跨进程传输的是 P
 bun install --frozen-lockfile
 bun run type-check
 bun run lint
-bun run check:pi
+bun run test:pi
 bun run test:cloud
 bun run build
 bun run test:pi:dist
 ```
 
-CI 会在 Windows 和 Ubuntu 上分别运行。云端/运行时输入发生变化时，还会构建配套的精简与工具链
-基础镜像及应用镜像，分别通过不可变摘要启动候选镜像并完成烟测后，才会提升可安装标签。
+CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行时行为和 Ubuntu 生产构建。
+类型检查、lint 和全仓测试只在权威门禁中执行一次；Windows 只补充平台相关测试。云端/运行时输入
+发生变化时，Docker 工作流只验证容器契约，并构建配套的精简与工具链基础镜像及应用镜像；两个
+候选应用都通过不可变摘要烟测后，才会提升可安装标签。
 
 参与贡献前，请阅读[贡献指南](.github/CONTRIBUTING.md)和仓库专用规则 [AGENTS.md](AGENTS.md)。
 

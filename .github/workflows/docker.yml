@@ -66,8 +66,8 @@ env:
   SLIM_BASE_IMAGE_NAME: youzini-afk/piarium-runtime-slim
 
 jobs:
-  quality-gate:
-    name: Verify Piarium runtime before image build
+  container-contract:
+    name: Verify container contract
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -78,19 +78,12 @@ jobs:
         with:
           node-version: 24
       - run: bun install --frozen-lockfile
-      - run: bun audit
-      - run: bun run type-check
-      - run: bun run lint
-      - run: bun run check:pi
-      - run: bun run --cwd packages/web test
       - run: bun run test:cloud
-      - run: bun run build
-      - run: bun run build:cloud-runtime -- --skip-build --no-archive --output artifacts/cloud-runtime-docker-gate
 
   verify-pr-image:
     name: Build and smoke PR ${{ matrix.variant }} image
     runs-on: ubuntu-latest
-    needs: [quality-gate]
+    needs: [container-contract]
     if: ${{ github.event_name == 'pull_request' }}
     strategy:
       fail-fast: false
@@ -186,7 +179,7 @@ jobs:
   build-runtime-slim:
     name: Build runtime slim candidate
     runs-on: ubuntu-latest
-    needs: [quality-gate]
+    needs: [container-contract]
     if: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.runtime_slim_image == '') }}
     permissions:
       contents: read
@@ -236,7 +229,7 @@ jobs:
   build-runtime-base:
     name: Build runtime base candidate
     runs-on: ubuntu-latest
-    needs: [quality-gate]
+    needs: [container-contract]
     if: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.runtime_base_image == '') }}
     permissions:
       contents: read
@@ -286,8 +279,8 @@ jobs:
   build-app-slim:
     name: Build Piarium slim app candidate
     runs-on: ubuntu-latest
-    needs: [quality-gate, build-runtime-slim]
-    if: ${{ always() && github.event_name != 'pull_request' && needs.quality-gate.result == 'success' && (needs.build-runtime-slim.result == 'success' || needs.build-runtime-slim.result == 'skipped') }}
+    needs: [container-contract, build-runtime-slim]
+    if: ${{ always() && github.event_name != 'pull_request' && needs.container-contract.result == 'success' && (needs.build-runtime-slim.result == 'success' || needs.build-runtime-slim.result == 'skipped') }}
     permissions:
       contents: read
       packages: write
@@ -364,8 +357,8 @@ jobs:
   build-app:
     name: Build Piarium app candidate
     runs-on: ubuntu-latest
-    needs: [quality-gate, build-runtime-base]
-    if: ${{ always() && github.event_name != 'pull_request' && needs.quality-gate.result == 'success' && (needs.build-runtime-base.result == 'success' || needs.build-runtime-base.result == 'skipped') }}
+    needs: [container-contract, build-runtime-base]
+    if: ${{ always() && github.event_name != 'pull_request' && needs.container-contract.result == 'success' && (needs.build-runtime-base.result == 'success' || needs.build-runtime-base.result == 'skipped') }}
     permissions:
       contents: read
       packages: write
