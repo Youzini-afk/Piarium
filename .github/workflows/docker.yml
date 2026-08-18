@@ -116,7 +116,7 @@ jobs:
               http = true
 
       - name: Build PR ${{ matrix.variant }} runtime base into the local registry
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.base
@@ -129,7 +129,7 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.cache_base }},mode=max
 
       - name: Build the coupled PR ${{ matrix.variant }} app image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -205,13 +205,13 @@ jobs:
 
       - name: Extract runtime slim labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.SLIM_BASE_IMAGE_NAME }}
 
       - name: Build and push immutable runtime slim candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.base
@@ -255,13 +255,13 @@ jobs:
 
       - name: Extract runtime base labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}
 
       - name: Build and push immutable runtime base candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.base
@@ -305,7 +305,7 @@ jobs:
 
       - name: Extract slim app labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.SLIM_APP_IMAGE_NAME }}
 
@@ -337,7 +337,7 @@ jobs:
 
       - name: Build and push immutable Piarium slim app candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -383,7 +383,7 @@ jobs:
 
       - name: Extract app labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}
 
@@ -415,7 +415,7 @@ jobs:
 
       - name: Build and push immutable Piarium app candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -565,7 +565,7 @@ jobs:
 
       - name: Resolve verified app tags
         id: app-meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.APP_IMAGE_NAME }}
           tags: |
@@ -578,7 +578,7 @@ jobs:
 
       - name: Resolve verified slim app tags
         id: slim-app-meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.SLIM_APP_IMAGE_NAME }}
           tags: |
@@ -592,7 +592,7 @@ jobs:
       - name: Resolve verified runtime base tags
         id: base-meta
         if: ${{ needs.build-runtime-base.outputs.digest != '' }}
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}
           tags: |
@@ -606,7 +606,7 @@ jobs:
       - name: Resolve verified runtime slim tags
         id: slim-base-meta
         if: ${{ needs.build-runtime-slim.outputs.digest != '' }}
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.SLIM_BASE_IMAGE_NAME }}
           tags: |

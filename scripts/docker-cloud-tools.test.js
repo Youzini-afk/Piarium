@@ -257,6 +257,10 @@ describe('Piarium container publication', () => {
   });
 
   it('builds multi-architecture candidates and promotes main, latest, sha, and semver tags with GHA caches', () => {
+    expect(dockerWorkflow.match(/docker\/build-push-action@v7/g)).toHaveLength(6);
+    expect(dockerWorkflow.match(/docker\/metadata-action@v6/g)).toHaveLength(8);
+    expect(dockerWorkflow).not.toContain('docker/build-push-action@v6');
+    expect(dockerWorkflow).not.toContain('docker/metadata-action@v5');
     expect(dockerWorkflow.match(/platforms: linux\/amd64,linux\/arm64/g)).toHaveLength(4);
     expect(dockerWorkflow).toContain('type=raw,value=main');
     expect(dockerWorkflow).toContain('type=raw,value=latest');
