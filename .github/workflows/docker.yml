@@ -116,7 +116,7 @@ jobs:
               http = true
 
       - name: Build PR ${{ matrix.variant }} runtime base into the local registry
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.base
@@ -129,7 +129,7 @@ jobs:
           cache-to: type=gha,scope=${{ matrix.cache_base }},mode=max
 
       - name: Build the coupled PR ${{ matrix.variant }} app image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -211,7 +211,7 @@ jobs:
 
       - name: Build and push immutable runtime slim candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.base
@@ -261,7 +261,7 @@ jobs:
 
       - name: Build and push immutable runtime base candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.base
@@ -337,7 +337,7 @@ jobs:
 
       - name: Build and push immutable Piarium slim app candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -415,7 +415,7 @@ jobs:
 
       - name: Build and push immutable Piarium app candidate
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
