@@ -1,8 +1,8 @@
 # Security model
 
-Status: Pi host, desktop boundary, and recovery controls in place; OpenChamber migration review active
+Status: Pi-native host, desktop, recovery, and extension boundaries in place; release verification active
 
-Last updated: 2026-08-04
+Last updated: 2026-08-18
 
 ## Protected assets
 

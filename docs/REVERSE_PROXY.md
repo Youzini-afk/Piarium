@@ -1,309 +1,141 @@
-# Reverse Proxy Setup
+# Reverse proxy setup
 
-Use this guide when running OpenChamber behind Nginx, Nginx Proxy Manager, Caddy, Cloudflare, or another reverse proxy.
+Use this guide when exposing a Piarium Web deployment through Nginx, Nginx Proxy Manager, Caddy, or
+another trusted TLS reverse proxy. Containers already expose one HTTP service on port `3000`; the
+proxy must forward the complete origin rather than selecting only ordinary REST requests.
 
-## Before you proxy it
+## Before adding a proxy
 
-1. Confirm OpenChamber works directly first.
-2. Open `http://<server-ip>:3000` or your custom port from the same network.
-3. Only add the reverse proxy after the direct connection works.
+1. Start Piarium on loopback or a private interface and confirm `GET /health` succeeds.
+2. Set a long random `PIARIUM_UI_PASSWORD` before allowing traffic from outside the local machine.
+3. Keep `PIARIUM_DATA_DIR` and workspaces outside immutable release directories.
+4. Terminate TLS at the proxy. Do not publish an unauthenticated plain-HTTP Piarium server.
 
-## What the proxy must support
+## Current realtime routes
 
-- WebSockets for live message transport:
-  - `/api/event/ws`
-  - `/api/global/event/ws`
-  - `/api/terminal/ws`
-- SSE without buffering:
-  - `/api/event`
-  - `/api/global/event`
-  - `/api/notifications/stream`
-  - `/api/openchamber/events`
-- Large request bodies for attachments and file operations
-- Long-lived read timeouts for live streams and terminal sessions
+Piarium no longer exposes the former OpenCode `/api/event`, `/api/global/event`, or matching
+WebSocket routes. A proxy for the current Pi-native product must preserve:
 
-## Rules that matter
+| Transport | Routes | Requirement |
+| --- | --- | --- |
+| WebSocket | `/api/piarium/runtime/ws`, `/api/terminal/ws`, `/api/dictation/ws` | Forward the HTTP/1.1 upgrade and keep long read timeouts |
+| SSE | `/api/piarium/events`, `/api/notifications/stream` | Disable proxy buffering, caching, and response transformation |
+| HTTP | `/api/*`, `/auth/*`, `/health`, application assets | Preserve method, body, cookies, authorization, and normal forwarded headers |
 
-- Enable WebSocket proxying.
-- Disable buffering on SSE routes.
-- Disable gzip on the proxy if OpenChamber is already compressing responses.
-- Keep compression enabled in only one layer.
-- Forward normal proxy headers such as `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto`.
-- Increase body size limits if users upload files.
+The application authenticates these routes and checks WebSocket origins. Do not strip cookies,
+`Authorization`, `Origin`, `Host`, or the query string. Do not add a proxy-side authentication bypass
+for requests that happen to arrive from loopback.
 
-## Quick checklist
+Attachments and file operations can contain large request bodies. Choose a deployment-appropriate
+limit instead of relying on a proxy's small default. Only one layer should compress a response; SSE
+must not be compressed or buffered by an intermediary that delays chunks.
 
-- OpenChamber reachable directly on LAN
-- WebSockets enabled in the proxy
-- SSE routes have buffering off
-- `gzip off` on the proxy host, or proxy compression disabled another way
-- `client_max_body_size` large enough for attachments
-- `proxy_read_timeout` long enough for streams
-
-## Example: Nginx
-
-<details>
-<summary>Show example config</summary>
+## Nginx
 
 ```nginx
-client_max_body_size 50M;
-client_body_buffer_size 50M;
-proxy_request_buffering off;
-
-proxy_http_version 1.1;
-proxy_set_header Connection "";
-proxy_set_header Host $host;
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header X-Forwarded-Host $host;
-
-gzip off;
-
-location = /api/terminal/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
+map $http_upgrade $piarium_connection_upgrade {
+    default upgrade;
+    ''      close;
 }
 
-location = /api/global/event/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
+upstream piarium {
+    server 127.0.0.1:3000;
+    keepalive 16;
 }
 
-location = /api/event/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
+server {
+    listen 443 ssl http2;
+    server_name piarium.example.com;
 
-location ~ ^/api/(event|global/event|notifications/stream|openchamber/events)$ {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
+    # Configure ssl_certificate / ssl_certificate_key for your deployment.
+    client_max_body_size 100m;
 
-location /api {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-}
+    location ~ ^/api/(piarium/runtime|terminal|dictation)/ws$ {
+        proxy_pass http://piarium;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $piarium_connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
 
-location / {
-    proxy_pass http://127.0.0.1:3000;
-}
-```
+    location ~ ^/api/(piarium/events|notifications/stream)$ {
+        proxy_pass http://piarium;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Accept text/event-stream;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering no always;
+        add_header Cache-Control 'no-cache, no-transform' always;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
 
-</details>
-
-## Example: Nginx Proxy Manager
-
-<details>
-<summary>Show Advanced tab example</summary>
-
-```nginx
-client_max_body_size 50M;
-client_body_buffer_size 50M;
-proxy_request_buffering off;
-
-proxy_http_version 1.1;
-proxy_set_header Connection "";
-proxy_set_header Host $host;
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header X-Forwarded-Host $host;
-
-gzip off;
-
-location = /api/terminal/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/global/event/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/event/ws {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/event {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/global/event {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/notifications/stream {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location = /api/openchamber/events {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Accept "text/event-stream";
-    proxy_set_header Cache-Control "no-cache";
-    proxy_buffering off;
-    proxy_cache off;
-    gzip off;
-    add_header X-Accel-Buffering "no" always;
-    add_header Cache-Control "no-cache, no-transform" always;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location /api {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-    proxy_connect_timeout 30s;
-}
-
-location / {
-    proxy_pass http://127.0.0.1:3000;
-}
-```
-
-</details>
-
-Also enable `Websockets Support` in Nginx Proxy Manager for this host.
-
-## Common failure signs
-
-### Page loads, but sending messages fails
-
-- WebSockets are not enabled in the proxy
-- `/api/event/ws` or `/api/global/event/ws` is not passing through correctly
-
-### Notifications or live status do not update
-
-- one of the SSE routes is buffered or cached
-- `X-Accel-Buffering "no"` is missing
-
-### File uploads fail
-
-- `client_max_body_size` is too small
-
-### Everything works locally, but breaks only behind the proxy
-
-- the proxy is compressing and buffering live traffic
-- the proxy is missing WebSocket support
-
-## Example: Caddy
-
-<details>
-<summary>Show example config</summary>
-
-```caddy
-reverse_proxy 127.0.0.1:3000 {
-    # WebSocket support is automatic in Caddy
-
-    # Flush SSE responses immediately
-    flush_interval -1
-
-    # Pass through Host and proxy headers
-    header_up Host {host}
-    header_up X-Real-IP {remote_host}
-    header_up X-Forwarded-For {remote_host}
-    header_up X-Forwarded-Proto {scheme}
-
-    # Increase timeouts for long-lived streams
-    transport http {
-        read_timeout 3600s
-        write_timeout 3600s
+    location / {
+        proxy_pass http://piarium;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        proxy_request_buffering off;
     }
 }
 ```
 
-</details>
+For Nginx Proxy Manager, enable **Websockets Support** and place the equivalent buffering, body-size,
+and timeout directives in the host's Advanced configuration. Do not recreate the removed
+`/api/event*` locations from older OpenChamber guides.
 
-Caddy handles WebSocket upgrades automatically — no extra configuration needed. The `flush_interval -1` directive ensures SSE chunks are forwarded immediately without buffering.
+## Caddy
 
-## CDN and double-compression warning
+Caddy forwards WebSocket upgrades automatically. `flush_interval -1` ensures SSE chunks are emitted
+without proxy buffering:
 
-If you place a CDN (such as Cloudflare) in front of your reverse proxy, be aware of double compression:
+```caddy
+piarium.example.com {
+    reverse_proxy 127.0.0.1:3000 {
+        flush_interval -1
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        transport http {
+            read_timeout 1h
+            write_timeout 1h
+        }
+    }
+}
+```
 
-- OpenChamber compresses HTTP responses with gzip (threshold 1 KB).
-- Cloudflare and other CDNs also compress responses by default.
-- This can cause double-compressed responses or incorrect `Content-Encoding` headers.
+## Verification
 
-To avoid this, disable compression at **one** layer:
+After configuring the proxy, verify more than the HTML page:
 
-- **Cloudflare:** Rules → Compression → disable (or use "Passthrough" mode).
-- **Nginx:** `gzip off` (already shown in the examples above).
-- **Caddy:** Caddy does not re-compress by default if the upstream already sends compressed content.
+1. Sign in through the public HTTPS origin and reload the page.
+2. Open or create a Pi session and confirm live output reaches the timeline.
+3. Open a terminal, send input, resize it, detach, and reattach.
+4. Leave the page open long enough to receive a notification or scheduled-task SSE update.
+5. Upload an attachment large enough to exercise the configured body limit.
+6. Confirm failed authentication remains `401`/`403`; the proxy must not replace it with success.
 
-SSE streaming routes are excluded from compression by OpenChamber, but the CDN may still buffer them. Check your CDN documentation for how to disable buffering on SSE paths.
+If the page loads but realtime operations fail, inspect the browser network panel for `101 Switching
+Protocols` on WebSockets and a long-lived `text/event-stream` response for SSE. `502`/`504` after an
+idle period usually means a proxy timeout; updates arriving in bursts usually mean buffering.
+
+For container persistence, health checks, immutable digests, and rollback behavior, see
+[cloud deployment](cloud-deployment.md). For authentication and trust boundaries, see
+[the security model](security.md).
