@@ -196,15 +196,18 @@ matches the important CI gates:
 bun install --frozen-lockfile
 bun run type-check
 bun run lint
-bun run check:pi
+bun run test:pi
 bun run test:cloud
 bun run build
 bun run test:pi:dist
 ```
 
-CI runs on both Windows and Ubuntu. Changes to cloud/runtime inputs additionally build the coupled
-slim and toolbelt base/application images, smoke both applications by immutable digest, and promote
-tags only after both candidates pass.
+CI exposes three stable gates with distinct responsibilities: Ubuntu source quality, Windows runtime
+behavior, and the Ubuntu production build. Type checking, lint, and the full workspace tests run once
+in their authoritative gate; Windows adds only platform-sensitive coverage. Changes to cloud/runtime
+inputs make the Docker workflow verify the container contract, build the coupled slim and toolbelt
+base/application images, smoke both applications by immutable digest, and promote tags only after
+both candidates pass.
 
 Before contributing, read [CONTRIBUTING.en.md](.github/CONTRIBUTING.en.md) and the repository-specific rules in
 [AGENTS.md](AGENTS.md).

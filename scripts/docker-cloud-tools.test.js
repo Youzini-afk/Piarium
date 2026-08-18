@@ -12,6 +12,7 @@ const dockerEntrypoint = readRepoFile('scripts/docker-entrypoint.sh');
 const dockerCompose = readRepoFile('docker-compose.yml');
 const dockerComposeToolbelt = readRepoFile('docker-compose.toolbelt.yml');
 const dockerIgnore = readRepoFile('.dockerignore');
+const ciWorkflow = readRepoFile('.github/workflows/ci.yml');
 const dockerWorkflow = readRepoFile('.github/workflows/docker.yml');
 const slimStage = runtimeBaseDockerfile.split('FROM slim AS runtime-base')[0] ?? '';
 const toolbeltStage = runtimeBaseDockerfile.includes('FROM slim AS runtime-base')
@@ -237,15 +238,15 @@ describe('Piarium container publication', () => {
       });
 
     expect(dockerWorkflows).toEqual(['docker.yml']);
-    expect(dockerWorkflow).toContain('quality-gate:');
+    expect(dockerWorkflow).toContain('container-contract:');
     expect(dockerWorkflow).toContain('build-runtime-slim:');
     expect(dockerWorkflow).toContain('build-runtime-base:');
     expect(dockerWorkflow).toContain('build-app-slim:');
     expect(dockerWorkflow).toContain('target: slim');
     expect(dockerWorkflow).toContain('target: runtime-base');
     expect(dockerWorkflow).toContain('- docker-compose.toolbelt.yml');
-    expect(dockerWorkflow).toContain('needs: [quality-gate, build-runtime-base]');
-    expect(dockerWorkflow).toContain('needs: [quality-gate, build-runtime-slim]');
+    expect(dockerWorkflow).toContain('needs: [container-contract, build-runtime-base]');
+    expect(dockerWorkflow).toContain('needs: [container-contract, build-runtime-slim]');
     expect(dockerWorkflow).toContain('digest: ${{ steps.build.outputs.digest }}');
     expect(dockerWorkflow).toContain('BASE_DIGEST: ${{ needs.build-runtime-base.outputs.digest }}');
     expect(dockerWorkflow).toContain('image=${REGISTRY}/${BASE_IMAGE_NAME}@${BASE_DIGEST}');
@@ -317,5 +318,35 @@ describe('Piarium container publication', () => {
     expect(dockerWorkflow).toContain('base_target: slim');
     expect(dockerWorkflow).toContain('base_target: runtime-base');
     expect(dockerWorkflow).toContain("github.event_name == 'pull_request'");
+  });
+});
+
+describe('Piarium CI governance', () => {
+  it('keeps three stable required checks with one authoritative source-quality pass', () => {
+    expect(ciWorkflow).toContain('name: Source quality');
+    expect(ciWorkflow).toContain('name: Windows runtime');
+    expect(ciWorkflow).toContain('name: Production build');
+    expect(ciWorkflow).toContain('group: piarium-ci-${{ github.event.pull_request.number || github.ref }}');
+    expect(ciWorkflow).toContain('cancel-in-progress: true');
+    expect(ciWorkflow).not.toContain('matrix.os');
+    expect(ciWorkflow).not.toContain('bun run check:pi');
+    expect(ciWorkflow).not.toContain('bun run --cwd packages/web test');
+    expect(ciWorkflow).not.toContain('bun run dead-code');
+    expect(ciWorkflow.match(/^\s*- run: bun run type-check\s*$/gm)).toHaveLength(1);
+    expect(ciWorkflow.match(/^\s*- run: bun run lint\s*$/gm)).toHaveLength(1);
+    expect(ciWorkflow.match(/^\s*- run: bun run test:pi\s*$/gm)).toHaveLength(2);
+    expect(ciWorkflow.match(/^\s*- run: bun run build\s*$/gm)).toHaveLength(1);
+  });
+
+  it('keeps Windows platform checks focused and leaves full source checks out of Docker', () => {
+    expect(ciWorkflow).toContain('bun run build:type-dependencies');
+    expect(ciWorkflow).toContain('bun run --cwd packages/electron test:architecture');
+    expect(ciWorkflow).toContain('bun run --cwd packages/electron test:updater');
+    expect(dockerWorkflow).toContain('name: Verify container contract');
+    expect(dockerWorkflow).toContain('bun run test:cloud');
+    expect(dockerWorkflow).not.toContain('bun run type-check');
+    expect(dockerWorkflow).not.toContain('bun run lint');
+    expect(dockerWorkflow).not.toContain('bun run check:pi');
+    expect(dockerWorkflow).not.toContain('bun run --cwd packages/web test');
   });
 });
