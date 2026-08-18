@@ -147,7 +147,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         writeWidgetSnapshot()
     }
 
-    private static let widgetAppGroup = "group.com.openchamber.app"
+    private static let widgetAppGroup = "group.dev.piarium.mobile"
     private static let widgetSnapshotKey = "widgetSnapshot"
 
     /// Pulls the session overview JSON from the web layer (window.__PIARIUM_WIDGET_SNAPSHOT__),

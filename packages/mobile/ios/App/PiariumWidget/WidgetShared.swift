@@ -25,7 +25,7 @@ struct WidgetSnapshot: Codable {
 }
 
 enum WidgetStore {
-    static let appGroup = "group.com.openchamber.app"
+    static let appGroup = "group.dev.piarium.mobile"
     static let snapshotKey = "widgetSnapshot"
 
     /// Reads the latest snapshot the app persisted. Returns `.empty` when nothing has been
@@ -84,10 +84,10 @@ struct OverviewProvider: TimelineProvider {
     }
 }
 
-// MARK: - Logo (full OpenChamber mark drawn from the SVG)
+// MARK: - Piarium logo
 
-/// The OpenChamber logo, drawn to match packages/web/public/logo-dark-512x512.svg: an
-/// isometric cube with translucent face fills, stroked edges, and the OpenCode mark on the
+/// The Piarium logo, drawn to match packages/web/public/logo-dark-512x512.svg: an
+/// isometric cube with translucent face fills, stroked edges, and the π mark on the
 /// top face. Faces use low-opacity `.primary` so the system tint on the Lock Screen / Control
 /// Center reads as a translucent fill (no colour) rather than a flat wireframe. Coordinates are
 /// the SVG inner group (range x:-41.568…41.568, y:-48…48).
@@ -103,7 +103,7 @@ struct CubeLogoView: View {
 
             // Cube coordinate → canvas point.
             func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: cx + x * scale, y: cy + y * scale) }
-            // OpenCode-mark local coordinate → canvas point (SVG: matrix(0.866,0.5,-0.866,0.5,0,-24) · scale(0.75)).
+            // π-mark local coordinate → canvas point (SVG: matrix(0.866,0.5,-0.866,0.5,0,-24) · scale(0.75)).
             func m(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
                 let s: CGFloat = 0.75
                 let mx = 0.866 * s * x - 0.866 * s * y
@@ -124,15 +124,13 @@ struct CubeLogoView: View {
             context.stroke(right, with: .color(.primary), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
             context.stroke(top, with: .color(.primary), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
 
-            // OpenCode mark: square ring (even-odd) + a partial inner fill.
-            var ring = Path()
-            ring.move(to: m(-16, -20)); ring.addLine(to: m(16, -20)); ring.addLine(to: m(16, 20)); ring.addLine(to: m(-16, 20)); ring.closeSubpath()
-            ring.move(to: m(-8, -12)); ring.addLine(to: m(-8, 12)); ring.addLine(to: m(8, 12)); ring.addLine(to: m(8, -12)); ring.closeSubpath()
-            context.fill(ring, with: .color(.primary), style: FillStyle(eoFill: true))
-
-            var inner = Path()
-            inner.move(to: m(-8, -4)); inner.addLine(to: m(8, -4)); inner.addLine(to: m(8, 12)); inner.addLine(to: m(-8, 12)); inner.closeSubpath()
-            context.fill(inner, with: .color(.primary.opacity(0.4)))
+            var pi = Path()
+            pi.move(to: m(-18, -15)); pi.addLine(to: m(18, -15)); pi.addLine(to: m(18, -9))
+            pi.addLine(to: m(13, -9)); pi.addLine(to: m(13, 15)); pi.addLine(to: m(7, 15))
+            pi.addLine(to: m(7, -9)); pi.addLine(to: m(-7, -9)); pi.addLine(to: m(-7, 15))
+            pi.addLine(to: m(-13, 15)); pi.addLine(to: m(-13, -9)); pi.addLine(to: m(-18, -9))
+            pi.closeSubpath()
+            context.fill(pi, with: .color(.primary))
         }
     }
 }

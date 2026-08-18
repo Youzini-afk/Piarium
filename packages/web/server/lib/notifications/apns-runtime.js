@@ -2,10 +2,10 @@
 //
 // Device tokens are persisted per UI session (mirrors push-runtime.js). Delivery has two
 // modes, chosen at send time:
-//   - Relay (default): POST tokens + generic text to the central Cloudflare relay, which
-//     holds the single project APNs key and signs+sends — so users configure nothing.
-//   - Direct (fallback): sign an ES256 JWT with Node crypto and send over HTTP/2 ourselves,
-//     for self-hosters who set PIARIUM_APNS_* and PIARIUM_PUSH_RELAY_DISABLED=true.
+//   - Relay (explicit): POST tokens + generic text to PIARIUM_PUSH_RELAY_URL, whose service
+//     holds the selected project APNs key and signs+sends.
+//   - Direct: sign an ES256 JWT with Node crypto and send over HTTP/2 ourselves for
+//     self-hosters who configure PIARIUM_APNS_*.
 // Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
 // generic, model-based text (no session content) — see APNS.md.
 
@@ -19,8 +19,7 @@ const APNS_HOST_PRODUCTION = 'https://api.push.apple.com';
 const APNS_HOST_SANDBOX = 'https://api.sandbox.push.apple.com';
 // APNs rejects auth tokens older than 1h; refresh well inside that window.
 const JWT_TTL_MS = 50 * 60 * 1000;
-const DEFAULT_BUNDLE_ID = 'com.openchamber.app';
-const DEFAULT_RELAY_URL = 'https://api.openchamber.dev/v1/push/send';
+const DEFAULT_BUNDLE_ID = 'dev.piarium.mobile';
 const MAX_TOKENS_PER_SESSION = 10;
 // APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
@@ -374,13 +373,13 @@ export const createApnsRuntime = (deps) => {
       req.end(body);
     });
 
-  // Relay mode (default): the single APNs key lives in the central Cloudflare relay, not on
-  // each user's server — so users configure nothing. The server just POSTs device tokens +
-  // generic text; the relay signs + sends and reports which tokens to drop. Direct mode (below)
-  // is the fallback for self-hosters who set PIARIUM_APNS_* and disable the relay.
+  // Relay mode is explicit: the selected service owns the APNs key, while this server POSTs
+  // device tokens + generic text and receives token-drop results. Without a relay URL, direct
+  // mode below uses the deployment's PIARIUM_APNS_* configuration when available.
   const resolveRelayConfig = () => {
     if (trimmedEnv('PIARIUM_PUSH_RELAY_DISABLED') === 'true') return null;
-    const url = trimmedEnv('PIARIUM_PUSH_RELAY_URL') || DEFAULT_RELAY_URL;
+    const url = trimmedEnv('PIARIUM_PUSH_RELAY_URL');
+    if (!url) return null;
     const override = (trimmedEnv('PIARIUM_APNS_ENVIRONMENT') || '').toLowerCase();
     return {
       url,
