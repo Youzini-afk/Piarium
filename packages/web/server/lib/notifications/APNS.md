@@ -1,15 +1,16 @@
-# APNs remote push — signed relay mode
+# APNs remote push — signed relay or direct mode
 
-Native iOS background push (notifications even when the app is **suspended or killed**) is
-delivered via APNs through a **central relay**, so no user configures an Apple key. Each server
-signs its relay requests with an auto-generated keypair, and tokens are bound to the server that
-registered them — so a leaked device token alone can't be used to push.
+Native iOS background push (notifications even when the app is **suspended or killed**) is delivered
+through APNs. A deployment can select a signed Piarium-compatible relay or configure direct APNs
+credentials. Source builds do not silently reuse another product's relay. In relay mode each server
+signs requests with an auto-generated keypair, and tokens are bound to the server that registered
+them, so a leaked device token alone cannot be used to push.
 
 ## How it works
 
 1. The app registers its APNs device token with **its own server** (`POST /api/push/apns-token`,
    `useNativePushRegistration`). PWA/desktop never register — only the native Capacitor app.
-2. The server **binds the token on the relay**: it POSTs `{ token, publicKeyJwk, ts, sig }` to
+2. In relay mode, the server **binds the token on the configured relay**: it POSTs `{ token, publicKeyJwk, ts, sig }` to
    `POST /v1/push/register-token`, signed with its auto-generated ECDSA P-256 key
    (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
    `token → serverId` where `serverId = SHA-256(publicKey)`.
@@ -18,8 +19,9 @@ registered them — so a leaked device token alone can't be used to push.
    needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
    badge, env, data:{sessionId}, publicKeyJwk, ts, sig }` to `POST /v1/push/send`
-   (`apns-runtime.js` → `sendViaRelay`). It does **not** gate on UI visibility (see below).
-4. The **relay** (`openchamber-website/apps/api`, Cloudflare Worker) verifies the signature +
+   (`apns-runtime.js` → `sendViaRelay`). Direct mode builds the equivalent APNs payload locally. It
+   does **not** gate on UI visibility (see below).
+4. A configured **push relay** verifies the signature +
    `ts` freshness, derives `serverId`, and only delivers to tokens bound to that server. It holds
    the single project APNs `.p8` key, signs an ES256 JWT with `crypto.subtle`, and sends each
    token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
@@ -67,15 +69,15 @@ device token of a server sees the same badge.
 
 ## Modes
 
-- **Relay (default):** server has no Apple key; `PIARIUM_PUSH_RELAY_URL` defaults to
-  `https://api.openchamber.dev/v1/push/send` (register URL is derived as `…/register-token`).
-- **Direct (fallback):** set `PIARIUM_PUSH_RELAY_DISABLED=true` + `PIARIUM_APNS_KEY_ID/
+- **Relay:** set `PIARIUM_PUSH_RELAY_URL` to a Piarium-compatible relay endpoint (the register URL is
+  derived as `…/register-token`). Source builds intentionally have no inherited central relay.
+- **Direct:** set `PIARIUM_PUSH_RELAY_DISABLED=true` + `PIARIUM_APNS_KEY_ID/
   TEAM_ID/P8` to sign+send from the server itself (HTTP/2 + ES256 JWT); no relay binding needed.
 
 ## Config
 
 Server (`apns-runtime.js`):
-- `PIARIUM_PUSH_RELAY_URL` (default the public relay), `PIARIUM_APNS_ENVIRONMENT`
+- `PIARIUM_PUSH_RELAY_URL` (optional explicit relay), `PIARIUM_APNS_ENVIRONMENT`
   (optional override forcing every send to `sandbox` or `production`; normally unset — each
   token is delivered to the environment it registered with: the iOS shell reads the
   `aps-environment` entitlement from the embedded provisioning profile and reports it at
@@ -91,9 +93,9 @@ binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy
 ## Apple setup (one-time)
 
 1. Apple **Keys** (not Certificates) → create an **APNs Auth Key** (`.p8`) → Key ID + Team ID;
-   enable **Push Notifications** on App ID `com.openchamber.app`.
-2. In the **openchamber-website** repo → Actions secrets: `APNS_P8` (PEM), `APNS_KEY_ID`,
-   `APNS_TEAM_ID`. Push to `main` → relay deploys, secrets sync, D1 migrations apply.
+   enable **Push Notifications** on App ID `dev.piarium.mobile`.
+2. Configure the selected Piarium push relay with that key, or configure the self-hosted server's
+   direct APNs environment variables. Do not reuse an OpenChamber App ID, token database, or key.
 3. Xcode: confirm the Push Notifications capability; Clean Build Folder; run on device.
 
 ## Security posture

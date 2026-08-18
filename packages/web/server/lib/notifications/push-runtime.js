@@ -314,7 +314,7 @@ export const createPushRuntime = (deps) => {
     if (typeof originEnv === 'string' && originEnv.trim().length > 0) {
       const trimmed = originEnv.trim();
       if (isLoopbackHttpOrigin(trimmed)) {
-        return 'mailto:openchamber@localhost';
+        return 'mailto:piarium@localhost';
       }
       return trimmed;
     }
@@ -325,14 +325,14 @@ export const createPushRuntime = (deps) => {
       if (typeof stored === 'string' && stored.trim().length > 0) {
         const trimmed = stored.trim();
         if (isLoopbackHttpOrigin(trimmed)) {
-          return 'mailto:openchamber@localhost';
+          return 'mailto:piarium@localhost';
         }
         return trimmed;
       }
     } catch {
     }
 
-    return 'mailto:openchamber@localhost';
+    return 'mailto:piarium@localhost';
   };
 
   const ensurePushInitialized = async () => {
@@ -340,7 +340,7 @@ export const createPushRuntime = (deps) => {
     const keys = await getOrCreateVapidKeys();
     const subject = await resolveVapidSubject();
 
-    if (subject === 'mailto:openchamber@localhost') {
+    if (subject === 'mailto:piarium@localhost') {
       console.warn('[Push] No public origin configured for VAPID; set PIARIUM_VAPID_SUBJECT or enable push once from a real origin.');
     }
 

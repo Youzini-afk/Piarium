@@ -3,8 +3,8 @@
 //
 // Config lives in the server settings file as `settings.privateRelay =
 // { enabled, relayUrl }` (same storage precedent as tunnels/notifications).
-// Routes are registered with the other OpenChamber feature routes, before the
-// generic OpenCode proxy, and are covered by the same global UI auth gate.
+// Routes are registered with the other Piarium feature routes and are covered
+// by the same global UI auth gate.
 //
 // Cross-runtime parity note: relay host mode intentionally targets the web
 // server runtime only in v1 (Electron shares this server in-process). The VS
@@ -110,7 +110,7 @@ export const createRelayService = ({
 
   const standbyStatus = (holderPid) => ({
     state: 'standby',
-    lastError: `relay host is owned by another local OpenChamber process (pid ${holderPid})`,
+    lastError: `relay host is owned by another local Piarium process (pid ${holderPid})`,
     connectedClients: 0,
   });
 

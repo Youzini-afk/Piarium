@@ -29,9 +29,10 @@ First public source snapshot of the Pi-native workspace.
 - Piarium extension platform (contract, host, surface, SDK, CLI)
 - OpenChamber upstream capability absorption, including Work Status,
   walkthroughs, and Markdown task loops
+- Piarium-owned Android/iOS application IDs, `piarium://` deep links, Widget/notification-service
+  targets, App Group, launcher/splash assets, and external release credential boundaries
 
 Known gaps for this release:
 
 - npm packages under `@piarium/*` are not published yet
 - GitHub Releases and signed desktop installers are not published yet
-- Native mobile bundle IDs still use the inherited OpenChamber application id

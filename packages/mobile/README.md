@@ -4,7 +4,16 @@ Capacitor shell for the dedicated Piarium mobile web surface.
 
 The mobile package reuses the web build, then rewrites `mobile.html` to `index.html` in `packages/mobile/dist` so native iOS/Android always launch `MobileApp` instead of the hosted surface selector.
 
-Native bundle IDs still use the inherited `com.openchamber.app` identity. Changing them is a store-facing follow-up, not part of this source checkout.
+The native product identity is Piarium-owned:
+
+- app/package ID: `dev.piarium.mobile`;
+- iOS App Group: `group.dev.piarium.mobile`;
+- widget extension: `dev.piarium.mobile.widget`;
+- notification service: `dev.piarium.mobile.notification-service`;
+- deep-link scheme: `piarium://`.
+
+These identifiers intentionally do not accept the unreleased inherited OpenChamber identity as a
+compatibility alias.
 
 ## Runtime Model
 
@@ -13,6 +22,8 @@ Native bundle IDs still use the inherited `com.openchamber.app` identity. Changi
 - Connections are saved locally in the app and can be managed from the mobile overflow menu under `Instances`.
 - The connection screen and `Instances` menu item are Capacitor-only. Hosted `mobile.html` in a normal browser keeps the regular web behavior.
 - Password-protected Piarium servers can be unlocked from the mobile app. The app stores the issued client token with the saved connection.
+- `piarium://` connection/session links open the native app on Android and iOS. Android declares a
+  browsable intent filter; iOS declares the same scheme for the app and bundled widgets.
 - The Terminal workspace surface runs its PTY on the active Piarium server over the shared authenticated runtime transport; it never opens a local shell on the phone or tablet. Closing the surface detaches the renderer while the server session remains available for reattachment. On touch devices, dragging scrolls the buffer while long-pressing and dragging selects terminal text.
 
 ## Commands
@@ -62,6 +73,19 @@ Required local tools:
 - JDK 21 for Android Gradle builds.
 - Android SDK command-line tools with platform/build-tools 35.
 
+## Push configuration
+
+The repository does not ship another product's Firebase or Apple credentials.
+
+- Android builds remain usable without Firebase, but push registration is disabled. Official
+  release automation must supply a Piarium-owned `android/app/google-services.json` for
+  `dev.piarium.mobile`; that file is ignored by Git.
+- iOS signing must provision `dev.piarium.mobile`, its widget and notification-service identifiers,
+  the `group.dev.piarium.mobile` App Group, and the APNs entitlement.
+- A central push relay is opt-in through `PIARIUM_PUSH_RELAY_URL`. Source builds have no inherited
+  default relay. Self-hosters can instead configure direct APNs delivery with the documented
+  `PIARIUM_APNS_*` environment variables.
+
 ## Troubleshooting
 
 - If `xcodebuild` reports that the active developer directory is Command Line Tools, keep using the provided scripts or set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
@@ -73,4 +97,11 @@ Required local tools:
 
 ## Generated Assets
 
-The native projects currently use Capacitor-generated launcher and splash assets. Replace them before release branding work.
+Launcher, adaptive, and splash assets are generated from Piarium's maintained desktop product icon:
+
+```sh
+bun run branding:generate
+```
+
+The generated native assets are committed so Android/iOS builds do not depend on a release-time
+image tool. Run `bun run test:identity` after changing identifiers, targets, schemes, or branding.

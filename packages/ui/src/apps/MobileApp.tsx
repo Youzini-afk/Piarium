@@ -2151,8 +2151,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }, [ipadRightPanel, isIPad]);
   const renderedIpadRightPanel = ipadRightPanel ?? lastIpadRightPanelRef.current;
 
-  const leftResize = useIpadSidebarResize('left', 'openchamber.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
-  const rightResize = useIpadSidebarResize('right', 'openchamber.ipad.rightSidebarWidth', IPAD_RIGHT_SIDEBAR_WIDTH);
+  const leftResize = useIpadSidebarResize('left', 'piarium.ipad.leftSidebarWidth', IPAD_LEFT_SIDEBAR_WIDTH);
+  const rightResize = useIpadSidebarResize('right', 'piarium.ipad.rightSidebarWidth', IPAD_RIGHT_SIDEBAR_WIDTH);
 
   const mobileActions = React.useMemo<MobileAppActions>(
     () => ({
