@@ -86,9 +86,10 @@ bun run electron:build:win
 
 This is equivalent to running `bun run --cwd packages/electron package:win:x64` and produces `packages/electron/dist/*.exe`, `*.blockmap`, and `latest.yml`.
 
-After packaging, verify the unpacked application, bundled Pi worker, health endpoint, renderer
-app-ready signal/error boundary, and a real `node-pty` terminal create/close cycle without
-installing it:
+After packaging, verify the unpacked application, external-runtime discovery state, health endpoint,
+renderer app-ready signal/error boundary, and a real `node-pty` terminal create/close cycle without
+installing it. The smoke must cover both the no-runtime onboarding state and a selected Pi runtime;
+merely finding the compiled Piarium Host is not proof that the selected Pi installation can load:
 
 ```bash
 bun run electron:smoke:win
@@ -143,12 +144,22 @@ The macOS menu bar item is enabled by default and can be disabled in General set
 
 ## Pi Runtime
 
-Packaged Desktop builds include the compiled Pi host and broker. Electron starts the host with its
-own executable in Node mode, so Piarium does not download or bundle an OpenCode CLI and does not
-require a separate Node installation at runtime. Production `node_modules` are unpacked as one
-coherent dependency tree because the ordinary Node worker cannot resolve modules from Electron's
-`app.asar`; keeping only a hand-maintained package subset would break whenever Pi adds a dependency.
-The package keeps Chromium locale files only for Piarium's supported interface languages.
+Packaged Desktop builds include Piarium's compiled Host bootstrap and runtime broker, but runtime
+execution no longer binds to a permanently bundled copy of the three Pi SDK packages. The Runtime
+Manager discovers a user-level Pi installation, verifies its package root and Node executable, and
+accepts it only after the Host handshake succeeds. Onboarding and Settings may select, install, or
+upgrade that installation; a newer Pi is retained, and no downgrade or silent upgrade is performed.
+
+Electron's executable provides Node mode for the Piarium Host process, so running the desktop shell
+does not require a separately installed Node runtime. Pi remains an independent user-level tool and
+can still be used by the Pi CLI outside Piarium. Cloud and VS Code distributions deliberately keep a
+pinned Pi runtime because their unattended/isolated hosts have different reproducibility needs.
+
+The official ordinary installer still has to prove that its final dependency inventory contains no
+unused Pi SDK copy; the optional offline distribution may instead carry an explicitly verified
+standalone installation payload. The production dependencies that normal Node workers do require
+remain unpacked for filesystem module resolution. Chromium locale files are limited to Piarium's
+supported interface languages.
 
 ## Common Env Vars
 

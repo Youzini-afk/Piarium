@@ -71,13 +71,18 @@ versions and exact evidence.
 
 ### Prerequisites
 
-- Node.js 22.19 or newer; Node.js 24 is the supported development baseline
+- Node.js 22.19 or newer; Node.js 24 is the supported source-development baseline
 - Bun 1.3.14
 - Git
 - Git for Windows and Git Bash when running Pi shell tools on Windows
 
-Packaged desktop and container builds include the pinned Pi runtime. End users do not need to
-install a separate Pi CLI or Node.js runtime for the packaged desktop application.
+Desktop no longer uses a permanently bundled Pi SDK. It discovers a user-level Pi installation
+first, then the Pi Runtime flow can select, install, or upgrade Pi without downgrading it. Piarium
+becomes ready only after a real Host handshake and does not need to restart after activation.
+Electron contains the Node runtime needed to run the application, while Pi remains an independently
+managed user-level tool. The official ordinary/offline installers and their dependency inventories
+are still at the release-verification boundary. Containers and the VS Code extension keep a pinned,
+self-contained Pi runtime for reproducible unattended and editor-host execution.
 
 ### Run the Web development surface
 

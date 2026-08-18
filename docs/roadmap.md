@@ -280,21 +280,28 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
 Acceptance: each adapter has an unavailable/degraded state, version compatibility diagnostics, and
 an integration smoke test without exposing credentials.
 
-## Phase 7 — Windows release
+## Phase 7 — Windows release (in progress)
 
-- Implemented: Electron's Node mode directly hosts the compiled Pi worker/broker; no separate Node
-  download is required. Windows product/installer identity and GitHub updater metadata now target
-  `Youzini-afk/Piarium`.
-- Implemented: the Windows x64 pipeline produces the unsigned NSIS installer, blockmap, and
-  `latest.yml`. Packaging rebuilds `better-sqlite3`, verifies the published `node-pty` N-API
-  prebuild by starting a PTY under Electron 41, and unpacks one coherent production dependency tree
-  for the ordinary Node Pi worker. A clean-profile unpacked-app smoke reaches Pi host protocol v1,
-  Pi 0.84.1, the local health endpoint, renderer app-ready state, and a create/close terminal
-  session; the same smoke can copy persisted settings plus Chromium Local/Session Storage into an
-  isolated profile to catch profile-dependent renderer regressions without modifying the source.
-- Git/Git Bash/npm/Pi discovery and guided repair.
-- NSIS installer, upgrade/uninstall behavior, logs, crash recovery, and update metadata.
-- Packaged-app smoke tests and artifact checks.
+- Implemented: Electron's Node mode hosts the compiled Piarium Host bootstrap and broker; running the
+  desktop shell requires no separate Node download. Windows product/installer identity and GitHub
+  updater metadata target `Youzini-afk/Piarium`.
+- Implemented: desktop starts without forcing a Pi warmup. The Runtime Manager discovers user-global,
+  standalone, source, and explicit custom Pi installations; probes the real package root and Host
+  handshake; and activates a successful selection without restarting Piarium. Existing sessions stay
+  on their owning generation while new work moves to the selected generation.
+- Implemented: installation planning prefers the package manager that owns an existing Pi, otherwise
+  detected npm/Bun/pnpm, and otherwise a verified standalone payload when the distribution supplies
+  one. Newer Pi versions are kept; only missing or older versions expose install/upgrade actions.
+- Implemented: the Windows x64 pipeline produces an unsigned NSIS installer, blockmap, and
+  `latest.yml`. Packaging rebuilds `better-sqlite3`, verifies the published `node-pty` N-API prebuild,
+  and performs a clean-profile unpacked-app smoke including the health endpoint, renderer app-ready
+  state, and terminal create/close cycle.
+- Remaining release boundary: make the ordinary installer graph free of the three Pi SDK packages,
+  produce an optional offline distribution with a verified standalone payload, and smoke both from
+  the current release commit.
+- Remaining release boundary: exercise install/no-install/upgrade/custom-runtime journeys on a clean
+  Windows profile, then verify signed release artifacts, update-in-place, crash recovery, and
+  uninstall data retention.
 
 Acceptance: install on a clean Windows user profile, run the Phase 5–6 smoke journey, restart with
 active history intact, upgrade in place, and uninstall without deleting user projects or sessions.
