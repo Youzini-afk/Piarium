@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { watch, type FSWatcher } from "node:fs";
+import { realpath as realpathCallback, watch, type FSWatcher } from "node:fs";
 import { lstat } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { promisify } from "node:util";
 import type {
   PiConfigWatchChangeReason,
   PiConfigWatchSubscription,
@@ -11,6 +12,7 @@ import { HostError } from "./errors.js";
 
 const COALESCE_DELAY_MS = 20;
 const WIN32 = process.platform === "win32";
+const realpathNative = promisify(realpathCallback.native);
 
 function isMissingPathError(error: unknown): boolean {
   return (
@@ -42,6 +44,25 @@ function sameDirectory(left: string, right: string): boolean {
 function firstPathSegment(value: string): string | undefined {
   const segment = value.split(/[\\/]/, 1)[0];
   return segment === undefined || segment.length === 0 ? undefined : segment;
+}
+
+function stripWindowsNamespacePrefix(path: string): string {
+  if (path.startsWith("\\\\?\\UNC\\")) return `\\\\${path.slice(8)}`;
+  if (path.startsWith("\\\\?\\")) return path.slice(4);
+  return path;
+}
+
+async function canonicalPath(path: string): Promise<string> {
+  const resolved = resolve(path);
+  if (!WIN32) return resolved;
+  try {
+    return stripWindowsNamespacePrefix(await realpathNative(resolved));
+  } catch (error) {
+    if (!isMissingPathError(error)) throw error;
+    const parent = dirname(resolved);
+    if (parent === resolved) return resolved;
+    return join(await canonicalPath(parent), basename(resolved));
+  }
 }
 
 async function deepestExistingDirectory(filePath: string): Promise<string> {
@@ -121,7 +142,7 @@ class ConfigPathWatcher {
     if (this.#disposed || expectedGeneration !== this.#generation) return;
     let directory: string;
     try {
-      directory = await deepestExistingDirectory(this.#filePath);
+      directory = await canonicalPath(await deepestExistingDirectory(this.#filePath));
     } catch {
       if (!this.#disposed && expectedGeneration === this.#generation) this.#notify("error");
       return;
@@ -144,15 +165,19 @@ class ConfigPathWatcher {
   }
 
   async #bind(generation: number): Promise<void> {
-    const directory = await deepestExistingDirectory(this.#filePath);
+    const directory = await canonicalPath(await deepestExistingDirectory(this.#filePath));
+    const filePath = await canonicalPath(this.#filePath);
     if (this.#disposed || generation !== this.#generation) return;
-    const relativePath = relative(directory, this.#filePath);
+    const relativePath = relative(directory, filePath);
     const watchedSegment = firstPathSegment(relativePath);
     if (!watchedSegment) {
       throw new HostError("config_watch_failed", "Configuration watch target must be a file");
     }
     let watcher: FSWatcher;
     try {
+      // Windows libuv aborts in fs-event.c when fs.watch() is given an 8.3
+      // short directory (GitHub Actions %TEMP%) because events arrive with the
+      // long path. Canonicalize before watching; never close from the callback.
       watcher = watch(directory, (eventType, filename) => {
         if (this.#disposed || generation !== this.#generation) return;
         const changedName = filename === null || filename === undefined

@@ -137,11 +137,12 @@ verification. Phase 9 recorded a local production Web build (`bun run build:web`
 `32239724870` for `feat: integrate background tasks with Fleet` passed Ubuntu Source quality
 (including `test:pi`) and Production build; Docker Images `32239724866` succeeded.
 
-The Windows runtime job failed at `bun run test:pi` because Host configuration watches closed and
-rebound `fs.watch` from inside the libuv callback after an atomic rename. That aborts Node with
-`Assertion failed: !_wcsnicmp(filename, dir, dirlen)` in `src\win\fs-event.c`, and
-`config.changed` can be lost after a catalog context switch. This is a Windows watcher lifecycle
-defect, not a CI runner flake.
+The Windows runtime job failed at `bun run test:pi` because Host configuration watches
+passed GitHub Actions' 8.3 `%TEMP%` path to `fs.watch`. libuv then aborts with
+`Assertion failed: !_wcsnicmp(filename, dir, dirlen)` in `src\win\fs-event.c` when
+directory-change events arrive with the long path. Closing or rebinding the watcher
+from inside that callback can also drop `config.changed` after a catalog context
+switch. This is a Windows watcher path and lifecycle defect, not a CI runner flake.
 
 `bun run electron:build:win` produced the unsigned Windows x64 NSIS installer and
 `packages/electron/dist/win-unpacked`. `bun run electron:smoke:win` reached a healthy in-process
