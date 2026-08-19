@@ -1,6 +1,7 @@
 import type {
   JsonValue,
   PiConfigScope,
+  PiConfigTextAuthorityId,
   PiConfigTextFormat,
   PiConfigTextRoot,
   PiConfigWatchSubscription,
@@ -62,6 +63,29 @@ export const updatePiConfigTextDocument = async (
     format,
     path,
     root,
+  });
+};
+
+export const getPiConfigTextAuthority = async (
+  target: RuntimeContextTarget,
+  authority: PiConfigTextAuthorityId,
+) => {
+  const { client } = await getPiRuntimeConnection();
+  return client.request('config.text.authority.get', { ...target, authority });
+};
+
+export const updatePiConfigTextAuthority = async (
+  target: RuntimeContextTarget,
+  authority: PiConfigTextAuthorityId,
+  content: string,
+  expectedRevision: string,
+) => {
+  const { client } = await getPiRuntimeConnection();
+  return client.request('config.text.authority.update', {
+    ...target,
+    authority,
+    content,
+    expectedRevision,
   });
 };
 

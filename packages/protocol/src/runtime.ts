@@ -51,6 +51,8 @@ type SessionScopedRuntimeMethod =
   | "agentProvider.list"
   | "config.document.get"
   | "config.document.update"
+  | "config.text.authority.get"
+  | "config.text.authority.update"
   | "config.text.get"
   | "config.text.update"
   | "config.watch"
@@ -159,6 +161,8 @@ export const RUNTIME_METHODS = [
   "command.list",
   "config.document.get",
   "config.document.update",
+  "config.text.authority.get",
+  "config.text.authority.update",
   "config.text.get",
   "config.text.update",
   "config.unwatch",

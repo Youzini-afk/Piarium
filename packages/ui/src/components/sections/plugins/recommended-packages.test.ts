@@ -8,6 +8,7 @@ describe('recommended Pi packages', () => {
     expect(sourceByName['pi-openai-codex-compat']).toBe('npm:pi-openai-codex-compat@alpha');
     expect(sourceByName['pi-observational-memory']).toBe('npm:pi-observational-memory');
     expect(sourceByName['context-mode']).toBe('npm:context-mode');
+    expect(sourceByName['pi-lens']).toBe('npm:pi-lens');
   });
 
   test('does not render duplicate package identities or install sources', () => {

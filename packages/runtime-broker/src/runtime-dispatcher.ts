@@ -12,6 +12,7 @@ import {
   type ProviderConfigInput,
   ProviderConfigValidationError,
   type ProviderAuthResponse,
+  type PiConfigTextAuthorityId,
   type PiConfigWatchTarget,
   type RuntimeMethod,
   type RuntimeMethodResult,
@@ -219,9 +220,19 @@ function requireSessionFeatureMutation(value: unknown) {
   }
 }
 
+function requireConfigTextAuthority(
+  record: Record<string, unknown>,
+): PiConfigTextAuthorityId {
+  return requireEnum(record, "authority", ["pi-lens-global", "pi-lens-project"] as const);
+}
+
 function requireConfigWatchTarget(value: unknown): PiConfigWatchTarget {
   const target = requireRecord(value);
-  const kind = requireEnum(target, "kind", ["document", "text", "settings"] as const);
+  const kind = requireEnum(
+    target,
+    "kind",
+    ["document", "text", "text-authority", "settings"] as const,
+  );
   if (kind === "document") {
     return {
       kind,
@@ -236,6 +247,9 @@ function requireConfigWatchTarget(value: unknown): PiConfigWatchTarget {
       path: requireString(target, "path"),
       root: requireEnum(target, "root", ["agent", "home", "project", "user-config"] as const),
     };
+  }
+  if (kind === "text-authority") {
+    return { authority: requireConfigTextAuthority(target), kind };
   }
   return {
     kind,
@@ -671,6 +685,26 @@ async function dispatchRuntimeRequestUnchecked(
           format: requireEnum(input, "format", ["json", "jsonc"] as const),
           path: requireString(input, "path"),
           root: requireEnum(input, "root", ["agent", "home", "project", "user-config"] as const),
+        },
+      );
+    }
+    case "config.text.authority.get": {
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "config.text.authority.get",
+        { authority: requireConfigTextAuthority(input) },
+      );
+    }
+    case "config.text.authority.update": {
+      return requestForRuntimeContext(
+        broker,
+        requireRuntimeContext(input),
+        "config.text.authority.update",
+        {
+          authority: requireConfigTextAuthority(input),
+          content: requireString(input, "content", { allowEmpty: true }),
+          expectedRevision: requireString(input, "expectedRevision"),
         },
       );
     }

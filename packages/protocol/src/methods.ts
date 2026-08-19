@@ -12,6 +12,8 @@ import type {
   PiAgentProviderActionResult,
   PiConfigDocumentSnapshot,
   PiConfigScope,
+  PiConfigTextAuthorityId,
+  PiConfigTextAuthoritySnapshot,
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
@@ -82,6 +84,18 @@ export interface HostMethodMap {
       root: PiConfigTextRoot;
     };
     result: PiConfigTextDocumentSnapshot;
+  };
+  "config.text.authority.get": {
+    params: { authority: PiConfigTextAuthorityId };
+    result: PiConfigTextAuthoritySnapshot;
+  };
+  "config.text.authority.update": {
+    params: {
+      authority: PiConfigTextAuthorityId;
+      content: string;
+      expectedRevision: string;
+    };
+    result: PiConfigTextAuthoritySnapshot;
   };
   "config.watch": {
     params: { target: PiConfigWatchTarget };

@@ -87,6 +87,12 @@ describe('plugin runtime status', () => {
     expect(pluginRuntimeStatus('context-mode', signals())).toBe('not-observed');
   });
 
+  test('observes pi-lens only when its native toggle command is listed', () => {
+    expect(pluginRuntimeStatus('pi-lens', signals({ commandNames: new Set(['lens-toggle']) }))).toBe('available');
+    expect(pluginRuntimeStatus('pi-lens', signals())).toBe('not-observed');
+    expect(pluginRuntimeStatus('pi-lens', signals({ hasActiveSession: false, commandNames: new Set(['lens-toggle']) }))).toBe('no-session');
+  });
+
   test('uses active recovery providers and MCP status reports', () => {
     expect(
       pluginRuntimeStatus(

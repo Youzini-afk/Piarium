@@ -2,6 +2,8 @@ import React from 'react';
 import type {
   JsonValue,
   PiConfigScope,
+  PiConfigTextAuthorityId,
+  PiConfigTextAuthoritySnapshot,
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
@@ -12,9 +14,11 @@ import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { toast } from '@/components/ui';
 import {
   getPiConfigDocument,
+  getPiConfigTextAuthority,
   getPiConfigTextDocument,
   subscribePiConfig,
   updatePiConfigDocument,
+  updatePiConfigTextAuthority,
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
 import {
@@ -73,11 +77,18 @@ interface DocumentDraftOptions extends CommonDraftOptions {
   scope: PiConfigScope;
 }
 
-interface TextDraftOptions extends CommonDraftOptions {
+interface TextPathDraftOptions extends CommonDraftOptions {
   format: PiConfigTextFormat;
   paths: readonly string[];
   root: PiConfigTextRoot;
 }
+
+interface TextAuthorityDraftOptions extends CommonDraftOptions {
+  authority: PiConfigTextAuthorityId;
+}
+
+type TextDraftOptions = TextPathDraftOptions | TextAuthorityDraftOptions;
+type TextDraftSnapshot = PiConfigTextDocumentSnapshot | PiConfigTextAuthoritySnapshot;
 
 interface DraftState {
   draft: JsonObject;
@@ -631,8 +642,11 @@ export const parsePluginTextObjectDraft = (
 
 const loadTextDocument = async (
   runtimeTarget: RuntimeContextTarget,
-  options: Pick<TextDraftOptions, 'format' | 'paths' | 'root'>,
-): Promise<PiConfigTextDocumentSnapshot> => {
+  options: TextDraftOptions,
+): Promise<TextDraftSnapshot> => {
+  if ('authority' in options) {
+    return getPiConfigTextAuthority(runtimeTarget, options.authority);
+  }
   let fallback: PiConfigTextDocumentSnapshot | undefined;
   for (const path of options.paths) {
     const snapshot = await getPiConfigTextDocument(runtimeTarget, options.root, path, options.format);
@@ -643,24 +657,68 @@ const loadTextDocument = async (
   throw new Error('Could not resolve the plugin configuration path');
 };
 
-export const useTextObjectDraft = ({
-  format,
-  paths,
-  root,
-  runtimeTarget,
-  targetKey,
-}: TextDraftOptions): PluginObjectDraft => {
+const textDraftFormat = (options: TextDraftOptions): PiConfigTextFormat => (
+  'authority' in options ? 'json' : options.format
+);
+
+const textDraftSourceKey = (options: TextDraftOptions): string => (
+  'authority' in options
+    ? `authority:${options.authority}`
+    : `paths:${options.format}:${options.root}:${options.paths.join('\0')}`
+);
+
+const textDraftDisplayPath = (snapshot: TextDraftSnapshot): string => (
+  'authority' in snapshot ? snapshot.path : `${snapshot.root}:${snapshot.path}`
+);
+
+const textDraftWatchTargets = (options: TextDraftOptions): readonly PiConfigWatchTarget[] => {
+  if ('authority' in options) {
+    return [{ authority: options.authority, kind: 'text-authority' }];
+  }
+  return options.paths.map((candidatePath) => ({
+    format: options.format,
+    kind: 'text',
+    path: candidatePath,
+    root: options.root,
+  }));
+};
+
+const updateTextDraftSnapshot = (
+  runtimeTarget: RuntimeContextTarget,
+  snapshot: TextDraftSnapshot,
+  content: string,
+): Promise<TextDraftSnapshot> => (
+  'authority' in snapshot
+    ? updatePiConfigTextAuthority(
+        runtimeTarget,
+        snapshot.authority,
+        content,
+        snapshot.revision,
+      )
+    : updatePiConfigTextDocument(
+        runtimeTarget,
+        snapshot.root,
+        snapshot.path,
+        snapshot.format,
+        content,
+        snapshot.revision,
+      )
+);
+
+export const useTextObjectDraft = (options: TextDraftOptions): PluginObjectDraft => {
+  const { runtimeTarget, targetKey } = options;
   const { t } = useI18n();
-  const pathsKey = paths.join('\0');
-  const pathsRef = React.useRef(paths);
-  pathsRef.current = paths;
-  const pathsKeyRef = React.useRef(pathsKey);
-  pathsKeyRef.current = pathsKey;
+  const format = textDraftFormat(options);
+  const sourceKey = textDraftSourceKey(options);
+  const sourceRef = React.useRef(options);
+  sourceRef.current = options;
+  const sourceKeyRef = React.useRef(sourceKey);
+  sourceKeyRef.current = sourceKey;
   const [state, setState] = React.useState<DraftState>(initialState);
   const [watchRevision, setWatchRevision] = React.useState(0);
   const [content, setContent] = React.useState('{}\n');
   const [rawError, setRawError] = React.useState<string | null>(null);
-  const [snapshot, setSnapshot] = React.useState<PiConfigTextDocumentSnapshot | null>(null);
+  const [snapshot, setSnapshot] = React.useState<TextDraftSnapshot | null>(null);
   const contentRef = React.useRef('{}\n');
   const generationRef = React.useRef(0);
   const mutationRevisionRef = React.useRef(0);
@@ -674,20 +732,16 @@ export const useTextObjectDraft = ({
     const mutationRevision = mutationRevisionRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
-    const actionPathsKey = pathsKey;
+    const actionSourceKey = sourceKey;
     setState((current) => current.targetKey === actionTargetKey
       ? { ...current, error: null, loading: true }
       : { ...initialState(), loading: true, targetKey: actionTargetKey });
     try {
-      const nextSnapshot = await loadTextDocument(runtimeTarget, {
-        format,
-        paths: pathsRef.current,
-        root,
-      });
+      const nextSnapshot = await loadTextDocument(runtimeTarget, sourceRef.current);
       if (
         generation !== generationRef.current
         || actionTargetKey !== targetKeyRef.current
-        || actionPathsKey !== pathsKeyRef.current
+        || actionSourceKey !== sourceKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
       if (!shouldApplyPluginDraftReload(options, mutationRevision, mutationRevisionRef.current)) {
@@ -713,7 +767,7 @@ export const useTextObjectDraft = ({
         externalChanged: false,
         loaded: true,
         loading: false,
-        path: `${nextSnapshot.root}:${nextSnapshot.path}`,
+        path: textDraftDisplayPath(nextSnapshot),
         projectTrusted: nextSnapshot.projectTrusted,
         rawContent: nextSnapshot.content,
         rawError: parsed.rawError,
@@ -726,14 +780,14 @@ export const useTextObjectDraft = ({
       if (
         generation !== generationRef.current
         || actionTargetKey !== targetKeyRef.current
-        || actionPathsKey !== pathsKeyRef.current
+        || actionSourceKey !== sourceKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
       setState((current) => current.targetKey === actionTargetKey
         ? preservePluginDraftOnFailure(current, errorMessage(error))
         : { ...initialState(), error: errorMessage(error), targetKey: actionTargetKey });
     }
-  }, [format, pathsKey, root, runtimeTarget, t, targetKey]);
+  }, [format, runtimeTarget, sourceKey, t, targetKey]);
 
   React.useEffect(() => {
     setState(initialState());
@@ -796,14 +850,7 @@ export const useTextObjectDraft = ({
     const actionTargetKey = targetKey;
     setState((current) => ({ ...current, error: null, saving: true }));
     try {
-      const nextSnapshot = await updatePiConfigTextDocument(
-        runtimeTarget,
-        snapshot.root,
-        snapshot.path,
-        snapshot.format,
-        content,
-        snapshot.revision,
-      );
+      const nextSnapshot = await updateTextDraftSnapshot(runtimeTarget, snapshot, content);
       const document = parseTextObject(nextSnapshot.content, format);
       if (
         generation !== generationRef.current
@@ -821,7 +868,7 @@ export const useTextObjectDraft = ({
         externalChanged: false,
         loaded: true,
         loading: false,
-        path: `${nextSnapshot.root}:${nextSnapshot.path}`,
+        path: textDraftDisplayPath(nextSnapshot),
         projectTrusted: nextSnapshot.projectTrusted,
         rawContent: nextSnapshot.content,
         rawError: null,
@@ -874,14 +921,7 @@ export const useTextObjectDraft = ({
     result.loaded,
     reload,
     runtimeTarget,
-    active && snapshot
-      ? pathsRef.current.map((candidatePath) => ({
-          format,
-          kind: 'text' as const,
-          path: candidatePath,
-          root,
-        }))
-      : [],
+    active && snapshot ? textDraftWatchTargets(sourceRef.current) : [],
     watchRevision,
     preserveExternal,
   );

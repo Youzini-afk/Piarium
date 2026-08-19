@@ -22,6 +22,7 @@ import {
   type RecoveryMode,
   type PiResourceKind,
   type PiResourceScope,
+  type PiConfigTextAuthorityId,
   type PiConfigWatchTarget,
   type PiPackageScope,
   type RuntimeDescriptor,
@@ -166,6 +167,16 @@ function readProviderDeleteScope(value: string): ProviderConfigDeleteScope {
   return value;
 }
 
+function readConfigTextAuthority(
+  record: Record<string, unknown>,
+): PiConfigTextAuthorityId {
+  const authority = readString(record, "authority");
+  if (authority !== "pi-lens-global" && authority !== "pi-lens-project") {
+    throw new HostError("invalid_params", "Unknown configuration text authority");
+  }
+  return authority;
+}
+
 function readConfigWatchTarget(value: unknown): PiConfigWatchTarget {
   const target = expectRecord(value, "target");
   const kind = readString(target, "kind");
@@ -186,6 +197,9 @@ function readConfigWatchTarget(value: unknown): PiConfigWatchTarget {
       throw new HostError("invalid_params", "Unknown configuration format");
     }
     return { format, kind, path: readString(target, "path"), root };
+  }
+  if (kind === "text-authority") {
+    return { authority: readConfigTextAuthority(target), kind };
   }
   if (kind === "settings") {
     const scope = readString(target, "scope");
@@ -648,6 +662,14 @@ export class HostController {
           readString(params, "path"),
         );
       }
+      case "config.text.authority.get":
+        return this.#sessionHost.getConfigTextAuthority(readConfigTextAuthority(params));
+      case "config.text.authority.update":
+        return this.#sessionHost.updateConfigTextAuthority(
+          readConfigTextAuthority(params),
+          readString(params, "content", { allowEmpty: true }),
+          readString(params, "expectedRevision"),
+        );
       case "config.text.update": {
         const root = readString(params, "root");
         const format = readString(params, "format");

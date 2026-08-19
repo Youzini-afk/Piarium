@@ -45,3 +45,36 @@ test('a Piarium adapter contribution can be withdrawn without changing the Pi pa
   expect(piPackage.enabled).toBe(true);
   expect(piPackage.installed).toBe(true);
 });
+
+test('maps the pi-lens package to its built-in settings adapter', async () => {
+  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+    candidate.manifest.id.endsWith('.pi-lens')
+  ));
+  expect(definition).toBeDefined();
+  if (!definition) return;
+  const runtime = new SurfaceExtensionRuntime({ surface: 'web' });
+  const handle = await runtime.activate({
+    owner: {
+      desiredRevision: 1,
+      entrypointId: 'main',
+      extensionId: definition.manifest.id,
+      extensionVersion: definition.manifest.version,
+      generation: 1,
+      hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+      realmId: 'pi-lens-adapter-test',
+    },
+  }, activateBuiltinPiIntegration(definition));
+  const piPackage: PackageDescriptor = {
+    enabled: true,
+    installed: true,
+    name: 'pi-lens',
+    scope: 'global',
+    source: 'npm:pi-lens',
+    structured: true,
+  };
+  expect(pluginSettingsAdapterForPackage(
+    piPackage,
+    pluginSettingsAdaptersFromSnapshot(runtime.getSnapshot()),
+  )?.adapterId).toBe('pi-lens');
+  await handle.deactivate(2, 2);
+});

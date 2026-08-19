@@ -179,6 +179,7 @@ value.
 | pi-wtf | Command words and the three generated command behaviors | Global `wtf.json`; previews are distinguished from commands currently loaded in a session | future plugin-owned fields | `!` rewrites session history and never restores file or external side effects |
 | pi-openai-codex-compat | Codex request, reasoning, remote-compaction and tool options | Independent global `openai-codex-compat.json` and trusted project `.pi/openai-codex-compat.json` drafts | unknown future plugin fields | absent keys stay unset; environment overrides remain plugin-owned |
 | pi-observational-memory | Observation, reflection, compaction, pool and worker settings | Independent user/project `settings.json#observational-memory` drafts | unknown future plugin fields | invalid thresholds and incomplete worker models block save without rewriting the draft |
+| pi-lens | Diagnostics; formatting and fixes; context delivery; project scale, rules, and security scans; native runtime actions | Resolved user authority (`PI_LENS_CONFIG_PATH` or `~/.pi-lens/config.json`) plus the nearest ordered project `.pi-lens.json` / `pi-lens.json` authority | future namespaces, detailed rule policies, LSP server maps and tool-specific tuning | project-ignored global keys stay visible, absent values remain unset, and native command availability is observed per session |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
 may succeed while an unsaved override draft remains, or vice versa; the UI presents and reports
@@ -443,6 +444,46 @@ Acceptance:
 - sidebar actions invoke public provider commands/bridge operations and refresh authoritative state;
 - cancellation, unknown command-only outcomes, and provider failures remain distinguishable.
 
+### 5.6 pi-lens
+
+Authority:
+
+- user JSON at `PI_LENS_CONFIG_PATH` when set, otherwise `~/.pi-lens/config.json`;
+- the nearest project JSON found while walking from the runtime working directory to the filesystem
+  root, checking `.pi-lens.json` before `pi-lens.json` at each level;
+- the active session's registered `lens-*` commands for immediate actions;
+- no private cache, report, instance registry, or NDJSON log as Piarium state.
+
+The Host resolves both authorities and returns only the selected path, content, and revision. The
+renderer names the closed `pi-lens-global` or `pi-lens-project` authority and never receives an
+arbitrary absolute-path capability. The quick form keeps user and project drafts independent. User controls cover the current flag
+registry plus formatting mode, warning autofix budget, widget visibility, ignore patterns, and the
+runner timeout floor. Project controls contain only fields the package actually honors there:
+mutation switches, ignore/rule policy, project and review-graph budgets, Trivy, and Helm render
+validation. A user-only key found in a project document is reported but never removed; arbitrary
+future fields remain round-trippable through Advanced.
+
+All fields are optional at the source layer. The form never writes pi-lens defaults merely because a
+control was rendered. Every project candidate from the working directory through its ancestors is
+one ordered authority chain, so all are watched and creating a nearer or same-directory
+higher-precedence file immediately changes the selected draft. JSON revisions and
+the shared Host lock prevent an external agent edit from being overwritten before the watch event
+arrives.
+
+Runtime actions are limited to commands actually returned by `command.list`: session activation,
+context injection, diagnostics widget, technical-debt index, project map, health, performance, and
+tool installation status. Piarium shows task labels rather than raw command identifiers and still
+dispatches the exact native slash command. It does not parse command output into a parallel status
+model.
+
+Acceptance:
+
+- both native scopes preserve unknown keys and choose the correct project filename by precedence;
+- project-global-only keys are diagnosed without becoming a save blocker or being deleted;
+- clean external changes reload, dirty changes remain intact, and stale saves conflict in the Host;
+- runtime buttons appear only for commands observed in the active session;
+- no pi-lens private diagnostics cache or telemetry log becomes a Piarium authority.
+
 ## 6. Implementation order
 
 1. Recovery correctness and sidebar controls, because the host operations already exist and the
@@ -452,7 +493,8 @@ Acceptance:
 4. Magic Context schema-complete settings and command operations.
 5. Web Access advanced routing/security and public runtime status when available.
 6. MCP provenance improvements without replacing its native panel.
-7. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
+7. pi-lens settings and command actions over its native JSON and public command catalog.
+8. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
    capability parity or an explicit rejection is documented and tested. This retirement is now
    complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
 

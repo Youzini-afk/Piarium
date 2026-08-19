@@ -33,6 +33,11 @@ export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
     descriptionKey: 'settings.piarium.plugins.package.contextMode',
   },
   {
+    name: 'pi-lens',
+    source: 'npm:pi-lens',
+    descriptionKey: 'settings.piarium.plugins.package.piLens',
+  },
+  {
     name: 'pi-mcp-adapter',
     source: 'https://github.com/Youzini-afk/pi-mcp-adapter.git',
     descriptionKey: 'settings.piarium.plugins.package.mcp',

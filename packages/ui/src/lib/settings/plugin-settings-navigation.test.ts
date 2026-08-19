@@ -43,4 +43,12 @@ describe('plugin settings navigation', () => {
       section: 'profiles',
     });
   });
+
+  test('maps pi-lens to its dedicated adapter', () => {
+    requestPluginSettingsTarget('npm:pi-lens@4.0.1');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'pi-lens',
+      pluginId: 'npm:pi-lens@4.0.1',
+    });
+  });
 });

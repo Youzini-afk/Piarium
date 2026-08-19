@@ -527,6 +527,7 @@ export type PiConfigScope = "global" | "project";
 
 export type PiConfigTextFormat = "json" | "jsonc";
 export type PiConfigTextRoot = "agent" | "home" | "project" | "user-config";
+export type PiConfigTextAuthorityId = "pi-lens-global" | "pi-lens-project";
 
 export interface ExtensionStateSnapshot {
   channel: string;
@@ -542,6 +543,16 @@ export interface PiConfigTextDocumentSnapshot {
   projectTrusted: boolean;
   revision: string;
   root: PiConfigTextRoot;
+}
+
+export interface PiConfigTextAuthoritySnapshot {
+  authority: PiConfigTextAuthorityId;
+  content: string;
+  exists: boolean;
+  format: "json";
+  path: string;
+  projectTrusted: boolean;
+  revision: string;
 }
 
 export interface PiConfigDocumentSnapshot {
@@ -564,6 +575,10 @@ export type PiConfigWatchTarget =
       kind: "text";
       path: string;
       root: PiConfigTextRoot;
+    }
+  | {
+      authority: PiConfigTextAuthorityId;
+      kind: "text-authority";
     }
   | {
       kind: "settings";

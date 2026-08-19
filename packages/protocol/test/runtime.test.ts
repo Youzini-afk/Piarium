@@ -38,7 +38,11 @@ describe("surface runtime protocol", () => {
     });
     const watchRequest = createRuntimeRequest("req-5", "config.watch", {
       cwd: "C:/workspace",
-      target: { kind: "settings", scope: "project" },
+      target: { authority: "pi-lens-project", kind: "text-authority" },
+    });
+    const authorityRequest = createRuntimeRequest("req-6", "config.text.authority.get", {
+      authority: "pi-lens-global",
+      cwd: "C:/workspace",
     });
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(request)), request);
@@ -55,12 +59,18 @@ describe("surface runtime protocol", () => {
       featureRequest,
     );
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(watchRequest)), watchRequest);
+    assert.deepEqual(
+      decodeRuntimeEnvelope(encodeRuntimeEnvelope(authorityRequest)),
+      authorityRequest,
+    );
     assert.equal(isRuntimeMethod("config.document.get"), true);
     assert.equal(isRuntimeMethod("agentProvider.action"), true);
     assert.equal(isRuntimeMethod("agentProvider.list"), true);
     assert.equal(isRuntimeMethod("config.document.update"), true);
     assert.equal(isRuntimeMethod("config.text.get"), true);
     assert.equal(isRuntimeMethod("config.text.update"), true);
+    assert.equal(isRuntimeMethod("config.text.authority.get"), true);
+    assert.equal(isRuntimeMethod("config.text.authority.update"), true);
     assert.equal(isRuntimeMethod("config.unwatch"), true);
     assert.equal(isRuntimeMethod("config.watch"), true);
     assert.equal(isRuntimeMethod("mcp.config.snapshot"), true);
@@ -113,7 +123,7 @@ describe("surface runtime protocol", () => {
       "config.changed",
       {
         reason: "rename",
-        target: { kind: "document", path: "wtf.json", scope: "global" },
+        target: { authority: "pi-lens-project", kind: "text-authority" },
         watchId: "watch-1",
       },
     );

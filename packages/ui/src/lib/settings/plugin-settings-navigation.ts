@@ -7,7 +7,8 @@ export type PluginSettingsIntegrationId =
   | 'openai-codex-compat'
   | 'observational-memory'
   | 'context-mode'
-  | 'mcp';
+  | 'mcp'
+  | 'pi-lens';
 
 export interface PluginSettingsNavigationTarget {
   integrationId: PluginSettingsIntegrationId | null;
@@ -28,6 +29,7 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-web-access': 'web-access',
   'pi-workspace-history': 'workspace-history',
   'pi-wtf': 'wtf',
+  'pi-lens': 'pi-lens',
 };
 
 export const pluginSettingsIntegrationForPluginId = (
@@ -47,6 +49,7 @@ const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, str
   'web-access': 'pi-web-access',
   'workspace-history': 'pi-workspace-history',
   'wtf': 'pi-wtf',
+  'pi-lens': 'pi-lens',
 };
 
 let pendingTarget: PluginSettingsNavigationTarget | null = null;

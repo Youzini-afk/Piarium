@@ -57,6 +57,10 @@ export function pluginRuntimeStatus(integrationId: PluginSettingsIntegrationId, 
       if (signals.commandsFailed) return 'error';
       if (!signals.commandsChecked) return 'checking';
       return signals.commandNames.has('ctx-stats') ? 'available' : 'not-observed';
+    case 'pi-lens':
+      if (signals.commandsFailed) return 'error';
+      if (!signals.commandsChecked) return 'checking';
+      return signals.commandNames.has('lens-toggle') ? 'available' : 'not-observed';
     case 'workspace-history':
       return recoveryProviderStatus(signals.recoveryProviders, signals.recoveryChecked, signals.recoveryFailed, 'pi-workspace-history');
     case 'wtf':

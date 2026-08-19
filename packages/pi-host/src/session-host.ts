@@ -34,6 +34,8 @@ import type {
   PiAgentProviderActionResult,
   PiConfigDocumentSnapshot,
   PiConfigScope,
+  PiConfigTextAuthorityId,
+  PiConfigTextAuthoritySnapshot,
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
@@ -85,6 +87,7 @@ import {
 import { AgentProviderRegistry } from "./agent-providers/registry.js";
 import { findPiSubagentsTool } from "./agent-providers/pi-subagents-provider.js";
 import { ConfigTextFileEditor } from "./config-text-file-editor.js";
+import { resolveConfigTextAuthority } from "./config-text-authority-resolver.js";
 import { ConfigWatchManager } from "./config-watch-manager.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
@@ -1798,11 +1801,58 @@ export class SessionHost {
     };
   }
 
+  async getConfigTextAuthority(
+    authority: PiConfigTextAuthorityId,
+  ): Promise<PiConfigTextAuthoritySnapshot> {
+    const settings = this.runtime.services.settingsManager;
+    this.#assertConfigTextAuthorityTrusted(authority, "read");
+    const location = await resolveConfigTextAuthority(authority, this.runtime.cwd);
+    const snapshot = await new ConfigTextFileEditor(location.path, "json").read();
+    return {
+      authority,
+      ...snapshot,
+      format: "json",
+      path: location.path,
+      projectTrusted: settings.isProjectTrusted(),
+    };
+  }
+
+  async updateConfigTextAuthority(
+    authority: PiConfigTextAuthorityId,
+    content: string,
+    expectedRevision: string,
+  ): Promise<PiConfigTextAuthoritySnapshot> {
+    const settings = this.runtime.services.settingsManager;
+    this.#assertConfigTextAuthorityTrusted(authority, "write");
+    const location = await resolveConfigTextAuthority(authority, this.runtime.cwd);
+    await settings.flush();
+    const pendingErrors = settings.drainErrors();
+    if (pendingErrors.length > 0) {
+      throw new HostError(
+        "settings_write_failed",
+        pendingErrors.map((entry) => entry.error.message).join("; "),
+      );
+    }
+    const snapshot = await new ConfigTextFileEditor(location.path, "json").update(
+      content,
+      expectedRevision,
+    );
+    await this.session.reload();
+    return {
+      authority,
+      ...snapshot,
+      format: "json",
+      path: location.path,
+      projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
+    };
+  }
+
   async watchConfig(target: PiConfigWatchTarget): Promise<PiConfigWatchSubscription> {
     const settings = this.runtime.services.settingsManager;
     if (
       (target.kind === "document" && target.scope === "project")
       || (target.kind === "text" && target.root === "project")
+      || (target.kind === "text-authority" && target.authority === "pi-lens-project")
       || (target.kind === "settings" && target.scope === "project")
     ) {
       if (!settings.isProjectTrusted()) {
@@ -1844,6 +1894,10 @@ export class SessionHost {
         [location.path],
       );
     }
+    if (target.kind === "text-authority") {
+      const location = await resolveConfigTextAuthority(target.authority, this.runtime.cwd);
+      return this.#configWatches.watch(target, location.watchPaths);
+    }
 
     const settingsRoot = target.scope === "global"
       ? this.#agentDir
@@ -1856,6 +1910,21 @@ export class SessionHost {
 
   unwatchConfig(watchId: string): boolean {
     return this.#configWatches.unwatch(watchId);
+  }
+
+  #assertConfigTextAuthorityTrusted(
+    authority: PiConfigTextAuthorityId,
+    operation: "read" | "write",
+  ): void {
+    if (
+      authority === "pi-lens-project"
+      && !this.runtime.services.settingsManager.isProjectTrusted()
+    ) {
+      throw new HostError(
+        "project_not_trusted",
+        `Project is not trusted; refusing to ${operation} project configuration`,
+      );
+    }
   }
 
   async updateSettings(
