@@ -2,16 +2,46 @@ name: Windows Desktop Build
 
 on:
   workflow_dispatch:
+    inputs:
+      release_ref:
+        description: Optional source ref to package (for example v0.1.0)
+        required: false
+        type: string
+      architecture:
+        description: Windows architecture to package
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - x64
+          - arm64
 
 permissions:
   contents: read
 
 jobs:
   package:
-    name: Package and smoke Windows x64
-    runs-on: windows-latest
+    name: Package and smoke Windows ${{ matrix.architecture }}
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: ${{ fromJSON(inputs.architecture == 'all' && '["x64","arm64"]' || format('["{0}"]', inputs.architecture)) }}
+    runs-on: ${{ matrix.architecture == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
+    env:
+      PIARIUM_TARGET_ARCH: ${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_ref || github.ref }}
+
+      - name: Record packaged source
+        id: source
+        shell: pwsh
+        run: |
+          "sha=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+          $version = (Get-Content -LiteralPath packages/electron/package.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -24,18 +54,38 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build Windows x64 installer
-        run: bun run electron:build:win
+      - name: Build Windows installer
+        run: |
+          bun run --cwd packages/electron build:web-assets
+          bun run --cwd packages/electron prepare:pi-runtime
+          bun run --cwd packages/electron bundle:main
+          bun run --cwd packages/electron rebuild:native
+          node packages/electron/scripts/package.mjs --win --${{ matrix.architecture }} --publish=never
 
       - name: Smoke unpacked Windows application
-        run: bun run electron:smoke:win
+        shell: pwsh
+        run: |
+          $executable = Get-ChildItem -LiteralPath packages/electron/dist -Recurse -File -Filter Piarium.exe |
+            Where-Object { $_.FullName -match 'unpacked' } |
+            Select-Object -First 1
+          if (-not $executable) {
+            throw 'Packaged Piarium.exe was not found under an unpacked output directory.'
+          }
+          node packages/electron/scripts/smoke-windows-unpacked.mjs $executable.FullName
+
+      - name: Stage architecture-specific release assets
+        shell: pwsh
+        run: |
+          $assets = 'packages/electron/release-assets'
+          New-Item -ItemType Directory -Path $assets -Force | Out-Null
+          Copy-Item -LiteralPath "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe" -Destination $assets
+          Copy-Item -LiteralPath "packages/electron/dist/Piarium-${{ steps.source.outputs.version }}-win-${{ matrix.architecture }}.exe.blockmap" -Destination $assets
+          $manifest = if ('${{ matrix.architecture }}' -eq 'arm64') { 'latest-arm64.yml' } else { 'latest.yml' }
+          Copy-Item -LiteralPath 'packages/electron/dist/latest.yml' -Destination (Join-Path $assets $manifest)
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: piarium-windows-${{ github.sha }}
+          name: piarium-windows-${{ matrix.architecture }}-${{ steps.source.outputs.sha }}
           if-no-files-found: error
-          path: |
-            packages/electron/dist/*.exe
-            packages/electron/dist/*.blockmap
-            packages/electron/dist/latest.yml
+          path: packages/electron/release-assets/*

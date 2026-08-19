@@ -86,6 +86,10 @@ bun run electron:build:win
 
 This is equivalent to running `bun run --cwd packages/electron package:win:x64` and produces `packages/electron/dist/*.exe`, `*.blockmap`, and `latest.yml`.
 
+Release ARM64 packages run natively on GitHub's `windows-11-arm` runner. The workflow sets
+`PIARIUM_TARGET_ARCH=arm64`, packages with `--win --arm64`, executes the unpacked ARM64 application,
+and publishes `latest-arm64.yml` beside the architecture-specific installer and blockmap.
+
 After packaging, verify the unpacked application, external-runtime discovery state, health endpoint,
 renderer app-ready signal/error boundary, and a real `node-pty` terminal create/close cycle without
 installing it. The smoke must cover both the no-runtime onboarding state and a selected Pi runtime;
@@ -118,9 +122,9 @@ When these variables are absent, the build falls back to an unsigned NSIS instal
 
 ### Smoke Builds
 
-Run the `Windows Desktop Build` workflow on demand to package and smoke an unsigned Windows x64
-installer on GitHub's Windows runner. The successful run publishes the installer, blockmap, and
-`latest.yml` as one downloadable artifact. Build and smoke the same artifacts locally with
+Run the `Windows Desktop Build` workflow on demand to package and smoke Windows x64, ARM64, or both
+on native GitHub Windows runners. The successful run publishes each installer, blockmap, and
+architecture-specific update manifest as a downloadable artifact. Build and smoke x64 locally with
 `bun run electron:build:win` and `bun run electron:smoke:win` when Visual Studio C++ Build Tools are
 available.
 

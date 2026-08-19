@@ -69,7 +69,7 @@ versions and exact evidence.
 
 ## Download Desktop
 
-The Windows x64 desktop installer is published through
+The Windows x64 and ARM64 desktop installers are published through
 [GitHub Releases](https://github.com/Youzini-afk/Piarium/releases).
 
 ## Get started from source
@@ -85,7 +85,7 @@ Desktop no longer uses a permanently bundled Pi SDK. It discovers a user-level P
 first, then the Pi Runtime flow can select, install, or upgrade Pi without downgrading it. Piarium
 becomes ready only after a real Host handshake and does not need to restart after activation.
 Electron contains the Node runtime needed to run the application, while Pi remains an independently
-managed user-level tool. The ordinary Windows x64 installer has passed no-Pi startup, Runtime Manager,
+managed user-level tool. The ordinary Windows x64 and ARM64 installers have passed no-Pi startup, Runtime Manager,
 health, and terminal-lifecycle smoke checks; optional offline installers and other desktop platforms
 remain at the release-verification boundary. Containers and the VS Code extension keep a pinned,
 self-contained Pi runtime for reproducible unattended and editor-host execution.

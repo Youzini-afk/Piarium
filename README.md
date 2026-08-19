@@ -63,7 +63,8 @@ Piarium 不会 fork 这些扩展，也不会复制它们的私有状态。集成
 
 ## 下载桌面版
 
-Windows x64 桌面安装包发布在 [GitHub Releases](https://github.com/Youzini-afk/Piarium/releases)。
+Windows x64 和 ARM64 桌面安装包发布在
+[GitHub Releases](https://github.com/Youzini-afk/Piarium/releases)。
 
 ## 从源码开始
 
@@ -76,7 +77,7 @@ Windows x64 桌面安装包发布在 [GitHub Releases](https://github.com/Youzin
 
 桌面端不再使用永久捆绑的 Pi SDK。它会先发现用户级 Pi 安装，再由“Pi 运行时”引导用户选择、安装
 或仅向上升级 Pi；完成真实 Host 握手后即可使用，无需重启 Piarium。Electron 自带运行应用所需的
-Node 环境，但 Pi 本身仍作为独立的用户级工具存在。Windows x64 普通安装包已经通过无 Pi 启动、
+Node 环境，但 Pi 本身仍作为独立的用户级工具存在。Windows x64 和 ARM64 普通安装包已经通过无 Pi 启动、
 运行时设置、健康检查和终端生命周期烟测；可选离线包及其他桌面平台仍在发布验证阶段。容器和 VS
 Code 扩展则固定自带经过验证的 Pi 运行时，以保证无人值守部署和编辑器宿主可复现。
 
