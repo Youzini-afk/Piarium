@@ -75,7 +75,14 @@ export const PiWorkStatusPanel: React.FC<PiWorkStatusPanelProps> = ({ sessionId 
   const isMobile = useUIStore((state) => state.isMobile);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const [fleet, setFleet] = React.useState<PiFleetSnapshot | null>(null);
+  const [ownedFleetSessionId, setOwnedFleetSessionId] = React.useState(sessionId);
   const fleetGeneration = React.useRef(0);
+  if (ownedFleetSessionId !== sessionId) {
+    setOwnedFleetSessionId(sessionId);
+    setFleet(null);
+    fleetGeneration.current += 1;
+  }
+  const visibleFleet = ownedFleetSessionId === sessionId ? fleet : null;
   const snapshot = record?.snapshot;
   const stats = record?.stats;
   const snapshotBusy = snapshot?.busy ?? false;
@@ -122,7 +129,7 @@ export const PiWorkStatusPanel: React.FC<PiWorkStatusPanelProps> = ({ sessionId 
     preview: piWorkStatusEntryPreview(entriesById.get(pin.entryId)),
   }));
   const mcp = parseMcpAdapterStatus(record?.extensionStates[MCP_ADAPTER_STATUS_CHANNEL]);
-  const activeFleetEntries = runningFleetEntries(fleet?.entries ?? []);
+  const activeFleetEntries = runningFleetEntries(visibleFleet?.entries ?? []);
   const activeLabel = snapshot.isCompacting
     ? t('chat.workStatus.state.compacting')
     : snapshot.retryAttempt > 0
@@ -193,7 +200,7 @@ export const PiWorkStatusPanel: React.FC<PiWorkStatusPanelProps> = ({ sessionId 
 
           {activeFleetEntries.length > 0 ? (
             <WorkSection icon="ai-agent" title={t('settings.page.fleet.title')}>
-              <MetricRow label={t('settings.piarium.fleet.active.title')} value={fleet?.totalActive ?? activeFleetEntries.length} />
+              <MetricRow label={t('settings.piarium.fleet.active.title')} value={visibleFleet?.totalActive ?? activeFleetEntries.length} />
               <div className="mt-1 space-y-1.5">
                 {activeFleetEntries.map((entry) => (
                   <div key={`${entry.providerId}:${entry.key}`} className="rounded-md border border-border/50 bg-background/50 px-2 py-1.5">

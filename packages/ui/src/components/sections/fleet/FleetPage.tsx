@@ -45,6 +45,11 @@ import {
   type FleetKindFilter,
   type FleetStateFilter,
 } from './fleetPresentation';
+import {
+  fleetSessionTargetKey,
+  fleetUiRequestIsCurrent,
+  type FleetUiRequestIdentity,
+} from './fleetRequestIdentity';
 
 const FLEET_REFRESH_INTERVAL_MS = 2_000;
 
@@ -140,11 +145,56 @@ export const FleetPage: React.FC = () => {
   const [stateFilter, setStateFilter] = React.useState<FleetStateFilter>('all');
   const [providerFilter, setProviderFilter] = React.useState<'all' | string>('all');
   const [query, setQuery] = React.useState('');
-  const targetKey = sessionId ? `${runtimeKey}:session:${sessionId}` : null;
+  const targetKey = sessionId ? fleetSessionTargetKey(runtimeKey, sessionId) : null;
   const targetKeyRef = React.useRef(targetKey);
   targetKeyRef.current = targetKey;
+  const sessionIdRef = React.useRef(sessionId);
+  sessionIdRef.current = sessionId;
   const requestGenerationRef = React.useRef(0);
   const inFlightRef = React.useRef<{ key: string; promise: Promise<void> } | null>(null);
+  const [ownedTargetKey, setOwnedTargetKey] = React.useState(targetKey);
+  if (ownedTargetKey !== targetKey) {
+    setOwnedTargetKey(targetKey);
+    requestGenerationRef.current += 1;
+    inFlightRef.current = null;
+    setSnapshot(null);
+    setError(null);
+    setSelectedIdentity(null);
+    setComposingRun(false);
+    setLogs(null);
+    setBusyAction(null);
+    setRunningCommand(null);
+    setLoading(Boolean(sessionId));
+  }
+  const sessionMatches = ownedTargetKey === targetKey;
+  const visibleSnapshot = sessionMatches ? snapshot : null;
+  const visibleError = sessionMatches ? error : null;
+  const visibleLogs = sessionMatches ? logs : null;
+  const visibleBusyAction = sessionMatches ? busyAction : null;
+  const visibleSelectedIdentity = sessionMatches ? selectedIdentity : null;
+  const visibleComposingRun = sessionMatches ? composingRun : false;
+
+  const currentIdentity = (): {
+    generation: number;
+    runtimeKey: string;
+    sessionId: string | null;
+    targetKey: string | null;
+  } => ({
+    generation: requestGenerationRef.current,
+    runtimeKey: getRuntimeKey(),
+    sessionId: sessionIdRef.current,
+    targetKey: targetKeyRef.current,
+  });
+
+  const captureIdentity = React.useCallback((): FleetUiRequestIdentity | null => {
+    if (!sessionId || !targetKey) return null;
+    return {
+      generation: requestGenerationRef.current,
+      runtimeKey,
+      sessionId,
+      targetKey,
+    };
+  }, [runtimeKey, sessionId, targetKey]);
 
   const refresh = React.useCallback((showLoading = false): Promise<void> => {
     if (!sessionId || !targetKey) return Promise.resolve();
@@ -185,12 +235,6 @@ export const FleetPage: React.FC = () => {
   React.useEffect(() => {
     requestGenerationRef.current += 1;
     inFlightRef.current = null;
-    setSnapshot(null);
-    setError(null);
-    setSelectedIdentity(null);
-    setComposingRun(false);
-    setLogs(null);
-    setLoading(Boolean(sessionId));
     if (!sessionId) return;
     void refresh(true);
     const timer = globalThis.setInterval(() => void refresh(false), FLEET_REFRESH_INTERVAL_MS);
@@ -206,36 +250,41 @@ export const FleetPage: React.FC = () => {
   );
 
   const runCommand = React.useCallback(async (command: string) => {
-    if (!sessionId || runningCommand) return;
+    const captured = captureIdentity();
+    if (!captured || runningCommand) return;
     setRunningCommand(command);
     try {
-      await executeCommand(sessionId, `/${command}`);
+      await executeCommand(captured.sessionId, `/${command}`);
+      if (!fleetUiRequestIsCurrent(captured, currentIdentity())) return;
       await refresh(false);
     } catch (commandError) {
+      if (!fleetUiRequestIsCurrent(captured, currentIdentity())) return;
       toast.error(t('settings.piarium.fleet.commandFailed'), {
         description: commandError instanceof Error ? commandError.message : String(commandError),
       });
     } finally {
-      setRunningCommand(null);
+      if (fleetUiRequestIsCurrent(captured, currentIdentity())) {
+        setRunningCommand(null);
+      }
     }
-  }, [executeCommand, refresh, runningCommand, sessionId, t]);
+  }, [captureIdentity, executeCommand, refresh, runningCommand, t]);
 
   const openSubagentsSettings = React.useCallback(() => {
     requestPluginSettingsIntegration('subagents');
     setSettingsPage('plugin-settings');
   }, [setSettingsPage]);
 
-  const providers = snapshot?.providers ?? [];
+  const providers = visibleSnapshot?.providers ?? [];
   const visibleEntries = React.useMemo(
-    () => filterFleetEntries(snapshot?.entries ?? [], {
+    () => filterFleetEntries(visibleSnapshot?.entries ?? [], {
       kind: kindFilter,
       providerId: providerFilter,
       query,
       state: stateFilter,
     }),
-    [kindFilter, providerFilter, query, snapshot?.entries, stateFilter],
+    [kindFilter, providerFilter, query, visibleSnapshot?.entries, stateFilter],
   );
-  const selectedEntry = findFleetEntry(snapshot, selectedIdentity);
+  const selectedEntry = findFleetEntry(visibleSnapshot, visibleSelectedIdentity);
   const selectedProvider = selectedEntry
     ? findFleetProvider(providers, selectedEntry.providerId)
     : runProviderId
@@ -254,7 +303,8 @@ export const FleetPage: React.FC = () => {
     payload?: JsonValue;
     providerId: string;
   }) => {
-    if (!sessionId || busyAction) return;
+    const captured = captureIdentity();
+    if (!captured || busyAction) return false;
     const actionKey = `${input.providerId}:${input.action}:${input.entry?.key ?? 'provider'}`;
     setBusyAction(actionKey);
     try {
@@ -263,21 +313,27 @@ export const FleetPage: React.FC = () => {
         ...(input.entry ? { entryKey: input.entry.key } : {}),
         ...(input.payload === undefined ? {} : { payload: input.payload }),
         providerId: input.providerId,
-        sessionId,
+        sessionId: captured.sessionId,
       });
+      if (!fleetUiRequestIsCurrent(captured, currentIdentity())) return false;
       setSnapshot(result.snapshot);
       if (result.entry) setSelectedIdentity(fleetEntryIdentity(result.entry));
       if (result.logs && input.entry) {
         setLogs({ identity: fleetEntryIdentity(result.entry ?? input.entry), value: result.logs });
       }
+      return true;
     } catch (actionError) {
+      if (!fleetUiRequestIsCurrent(captured, currentIdentity())) return false;
       toast.error(t('settings.piarium.fleet.actionFailed'), {
         description: actionError instanceof Error ? actionError.message : String(actionError),
       });
+      return false;
     } finally {
-      setBusyAction(null);
+      if (fleetUiRequestIsCurrent(captured, currentIdentity())) {
+        setBusyAction(null);
+      }
     }
-  }, [busyAction, sessionId, t]);
+  }, [busyAction, captureIdentity, t]);
 
   const submitRun = React.useCallback(async () => {
     if (!runProviderId) return;
@@ -292,7 +348,8 @@ export const FleetPage: React.FC = () => {
       triggerOnCompletion: runDraft.triggerOnCompletion,
       ...(runDraft.timeoutSeconds === undefined ? {} : { timeoutSeconds: runDraft.timeoutSeconds }),
     };
-    await runFleetAction({ action: 'run', payload, providerId: runProviderId });
+    const applied = await runFleetAction({ action: 'run', payload, providerId: runProviderId });
+    if (!applied) return;
     setComposingRun(false);
     setRunDraft(emptyRunDraft());
   }, [runDraft, runFleetAction, runProviderId]);
@@ -313,7 +370,7 @@ export const FleetPage: React.FC = () => {
     return key ? t(key) : action;
   }, [t]);
 
-  const showDetail = Boolean(selectedEntry || composingRun);
+  const showDetail = Boolean(selectedEntry || visibleComposingRun);
   const nowLabel = formatFleetDuration;
 
   return (
@@ -378,17 +435,17 @@ export const FleetPage: React.FC = () => {
             {t('settings.piarium.fleet.loading')}
           </div>
         ) : null}
-        {error ? (
-          <p className="mt-3 break-words typography-meta text-[var(--status-error)]">{error}</p>
+        {visibleError ? (
+          <p className="mt-3 break-words typography-meta text-[var(--status-error)]">{visibleError}</p>
         ) : null}
       </SettingsSection>
 
       <SettingsSection
         settingsItem="fleet.list"
         title={t('settings.piarium.fleet.list.title')}
-        headerAction={snapshot ? (
+        headerAction={visibleSnapshot ? (
           <span className="tabular-nums typography-meta text-muted-foreground">
-            {t('settings.piarium.fleet.active.count', { count: snapshot.totalActive })}
+            {t('settings.piarium.fleet.active.count', { count: visibleSnapshot.totalActive })}
           </span>
         ) : undefined}
       >
@@ -457,7 +514,7 @@ export const FleetPage: React.FC = () => {
                 <div className="space-y-1.5">
                   {visibleEntries.map((item) => {
                     const identity = fleetEntryIdentity(item);
-                    const selected = identity === selectedIdentity && !composingRun;
+                    const selected = identity === visibleSelectedIdentity && !visibleComposingRun;
                     return (
                       <button
                         key={identity}
@@ -503,9 +560,9 @@ export const FleetPage: React.FC = () => {
                   </p>
                 </div>
               )}
-              {snapshot && snapshot.omitted > 0 ? (
+              {visibleSnapshot && visibleSnapshot.omitted > 0 ? (
                 <p className="typography-meta text-muted-foreground">
-                  {t('settings.piarium.fleet.active.omitted', { count: snapshot.omitted })}
+                  {t('settings.piarium.fleet.active.omitted', { count: visibleSnapshot.omitted })}
                 </p>
               ) : null}
             </div>
@@ -526,7 +583,7 @@ export const FleetPage: React.FC = () => {
                   {t('settings.piarium.fleet.back')}
                 </Button>
               ) : null}
-              {composingRun && runProviderId ? (
+              {visibleComposingRun && runProviderId ? (
                 <div className="space-y-4">
                   <p className="typography-ui-label text-foreground">{t('settings.piarium.fleet.run.title')}</p>
                   {runProviders.length > 1 ? (
@@ -580,7 +637,7 @@ export const FleetPage: React.FC = () => {
                     <Button
                       type="button"
                       size="sm"
-                      disabled={!runDraft.name.trim() || !runDraft.command.trim() || busyAction !== null}
+                      disabled={!runDraft.name.trim() || !runDraft.command.trim() || visibleBusyAction !== null}
                       onClick={() => void submitRun()}
                     >
                       {t('settings.piarium.fleet.run.submit')}
@@ -650,7 +707,7 @@ export const FleetPage: React.FC = () => {
                           type="button"
                           variant={descriptor.destructive ? 'destructive' : 'outline'}
                           size="sm"
-                          disabled={busyAction !== null}
+                          disabled={visibleBusyAction !== null}
                           onClick={() => requestEntryAction(selectedEntry, descriptor)}
                         >
                           {actionLabel(descriptor.action)}
@@ -661,15 +718,15 @@ export const FleetPage: React.FC = () => {
                   {entryAdvertisesAction(selectedEntry, 'logs') ? (
                     <div>
                       <p className="typography-ui-label text-foreground">{t('settings.piarium.fleet.logs.title')}</p>
-                      {logs && logs.identity === fleetEntryIdentity(selectedEntry) ? (
+                      {visibleLogs && visibleLogs.identity === fleetEntryIdentity(selectedEntry) ? (
                         <>
-                          {logs.value.truncated ? (
+                          {visibleLogs.value.truncated ? (
                             <p className="mt-1 typography-meta text-muted-foreground">
-                              {t('settings.piarium.fleet.logs.truncated', { bytes: logs.value.bytesRead })}
+                              {t('settings.piarium.fleet.logs.truncated', { bytes: visibleLogs.value.bytesRead })}
                             </p>
                           ) : null}
                           <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-background/40 p-3 typography-micro text-foreground">
-                            {logs.value.text}
+                            {visibleLogs.value.text}
                           </pre>
                         </>
                       ) : (
