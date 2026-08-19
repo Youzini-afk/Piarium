@@ -108,6 +108,7 @@ export const PluginsPage: React.FC = () => {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [customSource, setCustomSource] = React.useState('');
   const [installScope, setInstallScope] = React.useState<PiPackageScope>('global');
+  const [recommendedExpanded, setRecommendedExpanded] = React.useState(false);
   const [busyAction, setBusyAction] = React.useState<{
     action: PackageAction;
     scope?: PiPackageScope;
@@ -218,6 +219,12 @@ export const PluginsPage: React.FC = () => {
     ? isPiPackageUpdatable(customPackage.source)
     : false;
   const isBusy = busyAction !== null;
+  const recommendedToggleLabel = t(
+    recommendedExpanded
+      ? 'sessions.sidebar.group.collapseAria'
+      : 'sessions.sidebar.group.expandAria',
+    { label: t('settings.piarium.plugins.recommended.title') },
+  );
 
   return (
     <SettingsPageLayout
@@ -386,86 +393,6 @@ export const PluginsPage: React.FC = () => {
       </SettingsSection>
 
       <SettingsSection
-        settingsItem="plugins.recommended"
-        title={t('settings.piarium.plugins.recommended.title')}
-        description={t('settings.piarium.plugins.recommended.description')}
-      >
-        {RECOMMENDED_PACKAGES.map((item) => {
-          const configured = findPiPackage(packages, item.name, installScope);
-          const source = configured?.source ?? item.source;
-          const action = busyAction?.source === source && busyAction.scope === installScope
-            ? busyAction.action
-            : null;
-          const packageAction = action === 'set-enabled' ? null : action;
-          return (
-            <div key={item.name} className="rounded-lg border border-border/60 px-3 py-3">
-              <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Icon
-                      name="plug-2"
-                      className={configured?.installed && configured.enabled
-                        ? 'size-4 text-[var(--status-success)]'
-                        : configured?.installed
-                          ? 'size-4 text-muted-foreground'
-                          : configured
-                          ? 'size-4 text-[var(--status-warning)]'
-                          : 'size-4 text-muted-foreground'}
-                    />
-                    <span className="typography-ui-label text-foreground">{item.name}</span>
-                    {loaded ? <PackageStatus packageInfo={configured} /> : null}
-                  </div>
-                  <p className="typography-meta text-muted-foreground">{t(item.descriptionKey)}</p>
-                  <p className="break-all font-mono typography-micro text-muted-foreground">{source}</p>
-                </div>
-                {!configured && loaded ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    disabled={isBusy}
-                    onClick={() => void runPackageAction('install', item.source, installScope)}
-                    className="!font-normal"
-                  >
-                    {packageActionLabel(packageAction, 'install', t)}
-                  </Button>
-                ) : configured ? (
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Switch
-                      checked={configured.enabled}
-                      disabled={isBusy || !configured.installed}
-                      onCheckedChange={(checked) => void runPackageAction(
-                        'set-enabled',
-                        configured.source,
-                        configured.scope,
-                        checked,
-                      )}
-                      aria-label={t('settings.piarium.plugins.actions.activationAria', { name: configured.name })}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      disabled={isBusy}
-                      onClick={() => openPackageConfiguration(configured)}
-                      className="!font-normal"
-                    >
-                      {t('settings.piarium.plugins.actions.configure')}
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-        {loaded && missingRecommended.length === 0 ? (
-          <p className="typography-meta text-[var(--status-success)]">
-            {t('settings.piarium.plugins.recommended.complete')}
-          </p>
-        ) : null}
-      </SettingsSection>
-
-      <SettingsSection
         settingsItem="plugins.source"
         title={t('settings.piarium.plugins.source.title')}
         description={t('settings.piarium.plugins.source.description')}
@@ -510,6 +437,107 @@ export const PluginsPage: React.FC = () => {
               )}
           </Button>
         </form>
+      </SettingsSection>
+
+      <SettingsSection
+        settingsItem="plugins.recommended"
+        title={t('settings.piarium.plugins.recommended.title')}
+        description={t('settings.piarium.plugins.recommended.description')}
+        headerAction={(
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setRecommendedExpanded((expanded) => !expanded)}
+            aria-expanded={recommendedExpanded}
+            aria-label={recommendedToggleLabel}
+            title={recommendedToggleLabel}
+          >
+            <Icon
+              name="arrow-down-s"
+              className={recommendedExpanded
+                ? 'size-4 rotate-180 transition-transform duration-200'
+                : 'size-4 transition-transform duration-200'}
+            />
+          </Button>
+        )}
+        contentClassName={recommendedExpanded ? undefined : 'hidden'}
+      >
+        <div className="space-y-5">
+          {RECOMMENDED_PACKAGES.map((item) => {
+            const configured = findPiPackage(packages, item.name, installScope);
+            const source = configured?.source ?? item.source;
+            const action = busyAction?.source === source && busyAction.scope === installScope
+              ? busyAction.action
+              : null;
+            const packageAction = action === 'set-enabled' ? null : action;
+            return (
+              <div key={item.name} className="rounded-lg border border-border/60 px-3 py-3">
+                <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Icon
+                        name="plug-2"
+                        className={configured?.installed && configured.enabled
+                          ? 'size-4 text-[var(--status-success)]'
+                          : configured?.installed
+                            ? 'size-4 text-muted-foreground'
+                            : configured
+                            ? 'size-4 text-[var(--status-warning)]'
+                            : 'size-4 text-muted-foreground'}
+                      />
+                      <span className="typography-ui-label text-foreground">{item.name}</span>
+                      {loaded ? <PackageStatus packageInfo={configured} /> : null}
+                    </div>
+                    <p className="typography-meta text-muted-foreground">{t(item.descriptionKey)}</p>
+                    <p className="break-all font-mono typography-micro text-muted-foreground">{source}</p>
+                  </div>
+                  {!configured && loaded ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={isBusy}
+                      onClick={() => void runPackageAction('install', item.source, installScope)}
+                      className="!font-normal"
+                    >
+                      {packageActionLabel(packageAction, 'install', t)}
+                    </Button>
+                  ) : configured ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Switch
+                        checked={configured.enabled}
+                        disabled={isBusy || !configured.installed}
+                        onCheckedChange={(checked) => void runPackageAction(
+                          'set-enabled',
+                          configured.source,
+                          configured.scope,
+                          checked,
+                        )}
+                        aria-label={t('settings.piarium.plugins.actions.activationAria', { name: configured.name })}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        disabled={isBusy}
+                        onClick={() => openPackageConfiguration(configured)}
+                        className="!font-normal"
+                      >
+                        {t('settings.piarium.plugins.actions.configure')}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+          {loaded && missingRecommended.length === 0 ? (
+            <p className="typography-meta text-[var(--status-success)]">
+              {t('settings.piarium.plugins.recommended.complete')}
+            </p>
+          ) : null}
+        </div>
       </SettingsSection>
 
     </SettingsPageLayout>

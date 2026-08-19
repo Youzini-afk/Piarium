@@ -643,18 +643,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['pi', 'packages', 'plugins', 'update', 'remove'],
   },
   {
-    id: 'plugins.recommended',
-    page: 'plugins',
-    titleKey: 'settings.piarium.plugins.recommended.title',
-    descriptionKey: 'settings.piarium.plugins.recommended.description',
-    keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf'],
-  },
-  {
     id: 'plugins.source',
     page: 'plugins',
     titleKey: 'settings.piarium.plugins.source.title',
     descriptionKey: 'settings.piarium.plugins.source.description',
     keywords: ['install', 'npm', 'git', 'url', 'local path', 'source'],
+  },
+  {
+    id: 'plugins.recommended',
+    page: 'plugins',
+    titleKey: 'settings.piarium.plugins.recommended.title',
+    descriptionKey: 'settings.piarium.plugins.recommended.description',
+    keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf'],
   },
   {
     id: 'plugin-settings.configuration',
