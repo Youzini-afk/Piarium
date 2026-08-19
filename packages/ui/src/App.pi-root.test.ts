@@ -18,6 +18,7 @@ describe('Pi main application root', () => {
     expect(source).not.toContain('MAX_RETRIES');
     expect(source).not.toContain('providersCount');
     expect(source).toContain('void state.loadCatalog()');
+    expect(source).toContain('resolveDesktopWorkspaceView');
     expect(source).not.toContain('initializeLegacyApp');
     expect(source).not.toContain('legacyIsConnected');
   });

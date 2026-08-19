@@ -6,8 +6,8 @@ import { LocalPiRuntimeCard } from './LocalPiRuntimeCard';
 
 interface LocalSetupScreenProps {
   isFromRecovery?: boolean;
-  onBack: () => void;
-  onRuntimeAvailable?: () => void;
+  onBack?: () => void;
+  onRuntimeAvailable?: () => void | Promise<void>;
   onSwitchToRemote?: () => void;
 }
 
@@ -33,16 +33,19 @@ export function LocalSetupScreen({
   return (
     <div
       className="relative flex h-full cursor-default select-none items-center justify-center bg-transparent p-8"
+      data-pi-runtime-setup="true"
       onMouseDown={handleDragStart}
     >
       <div className="w-full max-w-lg space-y-6">
-        <Button
-          variant="ghost"
-          onClick={onBack}
-          className="p-0 text-muted-foreground hover:text-foreground"
-        >
-          {t('onboarding.common.actions.back')}
-        </Button>
+        {onBack ? (
+          <Button
+            variant="ghost"
+            onClick={onBack}
+            className="p-0 text-muted-foreground hover:text-foreground"
+          >
+            {t('onboarding.common.actions.back')}
+          </Button>
+        ) : null}
 
         <header className="space-y-2 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">

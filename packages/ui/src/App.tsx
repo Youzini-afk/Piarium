@@ -28,6 +28,12 @@ import {
   type BootInjectionStatus,
   type DesktopBootView,
 } from '@/lib/desktopBoot';
+import {
+  desktopWorkspaceIsOperable,
+  resolveDesktopWorkspaceView,
+} from '@/lib/desktopWorkspaceView';
+import { shouldApplyPiRuntimeSnapshot } from '@/lib/pi-runtime/snapshot-order';
+import type { PiRuntimeSnapshot } from '@piarium/protocol';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -209,6 +215,8 @@ function App({ apis }: AppProps) {
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
     return getBootInjectionStatus();
   });
+  const [runtimeSnapshot, setRuntimeSnapshot] = React.useState<PiRuntimeSnapshot | null>(null);
+  const runtimeSnapshotRevisionRef = React.useRef(0);
   const [bootView, setBootView] = React.useState<DesktopBootView | null>(() => {
     const outcome = getInjectedBootOutcome();
     return outcome !== null
@@ -245,6 +253,60 @@ function App({ apis }: AppProps) {
     });
   }, [runtimeEndpointEpoch]);
 
+  React.useEffect(() => {
+    runtimeSnapshotRevisionRef.current = 0;
+    setRuntimeSnapshot(null);
+    const piRuntime = apis.piRuntime;
+    if (!piRuntime) {
+      setRuntimeSnapshot({
+        installations: [],
+        revision: 0,
+        status: 'failed',
+      });
+      return;
+    }
+    let cancelled = false;
+    const applySnapshot = (next: PiRuntimeSnapshot) => {
+      if (cancelled) {
+        return;
+      }
+      if (!shouldApplyPiRuntimeSnapshot(runtimeSnapshotRevisionRef.current, next)) {
+        return;
+      }
+      runtimeSnapshotRevisionRef.current = next.revision;
+      setRuntimeSnapshot(next);
+    };
+    const unsubscribe = piRuntime.subscribe(applySnapshot);
+    void piRuntime.getSnapshot().then(applySnapshot).catch((error) => {
+      if (cancelled || runtimeSnapshotRevisionRef.current > 0) {
+        return;
+      }
+      setRuntimeSnapshot({
+        installations: [],
+        issue: error instanceof Error ? error.message : String(error),
+        revision: 0,
+        status: 'failed',
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [apis.piRuntime, runtimeEndpointEpoch]);
+
+  React.useEffect(() => {
+    if (!isDesktopRuntime || runtimeSnapshot?.status !== 'ready') {
+      return;
+    }
+    const state = usePiSessionStore.getState();
+    if (state.catalogLoaded || state.catalogLoading) {
+      return;
+    }
+    void state.loadCatalog().catch((catalogError) => {
+      console.warn('[Piarium] failed to load the Pi session catalog after the runtime became ready:', catalogError);
+    });
+  }, [isDesktopRuntime, runtimeSnapshot?.status, runtimeEndpointEpoch]);
+
   useWideChatLayoutClass(wideChatLayoutEnabled);
 
   React.useEffect(() => {
@@ -266,7 +328,21 @@ function App({ apis }: AppProps) {
 
   const bootOutcomeKnown = bootInjectionStatus === 'valid';
   const bootViewIsMain = bootView?.screen === 'main';
-  const runtimeReady = piCatalogLoaded;
+  const desktopWorkspaceView = React.useMemo(
+    () =>
+      isDesktopRuntime
+        ? resolveDesktopWorkspaceView({
+            catalogError: piRuntimeError,
+            catalogLoaded: piCatalogLoaded,
+            catalogLoading: piCatalogLoading,
+            runtimeStatus: runtimeSnapshot?.status ?? null,
+          })
+        : null,
+    [isDesktopRuntime, piCatalogLoaded, piCatalogLoading, piRuntimeError, runtimeSnapshot?.status],
+  );
+  const runtimeReady = isDesktopRuntime
+    ? desktopWorkspaceIsOperable(desktopWorkspaceView ?? 'loading', isSwitchingDirectory)
+    : piCatalogLoaded;
 
   // Splash dismissal: use the authoritative loading gate from desktopBoot.
   // Desktop shells strictly require a valid boot outcome before dismissing.
@@ -274,7 +350,7 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     if (!canDismissInitialLoading({
       isDesktopShell: isDesktopRuntime,
-      runtimeReady,
+      runtimeReady: runtimeReady || desktopWorkspaceView === 'catalog-recovery',
       bootOutcomeKnown,
       bootViewIsMain,
     })) {
@@ -292,7 +368,7 @@ function App({ apis }: AppProps) {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [isDesktopRuntime, runtimeReady, bootOutcomeKnown, bootViewIsMain]);
+  }, [bootOutcomeKnown, bootViewIsMain, desktopWorkspaceView, isDesktopRuntime, runtimeReady]);
 
   // Deterministic malformed handling: update splash text so the user
   // sees a specific error instead of a generic spinner, but do NOT
@@ -447,12 +523,37 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!runtimeReady || isSwitchingDirectory) return;
+    (window as unknown as { __piariumStartupDiagnostics?: unknown }).__piariumStartupDiagnostics = {
+      bootView,
+      catalogError: piRuntimeError,
+      catalogLoaded: piCatalogLoaded,
+      isSwitchingDirectory,
+      runtimeReady,
+      runtimeSnapshot,
+      workspaceView: desktopWorkspaceView,
+    };
+  }, [
+    bootView,
+    desktopWorkspaceView,
+    isSwitchingDirectory,
+    piCatalogLoaded,
+    piRuntimeError,
+    runtimeReady,
+    runtimeSnapshot,
+  ]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (isDesktopRuntime && !bootView) return;
+    const bootSurfaceReady =
+      bootView?.screen === 'chooser' || bootView?.screen === 'recovery';
+    if (!runtimeReady && !bootSurfaceReady) return;
+    if (isSwitchingDirectory && desktopWorkspaceView !== 'runtime-setup') return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
     (window as unknown as { __piariumAppReady?: boolean }).__piariumAppReady = true;
     window.dispatchEvent(new Event('piarium:app-ready'));
-  }, [runtimeReady, isSwitchingDirectory]);
+  }, [bootView, desktopWorkspaceView, isDesktopRuntime, isSwitchingDirectory, runtimeReady]);
 
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
@@ -538,6 +639,27 @@ function App({ apis }: AppProps) {
     window.location.reload();
   }, []);
 
+  const handlePiRuntimeAvailable = React.useCallback(async () => {
+    try {
+      await usePiSessionStore.getState().loadCatalog();
+    } catch (catalogError) {
+      console.warn('[Piarium] failed to load the Pi session catalog after selecting a runtime:', catalogError);
+    }
+    setBootView((current) => current?.screen === 'main' ? current : { screen: 'main' });
+  }, []);
+
+  const renderDesktopOnboarding = (screen: React.ReactNode) => (
+    <ErrorBoundary>
+      <RuntimeAPIProvider apis={apis}>
+        <div className="h-full text-foreground bg-background">
+          <React.Suspense fallback={<div className="h-full" />}>
+            {screen}
+          </React.Suspense>
+        </div>
+      </RuntimeAPIProvider>
+    </ErrorBoundary>
+  );
+
   // Map boot outcome kind to recovery variant
   const mapBootViewToRecoveryVariant = (view: DesktopBootView): RecoveryVariant | undefined => {
     if (view.screen === 'recovery') {
@@ -552,18 +674,12 @@ function App({ apis }: AppProps) {
   if (isDesktopRuntime && bootView && bootView.screen !== 'main') {
     // First-launch chooser
     if (bootView.screen === 'chooser') {
-      return (
-        <ErrorBoundary>
-          <div className="h-full text-foreground bg-background">
-            <React.Suspense fallback={<div className="h-full" />}>
-              <OnboardingScreen
-                mode="first-launch"
-                localAvailable={bootView.localAvailable !== false}
-                onRuntimeAvailable={handleDesktopBootDismiss}
-              />
-            </React.Suspense>
-          </div>
-        </ErrorBoundary>
+      return renderDesktopOnboarding(
+        <OnboardingScreen
+          mode="first-launch"
+          localAvailable={bootView.localAvailable !== false}
+          onRuntimeAvailable={handlePiRuntimeAvailable}
+        />,
       );
     }
 
@@ -571,21 +687,15 @@ function App({ apis }: AppProps) {
     const recoveryVariant = mapBootViewToRecoveryVariant(bootView);
     const hostUrl = bootView.screen === 'recovery' && 'url' in bootView ? bootView.url : undefined;
 
-    return (
-      <ErrorBoundary>
-        <div className="h-full text-foreground bg-background">
-          <React.Suspense fallback={<div className="h-full" />}>
-            <OnboardingScreen
-              mode="recovery"
-              recoveryVariant={recoveryVariant}
-              recoveryHostUrl={hostUrl}
-              recoveryHostLabel={undefined}
-              localAvailable={bootView.localAvailable !== false}
-              onRuntimeAvailable={handleDesktopBootDismiss}
-            />
-          </React.Suspense>
-        </div>
-      </ErrorBoundary>
+    return renderDesktopOnboarding(
+      <OnboardingScreen
+        mode="recovery"
+        recoveryVariant={recoveryVariant}
+        recoveryHostUrl={hostUrl}
+        recoveryHostLabel={undefined}
+        localAvailable={bootView.localAvailable !== false}
+        onRuntimeAvailable={handleDesktopBootDismiss}
+      />,
     );
   }
 
@@ -606,7 +716,19 @@ function App({ apis }: AppProps) {
     );
   }
 
-  if (!embeddedSessionChat && !piCatalogLoaded && piRuntimeError) {
+  if (isDesktopRuntime && (!bootView || bootView.screen === 'main') && desktopWorkspaceView === 'runtime-setup') {
+    return renderDesktopOnboarding(
+      <OnboardingScreen
+        mode="local-setup"
+        onRuntimeAvailable={handlePiRuntimeAvailable}
+      />,
+    );
+  }
+
+  if (
+    (!embeddedSessionChat && !isDesktopRuntime && !piCatalogLoaded && piRuntimeError)
+    || desktopWorkspaceView === 'catalog-recovery'
+  ) {
     return (
       <ErrorBoundary>
         <RuntimeInitializationRecovery

@@ -73,13 +73,15 @@ export function OnboardingScreen({
   if (effectiveMode === 'local-setup') {
     return (
       <LocalSetupScreen
-        onBack={() => {
-          if (recoveryEnteredLocalSetup) {
-            setRecoveryEnteredLocalSetup(false);
-          } else {
-            onBack?.();
+        onBack={recoveryEnteredLocalSetup || onBack
+          ? () => {
+            if (recoveryEnteredLocalSetup) {
+              setRecoveryEnteredLocalSetup(false);
+            } else {
+              onBack?.();
+            }
           }
-        }}
+          : undefined}
         onRuntimeAvailable={onRuntimeAvailable}
         isFromRecovery={recoveryEnteredLocalSetup}
         onSwitchToRemote={() => {

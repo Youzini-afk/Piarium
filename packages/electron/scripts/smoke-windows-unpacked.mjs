@@ -29,9 +29,38 @@ const assertNear = (actual, expected, label) => {
   }
 };
 
+const formatConsoleArg = (arg) => {
+  if (arg == null) return String(arg);
+  if (arg.type === 'string' || arg.type === 'number' || arg.type === 'boolean' || arg.type === 'undefined') {
+    return String(arg.value);
+  }
+  if (typeof arg.description === 'string' && arg.description.length > 0) return arg.description.slice(0, 500);
+  if (arg.value !== undefined) {
+    try {
+      return typeof arg.value === 'string' ? arg.value.slice(0, 500) : JSON.stringify(arg.value).slice(0, 500);
+    } catch {
+      return String(arg.value).slice(0, 500);
+    }
+  }
+  return arg.type ?? 'unknown';
+};
+
+const describeSmokeFailure = (reason, extras = {}) => {
+  const lastState = extras.lastState ?? extras.state ?? null;
+  const payload = {
+    diagnostics: extras.diagnostics ?? lastState?.diagnostics ?? null,
+    lastState,
+    rendererConsole: extras.consoleMessages ?? [],
+    runtimeExceptions: extras.exceptions ?? [],
+  };
+  return new Error(`${reason}\n${JSON.stringify(payload, null, 2)}`);
+};
+
 const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) => {
   const socket = new WebSocket(webSocketDebuggerUrl);
   const pending = new Map();
+  const consoleMessages = [];
+  const exceptions = [];
   let nextId = 1;
   const connectionTimer = setTimeout(() => {
     socket.close();
@@ -41,6 +70,31 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
     clearTimeout(connectionTimer);
     reject(new Error('Unable to connect to the packaged renderer.'));
   };
+  const send = (method, params) => new Promise((sendResolve, sendReject) => {
+    const id = nextId;
+    nextId += 1;
+    const requestTimer = setTimeout(() => {
+      pending.delete(id);
+      sendReject(new Error(`Timed out calling ${method}.`));
+    }, DEVTOOLS_REQUEST_TIMEOUT_MS);
+    pending.set(id, {
+      reject: (error) => {
+        clearTimeout(requestTimer);
+        sendReject(error);
+      },
+      resolve: (value) => {
+        clearTimeout(requestTimer);
+        sendResolve(value);
+      },
+    });
+    try {
+      socket.send(JSON.stringify({ id, method, params }));
+    } catch (error) {
+      pending.delete(id);
+      clearTimeout(requestTimer);
+      sendReject(error);
+    }
+  });
 
   socket.addEventListener('error', rejectConnection, { once: true });
   socket.addEventListener('open', () => {
@@ -48,6 +102,24 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
     socket.removeEventListener('error', rejectConnection);
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data));
+      if (message.method === 'Runtime.consoleAPICalled') {
+        const params = message.params ?? {};
+        consoleMessages.push({
+          text: (params.args ?? []).map(formatConsoleArg).join(' ').slice(0, 2_000),
+          timestamp: params.timestamp,
+          type: params.type ?? 'log',
+        });
+        if (consoleMessages.length > 80) consoleMessages.shift();
+        return;
+      }
+      if (message.method === 'Runtime.exceptionThrown') {
+        const detail = message.params?.exceptionDetails ?? {};
+        exceptions.push({
+          text: detail.text ?? detail.exception?.description ?? JSON.stringify(detail).slice(0, 1_000),
+        });
+        if (exceptions.length > 20) exceptions.shift();
+        return;
+      }
       if (typeof message.id !== 'number') return;
       const request = pending.get(message.id);
       if (!request) return;
@@ -60,38 +132,18 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
       pending.clear();
     });
 
-    resolve({
-      close: () => socket.close(),
-      evaluate: (expression) => new Promise((evaluateResolve, evaluateReject) => {
-        const id = nextId;
-        nextId += 1;
-        const requestTimer = setTimeout(() => {
-          pending.delete(id);
-          evaluateReject(new Error('Timed out evaluating the packaged renderer.'));
-        }, DEVTOOLS_REQUEST_TIMEOUT_MS);
-        pending.set(id, {
-          reject: (error) => {
-            clearTimeout(requestTimer);
-            evaluateReject(error);
-          },
-          resolve: (value) => {
-            clearTimeout(requestTimer);
-            evaluateResolve(value);
-          },
-        });
-        try {
-          socket.send(JSON.stringify({
-            id,
-            method: 'Runtime.evaluate',
-            params: { awaitPromise: true, expression, returnByValue: true },
-          }));
-        } catch (error) {
-          pending.delete(id);
-          clearTimeout(requestTimer);
-          evaluateReject(error);
-        }
-      }),
-    });
+    send('Runtime.enable').then(() => {
+      resolve({
+        close: () => socket.close(),
+        consoleMessages,
+        evaluate: (expression) => send('Runtime.evaluate', {
+          awaitPromise: true,
+          expression,
+          returnByValue: true,
+        }),
+        exceptions,
+      });
+    }).catch(reject);
   }, { once: true });
 });
 
@@ -142,8 +194,15 @@ const waitForRenderer = async (userDataDir) => {
             borderTopWidth: Number.parseFloat(style.borderTopWidth) || 0,
           };
         };
+        let diagnostics = null;
+        try {
+          diagnostics = window.__piariumStartupDiagnostics ?? null;
+        } catch {
+          diagnostics = { error: 'startup diagnostics threw' };
+        }
         return {
           bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
+          diagnostics,
           href: window.location.href,
           layout: {
             closeControl: readElement('[data-window-control="close"]'),
@@ -153,17 +212,33 @@ const waitForRenderer = async (userDataDir) => {
             innerWidth: window.innerWidth,
             localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
             pendingDraft: document.querySelector('[data-pi-pending-draft="true"]') !== null,
+            runtimeSetup: document.querySelector('[data-pi-runtime-setup="true"]') !== null,
           },
           ready: window.__piariumAppReady === true,
         };
       })()`);
       if (evaluation?.exceptionDetails) {
-        throw new Error(`Packaged renderer evaluation failed: ${evaluation.exceptionDetails.text}`);
+        throw describeSmokeFailure(
+          `Packaged renderer evaluation failed: ${evaluation.exceptionDetails.text}`,
+          { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions },
+        );
       }
       lastState = evaluation?.result?.value;
+      if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
+        throw describeSmokeFailure('Packaged renderer entered its error boundary.', {
+          consoleMessages: devTools.consoleMessages,
+          exceptions: devTools.exceptions,
+          lastState,
+        });
+      }
       if (lastState?.ready === true) {
         const layoutReady = lastState.layout?.closeControl && lastState.layout?.composerShell && lastState.layout?.composerFrame;
-        if (layoutReady) return lastState;
+        if (layoutReady) {
+          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', state: lastState };
+        }
+        if (lastState.layout?.runtimeSetup === true && lastState.layout?.localRuntimeContinueReady !== true) {
+          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'runtime-setup', state: lastState };
+        }
         if (!continuedFromOnboarding && lastState.layout?.localRuntimeContinueReady === true) {
           const continuation = await devTools.evaluate(`(() => {
             const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
@@ -172,20 +247,22 @@ const waitForRenderer = async (userDataDir) => {
             return true;
           })()`);
           if (continuation?.exceptionDetails) {
-            throw new Error(`Packaged onboarding continuation failed: ${continuation.exceptionDetails.text}`);
+            throw describeSmokeFailure(
+              `Packaged onboarding continuation failed: ${continuation.exceptionDetails.text}`,
+              { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, lastState },
+            );
           }
           continuedFromOnboarding = continuation?.result?.value === true;
         }
       }
-      if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
-        throw new Error(`Packaged renderer entered its error boundary.\n${lastState.bodyText}`);
-      }
       await delay(250);
     }
-    if (lastState?.ready === true) {
-      throw new Error(`Packaged renderer became ready without the expected window and composer layout.\n${JSON.stringify(lastState, null, 2)}`);
-    }
-    throw new Error(`Packaged renderer did not become app-ready.\n${JSON.stringify(lastState, null, 2)}`);
+    throw describeSmokeFailure(
+      lastState?.ready === true
+        ? 'Packaged renderer became ready without the main workspace or runtime setup surface.'
+        : 'Packaged renderer did not become app-ready.',
+      { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, lastState },
+    );
   } finally {
     devTools.close();
   }
@@ -275,25 +352,48 @@ try {
   if (closed?.success !== true) throw new Error(`Packaged terminal close returned ${JSON.stringify(closed)}`);
 
   const renderer = await waitForRenderer(userDataDir);
-  const layout = renderer.layout;
+  const layout = renderer.state?.layout;
   if (!layout || !Number.isFinite(layout.innerWidth) || !Number.isFinite(layout.innerHeight)) {
-    throw new Error(`Packaged renderer did not report viewport geometry: ${JSON.stringify(layout)}`);
+    throw describeSmokeFailure(
+      `Packaged renderer did not report viewport geometry: ${JSON.stringify(layout)}`,
+      renderer,
+    );
   }
+  if (renderer.mode === 'runtime-setup') {
+    const log = await readLog();
+    console.log(JSON.stringify({
+      appPath,
+      health: 'ok',
+      layout,
+      piVersion: null,
+      profile: profileSource ? 'seeded' : 'clean',
+      renderer: 'runtime-setup',
+      runtimeDiscovery: renderer.state?.diagnostics?.runtimeSnapshot ?? null,
+      terminal: 'create-close-ok',
+      workspaceView: renderer.state?.diagnostics?.workspaceView ?? null,
+    }, null, 2));
+  } else {
   if (!layout.closeControl) {
-    throw new Error('Packaged renderer did not expose the Windows close control.');
+    throw describeSmokeFailure('Packaged renderer did not expose the Windows close control.', renderer);
   }
   const closeControlIsRight = layout.closeControl.left >= layout.innerWidth / 2;
   if (!profileSourcePath && !closeControlIsRight) {
-    throw new Error(`Clean profile placed the Windows close control on the unexpected side: ${JSON.stringify(layout.closeControl)}`);
+    throw describeSmokeFailure(
+      `Clean profile placed the Windows close control on the unexpected side: ${JSON.stringify(layout.closeControl)}`,
+      renderer,
+    );
   }
   if (closeControlIsRight) {
     assertNear(layout.closeControl.right, layout.innerWidth, 'Right-side close control edge');
   }
   if (!layout.composerShell || !layout.composerFrame) {
-    throw new Error(`Packaged renderer reported incomplete composer geometry: ${JSON.stringify(layout)}`);
+    throw describeSmokeFailure(
+      `Packaged renderer reported incomplete composer geometry: ${JSON.stringify(layout)}`,
+      renderer,
+    );
   }
   if (!profileSourcePath && layout.pendingDraft !== true) {
-    throw new Error('Clean packaged renderer did not open the pending Pi draft welcome state.');
+    throw describeSmokeFailure('Clean packaged renderer did not open the pending Pi draft welcome state.', renderer);
   }
   assertNear(layout.composerShell.bottom, layout.innerHeight, 'Composer shell bottom edge');
   assertNear(layout.composerShell.borderTopWidth, 0, 'Composer shell top border');
@@ -301,7 +401,9 @@ try {
     throw new Error(`Composer frame is wider than the fork-derived 48rem column: ${layout.composerFrame.width}px.`);
   }
   const log = await readLog();
-  if (!log.includes('[pi-runtime] ready')) throw new Error(`Pi runtime readiness was not logged.\n${log}`);
+  if (!log.includes('[pi-runtime] ready')) {
+    throw describeSmokeFailure(`Pi runtime readiness was not logged.\n${log}`, renderer);
+  }
   const piVersion = log.match(/piVersion: '([^']+)'/)?.[1] ?? 'unknown';
   console.log(JSON.stringify({
     appPath,
@@ -309,9 +411,18 @@ try {
     layout,
     piVersion,
     profile: profileSource ? 'seeded' : 'clean',
-    renderer: renderer.ready === true ? 'app-ready' : 'not-ready',
+    renderer: renderer.state?.ready === true ? 'app-ready' : 'not-ready',
     terminal: 'create-close-ok',
   }, null, 2));
+  }
+} catch (error) {
+  const log = await readLog();
+  const suffix = `\n--- main.log ---\n${log.slice(-6_000)}`;
+  if (error instanceof Error) {
+    error.message += suffix;
+    throw error;
+  }
+  throw new Error(`${String(error)}${suffix}`);
 } finally {
   if (child.exitCode === null) {
     spawnSync('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {

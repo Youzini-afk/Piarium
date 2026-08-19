@@ -50,6 +50,7 @@ export function ChooserScreen({ onRuntimeAvailable, localAvailable = true }: Cho
   return (
     <div
       className="app-region-drag flex h-full cursor-default select-none items-center justify-center overflow-y-auto bg-transparent p-8"
+      data-pi-runtime-setup="true"
       onMouseDown={handleDragStart}
     >
       <div className="w-full max-w-md space-y-7">
