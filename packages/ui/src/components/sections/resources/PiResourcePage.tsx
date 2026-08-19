@@ -15,6 +15,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/components/ui';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { usePiResourcesStore } from '@/stores/usePiResourcesStore';
@@ -33,6 +35,7 @@ const statusClass = (tone: 'success' | 'warning' | 'muted'): string => {
 
 export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
   const { t } = useI18n();
+  const { currentTheme } = useThemeSystem();
   const { runtimeTarget, targetKey } = useResourceRuntimeTarget();
   const pane = usePiResourcesStore((state) => state.panes[kind]);
   const loadCatalog = usePiResourcesStore((state) => state.loadCatalog);
@@ -45,7 +48,10 @@ export const PiResourcePage: React.FC<PiResourcePageProps> = ({ kind }) => {
   const [copying, setCopying] = React.useState(false);
   const [copyName, setCopyName] = React.useState('');
   const [copyScope, setCopyScope] = React.useState<PiResourceScope>('user');
-  const editorExtensions = React.useMemo(() => [markdown()], []);
+  const editorExtensions = React.useMemo(() => [
+    createFlexokiCodeMirrorTheme(currentTheme),
+    markdown(),
+  ], [currentTheme]);
 
   React.useEffect(() => {
     void loadCatalog(kind, runtimeTarget, targetKey);
