@@ -2,8 +2,10 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
 
+const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env };
 const builderArgs = process.argv.slice(2);
 const targetArchitecture = resolveTargetArchitecture({ environment: env, builderArgs });
@@ -48,6 +50,7 @@ if (process.platform === 'linux' && !builderArgs.some((argument) => (
 }
 
 const child = spawn(bunBinary, ['x', 'electron-builder', ...builderArgs], {
+  cwd: electronDir,
   env,
   stdio: 'inherit',
 });
