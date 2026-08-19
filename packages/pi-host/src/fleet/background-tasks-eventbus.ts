@@ -233,6 +233,16 @@ const parseTokens = (
   return { tokens: { input, output, total } };
 };
 
+export const mapBackgroundTaskPublicError = (error: string): string => {
+  if (error.startsWith("Output file does not exist for ") || error.startsWith("Output file not found:")) {
+    return "Background task output is not available";
+  }
+  if (error.startsWith("Output file write failed:")) {
+    return "Background task output could not be written";
+  }
+  return error;
+};
+
 export const projectBackgroundTaskEntry = (task: ProjectedTask): PiFleetEntry => {
   const state = task.status === "killed" ? "stopped" : task.status;
   const actions: PiFleetActionDescriptor[] = [{ action: "logs", scope: "entry" }];
@@ -242,7 +252,7 @@ export const projectBackgroundTaskEntry = (task: ProjectedTask): PiFleetEntry =>
     ...(task.bytesWritten === undefined ? {} : { bytesWritten: task.bytesWritten }),
     ...(task.description === undefined ? {} : { description: task.description }),
     ...(task.endTime === undefined ? {} : { endedAt: task.endTime }),
-    ...(task.error === undefined ? {} : { error: task.error }),
+    ...(task.error === undefined ? {} : { error: mapBackgroundTaskPublicError(task.error) }),
     key: task.id,
     kind: task.isAgent ? "background-agent" : "background-task",
     ...(task.model === undefined ? {} : { model: task.model }),

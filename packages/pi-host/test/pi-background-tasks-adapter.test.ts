@@ -318,4 +318,184 @@ describe("pi-background-tasks Fleet adapter", () => {
     assert.equal(killed.entry?.state, "stopped");
     assert.equal(JSON.stringify(killed).includes("/secret/"), false);
   });
+
+  it("rejects an EventBus reply whose operation does not match the pending request", async () => {
+    const bus = createBus();
+    const adapter = attachAdapter(bus);
+    bus.on(BG_REQUEST_CHANNEL, (value) => {
+      const request = value as { operation: string; request_id: string };
+      if (request.operation === "capabilities") {
+        replyOk(bus, request, CAPABILITIES);
+        return;
+      }
+      if (request.operation === "status") {
+        bus.emit(BG_RESPONSE_CHANNEL, {
+          ok: true,
+          operation: "logs",
+          request_id: request.request_id,
+          result: { tasks: [privateTask()] },
+          schema_version: BG_RESPONSE_SCHEMA,
+        });
+      }
+    });
+    adapter.startSession("session-a");
+    const snapshot = await adapter.status("session-a");
+    assert.equal(snapshot.provider.state, "degraded");
+    assert.equal(
+      snapshot.provider.issue,
+      "pi-background-tasks EventBus reply operation did not match the pending request",
+    );
+    assert.equal(JSON.stringify(snapshot).includes("/secret/"), false);
+  });
+
+  it("ignores a late terminal whose startedAt does not match the live task", async () => {
+    const bus = createBus();
+    const adapter = attachAdapter(bus);
+    bus.on(BG_REQUEST_CHANNEL, (value) => {
+      const request = value as { operation: string; request_id: string };
+      if (request.operation === "capabilities") {
+        replyOk(bus, request, CAPABILITIES);
+        return;
+      }
+      if (request.operation === "status") {
+        replyOk(bus, request, { tasks: [privateTask({ id: "task-1", startTime: 2_000 })] });
+      }
+    });
+    adapter.startSession("session-a");
+    await adapter.status("session-a");
+    bus.emit(BG_TERMINAL_CHANNEL, {
+      schema_version: BG_TERMINAL_SCHEMA,
+      task: privateTask({ id: "task-1", endTime: 1_500, startTime: 1_000, status: "completed" }),
+    });
+    const snapshot = await adapter.status("session-a");
+    const entry = snapshot.entries.find((item) => item.key === "task-1");
+    assert.equal(entry?.startedAt, 2_000);
+    assert.equal(entry?.state, "running");
+  });
+
+  it("maps logs output-file failures without leaking the output path", async () => {
+    const bus = createBus();
+    const adapter = attachAdapter(bus);
+    bus.on(BG_REQUEST_CHANNEL, (value) => {
+      const request = value as { operation: string; request_id: string };
+      if (request.operation === "capabilities") {
+        replyOk(bus, request, CAPABILITIES);
+        return;
+      }
+      if (request.operation === "status") {
+        replyOk(bus, request, { tasks: [privateTask()] });
+        return;
+      }
+      if (request.operation === "logs") {
+        bus.emit(BG_RESPONSE_CHANNEL, {
+          error: "Output file does not exist for task-1: /secret/out.log",
+          ok: false,
+          operation: request.operation,
+          request_id: request.request_id,
+          schema_version: BG_RESPONSE_SCHEMA,
+        });
+      }
+    });
+    adapter.startSession("session-a");
+    await adapter.status("session-a");
+    await assert.rejects(
+      adapter.action({ action: "logs", entryKey: "task-1", sessionId: "session-a" }),
+      (error: unknown) => {
+        assert.equal(error instanceof Error, true);
+        const message = error instanceof Error ? error.message : String(error);
+        assert.equal(message, "Background task output is not available");
+        assert.equal(message.includes("/secret/"), false);
+        return true;
+      },
+    );
+  });
+
+  it("covers run, status, logs, terminal, and kill for one task lifetime", async () => {
+    const bus = createBus();
+    const adapter = attachAdapter(bus);
+    const tasks = new Map<string, ReturnType<typeof privateTask>>();
+    bus.on(BG_REQUEST_CHANNEL, (value) => {
+      const request = value as { operation: string; payload?: { taskId?: string }; request_id: string };
+      if (request.operation === "capabilities") {
+        replyOk(bus, request, CAPABILITIES);
+        return;
+      }
+      if (request.operation === "run") {
+        const task = privateTask({ id: "life-1", name: "printf-ok", startTime: 1_000 });
+        tasks.set(task.id, task);
+        replyOk(bus, request, task);
+        return;
+      }
+      if (request.operation === "status") {
+        replyOk(bus, request, { tasks: [...tasks.values()] });
+        return;
+      }
+      if (request.operation === "logs") {
+        const task = tasks.get(request.payload?.taskId ?? "") ?? privateTask({ id: "life-1" });
+        replyOk(bus, request, {
+          bytesRead: 2,
+          path: "/secret/out.log",
+          tail: true,
+          task,
+          text: "ok",
+          truncated: false,
+        });
+        return;
+      }
+      if (request.operation === "kill") {
+        const current = tasks.get(request.payload?.taskId ?? "");
+        const task = { ...(current ?? privateTask({ id: "life-1" })), status: "killed" };
+        tasks.set(task.id, task);
+        replyOk(bus, request, {
+          message: "Killed background task printf-ok (life-1). Output: /secret/out.log",
+          task,
+        });
+      }
+    });
+    adapter.startSession("session-a");
+    const started = await adapter.action({
+      action: "run",
+      input: {
+        command: "printf ok",
+        isAgent: false,
+        name: "printf-ok",
+        notifyOnCompletion: true,
+        triggerOnCompletion: true,
+      },
+      sessionId: "session-a",
+    });
+    assert.equal(started.entry?.key, "life-1");
+    assert.equal(started.entry?.state, "running");
+    const listed = await adapter.status("session-a");
+    assert.equal(listed.entries[0]?.key, "life-1");
+    const logs = await adapter.action({
+      action: "logs",
+      entryKey: "life-1",
+      sessionId: "session-a",
+    });
+    assert.equal(logs.logs?.text, "ok");
+    assert.equal(JSON.stringify(logs).includes("/secret/"), false);
+    const killed = await adapter.action({
+      action: "kill",
+      entryKey: "life-1",
+      sessionId: "session-a",
+    });
+    assert.equal(killed.success, true);
+    assert.equal(killed.message, "Stopped printf-ok");
+    assert.equal(killed.entry?.state, "stopped");
+    bus.emit(BG_TERMINAL_CHANNEL, {
+      schema_version: BG_TERMINAL_SCHEMA,
+      task: privateTask({
+        id: "life-1",
+        endTime: 1_500,
+        name: "printf-ok",
+        startTime: 1_000,
+        status: "killed",
+      }),
+    });
+    const afterTerminal = await adapter.status("session-a");
+    assert.equal(afterTerminal.entries[0]?.state, "stopped");
+    assert.equal(JSON.stringify(killed).includes("/secret/"), false);
+    assert.equal(JSON.stringify(afterTerminal).includes("/secret/"), false);
+  });
 });

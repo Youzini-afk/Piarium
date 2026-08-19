@@ -109,4 +109,34 @@ describe("Fleet provider registry", () => {
     assert.equal(betaCalled, false);
     assert.equal(result.snapshot.providers.length, 2);
   });
+
+  it("returns healthy provider data when another provider never replies", async () => {
+    const registry = new FleetProviderRegistry([
+      new FakeAdapter("alpha", async () => providerResult("alpha", "active", [runningEntry("alpha", "a-1")])),
+      new FakeAdapter("beta", () => new Promise(() => undefined)),
+    ], { readDeadlineMs: 40 });
+    const snapshot = await registry.status("session-a");
+    assert.equal(snapshot.providers[0]?.state, "active");
+    assert.equal(snapshot.entries[0]?.key, "a-1");
+    assert.equal(snapshot.providers[1]?.state, "degraded");
+    assert.match(snapshot.providers[1]?.issue ?? "", /timed out/);
+  });
+
+  it("does not keep a completed action pending on an unrelated mute provider", async () => {
+    const registry = new FleetProviderRegistry([
+      new FakeAdapter("alpha", async () => providerResult("alpha", "active"), async () => ({
+        message: "alpha-run",
+        success: true,
+      })),
+      new FakeAdapter("beta", () => new Promise(() => undefined)),
+    ], { readDeadlineMs: 40 });
+    const result = await registry.action({
+      action: "run",
+      providerId: "alpha",
+      sessionId: "session-a",
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.message, "alpha-run");
+    assert.equal(result.snapshot.providers.find((provider) => provider.id === "beta")?.state, "degraded");
+  });
 });

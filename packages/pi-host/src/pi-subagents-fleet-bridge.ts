@@ -7,6 +7,7 @@ import type {
   PiFleetEntry,
   PiFleetProviderSnapshot,
 } from "@piarium/protocol";
+import { BG_READ_DEADLINE_MS } from "./fleet/background-tasks-eventbus.js";
 import type { FleetProviderAdapter, PiFleetProviderResult } from "./fleet/types.js";
 
 const PI_SUBAGENTS_RPC_VERSION = 1;
@@ -35,6 +36,7 @@ type ReadyState = CompatibleReadyState | IncompatibleReadyState;
 
 interface PendingRequest {
   reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
   unsubscribe?: () => void;
 }
 
@@ -178,6 +180,7 @@ const parseStatusReply = (value: unknown, bridgeVersion: number): PiFleetProvide
 
 export class PiSubagentsFleetBridge implements FleetProviderAdapter {
   readonly id = PROVIDER_ID;
+  readonly #readDeadlineMs: number;
   #events: ExtensionEventBus | undefined;
   #generation = 0;
   #nextRequestId = 0;
@@ -185,6 +188,10 @@ export class PiSubagentsFleetBridge implements FleetProviderAdapter {
   #pending = new Map<string, PendingRequest>();
   #ready: ReadyState | undefined;
   #sessionId: string | undefined;
+
+  constructor(options: { readDeadlineMs?: number } = {}) {
+    this.#readDeadlineMs = options.readDeadlineMs ?? BG_READ_DEADLINE_MS;
+  }
 
   attach(events: ExtensionEventBus): () => void {
     this.#events = events;
@@ -254,8 +261,13 @@ export class PiSubagentsFleetBridge implements FleetProviderAdapter {
       const cleanup = () => {
         const pending = this.#pending.get(requestId);
         this.#pending.delete(requestId);
+        if (pending?.timer !== undefined) clearTimeout(pending.timer);
         pending?.unsubscribe?.();
       };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("pi-subagents Fleet status timed out"));
+      }, this.#readDeadlineMs);
       const unsubscribe = events.on(replyEvent, (reply) => {
         cleanup();
         if (generation !== this.#generation || this.#sessionId !== sessionId) {
@@ -270,6 +282,7 @@ export class PiSubagentsFleetBridge implements FleetProviderAdapter {
       });
       this.#pending.set(requestId, {
         reject,
+        timer,
         ...(typeof unsubscribe === "function" ? { unsubscribe } : {}),
       });
       events.emit(PI_SUBAGENTS_RPC_REQUEST_EVENT, {
@@ -290,6 +303,7 @@ export class PiSubagentsFleetBridge implements FleetProviderAdapter {
     const pending = [...this.#pending.values()];
     this.#pending.clear();
     for (const request of pending) {
+      if (request.timer !== undefined) clearTimeout(request.timer);
       request.unsubscribe?.();
       request.reject(new Error(message));
     }

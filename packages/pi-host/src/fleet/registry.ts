@@ -1,17 +1,51 @@
 import type { ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { PiFleetActionResult, PiFleetSnapshot } from "@piarium/protocol";
 import { HostError } from "../errors.js";
+import { BG_READ_DEADLINE_MS } from "./background-tasks-eventbus.js";
 import type {
   ExtensionEventBus,
   FleetProviderAdapter,
   PiFleetProviderActionRequest,
+  PiFleetProviderResult,
 } from "./types.js";
+
+const statusWithDeadline = (
+  adapter: FleetProviderAdapter,
+  sessionId: string,
+  deadlineMs: number,
+): Promise<PiFleetProviderResult> => new Promise((resolve, reject) => {
+  let settled = false;
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    reject(new Error(`${adapter.id} Fleet status timed out`));
+  }, deadlineMs);
+  void adapter.status(sessionId).then(
+    (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    },
+    (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    },
+  );
+});
 
 export class FleetProviderRegistry {
   readonly #adapters: readonly FleetProviderAdapter[];
+  readonly #readDeadlineMs: number;
 
-  constructor(adapters: readonly FleetProviderAdapter[]) {
+  constructor(
+    adapters: readonly FleetProviderAdapter[],
+    options: { readDeadlineMs?: number } = {},
+  ) {
     this.#adapters = adapters;
+    this.#readDeadlineMs = options.readDeadlineMs ?? BG_READ_DEADLINE_MS;
   }
 
   attach(events: ExtensionEventBus): () => void {
@@ -31,7 +65,7 @@ export class FleetProviderRegistry {
 
   async status(sessionId: string): Promise<PiFleetSnapshot> {
     const settled = await Promise.allSettled(
-      this.#adapters.map((adapter) => adapter.status(sessionId)),
+      this.#adapters.map((adapter) => statusWithDeadline(adapter, sessionId, this.#readDeadlineMs)),
     );
     const entries = [];
     const providers = [];

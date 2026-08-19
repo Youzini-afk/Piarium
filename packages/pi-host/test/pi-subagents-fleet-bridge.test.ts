@@ -197,4 +197,18 @@ describe("pi-subagents Fleet bridge", () => {
     assert.match(degraded.provider.issue ?? "", /status storage is unreadable/);
     assert.deepEqual(degraded.entries, []);
   });
+
+  it("marks a mute RPC as degraded instead of hanging status", async () => {
+    const bridge = new PiSubagentsFleetBridge({ readDeadlineMs: 40 });
+    const runtime = createFakeExtensionRuntime();
+    await createPiSubagentsFleetBridgeExtension(bridge)(runtime.pi);
+    const context = sessionContext("session-a");
+    await runtime.lifecycleHandlers.get("session_start")?.({}, context);
+    runtime.pi.events.emit(PI_SUBAGENTS_RPC_READY_EVENT, readyPayload("session-a"));
+
+    const degraded = await bridge.status("session-a");
+    assert.equal(degraded.provider.state, "degraded");
+    assert.match(degraded.provider.issue ?? "", /timed out/);
+    assert.deepEqual(degraded.entries, []);
+  });
 });

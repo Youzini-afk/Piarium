@@ -18,6 +18,7 @@ import {
   parseBackgroundTaskStatusResult,
   parseBackgroundTaskTerminal,
   projectBackgroundTaskEntry,
+  mapBackgroundTaskPublicError,
   type BackgroundTaskCapabilities,
   type BackgroundTaskOperation,
   type BackgroundTaskRunPayload,
@@ -325,17 +326,26 @@ export class PiBackgroundTasksFleetAdapter implements FleetProviderAdapter {
     }
     const pending = this.#pending.get(parsed.requestId);
     if (!pending) return;
+    if (parsed.operation !== pending.operation) {
+      this.#pending.delete(parsed.requestId);
+      clearTimeout(pending.timer);
+      pending.reject(new Error(
+        "pi-background-tasks EventBus reply operation did not match the pending request",
+      ));
+      return;
+    }
     this.#pending.delete(parsed.requestId);
     clearTimeout(pending.timer);
     if (parsed.ok) pending.resolve(parsed.result);
-    else pending.reject(new Error(parsed.error));
+    else pending.reject(new Error(mapBackgroundTaskPublicError(parsed.error)));
   }
 
   #onTerminal(value: unknown): void {
     if (!this.#sessionId) return;
     try {
       const entry = projectBackgroundTaskEntry(parseBackgroundTaskTerminal(value));
-      if (!this.#entries.has(entry.key)) return;
+      const current = this.#entries.get(entry.key);
+      if (!current || current.startedAt !== entry.startedAt) return;
       this.#entries.set(entry.key, entry);
     } catch (error) {
       this.#issue = error instanceof Error ? error.message : String(error);

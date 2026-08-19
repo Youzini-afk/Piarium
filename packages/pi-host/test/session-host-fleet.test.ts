@@ -279,6 +279,8 @@ describe("SessionHost Fleet", () => {
       assert.equal(started.success, true);
       assert.equal(started.entry?.state, "running");
       assert.equal(started.entry?.name, "printf-ok");
+      const listed = await host.fleetStatus(sessionId);
+      assert.equal(listed.entries.some((entry) => entry.key === "bg-run" || entry.key === "bg-1"), true);
       await Promise.resolve();
       const logs = await host.fleetAction(sessionId, "pi-background-tasks", "logs", "bg-1", undefined);
       assert.equal(logs.logs?.text, "bounded");

@@ -12,6 +12,7 @@ import {
   parseBackgroundTaskStatusResult,
   parseBackgroundTaskTerminal,
   projectBackgroundTaskEntry,
+  mapBackgroundTaskPublicError,
 } from "../src/fleet/background-tasks-eventbus.js";
 
 const privateTask = (overrides: Record<string, unknown> = {}) => ({
@@ -139,5 +140,30 @@ describe("pi-background-tasks EventBus parser", () => {
     });
     assert.equal(projectBackgroundTaskEntry(terminal).error, "exit 1");
     assert.equal(createBackgroundTaskRequest("id-1", "logs", { taskId: "task-1" }).operation, "logs");
+  });
+
+  it("maps known output-file plugin errors to Host-stable public text", () => {
+    assert.equal(
+      mapBackgroundTaskPublicError("Output file does not exist for task-1: /secret/out.log"),
+      "Background task output is not available",
+    );
+    assert.equal(
+      mapBackgroundTaskPublicError("Output file not found: /secret/out.log"),
+      "Background task output is not available",
+    );
+    assert.equal(
+      mapBackgroundTaskPublicError("Output file write failed: EACCES /secret/out.log"),
+      "Background task output could not be written",
+    );
+    assert.equal(
+      mapBackgroundTaskPublicError("command failed with exit 1"),
+      "command failed with exit 1",
+    );
+    const entry = projectBackgroundTaskEntry(parseBackgroundTaskRunResult(privateTask({
+      error: "Output file write failed: EACCES /secret/out.log",
+      status: "failed",
+    })));
+    assert.equal(entry.error, "Background task output could not be written");
+    assert.equal(JSON.stringify(entry).includes("/secret/"), false);
   });
 });
