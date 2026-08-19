@@ -1,5 +1,10 @@
+import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { getAgentDir, VERSION } from "@earendil-works/pi-coding-agent";
+import {
+  type FileEntry,
+  getAgentDir,
+  VERSION,
+} from "@earendil-works/pi-coding-agent";
 import {
   createErrorResponse,
   createEvent,
@@ -33,6 +38,7 @@ import {
 } from "@piarium/protocol";
 import { HostError, toProtocolError } from "./errors.js";
 import { expectRecord, readBoolean, readJson, readString } from "./params.js";
+import { resolvePiSdkSpecifier } from "./pi-sdk-packages.js";
 import { SessionHost } from "./session-host.js";
 import type { HostTransport } from "./transport.js";
 
@@ -59,6 +65,57 @@ const OUT_OF_BAND_METHODS = new Set([
   "provider.auth.respond",
   "project.trust.respond",
 ]);
+
+interface PiSessionFileModule {
+  loadEntriesFromFile(filePath: string): FileEntry[];
+}
+
+const sessionFileModules = new Map<string, Promise<PiSessionFileModule>>();
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "ENOENT"
+  );
+}
+
+function isResolvableSessionHeader(
+  value: unknown,
+): value is { cwd: string; id: string; type: "session" } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    record.type === "session"
+    && typeof record.id === "string"
+    && record.id.trim().length > 0
+    && typeof record.cwd === "string"
+    && record.cwd.trim().length > 0
+  );
+}
+
+async function loadSessionEntries(
+  sessionFile: string,
+  packageRoot: string | undefined,
+): Promise<FileEntry[]> {
+  const sdkEntry = packageRoot === undefined
+    ? import.meta.resolve("@earendil-works/pi-coding-agent")
+    : resolvePiSdkSpecifier(packageRoot, "@earendil-works/pi-coding-agent");
+  const sessionManagerUrl = new URL("./core/session-manager.js", sdkEntry).href;
+  let modulePromise = sessionFileModules.get(sessionManagerUrl);
+  if (!modulePromise) {
+    modulePromise = import(sessionManagerUrl).then((loaded: unknown) => {
+      const module = loaded as Partial<PiSessionFileModule>;
+      if (typeof module.loadEntriesFromFile !== "function") {
+        throw new Error("The selected Pi SDK does not expose loadEntriesFromFile");
+      }
+      return module as PiSessionFileModule;
+    });
+    sessionFileModules.set(sessionManagerUrl, modulePromise);
+  }
+  return (await modulePromise).loadEntriesFromFile(sessionFile);
+}
 
 export interface HostControllerOptions {
   agentDir?: string;
@@ -171,7 +228,11 @@ function readConfigTextAuthority(
   record: Record<string, unknown>,
 ): PiConfigTextAuthorityId {
   const authority = readString(record, "authority");
-  if (authority !== "pi-lens-global" && authority !== "pi-lens-project") {
+  if (
+    authority !== "aft-user"
+    && authority !== "pi-lens-global"
+    && authority !== "pi-lens-project"
+  ) {
     throw new HostError("invalid_params", "Unknown configuration text authority");
   }
   return authority;
@@ -384,6 +445,49 @@ export class HostController {
           ...(sessionFile === undefined ? {} : { sessionFile }),
           ...(sessionId === undefined ? {} : { sessionId }),
         });
+      }
+      case "session.resolve": {
+        const sessionFile = resolve(readString(params, "sessionFile"));
+        try {
+          const fileInfo = await stat(sessionFile);
+          if (!fileInfo.isFile()) {
+            throw new HostError(
+              "invalid_session_file",
+              `Pi session path is not a regular file: ${sessionFile}`,
+            );
+          }
+        } catch (error) {
+          if (error instanceof HostError) throw error;
+          if (isMissingFileError(error)) {
+            throw new HostError("session_not_found", `Pi session file does not exist: ${sessionFile}`);
+          }
+          throw new HostError("session_read_failed", `Unable to inspect Pi session file: ${sessionFile}`, {
+            cause: error,
+          });
+        }
+        let entries: FileEntry[];
+        try {
+          entries = await loadSessionEntries(sessionFile, this.#packageRoot);
+        } catch (error) {
+          if (isMissingFileError(error)) {
+            throw new HostError("session_not_found", `Pi session file does not exist: ${sessionFile}`);
+          }
+          throw new HostError("session_read_failed", `Unable to read Pi session file: ${sessionFile}`, {
+            cause: error,
+          });
+        }
+        const header = entries[0] as unknown;
+        if (!isResolvableSessionHeader(header)) {
+          throw new HostError(
+            "invalid_session_file",
+            `Pi session file has no valid header with a non-empty id and cwd: ${sessionFile}`,
+          );
+        }
+        return {
+          cwd: resolve(header.cwd),
+          sessionFile,
+          sessionId: header.id,
+        };
       }
       case "session.close":
         return { closed: await this.#sessionHost.close(readString(params, "sessionId")) };

@@ -151,6 +151,14 @@ resolved from the chosen package root. This matches the single-active-session as
 several Pi extensions while allowing multiple background sessions. Idle sessions are persisted by Pi
 and need no live worker.
 
+The broker starts each session worker with the session project's absolute `cwd` as the operating-system
+working directory before Pi loads extensions. New sessions already provide that directory; reopened
+sessions without an explicit override are resolved from the session header by the selected Pi SDK
+before the child process is created. This keeps extensions that read `process.cwd()` during their
+factory phase aligned with Pi's session snapshot, project trust, worktrees, and project configuration.
+The reusable catalog worker deliberately retains the broker's fixed discovery directory and switches
+workspace context through the Host protocol instead of changing process-wide state.
+
 Opened sessions stay live until explicitly closed or the application exits. An optional hot-worker
 budget and idle eviction remain a later deployment optimization; eviction must be graceful: stop
 accepting requests, wait for idle or require explicit abort, dispose the SDK runtime, flush

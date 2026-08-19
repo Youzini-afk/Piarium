@@ -52,6 +52,14 @@ describe('plugin settings navigation', () => {
     });
   });
 
+  test('maps the scoped AFT package to its dedicated adapter', () => {
+    requestPluginSettingsTarget('npm:@cortexkit/aft-pi@0.51.2');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'aft',
+      pluginId: 'npm:@cortexkit/aft-pi@0.51.2',
+    });
+  });
+
   test('maps the scoped permission-system package to its dedicated adapter', () => {
     requestPluginSettingsTarget('npm:@gotgenes/pi-permission-system@22.0.0');
     expect(consumePluginSettingsTarget()).toEqual({

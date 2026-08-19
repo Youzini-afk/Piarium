@@ -180,6 +180,7 @@ value.
 | pi-openai-codex-compat | Codex request, reasoning, remote-compaction and tool options | Independent global `openai-codex-compat.json` and trusted project `.pi/openai-codex-compat.json` drafts | unknown future plugin fields | absent keys stay unset; environment overrides remain plugin-owned |
 | pi-observational-memory | Observation, reflection, compaction, pool and worker settings | Independent user/project `settings.json#observational-memory` drafts | unknown future plugin fields | invalid thresholds and incomplete worker models block save without rewriting the draft |
 | pi-lens | Diagnostics; formatting and fixes; context delivery; project scale, rules, and security scans; native runtime actions | Resolved user authority (`PI_LENS_CONFIG_PATH` or `~/.pi-lens/config.json`) plus the nearest ordered project `.pi-lens.json` / `pi-lens.json` authority | future namespaces, detailed rule policies, LSP server maps and tool-specific tuning | project-ignored global keys stay visible, absent values remain unset, and native command availability is observed per session |
+| @cortexkit/aft-pi | Editing mode; tool surface; search, semantic, call-graph, inspection, LSP, backup, and sandbox controls | Host-resolved CortexKit user `aft.jsonc` authority plus project `.cortexkit/aft.jsonc`; both are revisioned JSONC drafts | formatter/checker maps, server definitions, shell feature objects, transport, credentials, path lists, and future fields | invalid known fields block structured save; unknown fields and project-stripped fields stay visible and are preserved; runtime observation is command-only |
 | @gotgenes/pi-permission-system | Task-oriented allow/ask/deny policy; runtime/interface flags; prompt and review-log display budgets | Independent global `extensions/pi-permission-system/config.json` under the active Pi agent root and trusted project `.pi/extensions/pi-permission-system/config.json` | pattern maps, third-party permission surfaces, shell aliases, infrastructure read paths, authorizer chains, and deprecated preview caps | pattern maps remain intact until replaced deliberately, trailing commas and unknown 26.3 top-level keys block save, `yoloMode` keeps a source-qualified warning, and runtime availability comes only from the native command catalog |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
@@ -485,7 +486,48 @@ Acceptance:
 - runtime buttons appear only for commands observed in the active session;
 - no pi-lens private diagnostics cache or telemetry log becomes a Piarium authority.
 
-### 5.7 @gotgenes/pi-permission-system
+### 5.7 @cortexkit/aft-pi
+
+Authority:
+
+- the Host-owned `aft-user` authority resolving the platform-native CortexKit user
+  `aft.jsonc` path;
+- trusted project `.cortexkit/aft.jsonc` through the revisioned project text-document contract;
+- the active session's `command.list` result for the presence of `aft-status`;
+- no bridge cache, semantic index, call graph, backup tree, status output, or custom UI component as
+  Piarium state.
+
+Both scopes are JSONC drafts. Structured edits preserve comments, trailing commas, unknown fields,
+and the `bash` custom-object form. Known invalid fields block structured saving so AFT's partial
+loader cannot silently skip a malformed known section. Unknown top-level fields remain non-blocking:
+AFT's partial loader ignores them, while Piarium preserves them and explains that they are not
+currently effective.
+
+The project view follows AFT's native one-way and user-only merge rules instead of presenting the
+user form as if every field took effect. It reports but does not remove user-only top-level fields,
+`aft_safety` disablement, semantic backend/credential/query settings, executable-origin LSP settings,
+sandbox disablement, and project write allowances. Project quick controls expose only fields the
+loader actually honors. Additional project read denials and complex native values remain available
+in Advanced.
+
+Runtime observation is deliberately command-only. Piarium marks AFT observed only when
+`command.list` contains `aft-status`. It does not execute `/aft-status`: that command renders through
+`ctx.ui.custom`, while Piarium's RPC bridge can only project static custom UI. Saving uses the Host's
+revision check and active-Host configuration reload boundary, but the UI does not claim that every
+AFT subsystem hot-reloads or that a newly saved value is already effective.
+
+Acceptance:
+
+- both authorities preserve JSONC syntax, unknown fields, custom `bash` objects, dirty drafts,
+  external changes, and revisions;
+- invalid known fields block saving while unknown and project-ignored diagnostics remain
+  non-blocking;
+- project diagnostics match AFT's native strip/one-way merge rules and no hidden field is presented
+  as effective;
+- runtime availability depends only on observing `aft-status`, with no command execution or status
+  output parsing.
+
+### 5.8 @gotgenes/pi-permission-system
 
 Authority:
 
@@ -545,9 +587,10 @@ Acceptance:
 5. Web Access advanced routing/security and public runtime status when available.
 6. MCP provenance improvements without replacing its native panel.
 7. pi-lens settings and command actions over its native JSON and public command catalog.
-8. Permission-system policy and runtime settings over its native scoped JSONC documents and native
+8. AFT settings over its native CortexKit JSONC authorities and command-only runtime observation.
+9. Permission-system policy and runtime settings over its native scoped JSONC documents and native
    command catalog.
-9. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
+10. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
    capability parity or an explicit rejection is documented and tested. This retirement is now
    complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
 

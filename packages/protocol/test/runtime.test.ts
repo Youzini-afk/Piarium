@@ -38,10 +38,10 @@ describe("surface runtime protocol", () => {
     });
     const watchRequest = createRuntimeRequest("req-5", "config.watch", {
       cwd: "C:/workspace",
-      target: { authority: "pi-lens-project", kind: "text-authority" },
+      target: { authority: "aft-user", kind: "text-authority" },
     });
     const authorityRequest = createRuntimeRequest("req-6", "config.text.authority.get", {
-      authority: "pi-lens-global",
+      authority: "aft-user",
       cwd: "C:/workspace",
     });
 
@@ -123,7 +123,7 @@ describe("surface runtime protocol", () => {
       "config.changed",
       {
         reason: "rename",
-        target: { authority: "pi-lens-project", kind: "text-authority" },
+        target: { authority: "aft-user", kind: "text-authority" },
         watchId: "watch-1",
       },
     );
@@ -132,6 +132,7 @@ describe("surface runtime protocol", () => {
 
   it("rejects worker-only methods and unrouted events", () => {
     assert.equal(isRuntimeMethod("host.shutdown"), false);
+    assert.equal(isRuntimeMethod("session.resolve"), false);
     assert.throws(
       () =>
         decodeRuntimeEnvelope(

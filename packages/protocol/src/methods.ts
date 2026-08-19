@@ -318,6 +318,10 @@ export interface HostMethodMap {
     params: { cwd?: string; sessionFile?: string; sessionId?: string };
     result: SessionSnapshot;
   };
+  "session.resolve": {
+    params: { sessionFile: string };
+    result: { cwd: string; sessionFile: string; sessionId: string };
+  };
   "session.header": {
     params: { sessionId: string };
     result: SessionHeader | null;

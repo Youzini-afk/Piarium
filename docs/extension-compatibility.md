@@ -81,6 +81,11 @@ plugin ownership intact:
 - Observational Memory edits only the native user/project `settings.json#observational-memory`
   object. Threshold, pool, and worker-model validation blocks invalid saves without reading or
   rewriting the plugin-owned session ledger.
+- AFT edits the Host-resolved CortexKit user `aft.jsonc` authority and the trusted project
+  `.cortexkit/aft.jsonc` directly as revisioned JSONC. Project-only diagnostics mirror AFT's native
+  strip and one-way sandbox rules; unknown fields and custom `bash` objects are preserved. Runtime
+  observation checks only whether `command.list` contains `aft-status`. Piarium does not execute its
+  `ctx.ui.custom` command, parse status output, read native indexes, or claim subsystem hot reload.
 
 Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
 verification.

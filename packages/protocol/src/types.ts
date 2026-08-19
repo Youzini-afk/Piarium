@@ -527,7 +527,7 @@ export type PiConfigScope = "global" | "project";
 
 export type PiConfigTextFormat = "json" | "jsonc";
 export type PiConfigTextRoot = "agent" | "home" | "project" | "user-config";
-export type PiConfigTextAuthorityId = "pi-lens-global" | "pi-lens-project";
+export type PiConfigTextAuthorityId = "aft-user" | "pi-lens-global" | "pi-lens-project";
 
 export interface ExtensionStateSnapshot {
   channel: string;
@@ -549,7 +549,7 @@ export interface PiConfigTextAuthoritySnapshot {
   authority: PiConfigTextAuthorityId;
   content: string;
   exists: boolean;
-  format: "json";
+  format: PiConfigTextFormat;
   path: string;
   projectTrusted: boolean;
   revision: string;

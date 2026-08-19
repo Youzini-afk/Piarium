@@ -223,7 +223,11 @@ function requireSessionFeatureMutation(value: unknown) {
 function requireConfigTextAuthority(
   record: Record<string, unknown>,
 ): PiConfigTextAuthorityId {
-  return requireEnum(record, "authority", ["pi-lens-global", "pi-lens-project"] as const);
+  return requireEnum(
+    record,
+    "authority",
+    ["aft-user", "pi-lens-global", "pi-lens-project"] as const,
+  );
 }
 
 function requireConfigWatchTarget(value: unknown): PiConfigWatchTarget {

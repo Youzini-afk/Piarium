@@ -7,6 +7,7 @@ export type PluginSettingsIntegrationId =
   | 'openai-codex-compat'
   | 'observational-memory'
   | 'context-mode'
+  | 'aft'
   | 'mcp'
   | 'pi-lens'
   | 'permission-system';
@@ -26,6 +27,7 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-observational-memory': 'observational-memory',
   'pi-openai-codex-compat': 'openai-codex-compat',
   'context-mode': 'context-mode',
+  '@cortexkit/aft-pi': 'aft',
   'pi-subagents': 'subagents',
   'pi-web-access': 'web-access',
   'pi-workspace-history': 'workspace-history',
@@ -47,6 +49,7 @@ const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, str
   'observational-memory': 'pi-observational-memory',
   'openai-codex-compat': 'pi-openai-codex-compat',
   'context-mode': 'context-mode',
+  'aft': '@cortexkit/aft-pi',
   'subagents': 'pi-subagents',
   'web-access': 'pi-web-access',
   'workspace-history': 'pi-workspace-history',

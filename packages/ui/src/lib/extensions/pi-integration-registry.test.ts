@@ -79,6 +79,46 @@ test('maps the pi-lens package to its built-in settings adapter', async () => {
   await handle.deactivate(2, 2);
 });
 
+test('maps only @cortexkit/aft-pi to the AFT settings adapter', async () => {
+  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+    candidate.manifest.id.endsWith('.aft')
+  ));
+  expect(definition).toBeDefined();
+  if (!definition) return;
+  const runtime = new SurfaceExtensionRuntime({ surface: 'web' });
+  const handle = await runtime.activate({
+    owner: {
+      desiredRevision: 1,
+      entrypointId: 'main',
+      extensionId: definition.manifest.id,
+      extensionVersion: definition.manifest.version,
+      generation: 1,
+      hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+      realmId: 'aft-adapter-test',
+    },
+  }, activateBuiltinPiIntegration(definition));
+  const aftPackage: PackageDescriptor = {
+    enabled: true,
+    installed: true,
+    name: '@cortexkit/aft-pi',
+    scope: 'global',
+    source: 'npm:@cortexkit/aft-pi',
+    structured: true,
+  };
+  const adapter = pluginSettingsAdapterForPackage(
+    aftPackage,
+    pluginSettingsAdaptersFromSnapshot(runtime.getSnapshot()),
+  );
+  expect(adapter?.adapterId).toBe('aft');
+  expect(adapter?.icon).toBe('tools');
+  expect(adapter?.packageNames).toEqual(['@cortexkit/aft-pi']);
+  expect(pluginSettingsAdapterForPackage(
+    { ...aftPackage, name: '@cortexkit/aft', source: 'npm:@cortexkit/aft' },
+    pluginSettingsAdaptersFromSnapshot(runtime.getSnapshot()),
+  )).toBeNull();
+  await handle.deactivate(2, 2);
+});
+
 test('maps @gotgenes/pi-permission-system to its built-in settings adapter', async () => {
   const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
     candidate.manifest.id.endsWith('.permission-system')

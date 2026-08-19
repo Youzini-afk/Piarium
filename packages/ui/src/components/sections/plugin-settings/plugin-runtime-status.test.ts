@@ -93,6 +93,12 @@ describe('plugin runtime status', () => {
     expect(pluginRuntimeStatus('pi-lens', signals({ hasActiveSession: false, commandNames: new Set(['lens-toggle']) }))).toBe('no-session');
   });
 
+  test('observes AFT only through command.list reporting aft-status', () => {
+    expect(pluginRuntimeStatus('aft', signals({ commandNames: new Set(['aft-status']) }))).toBe('available');
+    expect(pluginRuntimeStatus('aft', signals())).toBe('not-observed');
+    expect(pluginRuntimeStatus('aft', signals({ commandNames: new Set(['/aft-status']) }))).toBe('not-observed');
+  });
+
   test('observes permission-system only through its native settings command', () => {
     expect(pluginRuntimeStatus(
       'permission-system',

@@ -8,6 +8,7 @@ describe('recommended Pi packages', () => {
     expect(sourceByName['pi-openai-codex-compat']).toBe('npm:pi-openai-codex-compat@alpha');
     expect(sourceByName['pi-observational-memory']).toBe('npm:pi-observational-memory');
     expect(sourceByName['context-mode']).toBe('npm:context-mode');
+    expect(sourceByName['@cortexkit/aft-pi']).toBe('npm:@cortexkit/aft-pi');
     expect(sourceByName['pi-lens']).toBe('npm:pi-lens');
     expect(sourceByName['@gotgenes/pi-permission-system']).toBe('npm:@gotgenes/pi-permission-system');
   });

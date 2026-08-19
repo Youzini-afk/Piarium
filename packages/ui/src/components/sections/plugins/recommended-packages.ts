@@ -33,6 +33,11 @@ export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
     descriptionKey: 'settings.piarium.plugins.package.contextMode',
   },
   {
+    name: '@cortexkit/aft-pi',
+    source: 'npm:@cortexkit/aft-pi',
+    descriptionKey: 'settings.piarium.plugins.package.aft',
+  },
+  {
     name: 'pi-lens',
     source: 'npm:pi-lens',
     descriptionKey: 'settings.piarium.plugins.package.piLens',

@@ -18,6 +18,7 @@ import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { RecoverySettings } from '@/components/sections/openchamber/RecoverySettings';
 import { PluginSettingsPage, PluginSettingsSidebar } from '@/components/sections/plugin-settings';
 import { ContextModeSettings } from '@/components/sections/plugin-settings/ContextModeSettings';
+import { AftSettings } from '@/components/sections/plugin-settings/AftSettings';
 import { MagicContextSettings } from '@/components/sections/plugin-settings/MagicContextSettings';
 import { ObservationalMemorySettings } from '@/components/sections/plugin-settings/ObservationalMemorySettings';
 import { OpenAICodexCompatSettings } from '@/components/sections/plugin-settings/OpenAICodexCompatSettings';
@@ -129,6 +130,8 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
         return <ObservationalMemorySettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'context-mode':
         return <ContextModeSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'aft':
+        return <AftSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'pi-lens':
         return <PiLensSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'permission-system':

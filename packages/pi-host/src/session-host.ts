@@ -1807,11 +1807,11 @@ export class SessionHost {
     const settings = this.runtime.services.settingsManager;
     this.#assertConfigTextAuthorityTrusted(authority, "read");
     const location = await resolveConfigTextAuthority(authority, this.runtime.cwd);
-    const snapshot = await new ConfigTextFileEditor(location.path, "json").read();
+    const snapshot = await new ConfigTextFileEditor(location.path, location.format).read();
     return {
       authority,
       ...snapshot,
-      format: "json",
+      format: location.format,
       path: location.path,
       projectTrusted: settings.isProjectTrusted(),
     };
@@ -1833,7 +1833,7 @@ export class SessionHost {
         pendingErrors.map((entry) => entry.error.message).join("; "),
       );
     }
-    const snapshot = await new ConfigTextFileEditor(location.path, "json").update(
+    const snapshot = await new ConfigTextFileEditor(location.path, location.format).update(
       content,
       expectedRevision,
     );
@@ -1841,7 +1841,7 @@ export class SessionHost {
     return {
       authority,
       ...snapshot,
-      format: "json",
+      format: location.format,
       path: location.path,
       projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
     };

@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { describe, it } from "node:test";
 import {
   createRequest,
   type EventEnvelope,
+  PIARIUM_PROTOCOL_VERSION,
   type PiConfigTextAuthoritySnapshot,
   type ResponseEnvelope,
   type WireEnvelope,
 } from "@piarium/protocol";
+import { resolveAftUserConfigPath } from "../src/config-text-authority-resolver.js";
 import { HostController } from "../src/host-controller.js";
 import { MemoryHostTransport } from "../src/transport.js";
 
@@ -22,6 +24,62 @@ function isEvent(envelope: WireEnvelope, event: string): envelope is EventEnvelo
 }
 
 describe("resolved configuration text authorities", () => {
+  it("matches AFT's absolute XDG and platform-specific home resolution", () => {
+    assert.equal(
+      resolveAftUserConfigPath({
+        env: { HOME: "/home/fallback", XDG_CONFIG_HOME: "/srv/aft-config" },
+        homedir: () => "/home/os",
+        platform: "linux",
+      }),
+      "/srv/aft-config/cortexkit/aft.jsonc",
+    );
+
+    assert.equal(
+      resolveAftUserConfigPath({
+        env: {
+          HOME: "D:\\home",
+          USERPROFILE: "C:\\users\\profile",
+          XDG_CONFIG_HOME: "relative-xdg",
+        },
+        homedir: () => "E:\\os-home",
+        platform: "win32",
+      }),
+      "C:\\users\\profile\\.config\\cortexkit\\aft.jsonc",
+    );
+    assert.equal(
+      resolveAftUserConfigPath({
+        env: { HOME: "D:\\home" },
+        homedir: () => "E:\\os-home",
+        platform: "win32",
+      }),
+      "D:\\home\\.config\\cortexkit\\aft.jsonc",
+    );
+    assert.equal(
+      resolveAftUserConfigPath({
+        env: {},
+        homedir: () => "E:\\os-home",
+        platform: "win32",
+      }),
+      "E:\\os-home\\.config\\cortexkit\\aft.jsonc",
+    );
+    assert.equal(
+      resolveAftUserConfigPath({
+        env: { HOME: "relative-home" },
+        homedir: () => "/home/os",
+        platform: "linux",
+      }),
+      posix.resolve("relative-home/.config/cortexkit/aft.jsonc"),
+    );
+    assert.equal(
+      resolveAftUserConfigPath({
+        env: { XDG_CONFIG_HOME: "C:\\absolute-xdg" },
+        homedir: () => "E:\\os-home",
+        platform: "win32",
+      }),
+      win32.resolve("C:\\absolute-xdg\\cortexkit\\aft.jsonc"),
+    );
+  });
+
   it("resolves Pi Lens authorities, watches every project candidate, and enforces revisions", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-config-authority-"));
     const workspace = join(root, "workspace");
@@ -192,6 +250,125 @@ describe("resolved configuration text authorities", () => {
       assert.equal(denied.error.code, "project_not_trusted");
     } finally {
       await controller.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("owns the AFT user JSONC authority without project trust", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-aft-authority-"));
+    const cwd = join(root, "workspace");
+    const configHome = join(root, "config-home");
+    const aftPath = join(configHome, "cortexkit", "aft.jsonc");
+    await mkdir(cwd, { recursive: true });
+
+    const previousConfigHome = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = configHome;
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({
+      agentDir: join(root, "agent"),
+      projectTrustOverride: false,
+      transport,
+    });
+    controller.start();
+    try {
+      transport.receive(createRequest("aft-create", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "aft-create"));
+      assert.ok(created.kind === "response" && created.ok);
+
+      transport.receive(createRequest("aft-get", "config.text.authority.get", {
+        authority: "aft-user",
+      }));
+      const getResponse = await transport.waitFor((entry) => isResponse(entry, "aft-get"));
+      assert.ok(getResponse.kind === "response" && getResponse.ok);
+      const missing = getResponse.result as PiConfigTextAuthoritySnapshot;
+      assert.equal(missing.authority, "aft-user");
+      assert.equal(missing.exists, false);
+      assert.equal(missing.format, "jsonc");
+      assert.equal(missing.path, aftPath);
+      assert.equal(missing.projectTrusted, false);
+
+      const content = "{\n  // AFT user preference\n  \"enabled\": true,\n}\n";
+      transport.receive(createRequest("aft-update", "config.text.authority.update", {
+        authority: "aft-user",
+        content,
+        expectedRevision: missing.revision,
+      }));
+      const updateResponse = await transport.waitFor((entry) => isResponse(entry, "aft-update"));
+      assert.ok(updateResponse.kind === "response" && updateResponse.ok);
+      const saved = updateResponse.result as PiConfigTextAuthoritySnapshot;
+      assert.equal(saved.content, content);
+      assert.equal(saved.format, "jsonc");
+      assert.equal(await readFile(aftPath, "utf8"), content);
+
+      transport.receive(createRequest("aft-watch", "config.watch", {
+        target: { authority: "aft-user", kind: "text-authority" },
+      }));
+      const watchResponse = await transport.waitFor((entry) => isResponse(entry, "aft-watch"));
+      assert.ok(watchResponse.kind === "response" && watchResponse.ok);
+      const watchId = (watchResponse.result as { watchId: string }).watchId;
+
+      const externalContent = "{\n  // External AFT change\n  \"enabled\": false,\n}\n";
+      await writeFile(aftPath, externalContent, "utf8");
+      const changed = await transport.waitFor(
+        (entry) =>
+          isEvent(entry, "config.changed")
+          && entry.event === "config.changed"
+          && entry.data.watchId === watchId,
+      );
+      assert.ok(changed.kind === "event" && changed.event === "config.changed");
+      assert.deepEqual(changed.data.target, {
+        authority: "aft-user",
+        kind: "text-authority",
+      });
+
+      transport.receive(createRequest("aft-refresh", "config.text.authority.get", {
+        authority: "aft-user",
+      }));
+      const refreshResponse = await transport.waitFor((entry) => isResponse(entry, "aft-refresh"));
+      assert.ok(refreshResponse.kind === "response" && refreshResponse.ok);
+      const refreshed = refreshResponse.result as PiConfigTextAuthoritySnapshot;
+      assert.equal(refreshed.content, externalContent);
+      assert.notEqual(refreshed.revision, saved.revision);
+
+      transport.receive(createRequest("aft-stale", "config.text.authority.update", {
+        authority: "aft-user",
+        content,
+        expectedRevision: saved.revision,
+      }));
+      const staleResponse = await transport.waitFor((entry) => isResponse(entry, "aft-stale"));
+      assert.ok(staleResponse.kind === "response" && !staleResponse.ok);
+      assert.equal(staleResponse.error.code, "config_conflict");
+      assert.equal(await readFile(aftPath, "utf8"), externalContent);
+
+      transport.receive({
+        id: "aft-unknown",
+        kind: "request",
+        method: "config.text.authority.get",
+        params: { authority: "unknown-authority" },
+        v: PIARIUM_PROTOCOL_VERSION,
+      } as unknown as WireEnvelope);
+      const unknownResponse = await transport.waitFor((entry) => isResponse(entry, "aft-unknown"));
+      assert.ok(unknownResponse.kind === "response" && !unknownResponse.ok);
+      assert.equal(unknownResponse.error.code, "invalid_params");
+
+      transport.receive(createRequest("aft-unwatch", "config.unwatch", { watchId }));
+      const unwatchResponse = await transport.waitFor((entry) => isResponse(entry, "aft-unwatch"));
+      assert.ok(unwatchResponse.kind === "response" && unwatchResponse.ok);
+
+      await rm(aftPath);
+      const linkedTarget = join(root, "linked-aft-target");
+      await mkdir(linkedTarget);
+      await symlink(linkedTarget, aftPath, "junction");
+      transport.receive(createRequest("aft-symlink", "config.text.authority.get", {
+        authority: "aft-user",
+      }));
+      const symlinkResponse = await transport.waitFor((entry) => isResponse(entry, "aft-symlink"));
+      assert.ok(symlinkResponse.kind === "response" && !symlinkResponse.ok);
+      assert.equal(symlinkResponse.error.code, "invalid_config_path");
+    } finally {
+      await controller.dispose();
+      if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousConfigHome;
       await rm(root, { force: true, recursive: true });
     }
   });

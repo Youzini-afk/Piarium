@@ -85,6 +85,7 @@ interface TextPathDraftOptions extends CommonDraftOptions {
 
 interface TextAuthorityDraftOptions extends CommonDraftOptions {
   authority: PiConfigTextAuthorityId;
+  format: PiConfigTextFormat;
 }
 
 type TextDraftOptions = TextPathDraftOptions | TextAuthorityDraftOptions;
@@ -645,7 +646,7 @@ const loadTextDocument = async (
   options: TextDraftOptions,
 ): Promise<TextDraftSnapshot> => {
   if ('authority' in options) {
-    return getPiConfigTextAuthority(runtimeTarget, options.authority);
+    return getPiConfigTextAuthority(runtimeTarget, options.authority, options.format);
   }
   let fallback: PiConfigTextDocumentSnapshot | undefined;
   for (const path of options.paths) {
@@ -658,12 +659,12 @@ const loadTextDocument = async (
 };
 
 const textDraftFormat = (options: TextDraftOptions): PiConfigTextFormat => (
-  'authority' in options ? 'json' : options.format
+  options.format
 );
 
-const textDraftSourceKey = (options: TextDraftOptions): string => (
+export const pluginTextDraftSourceKey = (options: TextDraftOptions): string => (
   'authority' in options
-    ? `authority:${options.authority}`
+    ? `authority:${options.format}:${options.authority}`
     : `paths:${options.format}:${options.root}:${options.paths.join('\0')}`
 );
 
@@ -692,6 +693,7 @@ const updateTextDraftSnapshot = (
     ? updatePiConfigTextAuthority(
         runtimeTarget,
         snapshot.authority,
+        snapshot.format,
         content,
         snapshot.revision,
       )
@@ -709,7 +711,7 @@ export const useTextObjectDraft = (options: TextDraftOptions): PluginObjectDraft
   const { runtimeTarget, targetKey } = options;
   const { t } = useI18n();
   const format = textDraftFormat(options);
-  const sourceKey = textDraftSourceKey(options);
+  const sourceKey = pluginTextDraftSourceKey(options);
   const sourceRef = React.useRef(options);
   sourceRef.current = options;
   const sourceKeyRef = React.useRef(sourceKey);

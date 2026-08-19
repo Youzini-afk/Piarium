@@ -50,6 +50,8 @@ describe('i18n store', () => {
       expect(useI18nStore.getState().loadingLocale).toBe('fr');
       await waitForLocaleLoadToSettle('fr');
       expect(useI18nStore.getState().dictionary['common.language.french']).toBe('Français');
+      expect(useI18nStore.getState().dictionary['settings.piarium.pluginSettings.aft.section.core'])
+        .toBe('Comportement principal de l’édition');
     } finally {
       resetStore();
     }

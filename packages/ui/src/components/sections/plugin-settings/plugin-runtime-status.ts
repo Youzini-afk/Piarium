@@ -57,6 +57,10 @@ export function pluginRuntimeStatus(integrationId: PluginSettingsIntegrationId, 
       if (signals.commandsFailed) return 'error';
       if (!signals.commandsChecked) return 'checking';
       return signals.commandNames.has('ctx-stats') ? 'available' : 'not-observed';
+    case 'aft':
+      if (signals.commandsFailed) return 'error';
+      if (!signals.commandsChecked) return 'checking';
+      return signals.commandNames.has('aft-status') ? 'available' : 'not-observed';
     case 'pi-lens':
       if (signals.commandsFailed) return 'error';
       if (!signals.commandsChecked) return 'checking';

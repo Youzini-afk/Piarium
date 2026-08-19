@@ -201,11 +201,13 @@ export const PiLensSettings: React.FC<PiLensSettingsProps> = ({ runtimeTarget, t
   const [scope, setScope] = React.useState<PiConfigScope>('global');
   const globalController = useTextObjectDraft({
     authority: 'pi-lens-global',
+    format: 'json',
     runtimeTarget,
     targetKey: `${targetKey}:global`,
   });
   const projectController = useTextObjectDraft({
     authority: 'pi-lens-project',
+    format: 'json',
     runtimeTarget,
     targetKey: `${targetKey}:project`,
   });

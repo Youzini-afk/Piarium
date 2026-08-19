@@ -2,12 +2,24 @@ import { describe, expect, test } from 'bun:test';
 import {
   parsePluginTextObjectDraft,
   isPluginDraftActionCurrent,
+  pluginTextDraftSourceKey,
   preservePluginDraftOnFailure,
   reconcilePluginDraftExternalChange,
   shouldApplyPluginDraftReload,
 } from './usePluginConfigDraft';
 
 describe('plugin text draft recovery', () => {
+  test('includes the declared authority format in the draft source identity', () => {
+    const common = {
+      authority: 'aft-user' as const,
+      runtimeTarget: { cwd: '/workspace' } as const,
+      targetKey: 'aft:user',
+    };
+
+    expect(pluginTextDraftSourceKey({ ...common, format: 'jsonc' })).toBe('authority:jsonc:aft-user');
+    expect(pluginTextDraftSourceKey({ ...common, format: 'json' })).toBe('authority:json:aft-user');
+  });
+
   test('keeps an invalid JSONC document repairable instead of treating it as a load failure', () => {
     const result = parsePluginTextObjectDraft('{\n  // keep me\n  "enabled": true,,\n}\n', 'jsonc');
 

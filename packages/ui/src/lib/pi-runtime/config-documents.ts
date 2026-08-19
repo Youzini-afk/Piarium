@@ -69,24 +69,34 @@ export const updatePiConfigTextDocument = async (
 export const getPiConfigTextAuthority = async (
   target: RuntimeContextTarget,
   authority: PiConfigTextAuthorityId,
+  format: PiConfigTextFormat,
 ) => {
   const { client } = await getPiRuntimeConnection();
-  return client.request('config.text.authority.get', { ...target, authority });
+  const snapshot = await client.request('config.text.authority.get', { ...target, authority });
+  if (snapshot.format !== format) {
+    throw new Error(`Configuration authority ${authority} returned ${snapshot.format}; expected ${format}`);
+  }
+  return snapshot;
 };
 
 export const updatePiConfigTextAuthority = async (
   target: RuntimeContextTarget,
   authority: PiConfigTextAuthorityId,
+  format: PiConfigTextFormat,
   content: string,
   expectedRevision: string,
 ) => {
   const { client } = await getPiRuntimeConnection();
-  return client.request('config.text.authority.update', {
+  const snapshot = await client.request('config.text.authority.update', {
     ...target,
     authority,
     content,
     expectedRevision,
   });
+  if (snapshot.format !== format) {
+    throw new Error(`Configuration authority ${authority} returned ${snapshot.format}; expected ${format}`);
+  }
+  return snapshot;
 };
 
 type PiConfigWatchEvent = PiConfigWatchSubscription & {

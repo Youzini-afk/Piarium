@@ -1,15 +1,26 @@
 import { lstat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import type { PiConfigTextAuthorityId } from "@piarium/protocol";
+import { dirname, join, posix, resolve, win32 } from "node:path";
+import type { PiConfigTextAuthorityId, PiConfigTextFormat } from "@piarium/protocol";
 import { HostError } from "./errors.js";
 
 const PI_LENS_PROJECT_CONFIG_NAMES = [".pi-lens.json", "pi-lens.json"] as const;
 
 export interface ResolvedConfigTextAuthority {
   authority: PiConfigTextAuthorityId;
+  format: PiConfigTextFormat;
   path: string;
   watchPaths: readonly string[];
+}
+
+export interface ConfigTextAuthorityResolverDependencies {
+  env: Readonly<{
+    HOME?: string;
+    USERPROFILE?: string;
+    XDG_CONFIG_HOME?: string;
+  }>;
+  homedir: () => string;
+  platform: NodeJS.Platform;
 }
 
 function isMissingPathError(error: unknown): boolean {
@@ -55,19 +66,46 @@ function piLensProjectCandidates(cwd: string): string[] {
   }
 }
 
+function resolverDependencies(): ConfigTextAuthorityResolverDependencies {
+  return { env: process.env, homedir, platform: process.platform };
+}
+
+export function resolveAftUserConfigPath(
+  dependencies: ConfigTextAuthorityResolverDependencies = resolverDependencies(),
+): string {
+  const pathApi = dependencies.platform === "win32" ? win32 : posix;
+  const home = dependencies.platform === "win32"
+    ? dependencies.env.USERPROFILE || dependencies.env.HOME || dependencies.homedir()
+    : dependencies.env.HOME || dependencies.homedir();
+  const xdg = dependencies.env.XDG_CONFIG_HOME;
+  const configHome = xdg && pathApi.isAbsolute(xdg)
+    ? xdg
+    : pathApi.join(home, ".config");
+  return pathApi.resolve(pathApi.join(configHome, "cortexkit", "aft.jsonc"));
+}
+
 export async function resolveConfigTextAuthority(
   authority: PiConfigTextAuthorityId,
   cwd: string,
+  dependencies: ConfigTextAuthorityResolverDependencies = resolverDependencies(),
 ): Promise<ResolvedConfigTextAuthority> {
   if (authority === "pi-lens-global") {
     const path = piLensGlobalConfigPath();
     await pathStatus(path);
-    return { authority, path, watchPaths: [path] };
+    return { authority, format: "json", path, watchPaths: [path] };
+  }
+
+  if (authority === "aft-user") {
+    const path = resolveAftUserConfigPath(dependencies);
+    await pathStatus(path);
+    return { authority, format: "jsonc", path, watchPaths: [path] };
   }
 
   const watchPaths = piLensProjectCandidates(cwd);
   for (const path of watchPaths) {
-    if (await pathStatus(path) === "present") return { authority, path, watchPaths };
+    if (await pathStatus(path) === "present") {
+      return { authority, format: "json", path, watchPaths };
+    }
   }
-  return { authority, path: watchPaths[0] as string, watchPaths };
+  return { authority, format: "json", path: watchPaths[0] as string, watchPaths };
 }

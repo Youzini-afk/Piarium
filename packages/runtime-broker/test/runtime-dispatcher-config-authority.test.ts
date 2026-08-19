@@ -11,11 +11,11 @@ describe("runtime dispatcher configuration text authorities", () => {
   it("routes closed authority payloads and authority watch targets", async () => {
     const calls: Array<{ method: string; params: unknown; target: unknown }> = [];
     const snapshot = {
-      authority: "pi-lens-project" as const,
-      content: "{}\n",
+      authority: "aft-user" as const,
+      content: "{\n  // AFT\n}\n",
       exists: false,
-      format: "json" as const,
-      path: "C:\\workspace\\.pi-lens.json",
+      format: "jsonc" as const,
+      path: "C:\\Users\\owner\\.config\\cortexkit\\aft.jsonc",
       projectTrusted: true,
       revision: "revision-1",
     };
@@ -33,14 +33,14 @@ describe("runtime dispatcher configuration text authorities", () => {
 
     assert.equal(
       (await dispatchRuntimeRequest(broker, "config.text.authority.get", {
-        authority: "pi-lens-project",
+        authority: "aft-user",
         cwd: "C:\\workspace",
       })).path,
       snapshot.path,
     );
     await dispatchRuntimeRequest(broker, "config.text.authority.update", {
-      authority: "pi-lens-global",
-      content: "{\"enabled\":true}\n",
+      authority: "aft-user",
+      content: "{\n  // AFT\n  \"enabled\": true,\n}\n",
       cwd: "C:\\workspace",
       expectedRevision: "revision-0",
     });
@@ -50,7 +50,7 @@ describe("runtime dispatcher configuration text authorities", () => {
       "config.watch",
       {
         cwd: "C:\\workspace",
-        target: { authority: "pi-lens-project", kind: "text-authority" },
+        target: { authority: "aft-user", kind: "text-authority" },
       },
       context,
     );
@@ -59,21 +59,21 @@ describe("runtime dispatcher configuration text authorities", () => {
     assert.deepEqual(calls, [
       {
         method: "config.text.authority.get",
-        params: { authority: "pi-lens-project" },
+        params: { authority: "aft-user" },
         target: { cwd: "C:\\workspace" },
       },
       {
         method: "config.text.authority.update",
         params: {
-          authority: "pi-lens-global",
-          content: "{\"enabled\":true}\n",
+          authority: "aft-user",
+          content: "{\n  // AFT\n  \"enabled\": true,\n}\n",
           expectedRevision: "revision-0",
         },
         target: { cwd: "C:\\workspace" },
       },
       {
         method: "config.watch",
-        params: { authority: "pi-lens-project", kind: "text-authority" },
+        params: { authority: "aft-user", kind: "text-authority" },
         target: { cwd: "C:\\workspace" },
       },
     ]);

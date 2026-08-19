@@ -48,7 +48,7 @@ test("broker owns catalog and per-session Pi workers", async () => {
       }
     },
     environment: { HOME: homeDir, PI_CODING_AGENT_DIR: join(root, "wrong-agent") },
-    execArgv: ["--import", "tsx"],
+    execArgv: ["--import", import.meta.resolve("tsx")],
     hostEntry: HOST_ENTRY,
     promptForProjectTrust: async () => ({ remember: false, trusted: true }),
   });
@@ -483,7 +483,7 @@ test("surface explicitly resolves project trust without a broker-owned deadline"
       clientVersion: "0.1.0",
       mode: "test",
     },
-    execArgv: ["--import", "tsx"],
+    execArgv: ["--import", import.meta.resolve("tsx")],
     hostEntry: HOST_ENTRY,
   });
 
@@ -546,7 +546,7 @@ test("workspace configuration watches survive catalog context switches and cance
       clientVersion: "0.1.0",
       mode: "test",
     },
-    execArgv: ["--import", "tsx"],
+    execArgv: ["--import", import.meta.resolve("tsx")],
     hostEntry: HOST_ENTRY,
     projectTrustOverride: true,
   });

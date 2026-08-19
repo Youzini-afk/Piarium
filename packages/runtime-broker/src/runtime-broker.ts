@@ -244,10 +244,11 @@ export class PiRuntimeBroker {
   }
 
   async createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
-    const worker = await this.#spawnWorker();
+    const normalizedCwd = resolve(cwd);
+    const worker = await this.#spawnWorker(normalizedCwd);
     try {
       const snapshot = await worker.request("session.create", {
-        cwd,
+        cwd: normalizedCwd,
         ...(name === undefined ? {} : { name }),
         ...(parentSession === undefined ? {} : { parentSession }),
       });
@@ -269,19 +270,56 @@ export class PiRuntimeBroker {
       const existing = this.#sessions.get(input.sessionId);
       if (existing) return existing.request("session.snapshot", { sessionId: input.sessionId });
     }
-    const worker = await this.#spawnWorker();
+
+    const explicitCwd = input.cwd === undefined ? undefined : resolve(input.cwd);
+    const explicitSessionFile = input.sessionFile === undefined
+      ? undefined
+      : resolve(this.#options.cwd ?? process.cwd(), input.sessionFile);
+    const normalizedInput = {
+      ...(explicitSessionFile === undefined ? {} : { sessionFile: explicitSessionFile }),
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+    };
+    let known = this.#knownSummaryForOpen(normalizedInput);
+    if (
+      explicitCwd === undefined
+      && explicitSessionFile === undefined
+      && input.sessionId !== undefined
+      && known === undefined
+    ) {
+      await this.listSessions();
+      known = this.#knownSummaryForOpen(normalizedInput);
+    }
+
+    let sessionFile = explicitSessionFile ?? known?.sessionFile;
+    let workerCwd = explicitCwd;
+    if (workerCwd === undefined && sessionFile !== undefined) {
+      const resolvedSession = await (await this.#getCatalog()).request("session.resolve", {
+        sessionFile,
+      });
+      workerCwd = resolve(resolvedSession.cwd);
+      sessionFile = resolvedSession.sessionFile;
+    }
+    if (workerCwd === undefined) {
+      throw new PiRuntimeBrokerError(
+        "session_not_found",
+        input.sessionId
+          ? `Unknown Pi session: ${input.sessionId}`
+          : "A session file or known session ID is required",
+      );
+    }
+
+    const openInput: HostMethodParams<"session.open"> = {
+      cwd: workerCwd,
+      ...(sessionFile === undefined ? {} : { sessionFile }),
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+    };
+    const opened = await this.#openUnboundSessionWorker(workerCwd, openInput);
     try {
-      const known = input.sessionId ? this.#knownSummaries.get(input.sessionId) : undefined;
-      const openInput =
-        input.sessionFile === undefined && known !== undefined
-          ? { ...input, sessionFile: known.sessionFile }
-          : input;
-      const snapshot = await worker.request("session.open", openInput);
-      this.#bindSession(worker, snapshot.sessionId);
-      await this.#rememberSummary(worker, snapshot.sessionId);
-      return snapshot;
+      this.#bindSession(opened.worker, opened.snapshot.sessionId);
+      await this.#rememberSummary(opened.worker, opened.snapshot.sessionId);
+      return opened.snapshot;
     } catch (error) {
-      await this.#removeWorker(worker);
+      await this.#removeWorker(opened.worker);
       throw error;
     }
   }
@@ -506,6 +544,19 @@ export class PiRuntimeBroker {
     return summary;
   }
 
+  #knownSummaryForOpen(input: {
+    sessionFile?: string;
+    sessionId?: string;
+  }): SessionSummary | undefined {
+    if (input.sessionFile !== undefined) {
+      const sessionFileKey = this.#pathKey(input.sessionFile);
+      return [...this.#knownSummaries.values()].find(
+        (summary) => this.#pathKey(summary.sessionFile) === sessionFileKey,
+      );
+    }
+    return input.sessionId === undefined ? undefined : this.#knownSummaries.get(input.sessionId);
+  }
+
   #pathKey(path: string): string {
     const normalized = resolve(path);
     return process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -555,9 +606,22 @@ export class PiRuntimeBroker {
     await rm(resolvedCandidate);
   }
 
-  async #spawnWorker(): Promise<PiHostClient> {
+  async #openUnboundSessionWorker(
+    cwd: string,
+    input: HostMethodParams<"session.open">,
+  ): Promise<{ snapshot: SessionSnapshot; worker: PiHostClient }> {
+    const worker = await this.#spawnWorker(cwd);
+    try {
+      return { snapshot: await worker.request("session.open", input), worker };
+    } catch (error) {
+      await this.#removeWorker(worker);
+      throw error;
+    }
+  }
+
+  async #spawnWorker(cwd: string): Promise<PiHostClient> {
     if (this.#disposed) throw new Error("Pi runtime broker is disposed");
-    const worker = this.#createClient("session");
+    const worker = this.#createClient("session", cwd);
     this.#clients.add(worker);
     try {
       await worker.start();
@@ -568,10 +632,11 @@ export class PiRuntimeBroker {
     }
   }
 
-  #createClient(role: "catalog" | "session"): PiHostClient {
+  #createClient(role: "catalog" | "session", sessionCwd?: string): PiHostClient {
+    const cwd = role === "catalog" ? this.#options.cwd : sessionCwd;
     const client = new PiHostClient({
       ...(this.#options.agentDir === undefined ? {} : { agentDir: this.#options.agentDir }),
-      ...(this.#options.cwd === undefined ? {} : { cwd: this.#options.cwd }),
+      ...(cwd === undefined ? {} : { cwd }),
       ...(this.#options.environment === undefined
         ? {}
         : { environment: this.#options.environment }),
