@@ -2,6 +2,7 @@ import React from 'react';
 import type { JsonValue, RuntimeContextTarget } from '@piarium/protocol';
 import { SettingsControlGroup } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   PluginOptionalBooleanField,
   PluginOptionalNumberField,
@@ -177,6 +178,7 @@ export const HermesMemorySettings: React.FC<HermesMemorySettingsProps> = ({
   targetKey,
 }) => {
   const { t } = useI18n();
+  const homeDir = useDirectoryStore((state) => state.homeDirectory);
   const controller = useTextObjectDraft({
     authority: 'hermes-memory-user',
     format: 'json',
@@ -188,8 +190,11 @@ export const HermesMemorySettings: React.FC<HermesMemorySettingsProps> = ({
     [controller.path],
   );
   const issues = React.useMemo(
-    () => hermesMemoryDraftIssues(controller.draft, { agentRoot }),
-    [agentRoot, controller.draft],
+    () => hermesMemoryDraftIssues(controller.draft, {
+      ...(agentRoot ? { agentRoot } : {}),
+      ...(homeDir.trim().length > 0 ? { homeDir } : {}),
+    }),
+    [agentRoot, controller.draft, homeDir],
   );
   const validationBlocked = issues.some((issue) => issue.blocking);
   const fields = fieldProps(controller, validationBlocked);

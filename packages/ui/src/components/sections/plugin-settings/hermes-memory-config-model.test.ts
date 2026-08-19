@@ -4,6 +4,7 @@ import {
   hermesAgentRootFromAuthorityPath,
   hermesMemoryDraftIssues,
   type HermesMemoryDraftIssue,
+  normalizeHermesProjectsMemoryDir,
   validHermesProjectsMemoryDir,
 } from './hermes-memory-config-model';
 
@@ -93,11 +94,27 @@ describe('Hermes Memory config model', () => {
     expect(validHermesProjectsMemoryDir('/home/u/.pi/agent/team', posixRoot)).toBe(true);
     expect(validHermesProjectsMemoryDir('C:\\Users\\u\\.pi\\agent\\team', windowsRoot)).toBe(true);
     expect(validHermesProjectsMemoryDir('~/.pi/agent/team', posixRoot)).toBe(true);
+    expect(normalizeHermesProjectsMemoryDir('./team', posixRoot)).toBe('team');
+    expect(validHermesProjectsMemoryDir('..team', posixRoot)).toBe(true);
+
+    const customWindowsRoot = 'D:\\work\\pi-agent';
+    expect(validHermesProjectsMemoryDir('team', customWindowsRoot)).toBe(true);
+    expect(validHermesProjectsMemoryDir('D:\\work\\pi-agent\\team', customWindowsRoot)).toBe(true);
+    expect(validHermesProjectsMemoryDir('D:\\work\\pi-agent\\team\\nested', customWindowsRoot)).toBe(false);
+    expect(validHermesProjectsMemoryDir('E:\\other\\team', customWindowsRoot)).toBe(false);
+    expect(validHermesProjectsMemoryDir(
+      '~/outside',
+      customWindowsRoot,
+      'C:\\Users\\u',
+    )).toBe(false);
 
     expect(validHermesProjectsMemoryDir('/home/u/.pi/agent', posixRoot)).toBe(false);
     expect(validHermesProjectsMemoryDir('/home/u/team', posixRoot)).toBe(false);
     expect(validHermesProjectsMemoryDir('/home/u/.pi/agent/team/nested', posixRoot)).toBe(false);
     expect(validHermesProjectsMemoryDir('../team', posixRoot)).toBe(false);
+    expect(validHermesProjectsMemoryDir('~/outside', posixRoot)).toBe(false);
+    expect(validHermesProjectsMemoryDir('foo\\bar', posixRoot)).toBe(false);
+    expect(validHermesProjectsMemoryDir('..\\escape', posixRoot)).toBe(false);
     expect(validHermesProjectsMemoryDir('', posixRoot)).toBe(false);
     expect(validHermesProjectsMemoryDir('nested/path', posixRoot)).toBe(false);
     expect(validHermesProjectsMemoryDir('C:\\memory', windowsRoot)).toBe(false);
@@ -116,6 +133,11 @@ describe('Hermes Memory config model', () => {
       field: 'projectsMemoryDir',
     });
     expectIssue(hermesMemoryDraftIssues({ projectsMemoryDir: '../outside' }, { agentRoot: posixRoot }), {
+      blocking: true,
+      code: 'invalid-value',
+      field: 'projectsMemoryDir',
+    });
+    expectIssue(hermesMemoryDraftIssues({ projectsMemoryDir: '~/outside' }, { agentRoot: posixRoot }), {
       blocking: true,
       code: 'invalid-value',
       field: 'projectsMemoryDir',

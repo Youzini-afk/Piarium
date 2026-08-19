@@ -18,6 +18,15 @@ describe('RTK optimizer config model', () => {
     expect(strict).toEqual({ draft: { enabled: true }, rawError: null });
     expect(comment.rawError).not.toBeNull();
     expect(trailingComma.rawError).not.toBeNull();
+
+    const bomDocument = `\uFEFF{\n  "enabled": true\n}\n`;
+    const bom = parsePluginTextObjectDraft(bomDocument, 'json');
+    expect(bom.rawError).not.toBeNull();
+    expect(bom.draft).toEqual({});
+    expect(parsePluginTextObjectDraft(bomDocument.replace(/^\uFEFF/, ''), 'json')).toEqual({
+      draft: { enabled: true },
+      rawError: null,
+    });
   });
 
   test('accepts the current native configuration tree and exact numeric ranges', () => {

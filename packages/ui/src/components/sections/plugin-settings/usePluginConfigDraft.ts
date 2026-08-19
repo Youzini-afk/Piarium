@@ -613,16 +613,23 @@ export const useConfigDocumentObjectDraft = ({
 };
 
 const parseTextObject = (content: string, format: PiConfigTextFormat): JsonObject => {
+  if (format === 'json') {
+    const value: unknown = JSON.parse(content);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('Configuration root must be an object');
+    }
+    return value as JsonObject;
+  }
   const errors: ParseError[] = [];
   const value = parse(content.replace(/^\uFEFF/, ''), errors, {
-    allowTrailingComma: format === 'jsonc',
-    disallowComments: format === 'json',
+    allowTrailingComma: true,
+    disallowComments: false,
   }) as JsonValue | undefined;
   if (errors.length > 0) {
     const first = errors[0];
     throw new Error(first
       ? `${printParseErrorCode(first.error)} at offset ${first.offset}`
-      : `Invalid ${format.toUpperCase()}`);
+      : 'Invalid JSONC');
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('Configuration root must be an object');
@@ -807,8 +814,13 @@ export const useTextObjectDraft = (options: TextDraftOptions): PluginObjectDraft
     const next = updateJsoncPath(contentRef.current, path, value);
     contentRef.current = next;
     setContent(next);
-    setRawError(null);
-    setState((current) => ({ ...current, draft: parseTextObject(next, format) }));
+    try {
+      const draft = parseTextObject(next, format);
+      setRawError(null);
+      setState((current) => ({ ...current, draft }));
+    } catch (error) {
+      setRawError(errorMessage(error));
+    }
   }, [format, state.targetKey, targetKey]);
 
   const removeValue = React.useCallback((path: readonly string[]) => {
@@ -818,8 +830,13 @@ export const useTextObjectDraft = (options: TextDraftOptions): PluginObjectDraft
     const next = removeJsoncPath(contentRef.current, path);
     contentRef.current = next;
     setContent(next);
-    setRawError(null);
-    setState((current) => ({ ...current, draft: parseTextObject(next, format) }));
+    try {
+      const draft = parseTextObject(next, format);
+      setRawError(null);
+      setState((current) => ({ ...current, draft }));
+    } catch (error) {
+      setRawError(errorMessage(error));
+    }
   }, [format, state.targetKey, targetKey]);
 
   const setRawContent = React.useCallback((next: string) => {

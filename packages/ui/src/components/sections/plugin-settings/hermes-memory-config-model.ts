@@ -97,6 +97,7 @@ const STRING_ARRAY_FIELDS = [
 
 interface HermesMemoryDraftIssueOptions {
   agentRoot?: string;
+  homeDir?: string;
 }
 
 type HermesPathStyle = 'posix' | 'win32';
@@ -158,15 +159,6 @@ const hermesSegmentsEqual = (style: HermesPathStyle, left: string, right: string
   style === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right
 );
 
-const hermesPathHasPrefix = (
-  style: HermesPathStyle,
-  root: readonly string[],
-  value: readonly string[],
-): boolean => (
-  value.length >= root.length
-  && root.every((segment, index) => hermesSegmentsEqual(style, segment, value[index]!))
-);
-
 const formatHermesParentPath = (parsed: HermesParsedPath): string | undefined => {
   const parent = parsed.segments.slice(0, -1);
   if (parsed.style === 'win32') {
@@ -178,13 +170,65 @@ const formatHermesParentPath = (parsed: HermesParsedPath): string | undefined =>
   return parent.length > 0 ? parent.join('/') : undefined;
 };
 
-const isSafeRelativeDirectory = (segments: readonly string[]): boolean => (
-  segments.length === 1 && segments[0] !== '.' && segments[0] !== '..'
-);
+const formatHermesPath = (parsed: HermesParsedPath): string => {
+  if (parsed.style === 'win32') {
+    const body = parsed.segments.join('\\');
+    if (parsed.absolute) return `${parsed.drive}\\${body}`;
+    return body;
+  }
+  if (parsed.absolute) return parsed.segments.length === 0 ? '/' : `/${parsed.segments.join('/')}`;
+  return parsed.segments.join('/');
+};
 
-const isTildeSpelling = (value: string): boolean => (
-  value === '~' || value.startsWith('~/') || value.startsWith('~\\')
-);
+const inferHomeDirFromAgentRoot = (agentRoot: string): string | undefined => {
+  const style = hermesPathStyleFor(agentRoot);
+  const parsed = parseHermesPath(agentRoot, style);
+  if (parsed.segments.length < 2) return undefined;
+  const parent = parsed.segments[parsed.segments.length - 2]!;
+  const leaf = parsed.segments[parsed.segments.length - 1]!;
+  if (!hermesSegmentsEqual(style, parent, '.pi') || !hermesSegmentsEqual(style, leaf, 'agent')) {
+    return undefined;
+  }
+  return formatHermesPath({
+    ...parsed,
+    segments: parsed.segments.slice(0, -2),
+  }) || (parsed.absolute && style === 'posix' ? '/' : undefined);
+};
+
+const expandHermesHome = (input: string, homeDir: string | undefined): string => {
+  if (!homeDir) return input;
+  if (input === '~') return homeDir;
+  if (!input.startsWith('~/') && !input.startsWith('~\\')) return input;
+  const homeStyle = hermesPathStyleFor(homeDir);
+  const home = parseHermesPath(homeDir, homeStyle);
+  const tail = parseHermesPath(input.slice(2), homeStyle);
+  return formatHermesPath({
+    absolute: home.absolute,
+    drive: home.drive,
+    segments: collapseHermesPathSegments(home.absolute, [...home.segments, ...tail.segments]),
+    style: home.style,
+  });
+};
+
+const hermesRelativeToRoot = (root: HermesParsedPath, value: HermesParsedPath): string => {
+  if (root.style === 'win32' && value.style === 'win32' && root.drive !== value.drive) {
+    return formatHermesPath(value);
+  }
+  let index = 0;
+  while (
+    index < root.segments.length
+    && index < value.segments.length
+    && hermesSegmentsEqual(root.style, root.segments[index]!, value.segments[index]!)
+  ) {
+    index += 1;
+  }
+  const parts = [
+    ...Array.from({ length: root.segments.length - index }, () => '..'),
+    ...value.segments.slice(index),
+  ];
+  if (parts.length === 0) return '';
+  return parts.join(root.style === 'win32' ? '\\' : '/');
+};
 
 export const hermesAgentRootFromAuthorityPath = (authorityPath: string): string | undefined => {
   const trimmed = authorityPath.trim();
@@ -255,7 +299,11 @@ const validateKnownFields = (
   )) {
     issue(issues, 'invalid-value', 'llmModelOverride');
   }
-  if ('projectsMemoryDir' in draft && !validHermesProjectsMemoryDir(draft.projectsMemoryDir, options.agentRoot)) {
+  if ('projectsMemoryDir' in draft && !validHermesProjectsMemoryDir(
+    draft.projectsMemoryDir,
+    options.agentRoot,
+    options.homeDir,
+  )) {
     issue(issues, 'invalid-value', 'projectsMemoryDir');
   }
 
@@ -280,24 +328,46 @@ const validateKnownFields = (
   }
 };
 
-export const validHermesProjectsMemoryDir = (value: unknown, agentRoot?: string): boolean => {
-  if (typeof value !== 'string') return false;
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.includes('\0')) return false;
-  if (isTildeSpelling(trimmed)) return true;
+export const validHermesProjectsMemoryDir = (
+  value: unknown,
+  agentRoot?: string,
+  homeDir?: string,
+): boolean => normalizeHermesProjectsMemoryDir(value, agentRoot, homeDir) !== undefined;
 
-  const style = hermesPathStyleFor(agentRoot ?? trimmed);
-  const parsed = parseHermesPath(trimmed, style);
+export const normalizeHermesProjectsMemoryDir = (
+  value: unknown,
+  agentRoot?: string,
+  homeDir?: string,
+): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.includes('\0')) return undefined;
+
+  const resolvedHome = homeDir ?? (agentRoot === undefined ? undefined : inferHomeDirFromAgentRoot(agentRoot));
+  const expanded = expandHermesHome(trimmed, resolvedHome);
+  const style = hermesPathStyleFor(agentRoot ?? expanded);
+  const parsed = parseHermesPath(expanded, style);
+  let relative = expanded;
+
   if (parsed.absolute) {
-    if (!agentRoot) return true;
+    if (!agentRoot) return trimmed;
     const root = parseHermesPath(agentRoot, style);
-    if (!root.absolute) return false;
-    if (style === 'win32' && parsed.drive !== root.drive) return false;
-    return parsed.segments.length === root.segments.length + 1
-      && hermesPathHasPrefix(style, root.segments, parsed.segments)
-      && isSafeRelativeDirectory(parsed.segments.slice(-1));
+    if (!root.absolute) return undefined;
+    const relativeToAgentRoot = hermesRelativeToRoot(root, parsed);
+    if (
+      relativeToAgentRoot === ''
+      || relativeToAgentRoot.startsWith('..')
+      || parseHermesPath(relativeToAgentRoot, style).absolute
+    ) {
+      return undefined;
+    }
+    relative = relativeToAgentRoot;
   }
-  return isSafeRelativeDirectory(parsed.segments);
+
+  const normalized = formatHermesPath(parseHermesPath(relative, style)).replace(/^[\\/]+|[\\/]+$/g, '');
+  const segments = normalized.split(/[\\/]+/).filter(Boolean);
+  if (segments.length !== 1 || segments[0] === '.' || segments[0] === '..') return undefined;
+  return normalized;
 };
 
 export const hermesMemoryDraftIssues = (

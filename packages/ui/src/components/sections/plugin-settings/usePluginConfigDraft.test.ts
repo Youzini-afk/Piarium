@@ -32,6 +32,18 @@ describe('plugin text draft recovery', () => {
 
     expect(result).toEqual({ draft: { enabled: true }, rawError: null });
   });
+
+  test('rejects a strict JSON BOM on load and keeps save blocked until the BOM is edited out', () => {
+    const bomDocument = `\uFEFF{\n  "enabled": true\n}\n`;
+    const loaded = parsePluginTextObjectDraft(bomDocument, 'json');
+    const edited = parsePluginTextObjectDraft(bomDocument.replace(/^\uFEFF/, ''), 'json');
+    const jsoncWithBom = parsePluginTextObjectDraft(bomDocument, 'jsonc');
+
+    expect(loaded.rawError).not.toBeNull();
+    expect(loaded.draft).toEqual({});
+    expect(edited).toEqual({ draft: { enabled: true }, rawError: null });
+    expect(jsoncWithBom).toEqual({ draft: { enabled: true }, rawError: null });
+  });
 });
 
 describe('plugin draft refresh reconciliation', () => {

@@ -6,7 +6,6 @@ import type {
   PiConfigTextRoot,
   RuntimeContextTarget,
 } from '@piarium/protocol';
-import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 import { Icon } from '@/components/icon/Icon';
 import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
@@ -31,6 +30,7 @@ import {
 } from '@/lib/pi-runtime/config-documents';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
+import { parsePluginTextObjectDraft } from './usePluginConfigDraft';
 
 interface AdvancedPluginConfigEditorProps {
   cwd: string;
@@ -150,24 +150,8 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
 
   const parsed = React.useMemo(() => {
     if (!selection) return { error: null, valid: false };
-    const errors: ParseError[] = [];
-    const value = parse(draft.replace(/^\uFEFF/, ''), errors, {
-      allowTrailingComma: selection.format === 'jsonc',
-      disallowComments: selection.format === 'json',
-    });
-    if (errors.length > 0) {
-      const first = errors[0];
-      return {
-        error: first
-          ? `${printParseErrorCode(first.error)} at offset ${first.offset}`
-          : `Invalid ${selection.format.toUpperCase()}`,
-        valid: false,
-      };
-    }
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return { error: 'Configuration root must be an object', valid: false };
-    }
-    return { error: null, valid: true };
+    const result = parsePluginTextObjectDraft(draft, selection.format);
+    return { error: result.rawError, valid: result.rawError === null };
   }, [draft, selection]);
   const snapshotMatchesTarget = snapshotTargetKeyRef.current === runtimeTargetKey;
   const dirty = snapshotMatchesTarget && snapshot !== null && draft !== snapshot.content;
