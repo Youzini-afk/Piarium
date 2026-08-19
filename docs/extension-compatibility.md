@@ -135,13 +135,13 @@ plugin ownership intact:
 Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
 verification. Phase 9 recorded a local production Web build (`bun run build:web`, exit 0). CI run
 `32239724870` for `feat: integrate background tasks with Fleet` passed Ubuntu Source quality
-(including `test:pi`) and Production build; Docker Images `32239724866` succeeded. The Windows
-runtime job failed at `bun run test:pi`: libuv `fs-event.c` assertion
-(`!_wcsnicmp(filename, dir, dirlen)`) aborted `packages/pi-host/test/config-text-authority.test.ts`,
-and `runtime-broker` failed
-`workspace configuration watches survive catalog context switches and cancel explicitly`. The same
-Windows job also failed on the earlier docs-only `cc5b3e8` commit, so it is treated as a pre-existing
-runner flake rather than a Fleet or Hermes regression.
+(including `test:pi`) and Production build; Docker Images `32239724866` succeeded.
+
+The Windows runtime job failed at `bun run test:pi` because Host configuration watches closed and
+rebound `fs.watch` from inside the libuv callback after an atomic rename. That aborts Node with
+`Assertion failed: !_wcsnicmp(filename, dir, dirlen)` in `src\win\fs-event.c`, and
+`config.changed` can be lost after a catalog context switch. This is a Windows watcher lifecycle
+defect, not a CI runner flake.
 
 `bun run electron:build:win` produced the unsigned Windows x64 NSIS installer and
 `packages/electron/dist/win-unpacked`. `bun run electron:smoke:win` reached a healthy in-process

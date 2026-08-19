@@ -10,6 +10,7 @@ import type {
 import { HostError } from "./errors.js";
 
 const COALESCE_DELAY_MS = 20;
+const WIN32 = process.platform === "win32";
 
 function isMissingPathError(error: unknown): boolean {
   return (
@@ -22,6 +23,25 @@ function isMissingPathError(error: unknown): boolean {
 
 function reasonPriority(reason: PiConfigWatchChangeReason): number {
   return reason === "error" ? 3 : reason === "rename" ? 2 : 1;
+}
+
+function sameWindowsText(left: string, right: string): boolean {
+  return left.localeCompare(right, "en", { sensitivity: "accent" }) === 0;
+}
+
+function sameFileName(left: string, right: string): boolean {
+  return WIN32 ? sameWindowsText(left, right) : left === right;
+}
+
+function sameDirectory(left: string, right: string): boolean {
+  const resolvedLeft = resolve(left);
+  const resolvedRight = resolve(right);
+  return WIN32 ? sameWindowsText(resolvedLeft, resolvedRight) : resolvedLeft === resolvedRight;
+}
+
+function firstPathSegment(value: string): string | undefined {
+  const segment = value.split(/[\\/]/, 1)[0];
+  return segment === undefined || segment.length === 0 ? undefined : segment;
 }
 
 async function deepestExistingDirectory(filePath: string): Promise<string> {
@@ -53,8 +73,10 @@ async function deepestExistingDirectory(filePath: string): Promise<string> {
 class ConfigPathWatcher {
   readonly #filePath: string;
   readonly #notify: (reason: PiConfigWatchChangeReason) => void;
+  #directory: string | undefined;
   #disposed = false;
   #generation = 0;
+  #queue: Promise<void> = Promise.resolve();
   #watcher: FSWatcher | undefined;
 
   constructor(filePath: string, notify: (reason: PiConfigWatchChangeReason) => void) {
@@ -63,22 +85,69 @@ class ConfigPathWatcher {
   }
 
   async start(): Promise<void> {
-    await this.#bind(++this.#generation);
+    await this.#enqueue(() => this.#bind(this.#generation));
   }
 
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#generation += 1;
-    this.#watcher?.close();
+    this.#closeWatcher();
+  }
+
+  #enqueue(work: () => Promise<void>): Promise<void> {
+    const run = this.#queue.then(work, work);
+    this.#queue = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  #closeWatcher(): void {
+    const watcher = this.#watcher;
     this.#watcher = undefined;
+    this.#directory = undefined;
+    watcher?.close();
+  }
+
+  #requestRebind(generation: number): void {
+    if (this.#disposed || generation !== this.#generation) return;
+    void this.#enqueue(() => new Promise<void>((resolve) => {
+      setImmediate(() => {
+        void this.#rebind(generation).then(resolve, resolve);
+      });
+    }));
+  }
+
+  async #rebind(expectedGeneration: number): Promise<void> {
+    if (this.#disposed || expectedGeneration !== this.#generation) return;
+    let directory: string;
+    try {
+      directory = await deepestExistingDirectory(this.#filePath);
+    } catch {
+      if (!this.#disposed && expectedGeneration === this.#generation) this.#notify("error");
+      return;
+    }
+    if (this.#disposed || expectedGeneration !== this.#generation) return;
+    if (
+      this.#watcher !== undefined
+      && this.#directory !== undefined
+      && sameDirectory(this.#directory, directory)
+    ) {
+      return;
+    }
+    const generation = ++this.#generation;
+    this.#closeWatcher();
+    try {
+      await this.#bind(generation);
+    } catch {
+      if (!this.#disposed && generation === this.#generation) this.#notify("error");
+    }
   }
 
   async #bind(generation: number): Promise<void> {
     const directory = await deepestExistingDirectory(this.#filePath);
     if (this.#disposed || generation !== this.#generation) return;
     const relativePath = relative(directory, this.#filePath);
-    const watchedSegment = relativePath.split(/[\\/]/, 1)[0];
+    const watchedSegment = firstPathSegment(relativePath);
     if (!watchedSegment) {
       throw new HostError("config_watch_failed", "Configuration watch target must be a file");
     }
@@ -86,13 +155,13 @@ class ConfigPathWatcher {
     try {
       watcher = watch(directory, (eventType, filename) => {
         if (this.#disposed || generation !== this.#generation) return;
-        const changedName = filename === null
+        const changedName = filename === null || filename === undefined
           ? undefined
-          : filename.split(/[\\/]/, 1)[0];
-        if (changedName !== undefined && changedName !== watchedSegment) return;
+          : firstPathSegment(String(filename));
+        if (changedName !== undefined && !sameFileName(changedName, watchedSegment)) return;
         const reason = eventType === "rename" ? "rename" : "change";
         this.#notify(reason);
-        if (reason === "rename") void this.#rebind(generation);
+        if (reason === "rename") this.#requestRebind(generation);
       });
       watcher.unref();
     } catch (error) {
@@ -105,26 +174,15 @@ class ConfigPathWatcher {
     watcher.on("error", () => {
       if (this.#disposed || generation !== this.#generation) return;
       this.#notify("error");
-      void this.#rebind(generation);
+      this.#requestRebind(generation);
     });
     if (this.#disposed || generation !== this.#generation) {
       watcher.close();
       return;
     }
-    this.#watcher?.close();
+    this.#closeWatcher();
     this.#watcher = watcher;
-  }
-
-  async #rebind(expectedGeneration: number): Promise<void> {
-    if (this.#disposed || expectedGeneration !== this.#generation) return;
-    const generation = ++this.#generation;
-    this.#watcher?.close();
-    this.#watcher = undefined;
-    try {
-      await this.#bind(generation);
-    } catch {
-      if (!this.#disposed && generation === this.#generation) this.#notify("error");
-    }
+    this.#directory = directory;
   }
 }
 
