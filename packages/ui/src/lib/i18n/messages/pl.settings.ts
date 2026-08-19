@@ -2498,6 +2498,8 @@ export const settingsDict = {
   "settings.piarium.pluginSettings.source.description": "To jest natywny dokument wtyczki edytowany za pomocą poniższych elementów sterujących. Pozostaje jedynym niezmiennym źródłem prawdy.",
   "settings.piarium.pluginSettings.source.unsaved": "Niezapisane zmiany",
   "settings.piarium.pluginSettings.source.discard": "Odrzuć zmiany",
+  "settings.piarium.pluginSettings.source.externalChanged": "Konfiguracja została zmieniona poza Piarium, gdy ten szkic zawierał niezapisane zmiany. Przeładuj, aby sprawdzić bieżący plik przed zapisaniem.",
+  "settings.piarium.pluginSettings.source.watchFailed": "Monitorowanie konfiguracji na żywo nie powiodło się. Zachowano ostatnio wczytaną treść; przeładuj, aby spróbować ponownie.",
   "settings.piarium.pluginSettings.advanced.description": "Piarium edytuje cały dokument natywny. Nieznane pola i komentarze JSONC zostają zachowane.",
   "settings.piarium.pluginSettings.advanced.sameDraftDescription": "Formularz i edytor natywny korzystają z jednej wersji roboczej, wersji, stanu walidacji i akcji Zapisz. Nieznane pola zostają zachowane; dokumenty JSONC zachowują także komentarze i końcowe przecinki.",
   "settings.piarium.pluginSettings.advanced.unknownPlugin": "Ta wtyczka jest właścicielem swojej konfiguracji. Wybierz poniżej jego natywny plik JSON lub JSONC; Piarium zachowuje cały dokument podczas jego edycji.",

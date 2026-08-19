@@ -28,6 +28,8 @@ interface OpenAICodexCompatSettingsProps {
 }
 
 const GROUP_CLASS = 'border-t border-border/60 pt-5';
+const OPENAI_CODEX_COMPAT_GLOBAL_PATHS = ['openai-codex-compat.json'] as const;
+const OPENAI_CODEX_COMPAT_PROJECT_PATHS = ['.pi/openai-codex-compat.json'] as const;
 
 export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps> = ({
   runtimeTarget,
@@ -37,14 +39,14 @@ export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps>
   const [scope, setScope] = React.useState<PiConfigScope>('global');
   const globalController = useTextObjectDraft({
     format: 'json',
-    paths: ['openai-codex-compat.json'],
+    paths: OPENAI_CODEX_COMPAT_GLOBAL_PATHS,
     root: 'agent',
     runtimeTarget,
     targetKey: `${targetKey}:global`,
   });
   const projectController = useTextObjectDraft({
     format: 'json',
-    paths: ['.pi/openai-codex-compat.json'],
+    paths: OPENAI_CODEX_COMPAT_PROJECT_PATHS,
     root: 'project',
     runtimeTarget,
     targetKey: `${targetKey}:project`,

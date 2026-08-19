@@ -2012,6 +2012,8 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.source.description': '下のコントロールが編集するプラグイン固有のドキュメントです。永続化される唯一の正本として保持されます。',
   'settings.piarium.pluginSettings.source.unsaved': '未保存の変更',
   'settings.piarium.pluginSettings.source.discard': '変更を破棄',
+  'settings.piarium.pluginSettings.source.externalChanged': '未保存の変更がある間に、Piarium の外部で設定が変更されました。保存前に再読み込みして現在のファイルを確認してください。',
+  'settings.piarium.pluginSettings.source.watchFailed': '設定のリアルタイム監視に失敗しました。最後に読み込んだ内容は保持されています。再読み込みして再試行してください。',
   'settings.piarium.pluginSettings.advanced.description': 'Piarium はネイティブドキュメント全体を編集します。未知のフィールドと JSONC コメントは保持されます。',
   'settings.piarium.pluginSettings.advanced.sameDraftDescription': 'フォームとネイティブエディターは、同じ下書き、リビジョン、検証状態、保存操作を共有します。未知のフィールドは保持され、JSONC 文書のコメントと末尾のカンマも維持されます。',
   'settings.piarium.pluginSettings.advanced.unknownPlugin': 'このプラグインが設定を所有します。下からネイティブ JSON または JSONC ファイルを選択してください。編集中も完全なドキュメントを保持します。',

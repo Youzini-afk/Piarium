@@ -14,7 +14,13 @@ export const updatePiSettings = async (
   target: RuntimeContextTarget,
   scope: PiConfigScope,
   changes: { remove: string[]; set: { [key: string]: JsonValue } },
+  expectedRevision: string,
 ) => {
   const { client } = await getPiRuntimeConnection();
-  return client.request('settings.update', { ...target, ...changes, scope });
+  return client.request('settings.update', {
+    ...target,
+    ...changes,
+    expectedRevision,
+    scope,
+  });
 };

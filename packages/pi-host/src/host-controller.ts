@@ -22,6 +22,7 @@ import {
   type RecoveryMode,
   type PiResourceKind,
   type PiResourceScope,
+  type PiConfigWatchTarget,
   type PiPackageScope,
   type RuntimeDescriptor,
   type RuntimeSourceKind,
@@ -52,6 +53,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
 
 const OUT_OF_BAND_METHODS = new Set([
   "agent.abort",
+  "config.unwatch",
   "extension.ui.respond",
   "provider.auth.respond",
   "project.trust.respond",
@@ -162,6 +164,37 @@ function readProviderDeleteScope(value: string): ProviderConfigDeleteScope {
     throw new HostError("invalid_params", "scope must be user, project, custom, auth, or all");
   }
   return value;
+}
+
+function readConfigWatchTarget(value: unknown): PiConfigWatchTarget {
+  const target = expectRecord(value, "target");
+  const kind = readString(target, "kind");
+  if (kind === "document") {
+    const scope = readString(target, "scope");
+    if (scope !== "global" && scope !== "project") {
+      throw new HostError("invalid_params", "Unknown configuration scope");
+    }
+    return { kind, path: readString(target, "path"), scope };
+  }
+  if (kind === "text") {
+    const root = readString(target, "root");
+    const format = readString(target, "format");
+    if (root !== "agent" && root !== "home" && root !== "project" && root !== "user-config") {
+      throw new HostError("invalid_params", "Unknown configuration root");
+    }
+    if (format !== "json" && format !== "jsonc") {
+      throw new HostError("invalid_params", "Unknown configuration format");
+    }
+    return { format, kind, path: readString(target, "path"), root };
+  }
+  if (kind === "settings") {
+    const scope = readString(target, "scope");
+    if (scope !== "global" && scope !== "project") {
+      throw new HostError("invalid_params", "Unknown settings scope");
+    }
+    return { kind, scope };
+  }
+  throw new HostError("invalid_params", "Unknown configuration watch target");
 }
 
 export class HostController {
@@ -597,6 +630,7 @@ export class HostController {
           readString(params, "path"),
           readJson(params, "set") ?? null,
           readStringList(params, "remove"),
+          readString(params, "expectedRevision"),
         );
       }
       case "config.text.get": {
@@ -631,6 +665,10 @@ export class HostController {
           readString(params, "expectedRevision"),
         );
       }
+      case "config.watch":
+        return this.#sessionHost.watchConfig(readConfigWatchTarget(params.target));
+      case "config.unwatch":
+        return { unwatched: this.#sessionHost.unwatchConfig(readString(params, "watchId")) };
       case "settings.get":
         return this.#sessionHost.getSettings();
       case "settings.update": {
@@ -642,6 +680,7 @@ export class HostController {
           scope,
           readJson(params, "set") ?? null,
           readStringList(params, "remove"),
+          readString(params, "expectedRevision"),
         );
       }
       case "package.list":

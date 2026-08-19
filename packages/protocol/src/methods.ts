@@ -15,6 +15,8 @@ import type {
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
+  PiConfigWatchSubscription,
+  PiConfigWatchTarget,
   PiFleetSnapshot,
   PiResourceCatalogSnapshot,
   PiResourceDocumentSnapshot,
@@ -59,6 +61,7 @@ export interface HostMethodMap {
   };
   "config.document.update": {
     params: {
+      expectedRevision: string;
       path: string;
       remove: string[];
       scope: PiConfigScope;
@@ -79,6 +82,14 @@ export interface HostMethodMap {
       root: PiConfigTextRoot;
     };
     result: PiConfigTextDocumentSnapshot;
+  };
+  "config.watch": {
+    params: { target: PiConfigWatchTarget };
+    result: PiConfigWatchSubscription;
+  };
+  "config.unwatch": {
+    params: { watchId: string };
+    result: { unwatched: boolean };
   };
   "catalog.context.open": {
     params: { cwd: string };
@@ -323,6 +334,7 @@ export interface HostMethodMap {
   };
   "settings.update": {
     params: {
+      expectedRevision: string;
       remove: string[];
       scope: PiConfigScope;
       set: { [key: string]: JsonValue };

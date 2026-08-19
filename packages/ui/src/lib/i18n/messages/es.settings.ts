@@ -2552,6 +2552,8 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.source.description': 'Este es el documento nativo del plugin que editan los controles siguientes. Sigue siendo la única fuente persistida de verdad.',
   'settings.piarium.pluginSettings.source.unsaved': 'Cambios sin guardar',
   'settings.piarium.pluginSettings.source.discard': 'Descartar cambios',
+  'settings.piarium.pluginSettings.source.externalChanged': 'La configuración cambió fuera de Piarium mientras este borrador tenía cambios sin guardar. Vuelve a cargar para revisar el archivo actual antes de guardar.',
+  'settings.piarium.pluginSettings.source.watchFailed': 'Falló la supervisión en vivo de la configuración. Se conservó el último contenido cargado; vuelve a cargar para reintentarlo.',
   'settings.piarium.pluginSettings.advanced.sameDraftDescription': 'El formulario y el editor nativo comparten el mismo borrador, revisión, estado de validación y acción Guardar. Se conservan los campos desconocidos; los documentos JSONC también mantienen los comentarios y las comas finales.',
   'settings.piarium.pluginSettings.advanced.unknownPlugin': 'Este plugin es propietario de su configuración. Elige abajo su archivo JSON o JSONC nativo; Piarium conserva el documento completo mientras lo editas.',
   'settings.piarium.pluginSettings.advanced.root': 'Ubicación del archivo',

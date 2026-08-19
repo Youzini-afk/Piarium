@@ -26,6 +26,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import {
   getPiConfigTextDocument,
+  subscribePiConfig,
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -67,13 +68,16 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [externalChanged, setExternalChanged] = React.useState(false);
+  const [watchRevision, setWatchRevision] = React.useState(0);
   const generationRef = React.useRef(0);
   const mutationRevisionRef = React.useRef(0);
   const dirtyRef = React.useRef(false);
   const editorExtensions = React.useMemo(() => [json()], []);
 
-  const load = React.useCallback(async (preserveNewerDraft = false) => {
+  const load = React.useCallback(async (externalInvalidation = false) => {
     if (!selection) return;
+    if (!externalInvalidation) setWatchRevision((revision) => revision + 1);
     const generation = ++generationRef.current;
     const mutationRevision = mutationRevisionRef.current;
     const actionTargetKey = runtimeTargetKey;
@@ -92,10 +96,18 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         || actionTargetKey !== runtimeTargetKeyRef.current
         || runtimeKey !== getRuntimeKey()
       ) return;
-      if (preserveNewerDraft && mutationRevision !== mutationRevisionRef.current) return;
+      if (mutationRevision !== mutationRevisionRef.current) {
+        if (externalInvalidation) {
+          setLoadError(t('settings.piarium.pluginSettings.source.externalChanged'));
+          setExternalChanged(true);
+        }
+        return;
+      }
       setSnapshot(next);
       snapshotTargetKeyRef.current = actionTargetKey;
+      dirtyRef.current = false;
       setDraft(next.content);
+      setExternalChanged(false);
     } catch (error) {
       if (
         generation !== generationRef.current
@@ -110,7 +122,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         && runtimeKey === getRuntimeKey()
       ) setLoading(false);
     }
-  }, [runtimeTarget, runtimeTargetKey, selection]);
+  }, [runtimeTarget, runtimeTargetKey, selection, t]);
 
   React.useEffect(() => {
     if (!selection) return;
@@ -121,14 +133,17 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       mutationRevisionRef.current += 1;
       setSnapshot(null);
       snapshotTargetKeyRef.current = null;
+      dirtyRef.current = false;
       setDraft('{}\n');
       setLoadError(null);
+      setExternalChanged(false);
       void load();
       return;
     }
     if (dirtyRef.current) return;
     setSnapshot(null);
     snapshotTargetKeyRef.current = null;
+    dirtyRef.current = false;
     setDraft('{}\n');
     void load();
   }, [load, runtimeTargetKey, selection]);
@@ -170,6 +185,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       || !selection
       || !parsed.valid
       || !dirty
+      || externalChanged
       || projectBlocked
       || saving
     ) return;
@@ -193,7 +209,10 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       ) return;
       setSnapshot(next);
       snapshotTargetKeyRef.current = actionTargetKey;
+      dirtyRef.current = false;
       setDraft(next.content);
+      setLoadError(null);
+      setExternalChanged(false);
     } catch (error) {
       if (
         generation !== generationRef.current
@@ -210,17 +229,18 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         && runtimeKey === getRuntimeKey()
       ) setSaving(false);
     }
-  }, [dirty, draft, parsed.valid, projectBlocked, runtimeTarget, runtimeTargetKey, saving, selection, snapshot, snapshotMatchesTarget, t]);
+  }, [dirty, draft, externalChanged, parsed.valid, projectBlocked, runtimeTarget, runtimeTargetKey, saving, selection, snapshot, snapshotMatchesTarget, t]);
 
   const chooseSelection = (): void => {
     const nextPath = path.trim();
     if (!nextPath || dirty) return;
+    setExternalChanged(false);
     setSelection({ format, path: nextPath, root });
   };
 
   React.useEffect(() => {
     const refreshCleanDraft = (): void => {
-      if (!dirtyRef.current && selection && document.visibilityState === 'visible') void load(true);
+      if (!dirtyRef.current && selection && document.visibilityState === 'visible') void load();
     };
     window.addEventListener('focus', refreshCleanDraft);
     document.addEventListener('visibilitychange', refreshCleanDraft);
@@ -233,6 +253,54 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
       document.removeEventListener('visibilitychange', refreshCleanDraft);
     };
   }, [load, selection]);
+
+  const watchKey = snapshotMatchesTarget && snapshot
+    ? `${snapshot.root}\0${snapshot.format}\0${snapshot.path}`
+    : '';
+  React.useEffect(() => {
+    if (!watchKey || !snapshot) return;
+    const actionRuntimeKey = getRuntimeKey();
+    const actionTargetKey = runtimeTargetKey;
+    const watchTarget = {
+      format: snapshot.format,
+      kind: 'text' as const,
+      path: snapshot.path,
+      root: snapshot.root,
+    };
+    let active = true;
+    let stop: (() => Promise<void>) | undefined;
+    void subscribePiConfig(runtimeTarget, watchTarget, (event) => {
+      if (
+        !active
+        || actionRuntimeKey !== getRuntimeKey()
+        || actionTargetKey !== runtimeTargetKeyRef.current
+      ) return;
+      if (event.reason === 'error') {
+        setLoadError(t('settings.piarium.pluginSettings.source.watchFailed'));
+      } else if (dirtyRef.current) {
+        setLoadError(t('settings.piarium.pluginSettings.source.externalChanged'));
+        setExternalChanged(true);
+      } else {
+        void load(true);
+      }
+    }).then((unsubscribe) => {
+      if (!active) {
+        void unsubscribe();
+        return;
+      }
+      stop = unsubscribe;
+      void load(true);
+    }).catch(() => {
+      if (!active) return;
+      setLoadError(t('settings.piarium.pluginSettings.source.watchFailed'));
+    });
+    return () => {
+      active = false;
+      if (stop) void stop();
+    };
+  // watchKey is the normalized authority identity; revision-only reloads keep the same subscription.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, runtimeTarget, runtimeTargetKey, t, watchKey, watchRevision]);
 
   return (
     <div className="space-y-5">
@@ -311,6 +379,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         <CodeMirrorEditor
           value={draft}
           onChange={(content) => {
+            dirtyRef.current = true;
             mutationRevisionRef.current += 1;
             setDraft(content);
           }}
@@ -357,7 +426,7 @@ export const AdvancedPluginConfigEditor: React.FC<AdvancedPluginConfigEditorProp
         <Button
           type="button"
           size="sm"
-          disabled={loading || saving || !dirty || !parsed.valid || projectBlocked}
+          disabled={loading || saving || !dirty || externalChanged || !parsed.valid || projectBlocked}
           onClick={() => void save()}
         >
           {saving

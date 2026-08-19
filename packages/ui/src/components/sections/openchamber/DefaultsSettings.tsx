@@ -184,10 +184,14 @@ export const DefaultsSettings: React.FC = () => {
     changes: { remove: string[]; set: { [key: string]: JsonValue } },
   ) => {
     if (isSaving) return;
+    const expectedRevision = scope === 'global'
+      ? snapshot?.globalRevision
+      : snapshot?.projectRevision;
+    if (!expectedRevision) return;
     setIsSaving(true);
     setSettingsError(null);
     try {
-      const next = await updatePiSettings(runtimeTarget, scope, changes);
+      const next = await updatePiSettings(runtimeTarget, scope, changes, expectedRevision);
       setSnapshot(next);
       toast.success(t('settings.common.status.saved'));
     } catch (error) {
@@ -197,7 +201,7 @@ export const DefaultsSettings: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [isSaving, runtimeTarget, scope, t]);
+  }, [isSaving, runtimeTarget, scope, snapshot, t]);
 
   const handleModelChange = React.useCallback((providerId: string, modelId: string) => {
     if (!providerId || !modelId) {

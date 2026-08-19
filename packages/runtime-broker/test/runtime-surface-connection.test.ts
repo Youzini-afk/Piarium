@@ -40,13 +40,23 @@ const handshakeResult = {
 const createFakeBroker = () => {
   const listeners = new Set<(event: PiRuntimeBrokerEvent) => void>();
   let listSessions = async () => [];
+  let nextWatchId = 0;
+  const unwatched: string[] = [];
   const broker = {
     listSessions: (...args: Parameters<typeof listSessions>) => listSessions(...args),
     subscribe(listener: (event: PiRuntimeBrokerEvent) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    unwatchConfig: async (watchId: string) => {
+      unwatched.push(watchId);
+      return { unwatched: true };
+    },
     warmup: async () => handshakeResult,
+    watchConfig: async (_runtimeTarget: unknown, target: unknown) => ({
+      target,
+      watchId: `watch-${++nextWatchId}`,
+    }),
   } as unknown as PiRuntimeBroker;
   return {
     broker,
@@ -54,6 +64,7 @@ const createFakeBroker = () => {
       for (const listener of listeners) listener(event);
     },
     listenerCount: () => listeners.size,
+    unwatched,
     setListSessions(next: typeof listSessions) {
       listSessions = next;
     },
@@ -195,6 +206,71 @@ test("surface connection reports a session worker exit to every connected surfac
       },
       v: PIARIUM_PROTOCOL_VERSION,
     });
+  } finally {
+    harness.connection.close();
+  }
+});
+
+test("surface connection projects and cancels only configuration watches owned by that client", async () => {
+  const harness = createHarness();
+  try {
+    await handshake(harness);
+    harness.receive(createRuntimeRequest("watch", "config.watch", {
+      cwd: "C:/workspace",
+      target: { kind: "document", path: "plugin.json", scope: "global" },
+    }));
+    const watchResponse = await harness.next();
+    assert.equal(watchResponse.kind, "response");
+    assert.equal(watchResponse.ok, true);
+    if (watchResponse.kind !== "response" || !watchResponse.ok) assert.fail("expected watch response");
+    const watchId = (watchResponse.result as { watchId: string }).watchId;
+
+    harness.emit({
+      envelope: createEvent(3, "config.changed", {
+        reason: "rename",
+        target: { kind: "document", path: "plugin.json", scope: "global" },
+        watchId: "another-client-watch",
+      }),
+      kind: "host",
+      role: "catalog",
+      workerId: "catalog-worker",
+    });
+    harness.emit({
+      envelope: createEvent(4, "config.changed", {
+        reason: "rename",
+        target: { kind: "document", path: "plugin.json", scope: "global" },
+        watchId,
+      }),
+      kind: "host",
+      role: "catalog",
+      workerId: "catalog-worker",
+    });
+    const changed = await harness.next();
+    assert.equal(changed.kind, "event");
+    if (changed.kind !== "event") assert.fail("expected config event");
+    assert.equal(changed.event, "config.changed");
+    assert.equal((changed.data as { watchId: string }).watchId, watchId);
+
+    harness.receive(createRuntimeRequest("unwatch", "config.unwatch", { watchId }));
+    const unwatchResponse = await harness.next();
+    assert.equal(unwatchResponse.kind, "response");
+    assert.equal(unwatchResponse.ok, true);
+    assert.deepEqual(harness.unwatched, [watchId]);
+
+    harness.receive(createRuntimeRequest("watch-close", "config.watch", {
+      cwd: "C:/workspace",
+      target: { kind: "settings", scope: "global" },
+    }));
+    const watchOnClose = await harness.next();
+    assert.equal(watchOnClose.kind, "response");
+    assert.equal(watchOnClose.ok, true);
+    if (watchOnClose.kind !== "response" || !watchOnClose.ok) {
+      assert.fail("expected second watch response");
+    }
+    const closeWatchId = (watchOnClose.result as { watchId: string }).watchId;
+    harness.connection.close();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(harness.unwatched, [watchId, closeWatchId]);
   } finally {
     harness.connection.close();
   }

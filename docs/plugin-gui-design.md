@@ -2,7 +2,7 @@
 
 Status: implementation contract for Phase 6
 
-Last updated: 2026-08-12
+Last updated: 2026-08-19
 
 ## 1. Purpose
 
@@ -148,6 +148,20 @@ host update API; the renderer does not claim to preserve comment syntax that API
 Invalid raw content disables structured controls while leaving Advanced available for repair.
 Switching plugin, scope, or source keeps an independent mounted draft or requires the current draft
 to be explicitly saved or discarded first.
+
+Opened native authorities subscribe through the shared Pi runtime `config.watch` contract. The Host
+resolves the same trusted root/path/symlink boundary used by the corresponding read and emits only
+an invalidation; renderers never receive a filesystem watcher or an arbitrary path capability.
+Clean drafts re-read the authority after an invalidation. Dirty drafts keep every local edit, mark
+the external change visibly, and block saving until the user explicitly reloads the authority. Text
+documents, object documents, and both settings scopes retain their loaded revision; every save sends
+that value as `expectedRevision`, and the Host compares it while holding the write lock. The file
+notification is therefore a refresh signal, not the concurrency boundary, and a race before an
+invalidation is observed still fails as a conflict. A read or watch failure preserves the last valid draft,
+while missing files remain distinct from present empty documents. Surface disconnect, runtime
+replacement, target change, session close, and Host shutdown release their watches. A native
+authority with ordered fallback filenames watches every candidate that can become authoritative,
+not only the file selected by the last read.
 
 Every selected adapter shows the package observation separately from its configuration authority:
 the package source/version, active session or workspace target, current native document and scope,

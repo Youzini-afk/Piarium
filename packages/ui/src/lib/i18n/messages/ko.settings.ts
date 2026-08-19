@@ -2577,6 +2577,8 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.source.description': '아래 컨트롤이 편집하는 플러그인 네이티브 문서입니다. 저장되는 유일한 기준 소스로 유지됩니다.',
   'settings.piarium.pluginSettings.source.unsaved': '저장되지 않은 변경 사항',
   'settings.piarium.pluginSettings.source.discard': '변경 사항 삭제',
+  'settings.piarium.pluginSettings.source.externalChanged': '이 초안에 저장되지 않은 변경 사항이 있는 동안 Piarium 외부에서 구성이 변경되었습니다. 저장하기 전에 다시 불러와 현재 파일을 검토하세요.',
+  'settings.piarium.pluginSettings.source.watchFailed': '실시간 구성 모니터링에 실패했습니다. 마지막으로 불러온 내용은 보존되었습니다. 다시 불러와 재시도하세요.',
   'settings.piarium.pluginSettings.advanced.sameDraftDescription': '폼과 네이티브 편집기는 하나의 초안, 리비전, 유효성 상태 및 저장 작업을 공유합니다. 알 수 없는 필드는 보존되며 JSONC 문서의 주석과 후행 쉼표도 유지됩니다.',
   'settings.piarium.pluginSettings.advanced.unknownPlugin': '이 플러그인이 구성을 소유합니다. 아래에서 네이티브 JSON 또는 JSONC 파일을 선택하면 Piarium가 편집 중에도 문서 전체를 보존합니다.',
   'settings.piarium.pluginSettings.advanced.root': '파일 위치',

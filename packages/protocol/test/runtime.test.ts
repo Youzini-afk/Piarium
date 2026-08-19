@@ -17,6 +17,7 @@ describe("surface runtime protocol", () => {
     });
     const configRequest = createRuntimeRequest("req-2", "config.document.update", {
       cwd: "C:/workspace",
+      expectedRevision: "revision-1",
       path: "wtf.json",
       remove: [],
       scope: "global",
@@ -35,6 +36,10 @@ describe("surface runtime protocol", () => {
       },
       sessionId: "session-1",
     });
+    const watchRequest = createRuntimeRequest("req-5", "config.watch", {
+      cwd: "C:/workspace",
+      target: { kind: "settings", scope: "project" },
+    });
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(request)), request);
     assert.deepEqual(
@@ -49,12 +54,15 @@ describe("surface runtime protocol", () => {
       decodeRuntimeEnvelope(encodeRuntimeEnvelope(featureRequest)),
       featureRequest,
     );
+    assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(watchRequest)), watchRequest);
     assert.equal(isRuntimeMethod("config.document.get"), true);
     assert.equal(isRuntimeMethod("agentProvider.action"), true);
     assert.equal(isRuntimeMethod("agentProvider.list"), true);
     assert.equal(isRuntimeMethod("config.document.update"), true);
     assert.equal(isRuntimeMethod("config.text.get"), true);
     assert.equal(isRuntimeMethod("config.text.update"), true);
+    assert.equal(isRuntimeMethod("config.unwatch"), true);
+    assert.equal(isRuntimeMethod("config.watch"), true);
     assert.equal(isRuntimeMethod("mcp.config.snapshot"), true);
     assert.equal(isRuntimeMethod("package.setEnabled"), true);
     assert.equal(isRuntimeMethod("session.tree"), true);
@@ -98,6 +106,18 @@ describe("surface runtime protocol", () => {
       },
     );
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(extensionState)), extensionState);
+
+    const configChanged = createRuntimeEvent(
+      { role: "catalog", workerId: "worker-2" },
+      14,
+      "config.changed",
+      {
+        reason: "rename",
+        target: { kind: "document", path: "wtf.json", scope: "global" },
+        watchId: "watch-1",
+      },
+    );
+    assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(configChanged)), configChanged);
   });
 
   it("rejects worker-only methods and unrouted events", () => {

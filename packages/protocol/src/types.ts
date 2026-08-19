@@ -549,12 +549,39 @@ export interface PiConfigDocumentSnapshot {
   exists: boolean;
   path: string;
   projectTrusted: boolean;
+  revision: string;
   scope: PiConfigScope;
 }
 
+export type PiConfigWatchTarget =
+  | {
+      kind: "document";
+      path: string;
+      scope: PiConfigScope;
+    }
+  | {
+      format: PiConfigTextFormat;
+      kind: "text";
+      path: string;
+      root: PiConfigTextRoot;
+    }
+  | {
+      kind: "settings";
+      scope: PiConfigScope;
+    };
+
+export interface PiConfigWatchSubscription {
+  target: PiConfigWatchTarget;
+  watchId: string;
+}
+
+export type PiConfigWatchChangeReason = "change" | "error" | "rename";
+
 export interface PiSettingsSnapshot {
   global: { [key: string]: JsonValue };
+  globalRevision: string;
   project: { [key: string]: JsonValue };
+  projectRevision: string;
   projectTrusted: boolean;
 }
 

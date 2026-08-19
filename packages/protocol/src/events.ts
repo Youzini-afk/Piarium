@@ -3,6 +3,8 @@ import type {
   ExtensionUiRequest,
   JsonValue,
   ProjectTrustRequest,
+  PiConfigWatchChangeReason,
+  PiConfigWatchTarget,
   ProtocolErrorData,
   RecoveryStatus,
   RuntimeDescriptor,
@@ -19,6 +21,11 @@ export interface HostEventMap {
   "agent.event": {
     event: PiAgentEvent;
     sessionId: string;
+  };
+  "config.changed": {
+    reason: PiConfigWatchChangeReason;
+    target: PiConfigWatchTarget;
+    watchId: string;
   };
   "extension.ui.dismiss": {
     requestId: string;
@@ -78,6 +85,7 @@ export interface HostEventMap {
 
 export const HOST_EVENTS = [
   "agent.event",
+  "config.changed",
   "extension.ui.dismiss",
   "extension.ui.request",
   "extension.state",

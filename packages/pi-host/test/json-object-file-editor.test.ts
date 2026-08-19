@@ -37,7 +37,10 @@ describe("JsonObjectFileEditor", () => {
     const projectPath = join(cwd, ".pi", "settings.json");
     const editor = new JsonObjectFileEditor(projectPath);
     try {
-      assert.deepEqual(await editor.read(), { document: {}, exists: false });
+      const missing = await editor.read();
+      assert.deepEqual(missing.document, {});
+      assert.equal(missing.exists, false);
+      assert.equal(missing.revision.length, 64);
       await editor.update({ workspaceHistory: { enabled: true } }, []);
       assert.deepEqual(JSON.parse(await readFile(projectPath, "utf8")), {
         workspaceHistory: { enabled: true },
@@ -49,6 +52,52 @@ describe("JsonObjectFileEditor", () => {
         /Configuration file is not valid JSON/,
       );
       assert.equal(await readFile(projectPath, "utf8"), "not json");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a revisioned update after an external write", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-settings-conflict-"));
+    const settingsPath = join(root, "settings.json");
+    const editor = new JsonObjectFileEditor(settingsPath);
+    try {
+      await writeFile(settingsPath, '{"plugin":{"enabled":true}}\n', "utf8");
+      const opened = await editor.read();
+      await writeFile(settingsPath, '{"plugin":{"enabled":false,"external":true}}\n', "utf8");
+
+      await assert.rejects(
+        editor.updateRevisioned(
+          { plugin: { enabled: true, local: true } },
+          [],
+          opened.revision,
+        ),
+        /changed since it was opened/,
+      );
+      assert.deepEqual(JSON.parse(await readFile(settingsPath, "utf8")), {
+        plugin: { enabled: false, external: true },
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("allows only one concurrent writer for the same expected revision", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-settings-cas-"));
+    const settingsPath = join(root, "settings.json");
+    const editor = new JsonObjectFileEditor(settingsPath);
+    try {
+      const opened = await editor.read();
+      const results = await Promise.allSettled([
+        editor.updateRevisioned({ plugin: { writer: "a" } }, [], opened.revision),
+        editor.updateRevisioned({ plugin: { writer: "b" } }, [], opened.revision),
+      ]);
+      assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+      const persisted = JSON.parse(await readFile(settingsPath, "utf8")) as {
+        plugin: { writer: string };
+      };
+      assert.ok(persisted.plugin.writer === "a" || persisted.plugin.writer === "b");
     } finally {
       await rm(root, { force: true, recursive: true });
     }

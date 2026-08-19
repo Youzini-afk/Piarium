@@ -20,6 +20,7 @@ type DirectRuntimeMethod =
   | "agent.prompt"
   | "agent.steer"
   | "command.execute"
+  | "config.unwatch"
   | "fleet.status"
   | "recovery.checkpoint.create"
   | "recovery.navigate"
@@ -52,6 +53,7 @@ type SessionScopedRuntimeMethod =
   | "config.document.update"
   | "config.text.get"
   | "config.text.update"
+  | "config.watch"
   | "model.list"
   | "mcp.config.snapshot"
   | "package.install"
@@ -159,6 +161,8 @@ export const RUNTIME_METHODS = [
   "config.document.update",
   "config.text.get",
   "config.text.update",
+  "config.unwatch",
+  "config.watch",
   "extension.ui.respond",
   "fleet.status",
   "host.handshake",

@@ -10,7 +10,12 @@ import {
 } from "@piarium/protocol";
 import { PiHostRequestError } from "./host-client.js";
 import { PiRuntimeBrokerError } from "./errors.js";
-import { RuntimeDispatchError, dispatchRuntimeRequest } from "./runtime-dispatcher.js";
+import {
+  createRuntimeDispatchContext,
+  disposeRuntimeDispatchContext,
+  RuntimeDispatchError,
+  dispatchRuntimeRequest,
+} from "./runtime-dispatcher.js";
 import type { PiRuntimeBroker } from "./runtime-broker.js";
 
 export interface RuntimeSurfaceConnectionOptions {
@@ -72,6 +77,7 @@ const errorEnvelope = (id: string, error: unknown): RuntimeWireEnvelope => {
  */
 export class PiRuntimeSurfaceConnection {
   readonly #broker: PiRuntimeBroker;
+  readonly #dispatchContext = createRuntimeDispatchContext();
   readonly #maxPendingRequests: number;
   readonly #onClose: ((reason: string) => void) | undefined;
   readonly #pending = new Set<string>();
@@ -111,6 +117,12 @@ export class PiRuntimeSurfaceConnection {
         return;
       }
       if (event.kind !== "host") return;
+      if (
+        event.envelope.event === "config.changed"
+        && !this.#dispatchContext.configWatchIds.has(event.envelope.data.watchId)
+      ) {
+        return;
+      }
       this.#send(createRuntimeEvent(
         {
           role: event.role,
@@ -185,7 +197,12 @@ export class PiRuntimeSurfaceConnection {
     }
 
     this.#pending.add(envelope.id);
-    void dispatchRuntimeRequest(this.#broker, envelope.method, envelope.params).then(
+    void dispatchRuntimeRequest(
+      this.#broker,
+      envelope.method,
+      envelope.params,
+      this.#dispatchContext,
+    ).then(
       (result) => {
         if (envelope.method === "host.handshake") this.#handshake = "complete";
         this.#send(createRuntimeSuccessResponse(envelope.id, result));
@@ -203,6 +220,7 @@ export class PiRuntimeSurfaceConnection {
     if (this.#closed) return;
     this.#closed = true;
     this.#pending.clear();
+    disposeRuntimeDispatchContext(this.#broker, this.#dispatchContext);
     this.#unsubscribe();
   }
 

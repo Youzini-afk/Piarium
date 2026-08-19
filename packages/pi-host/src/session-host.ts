@@ -37,6 +37,8 @@ import type {
   PiConfigTextDocumentSnapshot,
   PiConfigTextFormat,
   PiConfigTextRoot,
+  PiConfigWatchSubscription,
+  PiConfigWatchTarget,
   PiFleetSnapshot,
   PiMcpConfigSnapshot,
   PiResourceCatalogSnapshot,
@@ -83,6 +85,7 @@ import {
 import { AgentProviderRegistry } from "./agent-providers/registry.js";
 import { findPiSubagentsTool } from "./agent-providers/pi-subagents-provider.js";
 import { ConfigTextFileEditor } from "./config-text-file-editor.js";
+import { ConfigWatchManager } from "./config-watch-manager.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { JsonObjectFileEditor } from "./json-object-file-editor.js";
@@ -433,6 +436,7 @@ async function copyResourceDirectory(source: string, target: string): Promise<vo
 export class SessionHost {
   readonly #agentDir: string;
   readonly #configureServices: SessionHostOptions["configureServices"];
+  readonly #configWatches: ConfigWatchManager;
   readonly #emit: EventEmitter;
   readonly #projectTrustOverride: boolean | undefined;
   readonly #providerConfiguration: ProviderConfigurationManager;
@@ -453,6 +457,9 @@ export class SessionHost {
     this.#agentDir = resolve(options.agentDir);
     this.#configureServices = options.configureServices;
     this.#emit = options.emit;
+    this.#configWatches = new ConfigWatchManager((subscription, reason) => {
+      this.#emit("config.changed", { ...subscription, reason });
+    });
     this.#projectTrustOverride = options.projectTrustOverride;
     this.#runtimeFactory = options.runtimeFactory;
     this.#providerConfiguration = new ProviderConfigurationManager({ agentDir: this.#agentDir });
@@ -510,6 +517,7 @@ export class SessionHost {
 
   async close(sessionId: string): Promise<boolean> {
     this.assertSession(sessionId);
+    this.#configWatches.close();
     await this.#disposeRuntime();
     this.#emit("session.closed", { sessionId });
     return true;
@@ -1606,11 +1614,30 @@ export class SessionHost {
     return this.listPackages();
   }
 
-  getSettings(): PiSettingsSnapshot {
+  async getSettings(): Promise<PiSettingsSnapshot> {
     const settings = this.runtime.services.settingsManager;
+    await settings.reload();
+    const reloadErrors = settings.drainErrors();
+    if (reloadErrors.length > 0) {
+      throw new HostError(
+        "settings_read_failed",
+        reloadErrors.map((entry) => entry.error.message).join("; "),
+      );
+    }
+    return this.#settingsSnapshot();
+  }
+
+  async #settingsSnapshot(): Promise<PiSettingsSnapshot> {
+    const settings = this.runtime.services.settingsManager;
+    const [globalSource, projectSource] = await Promise.all([
+      new JsonObjectFileEditor(join(this.#agentDir, "settings.json")).read(),
+      new JsonObjectFileEditor(join(this.runtime.cwd, ".pi", "settings.json")).read(),
+    ]);
     return {
-      global: toJsonValue(settings.getGlobalSettings()) as PiSettingsSnapshot["global"],
-      project: toJsonValue(settings.getProjectSettings()) as PiSettingsSnapshot["project"],
+      global: globalSource.document,
+      globalRevision: globalSource.revision,
+      project: projectSource.document,
+      projectRevision: projectSource.revision,
       projectTrusted: settings.isProjectTrusted(),
     };
   }
@@ -1636,6 +1663,7 @@ export class SessionHost {
       exists: result.exists,
       path: location.relativePath,
       projectTrusted: settings.isProjectTrusted(),
+      revision: result.revision,
       scope,
     };
   }
@@ -1645,6 +1673,7 @@ export class SessionHost {
     requestedPath: string,
     set: JsonValue,
     remove: readonly string[],
+    expectedRevision: string,
   ): Promise<PiConfigDocumentSnapshot> {
     const settings = this.runtime.services.settingsManager;
     if (scope === "project" && !settings.isProjectTrusted()) {
@@ -1665,13 +1694,18 @@ export class SessionHost {
         pendingErrors.map((entry) => entry.error.message).join("; "),
       );
     }
-    const document = await new JsonObjectFileEditor(location.path).update(set, remove);
+    const snapshot = await new JsonObjectFileEditor(location.path).updateRevisioned(
+      set,
+      remove,
+      expectedRevision,
+    );
     await this.session.reload();
     return {
-      document,
-      exists: true,
+      document: snapshot.document,
+      exists: snapshot.exists,
       path: location.relativePath,
       projectTrusted: this.runtime.services.settingsManager.isProjectTrusted(),
+      revision: snapshot.revision,
       scope,
     };
   }
@@ -1764,10 +1798,71 @@ export class SessionHost {
     };
   }
 
+  async watchConfig(target: PiConfigWatchTarget): Promise<PiConfigWatchSubscription> {
+    const settings = this.runtime.services.settingsManager;
+    if (
+      (target.kind === "document" && target.scope === "project")
+      || (target.kind === "text" && target.root === "project")
+      || (target.kind === "settings" && target.scope === "project")
+    ) {
+      if (!settings.isProjectTrusted()) {
+        throw new HostError(
+          "project_not_trusted",
+          "Project is not trusted; refusing to watch project configuration",
+        );
+      }
+    }
+
+    if (target.kind === "document") {
+      const location = await resolveConfigDocumentPath(
+        target.scope === "global" ? this.#agentDir : join(this.runtime.cwd, ".pi"),
+        target.path,
+      );
+      return this.#configWatches.watch(
+        { ...target, path: location.relativePath },
+        [location.path],
+      );
+    }
+    if (target.kind === "text") {
+      const base = target.root === "agent"
+        ? this.#agentDir
+        : target.root === "home"
+          ? homeRoot()
+          : target.root === "project"
+            ? this.runtime.cwd
+            : userConfigRoot();
+      const location = await resolveConfigDocumentPath(base, target.path, {
+        extensions: target.format === "json" ? [".json"] : [".jsonc", ".json"],
+        reservedPaths: target.root === "agent"
+          ? ["settings.json", "models.json"]
+          : target.root === "project"
+            ? [".pi/settings.json", ".pi/models.json"]
+            : [],
+      });
+      return this.#configWatches.watch(
+        { ...target, path: location.relativePath },
+        [location.path],
+      );
+    }
+
+    const settingsRoot = target.scope === "global"
+      ? this.#agentDir
+      : join(this.runtime.cwd, ".pi");
+    const location = await resolveConfigDocumentPath(settingsRoot, "settings.json", {
+      reservedPaths: [],
+    });
+    return this.#configWatches.watch(target, [location.path]);
+  }
+
+  unwatchConfig(watchId: string): boolean {
+    return this.#configWatches.unwatch(watchId);
+  }
+
   async updateSettings(
     scope: PiConfigScope,
     set: JsonValue,
     remove: readonly string[],
+    expectedRevision: string,
   ): Promise<PiSettingsSnapshot> {
     const settings = this.runtime.services.settingsManager;
     if (scope === "project" && !settings.isProjectTrusted()) {
@@ -1787,7 +1882,11 @@ export class SessionHost {
     const settingsPath = scope === "global"
       ? join(this.#agentDir, "settings.json")
       : join(this.runtime.cwd, ".pi", "settings.json");
-    await new JsonObjectFileEditor(settingsPath).update(set, remove);
+    await new JsonObjectFileEditor(settingsPath).updateRevisioned(
+      set,
+      remove,
+      expectedRevision,
+    );
     await settings.reload();
     const reloadErrors = settings.drainErrors();
     if (reloadErrors.length > 0) {
@@ -1797,7 +1896,7 @@ export class SessionHost {
       );
     }
     await this.session.reload();
-    return this.getSettings();
+    return this.#settingsSnapshot();
   }
 
   #resourceRoots(kind: PiResourceKind): ResourceRoot[] {
@@ -1998,6 +2097,7 @@ export class SessionHost {
     this.ui.cancelAll();
     this.auth.cancelAll();
     this.trust.cancelAll();
+    this.#configWatches.close();
     await this.#disposeRuntime();
   }
 

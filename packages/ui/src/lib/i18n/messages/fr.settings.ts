@@ -2159,6 +2159,8 @@ export const settingsDict = {
   "settings.piarium.pluginSettings.source.description": "Il s'agit du document du plugin natif édité par les contrôles ci-dessous. Cela reste la seule source de vérité persistante.",
   "settings.piarium.pluginSettings.source.unsaved": "Modifications non enregistrées",
   "settings.piarium.pluginSettings.source.discard": "Ignorer les modifications",
+  "settings.piarium.pluginSettings.source.externalChanged": "La configuration a été modifiée hors de Piarium alors que ce brouillon contenait des changements non enregistrés. Rechargez pour examiner le fichier actuel avant d’enregistrer.",
+  "settings.piarium.pluginSettings.source.watchFailed": "La surveillance en direct de la configuration a échoué. Le dernier contenu chargé a été conservé ; rechargez pour réessayer.",
   "settings.piarium.pluginSettings.advanced.description": "Piarium édite le document natif complet. Les champs inconnus et les commentaires JSONC sont conservés.",
   "settings.piarium.pluginSettings.advanced.sameDraftDescription": "Le formulaire et l’éditeur natif partagent le même brouillon, la même révision, le même état de validation et la même action Enregistrer. Les champs inconnus sont conservés ; les documents JSONC gardent aussi les commentaires et les virgules finales.",
   "settings.piarium.pluginSettings.advanced.unknownPlugin": "Ce plugin est propriétaire de sa configuration. Choisissez son fichier JSON ou JSONC natif ci-dessous ; Piarium préserve le document complet lors de son édition.",

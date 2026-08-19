@@ -12,6 +12,7 @@ import {
   type ProviderConfigInput,
   ProviderConfigValidationError,
   type ProviderAuthResponse,
+  type PiConfigWatchTarget,
   type RuntimeMethod,
   type RuntimeMethodResult,
 } from "@piarium/protocol";
@@ -27,6 +28,26 @@ export class RuntimeDispatchError extends Error {
     this.code = code;
     this.retryable = retryable;
   }
+}
+
+export interface RuntimeDispatchContext {
+  active: boolean;
+  configWatchIds: Set<string>;
+}
+
+export function createRuntimeDispatchContext(): RuntimeDispatchContext {
+  return { active: true, configWatchIds: new Set() };
+}
+
+export function disposeRuntimeDispatchContext(
+  broker: PiRuntimeBroker,
+  context: RuntimeDispatchContext,
+): void {
+  if (!context.active) return;
+  context.active = false;
+  const watchIds = [...context.configWatchIds];
+  context.configWatchIds.clear();
+  void Promise.allSettled(watchIds.map((watchId) => broker.unwatchConfig(watchId)));
 }
 
 function requireRecord(value: unknown): Record<string, unknown> {
@@ -198,6 +219,30 @@ function requireSessionFeatureMutation(value: unknown) {
   }
 }
 
+function requireConfigWatchTarget(value: unknown): PiConfigWatchTarget {
+  const target = requireRecord(value);
+  const kind = requireEnum(target, "kind", ["document", "text", "settings"] as const);
+  if (kind === "document") {
+    return {
+      kind,
+      path: requireString(target, "path"),
+      scope: requireEnum(target, "scope", ["global", "project"] as const),
+    };
+  }
+  if (kind === "text") {
+    return {
+      format: requireEnum(target, "format", ["json", "jsonc"] as const),
+      kind,
+      path: requireString(target, "path"),
+      root: requireEnum(target, "root", ["agent", "home", "project", "user-config"] as const),
+    };
+  }
+  return {
+    kind,
+    scope: requireEnum(target, "scope", ["global", "project"] as const),
+  };
+}
+
 function assertNever(value: never): never {
   throw new RuntimeDispatchError("unsupported_method", `Unsupported runtime method: ${String(value)}`);
 }
@@ -211,8 +256,9 @@ export async function dispatchRuntimeRequest<M extends RuntimeMethod>(
   broker: PiRuntimeBroker,
   method: M,
   params: unknown,
+  context?: RuntimeDispatchContext,
 ): Promise<RuntimeMethodResult<M>> {
-  const result = await dispatchRuntimeRequestUnchecked(broker, method, params);
+  const result = await dispatchRuntimeRequestUnchecked(broker, method, params, context);
   return result as RuntimeMethodResult<M>;
 }
 
@@ -220,6 +266,7 @@ async function dispatchRuntimeRequestUnchecked(
   broker: PiRuntimeBroker,
   method: RuntimeMethod,
   params: unknown,
+  context?: RuntimeDispatchContext,
 ): Promise<unknown> {
   const input = requireRecord(params);
   switch (method) {
@@ -607,6 +654,7 @@ async function dispatchRuntimeRequestUnchecked(
         requireRuntimeContext(input),
         "config.document.update",
         {
+          expectedRevision: requireString(input, "expectedRevision"),
           path: requireString(input, "path"),
           remove: requireStringList(input, "remove"),
           scope: requireEnum(input, "scope", ["global", "project"] as const),
@@ -640,6 +688,43 @@ async function dispatchRuntimeRequestUnchecked(
         },
       );
     }
+    case "config.watch": {
+      if (!context) {
+        throw new RuntimeDispatchError(
+          "persistent_connection_required",
+          "Configuration watches require a persistent runtime connection",
+        );
+      }
+      const subscription = await broker.watchConfig(
+        requireRuntimeContext(input),
+        requireConfigWatchTarget(input.target),
+      );
+      if (context && !context.active) {
+        await broker.unwatchConfig(subscription.watchId);
+        throw new RuntimeDispatchError(
+          "runtime_connection_closed",
+          "Runtime connection closed while creating the configuration watch",
+        );
+      }
+      context.configWatchIds.add(subscription.watchId);
+      return subscription;
+    }
+    case "config.unwatch": {
+      if (!context) {
+        throw new RuntimeDispatchError(
+          "persistent_connection_required",
+          "Configuration watches require a persistent runtime connection",
+        );
+      }
+      const watchId = requireString(input, "watchId");
+      if (!context.configWatchIds.delete(watchId)) {
+        throw new RuntimeDispatchError(
+          "config_watch_not_owned",
+          "Configuration watch does not belong to this runtime connection",
+        );
+      }
+      return broker.unwatchConfig(watchId);
+    }
 
     case "settings.get": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.get", {});
@@ -649,6 +734,7 @@ async function dispatchRuntimeRequestUnchecked(
         throw new RuntimeDispatchError("invalid_params", "set is required");
       }
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "settings.update", {
+        expectedRevision: requireString(input, "expectedRevision"),
         remove: requireStringList(input, "remove"),
         scope: requireEnum(input, "scope", ["global", "project"] as const),
         set: requireRecord(input.set) as { [key: string]: JsonValue },

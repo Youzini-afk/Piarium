@@ -10,6 +10,9 @@ import type {
   HostMethodResult,
   ProviderAuthResponse,
   ProjectTrustRequest,
+  PiConfigWatchSubscription,
+  PiConfigWatchTarget,
+  RuntimeContextTarget,
   RuntimeSourceKind,
   SessionSnapshot,
   SessionSummary,
@@ -75,6 +78,7 @@ export type PiCatalogMethod =
   | "config.document.update"
   | "config.text.get"
   | "config.text.update"
+  | "config.watch"
   | "model.list"
   | "mcp.config.snapshot"
   | "package.install"
@@ -102,6 +106,7 @@ export type PiCatalogMethod =
 
 export class PiRuntimeBroker {
   readonly #clients = new Set<PiHostClient>();
+  readonly #configWatches = new Map<string, PiHostClient>();
   readonly #listeners = new Set<(event: PiRuntimeBrokerEvent) => void>();
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
@@ -296,6 +301,53 @@ export class PiRuntimeBroker {
     return this.#workerForSession(sessionId).request(method, params);
   }
 
+  async watchConfig(
+    target: RuntimeContextTarget,
+    watchTarget: PiConfigWatchTarget,
+  ): Promise<PiConfigWatchSubscription> {
+    let worker: PiHostClient;
+    let subscription: PiConfigWatchSubscription;
+    if ("sessionId" in target) {
+      worker = this.#workerForSession(target.sessionId);
+      subscription = await worker.request("config.watch", { target: watchTarget });
+    } else {
+      const normalizedCwd = resolve(target.cwd);
+      const request = this.#catalogContextQueue.then(async () => {
+        const catalog = await this.#getCatalog();
+        if (this.#catalogContextCwd !== normalizedCwd) {
+          const snapshot = await catalog.request("catalog.context.open", { cwd: normalizedCwd });
+          this.#catalogContextCwd = snapshot.cwd;
+          this.#catalogContextSessionId = snapshot.sessionId;
+        }
+        return {
+          subscription: await catalog.request("config.watch", { target: watchTarget }),
+          worker: catalog,
+        };
+      });
+      this.#catalogContextQueue = request.then(
+        () => undefined,
+        () => undefined,
+      );
+      ({ subscription, worker } = await request);
+    }
+    if (!this.#clients.has(worker)) {
+      throw new PiRuntimeBrokerError(
+        "config_watch_failed",
+        "Pi configuration worker closed while creating the watch",
+      );
+    }
+    this.#configWatches.set(subscription.watchId, worker);
+    return subscription;
+  }
+
+  async unwatchConfig(watchId: string): Promise<{ unwatched: boolean }> {
+    const worker = this.#configWatches.get(watchId);
+    if (!worker) return { unwatched: false };
+    this.#configWatches.delete(watchId);
+    if (!this.#clients.has(worker)) return { unwatched: false };
+    return worker.request("config.unwatch", { watchId });
+  }
+
   async forkSession(sessionId: string, entryId: string, position?: "before" | "at") {
     const worker = this.#workerForSession(sessionId);
     await this.#rememberSummary(worker, sessionId);
@@ -400,6 +452,7 @@ export class PiRuntimeBroker {
     this.#disposed = true;
     const clients = [...this.#clients];
     this.#clients.clear();
+    this.#configWatches.clear();
     this.#sessions.clear();
     this.#knownSummaries.clear();
     this.#pendingProjectTrust.clear();
@@ -532,6 +585,12 @@ export class PiRuntimeBroker {
         this.#emit({ kind: "diagnostic", level, message, role, workerId: client.id });
       },
       onEvent: (envelope) => {
+        if (
+          envelope.event === "config.changed"
+          && this.#configWatches.get(envelope.data.watchId) !== client
+        ) {
+          return;
+        }
         if (role === "session" && envelope.event === "session.snapshot") {
           this.#bindSession(client, envelope.data.sessionId);
         }
@@ -622,6 +681,7 @@ export class PiRuntimeBroker {
       if (candidate === worker) this.#sessions.delete(sessionId);
     }
     this.#clearProjectTrustForClient(worker);
+    this.#clearConfigWatchesForClient(worker);
     await worker.dispose();
   }
 
@@ -642,6 +702,7 @@ export class PiRuntimeBroker {
       if (worker === client) this.#sessions.delete(mappedSessionId);
     }
     this.#clearProjectTrustForClient(client);
+    this.#clearConfigWatchesForClient(client);
     this.#emit({
       code: exit.code,
       expected,
@@ -667,6 +728,12 @@ export class PiRuntimeBroker {
   #clearProjectTrustForClient(client: PiHostClient): void {
     for (const [requestId, pending] of this.#pendingProjectTrust) {
       if (pending.client === client) this.#pendingProjectTrust.delete(requestId);
+    }
+  }
+
+  #clearConfigWatchesForClient(client: PiHostClient): void {
+    for (const [watchId, worker] of this.#configWatches) {
+      if (worker === client) this.#configWatches.delete(watchId);
     }
   }
 }

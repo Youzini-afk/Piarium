@@ -2155,6 +2155,8 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.source.description': 'This is the native plugin document edited by the controls below. It remains the only persisted source of truth.',
   'settings.piarium.pluginSettings.source.unsaved': 'Unsaved changes',
   'settings.piarium.pluginSettings.source.discard': 'Discard changes',
+  'settings.piarium.pluginSettings.source.externalChanged': 'The configuration changed outside Piarium while this draft has unsaved edits. Reload to review the current file before saving.',
+  'settings.piarium.pluginSettings.source.watchFailed': 'Live configuration monitoring failed. The last loaded content was preserved; reload to retry.',
   'settings.piarium.pluginSettings.advanced.sectionTitle': 'Advanced and future fields',
   'settings.piarium.pluginSettings.advanced.sectionDescription': 'Edit the plugin-owned object or JSON/JSONC document directly when a setting has no dedicated control yet.',
   'settings.piarium.pluginSettings.advanced.show': 'Show advanced editor',

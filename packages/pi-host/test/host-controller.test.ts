@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -272,8 +272,18 @@ describe("HostController", () => {
       assert.ok(thinking.kind === "response" && thinking.ok);
       assert.equal((thinking.result as SessionSnapshot).thinkingLevel, "off");
 
+      transport.receive(createRequest("settings-before-update", "settings.get", {}));
+      const settingsBeforeUpdate = await transport.waitFor((entry) =>
+        isResponse(entry, "settings-before-update"),
+      );
+      assert.ok(settingsBeforeUpdate.kind === "response" && settingsBeforeUpdate.ok);
+      const projectSettingsRevision = (settingsBeforeUpdate.result as {
+        projectRevision: string;
+      }).projectRevision;
+
       transport.receive(
         createRequest("plugin-settings", "settings.update", {
+          expectedRevision: projectSettingsRevision,
           remove: [],
           scope: "project",
           set: {
@@ -319,11 +329,15 @@ describe("HostController", () => {
         exists: false,
         path: "wtf.json",
         projectTrusted: true,
+        revision: (emptyWtfConfig.result as { revision: string }).revision,
         scope: "global",
       });
+      const wtfRevision = (emptyWtfConfig.result as { revision: string }).revision;
+      assert.equal(wtfRevision.length, 64);
 
       transport.receive(
         createRequest("wtf-config-update", "config.document.update", {
+          expectedRevision: wtfRevision,
           path: "wtf.json",
           remove: [],
           scope: "global",
@@ -462,6 +476,184 @@ describe("HostController", () => {
       assert.equal(response.error.code, "invalid_params");
     } finally {
       await controller.dispose();
+    }
+  });
+
+  it("watches validated configuration authorities across atomic replacement and cancellation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-host-config-watch-"));
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "agent");
+    await mkdir(cwd, { recursive: true });
+    await mkdir(agentDir, { recursive: true });
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({
+      agentDir,
+      projectTrustOverride: true,
+      transport,
+    });
+    controller.start();
+    try {
+      transport.receive(createRequest("create", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "create"));
+      assert.ok(created.kind === "response" && created.ok);
+
+      transport.receive(createRequest("watch-document", "config.watch", {
+        target: { kind: "document", path: "watched.json", scope: "global" },
+      }));
+      const watchedDocument = await transport.waitFor((entry) =>
+        isResponse(entry, "watch-document"),
+      );
+      assert.ok(watchedDocument.kind === "response" && watchedDocument.ok);
+      const documentWatchId = (watchedDocument.result as { watchId: string }).watchId;
+      const documentTemporary = join(agentDir, "watched.json.atomic");
+      await writeFile(documentTemporary, "{\"value\":1}\n", "utf8");
+      await rename(documentTemporary, join(agentDir, "watched.json"));
+      const documentChanged = await transport.waitFor(
+        (entry) => isEvent(entry, "config.changed")
+          && entry.event === "config.changed"
+          && entry.data.watchId === documentWatchId,
+      );
+      assert.ok(documentChanged.kind === "event" && documentChanged.event === "config.changed");
+      assert.equal(documentChanged.data.reason, "rename");
+
+      transport.receive(createRequest("watch-text", "config.watch", {
+        target: {
+          format: "jsonc",
+          kind: "text",
+          path: ".plugin/native.jsonc",
+          root: "project",
+        },
+      }));
+      const watchedText = await transport.waitFor((entry) => isResponse(entry, "watch-text"));
+      assert.ok(watchedText.kind === "response" && watchedText.ok);
+      const textWatchId = (watchedText.result as { watchId: string }).watchId;
+      await mkdir(join(cwd, ".plugin"));
+      await writeFile(join(cwd, ".plugin", "native.jsonc"), "{\n  // external\n}\n", "utf8");
+      const textChanged = await transport.waitFor(
+        (entry) => isEvent(entry, "config.changed")
+          && entry.event === "config.changed"
+          && entry.data.watchId === textWatchId,
+      );
+      assert.ok(textChanged.kind === "event" && textChanged.event === "config.changed");
+
+      transport.receive(createRequest("watch-settings", "config.watch", {
+        target: { kind: "settings", scope: "global" },
+      }));
+      const watchedSettings = await transport.waitFor((entry) =>
+        isResponse(entry, "watch-settings"),
+      );
+      assert.ok(watchedSettings.kind === "response" && watchedSettings.ok);
+      const settingsWatchId = (watchedSettings.result as { watchId: string }).watchId;
+      const settingsTemporary = join(agentDir, "settings.json.atomic");
+      await writeFile(settingsTemporary, "{\"theme\":\"external\"}\n", "utf8");
+      await rename(settingsTemporary, join(agentDir, "settings.json"));
+      await transport.waitFor(
+        (entry) => isEvent(entry, "config.changed")
+          && entry.event === "config.changed"
+          && entry.data.watchId === settingsWatchId,
+      );
+      transport.receive(createRequest("settings-after-external", "settings.get", {}));
+      const externallyReloadedSettings = await transport.waitFor((entry) =>
+        isResponse(entry, "settings-after-external"),
+      );
+      assert.ok(externallyReloadedSettings.kind === "response" && externallyReloadedSettings.ok);
+      assert.equal(
+        (externallyReloadedSettings.result as { global: { theme?: string } }).global.theme,
+        "external",
+      );
+
+      transport.receive(createRequest("unwatch-document", "config.unwatch", {
+        watchId: documentWatchId,
+      }));
+      const unwatched = await transport.waitFor((entry) => isResponse(entry, "unwatch-document"));
+      assert.ok(unwatched.kind === "response" && unwatched.ok);
+      assert.deepEqual(unwatched.result, { unwatched: true });
+      const documentEventCount = transport.sent.filter(
+        (entry) => isEvent(entry, "config.changed")
+          && entry.event === "config.changed"
+          && entry.data.watchId === documentWatchId,
+      ).length;
+      const replacement = join(agentDir, "watched.json.replacement");
+      await writeFile(replacement, "{\"value\":2}\n", "utf8");
+      await rename(replacement, join(agentDir, "watched.json"));
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 80));
+      assert.equal(
+        transport.sent.filter(
+          (entry) => isEvent(entry, "config.changed")
+            && entry.event === "config.changed"
+            && entry.data.watchId === documentWatchId,
+        ).length,
+        documentEventCount,
+      );
+
+      const outside = join(root, "outside");
+      await mkdir(outside);
+      await symlink(outside, join(agentDir, "linked"), "junction");
+      transport.receive(createRequest("watch-symlink", "config.watch", {
+        target: { kind: "document", path: "linked/escaped.json", scope: "global" },
+      }));
+      const symlinkWatch = await transport.waitFor((entry) =>
+        isResponse(entry, "watch-symlink"),
+      );
+      assert.ok(symlinkWatch.kind === "response" && !symlinkWatch.ok);
+      assert.equal(symlinkWatch.error.code, "invalid_config_path");
+
+      transport.receive(createRequest("watch-escape", "config.watch", {
+        target: { kind: "document", path: "../escaped.json", scope: "global" },
+      }));
+      const escapedWatch = await transport.waitFor((entry) => isResponse(entry, "watch-escape"));
+      assert.ok(escapedWatch.kind === "response" && !escapedWatch.ok);
+      assert.equal(escapedWatch.error.code, "invalid_config_path");
+
+      transport.receive(createRequest("close", "session.close", {
+        sessionId: (created.result as SessionSnapshot).sessionId,
+      }));
+      const closed = await transport.waitFor((entry) => isResponse(entry, "close"));
+      assert.ok(closed.kind === "response" && closed.ok);
+      const configEventCount = transport.sent.filter((entry) =>
+        isEvent(entry, "config.changed"),
+      ).length;
+      const afterCloseSettings = join(agentDir, "settings.json.after-close");
+      await writeFile(afterCloseSettings, "{\"theme\":\"closed\"}\n", "utf8");
+      await rename(afterCloseSettings, join(agentDir, "settings.json"));
+      await writeFile(join(cwd, ".plugin", "native.jsonc"), "{\"closed\":true}\n", "utf8");
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 80));
+      assert.equal(
+        transport.sent.filter((entry) => isEvent(entry, "config.changed")).length,
+        configEventCount,
+      );
+    } finally {
+      await controller.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("denies project configuration watches when the project is not trusted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-host-config-watch-trust-"));
+    const cwd = join(root, "workspace");
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({
+      agentDir: join(root, "agent"),
+      projectTrustOverride: false,
+      transport,
+    });
+    controller.start();
+    try {
+      await mkdir(cwd, { recursive: true });
+      transport.receive(createRequest("create", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "create"));
+      assert.ok(created.kind === "response" && created.ok);
+      transport.receive(createRequest("watch-project-settings", "config.watch", {
+        target: { kind: "settings", scope: "project" },
+      }));
+      const denied = await transport.waitFor((entry) =>
+        isResponse(entry, "watch-project-settings"),
+      );
+      assert.ok(denied.kind === "response" && !denied.ok);
+      assert.equal(denied.error.code, "project_not_trusted");
+    } finally {
+      await controller.dispose();
+      await rm(root, { force: true, recursive: true });
     }
   });
 

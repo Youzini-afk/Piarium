@@ -2577,6 +2577,8 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.source.description': 'Це власний документ плагіна, який редагують наведені елементи керування. Він залишається єдиним збереженим джерелом правди.',
   'settings.piarium.pluginSettings.source.unsaved': 'Незбережені зміни',
   'settings.piarium.pluginSettings.source.discard': 'Відкинути зміни',
+  'settings.piarium.pluginSettings.source.externalChanged': 'Конфігурацію змінено поза Piarium, поки ця чернетка містила незбережені зміни. Перезавантажте, щоб переглянути поточний файл перед збереженням.',
+  'settings.piarium.pluginSettings.source.watchFailed': 'Не вдалося відстежувати конфігурацію в реальному часі. Останній завантажений вміст збережено; перезавантажте, щоб повторити спробу.',
   'settings.piarium.pluginSettings.advanced.sameDraftDescription': 'Форма та власний редактор використовують одну чернетку, ревізію, стан перевірки й дію «Зберегти». Невідомі поля зберігаються; документи JSONC також зберігають коментарі та кінцеві коми.',
   'settings.piarium.pluginSettings.advanced.unknownPlugin': 'Цей плагін володіє своєю конфігурацією. Виберіть нижче власний файл JSON або JSONC; Piarium зберігає весь документ під час редагування.',
   'settings.piarium.pluginSettings.advanced.root': 'Розташування файлу',

@@ -2799,6 +2799,8 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.scope.label': '应用于',
   'settings.piarium.pluginSettings.source.description': '这是由下方控件编辑的原生插件文档，也是唯一持久化的事实来源。',
   'settings.piarium.pluginSettings.source.discard': '放弃更改',
+  'settings.piarium.pluginSettings.source.externalChanged': '此草稿仍有未保存更改时，配置已在 Piarium 外部发生变化。请重新加载并检查当前文件后再保存。',
+  'settings.piarium.pluginSettings.source.watchFailed': '配置实时监听失败。已保留上次加载的内容；请重新加载以重试。',
   'settings.piarium.pluginSettings.source.label': '配置来源',
   'settings.piarium.pluginSettings.source.unsaved': '未保存的更改',
   'settings.piarium.pluginSettings.subagents.acceptance.readOnly': '只读审查者',

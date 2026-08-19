@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -140,8 +140,12 @@ test("broker owns catalog and per-session Pi workers", async () => {
         .some((command) => command.name === "broker-package-command"),
       true,
     );
+    const settingsBeforeUpdate = await dispatchRuntimeRequest(broker, "settings.get", {
+      cwd: workspace,
+    });
     const updatedSettings = await dispatchRuntimeRequest(broker, "settings.update", {
       cwd: workspace,
+      expectedRevision: settingsBeforeUpdate.projectRevision,
       remove: [],
       scope: "project",
       set: {
@@ -159,11 +163,17 @@ test("broker owns catalog and per-session Pi workers", async () => {
       (await dispatchRuntimeRequest(broker, "settings.get", { cwd: workspace })).project,
       updatedSettings.project,
     );
+    const wtfBeforeUpdate = await dispatchRuntimeRequest(
+      broker,
+      "config.document.get",
+      { cwd: workspace, path: "wtf.json", scope: "global" },
+    );
     const updatedWtfConfig = await dispatchRuntimeRequest(
       broker,
       "config.document.update",
       {
         cwd: workspace,
+        expectedRevision: wtfBeforeUpdate.revision,
         path: "wtf.json",
         remove: [],
         scope: "global",
@@ -516,6 +526,88 @@ test("surface explicitly resolves project trust without a broker-owned deadline"
       { accepted: false },
     );
   } finally {
+    await broker.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("workspace configuration watches survive catalog context switches and cancel explicitly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-config-watch-"));
+  const workspaceA = join(root, "workspace-a");
+  const workspaceB = join(root, "workspace-b");
+  const agentDir = join(root, "agent");
+  await mkdir(join(workspaceA, ".pi"), { recursive: true });
+  await mkdir(join(workspaceB, ".pi"), { recursive: true });
+  const events: PiRuntimeBrokerEvent[] = [];
+  const broker = new PiRuntimeBroker({
+    agentDir,
+    client: {
+      clientName: "runtime-config-watch-test",
+      clientVersion: "0.1.0",
+      mode: "test",
+    },
+    execArgv: ["--import", "tsx"],
+    hostEntry: HOST_ENTRY,
+    projectTrustOverride: true,
+  });
+  const unsubscribe = broker.subscribe((event) => events.push(event));
+  try {
+    await assert.rejects(
+      dispatchRuntimeRequest(broker, "config.watch", {
+        cwd: workspaceA,
+        target: { kind: "document", path: "native.json", scope: "project" },
+      }),
+      (error: unknown) => (
+        error instanceof RuntimeDispatchError
+        && error.code === "persistent_connection_required"
+      ),
+    );
+    const watch = await broker.watchConfig(
+      { cwd: workspaceA },
+      { kind: "document", path: "native.json", scope: "project" },
+    );
+    await dispatchRuntimeRequest(broker, "settings.get", { cwd: workspaceB });
+
+    const temporary = join(workspaceA, ".pi", "native.json.atomic");
+    await writeFile(temporary, "{\"external\":true}\n", "utf8");
+    await rename(temporary, join(workspaceA, ".pi", "native.json"));
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      if (events.some((event) =>
+        event.kind === "host"
+        && event.envelope.event === "config.changed"
+        && event.envelope.data.watchId === watch.watchId
+      )) break;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
+    }
+    assert.ok(events.some((event) =>
+      event.kind === "host"
+      && event.envelope.event === "config.changed"
+      && event.envelope.data.watchId === watch.watchId,
+    ));
+
+    assert.deepEqual(
+      await broker.unwatchConfig(watch.watchId),
+      { unwatched: true },
+    );
+    const eventCount = events.filter((event) =>
+      event.kind === "host"
+      && event.envelope.event === "config.changed"
+      && event.envelope.data.watchId === watch.watchId,
+    ).length;
+    const replacement = join(workspaceA, ".pi", "native.json.replacement");
+    await writeFile(replacement, "{\"external\":false}\n", "utf8");
+    await rename(replacement, join(workspaceA, ".pi", "native.json"));
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 80));
+    assert.equal(
+      events.filter((event) =>
+        event.kind === "host"
+        && event.envelope.event === "config.changed"
+        && event.envelope.data.watchId === watch.watchId,
+      ).length,
+      eventCount,
+    );
+  } finally {
+    unsubscribe();
     await broker.dispose();
     await rm(root, { force: true, recursive: true });
   }

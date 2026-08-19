@@ -62,7 +62,7 @@ export const PluginDraftFooter: React.FC<{
           <Button
             type="button"
             size="sm"
-            disabled={!controller.loaded || !controller.dirty || controller.loading || controller.saving || controller.rawError !== null || blocked}
+            disabled={!controller.loaded || !controller.dirty || controller.externalChanged || controller.loading || controller.saving || controller.rawError !== null || blocked}
             onClick={() => void controller.save()}
           >
             {controller.saving
