@@ -76,5 +76,16 @@ describe('settings search availability', () => {
       result.id === 'plugin-settings.configuration'
       && result.page === 'plugin-settings'
     ))).toBe(true);
+
+    const rtkResults = buildSettingsSearchResults({
+      getPageTitle: (slug) => slug,
+      query: 'rtk optimizer',
+      runtimeCtx: runtimeContext(false),
+      t: (key) => key,
+    });
+    expect(rtkResults.some((result) => (
+      result.id === 'plugin-settings.configuration'
+      && result.page === 'plugin-settings'
+    ))).toBe(true);
   });
 });

@@ -25,6 +25,7 @@ import { ObservationalMemorySettings } from '@/components/sections/plugin-settin
 import { OpenAICodexCompatSettings } from '@/components/sections/plugin-settings/OpenAICodexCompatSettings';
 import { PiLensSettings } from '@/components/sections/plugin-settings/PiLensSettings';
 import { PermissionSystemSettings } from '@/components/sections/plugin-settings/PermissionSystemSettings';
+import { RtkSettings } from '@/components/sections/plugin-settings/RtkSettings';
 import { SubagentsSettings } from '@/components/sections/plugin-settings/SubagentsSettings';
 import { WebAccessSettings } from '@/components/sections/plugin-settings/WebAccessSettings';
 import { WorkspaceHistorySettings } from '@/components/sections/plugin-settings/WorkspaceHistorySettings';
@@ -139,6 +140,8 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
         return <PermissionSystemSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'hermes-memory':
         return <HermesMemorySettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'rtk':
+        return <RtkSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       default:
         throw new Error(`Unknown built-in Pi Plugin Settings adapter: ${adapterId}`);
     }

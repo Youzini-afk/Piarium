@@ -134,8 +134,10 @@ describe('i18n message parity', () => {
       key === 'settings.piarium.plugins.package.aft'
       || key === 'settings.piarium.plugins.package.hermesMemory'
       || key === 'settings.piarium.plugins.package.backgroundTasks'
+      || key === 'settings.piarium.plugins.package.rtk'
       || key.startsWith('settings.piarium.pluginSettings.aft.')
       || key.startsWith('settings.piarium.pluginSettings.hermesMemory.')
+      || key.startsWith('settings.piarium.pluginSettings.rtk.')
       || key.startsWith('settings.piarium.fleet.')
     ));
     const failures: Record<string, unknown> = {};

@@ -240,9 +240,11 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
 - Implemented: Hermes Memory settings edit only the Host-resolved agent-root
   `hermes-memory-config.json`. `projectsMemoryDir` accepts a one-level relative name or an absolute
   child of that agent directory. Runtime availability is `memory-insights` command presence only.
-- Externally blocked: `pi-rtk-optimizer@0.9.0` still declares Pi peers through `^0.80.0` on npm and
-  GitHub `main`. Piarium stays on Pi `0.84.1` and does not recommend or adapt RTK until upstream
-  names the current line.
+- Implemented: `pi-rtk-optimizer@0.9.0` is recommended and adapted through its one strict-JSON
+  agent-root authority after its entry point and exact `rtk` command registration were verified on
+  Piarium's Pi `0.84.1`. Its upstream peer declaration still stops at Pi 0.80, but Piarium does not
+  maintain a fork or old-Pi compatibility layer. Command presence proves extension loading only,
+  not availability of the external RTK binary.
 - Implemented: Agents, Commands, Prompts, Skills, Pi Packages, and Plugin Settings now observe one
   ownership model. Agents exposes provider-owned source/package/invocation facts without inventing
   a universal override schema; Commands is a read-only live catalog with native source provenance;

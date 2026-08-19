@@ -757,6 +757,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
       'memory policy',
       'memory review',
       'session search',
+      'rtk',
+      'rtk optimizer',
+      'command rewrite',
+      'output compaction',
+      'smart truncation',
     ],
   },
   {

@@ -183,6 +183,7 @@ value.
 | @cortexkit/aft-pi | Editing mode; tool surface; search, semantic, call-graph, inspection, LSP, backup, and sandbox controls | Host-resolved CortexKit user `aft.jsonc` authority plus project `.cortexkit/aft.jsonc`; both are revisioned JSONC drafts | formatter/checker maps, server definitions, shell feature objects, transport, credentials, path lists, and future fields | invalid known fields block structured save; unknown fields and project-stripped fields stay visible and are preserved; runtime observation is command-only |
 | pi-hermes-memory | Memory policy and limits; review; flush; capacity; correction/failure recall; session search and model overrides | Host-resolved global `hermes-memory-user` authority (`hermes-memory-config.json` under the active Pi agent directory) | `memoryDir`, custom policy text, child extension paths, four correction arrays, and future fields | unknown fields are preserved and non-blocking; modern overflow strategy takes precedence without deleting the legacy field; runtime observation is command-only |
 | @gotgenes/pi-permission-system | Task-oriented allow/ask/deny policy; runtime/interface flags; prompt and review-log display budgets | Independent global `extensions/pi-permission-system/config.json` under the active Pi agent root and trusted project `.pi/extensions/pi-permission-system/config.json` | pattern maps, third-party permission surfaces, shell aliases, infrastructure read paths, authorizer chains, and deprecated preview caps | pattern maps remain intact until replaced deliberately, trailing commas and unknown 26.3 top-level keys block save, `yoloMode` keeps a source-qualified warning, and runtime availability comes only from the native command catalog |
+| pi-rtk-optimizer | Rewrite/suggest behavior; missing-binary guard; notifications; output, read/source, and truncation controls | Strict JSON at global `<agentDir>/extensions/pi-rtk-optimizer/config.json` | removed rewrite categories, unknown future fields, and complex legacy shapes | missing fields remain absent; unknown and legacy fields are preserved; numeric controls use only native 40–4000 and 1000–200000 ranges; runtime presence is the exact `rtk` command, not binary availability |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
 may succeed while an unsaved override draft remains, or vice versa; the UI presents and reports
@@ -608,6 +609,25 @@ Runtime observation checks only whether the active session's `command.list` cont
 memory data, or infer background-review, Markdown, or SQLite health. No session, command-list
 failure, and command not observed remain separate states.
 
+### 5.10 pi-rtk-optimizer
+
+RTK Optimizer has one strict-JSON configuration authority:
+`<agentDir>/extensions/pi-rtk-optimizer/config.json`. The active agent directory comes from the
+existing Host-resolved `config.text` root; the renderer does not invent a home path or a project
+configuration. Quick controls edit the same raw draft as Advanced. Missing fields stay absent, and
+unknown or legacy fields round-trip without being promoted back into the Quick surface. In
+particular, the removed rewrite-category controls are not restored.
+
+The form covers `enabled`, rewrite/suggest mode, the missing-binary guard, rewrite notifications,
+and the current `outputCompaction` tree. Smart-line truncation accepts only the plugin's 40–4000
+range and final character truncation only 1000–200000. Known invalid values block saving for repair
+in Advanced; unknown and legacy values remain visible and non-blocking.
+
+Runtime observation is deliberately command-only. Only an exact `rtk` entry from `command.list`
+means the extension loaded. It does not establish that the external `rtk` binary is installed.
+Piarium may dispatch `/rtk show`, `/rtk verify`, `/rtk stats`, and `/rtk clear-stats`, but does not
+parse their notification text into status or copy metrics into Piarium state.
+
 ## 6. Implementation order
 
 1. Recovery correctness and sidebar controls, because the host operations already exist and the
@@ -624,9 +644,10 @@ failure, and command not observed remain separate states.
 10. Hermes Memory settings over its single native agent-root JSON authority and command-only
    runtime observation.
 11. Provider-neutral Fleet plus `pi-background-tasks` EventBus v1 (list, run, bounded logs, stop)
-   without a fabricated settings schema. `pi-rtk-optimizer` stays out of Recommended Integrations
-   until upstream declares the current Pi line.
-12. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
+   without a fabricated settings schema.
+12. RTK Optimizer over its one native strict-JSON authority, with command-only runtime observation
+   and no fork or old-Pi compatibility layer.
+13. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
    capability parity or an explicit rejection is documented and tested. This retirement is now
    complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
 

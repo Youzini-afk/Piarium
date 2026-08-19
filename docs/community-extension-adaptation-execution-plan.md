@@ -436,29 +436,21 @@ Commit and push as:
 feat: integrate background tasks with Fleet
 ```
 
-## 6. Phase 8 — RTK optimizer, externally gated
+## 6. Phase 8 — RTK optimizer (complete)
 
-Do not start implementation merely because `pi-rtk-optimizer@0.9.0` happens to load under Pi 0.84.1.
-Its published peer range currently ends at Pi 0.80:
+`pi-rtk-optimizer@0.9.0` still publishes a peer range ending at Pi 0.80:
 
 ```text
 @earendil-works/pi-coding-agent: ^0.74 ... ^0.80
 @earendil-works/pi-tui:          ^0.74 ... ^0.80
 ```
 
-Before Phase 8, check the current npm/GitHub package. Proceed only when upstream explicitly declares
-support for Piarium's current Pi line and a selected-runtime smoke verifies extension load plus the
-`/rtk` command. Do not suppress the peer warning, pin an old Pi SDK, or add a v0.80 compatibility
-branch.
+Piarium now treats that declaration as upstream metadata rather than an adapter/recommendation
+blocker because the package entry point and exact `rtk` command registration were verified on the
+bundled Pi `0.84.1`. The adaptation consumes `npm:pi-rtk-optimizer` directly. It does not suppress
+the recorded peer evidence, pin an old Pi SDK, maintain a fork, or add a v0.80 compatibility branch.
 
-If the gate remains closed:
-
-- leave RTK out of Recommended Integrations;
-- keep the compatibility document's caveat truthful;
-- report Phase 8 as externally blocked, not failed;
-- continue to final convergence without an RTK commit.
-
-If the gate opens, implement one native adapter phase:
+The native adapter provides:
 
 - closed authority `<agentDir>/extensions/pi-rtk-optimizer/config.json`;
 - strict JSON, revision/watch semantics, no project authority invented;
@@ -472,7 +464,7 @@ If the gate opens, implement one native adapter phase:
 - do not claim the external `rtk` binary is available until the plugin reports it through a stable
   public contract; command presence proves only that the extension loaded.
 
-Commit and push, only when unblocked, as:
+The phase commit is:
 
 ```text
 feat: adapt the RTK optimizer
@@ -487,7 +479,7 @@ Required work:
 - update `docs/extension-compatibility.md` with the exact versions and what was actually exercised;
 - update `docs/plugin-gui-design.md`, `docs/architecture.md`, and `docs/roadmap.md` so Fleet is no
   longer described as pi-subagents-only and Hermes is marked complete;
-- list `pi-background-tasks` in recommendations and RTK only if Phase 8's gate opened;
+- list both `pi-background-tasks` and the verified `npm:pi-rtk-optimizer` source in recommendations;
 - ensure every built-in adapter manifest is exported by the built `@piarium/extension-builtins`
   artifact and survives disable/enable without disabling the Pi package;
 - rerun the reusable selected-runtime package-entry smoke for all recommended community packages;

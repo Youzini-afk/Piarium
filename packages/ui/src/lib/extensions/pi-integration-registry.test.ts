@@ -190,6 +190,44 @@ test('maps only pi-hermes-memory to the Hermes Memory settings adapter', async (
   await handle.deactivate(2, 2);
 });
 
+test('maps only pi-rtk-optimizer to the RTK settings adapter', async () => {
+  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+    candidate.manifest.id.endsWith('.rtk')
+  ));
+  expect(definition).toBeDefined();
+  if (!definition) return;
+  const runtime = new SurfaceExtensionRuntime({ surface: 'web' });
+  const handle = await runtime.activate({
+    owner: {
+      desiredRevision: 1,
+      entrypointId: 'main',
+      extensionId: definition.manifest.id,
+      extensionVersion: definition.manifest.version,
+      generation: 1,
+      hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+      realmId: 'rtk-adapter-test',
+    },
+  }, activateBuiltinPiIntegration(definition));
+  const rtkPackage: PackageDescriptor = {
+    enabled: true,
+    installed: true,
+    name: 'pi-rtk-optimizer',
+    scope: 'global',
+    source: 'npm:pi-rtk-optimizer',
+    structured: true,
+  };
+  const adapters = pluginSettingsAdaptersFromSnapshot(runtime.getSnapshot());
+  const adapter = pluginSettingsAdapterForPackage(rtkPackage, adapters);
+  expect(adapter?.adapterId).toBe('rtk');
+  expect(adapter?.icon).toBe('terminal-box');
+  expect(adapter?.packageNames).toEqual(['pi-rtk-optimizer']);
+  expect(pluginSettingsAdapterForPackage(
+    { ...rtkPackage, name: 'pi-rtk', source: 'npm:pi-rtk' },
+    adapters,
+  )).toBeNull();
+  await handle.deactivate(2, 2);
+});
+
 test('the public Fleet builtin owns both work providers and has no Plugin Settings adapter', () => {
   expect(PIARIUM_BUILTIN_FLEET_EXTENSION.manifest.integrates?.piPackages).toEqual([
     'pi-subagents',

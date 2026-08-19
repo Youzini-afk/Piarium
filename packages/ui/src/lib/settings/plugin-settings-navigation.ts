@@ -11,7 +11,8 @@ export type PluginSettingsIntegrationId =
   | 'mcp'
   | 'pi-lens'
   | 'permission-system'
-  | 'hermes-memory';
+  | 'hermes-memory'
+  | 'rtk';
 
 export interface PluginSettingsNavigationTarget {
   integrationId: PluginSettingsIntegrationId | null;
@@ -36,6 +37,7 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-lens': 'pi-lens',
   '@gotgenes/pi-permission-system': 'permission-system',
   'pi-hermes-memory': 'hermes-memory',
+  'pi-rtk-optimizer': 'rtk',
 };
 
 export const pluginSettingsIntegrationForPluginId = (
@@ -59,6 +61,7 @@ const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, str
   'pi-lens': 'pi-lens',
   'permission-system': '@gotgenes/pi-permission-system',
   'hermes-memory': 'pi-hermes-memory',
+  'rtk': 'pi-rtk-optimizer',
 };
 
 let pendingTarget: PluginSettingsNavigationTarget | null = null;

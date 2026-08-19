@@ -24,7 +24,7 @@ destructive commands.
 | pi-hermes-memory | 0.9.6 | Pass | 10 memory, search, skill, and maintenance commands |
 | pi-background-tasks | 2.4.2 | Pass; EventBus provider `active` on `extensions/background-tasks.ts` | 10 background/Fusion/log commands on the work entry; `claude-cache` on `extensions/anthropic-attribution.ts` |
 | @cortexkit/aft-pi | 0.51.2 | Pass | `aft-status` |
-| pi-rtk-optimizer | 0.9.0 | Not rerun; still out of Recommended Integrations | earlier load registered `rtk`; upstream peer range still stops at Pi 0.80 |
+| pi-rtk-optimizer | 0.9.0 | Pass | `rtk` |
 
 `pi-openai-codex-compat@0.0.7-alpha.0` declares Pi `>=0.84.0 <0.85.0`; Piarium's Pi `0.84.1`
 runtime now satisfies that contract. The npm-pack smoke above still proves entry-point loading and
@@ -40,14 +40,18 @@ On 2026-08-19 the published `pi-rtk-optimizer@0.9.0` peer range was rechecked on
 @earendil-works/pi-tui:          ^0.74.0 || ^0.75.0 || ^0.78.0 || ^0.79.0 || ^0.80.0
 ```
 
-Piarium's bundled Pi is `0.84.1`. Loading under 0.84.1 is not treated as declared support. RTK stays
-out of Recommended Integrations and has no Piarium settings adapter.
+Piarium's bundled Pi is `0.84.1`. The package has been verified to load its entry point and register
+`rtk` on that runtime, so the older peer declaration is recorded as upstream metadata rather than a
+Piarium recommendation or adapter blocker. Piarium integrates the published
+`npm:pi-rtk-optimizer` package directly; it does not maintain an RTK fork or a Pi 0.80 compatibility
+layer.
 
 On 2026-08-19 Phase 9 reran `node scripts/smoke-extension.mjs` against npm-packed published
 tarballs (production dependencies installed with `--ignore-scripts`) through Piarium's bundled Pi
-`0.84.1`. Local plugin working trees were not required. `pi-rtk-optimizer` was not packed or loaded
-again because Phase 8 remains externally blocked. The generic smoke still does not invoke models,
-network calls, permission decisions, memory search, or mutating tools.
+`0.84.1`. Local plugin working trees were not required. The RTK entry-point verification proves
+extension loading and `rtk` command registration only; it does not prove that an external `rtk`
+binary is installed. The generic smoke still does not invoke models, network calls, permission
+decisions, memory search, or mutating tools.
 
 A separate real `pi-background-tasks@2.4.2` Fleet lifecycle on the same Host exercised EventBus v1
 `run` → `status` → bounded `logs` → `kill` for a Windows `ping` task. The public DTO stayed free of
@@ -121,6 +125,12 @@ plugin ownership intact:
   Advanced. Project memory directories, Markdown, and SQLite are data rather than configuration
   authorities. Runtime observation checks only for `memory-insights` in `command.list` and does not
   execute commands or infer memory-store or background-review health.
+- RTK Optimizer edits only strict JSON at
+  `<agentDir>/extensions/pi-rtk-optimizer/config.json`. Quick controls project the raw native draft,
+  so absent values stay absent while unknown and legacy fields remain in Advanced. Runtime
+  observation checks only for the exact `rtk` command. `/rtk show`, `verify`, `stats`, and
+  `clear-stats` remain plugin-owned actions; Piarium does not parse their notifications or claim the
+  external RTK binary is available.
 
 Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
 verification. Phase 9 recorded a local production Web build (`bun run build:web`, exit 0). CI run

@@ -75,4 +75,12 @@ describe('plugin settings navigation', () => {
       pluginId: 'npm:pi-hermes-memory@0.9.6',
     });
   });
+
+  test('maps pi-rtk-optimizer to its dedicated adapter', () => {
+    requestPluginSettingsTarget('npm:pi-rtk-optimizer@0.9.0');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'rtk',
+      pluginId: 'npm:pi-rtk-optimizer@0.9.0',
+    });
+  });
 });

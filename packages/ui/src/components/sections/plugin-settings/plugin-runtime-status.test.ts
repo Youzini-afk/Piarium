@@ -123,6 +123,12 @@ describe('plugin runtime status', () => {
     )).toBe('not-observed');
   });
 
+  test('observes RTK only through the exact rtk command', () => {
+    expect(pluginRuntimeStatus('rtk', signals({ commandNames: new Set(['rtk']) }))).toBe('available');
+    expect(pluginRuntimeStatus('rtk', signals())).toBe('not-observed');
+    expect(pluginRuntimeStatus('rtk', signals({ commandNames: new Set(['/rtk']) }))).toBe('not-observed');
+  });
+
   test('uses active recovery providers and MCP status reports', () => {
     expect(
       pluginRuntimeStatus(
