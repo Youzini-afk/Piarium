@@ -173,14 +173,17 @@ const summarizeAgents = (catalog: PiAgentCatalogSnapshot) => ({
 
 const summarizeFleet = (fleet: PiFleetSnapshot) => ({
   entries: fleet.entries.map((entry) => ({
-    agent: entry.agent,
+    agent: entry.agent ?? null,
     effort: entry.effort ?? null,
     key: entry.key,
+    kind: entry.kind,
     model: entry.model ?? null,
+    name: entry.name,
     providerId: entry.providerId,
     role: entry.role ?? null,
     startedAt: entry.startedAt,
-    tokens: entry.tokens,
+    state: entry.state,
+    tokens: entry.tokens ?? null,
   })),
   omitted: fleet.omitted,
   providers: fleet.providers.map((provider) => ({

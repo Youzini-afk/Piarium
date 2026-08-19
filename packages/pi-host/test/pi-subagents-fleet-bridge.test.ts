@@ -64,13 +64,13 @@ describe("pi-subagents Fleet bridge", () => {
     assert.deepEqual(await bridge.status("session-a"), {
       entries: [],
       omitted: 0,
-      providers: [{
+      provider: {
         id: "pi-subagents",
         issue: "pi-subagents is not active in this session",
         label: "pi-subagents",
         source: "npm:pi-subagents",
         state: "unavailable",
-      }],
+      },
       totalActive: 0,
     });
 
@@ -91,13 +91,13 @@ describe("pi-subagents Fleet bridge", () => {
     assert.deepEqual(await bridge.status("session-a"), {
       entries: [],
       omitted: 0,
-      providers: [{
+      provider: {
         bridgeVersion: 1,
         id: "pi-subagents",
         label: "pi-subagents",
         source: "npm:pi-subagents",
         state: "active",
-      }],
+      },
       totalActive: 0,
     });
   });
@@ -140,24 +140,28 @@ describe("pi-subagents Fleet bridge", () => {
 
     assert.deepEqual(await bridge.status("session-a"), {
       entries: [{
+        actions: [],
         agent: "reviewer",
+        description: "Review the authentication changes",
         effort: "high",
-        goal: "Review the authentication changes",
         key: "fleet-1",
+        kind: "delegated-agent",
         model: "anthropic/claude",
+        name: "reviewer",
         providerId: "pi-subagents",
         role: "security",
         startedAt: 1_700_000_000_000,
+        state: "running",
         tokens: { input: 120, output: 30, total: 150 },
       }],
       omitted: 2,
-      providers: [{
+      provider: {
         bridgeVersion: 1,
         id: "pi-subagents",
         label: "pi-subagents",
         source: "npm:pi-subagents",
         state: "active",
-      }],
+      },
       totalActive: 3,
     });
   });
@@ -174,8 +178,8 @@ describe("pi-subagents Fleet bridge", () => {
     });
 
     const incompatible = await bridge.status("session-a");
-    assert.equal(incompatible.providers[0]?.state, "incompatible");
-    assert.match(incompatible.providers[0]?.issue ?? "", /fleetStatus v1/);
+    assert.equal(incompatible.provider.state, "incompatible");
+    assert.match(incompatible.provider.issue ?? "", /fleetStatus v1/);
 
     runtime.pi.events.emit(PI_SUBAGENTS_RPC_READY_EVENT, readyPayload("session-a"));
     runtime.pi.events.on(PI_SUBAGENTS_RPC_REQUEST_EVENT, (value: unknown) => {
@@ -189,8 +193,8 @@ describe("pi-subagents Fleet bridge", () => {
     });
 
     const degraded = await bridge.status("session-a");
-    assert.equal(degraded.providers[0]?.state, "degraded");
-    assert.match(degraded.providers[0]?.issue ?? "", /status storage is unreadable/);
+    assert.equal(degraded.provider.state, "degraded");
+    assert.match(degraded.provider.issue ?? "", /status storage is unreadable/);
     assert.deepEqual(degraded.entries, []);
   });
 });

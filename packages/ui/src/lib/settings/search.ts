@@ -603,6 +603,27 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['provider', 'pi-subagents', 'magic context', 'historian', 'dreamer', 'sidekick'],
   },
   {
+    id: 'fleet.provider',
+    page: 'fleet',
+    titleKey: 'settings.piarium.fleet.provider.title',
+    descriptionKey: 'settings.piarium.fleet.provider.description',
+    keywords: ['pi-subagents', 'pi-background-tasks', 'eventbus', 'provider', 'delegation'],
+  },
+  {
+    id: 'fleet.list',
+    page: 'fleet',
+    titleKey: 'settings.piarium.fleet.list.title',
+    descriptionKey: 'settings.piarium.fleet.description',
+    keywords: ['background task', 'background agent', 'logs', 'kill', 'stop', 'run', 'jobs'],
+  },
+  {
+    id: 'fleet.actions',
+    page: 'fleet',
+    titleKey: 'settings.piarium.fleet.actions.title',
+    descriptionKey: 'settings.piarium.fleet.actions.description',
+    keywords: ['inspector', 'doctor', 'subagents-stop', 'packages'],
+  },
+  {
     id: 'agents.catalog',
     page: 'agents',
     titleKey: 'settings.piarium.agents.catalog.title',
@@ -654,7 +675,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'plugins',
     titleKey: 'settings.piarium.plugins.recommended.title',
     descriptionKey: 'settings.piarium.plugins.recommended.description',
-    keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf'],
+    keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf', 'background tasks', 'fleet'],
   },
   {
     id: 'plugin-settings.configuration',

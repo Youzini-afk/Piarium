@@ -335,8 +335,10 @@ test("broker owns catalog and per-session Pi workers", async () => {
       sessionId: created.sessionId,
     });
     assert.deepEqual(fleetStatus.entries, []);
-    assert.equal(fleetStatus.providers[0]?.id, "pi-subagents");
-    assert.equal(fleetStatus.providers[0]?.state, "unavailable");
+    const subagents = fleetStatus.providers.find((provider) => provider.id === "pi-subagents");
+    const backgroundTasks = fleetStatus.providers.find((provider) => provider.id === "pi-background-tasks");
+    assert.equal(subagents?.state, "unavailable");
+    assert.ok(backgroundTasks);
     const models = await dispatchRuntimeRequest(broker, "model.list", {
       sessionId: created.sessionId,
     });

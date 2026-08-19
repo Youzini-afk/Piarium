@@ -593,6 +593,26 @@ export class HostController {
         );
       case "fleet.status":
         return this.#sessionHost.fleetStatus(readString(params, "sessionId"));
+      case "fleet.action": {
+        for (const key of Object.keys(params)) {
+          if (
+            key !== "action"
+            && key !== "entryKey"
+            && key !== "input"
+            && key !== "providerId"
+            && key !== "sessionId"
+          ) {
+            throw new HostError("invalid_params", `Unknown fleet.action field ${key}`);
+          }
+        }
+        return this.#sessionHost.fleetAction(
+          readString(params, "sessionId"),
+          readString(params, "providerId"),
+          readString(params, "action"),
+          optionalString(params, "entryKey"),
+          readJson(params, "input"),
+        );
+      }
       case "model.list":
         return this.#sessionHost.listModels();
       case "mcp.config.snapshot":

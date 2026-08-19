@@ -162,11 +162,15 @@ mock.module('@/lib/pi-runtime/resources', () => ({
 mock.module('@/lib/pi-runtime/fleet', () => ({
   getPiFleetStatus: async () => ({
     entries: [{
+      actions: [],
       agent: 'Historian',
-      goal: 'private task contents',
+      description: 'private task contents',
       key: 'agent-1',
+      kind: 'delegated-agent',
+      name: 'Historian',
       providerId: 'magic-context',
       startedAt: 1,
+      state: 'running',
       tokens: { input: 2, output: 3, total: 5 },
     }],
     omitted: 0,

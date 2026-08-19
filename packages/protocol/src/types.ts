@@ -355,7 +355,18 @@ export interface PiAgentProviderActionResult {
 
 export type PiFleetProviderState = "active" | "degraded" | "incompatible" | "unavailable";
 
+export type PiFleetEntryKind = "background-agent" | "background-task" | "delegated-agent";
+export type PiFleetEntryState = "completed" | "failed" | "running" | "stopped";
+export type PiFleetActionScope = "entry" | "provider";
+
+export interface PiFleetActionDescriptor {
+  action: string;
+  destructive?: boolean;
+  scope: PiFleetActionScope;
+}
+
 export interface PiFleetProviderSnapshot {
+  actions?: PiFleetActionDescriptor[];
   bridgeVersion?: number;
   id: string;
   issue?: string;
@@ -365,15 +376,22 @@ export interface PiFleetProviderSnapshot {
 }
 
 export interface PiFleetEntry {
-  agent: string;
+  actions: PiFleetActionDescriptor[];
+  agent?: string;
+  bytesWritten?: number;
+  description?: string;
   effort?: string;
-  goal?: string;
+  endedAt?: number;
+  error?: string;
   key: string;
+  kind: PiFleetEntryKind;
   model?: string;
+  name: string;
   providerId: string;
   role?: string;
   startedAt: number;
-  tokens: {
+  state: PiFleetEntryState;
+  tokens?: {
     input: number;
     output: number;
     total: number;
@@ -385,6 +403,22 @@ export interface PiFleetSnapshot {
   omitted: number;
   providers: PiFleetProviderSnapshot[];
   totalActive: number;
+}
+
+export interface PiFleetLogsData {
+  bytesRead: number;
+  tail: boolean;
+  text: string;
+  truncated: boolean;
+}
+
+export interface PiFleetActionResult {
+  entry?: PiFleetEntry;
+  logs?: PiFleetLogsData;
+  message: string;
+  providerId: string;
+  snapshot: PiFleetSnapshot;
+  success: boolean;
 }
 
 export type RecoveryMode = "conversation" | "files" | "both";

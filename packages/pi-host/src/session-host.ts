@@ -41,6 +41,7 @@ import type {
   PiConfigTextRoot,
   PiConfigWatchSubscription,
   PiConfigWatchTarget,
+  PiFleetActionResult,
   PiFleetSnapshot,
   PiMcpConfigSnapshot,
   PiResourceCatalogSnapshot,
@@ -94,10 +95,9 @@ import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
-import {
-  createPiSubagentsFleetBridgeExtension,
-  PiSubagentsFleetBridge,
-} from "./pi-subagents-fleet-bridge.js";
+import { FleetProviderRegistry, createFleetRegistryExtension } from "./fleet/registry.js";
+import { PiBackgroundTasksFleetAdapter } from "./fleet/pi-background-tasks-adapter.js";
+import { PiSubagentsFleetBridge } from "./pi-subagents-fleet-bridge.js";
 import {
   createPiMcpConfigBridgeExtension,
   PiMcpConfigBridge,
@@ -127,6 +127,39 @@ import {
 type EventEmitter = <E extends HostEvent>(event: E, data: HostEventData<E>) => void;
 
 const PIARIUM_INSTRUCTIONS_MESSAGE_TYPE = "piarium.instructions";
+
+function overlayFleetExtensionLoadErrors(
+  snapshot: PiFleetSnapshot,
+  session: AgentSession,
+): PiFleetSnapshot {
+  const extensions = session.resourceLoader.getExtensions();
+  const overlay = (providerId: string, needle: string, incompatibleIssue?: string) => {
+    const provider = snapshot.providers.find((entry) => entry.id === providerId);
+    if (provider?.state !== "unavailable") return snapshot;
+    const loadError = extensions.errors.find((entry) => entry.path.toLowerCase().includes(needle));
+    if (loadError) {
+      snapshot = {
+        ...snapshot,
+        providers: snapshot.providers.map((entry) => entry.id === providerId
+          ? { ...entry, issue: loadError.error, state: "degraded" as const }
+          : entry),
+      };
+      return snapshot;
+    }
+    if (providerId === "pi-subagents" && incompatibleIssue && findPiSubagentsTool(session)) {
+      snapshot = {
+        ...snapshot,
+        providers: snapshot.providers.map((entry) => entry.id === providerId
+          ? { ...entry, issue: incompatibleIssue, state: "incompatible" as const }
+          : entry),
+      };
+    }
+    return snapshot;
+  };
+  overlay("pi-subagents", "pi-subagents", "The loaded pi-subagents version does not expose fleetStatus v1");
+  overlay("pi-background-tasks", "pi-background-tasks");
+  return snapshot;
+}
 
 function hasPiariumTrustRequiringProjectResources(cwd: string): boolean {
   return hasTrustRequiringProjectResources(cwd)
@@ -449,7 +482,7 @@ export class SessionHost {
   readonly ui: ExtensionUiBridge;
   readonly auth: ProviderAuthBridge;
   #agentProviders: AgentProviderBridge | undefined;
-  #fleet: PiSubagentsFleetBridge | undefined;
+  #fleet: FleetProviderRegistry | undefined;
   #mcpConfig: PiMcpConfigBridge | undefined;
   #runtime: AgentSessionRuntime | undefined;
   #recovery: RecoveryPluginAdapter | undefined;
@@ -952,38 +985,24 @@ export class SessionHost {
   async fleetStatus(sessionId: string): Promise<PiFleetSnapshot> {
     this.assertSession(sessionId);
     const snapshot = await this.fleet.status(sessionId);
-    const provider = snapshot.providers.find((entry) => entry.id === "pi-subagents");
-    if (provider?.state !== "unavailable") return snapshot;
+    return overlayFleetExtensionLoadErrors(snapshot, this.session);
+  }
 
-    const extensions = this.session.resourceLoader.getExtensions();
-    const loadError = extensions.errors.find(
-      (entry) => entry.path.toLowerCase().includes("pi-subagents"),
-    );
-    if (loadError) {
-      return {
-        ...snapshot,
-        providers: snapshot.providers.map((entry) => entry.id === "pi-subagents"
-          ? {
-              ...entry,
-              issue: loadError.error,
-              state: "degraded" as const,
-            }
-          : entry),
-      };
-    }
-    if (findPiSubagentsTool(this.session)) {
-      return {
-        ...snapshot,
-        providers: snapshot.providers.map((entry) => entry.id === "pi-subagents"
-          ? {
-              ...entry,
-              issue: "The loaded pi-subagents version does not expose fleetStatus v1",
-              state: "incompatible" as const,
-            }
-          : entry),
-      };
-    }
-    return snapshot;
+  async fleetAction(
+    sessionId: string,
+    providerId: string,
+    action: string,
+    entryKey: string | undefined,
+    input: JsonValue | undefined,
+  ): Promise<PiFleetActionResult> {
+    this.assertSession(sessionId);
+    return this.fleet.action({
+      action,
+      ...(entryKey === undefined ? {} : { entryKey }),
+      ...(input === undefined ? {} : { input }),
+      providerId,
+      sessionId,
+    });
   }
 
   mcpConfigSnapshot(): Promise<PiMcpConfigSnapshot> {
@@ -2219,7 +2238,10 @@ export class SessionHost {
       this.#recovery = recovery;
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
-      const fleet = new PiSubagentsFleetBridge();
+      const fleet = new FleetProviderRegistry([
+        new PiSubagentsFleetBridge(),
+        new PiBackgroundTasksFleetAdapter(),
+      ]);
       this.#fleet = fleet;
       const mcpConfig = new PiMcpConfigBridge();
       this.#mcpConfig = mcpConfig;
@@ -2239,9 +2261,9 @@ export class SessionHost {
               name: "piarium-extension-state-bridge",
             },
             {
-              factory: createPiSubagentsFleetBridgeExtension(fleet),
+              factory: createFleetRegistryExtension(fleet),
               hidden: true,
-              name: "piarium-subagents-fleet-bridge",
+              name: "piarium-fleet-registry",
             },
             {
               factory: createPiMcpConfigBridgeExtension(mcpConfig),
@@ -2414,8 +2436,8 @@ export class SessionHost {
     this.#recovery = undefined;
   }
 
-  get fleet(): PiSubagentsFleetBridge {
-    if (!this.#fleet) throw new HostError("fleet_unavailable", "Subagent Fleet is unavailable");
+  get fleet(): FleetProviderRegistry {
+    if (!this.#fleet) throw new HostError("fleet_unavailable", "Fleet is unavailable");
     return this.#fleet;
   }
 

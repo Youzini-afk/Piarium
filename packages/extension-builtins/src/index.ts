@@ -116,12 +116,12 @@ export const PIARIUM_BUILTIN_AGENTS_EXTENSION = definition({
 export const PIARIUM_BUILTIN_FLEET_EXTENSION = definition({
   id: "piarium.builtin.pi-fleet",
   displayName: "Pi Fleet Workbench",
-  piPackages: ["pi-subagents"],
+  piPackages: ["pi-subagents", "pi-background-tasks"],
   contributions: [pageContribution({
     group: "pi",
     icon: "pulse",
     id: "piarium.builtin.pi-fleet.page.fleet",
-    keywords: ["fleet", "subagent", "delegation", "tasks", "running"],
+    keywords: ["fleet", "subagent", "delegation", "tasks", "running", "background", "eventbus", "logs"],
     kind: "single",
     order: 42,
     slug: "fleet",

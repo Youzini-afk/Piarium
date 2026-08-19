@@ -13,7 +13,7 @@ import {
   parseMcpAdapterStatus,
   type McpAdapterServerStatus,
 } from '@/components/sections/mcp/mcpAdapterStatus';
-import { formatFleetDuration } from '@/components/sections/fleet/fleetPresentation';
+import { formatFleetDuration, runningFleetEntries } from '@/components/sections/fleet/fleetPresentation';
 import { piWorkStatusEntryPreview, piWorkStatusQueueCount } from './piWorkStatus';
 
 interface PiWorkStatusPanelProps {
@@ -122,7 +122,7 @@ export const PiWorkStatusPanel: React.FC<PiWorkStatusPanelProps> = ({ sessionId 
     preview: piWorkStatusEntryPreview(entriesById.get(pin.entryId)),
   }));
   const mcp = parseMcpAdapterStatus(record?.extensionStates[MCP_ADAPTER_STATUS_CHANNEL]);
-  const activeFleetEntries = fleet?.entries ?? [];
+  const activeFleetEntries = runningFleetEntries(fleet?.entries ?? []);
   const activeLabel = snapshot.isCompacting
     ? t('chat.workStatus.state.compacting')
     : snapshot.retryAttempt > 0
@@ -199,10 +199,10 @@ export const PiWorkStatusPanel: React.FC<PiWorkStatusPanelProps> = ({ sessionId 
                   <div key={`${entry.providerId}:${entry.key}`} className="rounded-md border border-border/50 bg-background/50 px-2 py-1.5">
                     <div className="flex items-center gap-2">
                       <span className="size-1.5 shrink-0 rounded-full bg-[var(--status-success)]" />
-                      <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{entry.agent}</span>
+                      <span className="min-w-0 flex-1 truncate typography-meta font-medium text-foreground">{entry.name}</span>
                       <span className="shrink-0 typography-micro text-muted-foreground">{formatFleetDuration(entry.startedAt, now)}</span>
                     </div>
-                    {entry.goal ? <p className="mt-1 line-clamp-2 typography-micro text-muted-foreground">{entry.goal}</p> : null}
+                    {entry.description ? <p className="mt-1 line-clamp-2 typography-micro text-muted-foreground">{entry.description}</p> : null}
                   </div>
                 ))}
               </div>

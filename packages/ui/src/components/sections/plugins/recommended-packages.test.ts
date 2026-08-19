@@ -5,7 +5,9 @@ describe('recommended Pi packages', () => {
   test('includes every maintained context integration with its installable source', () => {
     const sourceByName = Object.fromEntries(RECOMMENDED_PACKAGES.map((entry) => [entry.name, entry.source]));
 
-    expect(sourceByName['pi-openai-codex-compat']).toBe('npm:pi-openai-codex-compat@alpha');
+    expect(sourceByName['pi-subagents']).toBe('npm:pi-subagents');
+    expect(sourceByName['pi-background-tasks']).toBe('npm:pi-background-tasks');
+    expect(RECOMMENDED_PACKAGES.find((entry) => entry.name === 'pi-background-tasks')?.workbench).toBe('fleet');
     expect(sourceByName['pi-observational-memory']).toBe('npm:pi-observational-memory');
     expect(sourceByName['context-mode']).toBe('npm:context-mode');
     expect(sourceByName['@cortexkit/aft-pi']).toBe('npm:@cortexkit/aft-pi');

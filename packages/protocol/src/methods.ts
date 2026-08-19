@@ -19,6 +19,7 @@ import type {
   PiConfigTextRoot,
   PiConfigWatchSubscription,
   PiConfigWatchTarget,
+  PiFleetActionResult,
   PiFleetSnapshot,
   PiResourceCatalogSnapshot,
   PiResourceDocumentSnapshot,
@@ -136,6 +137,16 @@ export interface HostMethodMap {
   "extension.ui.respond": {
     params: ExtensionUiResponse;
     result: { accepted: boolean };
+  };
+  "fleet.action": {
+    params: {
+      action: string;
+      entryKey?: string;
+      input?: JsonValue;
+      providerId: string;
+      sessionId: string;
+    };
+    result: PiFleetActionResult;
   };
   "fleet.status": {
     params: { sessionId: string };

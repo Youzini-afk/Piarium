@@ -521,10 +521,14 @@ export const PluginsPage: React.FC = () => {
                         variant="outline"
                         size="xs"
                         disabled={isBusy}
-                        onClick={() => openPackageConfiguration(configured)}
+                        onClick={() => item.workbench === 'fleet' && configured.installed
+                          ? setSettingsPage('fleet')
+                          : openPackageConfiguration(configured)}
                         className="!font-normal"
                       >
-                        {t('settings.piarium.plugins.actions.configure')}
+                        {item.workbench === 'fleet' && configured.installed
+                          ? t('settings.piarium.plugins.actions.openFleet')
+                          : t('settings.piarium.plugins.actions.configure')}
                       </Button>
                     </div>
                   ) : null}

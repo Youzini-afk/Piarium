@@ -133,8 +133,10 @@ describe('i18n message parity', () => {
     const keys = sortedKeys(enSettingsDict).filter((key) => (
       key === 'settings.piarium.plugins.package.aft'
       || key === 'settings.piarium.plugins.package.hermesMemory'
+      || key === 'settings.piarium.plugins.package.backgroundTasks'
       || key.startsWith('settings.piarium.pluginSettings.aft.')
       || key.startsWith('settings.piarium.pluginSettings.hermesMemory.')
+      || key.startsWith('settings.piarium.fleet.')
     ));
     const failures: Record<string, unknown> = {};
 

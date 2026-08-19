@@ -6,8 +6,8 @@ import type {
 import type {
   PiFleetEntry,
   PiFleetProviderSnapshot,
-  PiFleetSnapshot,
 } from "@piarium/protocol";
+import type { FleetProviderAdapter, PiFleetProviderResult } from "./fleet/types.js";
 
 const PI_SUBAGENTS_RPC_VERSION = 1;
 export const PI_SUBAGENTS_RPC_READY_EVENT = "subagents:rpc:v1:ready";
@@ -73,10 +73,10 @@ const providerSnapshot = (
   state,
 });
 
-const emptySnapshot = (provider: PiFleetProviderSnapshot): PiFleetSnapshot => ({
+const emptyResult = (provider: PiFleetProviderSnapshot): PiFleetProviderResult => ({
   entries: [],
   omitted: 0,
-  providers: [provider],
+  provider,
   totalActive: 0,
 });
 
@@ -123,14 +123,18 @@ const parseFleetEntry = (value: unknown, index: number): PiFleetEntry => {
   const model = readOptionalString(value.model, `fleet.entries[${index}].model`);
   const role = readOptionalString(value.role, `fleet.entries[${index}].role`);
   return {
+    actions: [],
     agent: readNonEmptyString(value.agent, `fleet.entries[${index}].agent`),
     ...(effort === undefined ? {} : { effort }),
-    ...(goal === undefined ? {} : { goal }),
+    ...(goal === undefined ? {} : { description: goal }),
     key: readNonEmptyString(value.key, `fleet.entries[${index}].key`),
+    kind: "delegated-agent",
     ...(model === undefined ? {} : { model }),
+    name: readNonEmptyString(value.agent, `fleet.entries[${index}].agent`),
     providerId: PROVIDER_ID,
     ...(role === undefined ? {} : { role }),
     startedAt: readCount(value.startedAt, `fleet.entries[${index}].startedAt`),
+    state: "running",
     tokens: {
       input: readCount(value.tokens.input, `fleet.entries[${index}].tokens.input`),
       output: readCount(value.tokens.output, `fleet.entries[${index}].tokens.output`),
@@ -139,7 +143,7 @@ const parseFleetEntry = (value: unknown, index: number): PiFleetEntry => {
   };
 };
 
-const parseStatusReply = (value: unknown, bridgeVersion: number): PiFleetSnapshot => {
+const parseStatusReply = (value: unknown, bridgeVersion: number): PiFleetProviderResult => {
   if (!isRecord(value) || value.version !== PI_SUBAGENTS_RPC_VERSION || value.success !== true) {
     if (isRecord(value) && value.success === false && isRecord(value.error)) {
       const code = typeof value.error.code === "string" ? value.error.code : "rpc_failed";
@@ -167,12 +171,13 @@ const parseStatusReply = (value: unknown, bridgeVersion: number): PiFleetSnapsho
   return {
     entries,
     omitted,
-    providers: [providerSnapshot("active", { bridgeVersion })],
+    provider: providerSnapshot("active", { bridgeVersion }),
     totalActive,
   };
 };
 
-export class PiSubagentsFleetBridge {
+export class PiSubagentsFleetBridge implements FleetProviderAdapter {
+  readonly id = PROVIDER_ID;
   #events: ExtensionEventBus | undefined;
   #generation = 0;
   #nextRequestId = 0;
@@ -210,19 +215,19 @@ export class PiSubagentsFleetBridge {
     this.#endSession("Pi session closed while reading subagent Fleet status");
   }
 
-  async status(sessionId: string): Promise<PiFleetSnapshot> {
+  async status(sessionId: string): Promise<PiFleetProviderResult> {
     if (this.#sessionId !== sessionId || !this.#events) {
-      return emptySnapshot(providerSnapshot("unavailable", {
+      return emptyResult(providerSnapshot("unavailable", {
         issue: "Open a live Pi session to inspect delegated work",
       }));
     }
     if (!this.#ready) {
-      return emptySnapshot(providerSnapshot("unavailable", {
+      return emptyResult(providerSnapshot("unavailable", {
         issue: "pi-subagents is not active in this session",
       }));
     }
     if (!this.#ready.compatible) {
-      return emptySnapshot(providerSnapshot("incompatible", {
+      return emptyResult(providerSnapshot("incompatible", {
         ...(this.#ready.version === undefined ? {} : { bridgeVersion: this.#ready.version }),
         issue: this.#ready.issue,
       }));
@@ -232,7 +237,7 @@ export class PiSubagentsFleetBridge {
       const reply = await this.#requestStatus(sessionId);
       return parseStatusReply(reply, this.#ready.version);
     } catch (error) {
-      return emptySnapshot(providerSnapshot("degraded", {
+      return emptyResult(providerSnapshot("degraded", {
         bridgeVersion: this.#ready.version,
         issue: error instanceof Error ? error.message : String(error),
       }));

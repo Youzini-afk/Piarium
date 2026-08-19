@@ -220,6 +220,19 @@ function requireSessionFeatureMutation(value: unknown) {
   }
 }
 
+function rejectUnknownKeys(
+  record: Record<string, unknown>,
+  allowed: readonly string[],
+  label: string,
+): void {
+  const permitted = new Set(allowed);
+  for (const key of Object.keys(record)) {
+    if (!permitted.has(key)) {
+      throw new RuntimeDispatchError("invalid_params", `Unknown ${label} field ${key}`);
+    }
+  }
+}
+
 function requireConfigTextAuthority(
   record: Record<string, unknown>,
 ): PiConfigTextAuthorityId {
@@ -791,6 +804,23 @@ async function dispatchRuntimeRequestUnchecked(
     case "fleet.status": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "fleet.status", { sessionId });
+    }
+
+    case "fleet.action": {
+      rejectUnknownKeys(
+        input,
+        ["action", "entryKey", "input", "providerId", "sessionId"],
+        "fleet.action",
+      );
+      const sessionId = requireString(input, "sessionId");
+      const entryKey = optionalString(input, "entryKey");
+      return broker.requestForSession(sessionId, "fleet.action", {
+        action: requireString(input, "action"),
+        ...(entryKey === undefined ? {} : { entryKey }),
+        ...(input.input === undefined ? {} : { input: input.input as JsonValue }),
+        providerId: requireString(input, "providerId"),
+        sessionId,
+      });
     }
 
     case "recovery.status": {
