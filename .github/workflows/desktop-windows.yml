@@ -55,12 +55,14 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build Windows installer
+        shell: pwsh
         run: |
           bun run --cwd packages/electron build:web-assets
           bun run --cwd packages/electron prepare:pi-runtime
           bun run --cwd packages/electron bundle:main
           bun run --cwd packages/electron rebuild:native
-          node packages/electron/scripts/package.mjs --win --${{ matrix.architecture }} --publish=never
+          $electronVersion = node -p "require('electron/package.json').version"
+          node packages/electron/scripts/package.mjs --win --${{ matrix.architecture }} --publish=never "--config.electronVersion=$electronVersion"
 
       - name: Smoke unpacked Windows application
         shell: pwsh

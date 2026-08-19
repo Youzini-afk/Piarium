@@ -1,12 +1,19 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
 
 const env = { ...process.env };
 const builderArgs = process.argv.slice(2);
 const targetArchitecture = resolveTargetArchitecture({ environment: env, builderArgs });
+const require = createRequire(import.meta.url);
+const electronVersion = require('electron/package.json').version;
 env.PIARIUM_TARGET_ARCH = targetArchitecture.node;
+
+if (!builderArgs.some((argument) => argument.startsWith('--config.electronVersion='))) {
+  builderArgs.push(`--config.electronVersion=${electronVersion}`);
+}
 
 if (process.platform === 'win32' && env.WINDOWS_CSC_LINK && !env.WIN_CSC_LINK) {
   env.WIN_CSC_LINK = env.WINDOWS_CSC_LINK;
