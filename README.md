@@ -58,6 +58,12 @@ Piarium 不会 fork 这些扩展，也不会复制它们的私有状态。集成
 | `pi-openai-codex-compat` | 原生的全局/项目请求、推理、远程压缩和 Codex 工具配置 |
 | `pi-observational-memory` | 原生的全局/项目观察、反思、压缩、池和工作进程配置 |
 | `context-mode` | 推荐的原生 Pi 包；因没有单一权威设置文件，使用通用插件配置界面 |
+| `pi-lens` | 原生用户/最近项目配置、诊断与格式化控制，以及已注册命令操作 |
+| `@cortexkit/aft-pi` | 原生用户/项目 JSONC 中的编辑、搜索、语义分析、LSP、备份和沙箱配置 |
+| `@gotgenes/pi-permission-system` | 原生全局/项目权限策略、运行界面控制和命令可用状态 |
+| `pi-hermes-memory` | 原生记忆策略、后台审查、刷新、容量、召回和模型覆盖配置 |
+| `pi-background-tasks` | 通过公开 EventBus 在 Fleet 中查看、启动、读取日志和停止后台任务 |
+| `pi-rtk-optimizer` | 原生严格 JSON 中的 RTK 改写、输出、读取和截断配置，以及命令可用状态 |
 
 当前验证过的版本和具体证据见[扩展兼容性记录](docs/extension-compatibility.md)。
 

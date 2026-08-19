@@ -63,6 +63,12 @@ advance independently.
 | `pi-openai-codex-compat` | Native global/project request, reasoning, remote-compaction, and Codex-tool configuration |
 | `pi-observational-memory` | Native global/project observation, reflection, compaction, pool, and worker configuration |
 | `context-mode` | Recommended native Pi package with generic plugin configuration because it has no single canonical settings document |
+| `pi-lens` | Native user/nearest-project configuration, diagnostics and formatting controls, and registered command actions |
+| `@cortexkit/aft-pi` | Native user/project JSONC for editing, search, semantic analysis, LSP, backup, and sandbox configuration |
+| `@gotgenes/pi-permission-system` | Native global/project permission policy, runtime interface controls, and command availability |
+| `pi-hermes-memory` | Native memory policy, background review, flush, capacity, recall, and model-override configuration |
+| `pi-background-tasks` | Fleet visibility, launch, bounded logs, and stop controls through the public EventBus contract |
+| `pi-rtk-optimizer` | Native strict-JSON RTK rewrite, output, read, and truncation configuration plus command availability |
 
 See [maintained extension compatibility](docs/extension-compatibility.md) for the currently verified
 versions and exact evidence.
