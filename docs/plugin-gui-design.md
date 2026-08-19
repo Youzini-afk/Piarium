@@ -252,26 +252,36 @@ late-warning enums remain in Advanced until the plugin exposes an actual user ch
 Agents consumes every provider action currently advertised by the extension: create, edit/inspect,
 update, delete, eject, enable, disable, and reset. It does not stop at displaying action badges.
 
-Fleet is a separate live-work surface. It projects task state, steps, workflow graph, parent/child
-relationships, timing, artifacts, and errors from the stable public contract. It provides only
-advertised controls such as steer, append, interrupt, stop, resume, and checkpoint decisions.
+Fleet is a separate live-work surface. It is provider-neutral: each Host adapter reports its own
+`active` / `degraded` / `incompatible` / `unavailable` state, and the registry merges entries under
+`providerId + key`. The page is master/detail (list then detail on narrow panes) and does not parse
+plugin wire in the renderer.
 
-Implemented Fleet slice: the dedicated Fleet page consumes `subagents:rpc:v1` only after the
-extension advertises `fleetStatus: { version: 1 }`. It renders the bounded, current-session public
-entries with agent/role, caller-facing goal, model, effort, elapsed time, and token totals. The host
-revalidates that DTO and deliberately drops the RPC's text, tool details, run IDs, async paths, and
-other private status data before crossing the renderer boundary. The native Fleet inspector, stop
-selector, and doctor remain available through the plugin's registered commands. The public Fleet
-DTO intentionally withholds actionable run IDs, so Piarium does not attach guessed per-entry
-controls; those land only when a provider advertises stable action targets. Recent/completed task
-projection and richer workflow graphs remain a later public-contract slice.
+Implemented Fleet providers:
+
+- `pi-subagents` after `subagents:rpc:v1` advertises `fleetStatus: { version: 1 }`. Entries are
+  `delegated-agent` / `running`, with agent/role, caller-facing goal as `description`, model, effort,
+  timing, and token totals. The host drops RPC text, tool details, run IDs, and async paths. Native
+  inspector, stop selector, and doctor remain command-backed.
+- `pi-background-tasks` through published EventBus v1
+  (`pi-background-tasks:request:v1` / `response:v1` / `terminal:v1`). `isAgent:true` becomes
+  `background-agent`; other tasks become `background-task`; plugin `killed` becomes `stopped`.
+  Provider `run` and entry `logs` / `kill` are advertised on the DTO. The Host omits `command`,
+  `cwd`, output paths, PIDs, and the plugin kill message. There is no Plugin Settings schema and no
+  `.pi/tasks` reader.
+
+Per-entry controls render only for DTO actions Piarium knows how to invoke (`logs`, `kill`, `run`).
+Richer workflow graphs remain a later public-contract slice.
 
 Acceptance:
 
 - settings round-trip unknown keys at both scopes;
 - provider-owned actions update the catalog without a renderer refresh;
 - an async child task appears in its parent session and Fleet with structured state;
-- unavailable RPC/lifecycle capabilities produce a truthful degraded state, not parsed output.
+- a background-task EventBus fixture can run, list mixed running/recent work, load bounded logs
+  without a file path, stop a running task, and survive session replacement without leaking stale
+  rows;
+- unavailable or malformed provider contracts degrade only that provider, not parsed terminal text.
 
 ### 5.2 Magic Context
 
@@ -613,7 +623,10 @@ failure, and command not observed remain separate states.
    command catalog.
 10. Hermes Memory settings over its single native agent-root JSON authority and command-only
    runtime observation.
-11. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
+11. Provider-neutral Fleet plus `pi-background-tasks` EventBus v1 (list, run, bounded logs, stop)
+   without a fabricated settings schema. `pi-rtk-optimizer` stays out of Recommended Integrations
+   until upstream declares the current Pi line.
+12. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
    capability parity or an explicit rejection is documented and tested. This retirement is now
    complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
 

@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test';
-import { PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS } from '@piarium/extension-builtins';
+import { PIARIUM_BUILTIN_FLEET_EXTENSION, PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS } from '@piarium/extension-builtins';
 import { SurfaceExtensionRuntime } from '@piarium/extension-surface';
 import type { PackageDescriptor } from '@piarium/protocol';
 
@@ -188,4 +188,14 @@ test('maps only pi-hermes-memory to the Hermes Memory settings adapter', async (
     adapters,
   )).toBeNull();
   await handle.deactivate(2, 2);
+});
+
+test('the public Fleet builtin owns both work providers and has no Plugin Settings adapter', () => {
+  expect(PIARIUM_BUILTIN_FLEET_EXTENSION.manifest.integrates?.piPackages).toEqual([
+    'pi-subagents',
+    'pi-background-tasks',
+  ]);
+  expect(PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.some((definition) => (
+    definition.manifest.integrates?.piPackages?.includes('pi-background-tasks')
+  ))).toBe(false);
 });

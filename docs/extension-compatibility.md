@@ -8,41 +8,70 @@ checks Pi diagnostics, lists its registered commands and public read-only MCP ca
 disposes the runtime, and removes all test state. It does not invoke network, model, recovery, or
 destructive commands.
 
-| Extension | Version | Phase 1 load result | Registered commands observed |
+| Extension | Version | 2026-08-19 npm-pack load | Registered commands observed |
 | --- | --- | --- | --- |
 | pi-wtf | 0.2.4 | Pass | `fuck`, `fuck?`, `fuck!` |
 | pi-workspace-history | 0.2.2 | Pass | `undo`, `redo`, `checkpoint` |
-| pi-subagents | 0.38.0 | Pass | 19 subagent and workflow commands |
-| pi-mcp-adapter | 2.23.0 + Piarium `62255b3` | Pass | `mcp`, `mcp-auth`; read-only `configCatalog/v1` RPC |
-| pi-web-access | 0.17.1 | Pass | `websearch`, `curator`, `google-account`, `search` |
-| @cortexkit/pi-magic-context | 0.33.0 | Pass | 9 context, dream, and embedding commands |
+| pi-subagents | 0.51.0 | Pass; Fleet provider `active` | 17 subagent and workflow commands, including `subagents-fleet` |
+| pi-mcp-adapter | 2.26.1 | Pass | `mcp`, `mcp-auth` |
+| pi-web-access | 0.24.0 | Pass | `websearch`, `curator`, `google-account`, `search` |
+| @cortexkit/pi-magic-context | 0.38.0 | Pass | 10 commands: the previous `ctx-*` set plus `todos` |
 | pi-openai-codex-compat | 0.0.7-alpha.0 | Pass | `codex-settings` |
 | pi-observational-memory | 3.0.4 | Pass | `om:status`, `om:view` |
 | context-mode | 1.0.169 | Pass | `ctx-stats`, `ctx-doctor` |
 | pi-lens | 4.0.1 | Pass | 9 Lens commands plus four packaged skill commands |
 | @gotgenes/pi-permission-system | 26.3.0 | Pass | `permission-system` |
 | pi-hermes-memory | 0.9.6 | Pass | 10 memory, search, skill, and maintenance commands |
-| pi-background-tasks | 2.4.2 | Pass | 11 background-task, Fusion, log, and cache commands |
-| @cortexkit/aft-pi | 0.51.2 | Pass | `aft-status`; Windows native bridge downloaded, SHA-256 verified, and started |
-| pi-rtk-optimizer | 0.9.0 | Pass with compatibility caveat | `rtk`; upstream peer range stops at Pi 0.80 |
+| pi-background-tasks | 2.4.2 | Pass; EventBus provider `active` on `extensions/background-tasks.ts` | 10 background/Fusion/log commands on the work entry; `claude-cache` on `extensions/anthropic-attribution.ts` |
+| @cortexkit/aft-pi | 0.51.2 | Pass | `aft-status` |
+| pi-rtk-optimizer | 0.9.0 | Not rerun; still out of Recommended Integrations | earlier load registered `rtk`; upstream peer range still stops at Pi 0.80 |
 
 `pi-openai-codex-compat@0.0.7-alpha.0` declares Pi `>=0.84.0 <0.85.0`; Piarium's Pi `0.84.1`
-runtime now satisfies that contract. The Phase 1 smoke above still proves entry-point loading and
+runtime now satisfies that contract. The npm-pack smoke above still proves entry-point loading and
 command registration only. Codex provider transport and remote compaction require an authenticated,
 provider-specific integration check before Piarium claims that network path as verified.
 
-The six community candidates added on 2026-08-19 were loaded through Piarium's bundled Pi `0.84.1`,
-not through the repositories' development SDK copies. `pi-rtk-optimizer@0.9.0` loaded and registered
-its command, but its declared Pi peer range ends at `^0.80.0`; Piarium therefore does not present it
-as a recommended integration until upstream declares current compatibility and the RTK binary path is
-verified. The generic smoke did not invoke models, network calls, permission decisions, memory search,
-background processes, or mutating tools.
+On 2026-08-19 the published `pi-rtk-optimizer@0.9.0` peer range was rechecked on npm
+(`registry.npmjs.org/pi-rtk-optimizer/latest`) and GitHub `MasuRii/pi-rtk-optimizer` `main`
+`package.json`. Both still declare:
 
-The AFT smoke built `@cortexkit/aft-bridge` before `@cortexkit/aft-pi`, then exercised its real Windows
-startup far enough to download and SHA-256 verify the matching `aft.exe`, start the native bridge, and
-enter configuration. It did not exercise LSP, semantic search, or file mutation. Hermes Memory loaded
-successfully, but its startup treats SQLite initialization as best effort; packaged-runtime ABI
-verification remains separate from this entry-point smoke.
+```text
+@earendil-works/pi-coding-agent: ^0.74.0 || ^0.75.0 || ^0.78.0 || ^0.79.0 || ^0.80.0
+@earendil-works/pi-tui:          ^0.74.0 || ^0.75.0 || ^0.78.0 || ^0.79.0 || ^0.80.0
+```
+
+Piarium's bundled Pi is `0.84.1`. Loading under 0.84.1 is not treated as declared support. RTK stays
+out of Recommended Integrations and has no Piarium settings adapter.
+
+On 2026-08-19 Phase 9 reran `node scripts/smoke-extension.mjs` against npm-packed published
+tarballs (production dependencies installed with `--ignore-scripts`) through Piarium's bundled Pi
+`0.84.1`. Local plugin working trees were not required. `pi-rtk-optimizer` was not packed or loaded
+again because Phase 8 remains externally blocked. The generic smoke still does not invoke models,
+network calls, permission decisions, memory search, or mutating tools.
+
+A separate real `pi-background-tasks@2.4.2` Fleet lifecycle on the same Host exercised EventBus v1
+`run` → `status` → bounded `logs` → `kill` for a Windows `ping` task. The public DTO stayed free of
+`command`, `cwd`, `pid`, `outputPath`, and `logs.path`. Bounded log text is plugin-owned and may
+include a relative `.pi/tasks/...` footer; Piarium does not parse that footer or open the file. The
+kill confirmation is Host-owned (`Stopped <name>`). After kill, `fleet.status` reported `stopped`
+while the provider remained `active`. Host EventBus fixtures covering capabilities, mixed status,
+run-before-terminal, duplicate terminals, session isolation, malformed-frame degrade, and privacy
+projection remain in `packages/pi-host/test`.
+
+Earlier adapter-contract evidence that is still authoritative, and not replaced by the npm-pack
+rerun:
+
+- `pi-subagents@0.38.0` previously proved the live `subagents:rpc:v1` Fleet path; `0.51.0` now loads
+  and still reports Fleet provider `active`.
+- MCP `configCatalog/v1` / `status/v1` contract verification remains the Piarium-maintained plugin
+  commit `62255b394e10c2d1ced621cd95abc457bec2a7f1`. Published `2.26.1` was entry-smoke only.
+- Magic Context session operations still target the public `ctx-*` command set. `0.38.0` also
+  registers `todos`; that command is not a first-class Piarium adapter action.
+- An earlier AFT Windows smoke built `@cortexkit/aft-bridge` before `@cortexkit/aft-pi@0.51.2`,
+  downloaded and SHA-256 verified `aft.exe`, and started the native bridge. The Phase 9 npm-pack
+  rerun omitted install scripts, so it only reconfirmed `aft-status` registration.
+- Hermes Memory startup still treats SQLite initialization as best effort; packaged-runtime ABI
+  verification remains separate from this entry-point smoke.
 
 Run the reusable smoke harness after building Piarium:
 
@@ -50,10 +79,9 @@ Run the reusable smoke harness after building Piarium:
 node scripts/smoke-extension.mjs D:\path\to\extension\index.ts
 ```
 
-The local plugin repositories must have their own locked dependencies installed. Magic Context
-must build `packages/pi-plugin/dist/index.js` first. Its current `bun run build` cleanup glob fails
-on Windows when `dist/*-*.js` has no match; invoking the documented `bun build` portion directly
-produces the same split ESM output without changing that upstream repository.
+Published tarballs work when their `pi.extensions` entries and production dependencies are present.
+Local plugin repositories still need their own locked dependencies installed if you smoke a checkout
+instead of a pack. Magic Context's published `0.38.0` tarball already includes `dist/index.js`.
 
 The table proves generic loading and command registration. Current feature integration also keeps
 plugin ownership intact:
@@ -61,11 +89,13 @@ plugin ownership intact:
 - recovery discovers the current workspace-history and pi-wtf command/tree capabilities, delegates
   operations to them, and accepts richer capabilities through recovery bridge v1 without reading
   either plugin's private state;
-- Fleet handshakes with pi-subagents' public `subagents:rpc:v1`, requires its advertised
-  `fleetStatus: { version: 1 }`, and projects only the bounded public display entries. The local
-  `0.38.0` smoke returned an active provider through this real RPC path;
-- the Magic Context `0.33.0` smoke exposes all nine current Pi commands used by the adapter. Session
-  operations invoke those registered commands and render only their public custom entries or UI;
+- Fleet is a registry of Host adapters. `pi-subagents` still handshakes on public `subagents:rpc:v1`
+  and requires advertised `fleetStatus: { version: 1 }`. `pi-background-tasks@2.4.2` is adapted only
+  through EventBus v1 (`request`/`response`/`terminal`); Piarium never reads `.pi/tasks`, output
+  files, or private SQLite. Host fixtures plus one real 2.4.2 run/status/logs/kill lifecycle prove
+  that path. `pi-subagents@0.51.0` still returns an active Fleet provider through the real RPC path;
+- the Magic Context `0.38.0` smoke exposes the current `ctx-*` command set plus `todos`. Session
+  operations invoke the registered `ctx-*` commands and render only their public custom entries or UI;
   no private database is inspected;
 - MCP consumes `pi-mcp-adapter/status/v1` and the adapter-owned read-only `configCatalog/v1`, invokes
   adapter commands, and edits one revisioned native config source without taking over merging,
@@ -93,4 +123,19 @@ plugin ownership intact:
   execute commands or infer memory-store or background-review health.
 
 Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
-verification.
+verification. Phase 9 recorded a local production Web build (`bun run build:web`, exit 0). CI run
+`32239724870` for `feat: integrate background tasks with Fleet` passed Ubuntu Source quality
+(including `test:pi`) and Production build; Docker Images `32239724866` succeeded. The Windows
+runtime job failed at `bun run test:pi`: libuv `fs-event.c` assertion
+(`!_wcsnicmp(filename, dir, dirlen)`) aborted `packages/pi-host/test/config-text-authority.test.ts`,
+and `runtime-broker` failed
+`workspace configuration watches survive catalog context switches and cancel explicitly`. The same
+Windows job also failed on the earlier docs-only `cc5b3e8` commit, so it is treated as a pre-existing
+runner flake rather than a Fleet or Hermes regression.
+
+`bun run electron:build:win` produced the unsigned Windows x64 NSIS installer and
+`packages/electron/dist/win-unpacked`. `bun run electron:smoke:win` reached a healthy in-process
+`/health` endpoint and completed one terminal create/close cycle, then twice failed waiting for
+`window.__piariumAppReady`: the packaged renderer stayed on the localized startup-recovery screen
+(`startup.initRecovery`). That renderer-ready failure is recorded as desktop bootstrap evidence, not
+as a community-adapter regression, and was not turned into a bootstrap rewrite in this phase.

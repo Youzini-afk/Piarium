@@ -230,12 +230,19 @@ Implementation follows the native-ownership and per-adapter acceptance contract 
   and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused
   destructive confirmation, project-trust gating, result reporting, and catalog refresh all route
   through the plugin-owned management tool.
-- Implemented: a separate Fleet page now consumes pi-subagents' public `subagents:rpc:v1`
-  `fleetStatus` projection for active foreground/background children. Piarium validates and
-  projects only the opaque display key, role/agent, goal, model/effort, timing, and token counts;
-  private run IDs, paths, and raw status details never cross to the renderer. The plugin-owned
-  inspector, stop selector, and doctor stay command-backed. Per-task controls wait for stable
-  provider-advertised action targets instead of inferring identifiers from private artifacts.
+- Implemented: Fleet is a provider-neutral live-work surface. `pi-subagents` still uses public
+  `subagents:rpc:v1` `fleetStatus` v1 for delegated agents. `pi-background-tasks@2.4.2` uses EventBus
+  v1 for background agents and shell tasks, including advertised `run`, bounded `logs`, and `kill`.
+  Composite identity is `providerId + key`. One degraded provider does not hide another. The public
+  DTO carries kind, state, name, optional description/tokens/bytes, and advertised actions only;
+  private paths, PIDs, and plugin kill messages never cross to the renderer. The plugin-owned
+  inspector, stop selector, and doctor stay command-backed for subagents.
+- Implemented: Hermes Memory settings edit only the Host-resolved agent-root
+  `hermes-memory-config.json`. `projectsMemoryDir` accepts a one-level relative name or an absolute
+  child of that agent directory. Runtime availability is `memory-insights` command presence only.
+- Externally blocked: `pi-rtk-optimizer@0.9.0` still declares Pi peers through `^0.80.0` on npm and
+  GitHub `main`. Piarium stays on Pi `0.84.1` and does not recommend or adapt RTK until upstream
+  names the current line.
 - Implemented: Agents, Commands, Prompts, Skills, Pi Packages, and Plugin Settings now observe one
   ownership model. Agents exposes provider-owned source/package/invocation facts without inventing
   a universal override schema; Commands is a read-only live catalog with native source provenance;

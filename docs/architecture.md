@@ -2,7 +2,7 @@
 
 Status: Pi-native engine cutover complete; plugin product surfaces and Windows release in progress
 
-Last updated: 2026-08-16
+Last updated: 2026-08-19
 
 ## 1. Context
 
@@ -247,9 +247,18 @@ types from that package, and restores the package's previous native filters when
 ### 7.2 First-class adapters
 
 - **pi-subagents:** task tree and controls from its event bus; lifecycle artifacts for restart and
-  cross-process reconciliation. The first native Fleet surface consumes its public in-process RPC
-  `fleetStatus/v1` projection; private run identifiers and artifact paths remain host-side, while
-  the plugin's own inspector/stop/doctor commands retain their validation and selectors.
+  cross-process reconciliation. Fleet consumes its public in-process RPC `fleetStatus/v1`
+  projection as the `delegated-agent` provider; private run identifiers and artifact paths remain
+  host-side, while the plugin's own inspector/stop/doctor commands retain their validation and
+  selectors.
+- **pi-background-tasks:** Fleet, not Plugin Settings. The Host speaks the published EventBus v1
+  channels (`request`/`response`/`terminal`) and projects running and recent background agents or
+  shell tasks. `command`, `cwd`, output paths, PIDs, and delegate/Fusion artifacts never cross to
+  the renderer. New-task, bounded logs, and stop use `fleet.action`; Piarium does not read `.pi/tasks`
+  or parse terminal text.
+- **pi-hermes-memory:** one Host-resolved global JSON authority,
+  `<active Pi agent directory>/hermes-memory-config.json`. Project Markdown and SQLite stores are
+  data, not settings. Runtime observation is the registered `memory-insights` command only.
 - **Magic Context:** plugin-owned user/project JSONC configuration, registered `ctx-*` session
   operations, native Pi status component, and persisted public custom entries. Memory,
   compartment, historian/dreamer/sidekick, and diagnostic views read only future public
