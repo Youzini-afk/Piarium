@@ -1806,7 +1806,11 @@ export class SessionHost {
   ): Promise<PiConfigTextAuthoritySnapshot> {
     const settings = this.runtime.services.settingsManager;
     this.#assertConfigTextAuthorityTrusted(authority, "read");
-    const location = await resolveConfigTextAuthority(authority, this.runtime.cwd);
+    const location = await resolveConfigTextAuthority(
+      authority,
+      this.runtime.cwd,
+      this.#agentDir,
+    );
     const snapshot = await new ConfigTextFileEditor(location.path, location.format).read();
     return {
       authority,
@@ -1824,7 +1828,11 @@ export class SessionHost {
   ): Promise<PiConfigTextAuthoritySnapshot> {
     const settings = this.runtime.services.settingsManager;
     this.#assertConfigTextAuthorityTrusted(authority, "write");
-    const location = await resolveConfigTextAuthority(authority, this.runtime.cwd);
+    const location = await resolveConfigTextAuthority(
+      authority,
+      this.runtime.cwd,
+      this.#agentDir,
+    );
     await settings.flush();
     const pendingErrors = settings.drainErrors();
     if (pendingErrors.length > 0) {
@@ -1895,7 +1903,11 @@ export class SessionHost {
       );
     }
     if (target.kind === "text-authority") {
-      const location = await resolveConfigTextAuthority(target.authority, this.runtime.cwd);
+      const location = await resolveConfigTextAuthority(
+        target.authority,
+        this.runtime.cwd,
+        this.#agentDir,
+      );
       return this.#configWatches.watch(target, location.watchPaths);
     }
 

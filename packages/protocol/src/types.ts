@@ -527,7 +527,11 @@ export type PiConfigScope = "global" | "project";
 
 export type PiConfigTextFormat = "json" | "jsonc";
 export type PiConfigTextRoot = "agent" | "home" | "project" | "user-config";
-export type PiConfigTextAuthorityId = "aft-user" | "pi-lens-global" | "pi-lens-project";
+export type PiConfigTextAuthorityId =
+  | "aft-user"
+  | "hermes-memory-user"
+  | "pi-lens-global"
+  | "pi-lens-project";
 
 export interface ExtensionStateSnapshot {
   channel: string;

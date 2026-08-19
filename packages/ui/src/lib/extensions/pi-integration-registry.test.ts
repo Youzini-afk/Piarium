@@ -151,3 +151,41 @@ test('maps @gotgenes/pi-permission-system to its built-in settings adapter', asy
   )?.adapterId).toBe('permission-system');
   await handle.deactivate(2, 2);
 });
+
+test('maps only pi-hermes-memory to the Hermes Memory settings adapter', async () => {
+  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+    candidate.manifest.id.endsWith('.hermes-memory')
+  ));
+  expect(definition).toBeDefined();
+  if (!definition) return;
+  const runtime = new SurfaceExtensionRuntime({ surface: 'web' });
+  const handle = await runtime.activate({
+    owner: {
+      desiredRevision: 1,
+      entrypointId: 'main',
+      extensionId: definition.manifest.id,
+      extensionVersion: definition.manifest.version,
+      generation: 1,
+      hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+      realmId: 'hermes-memory-adapter-test',
+    },
+  }, activateBuiltinPiIntegration(definition));
+  const hermesPackage: PackageDescriptor = {
+    enabled: true,
+    installed: true,
+    name: 'pi-hermes-memory',
+    scope: 'global',
+    source: 'npm:pi-hermes-memory',
+    structured: true,
+  };
+  const adapters = pluginSettingsAdaptersFromSnapshot(runtime.getSnapshot());
+  const adapter = pluginSettingsAdapterForPackage(hermesPackage, adapters);
+  expect(adapter?.adapterId).toBe('hermes-memory');
+  expect(adapter?.icon).toBe('brain');
+  expect(adapter?.packageNames).toEqual(['pi-hermes-memory']);
+  expect(pluginSettingsAdapterForPackage(
+    { ...hermesPackage, name: 'pi-memory', source: 'npm:pi-memory' },
+    adapters,
+  )).toBeNull();
+  await handle.deactivate(2, 2);
+});

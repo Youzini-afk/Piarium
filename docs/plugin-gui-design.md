@@ -181,6 +181,7 @@ value.
 | pi-observational-memory | Observation, reflection, compaction, pool and worker settings | Independent user/project `settings.json#observational-memory` drafts | unknown future plugin fields | invalid thresholds and incomplete worker models block save without rewriting the draft |
 | pi-lens | Diagnostics; formatting and fixes; context delivery; project scale, rules, and security scans; native runtime actions | Resolved user authority (`PI_LENS_CONFIG_PATH` or `~/.pi-lens/config.json`) plus the nearest ordered project `.pi-lens.json` / `pi-lens.json` authority | future namespaces, detailed rule policies, LSP server maps and tool-specific tuning | project-ignored global keys stay visible, absent values remain unset, and native command availability is observed per session |
 | @cortexkit/aft-pi | Editing mode; tool surface; search, semantic, call-graph, inspection, LSP, backup, and sandbox controls | Host-resolved CortexKit user `aft.jsonc` authority plus project `.cortexkit/aft.jsonc`; both are revisioned JSONC drafts | formatter/checker maps, server definitions, shell feature objects, transport, credentials, path lists, and future fields | invalid known fields block structured save; unknown fields and project-stripped fields stay visible and are preserved; runtime observation is command-only |
+| pi-hermes-memory | Memory policy and limits; review; flush; capacity; correction/failure recall; session search and model overrides | Host-resolved global `hermes-memory-user` authority (`hermes-memory-config.json` under the active Pi agent directory) | `memoryDir`, custom policy text, child extension paths, four correction arrays, and future fields | unknown fields are preserved and non-blocking; modern overflow strategy takes precedence without deleting the legacy field; runtime observation is command-only |
 | @gotgenes/pi-permission-system | Task-oriented allow/ask/deny policy; runtime/interface flags; prompt and review-log display budgets | Independent global `extensions/pi-permission-system/config.json` under the active Pi agent root and trusted project `.pi/extensions/pi-permission-system/config.json` | pattern maps, third-party permission surfaces, shell aliases, infrastructure read paths, authorizer chains, and deprecated preview caps | pattern maps remain intact until replaced deliberately, trailing commas and unknown 26.3 top-level keys block save, `yoloMode` keeps a source-qualified warning, and runtime availability comes only from the native command catalog |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
@@ -577,6 +578,26 @@ Acceptance:
 - Host reload after save and the plugin's next-lifecycle reread are not described as immediate
   runtime state.
 
+### 5.9 pi-hermes-memory
+
+Hermes Memory has one configuration authority: the Host-resolved `hermes-memory-user` file
+`hermes-memory-config.json` under the active Pi agent directory. The renderer does not guess `HOME`
+or the agent root. It has no project configuration authority. Project memory directories, Markdown
+files, and SQLite stores contain plugin-owned data and are never read or presented as settings.
+
+The strict JSON draft uses the shared revision, dirty-draft, external-change, and Host reload
+contract. Quick controls leave absent fields absent so the plugin keeps ownership of defaults.
+Known invalid loader fields block structured saving. Unknown top-level fields are ignored by the
+current plugin loader, reported without blocking, and preserved in Advanced. Advanced also owns
+`memoryDir`, custom policy text, child extension paths, the four correction-pattern arrays, and
+future fields. If both `memoryOverflowStrategy` and legacy `autoConsolidate` exist, both remain
+unchanged and the UI explains that the modern field takes precedence.
+
+Runtime observation checks only whether the active session's `command.list` contains
+`memory-insights`. Piarium does not execute the command, parse notifications or TUI output, inspect
+memory data, or infer background-review, Markdown, or SQLite health. No session, command-list
+failure, and command not observed remain separate states.
+
 ## 6. Implementation order
 
 1. Recovery correctness and sidebar controls, because the host operations already exist and the
@@ -590,7 +611,9 @@ Acceptance:
 8. AFT settings over its native CortexKit JSONC authorities and command-only runtime observation.
 9. Permission-system policy and runtime settings over its native scoped JSONC documents and native
    command catalog.
-10. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
+10. Hermes Memory settings over its single native agent-root JSON authority and command-only
+   runtime observation.
+11. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
    capability parity or an explicit rejection is documented and tested. This retirement is now
    complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
 

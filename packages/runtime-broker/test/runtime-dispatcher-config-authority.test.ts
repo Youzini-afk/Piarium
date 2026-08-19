@@ -79,6 +79,52 @@ describe("runtime dispatcher configuration text authorities", () => {
     ]);
   });
 
+  it("routes the Hermes Memory user authority without accepting arbitrary paths", async () => {
+    const calls: Array<{ method: string; params: unknown; target: unknown }> = [];
+    const snapshot = {
+      authority: "hermes-memory-user" as const,
+      content: "{\n  \"reviewEnabled\": true\n}\n",
+      exists: true,
+      format: "json" as const,
+      path: "C:\\Users\\owner\\.pi\\agent\\hermes-memory-config.json",
+      projectTrusted: false,
+      revision: "revision-1",
+    };
+    const broker = {
+      requestForWorkspace: async (cwd: string, method: string, params: unknown) => {
+        calls.push({ method, params, target: { cwd } });
+        return snapshot;
+      },
+    } as unknown as PiRuntimeBroker;
+
+    assert.equal(
+      (await dispatchRuntimeRequest(broker, "config.text.authority.get", {
+        authority: "hermes-memory-user",
+        cwd: "C:\\workspace",
+      })).path,
+      snapshot.path,
+    );
+    assert.deepEqual(calls, [
+      {
+        method: "config.text.authority.get",
+        params: { authority: "hermes-memory-user" },
+        target: { cwd: "C:\\workspace" },
+      },
+    ]);
+
+    await assert.rejects(
+      dispatchRuntimeRequest(broker, "config.text.authority.get", {
+        authority: "C:\\arbitrary.json",
+        cwd: "C:\\workspace",
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeDispatchError);
+        assert.equal(error.code, "invalid_params");
+        return true;
+      },
+    );
+  });
+
   it("rejects renderer-selected authority names", async () => {
     const broker = {} as PiRuntimeBroker;
     await assert.rejects(

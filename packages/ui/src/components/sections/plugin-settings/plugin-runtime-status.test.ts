@@ -111,6 +111,18 @@ describe('plugin runtime status', () => {
     )).toBe('not-observed');
   });
 
+  test('observes Hermes Memory only through memory-insights', () => {
+    expect(pluginRuntimeStatus(
+      'hermes-memory',
+      signals({ commandNames: new Set(['memory-insights']) }),
+    )).toBe('available');
+    expect(pluginRuntimeStatus('hermes-memory', signals())).toBe('not-observed');
+    expect(pluginRuntimeStatus(
+      'hermes-memory',
+      signals({ commandNames: new Set(['memory-search']) }),
+    )).toBe('not-observed');
+  });
+
   test('uses active recovery providers and MCP status reports', () => {
     expect(
       pluginRuntimeStatus(

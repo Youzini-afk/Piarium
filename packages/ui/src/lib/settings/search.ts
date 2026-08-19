@@ -730,6 +730,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
       'allow ask deny',
       'yolo mode',
       'permission review log',
+      'hermes memory',
+      'persistent memory',
+      'memory insights',
+      'memory policy',
+      'memory review',
+      'session search',
     ],
   },
   {

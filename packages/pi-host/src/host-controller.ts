@@ -230,6 +230,7 @@ function readConfigTextAuthority(
   const authority = readString(record, "authority");
   if (
     authority !== "aft-user"
+    && authority !== "hermes-memory-user"
     && authority !== "pi-lens-global"
     && authority !== "pi-lens-project"
   ) {

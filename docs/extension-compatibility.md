@@ -86,6 +86,11 @@ plugin ownership intact:
   strip and one-way sandbox rules; unknown fields and custom `bash` objects are preserved. Runtime
   observation checks only whether `command.list` contains `aft-status`. Piarium does not execute its
   `ctx.ui.custom` command, parse status output, read native indexes, or claim subsystem hot reload.
+- Hermes Memory edits only the Host-resolved global `hermes-memory-config.json` under the active Pi agent
+  directory. Unknown loader-ignored fields are preserved; complex and future fields remain in
+  Advanced. Project memory directories, Markdown, and SQLite are data rather than configuration
+  authorities. Runtime observation checks only for `memory-insights` in `command.list` and does not
+  execute commands or infer memory-store or background-review health.
 
 Packaged-runtime compatibility and richer extension-owned webviews still require release smoke
 verification.

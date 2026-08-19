@@ -207,6 +207,7 @@ export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
   pluginAdapter("aft", "AFT Settings Adapter", "aft", "tools", ["@cortexkit/aft-pi"]),
   pluginAdapter("pi-lens", "pi-lens Settings Adapter", "pi-lens", "pulse", ["pi-lens"]),
   pluginAdapter("permission-system", "Permission System Settings Adapter", "permission-system", "shield-keyhole", ["@gotgenes/pi-permission-system"]),
+  pluginAdapter("hermes-memory", "Hermes Memory Settings Adapter", "hermes-memory", "brain", ["pi-hermes-memory"]),
 ] as const;
 
 export const PIARIUM_BUILTIN_EXTENSION_DEFINITIONS: readonly PiariumBuiltinExtensionDefinition[] = [

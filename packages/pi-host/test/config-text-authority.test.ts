@@ -372,4 +372,125 @@ describe("resolved configuration text authorities", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("owns the Hermes Memory JSON authority from the active agent directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-hermes-authority-"));
+    const cwd = join(root, "workspace");
+    const agentDir = join(root, "custom-agent");
+    const configPath = join(agentDir, "hermes-memory-config.json");
+    await mkdir(cwd, { recursive: true });
+    await mkdir(agentDir, { recursive: true });
+
+    const transport = new MemoryHostTransport();
+    const controller = new HostController({
+      agentDir,
+      projectTrustOverride: false,
+      transport,
+    });
+    controller.start();
+    try {
+      transport.receive(createRequest("hermes-create", "session.create", { cwd }));
+      const created = await transport.waitFor((entry) => isResponse(entry, "hermes-create"));
+      assert.ok(created.kind === "response" && created.ok);
+
+      transport.receive(createRequest("hermes-get", "config.text.authority.get", {
+        authority: "hermes-memory-user",
+      }));
+      const getResponse = await transport.waitFor((entry) => isResponse(entry, "hermes-get"));
+      assert.ok(getResponse.kind === "response" && getResponse.ok);
+      const missing = getResponse.result as PiConfigTextAuthoritySnapshot;
+      assert.equal(missing.authority, "hermes-memory-user");
+      assert.equal(missing.exists, false);
+      assert.equal(missing.format, "json");
+      assert.equal(missing.path, configPath);
+      assert.equal(missing.projectTrusted, false);
+
+      const content = "{\n  \"reviewEnabled\": true\n}\n";
+      transport.receive(createRequest("hermes-update", "config.text.authority.update", {
+        authority: "hermes-memory-user",
+        content,
+        expectedRevision: missing.revision,
+      }));
+      const updateResponse = await transport.waitFor((entry) => isResponse(entry, "hermes-update"));
+      assert.ok(updateResponse.kind === "response" && updateResponse.ok);
+      const saved = updateResponse.result as PiConfigTextAuthoritySnapshot;
+      assert.equal(saved.content, content);
+      assert.equal(saved.format, "json");
+      assert.equal(await readFile(configPath, "utf8"), content);
+
+      transport.receive(createRequest("hermes-jsonc", "config.text.authority.update", {
+        authority: "hermes-memory-user",
+        content: "{\n  // JSONC is not accepted\n  \"reviewEnabled\": false\n}\n",
+        expectedRevision: saved.revision,
+      }));
+      const jsoncResponse = await transport.waitFor((entry) => isResponse(entry, "hermes-jsonc"));
+      assert.ok(jsoncResponse.kind === "response" && !jsoncResponse.ok);
+      assert.equal(jsoncResponse.error.code, "invalid_config_file");
+      assert.equal(await readFile(configPath, "utf8"), content);
+
+      transport.receive(createRequest("hermes-watch", "config.watch", {
+        target: { authority: "hermes-memory-user", kind: "text-authority" },
+      }));
+      const watchResponse = await transport.waitFor((entry) => isResponse(entry, "hermes-watch"));
+      assert.ok(watchResponse.kind === "response" && watchResponse.ok);
+      const watchId = (watchResponse.result as { watchId: string }).watchId;
+
+      const externalContent = "{\n  \"reviewEnabled\": false\n}\n";
+      await writeFile(configPath, externalContent, "utf8");
+      const changed = await transport.waitFor(
+        (entry) =>
+          isEvent(entry, "config.changed")
+          && entry.event === "config.changed"
+          && entry.data.watchId === watchId,
+      );
+      assert.ok(changed.kind === "event" && changed.event === "config.changed");
+      assert.deepEqual(changed.data.target, {
+        authority: "hermes-memory-user",
+        kind: "text-authority",
+      });
+
+      transport.receive(createRequest("hermes-refresh", "config.text.authority.get", {
+        authority: "hermes-memory-user",
+      }));
+      const refreshResponse = await transport.waitFor((entry) =>
+        isResponse(entry, "hermes-refresh"),
+      );
+      assert.ok(refreshResponse.kind === "response" && refreshResponse.ok);
+      const refreshed = refreshResponse.result as PiConfigTextAuthoritySnapshot;
+      assert.equal(refreshed.content, externalContent);
+      assert.notEqual(refreshed.revision, saved.revision);
+
+      transport.receive(createRequest("hermes-stale", "config.text.authority.update", {
+        authority: "hermes-memory-user",
+        content,
+        expectedRevision: saved.revision,
+      }));
+      const staleResponse = await transport.waitFor((entry) => isResponse(entry, "hermes-stale"));
+      assert.ok(staleResponse.kind === "response" && !staleResponse.ok);
+      assert.equal(staleResponse.error.code, "config_conflict");
+      assert.equal(await readFile(configPath, "utf8"), externalContent);
+
+      transport.receive(createRequest("hermes-unwatch", "config.unwatch", { watchId }));
+      const unwatchResponse = await transport.waitFor((entry) =>
+        isResponse(entry, "hermes-unwatch"),
+      );
+      assert.ok(unwatchResponse.kind === "response" && unwatchResponse.ok);
+
+      await rm(configPath);
+      const linkedTarget = join(root, "linked-hermes-target");
+      await mkdir(linkedTarget);
+      await symlink(linkedTarget, configPath, "junction");
+      transport.receive(createRequest("hermes-symlink", "config.text.authority.get", {
+        authority: "hermes-memory-user",
+      }));
+      const symlinkResponse = await transport.waitFor((entry) =>
+        isResponse(entry, "hermes-symlink"),
+      );
+      assert.ok(symlinkResponse.kind === "response" && !symlinkResponse.ok);
+      assert.equal(symlinkResponse.error.code, "invalid_config_path");
+    } finally {
+      await controller.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

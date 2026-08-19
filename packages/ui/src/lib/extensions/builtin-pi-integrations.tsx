@@ -19,6 +19,7 @@ import { RecoverySettings } from '@/components/sections/openchamber/RecoverySett
 import { PluginSettingsPage, PluginSettingsSidebar } from '@/components/sections/plugin-settings';
 import { ContextModeSettings } from '@/components/sections/plugin-settings/ContextModeSettings';
 import { AftSettings } from '@/components/sections/plugin-settings/AftSettings';
+import { HermesMemorySettings } from '@/components/sections/plugin-settings/HermesMemorySettings';
 import { MagicContextSettings } from '@/components/sections/plugin-settings/MagicContextSettings';
 import { ObservationalMemorySettings } from '@/components/sections/plugin-settings/ObservationalMemorySettings';
 import { OpenAICodexCompatSettings } from '@/components/sections/plugin-settings/OpenAICodexCompatSettings';
@@ -136,6 +137,8 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
         return <PiLensSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'permission-system':
         return <PermissionSystemSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'hermes-memory':
+        return <HermesMemorySettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       default:
         throw new Error(`Unknown built-in Pi Plugin Settings adapter: ${adapterId}`);
     }

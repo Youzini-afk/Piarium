@@ -11,6 +11,7 @@ describe('recommended Pi packages', () => {
     expect(sourceByName['@cortexkit/aft-pi']).toBe('npm:@cortexkit/aft-pi');
     expect(sourceByName['pi-lens']).toBe('npm:pi-lens');
     expect(sourceByName['@gotgenes/pi-permission-system']).toBe('npm:@gotgenes/pi-permission-system');
+    expect(sourceByName['pi-hermes-memory']).toBe('npm:pi-hermes-memory');
   });
 
   test('does not render duplicate package identities or install sources', () => {

@@ -226,7 +226,7 @@ function requireConfigTextAuthority(
   return requireEnum(
     record,
     "authority",
-    ["aft-user", "pi-lens-global", "pi-lens-project"] as const,
+    ["aft-user", "hermes-memory-user", "pi-lens-global", "pi-lens-project"] as const,
   );
 }
 

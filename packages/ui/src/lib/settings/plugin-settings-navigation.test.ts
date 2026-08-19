@@ -67,4 +67,12 @@ describe('plugin settings navigation', () => {
       pluginId: 'npm:@gotgenes/pi-permission-system@22.0.0',
     });
   });
+
+  test('maps pi-hermes-memory to its dedicated adapter', () => {
+    requestPluginSettingsTarget('npm:pi-hermes-memory@0.9.6');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'hermes-memory',
+      pluginId: 'npm:pi-hermes-memory@0.9.6',
+    });
+  });
 });

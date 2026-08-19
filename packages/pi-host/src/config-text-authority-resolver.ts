@@ -87,6 +87,7 @@ export function resolveAftUserConfigPath(
 export async function resolveConfigTextAuthority(
   authority: PiConfigTextAuthorityId,
   cwd: string,
+  agentDir: string,
   dependencies: ConfigTextAuthorityResolverDependencies = resolverDependencies(),
 ): Promise<ResolvedConfigTextAuthority> {
   if (authority === "pi-lens-global") {
@@ -99,6 +100,19 @@ export async function resolveConfigTextAuthority(
     const path = resolveAftUserConfigPath(dependencies);
     await pathStatus(path);
     return { authority, format: "jsonc", path, watchPaths: [path] };
+  }
+
+  if (authority === "hermes-memory-user") {
+    const trimmed = agentDir.trim();
+    if (trimmed.length === 0) {
+      throw new HostError(
+        "invalid_params",
+        "Hermes Memory authority requires an agent directory",
+      );
+    }
+    const path = join(resolve(trimmed), "hermes-memory-config.json");
+    await pathStatus(path);
+    return { authority, format: "json", path, watchPaths: [path] };
   }
 
   const watchPaths = piLensProjectCandidates(cwd);
