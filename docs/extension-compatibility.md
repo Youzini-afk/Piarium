@@ -1,6 +1,6 @@
 # Maintained extension compatibility
 
-Last verified: 2026-08-12
+Last verified: 2026-08-19
 
 Piarium Phase 1 loads extensions through Pi `0.84.1` and its generic `ExtensionUIContext` bridge.
 The smoke test creates an isolated agent directory and disposable workspace, loads one extension,
@@ -19,11 +19,30 @@ destructive commands.
 | pi-openai-codex-compat | 0.0.7-alpha.0 | Pass | `codex-settings` |
 | pi-observational-memory | 3.0.4 | Pass | `om:status`, `om:view` |
 | context-mode | 1.0.169 | Pass | `ctx-stats`, `ctx-doctor` |
+| pi-lens | 4.0.1 | Pass | 9 Lens commands plus four packaged skill commands |
+| @gotgenes/pi-permission-system | 26.3.0 | Pass | `permission-system` |
+| pi-hermes-memory | 0.9.6 | Pass | 10 memory, search, skill, and maintenance commands |
+| pi-background-tasks | 2.4.2 | Pass | 11 background-task, Fusion, log, and cache commands |
+| @cortexkit/aft-pi | 0.51.2 | Pass | `aft-status`; Windows native bridge downloaded, SHA-256 verified, and started |
+| pi-rtk-optimizer | 0.9.0 | Pass with compatibility caveat | `rtk`; upstream peer range stops at Pi 0.80 |
 
 `pi-openai-codex-compat@0.0.7-alpha.0` declares Pi `>=0.84.0 <0.85.0`; Piarium's Pi `0.84.1`
 runtime now satisfies that contract. The Phase 1 smoke above still proves entry-point loading and
 command registration only. Codex provider transport and remote compaction require an authenticated,
 provider-specific integration check before Piarium claims that network path as verified.
+
+The six community candidates added on 2026-08-19 were loaded through Piarium's bundled Pi `0.84.1`,
+not through the repositories' development SDK copies. `pi-rtk-optimizer@0.9.0` loaded and registered
+its command, but its declared Pi peer range ends at `^0.80.0`; Piarium therefore does not present it
+as a recommended integration until upstream declares current compatibility and the RTK binary path is
+verified. The generic smoke did not invoke models, network calls, permission decisions, memory search,
+background processes, or mutating tools.
+
+The AFT smoke built `@cortexkit/aft-bridge` before `@cortexkit/aft-pi`, then exercised its real Windows
+startup far enough to download and SHA-256 verify the matching `aft.exe`, start the native bridge, and
+enter configuration. It did not exercise LSP, semantic search, or file mutation. Hermes Memory loaded
+successfully, but its startup treats SQLite initialization as best effort; packaged-runtime ABI
+verification remains separate from this entry-point smoke.
 
 Run the reusable smoke harness after building Piarium:
 
