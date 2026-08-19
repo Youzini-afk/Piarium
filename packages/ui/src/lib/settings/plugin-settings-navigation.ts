@@ -8,7 +8,8 @@ export type PluginSettingsIntegrationId =
   | 'observational-memory'
   | 'context-mode'
   | 'mcp'
-  | 'pi-lens';
+  | 'pi-lens'
+  | 'permission-system';
 
 export interface PluginSettingsNavigationTarget {
   integrationId: PluginSettingsIntegrationId | null;
@@ -30,6 +31,7 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-workspace-history': 'workspace-history',
   'pi-wtf': 'wtf',
   'pi-lens': 'pi-lens',
+  '@gotgenes/pi-permission-system': 'permission-system',
 };
 
 export const pluginSettingsIntegrationForPluginId = (
@@ -50,6 +52,7 @@ const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, str
   'workspace-history': 'pi-workspace-history',
   'wtf': 'pi-wtf',
   'pi-lens': 'pi-lens',
+  'permission-system': '@gotgenes/pi-permission-system',
 };
 
 let pendingTarget: PluginSettingsNavigationTarget | null = null;

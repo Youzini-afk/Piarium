@@ -22,6 +22,7 @@ import { MagicContextSettings } from '@/components/sections/plugin-settings/Magi
 import { ObservationalMemorySettings } from '@/components/sections/plugin-settings/ObservationalMemorySettings';
 import { OpenAICodexCompatSettings } from '@/components/sections/plugin-settings/OpenAICodexCompatSettings';
 import { PiLensSettings } from '@/components/sections/plugin-settings/PiLensSettings';
+import { PermissionSystemSettings } from '@/components/sections/plugin-settings/PermissionSystemSettings';
 import { SubagentsSettings } from '@/components/sections/plugin-settings/SubagentsSettings';
 import { WebAccessSettings } from '@/components/sections/plugin-settings/WebAccessSettings';
 import { WorkspaceHistorySettings } from '@/components/sections/plugin-settings/WorkspaceHistorySettings';
@@ -130,6 +131,8 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
         return <ContextModeSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'pi-lens':
         return <PiLensSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
+      case 'permission-system':
+        return <PermissionSystemSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       default:
         throw new Error(`Unknown built-in Pi Plugin Settings adapter: ${adapterId}`);
     }

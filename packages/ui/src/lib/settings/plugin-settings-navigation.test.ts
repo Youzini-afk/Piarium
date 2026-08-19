@@ -51,4 +51,12 @@ describe('plugin settings navigation', () => {
       pluginId: 'npm:pi-lens@4.0.1',
     });
   });
+
+  test('maps the scoped permission-system package to its dedicated adapter', () => {
+    requestPluginSettingsTarget('npm:@gotgenes/pi-permission-system@22.0.0');
+    expect(consumePluginSettingsTarget()).toEqual({
+      integrationId: 'permission-system',
+      pluginId: 'npm:@gotgenes/pi-permission-system@22.0.0',
+    });
+  });
 });

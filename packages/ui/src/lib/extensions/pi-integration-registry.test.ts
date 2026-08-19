@@ -78,3 +78,36 @@ test('maps the pi-lens package to its built-in settings adapter', async () => {
   )?.adapterId).toBe('pi-lens');
   await handle.deactivate(2, 2);
 });
+
+test('maps @gotgenes/pi-permission-system to its built-in settings adapter', async () => {
+  const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (
+    candidate.manifest.id.endsWith('.permission-system')
+  ));
+  expect(definition).toBeDefined();
+  if (!definition) return;
+  const runtime = new SurfaceExtensionRuntime({ surface: 'web' });
+  const handle = await runtime.activate({
+    owner: {
+      desiredRevision: 1,
+      entrypointId: 'main',
+      extensionId: definition.manifest.id,
+      extensionVersion: definition.manifest.version,
+      generation: 1,
+      hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+      realmId: 'permission-system-adapter-test',
+    },
+  }, activateBuiltinPiIntegration(definition));
+  const piPackage: PackageDescriptor = {
+    enabled: true,
+    installed: true,
+    name: '@gotgenes/pi-permission-system',
+    scope: 'global',
+    source: 'npm:@gotgenes/pi-permission-system',
+    structured: true,
+  };
+  expect(pluginSettingsAdapterForPackage(
+    piPackage,
+    pluginSettingsAdaptersFromSnapshot(runtime.getSnapshot()),
+  )?.adapterId).toBe('permission-system');
+  await handle.deactivate(2, 2);
+});

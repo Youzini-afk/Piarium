@@ -9,6 +9,7 @@ describe('recommended Pi packages', () => {
     expect(sourceByName['pi-observational-memory']).toBe('npm:pi-observational-memory');
     expect(sourceByName['context-mode']).toBe('npm:context-mode');
     expect(sourceByName['pi-lens']).toBe('npm:pi-lens');
+    expect(sourceByName['@gotgenes/pi-permission-system']).toBe('npm:@gotgenes/pi-permission-system');
   });
 
   test('does not render duplicate package identities or install sources', () => {

@@ -93,6 +93,18 @@ describe('plugin runtime status', () => {
     expect(pluginRuntimeStatus('pi-lens', signals({ hasActiveSession: false, commandNames: new Set(['lens-toggle']) }))).toBe('no-session');
   });
 
+  test('observes permission-system only through its native settings command', () => {
+    expect(pluginRuntimeStatus(
+      'permission-system',
+      signals({ commandNames: new Set(['permission-system']) }),
+    )).toBe('available');
+    expect(pluginRuntimeStatus('permission-system', signals())).toBe('not-observed');
+    expect(pluginRuntimeStatus(
+      'permission-system',
+      signals({ commandNames: new Set(['permissions:decision']) }),
+    )).toBe('not-observed');
+  });
+
   test('uses active recovery providers and MCP status reports', () => {
     expect(
       pluginRuntimeStatus(

@@ -9,7 +9,10 @@ mock.module('@/hooks/useProviderLogo', () => ({
 const { buildSettingsSearchResults } = await import('./search');
 const { getSettingsPageMeta } = await import('./metadata');
 const { ensureBuiltinSettingsContributions, piariumSurfaceRuntime } = await import('./surface-registry');
-const { PIARIUM_BUILTIN_MCP_EXTENSION } = await import('@piarium/extension-builtins');
+const {
+  PIARIUM_BUILTIN_MCP_EXTENSION,
+  PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION,
+} = await import('@piarium/extension-builtins');
 const { activateBuiltinPiIntegration } = await import('@/lib/extensions/builtin-pi-integrations');
 
 const runtimeContext = (mcpInstalled: boolean): SettingsSearchAvailabilityContext => ({
@@ -48,5 +51,30 @@ describe('settings search availability', () => {
 
     expect(build(false).some((result) => result.page === 'mcp')).toBe(false);
     expect(build(true).some((result) => result.page === 'mcp')).toBe(true);
+  });
+
+  test('indexes the permission-system adapter under Plugin Settings', async () => {
+    await ensureBuiltinSettingsContributions();
+    if (!getSettingsPageMeta('plugin-settings')) await piariumSurfaceRuntime.activate({
+      owner: {
+        desiredRevision: 1,
+        entrypointId: 'main',
+        extensionId: PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION.manifest.id,
+        extensionVersion: PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION.manifest.version,
+        generation: 1,
+        hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+        realmId: 'plugin-settings-search-test',
+      },
+    }, activateBuiltinPiIntegration(PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION));
+    const results = buildSettingsSearchResults({
+      getPageTitle: (slug) => slug,
+      query: 'permission system',
+      runtimeCtx: runtimeContext(false),
+      t: (key) => key,
+    });
+    expect(results.some((result) => (
+      result.id === 'plugin-settings.configuration'
+      && result.page === 'plugin-settings'
+    ))).toBe(true);
   });
 });

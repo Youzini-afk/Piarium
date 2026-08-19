@@ -477,6 +477,8 @@ export const PluginSelectField: React.FC<SelectFieldProps> = ({
 
 interface OptionalSelectFieldProps extends BaseFieldProps {
   options: readonly SelectOption[];
+  preserveUnsupportedUntilSelection?: boolean;
+  unsupportedLabel?: React.ReactNode;
   unsetLabel?: string;
 }
 
@@ -490,7 +492,9 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
   onSet,
   options,
   path,
+  preserveUnsupportedUntilSelection = false,
   settingsItem,
+  unsupportedLabel,
   unsetLabel,
 }) => {
   const { t } = useI18n();
@@ -499,8 +503,10 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
   const unsupported = field.explicit && current === undefined;
   const value = current ? optionKey(current.value) : unsupported ? 'unsupported' : 'default';
   const notSetLabel = unsetLabel ?? t('settings.piarium.pluginSettings.field.pluginDefault');
+  const unsupportedValueLabel = unsupportedLabel
+    ?? t('settings.piarium.pluginSettings.field.unsupportedValue');
   const selectedLabel = current?.label ?? (unsupported
-    ? t('settings.piarium.pluginSettings.field.unsupportedValue')
+    ? unsupportedValueLabel
     : notSetLabel);
   return (
     <SettingsFieldRow
@@ -515,6 +521,7 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
         disabled={disabled}
         onValueChange={(key) => {
           if (key === 'default') {
+            if (unsupported && preserveUnsupportedUntilSelection) return;
             field.remove();
             return;
           }
@@ -532,12 +539,14 @@ export const PluginOptionalSelectField: React.FC<OptionalSelectFieldProps> = ({
         <SelectContent>
           {unsupported ? (
             <SelectItem value="unsupported" disabled>
-              {t('settings.piarium.pluginSettings.field.unsupportedValue')}
+              {unsupportedValueLabel}
             </SelectItem>
           ) : null}
-          <SelectItem value="default">
-            {notSetLabel}
-          </SelectItem>
+          {!unsupported || !preserveUnsupportedUntilSelection ? (
+            <SelectItem value="default">
+              {notSetLabel}
+            </SelectItem>
+          ) : null}
           {options.map((option) => (
             <SelectItem key={optionKey(option.value)} value={optionKey(option.value)}>
               {option.label}

@@ -180,6 +180,7 @@ value.
 | pi-openai-codex-compat | Codex request, reasoning, remote-compaction and tool options | Independent global `openai-codex-compat.json` and trusted project `.pi/openai-codex-compat.json` drafts | unknown future plugin fields | absent keys stay unset; environment overrides remain plugin-owned |
 | pi-observational-memory | Observation, reflection, compaction, pool and worker settings | Independent user/project `settings.json#observational-memory` drafts | unknown future plugin fields | invalid thresholds and incomplete worker models block save without rewriting the draft |
 | pi-lens | Diagnostics; formatting and fixes; context delivery; project scale, rules, and security scans; native runtime actions | Resolved user authority (`PI_LENS_CONFIG_PATH` or `~/.pi-lens/config.json`) plus the nearest ordered project `.pi-lens.json` / `pi-lens.json` authority | future namespaces, detailed rule policies, LSP server maps and tool-specific tuning | project-ignored global keys stay visible, absent values remain unset, and native command availability is observed per session |
+| @gotgenes/pi-permission-system | Task-oriented allow/ask/deny policy; runtime/interface flags; prompt and review-log display budgets | Independent global `extensions/pi-permission-system/config.json` under the active Pi agent root and trusted project `.pi/extensions/pi-permission-system/config.json` | pattern maps, third-party permission surfaces, shell aliases, infrastructure read paths, authorizer chains, and deprecated preview caps | pattern maps remain intact until replaced deliberately, trailing commas and unknown 26.3 top-level keys block save, `yoloMode` keeps a source-qualified warning, and runtime availability comes only from the native command catalog |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
 may succeed while an unsaved override draft remains, or vice versa; the UI presents and reports
@@ -484,6 +485,56 @@ Acceptance:
 - runtime buttons appear only for commands observed in the active session;
 - no pi-lens private diagnostics cache or telemetry log becomes a Piarium authority.
 
+### 5.7 @gotgenes/pi-permission-system
+
+Authority:
+
+- global `<agentDir>/extensions/pi-permission-system/config.json` and project
+  `<cwd>/.pi/extensions/pi-permission-system/config.json` through the existing revisioned
+  `config.text` contract;
+- project configuration only after the Host reports the project trusted;
+- the active session's registered `permission-system` command for showing the plugin's resolved
+  active settings;
+- no `permissions:*` event, review log, debug log, or command output as Piarium state.
+
+The global and project documents are independent JSONC drafts. Comments and surrounding formatting
+survive structured edits, while a second strict parse rejects trailing commas because the plugin's
+loader does not accept them. Quick controls show user tasks rather than configuration keys. A scalar
+permission can be left unset or set to allow, ask, or deny; an existing pattern map is shown as a
+disabled custom-rule sentinel and remains unchanged in the shared draft until the user chooses a
+scalar replacement or edits it in Advanced. The current 26.3 schema is strict: an unknown top-level
+key would invalidate the entire scope, so Piarium preserves it visibly in the draft but diagnoses and
+blocks saving until it is removed or the adapter is updated for a plugin version that owns it. Known
+booleans, positive integers, permission maps, shell aliases, string arrays, and the optional schema
+reference are validated before save without materializing defaults.
+
+Saving goes through the Host's normal revision check, atomic write, and active-Host reload. That
+reload is the persistence boundary, not a claim that every runtime value changes immediately. The
+plugin reads policy and runtime knobs at its own lifecycle boundaries: settings used by agent
+preparation are read on the next `before_agent_start`, while session-owned composition is refreshed
+on the next `session_start` (or a later plugin-owned resource reload where documented). The UI does
+not synthesize an immediate effective-state result.
+
+Runtime observation is deliberately narrow. Piarium lists commands for the active session and marks
+the adapter available only when `permission-system` is present. The one runtime action dispatches
+exactly `/permission-system show`, whose public notification reports the plugin's resolved active
+settings; the custom TUI settings modal is not advertised because Piarium's RPC custom-component
+bridge is read-only. Busy sessions and transport failures remain explicit. Command output is not
+parsed into state, and permission events are not bridged into statistics or an audit dashboard.
+
+Acceptance:
+
+- both scopes preserve comments, pattern maps, revisions, dirty drafts,
+  external-change conflicts, and project trust behavior;
+- missing fields stay absent, while invalid known values, unknown 26.3 top-level keys, and trailing
+  commas block save with localized diagnostics;
+- `yoloMode` explains that ask decisions are approved automatically if the selected source becomes
+  effective, while explicit deny decisions still apply;
+- the active-settings button appears only after `command.list` observes `permission-system` and
+  dispatches exactly `/permission-system show`;
+- Host reload after save and the plugin's next-lifecycle reread are not described as immediate
+  runtime state.
+
 ## 6. Implementation order
 
 1. Recovery correctness and sidebar controls, because the host operations already exist and the
@@ -494,7 +545,9 @@ Acceptance:
 5. Web Access advanced routing/security and public runtime status when available.
 6. MCP provenance improvements without replacing its native panel.
 7. pi-lens settings and command actions over its native JSON and public command catalog.
-8. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
+8. Permission-system policy and runtime settings over its native scoped JSONC documents and native
+   command catalog.
+9. Cross-page navigation, unknown-plugin discovery, and final removal of superseded pages after
    capability parity or an explicit rejection is documented and tested. This retirement is now
    complete for the imported Magic Context, OpenAgent, and Agent Orchestration pages.
 

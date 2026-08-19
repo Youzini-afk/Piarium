@@ -721,6 +721,11 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
       'trivy',
       'helm render',
       'technical debt',
+      'permission system',
+      'permissions',
+      'allow ask deny',
+      'yolo mode',
+      'permission review log',
     ],
   },
   {
