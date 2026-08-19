@@ -35,4 +35,4 @@ First public source snapshot of the Pi-native workspace.
 Known gaps for this release:
 
 - npm packages under `@piarium/*` are not published yet
-- GitHub Releases and signed desktop installers are not published yet
+- optional offline installers and other desktop-platform release assets are not published yet
