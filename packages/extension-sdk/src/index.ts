@@ -214,3 +214,11 @@ export const resolveHostExtensionModule = (
   }
   throw new Error("Brokered Piarium Host module must export activate or a default extension definition");
 };
+
+export const PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY = "workspace.documents";
+
+export const callWorkspaceDocuments = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  method: string,
+  params: JsonValue,
+): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY, method, params);

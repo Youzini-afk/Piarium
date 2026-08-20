@@ -17,6 +17,8 @@ import {
 } from "@piarium/extension-contract";
 import { ExtensionStorageStore } from "./storage-store.js";
 
+export type WorkspaceScopeResolver = (scopeId: string) => Promise<string | null>;
+
 const ADDRESS = {
   extensionId: "piarium.core.workbench",
   key: "profiles",
@@ -38,13 +40,27 @@ export class WorkbenchProfileStore {
   readonly hostId: string;
   readonly storage: ExtensionStorageStore;
   #lastValid: PiariumWorkbenchProfileDocument | null = null;
+  #resolveWorkspaceScopeId: WorkspaceScopeResolver | null = null;
 
   constructor(options: { hostId: string; storage: ExtensionStorageStore }) {
     this.hostId = options.hostId;
     this.storage = options.storage;
   }
 
+  setWorkspaceScopeResolver(resolver: WorkspaceScopeResolver | null): void {
+    this.#resolveWorkspaceScopeId = resolver;
+  }
+
   async read(): Promise<PiariumWorkbenchProfileSnapshot> {
+    const snapshot = await this.#load();
+    if (!snapshot.authoritative) return snapshot;
+    const document = structuredClone(snapshot.document);
+    const changed = await this.#migrateWorkspaceScopes(document);
+    if (!changed) return snapshot;
+    return this.#persist(document, snapshot.document.revision);
+  }
+
+  async #load(): Promise<PiariumWorkbenchProfileSnapshot> {
     try {
       const storage = await this.storage.read(ADDRESS);
       const document = workbenchDocumentFromStorage(storage);
@@ -74,26 +90,32 @@ export class WorkbenchProfileStore {
 
   updateLayout(requestValue: PiariumWorkbenchLayoutUpdateRequest | unknown): Promise<PiariumWorkbenchProfileSnapshot> {
     const request = parsePiariumWorkbenchLayoutUpdateRequest(requestValue);
-    return this.#mutate(request.expectedRevision, (document) => {
+    return this.#mutate(request.expectedRevision, async (document) => {
       if (!document.profiles.some((profile) => profile.id === request.layer.profileId)) {
         throw new Error(`Workbench profile is not installed: ${request.layer.profileId}`);
       }
-      const key = layerKey(request.layer);
-      const index = document.layouts.findIndex((layer) => layerKey(layer) === key);
-      if (index === -1) document.layouts.push(request.layer);
-      else document.layouts[index] = request.layer;
+      const layer = request.layer.scope === "workspace"
+        ? { ...request.layer, scopeId: await this.#canonicalScopeId(request.layer.scopeId) }
+        : request.layer;
+      const key = layerKey(layer);
+      const index = document.layouts.findIndex((candidate) => layerKey(candidate) === key);
+      if (index === -1) document.layouts.push(layer);
+      else document.layouts[index] = layer;
     });
   }
 
   selectProfile(requestValue: PiariumWorkbenchProfileSelectionRequest | unknown): Promise<PiariumWorkbenchProfileSnapshot> {
     const request = parsePiariumWorkbenchProfileSelectionRequest(requestValue);
-    return this.#mutate(request.expectedRevision, (document) => {
+    return this.#mutate(request.expectedRevision, async (document) => {
       if (!document.profiles.some((profile) => profile.id === request.profileId)) {
         throw new Error(`Workbench profile is not installed: ${request.profileId}`);
       }
       if (request.scope === "application") document.activeProfileId = request.profileId;
       else if (request.scope === "user") document.profileSelections.users[request.scopeId as string] = request.profileId;
-      else document.profileSelections.workspaces[request.scopeId as string] = request.profileId;
+      else {
+        const scopeId = await this.#canonicalScopeId(request.scopeId as string);
+        document.profileSelections.workspaces[scopeId] = request.profileId;
+      }
     });
   }
 
@@ -123,14 +145,39 @@ export class WorkbenchProfileStore {
     });
   }
 
-  async #mutate(
+  async #canonicalScopeId(scopeId: string): Promise<string> {
+    if (!this.#resolveWorkspaceScopeId) return scopeId;
+    return await this.#resolveWorkspaceScopeId(scopeId) ?? scopeId;
+  }
+
+  async #migrateWorkspaceScopes(document: PiariumWorkbenchProfileDocument): Promise<boolean> {
+    if (!this.#resolveWorkspaceScopeId) return false;
+    let changed = false;
+    const workspaces: Record<string, string> = {};
+    for (const [scopeId, profileId] of Object.entries(document.profileSelections.workspaces)) {
+      const canonical = await this.#canonicalScopeId(scopeId);
+      if (canonical !== scopeId) changed = true;
+      workspaces[canonical] = profileId;
+    }
+    document.profileSelections.workspaces = workspaces;
+    const layouts: PiariumWorkbenchLayoutLayer[] = [];
+    for (const layer of document.layouts) {
+      if (layer.scope !== "workspace") {
+        layouts.push(layer);
+        continue;
+      }
+      const scopeId = await this.#canonicalScopeId(layer.scopeId);
+      if (scopeId !== layer.scopeId) changed = true;
+      layouts.push(scopeId === layer.scopeId ? layer : { ...layer, scopeId });
+    }
+    document.layouts = layouts;
+    return changed;
+  }
+
+  async #persist(
+    document: PiariumWorkbenchProfileDocument,
     expectedRevision: number,
-    mutate: (document: PiariumWorkbenchProfileDocument) => void,
   ): Promise<PiariumWorkbenchProfileSnapshot> {
-    const current = await this.read();
-    if (!current.authoritative) throw new Error("Cannot update stale workbench profile state");
-    const document = structuredClone(current.document);
-    mutate(document);
     const storage = await this.storage.update(
       ADDRESS,
       expectedRevision,
@@ -146,6 +193,18 @@ export class WorkbenchProfileStore {
     } satisfies PiariumWorkbenchProfileSnapshot;
     if (next.authoritative) this.#lastValid = structuredClone(next.document);
     return next;
+  }
+
+  async #mutate(
+    expectedRevision: number,
+    mutate: (document: PiariumWorkbenchProfileDocument) => void | Promise<void>,
+  ): Promise<PiariumWorkbenchProfileSnapshot> {
+    const current = await this.#load();
+    if (!current.authoritative) throw new Error("Cannot update stale workbench profile state");
+    const document = structuredClone(current.document);
+    await this.#migrateWorkspaceScopes(document);
+    await mutate(document);
+    return this.#persist(document, expectedRevision);
   }
 }
 

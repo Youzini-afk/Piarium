@@ -21,6 +21,7 @@ import { createWebSmartSearchAPI } from './smart-search';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebExtensionsAPI } from './extensions';
 import { createWebPiRuntimeAPI } from './piRuntime';
+import { createWebDocumentsAPI } from './documents';
 
 export interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -48,6 +49,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
     git: createWebGitAPI(),
     workspace: createWebWorkspaceAPI(),
     files: createWebFilesAPI({ urls: activeUrls, getDirectory: () => useDirectoryStore.getState().currentDirectory }),
+    documents: createWebDocumentsAPI(),
     settings: createWebSettingsAPI(),
     permissions: createWebPermissionsAPI(),
     notifications: createWebNotificationsAPI(),

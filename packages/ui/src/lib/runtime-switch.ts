@@ -21,6 +21,7 @@ const RUNTIME_ENDPOINT_WILL_CHANGE_EVENT = 'piarium:runtime-endpoint-will-change
 
 let activeApiBaseUrl = '';
 let activeRuntimeKey = '';
+let runtimeEndpointGeneration = 1;
 
 const setWindowRuntimeValue = <K extends '__PIARIUM_API_BASE_URL__' | '__PIARIUM_CLIENT_TOKEN__' | '__PIARIUM_RUNTIME_HEADERS__'>(
   runtimeWindow: typeof window & {
@@ -93,6 +94,8 @@ const readRawRuntimeGlobal = (
   return typeof value === 'string' ? value : undefined;
 };
 
+export const getRuntimeEndpointGeneration = (): number => runtimeEndpointGeneration;
+
 export const getRuntimeKey = (): string => {
   if (activeRuntimeKey) return activeRuntimeKey;
 
@@ -139,6 +142,7 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_WILL_CHANGE_EVENT, { detail }));
   }
+  runtimeEndpointGeneration += 1;
   activeApiBaseUrl = apiBaseUrl;
   activeRuntimeKey = runtimeKey;
   if (typeof window !== 'undefined') {

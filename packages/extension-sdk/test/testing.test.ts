@@ -151,3 +151,21 @@ test("defineSurfaceMount exposes the framework-neutral DOM lifecycle contract", 
   assert.equal(disposed, 1);
   assert.equal(container.textContent, "");
 });
+
+test("workspace.documents capability helper forwards resource-scoped calls", async () => {
+  const { callWorkspaceDocuments, PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY } = await import("../src/index.js");
+  assert.equal(PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY, "workspace.documents");
+  const calls: Array<[string, string, unknown]> = [];
+  const result = await callWorkspaceDocuments({
+    call: async (capability, method, params) => {
+      calls.push([capability, method, params]);
+      return { status: "missing", resource: params };
+    },
+  }, "read", { workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", resourceId: "note.txt" });
+  assert.deepEqual(calls, [[
+    "workspace.documents",
+    "read",
+    { workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", resourceId: "note.txt" },
+  ]]);
+  assert.equal((result as { status?: string }).status, "missing");
+});

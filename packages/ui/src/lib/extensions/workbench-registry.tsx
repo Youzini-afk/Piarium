@@ -9,12 +9,12 @@ import {
   resolvePiariumWorkbenchLayout,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   getPiariumExtensionCatalogState,
   refreshPiariumExtensionCatalog,
   usePiariumExtensionCatalog,
 } from './catalog-store';
+import { useWorkbenchWorkspaceId } from './workbench-workspace';
 import {
   startWorkbenchMountSession,
   type WorkbenchMountImplementation,
@@ -256,17 +256,17 @@ const useVisibleContributionActivation = (contributions: readonly SurfaceContrib
 
 export const WorkbenchProfileBridge: React.FC = () => {
   const catalog = usePiariumExtensionCatalog();
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const workspaceId = useWorkbenchWorkspaceId();
   const workbench = catalog.snapshot?.workbench;
   React.useEffect(() => {
     if (!workbench?.authoritative) return;
     const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
       surface: piariumSurfaceRuntime.surface,
       userId: 'default',
-      ...(currentDirectory ? { workspaceId: currentDirectory } : {}),
+      ...(workspaceId ? { workspaceId } : {}),
     });
     piariumSurfaceRuntime.setWorkbenchState(resolved.references, resolved.replacementSelections);
-  }, [currentDirectory, workbench]);
+  }, [workspaceId, workbench]);
   return null;
 };
 

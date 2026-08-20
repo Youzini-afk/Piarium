@@ -41,3 +41,36 @@ test("workbench layouts persist replacement choices and retain missing contribut
     ExtensionStorageRevisionConflictError,
   );
 });
+
+test("migrates raw filesystem workspace scope ids to canonical workspace ids on the same host", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-workbench-workspace-id-"));
+  directories.push(dataDir);
+  const storage = new ExtensionStorageStore(dataDir);
+  const store = new WorkbenchProfileStore({
+    hostId: "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a",
+    storage,
+  });
+  const canonicalId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const otherHostPath = "D:\\other-host\\project";
+  const written = await store.selectProfile({
+    expectedRevision: 0,
+    profileId: "default",
+    scope: "workspace",
+    scopeId: "/workspace/demo",
+  });
+  assert.equal(written.document.profileSelections.workspaces["/workspace/demo"], "default");
+  store.setWorkspaceScopeResolver(async (scopeId) => (
+    scopeId === "/workspace/demo" || scopeId === canonicalId ? canonicalId : null
+  ));
+  const migrated = await store.read();
+  assert.equal(migrated.document.profileSelections.workspaces[canonicalId], "default");
+  assert.equal(migrated.document.profileSelections.workspaces["/workspace/demo"], undefined);
+  const foreign = await store.selectProfile({
+    expectedRevision: migrated.document.revision,
+    profileId: "default",
+    scope: "workspace",
+    scopeId: otherHostPath,
+  });
+  assert.equal(foreign.document.profileSelections.workspaces[otherHostPath], "default");
+  assert.equal(foreign.document.profileSelections.workspaces[canonicalId], "default");
+});

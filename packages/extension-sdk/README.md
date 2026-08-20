@@ -21,3 +21,7 @@ the same contract without importing Piarium's React or private UI.
 `@piarium/extension-sdk/testing` exports managed Surface, isolated Surface, and Host conformance
 harnesses with real owner cleanup semantics. See the complete
 [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).
+
+Granted Host extensions can call `workspace.documents` through `callWorkspaceDocuments` for
+resource-scoped, revisioned document access. The capability never returns file bodies in watch
+events, and it cannot escape the workspace the application host resolved.

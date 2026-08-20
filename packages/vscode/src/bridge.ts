@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import { handleStandardGitBridgeMessage } from './bridge-git-runtime';
 import { handleGitConflictBridgeMessage } from './bridge-git-conflict-runtime';
 import { handleFsBridgeMessage } from './bridge-fs-runtime';
+import { handleDocumentsBridgeMessage } from './documents-bridge-runtime';
 import { handleNativeVSCodeBridgeMessage } from './bridge-vscode-runtime';
-import { handleExtensionsBridgeMessage } from './bridge-extensions-runtime';
+import { getVSCodeDocuments, handleExtensionsBridgeMessage } from './bridge-extensions-runtime';
 import type { VSCodePiRuntime } from './piRuntime';
 import {
   DEFAULT_GITHUB_CLIENT_ID,
@@ -69,6 +70,7 @@ export interface BridgeResponse {
 export interface BridgeContext {
   context?: vscode.ExtensionContext;
   piRuntime?: VSCodePiRuntime;
+  webview?: vscode.Webview;
 }
 const GITHUB_API_BASE = 'https://api.github.com';
 
@@ -427,6 +429,18 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
     );
     if (fsResponse) return fsResponse;
+
+    if (type.startsWith('api:documents:') && ctx?.context) {
+      const documents = await getVSCodeDocuments(ctx.context, ctx.piRuntime);
+      const documentsResponse = await handleDocumentsBridgeMessage(
+        { id, type, payload },
+        {
+          documents,
+          ...(ctx.webview ? { webview: ctx.webview } : {}),
+        },
+      );
+      if (documentsResponse) return documentsResponse;
+    }
 
     if (type === 'api:settings:get') {
       return { id, type, success: true, data: readSettings(ctx) };

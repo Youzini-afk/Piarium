@@ -42,6 +42,7 @@ import {
 } from '@/lib/extensions/catalog-store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import {
   resolvePiariumExtensionServiceRouting,
   resolvePiariumWorkbenchLayout,
@@ -116,7 +117,7 @@ const WorkbenchProfileSection: React.FC = () => {
   const { t } = useI18n();
   const catalog = usePiariumExtensionCatalog();
   const surface = useSurfaceRegistrySnapshot();
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const workspaceId = useWorkbenchWorkspaceId();
   const [createOpen, setCreateOpen] = React.useState(false);
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [profileName, setProfileName] = React.useState('');
@@ -127,12 +128,12 @@ const WorkbenchProfileSection: React.FC = () => {
   const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
     surface: piariumSurfaceRuntime.surface,
     userId: 'default',
-    ...(currentDirectory ? { workspaceId: currentDirectory } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
   });
   const profileResolution = resolvePiariumWorkbenchProfile(workbench.document, catalog.snapshot.catalog, {
     surface: piariumSurfaceRuntime.surface,
     userId: 'default',
-    ...(currentDirectory ? { workspaceId: currentDirectory } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
   });
   const profile = workbench.document.profiles.find((candidate) => candidate.id === resolved.profileId);
   if (!profile) return null;
@@ -162,7 +163,7 @@ const WorkbenchProfileSection: React.FC = () => {
   ): Promise<void> => {
     setProfileBusy(true);
     try {
-      await selectActiveWorkbenchProfile(profileId, currentDirectory || undefined, options);
+      await selectActiveWorkbenchProfile(profileId, workspaceId, options);
       setPendingUnavailable(null);
     } catch (error) {
       if (error instanceof WorkbenchShellUnavailableError) {
@@ -328,8 +329,8 @@ const WorkbenchProfileSection: React.FC = () => {
                 onValueChange={(value) => run(setWorkbenchReplacementSelection(
                   target,
                   value === '__builtin__' ? null : value,
-                  currentDirectory
-                    ? { scope: 'workspace', scopeId: currentDirectory }
+                  workspaceId
+                    ? { scope: 'workspace', scopeId: workspaceId }
                     : { scope: 'user', scopeId: 'default' },
                 ))}
               >

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import {
   parsePiariumExtensionActualState,
   parsePiariumExtensionHostStateWaitRequest,
@@ -10,6 +10,10 @@ import {
   ApplicationExtensionRuntime,
 } from '@piarium/extension-host';
 import type { VSCodePiRuntime } from './piRuntime';
+import {
+  createDocumentsCapabilityHandler,
+  createVSCodeDocumentAuthority,
+} from './documents-runtime';
 
 interface BridgeRequest {
   id: string;
@@ -25,6 +29,7 @@ interface BridgeResponse {
 }
 
 interface ExtensionRuntime {
+  documents: ReturnType<typeof createVSCodeDocumentAuthority>;
   runtime: ApplicationExtensionRuntime;
 }
 
@@ -44,6 +49,13 @@ const getRuntime = (
       dataDir,
       piariumVersion: context.extension.packageJSON.version,
     });
+    const documents = createVSCodeDocumentAuthority({
+      hostId: runtime.services.hostId,
+      dataDir,
+      workspace: vscode.workspace,
+    });
+    runtime.workbench.setWorkspaceScopeResolver((scopeId) => documents.resolveScopeId(scopeId));
+    runtime.capabilities.register('workspace.documents', createDocumentsCapabilityHandler(documents));
     runtime.capabilities.register('pi-runtime', async (method, value) => {
       if (method !== 'request' || !value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('The pi-runtime capability expects a request object');
@@ -65,10 +77,18 @@ const getRuntime = (
     });
     await runtime.start().catch(() => undefined);
     context.subscriptions.push({ dispose: () => { void runtime.stop(); } });
-    return { runtime };
+    return { documents, runtime };
   })();
   runtimes.set(context, creating);
   return creating;
+};
+
+export const getVSCodeDocuments = async (
+  context: vscode.ExtensionContext,
+  piRuntime?: VSCodePiRuntime,
+): Promise<ReturnType<typeof createVSCodeDocumentAuthority>> => {
+  const { documents } = await getRuntime(context, piRuntime);
+  return documents;
 };
 
 const payloadRecord = (value: unknown): Record<string, unknown> => (

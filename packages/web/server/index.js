@@ -16,6 +16,10 @@ import {
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
 } from '@piarium/extension-host';
+import { createDocumentAuthority } from './lib/documents/authority.js';
+import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
+import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
+import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -782,6 +786,21 @@ async function main(options = {}) {
       piariumVersion: PIARIUM_VERSION,
     });
   }
+  const documentsAuthority = createDocumentAuthority({
+    hostId: extensionRuntime.services.hostId,
+    dataDir: PIARIUM_DATA_DIR,
+    isAllowedRoot: createDocumentRootGuard({
+      fsPromises,
+      pathModule: path,
+      readSettings: readSettingsFromDiskMigrated,
+      getWorkspaceRoot: () => createWorkspaceConfig({ env: process.env, cwd: process.cwd(), pathModule: path, osModule: os }).root,
+    }),
+  });
+  extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));
+  const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
+    'workspace.documents',
+    createDocumentsCapabilityHandler(documentsAuthority),
+  );
   const unregisterPiRuntimeCapability = extensionRuntime.capabilities.register('pi-runtime', async (method, value) => {
     if (method !== 'request' || !value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error('The pi-runtime capability expects a request object');
@@ -954,6 +973,7 @@ async function main(options = {}) {
     extensionPackages,
     extensionRuntime,
     uiAuthController,
+    documents: documentsAuthority,
     reloadRuntimeConfiguration: async () => { await piRuntimeLifecycle.ensureActiveBroker(); },
   });
 
@@ -1037,6 +1057,7 @@ async function main(options = {}) {
       brokerUnsubscribe();
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
+      unregisterDocumentsCapability();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       realtimeProxyRuntime.stop();

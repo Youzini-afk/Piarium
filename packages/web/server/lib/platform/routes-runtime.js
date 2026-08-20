@@ -11,6 +11,7 @@ import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSmartSearchRoutes } from '../smart-search/routes.js';
 import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
+import { registerDocumentRoutes } from '../documents/routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerPiRuntimeHttpRoute } from './pi-runtime-http-route.js';
@@ -83,6 +84,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       extensionPackages,
       extensionRuntime,
       uiAuthController,
+      documents,
     } = dependencies;
 
     registerExtensionRoutes(app, { extensionCatalog, extensionPackages, extensionRuntime, uiAuthController });
@@ -189,6 +191,9 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       resolveGitBinaryForSpawn,
       piariumUserConfigRoot,
     });
+    if (documents) {
+      registerDocumentRoutes(app, { documents, uiAuthController });
+    }
   };
 
   return { registerRoutes };

@@ -45,8 +45,8 @@ behavior are documented in [Cloud deployment](../../docs/cloud-deployment.md).
 
 Set `PIARIUM_DATA_DIR` to choose the persistent data root. The Linux default is
 `~/.config/piarium`. It contains settings, runtime registry files, authentication keys, remote
-clients, pairing state, notifications, and tunnel state; it must remain outside immutable release
-directories.
+clients, pairing state, notifications, tunnel state, workspace identity, and document recovery
+journals; it must remain outside immutable release directories.
 
 Binding beyond loopback requires `PIARIUM_UI_PASSWORD`. Tunnel tokens and passwords are runtime-only
 configuration and must not be placed in package archives or build arguments.

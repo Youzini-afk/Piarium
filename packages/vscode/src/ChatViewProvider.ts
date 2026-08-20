@@ -135,7 +135,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      const response = await handleBridgeMessage(message, { context: this._context, piRuntime: this._piRuntime });
+      const response = await handleBridgeMessage(message, { context: this._context, piRuntime: this._piRuntime, webview: webviewView.webview });
       void this._sendMessageWithRetry(response);
 
       if (message.type === 'api:settings:save' && response.success) {

@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+import { createDocumentAuthorityHarness } from './contract-fixtures.js';
+import { registerDocumentRoutes } from './routes.js';
+
+describe('document routes', () => {
+  it('serves revisioned reads without mapping failures to missing', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const app = express();
+      app.use(express.json());
+      registerDocumentRoutes(app, { documents: harness.authority });
+      const missing = await request(app)
+        .post('/api/documents/read')
+        .send({ resource: harness.resource('missing.txt') })
+        .expect(200);
+      expect(missing.body.status).toBe('missing');
+      const created = await request(app)
+        .post('/api/documents/write')
+        .send({
+          resource: harness.resource('note.txt'),
+          content: 'hello',
+          encoding: 'utf-8',
+          bom: false,
+          expectedRevision: null,
+          operationId: 'op-1',
+        })
+        .expect(200);
+      expect(created.body.status).toBe('written');
+      const escaped = await request(app)
+        .post('/api/documents/read')
+        .send({ resource: harness.resource('../secret.txt') })
+        .expect(403);
+      expect(escaped.body.reason).toBe('path-escape');
+      expect(JSON.stringify(escaped.body)).not.toContain('hello');
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});

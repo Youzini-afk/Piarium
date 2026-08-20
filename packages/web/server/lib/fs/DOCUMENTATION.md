@@ -32,6 +32,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
 - `index.js` no longer owns FS route handlers or FS exec job state.
 
+Revisioned document read/write, watch, and recovery journals belong to `packages/web/server/lib/documents/`. Files UI still uses `/api/fs/*` until that later migration.
+
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.

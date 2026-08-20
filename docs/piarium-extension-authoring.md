@@ -126,6 +126,10 @@ capabilities remains disabled until every request has an explicit allow/deny dec
 that asks for a new capability cannot activate until every added capability has a decision. Completing
 review does not execute code; update application is a separate explicit action.
 
+`workspace.documents` is a Host capability for revisioned, resource-scoped document access. Use
+`callWorkspaceDocuments` from `@piarium/extension-sdk`. Reads distinguish missing, empty, binary,
+undecodable, and failed results. Watch events carry metadata only and never include file bodies.
+
 ## Managed Surface entrypoint
 
 ```ts

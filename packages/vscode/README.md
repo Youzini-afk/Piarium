@@ -2,7 +2,7 @@
 
 Piarium brings the project's Pi-native sessions, agents, providers, packages, and workspace tools into VS Code, Cursor, and compatible editors.
 
-The extension starts the bundled Pi host and runtime broker in the extension host. It does not download, discover, or proxy an OpenCode CLI. The webview talks to the Pi runtime through a typed VS Code message bridge, while filesystem, Git, GitHub, editor, and settings operations stay in the trusted extension host.
+The extension starts the bundled Pi host and runtime broker in the extension host. It does not download, discover, or proxy an OpenCode CLI. The webview talks to the Pi runtime through a typed VS Code message bridge, while filesystem, Git, GitHub, editor, settings, and revisioned document operations stay in the trusted extension host.
 
 ## Features
 

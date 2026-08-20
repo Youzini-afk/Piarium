@@ -45,7 +45,7 @@ interface RuntimeDescriptor {
   label?: string;
 }
 
-interface Subscription {
+export interface Subscription {
 
   close: () => void;
 }
@@ -1675,6 +1675,147 @@ export interface PiRuntimeManagementAPI {
   upgrade(): Promise<PiRuntimeSnapshot>;
 }
 
+export interface PiariumWorkspaceIdentity {
+  workspaceId: string;
+  hostId: string;
+}
+
+export interface PiariumResourceReference {
+  workspaceId: string;
+  resourceId: string;
+}
+
+export type PiariumDocumentReadResult =
+  | {
+      status: 'ready';
+      resource: PiariumResourceReference;
+      revision: string;
+      content: string;
+      encoding: string;
+      bom: boolean;
+      byteLength: number;
+      modifiedAt?: string;
+    }
+  | {
+      status: 'missing';
+      resource: PiariumResourceReference;
+    }
+  | {
+      status: 'binary';
+      resource: PiariumResourceReference;
+      revision: string;
+      byteLength: number;
+      mime?: string;
+    }
+  | {
+      status: 'unsupported-encoding';
+      resource: PiariumResourceReference;
+      revision: string;
+      byteLength: number;
+      candidates?: string[];
+    };
+
+export interface PiariumDocumentWriteRequest {
+  resource: PiariumResourceReference;
+  content: string;
+  encoding: string;
+  bom: boolean;
+  expectedRevision: string | null;
+  operationId: string;
+}
+
+export type PiariumDocumentWriteResult =
+  | { status: 'written'; revision: string; byteLength: number; modifiedAt?: string }
+  | { status: 'conflict'; current: Omit<PiariumDocumentReadResult, 'content'> };
+
+export interface PiariumDocumentMoveRequest {
+  from: PiariumResourceReference;
+  to: PiariumResourceReference;
+  expectedRevision: string;
+  operationId: string;
+}
+
+export type PiariumDocumentMoveResult =
+  | { status: 'moved'; resource: PiariumResourceReference; revision: string; byteLength: number; modifiedAt?: string }
+  | { status: 'missing'; resource: PiariumResourceReference }
+  | { status: 'target-exists'; resource: PiariumResourceReference }
+  | { status: 'conflict'; current: Omit<PiariumDocumentReadResult, 'content'> };
+
+export interface PiariumDocumentDeleteRequest {
+  resource: PiariumResourceReference;
+  expectedRevision: string;
+  operationId: string;
+}
+
+export type PiariumDocumentDeleteResult =
+  | { status: 'deleted'; resource: PiariumResourceReference }
+  | { status: 'missing'; resource: PiariumResourceReference }
+  | { status: 'conflict'; current: Omit<PiariumDocumentReadResult, 'content'> };
+
+export type PiariumWorkspaceFileEvent =
+  | { kind: 'created' | 'changed' | 'deleted'; sequence: number; resource: PiariumResourceReference; revision?: string }
+  | { kind: 'moved'; sequence: number; from: PiariumResourceReference; resource: PiariumResourceReference; revision?: string }
+  | { kind: 'reset'; sequence: number; reason: 'overflow' | 'reconnected' | 'authority-changed' };
+
+export interface PiariumDocumentRecoveryJournalSummary {
+  journalId: string;
+  resource: PiariumResourceReference;
+  revision: number;
+  baseRevision: string | null;
+  updatedAt: string;
+  byteLength: number;
+}
+
+export type PiariumDocumentRecoveryReadResult =
+  | {
+      status: 'ready';
+      journal: PiariumDocumentRecoveryJournalSummary;
+      content: string;
+      encoding: string;
+      bom: boolean;
+    }
+  | { status: 'missing'; journalId: string }
+  | { status: 'malformed'; journalId: string };
+
+export interface PiariumDocumentRecoveryWriteRequest {
+  workspaceId: string;
+  recoverySessionId: string;
+  resource: PiariumResourceReference;
+  content: string;
+  encoding: string;
+  bom: boolean;
+  baseRevision: string | null;
+  expectedRevision: number | null;
+}
+
+export type PiariumDocumentRecoveryWriteResult =
+  | { status: 'written'; journal: PiariumDocumentRecoveryJournalSummary }
+  | { status: 'conflict'; journal: PiariumDocumentRecoveryJournalSummary }
+  | { status: 'missing'; journalId: string };
+
+export interface DocumentsAPI {
+  resolveWorkspace(input: { path?: string; workspaceId?: string }): Promise<PiariumWorkspaceIdentity>;
+  read(resource: PiariumResourceReference): Promise<PiariumDocumentReadResult>;
+  write(request: PiariumDocumentWriteRequest): Promise<PiariumDocumentWriteResult>;
+  move(request: PiariumDocumentMoveRequest): Promise<PiariumDocumentMoveResult>;
+  delete(request: PiariumDocumentDeleteRequest): Promise<PiariumDocumentDeleteResult>;
+  watch(
+    workspaceId: string,
+    listener: (event: PiariumWorkspaceFileEvent) => void,
+    options?: { signal?: AbortSignal },
+  ): Subscription;
+  listRecoveryJournals(request: {
+    workspaceId: string;
+    recoverySessionId?: string;
+  }): Promise<PiariumDocumentRecoveryJournalSummary[]>;
+  readRecoveryJournal(journalId: string): Promise<PiariumDocumentRecoveryReadResult>;
+  writeRecoveryJournal(request: PiariumDocumentRecoveryWriteRequest): Promise<PiariumDocumentRecoveryWriteResult>;
+  deleteRecoveryJournal(request: {
+    journalId: string;
+    expectedRevision: number;
+  }): Promise<{ status: 'deleted' } | { status: 'missing' } | { status: 'conflict'; journal: PiariumDocumentRecoveryJournalSummary }>;
+}
+
 export interface RuntimeAPIs {
   runtime: RuntimeDescriptor;
   piRuntime?: PiRuntimeManagementAPI;
@@ -1682,6 +1823,7 @@ export interface RuntimeAPIs {
   git: GitAPI;
   workspace?: WorkspaceAPI;
   files: FilesAPI;
+  documents: DocumentsAPI;
   settings: SettingsAPI;
   permissions: PermissionsAPI;
   notifications: NotificationsAPI;
