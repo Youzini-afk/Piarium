@@ -47,6 +47,10 @@ export const defineReactContribution = <TProps extends object>(
   },
 });
 
+export const defineReactShell = defineReactReplacement;
+export const defineReactView = defineReactContribution;
+export const defineReactEditor = defineReactContribution;
+
 export const ownReactRoot = (context: PiariumManagedSurfaceContext, root: Root): Root => {
   context.onDispose(() => root.unmount());
   return root;

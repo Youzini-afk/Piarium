@@ -61,6 +61,11 @@ import {
 } from '@/lib/extensions/workbench-registry';
 import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
+import {
+  describeWorkbenchContributionPlacement,
+  workbenchInspectorOwnsDocuments,
+  workbenchInspectorOwnsLanguage,
+} from '@/lib/extensions/workbench-inspector';
 
 const STATUS_KEYS: Readonly<Record<PiariumExtensionActualStatus, I18nKey>> = {
   active: 'settings.piarium.extensions.status.active',
@@ -592,6 +597,20 @@ const ExtensionCard: React.FC<{
   const liveSurfaceServices = surface.services.filter((item) => item.owner.extensionId === entry.manifest.id);
   const liveHostServices = hostState?.services.providers.filter((item) => item.extensionId === entry.manifest.id) ?? [];
   const catalogDiagnostics = hostState?.catalog.diagnostics.filter((item) => item.extensionId === entry.manifest.id) ?? [];
+  const workspaceId = useWorkbenchWorkspaceId();
+  const profileResolution = hostState?.workbench.authoritative && hostState.workbench.storageState === 'ready'
+    ? resolvePiariumWorkbenchProfile(hostState.workbench.document, hostState.catalog, {
+      surface: piariumSurfaceRuntime.surface,
+      userId: 'default',
+      ...(workspaceId ? { workspaceId } : {}),
+    })
+    : undefined;
+  const ownsActiveShell = profileResolution?.shellExtensionId === entry.manifest.id;
+  const documentOwner = entry.capabilityGrants.some((grant) => (
+    workbenchInspectorOwnsDocuments(grant.capability) && grant.granted
+  ));
+  const languageOwner = liveHostServices.some((service) => workbenchInspectorOwnsLanguage(service.descriptor.id))
+    || entry.capabilityGrants.some((grant) => grant.capability === 'workspace.language' && grant.granted);
   const decisions = new Map(candidate?.capabilityGrants.map((grant) => [capabilityKey(grant), grant.granted]) ?? []);
   const review = async (reference: PiariumExtensionCapabilityReference, granted: boolean): Promise<void> => {
     if (!candidate) return;
@@ -836,21 +855,55 @@ const ExtensionCard: React.FC<{
                 </div>
               </div>
               <div>
+                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.activeShell')}</div>
+                <div className="mt-1 typography-micro text-muted-foreground">
+                  {ownsActiveShell
+                    ? t('settings.piarium.extensions.inspector.ownsActiveShell')
+                    : profileResolution?.shellContributionId
+                      ? t('settings.piarium.extensions.inspector.activeShellId', { id: profileResolution.shellContributionId })
+                      : t('settings.piarium.extensions.inspector.none')}
+                </div>
+              </div>
+              <div>
                 <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.contributions')}</div>
                 <div className="mt-1 space-y-1">
-                  {(entry.manifest.contributions ?? []).map((contribution) => (
-                    <div key={contribution.id} className="break-all typography-micro text-muted-foreground">
-                      {contribution.title ?? contribution.id} · {contribution.kind} · {liveContributions.some((item) => item.descriptor.id === contribution.id)
-                        ? t('settings.piarium.extensions.status.active')
-                        : t('settings.piarium.extensions.status.inactive')}
-                    </div>
-                  ))}
-                  {liveContributions.filter((item) => !(entry.manifest.contributions ?? []).some((declared) => declared.id === item.descriptor.id)).map((item) => (
-                    <div key={item.descriptor.id} className="break-all typography-micro text-muted-foreground">
-                      {item.descriptor.title ?? item.descriptor.id} · {item.descriptor.kind} · {t('settings.piarium.extensions.status.active')}
-                    </div>
-                  ))}
+                  {(entry.manifest.contributions ?? []).map((contribution) => {
+                    const described = describeWorkbenchContributionPlacement(contribution);
+                    const live = liveContributions.some((item) => item.descriptor.id === contribution.id);
+                    return (
+                      <div key={contribution.id} className="break-all typography-micro text-muted-foreground">
+                        {contribution.title ?? contribution.id} · {contribution.kind} · {live
+                          ? t('settings.piarium.extensions.status.active')
+                          : t('settings.piarium.extensions.status.inactive')}
+                        {described.placement ? ` · ${t('settings.piarium.extensions.inspector.slot', { slot: described.placement })}` : ''}
+                        {described.replacement ? ` · ${t('settings.piarium.extensions.inspector.replaces', { target: described.replacement })}` : ''}
+                      </div>
+                    );
+                  })}
+                  {liveContributions.filter((item) => !(entry.manifest.contributions ?? []).some((declared) => declared.id === item.descriptor.id)).map((item) => {
+                    const described = describeWorkbenchContributionPlacement(item.descriptor);
+                    return (
+                      <div key={item.descriptor.id} className="break-all typography-micro text-muted-foreground">
+                        {item.descriptor.title ?? item.descriptor.id} · {item.descriptor.kind} · {t('settings.piarium.extensions.status.active')}
+                        {described.placement ? ` · ${t('settings.piarium.extensions.inspector.slot', { slot: described.placement })}` : ''}
+                        {described.replacement ? ` · ${t('settings.piarium.extensions.inspector.replaces', { target: described.replacement })}` : ''}
+                        {` · ${t('settings.piarium.extensions.inspector.cleanup')} #${item.owner.generation}`}
+                      </div>
+                    );
+                  })}
                   {(entry.manifest.contributions ?? []).length === 0 && liveContributions.length === 0 ? <span className="typography-micro text-muted-foreground">—</span> : null}
+                </div>
+              </div>
+              <div>
+                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.documentOwner')}</div>
+                <div className="mt-1 typography-micro text-muted-foreground">
+                  {documentOwner ? t('settings.piarium.extensions.status.active') : t('settings.piarium.extensions.inspector.none')}
+                </div>
+              </div>
+              <div>
+                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.languageOwner')}</div>
+                <div className="mt-1 typography-micro text-muted-foreground">
+                  {languageOwner ? t('settings.piarium.extensions.status.active') : t('settings.piarium.extensions.inspector.none')}
                 </div>
               </div>
               <div>

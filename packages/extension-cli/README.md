@@ -8,6 +8,7 @@ not require the Piarium monorepo or any Pi package.
 
 ```sh
 piarium-extension init ./my-extension --id dev.example.my-extension --name "My Extension"
+piarium-extension init ./my-shell --id dev.example.shell --name "Vanilla Shell" --template shell
 piarium-extension check ./my-extension
 piarium-extension build ./my-extension
 piarium-extension test ./my-extension
@@ -19,8 +20,9 @@ line. Validation and non-zero failure exit codes are identical in human, non-TTY
 modes.
 
 `init` is non-interactive. Both `--id` and `--name` are required, and an existing non-empty target is
-never overwritten. The generated project contains a public manifest, package metadata, TypeScript
-configuration, a managed Surface entrypoint, and author documentation.
+never overwritten. `--template` selects `surface` (default), `shell`, `editor`, `view`, or `language`.
+The generated project contains a public manifest, package metadata, TypeScript configuration, and the
+matching Surface or Host entrypoint.
 
 `check` parses the manifest with `@piarium/extension-contract`, checks that the manifest version and
 `package.json` version agree, and checks every declared Host or executable Surface file. Errors name

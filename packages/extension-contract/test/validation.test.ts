@@ -236,6 +236,15 @@ test("validates public catalog snapshots before a surface accepts them", () => {
   }), PiariumExtensionContractError);
 });
 
+test("rejects unknown contribution kinds instead of coercing them", () => {
+  const source = manifest();
+  source.contributions = [{ ...source.contributions[0]!, kind: "unknown-kind" }];
+  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
+    error instanceof PiariumExtensionContractError
+    && error.issues.some((issue) => issue.includes("kind is unsupported"))
+  ));
+});
+
 test("accepts view and editor contribution kinds", () => {
   const source = manifest();
   source.contributions = [

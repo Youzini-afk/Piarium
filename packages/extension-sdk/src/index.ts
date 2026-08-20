@@ -219,6 +219,18 @@ export const PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY = "workspace.documents";
 export const PIARIUM_WORKSPACE_SEARCH_CAPABILITY = "workspace.search";
 export const PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY = "workspace.language";
 
+export {
+  PIARIUM_WORKBENCH_CONTEXT_KEYS,
+  PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+  PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+  PIARIUM_WORKBENCH_SLOTS,
+} from "@piarium/extension-contract";
+
+export const defineShellMount = defineSurfaceMount;
+export const defineViewMount = defineSurfaceMount;
+export const defineEditorMount = defineSurfaceMount;
+
 export const callWorkspaceDocuments = (
   capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
   method: string,
@@ -236,3 +248,68 @@ export const callWorkspaceLanguage = (
   method: string,
   params: JsonValue,
 ): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY, method, params);
+
+export interface PiariumWorkspaceDocumentsClient {
+  delete(request: JsonObject): Promise<JsonValue>;
+  move(request: JsonObject): Promise<JsonValue>;
+  read(resource: JsonObject): Promise<JsonValue>;
+  resolveWorkspace(input: JsonObject): Promise<JsonValue>;
+  write(request: JsonObject): Promise<JsonValue>;
+}
+
+export const createWorkspaceDocumentsClient = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+): PiariumWorkspaceDocumentsClient => ({
+  resolveWorkspace: (input) => callWorkspaceDocuments(capabilities, "resolveWorkspace", input),
+  read: (resource) => callWorkspaceDocuments(capabilities, "read", resource),
+  write: (request) => callWorkspaceDocuments(capabilities, "write", request),
+  move: (request) => callWorkspaceDocuments(capabilities, "move", request),
+  delete: (request) => callWorkspaceDocuments(capabilities, "delete", request),
+});
+
+export type PiariumLanguageProviderDescriptor = {
+  args?: readonly string[];
+  command: string;
+  languageIds: readonly string[];
+  providerId: string;
+  source?: string;
+  workspaceId?: string;
+};
+
+export interface PiariumWorkspaceLanguageClient {
+  disposeWorkspace(workspaceId: string): Promise<JsonValue>;
+  getStatus(workspaceId: string, languageId?: string): Promise<JsonValue>;
+  registerProvider(descriptor: PiariumLanguageProviderDescriptor): Promise<JsonValue>;
+}
+
+const languageProviderParams = (descriptor: PiariumLanguageProviderDescriptor): JsonObject => {
+  const params: JsonObject = {
+    command: descriptor.command,
+    languageIds: [...descriptor.languageIds],
+    providerId: descriptor.providerId,
+  };
+  if (descriptor.args) params.args = [...descriptor.args];
+  if (descriptor.source) params.source = descriptor.source;
+  if (descriptor.workspaceId) params.workspaceId = descriptor.workspaceId;
+  return params;
+};
+
+export const createWorkspaceLanguageClient = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+): PiariumWorkspaceLanguageClient => ({
+  registerProvider: (descriptor) => callWorkspaceLanguage(capabilities, "registerProvider", languageProviderParams(descriptor)),
+  getStatus: (workspaceId, languageId) => callWorkspaceLanguage(capabilities, "getStatus", {
+    workspaceId,
+    ...(languageId ? { languageId } : {}),
+  }),
+  disposeWorkspace: (workspaceId) => callWorkspaceLanguage(capabilities, "disposeWorkspace", { workspaceId }),
+});
+
+export const defineLanguageProvider = (
+  descriptor: PiariumLanguageProviderDescriptor,
+): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  await createWorkspaceLanguageClient(context.capabilities).registerProvider({
+    ...descriptor,
+    source: descriptor.source ?? "extension",
+  });
+});

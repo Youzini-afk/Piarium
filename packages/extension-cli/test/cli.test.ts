@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -22,6 +22,45 @@ test("init writes a standalone managed Surface template and refuses overwrite", 
     /non-empty target directory/,
   );
 });
+
+test("init templates cover shell, editor, view, and language workbench seams", async () => {
+  const root = await temporaryDirectory();
+  const shell = await initProject({
+    directory: join(root, "shell"),
+    id: "dev.example.shell",
+    name: "Vanilla Shell",
+    template: "shell",
+  });
+  assert.equal(shell.template, "shell");
+  const surface = await readFile(join(shell.directory, "src/surface.ts"), "utf8");
+  assert.match(surface, /defineShellMount/);
+  assert.match(surface, /PIARIUM_WORKBENCH_REPLACEMENT_TARGETS/);
+  assert.doesNotMatch(surface, /@piarium\/ui|@\/components/);
+
+  await initProject({
+    directory: join(root, "editor"),
+    id: "dev.example.editor",
+    name: "Custom Editor",
+    template: "editor",
+  });
+  await initProject({
+    directory: join(root, "view"),
+    id: "dev.example.view",
+    name: "Sidebar View",
+    template: "view",
+  });
+  const language = await initProject({
+    directory: join(root, "language"),
+    id: "dev.example.language",
+    name: "Markdown Language",
+    template: "language",
+  });
+  const host = await readFile(join(language.directory, "src/host.ts"), "utf8");
+  assert.match(host, /defineLanguageProvider/);
+  const checked = await checkProject(language.directory);
+  assert.deepEqual(checked.missingFiles, ["dist/host.cjs"]);
+});
+
 
 test("check reports a valid contract and missing published output", async () => {
   const root = await temporaryDirectory();

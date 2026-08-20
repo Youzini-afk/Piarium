@@ -3,11 +3,12 @@ import { buildProject } from "./build.js";
 import { initProject } from "./init.js";
 import { checkProject, formatContractError } from "./project.js";
 import { testProject } from "./test-command.js";
+import { isInitTemplate, type InitTemplate } from "./templates.js";
 import { pathToFileURL } from "node:url";
 import { CliOutput, type CliConsole } from "./cli-output.js";
 
 const usage = `Usage:
-  piarium-extension init [dir] --id <extension-id> --name <display-name>
+  piarium-extension init [dir] --id <extension-id> --name <display-name> [--template surface|shell|editor|view|language]
   piarium-extension check [dir]
   piarium-extension build [dir]
   piarium-extension test [dir]
@@ -25,6 +26,7 @@ interface ParsedArgs {
   json: boolean;
   name: string | undefined;
   quiet: boolean;
+  template: InitTemplate | undefined;
 }
 
 const parseArgs = (args: string[]): ParsedArgs => {
@@ -36,6 +38,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
     json: false,
     name: undefined,
     quiet: false,
+    template: undefined,
   };
   const positional: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
@@ -44,22 +47,30 @@ const parseArgs = (args: string[]): ParsedArgs => {
     if (value === "--help" || value === "-h") result.help = true;
     else if (value === "--json") result.json = true;
     else if (value === "--quiet") result.quiet = true;
-    else if (value === "--id" || value === "--name") {
+    else if (value === "--id" || value === "--name" || value === "--template") {
       const next = args[index + 1];
       if (!next || next.startsWith("--")) throw new Error(`${value} requires a value`);
       if (value === "--id") result.id = next;
-      else result.name = next;
+      else if (value === "--name") result.name = next;
+      else {
+        if (!isInitTemplate(next)) throw new Error(`Unknown init template "${next}". Use surface, shell, editor, view, or language.`);
+        result.template = next;
+      }
       index += 1;
       continue;
     }
     if (value === "--help" || value === "-h" || value === "--json" || value === "--quiet") continue;
-    if (value.startsWith("--id=") || value.startsWith("--name=")) {
+    if (value.startsWith("--id=") || value.startsWith("--name=") || value.startsWith("--template=")) {
       const split = value.indexOf("=");
       const option = value.slice(0, split);
       const optionValue = value.slice(split + 1);
       if (!optionValue) throw new Error(`${option} requires a value`);
       if (option === "--id") result.id = optionValue;
-      else result.name = optionValue;
+      else if (option === "--name") result.name = optionValue;
+      else {
+        if (!isInitTemplate(optionValue)) throw new Error(`Unknown init template "${optionValue}". Use surface, shell, editor, view, or language.`);
+        result.template = optionValue;
+      }
       continue;
     }
     if (value.startsWith("--")) throw new Error(`Unknown option: ${value}`);
@@ -87,15 +98,22 @@ export const runCli = async (args: string[], output: CliConsole = console): Prom
     }
     if (parsed.command === "init") {
       if (!parsed.id || !parsed.name) throw new Error("init requires both --id and --name; the command is non-interactive");
-      const directory = await initProject({
+      const created = await initProject({
         ...(parsed.directory ? { directory: parsed.directory } : {}),
         id: parsed.id,
         name: parsed.name,
+        ...(parsed.template ? { template: parsed.template } : {}),
       });
       cliOutput.success({
-        human: [`Created Piarium extension template in ${directory}`],
-        json: { command: "init", directory, displayName: parsed.name, extensionId: parsed.id },
-        quiet: `created ${directory}`,
+        human: [`Created Piarium extension template in ${created.directory}`],
+        json: {
+          command: "init",
+          directory: created.directory,
+          displayName: parsed.name,
+          extensionId: parsed.id,
+          template: created.template,
+        },
+        quiet: `created ${created.directory}`,
       });
       return 0;
     }

@@ -45,6 +45,12 @@ export const PIARIUM_WORKBENCH_SLOTS = {
   statusItems: "workbench.status.items",
 } as const;
 
+export const PIARIUM_WORKBENCH_CONTEXT_KEYS = {
+  editorHasSelection: "editorHasSelection",
+  editorIsDirty: "editorIsDirty",
+  editorIsOpen: "editorIsOpen",
+} as const;
+
 export type PiariumWorkbenchShellStatus = "builtin" | "disabled" | "failed" | "missing" | "ready";
 
 export interface PiariumWorkbenchResolvedProfile {

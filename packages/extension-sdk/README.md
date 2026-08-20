@@ -22,10 +22,15 @@ the same contract without importing Piarium's React or private UI.
 harnesses with real owner cleanup semantics. See the complete
 [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).
 
-Granted Host extensions can call `workspace.documents` through `callWorkspaceDocuments` for
-resource-scoped, revisioned document access. The capability never returns file bodies in watch
-events, and it cannot escape the workspace the application host resolved.
+Granted Host extensions can call `workspace.documents` through `callWorkspaceDocuments` or
+`createWorkspaceDocumentsClient` for resource-scoped, revisioned document access. The capability never
+returns file bodies in watch events, and it cannot escape the workspace the application host resolved.
 
-`callWorkspaceSearch` and `callWorkspaceLanguage` reach the host-owned search and language
-services. Language servers are spawned only in the application host; untrusted workspaces cannot
-execute project-provided server commands. Search failures are distinct from zero matches.
+`callWorkspaceSearch` / `callWorkspaceLanguage` and `createWorkspaceLanguageClient` reach the
+host-owned search and language services. `defineLanguageProvider` registers a Host language server.
+Language servers are spawned only in the application host; untrusted workspaces cannot execute
+project-provided server commands. Search failures are distinct from zero matches.
+
+Public workbench constants (`PIARIUM_WORKBENCH_REPLACEMENT_TARGETS`, `PIARIUM_WORKBENCH_SLOTS`,
+`PIARIUM_WORKBENCH_CONTEXT_KEYS`) are re-exported from this package. `defineShellMount`,
+`defineViewMount`, and `defineEditorMount` are typed aliases of `defineSurfaceMount`.

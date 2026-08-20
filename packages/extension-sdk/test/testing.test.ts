@@ -193,3 +193,72 @@ test("workspace.search and workspace.language capability helpers forward host ca
     ["workspace.language", "getStatus", { workspaceId: "ws", languageId: "typescript" }],
   ]);
 });
+
+test("typed document and language clients plus workbench mounts are public SDK contracts", async () => {
+  const {
+    createWorkspaceDocumentsClient,
+    createWorkspaceLanguageClient,
+    defineEditorMount,
+    defineLanguageProvider,
+    defineShellMount,
+    PIARIUM_WORKBENCH_CONTEXT_KEYS,
+    PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+    PIARIUM_WORKBENCH_SLOTS,
+  } = await import("../src/index.js");
+  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
+  assert.equal(PIARIUM_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
+  assert.equal(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
+  const calls: Array<[string, string]> = [];
+  const capabilities = {
+    call: async (capability: string, method: string) => {
+      calls.push([capability, method]);
+      if (method === "write") return { status: "written", revision: "d1_1", byteLength: 3 };
+      if (method === "registerProvider") return { status: "registered", providerId: "md" };
+      return { status: "ok" };
+    },
+  };
+  const written = await createWorkspaceDocumentsClient(capabilities).write({
+    resource: { workspaceId: "ws", resourceId: "note.txt" },
+    content: "one",
+    encoding: "utf-8",
+    bom: false,
+    expectedRevision: null,
+    operationId: "op-1",
+  });
+  assert.equal((written as { status?: string }).status, "written");
+  await createWorkspaceLanguageClient(capabilities).registerProvider({
+    command: "node",
+    languageIds: ["markdown"],
+    providerId: "md",
+  });
+  const provider = defineLanguageProvider({
+    command: "node",
+    languageIds: ["markdown"],
+    providerId: "md",
+  });
+  await runHostExtensionConformance({ activation: provider.activate, extensionId: "dev.example.language" });
+  assert.equal(typeof defineShellMount, "function");
+  assert.equal(typeof defineEditorMount, "function");
+  assert.deepEqual(calls.slice(0, 2), [
+    ["workspace.documents", "write"],
+    ["workspace.language", "registerProvider"],
+  ]);
+});
+
+test("workbench conformance covers async mount abort, profile switch, and resource conflict", async () => {
+  const {
+    runIsolatedDocumentConflictConformance,
+    runSurfaceMountConformance,
+    runWorkbenchProfileConformance,
+  } = await import("../src/testing.js");
+  const mount = await runSurfaceMountConformance();
+  assert.equal(mount.mounted, true);
+  assert.equal(mount.disposed, true);
+  assert.equal(mount.aborted, true);
+  const profiles = runWorkbenchProfileConformance();
+  assert.equal(profiles.beforeSwitch, "default");
+  assert.equal(profiles.afterSwitch, "studio");
+  assert.equal(profiles.desiredEnabledUnchanged, true);
+  assert.equal(profiles.failedCandidateKeepsPrevious, true);
+  assert.equal((await runIsolatedDocumentConflictConformance()).status, "conflict");
+});

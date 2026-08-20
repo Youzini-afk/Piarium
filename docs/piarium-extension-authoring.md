@@ -38,6 +38,37 @@ npx piarium-extension test
 project is a complete managed Surface extension with a standalone `piarium.extension.json`, source,
 build mapping, TypeScript configuration, and package metadata.
 
+Optional `--template` values:
+
+| Template | What it generates |
+| --- | --- |
+| `surface` | Default managed Surface page contribution |
+| `shell` | Framework-neutral `workbench.shell` replacement using `defineShellMount` |
+| `editor` | Custom editor contribution on `workbench.editor.actions` |
+| `view` | Sidebar view on `workbench.primary-sidebar.views` |
+| `language` | Brokered Host language provider using `defineLanguageProvider` |
+
+Shell, editor, and view templates import only `@piarium/extension-sdk` and
+`@piarium/extension-contract`. They must not import Piarium's React product UI. Documents, terminals,
+and sessions stay in Core even when a community Shell fully redraws the chrome.
+
+## Workbench SDK
+
+`@piarium/extension-sdk` re-exports workbench targets, slots, context keys, and the `default` /
+`piarium.ide` profile IDs. Use:
+
+- `defineSurfaceMount` / `defineShellMount` / `defineViewMount` / `defineEditorMount` for DOM, Canvas, or any framework
+- `createWorkspaceDocumentsClient` for resource-scoped, revisioned document reads and writes
+- `createWorkspaceLanguageClient` / `defineLanguageProvider` to register a Host-side language server
+- `@piarium/extension-sdk/testing` fixtures for enable/disable leak checks, async mount abort, profile switch without mutating desired enablement, and expected-revision document conflict
+
+`@piarium/extension-react` remains optional. `defineReactShell`, `defineReactView`, and
+`defineReactEditor` wrap the same mount contract.
+
+Do not publish a new npm tag from this handoff. The coordinated next public version is **0.2.0** for
+`extension-contract`, `extension-sdk`, `extension-react`, `extension-cli`, `extension-surface`, and
+`extension-host`. Wait for an explicit publish approval.
+
 ## Manifest authority
 
 `piarium.extension.json` is the authoritative package contract. `package.json` remains npm/package
@@ -345,8 +376,10 @@ on restart. Staged or merely reviewed native candidates do not move on restart.
 The Extension Inspector uses public host and Surface state. It shows:
 
 - selected version/source/integrity and candidate artifact facts;
-- Host and Surface owner realms, generation, current status, and update timestamp;
-- manifest and live dynamic contributions;
+- Host and Surface owner realms, generation, current status, update timestamp, and cleanup generation;
+- manifest and live dynamic contributions, including slot placement and replacement targets;
+- the active Shell contribution and whether the inspected extension owns it;
+- document and language service ownership from granted capabilities and live Host providers;
 - live Host and Surface service providers;
 - required services and companion Pi-package metadata;
 - capability decisions and extension-attributed catalog/runtime diagnostics.

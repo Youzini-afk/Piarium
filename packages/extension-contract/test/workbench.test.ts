@@ -17,6 +17,7 @@ import {
   PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL,
   PIARIUM_WORKBENCH_IDE_PROFILE_ID,
   PIARIUM_WORKBENCH_IDE_PROFILE_LABEL,
+  PIARIUM_WORKBENCH_CONTEXT_KEYS,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
   PIARIUM_WORKBENCH_SLOTS,
   resolvePiariumWorkbenchLayout,
@@ -350,4 +351,13 @@ test("resolves the official IDE Workbench on web and desktop without forcing mob
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" }).status, "ready");
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "desktop", userId: "default" }).status, "ready");
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "mobile", userId: "default" }).status, "builtin");
+});
+
+test("public workbench context keys stay stable identifiers", () => {
+  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorIsOpen, "editorIsOpen");
+  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorIsDirty, "editorIsDirty");
+  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.editorHasSelection, "editorHasSelection");
+  assert.equal(PIARIUM_WORKBENCH_SLOTS.primarySidebarViews, "workbench.primary-sidebar.views");
+  assert.equal(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell, "workbench.shell");
+  assert.equal(PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.editor, "workbench.editor");
 });
