@@ -3052,6 +3052,7 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "Скасувати",
   "vscodeLayout.actions.newSessionAria": "Нова сесія",
   "vscodeLayout.actions.openAgentManagerAria": "Відкрити менеджер агентів",
+  "vscodeLayout.agentManager.companionHint": "Групи агентів і Fleet працюють у профілі Agent Piarium на комп’ютері або в Інтернеті. Цей супутник зберігає чат, файли й контекст у редакторі.",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Змінити розмір бічної панелі сесій",
   "vscodeLayout.actions.settingsAria": "Налаштування",
   "vscodeLayout.quota.title": "Ліміти запитів",

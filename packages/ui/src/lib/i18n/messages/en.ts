@@ -2902,6 +2902,7 @@ export const dict = {
   'vscodeLayout.actions.cancel': 'Cancel',
   'vscodeLayout.actions.newSessionAria': 'New session',
   'vscodeLayout.actions.openAgentManagerAria': 'Open Agent Manager',
+  'vscodeLayout.agentManager.companionHint': 'Agent groups and Fleet run in the Piarium Agent Profile on desktop or web. This companion keeps chat, files, and context in the editor.',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Resize sessions sidebar',
   'vscodeLayout.actions.settingsAria': 'Settings',
   'vscodeLayout.quota.title': 'Rate limits',

@@ -1,27 +1,33 @@
 import * as vscode from 'vscode';
-import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { ChatViewProvider } from './ChatViewProvider';
+import { parseCompanionUri } from './companion-uri';
 import {
   resolvePiNodeExecutable,
   resolveVSCodePiHostEntry,
   VSCodePiRuntime,
 } from './piRuntime';
-import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
-import { SettingsPanelProvider } from './SettingsPanelProvider';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 
 let chatViewProvider: ChatViewProvider | undefined;
-let agentManagerProvider: AgentManagerPanelProvider | undefined;
-let sessionEditorProvider: SessionEditorPanelProvider | undefined;
-let settingsPanelProvider: SettingsPanelProvider | undefined;
 let piRuntime: VSCodePiRuntime | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let activeSessionId: string | null = null;
-let activeSessionTitle: string | null = null;
 
 const t = vscode.l10n.t;
 const CHAT_VIEW_BOOTSTRAP_DELAY_MS = 80;
 const waitForChatViewBootstrap = () => new Promise<void>((resolve) => setTimeout(resolve, CHAT_VIEW_BOOTSTRAP_DELAY_MS));
+
+const readSettingsPage = (settingsPage: unknown): string | undefined => {
+  if (typeof settingsPage === 'string') {
+    const page = settingsPage.trim();
+    return page || undefined;
+  }
+  if (settingsPage && typeof settingsPage === 'object' && typeof (settingsPage as { page?: unknown }).page === 'string') {
+    const page = String((settingsPage as { page: string }).page).trim();
+    return page || undefined;
+  }
+  return undefined;
+};
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel('Piarium');
@@ -29,10 +35,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(piRuntime);
 
   chatViewProvider = new ChatViewProvider(context, context.extensionUri, piRuntime);
-  agentManagerProvider = new AgentManagerPanelProvider(context, context.extensionUri, piRuntime);
-  sessionEditorProvider = new SessionEditorPanelProvider(context, context.extensionUri, piRuntime);
-  settingsPanelProvider = new SettingsPanelProvider(context, context.extensionUri, piRuntime);
-  context.subscriptions.push(agentManagerProvider, sessionEditorProvider, settingsPanelProvider);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(
     ChatViewProvider.viewType,
     chatViewProvider,
@@ -104,33 +106,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return false;
   };
 
+  const openCompanionSession = async (sessionId: string): Promise<void> => {
+    if (!await revealChatViewForPayload()) return;
+    chatViewProvider?.openSession(sessionId);
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('piarium.focusChat', () => vscode.commands.executeCommand('piarium.chatView.focus')),
-    vscode.commands.registerCommand('piarium.openAgentManager', () => agentManagerProvider?.createOrShow()),
+    vscode.commands.registerCommand('piarium.openAgentManager', () => {
+      vscode.window.showInformationMessage(
+        t('Piarium: Agent groups and Fleet run in the Piarium Agent Profile on desktop or web'),
+      );
+    }),
     vscode.commands.registerCommand('piarium.internal.settingsSynced', (settings: unknown) => {
       chatViewProvider?.notifySettingsSynced(settings);
-      sessionEditorProvider?.notifySettingsSynced(settings);
-      settingsPanelProvider?.notifySettingsSynced(settings);
     }),
-    vscode.commands.registerCommand('piarium.setActiveSession', (sessionId: unknown, title?: unknown) => {
+    vscode.commands.registerCommand('piarium.setActiveSession', (sessionId: unknown) => {
       activeSessionId = typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : null;
-      activeSessionTitle = activeSessionId && typeof title === 'string' && title.trim() ? title.trim() : null;
     }),
     vscode.commands.registerCommand('piarium.openActiveSessionInEditor', () => {
       if (!activeSessionId) {
         vscode.window.showInformationMessage(t('Piarium: No active session'));
         return;
       }
-      sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
+      return openCompanionSession(activeSessionId);
     }),
-    vscode.commands.registerCommand('piarium.openSessionInEditor', (sessionId: unknown, title?: unknown) => {
+    vscode.commands.registerCommand('piarium.openSessionInEditor', (sessionId: unknown) => {
       if (typeof sessionId !== 'string' || !sessionId.trim()) return;
-      sessionEditorProvider?.createOrShow(sessionId.trim(), typeof title === 'string' ? title : undefined);
+      return openCompanionSession(sessionId.trim());
     }),
-    vscode.commands.registerCommand('piarium.openNewSessionInEditor', () => sessionEditorProvider?.createOrShowNewSession()),
+    vscode.commands.registerCommand('piarium.openNewSessionInEditor', () => vscode.commands.executeCommand('piarium.newSession')),
     vscode.commands.registerCommand('piarium.openCurrentOrNewSessionInEditor', () => {
-      if (activeSessionId) sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
-      else sessionEditorProvider?.createOrShowNewSession();
+      if (activeSessionId) return openCompanionSession(activeSessionId);
+      return vscode.commands.executeCommand('piarium.newSession');
     }),
     vscode.commands.registerCommand('piarium.restartRuntime', async () => {
       try {
@@ -142,6 +150,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
     }),
   );
+
+  context.subscriptions.push(vscode.window.registerUriHandler({
+    handleUri(uri) {
+      const target = parseCompanionUri(uri);
+      if (target.action === 'unknown') {
+        vscode.window.showErrorMessage(t('Piarium: Unknown deep link {0}', target.path));
+        return;
+      }
+      void (async () => {
+        if (target.action === 'session') {
+          await openCompanionSession(target.sessionId);
+          return;
+        }
+        await revealChatViewForPayload();
+      })();
+    },
+  }));
 
   context.subscriptions.push(vscode.commands.registerCommand('piarium.addToContext', async () => {
     const editor = vscode.window.activeTextEditor;
@@ -161,7 +186,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       filename: `${vscode.workspace.asRelativePath(editor.document.uri, false)}:${startLine === endLine ? startLine : `${startLine}-${endLine}`}`,
       text: selectedText,
     };
-    if (sessionEditorProvider?.addContextSelectionToActivePanel(contextSelection)) return;
     if (await revealChatViewForPayload()) chatViewProvider?.addContextSelection(contextSelection);
   }));
 
@@ -199,10 +223,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.window.showWarningMessage(t('Piarium: No file selected to mention'));
         return;
       }
-      if (!sessionEditorProvider?.addFileAttachmentsToActivePanel(files)) {
-        if (!await revealChatViewForPayload()) return;
-        chatViewProvider?.addFileAttachments(files);
-      }
+      if (!await revealChatViewForPayload()) return;
+      chatViewProvider?.addFileAttachments(files);
       if (skipped) vscode.window.showInformationMessage(t('Piarium: Some folders or unsupported resources were skipped'));
     },
   ));
@@ -229,7 +251,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const createSessionWithEditorPrompt = async (mode: 'explain' | 'improve'): Promise<void> => {
     const prompt = promptFromEditor(mode);
-    if (!prompt || sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) return;
+    if (!prompt) return;
     if (await revealChatViewForPayload()) chatViewProvider?.createNewSessionWithPrompt(prompt);
   };
   context.subscriptions.push(
@@ -256,6 +278,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const workspaceFolders = candidates.some((folder) => folder.path === folderPath)
       ? candidates
       : [...candidates, { name: folderPath.split(/[\\/]/).filter(Boolean).pop() ?? folderPath, path: folderPath }];
+    if (!await revealChatViewForPayload()) return;
     chatViewProvider?.createNewSession({ directory: folderPath, workspaceFolders });
   }));
 
@@ -263,15 +286,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       chatViewProvider?.syncWorkspaceFolders(resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []));
     }),
-    vscode.commands.registerCommand('piarium.showSettings', (settingsPage?: unknown) => {
-      const page = typeof settingsPage === 'string'
-        ? settingsPage
-        : settingsPage && typeof settingsPage === 'object' && typeof (settingsPage as { page?: unknown }).page === 'string'
-          ? String((settingsPage as { page: string }).page)
-          : undefined;
-      settingsPanelProvider?.createOrShow(page);
+    vscode.commands.registerCommand('piarium.showSettings', async (settingsPage?: unknown) => {
+      if (!await revealChatViewForPayload()) return;
+      const page = readSettingsPage(settingsPage);
+      if (page) chatViewProvider?.showSettings(page);
+      else chatViewProvider?.showSettings();
     }),
-    vscode.commands.registerCommand('piarium.closeSettingsPanel', () => settingsPanelProvider?.dispose()),
     vscode.commands.registerCommand('piarium.showRuntimeStatus', () => {
       const status = piRuntime?.getStatus();
       let nodePath = '(unavailable)';
@@ -297,30 +317,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((state) => {
       chatViewProvider?.notifyWindowFocusChanged(state.focused);
-      sessionEditorProvider?.notifyWindowFocusChanged(state.focused);
-      agentManagerProvider?.notifyWindowFocusChanged(state.focused);
     }),
     vscode.window.onDidChangeActiveColorTheme((theme) => {
       chatViewProvider?.updateTheme(theme.kind);
-      agentManagerProvider?.updateTheme(theme.kind);
-      sessionEditorProvider?.updateTheme(theme.kind);
-      settingsPanelProvider?.updateTheme(theme.kind);
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration('workbench.colorTheme')
         && !event.affectsConfiguration('workbench.preferredLightColorTheme')
         && !event.affectsConfiguration('workbench.preferredDarkColorTheme')) return;
-      const kind = vscode.window.activeColorTheme.kind;
-      chatViewProvider?.updateTheme(kind);
-      agentManagerProvider?.updateTheme(kind);
-      sessionEditorProvider?.updateTheme(kind);
-      settingsPanelProvider?.updateTheme(kind);
+      chatViewProvider?.updateTheme(vscode.window.activeColorTheme.kind);
     }),
     piRuntime.onStatusChange(({ status, error }) => {
       chatViewProvider?.updateConnectionStatus(status, error);
-      agentManagerProvider?.updateConnectionStatus(status, error);
-      sessionEditorProvider?.updateConnectionStatus(status, error);
-      settingsPanelProvider?.updateConnectionStatus(status, error);
     }),
   );
 
@@ -333,9 +341,6 @@ export async function deactivate(): Promise<void> {
   await piRuntime?.stop();
   piRuntime = undefined;
   chatViewProvider = undefined;
-  agentManagerProvider = undefined;
-  sessionEditorProvider = undefined;
-  settingsPanelProvider = undefined;
   outputChannel?.dispose();
   outputChannel = undefined;
 }

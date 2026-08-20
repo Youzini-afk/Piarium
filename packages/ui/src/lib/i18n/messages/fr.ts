@@ -2656,6 +2656,7 @@ export const dict = {
   'vscodeLayout.actions.backToSessionsAria': 'Retour aux sessions',
   'vscodeLayout.actions.newSessionAria': 'Nouvelle session',
   'vscodeLayout.actions.openAgentManagerAria': 'Ouvrir le gestionnaire d\'agents',
+  'vscodeLayout.agentManager.companionHint': 'Les groupes d’agents et Fleet s’exécutent dans le profil Agent de Piarium sur le bureau ou le Web. Ce compagnon conserve le chat, les fichiers et le contexte dans l’éditeur.',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Redimensionner la barre latérale des sessions',
   'vscodeLayout.actions.settingsAria': 'Paramètres',
   'vscodeLayout.quota.title': 'Limites de taux',

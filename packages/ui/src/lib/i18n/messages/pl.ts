@@ -2939,6 +2939,7 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': 'Anuluj',
   'vscodeLayout.actions.newSessionAria': 'Nowa sesja',
   'vscodeLayout.actions.openAgentManagerAria': 'Otwórz menedżer agentów',
+  'vscodeLayout.agentManager.companionHint': 'Grupy agentów i Fleet działają w profilu Agent Piarium na pulpicie lub w sieci. Ten dodatek zachowuje czat, pliki i kontekst w edytorze.',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Zmień rozmiar panelu sesji',
   'vscodeLayout.actions.settingsAria': 'Ustawienia',
   'vscodeLayout.quota.actions.rateLimitsAria': 'Limity użycia',

@@ -19,5 +19,7 @@
   "Session": "Session",
   "Agent Manager": "Gestionnaire d’agents",
   "Piarium: Pi runtime connection failed": "Piarium : échec de la connexion à l’exécution Pi",
-  "Piarium: Waiting for the webview development server": "Piarium : en attente du serveur de développement de la webview"
+  "Piarium: Waiting for the webview development server": "Piarium : en attente du serveur de développement de la webview",
+  "Piarium: Agent groups and Fleet run in the Piarium Agent Profile on desktop or web": "Piarium : les groupes d’agents et Fleet s’exécutent dans le profil Agent de Piarium sur le bureau ou le Web",
+  "Piarium: Unknown deep link {0}": "Piarium : lien profond inconnu {0}"
 }

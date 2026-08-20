@@ -2903,6 +2903,7 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '취소',
   'vscodeLayout.actions.newSessionAria': '새 세션',
   'vscodeLayout.actions.openAgentManagerAria': '에이전트 관리자 열기',
+  'vscodeLayout.agentManager.companionHint': '에이전트 그룹과 Fleet는 데스크톱 또는 웹의 Piarium Agent 프로필에서 실행됩니다. 이 컴패니언은 채팅, 파일, 컨텍스트를 편집기에 유지합니다.',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '세션 사이드바 크기 조정',
   'vscodeLayout.actions.settingsAria': '설정',
   'vscodeLayout.quota.title': '레이트 리밋',

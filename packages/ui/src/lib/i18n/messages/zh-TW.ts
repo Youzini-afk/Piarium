@@ -2866,6 +2866,7 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': '取消',
   'vscodeLayout.actions.newSessionAria': '新增會話',
   'vscodeLayout.actions.openAgentManagerAria': '開啟 Agent 管理器',
+  'vscodeLayout.agentManager.companionHint': 'Agent 群組與 Fleet 在桌面或網頁的 Piarium Agent 設定檔中執行。此配套擴充功能將聊天、檔案與上下文留在編輯器中。',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '調整會話側邊欄大小',
   'vscodeLayout.actions.settingsAria': '設定',
   'vscodeLayout.quota.title': '速率限制',

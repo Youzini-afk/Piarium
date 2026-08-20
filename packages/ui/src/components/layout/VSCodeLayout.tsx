@@ -29,8 +29,6 @@ const readVSCodeConfig = () => (
     ? undefined
     : (window as typeof window & {
         __VSCODE_CONFIG__?: {
-          initialSessionId?: unknown;
-          viewMode?: unknown;
           workspaceFolder?: unknown;
         };
       }).__VSCODE_CONFIG__
@@ -135,24 +133,14 @@ export const VSCodeLayout: React.FC = () => {
   const runtimeApis = useRuntimeAPIs();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const width = useContainerWidth(containerRef);
-  const viewMode = readVSCodeConfig()?.viewMode === 'editor' ? 'editor' : 'sidebar';
-  const initialSessionId = React.useMemo(() => {
-    const value = readVSCodeConfig()?.initialSessionId;
-    return typeof value === 'string' && value.trim() ? value.trim() : null;
-  }, []);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const summaries = usePiSessionStore((state) => state.summaries);
   const currentRecord = usePiSessionStore((state) => (
     state.currentSessionId ? state.records[state.currentSessionId] : undefined
   ));
-  const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
-  const openSession = usePiSessionStore((state) => state.openSession);
-  const createSession = usePiSessionStore((state) => state.createSession);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const setDirectory = useDirectoryStore((state) => state.setDirectory);
-  const bootstrappedEditor = React.useRef(false);
   const [currentView, setCurrentView] = React.useState<VSCodeView>('sessions');
   const viewBeforeSettings = React.useRef<VSCodeView>('sessions');
 
@@ -191,34 +179,9 @@ export const VSCodeLayout: React.FC = () => {
   }, [currentSessionId]);
 
   React.useEffect(() => {
-    if (viewMode !== 'editor' || bootstrappedEditor.current) return;
-    bootstrappedEditor.current = true;
-    void (async () => {
-      try {
-        await loadCatalog();
-        if (initialSessionId) {
-          await openSession({ sessionId: initialSessionId });
-          return;
-        }
-        const cwd = resolveCwd();
-        if (!cwd) throw new Error('Open a workspace folder before creating a Pi session.');
-        setDirectory(cwd, { showOverlay: false });
-        // Editor bootstrap intentionally keeps its historical immediate-create
-        // behavior so the editor always has a real session to attach to.
-        await createSession(cwd);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : String(error));
-      }
-    })();
-  }, [createSession, initialSessionId, loadCatalog, openSession, resolveCwd, setDirectory, viewMode]);
-
-  React.useEffect(() => {
     if (!runtimeApis.vscode) return;
     void runtimeApis.vscode.executeCommand('piarium.setActiveSession', currentSessionId, sessionTitle);
-    if (viewMode === 'editor' && currentSessionId && sessionTitle) {
-      void runtimeApis.vscode.executeCommand('piarium.updateSessionEditorTitle', currentSessionId, sessionTitle);
-    }
-  }, [currentSessionId, runtimeApis.vscode, sessionTitle, viewMode]);
+  }, [currentSessionId, runtimeApis.vscode, sessionTitle]);
 
   React.useEffect(() => {
     const handler = (event: Event) => {
@@ -236,17 +199,13 @@ export const VSCodeLayout: React.FC = () => {
     setCurrentView('settings');
   }, [currentView]);
   const openAgentManager = React.useCallback(() => {
-    void runtimeApis.vscode?.openAgentManager();
-  }, [runtimeApis.vscode]);
-  const expanded = viewMode === 'sidebar' && width >= EXPANDED_LAYOUT_THRESHOLD;
+    toast.info(t('vscodeLayout.agentManager.companionHint'));
+  }, [t]);
+  const expanded = width >= EXPANDED_LAYOUT_THRESHOLD;
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 w-full flex-col bg-background text-foreground">
-      {viewMode === 'editor' ? (
-        <ErrorBoundary>
-          <PiChatView active />
-        </ErrorBoundary>
-      ) : currentView === 'settings' ? (
+      {currentView === 'settings' ? (
         <React.Suspense fallback={null}>
           <SettingsView
             forceMobile={width > 0 && width < SETTINGS_MOBILE_THRESHOLD}

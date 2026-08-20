@@ -2,17 +2,19 @@
 
 Piarium brings the project's Pi-native sessions, agents, providers, packages, and workspace tools into VS Code, Cursor, and compatible editors.
 
-The extension starts the bundled Pi host and runtime broker in the extension host. It does not download, discover, or proxy an OpenCode CLI. The webview talks to the Pi runtime through a typed VS Code message bridge, while filesystem, Git, GitHub, editor, settings, and revisioned document operations stay in the trusted extension host.
+The extension is a companion, not a second workbench. It starts the bundled Pi host and runtime broker in the extension host. It does not download, discover, or proxy an OpenCode CLI. The sidebar webview talks to the Pi runtime through a typed VS Code message bridge, while filesystem, Git, GitHub, editor, settings, and revisioned document operations stay in the trusted extension host.
+
+Official IDE Workbench (`piarium.ide`) and Agent Profile Fleet/agent-group management run on Piarium desktop or web. See [the companion migration notes](../../docs/vscode-companion.md).
 
 ## Features
 
 - Pi session tree and streaming chat beside the editor.
 - Pi agents from built-ins, user/project configuration, and installed packages.
-- Provider, model, package, prompt, and resource settings shared with Piarium.
-- Parallel agent groups with isolated Git worktrees.
+- Provider, model, package, prompt, and resource settings in the companion sidebar.
 - File mentions, attachments, click-to-open paths, and diff views.
 - Git and GitHub pull request or issue workflows.
-- Sidebar, editor-tab session, Settings, and Agent Manager surfaces.
+- Send the current file, selection, or editor prompt into the active Pi session.
+- Deep links that focus chat (`vscode://youzini-afk.piarium/chat`) or open a session (`?session=<id>`).
 - VS Code light, dark, and high-contrast theme adaptation.
 
 ## Commands
@@ -22,9 +24,9 @@ The extension starts the bundled Pi host and runtime broker in the extension hos
 | `Piarium: Focus Chat` | Focus the chat view. |
 | `Piarium: New Session` | Start a Pi session in the selected workspace. |
 | `Piarium: Open Sidebar` | Reveal the Piarium view container. |
-| `Piarium: Open Agent Manager` | Run and compare an agent group. |
-| `Piarium: Open Session in Editor` | Open the active or a new session in an editor tab. |
-| `Piarium: Settings` | Open Piarium Settings. |
+| `Piarium: Open Agent Manager` | Explain that agent groups and Fleet live in the Piarium Agent Profile on desktop or web. |
+| `Piarium: Open Active Session` | Open the active session in the companion sidebar. |
+| `Piarium: Settings` | Open Piarium Settings in the sidebar. |
 | `Piarium: Restart Pi Runtime` | Dispose and restart the bundled Pi runtime. |
 | `Piarium: Show Pi Runtime Status` | Show runtime diagnostics in the output channel. |
 

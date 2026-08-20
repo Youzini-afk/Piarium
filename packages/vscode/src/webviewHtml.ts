@@ -4,17 +4,11 @@ import { getThemeKindName } from './theme';
 import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
-export type PanelType = 'chat' | 'agentManager' | 'settings';
-
 export interface WebviewHtmlOptions {
   devServerUrl?: string | null;
   extensionUri: vscode.Uri;
   extensionVersion?: string;
-  initialSessionId?: string;
-  initialSettingsPage?: string;
   initialStatus: PiRuntimeConnectionStatus;
-  panelType?: PanelType;
-  viewMode?: 'sidebar' | 'editor';
   webview: vscode.Webview;
   workspaceFolder: string;
   workspaceFolders?: WorkspaceFolderCandidate[];
@@ -47,10 +41,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     workspaceFolder,
     workspaceFolders = [],
     initialStatus,
-    panelType = 'chat',
-    initialSessionId,
-    initialSettingsPage,
-    viewMode = 'sidebar',
     devServerUrl,
     extensionVersion = '',
   } = options;
@@ -75,10 +65,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     extensionVersion,
     platform: os.platform(),
     arch: os.arch(),
-    panelType,
-    viewMode,
-    initialSessionId: initialSessionId ?? null,
-    initialSettingsPage: initialSettingsPage ?? null,
   });
 
   return `<!DOCTYPE html>

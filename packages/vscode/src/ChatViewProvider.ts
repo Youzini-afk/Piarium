@@ -268,16 +268,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public showSettings() {
-    if (this._view) {
-      // Reveal the webview panel
-      this._view.show(true);
-
-      this._view.webview.postMessage({
-        type: 'command',
-        command: 'showSettings'
-      });
+  public openSession(sessionId: string) {
+    const trimmed = sessionId.trim();
+    if (!this._view || !trimmed) {
+      return;
     }
+
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'openSession',
+      payload: { sessionId: trimmed },
+    });
+  }
+
+  public showSettings(page?: string) {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'showSettings',
+    });
+    const trimmed = page?.trim();
+    if (!trimmed) return;
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'showSettingsPage',
+      payload: { page: trimmed },
+    });
   }
 
   public postMessage(message: unknown): void {

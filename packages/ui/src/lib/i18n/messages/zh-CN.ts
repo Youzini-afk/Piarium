@@ -3052,6 +3052,7 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "取消",
   'vscodeLayout.actions.newSessionAria': '新建会话',
   'vscodeLayout.actions.openAgentManagerAria': '打开智能体管理器',
+  'vscodeLayout.agentManager.companionHint': '智能体组和 Fleet 在桌面或网页的 Piarium Agent 配置中运行。此配套扩展将聊天、文件和上下文留在编辑器中。',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '调整会话侧边栏大小',
   'vscodeLayout.actions.settingsAria': '设置',
   'vscodeLayout.quota.title': '速率限制',

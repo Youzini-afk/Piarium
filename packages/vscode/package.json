@@ -36,7 +36,8 @@
   "activationEvents": [
     "onCommand:piarium.openSidebar",
     "onCommand:piarium.attachExplorerToChat",
-    "onView:piarium.chatView"
+    "onView:piarium.chatView",
+    "onUri"
   ],
   "contributes": {
     "viewsContainers": {
@@ -164,7 +165,7 @@
       ],
       "editor/title": [
         {
-          "command": "piarium.openNewSessionInEditor",
+          "command": "piarium.newSession",
           "group": "navigation@1"
         }
       ],
@@ -175,19 +176,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "piarium.openCurrentOrNewSessionInEditor",
+          "command": "piarium.openAgentManager",
           "when": "view == piarium.chatView",
           "group": "navigation@2"
         },
         {
-          "command": "piarium.openAgentManager",
-          "when": "view == piarium.chatView",
-          "group": "navigation@3"
-        },
-        {
           "command": "piarium.showSettings",
           "when": "view == piarium.chatView",
-          "group": "navigation@4"
+          "group": "navigation@3"
         }
       ],
       "piarium.submenu": [

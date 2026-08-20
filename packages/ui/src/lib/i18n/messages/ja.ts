@@ -2902,6 +2902,7 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.cancel': 'キャンセル',
   'vscodeLayout.actions.newSessionAria': '新しいセッション',
   'vscodeLayout.actions.openAgentManagerAria': 'エージェントマネージャーを開く',
+  'vscodeLayout.agentManager.companionHint': 'エージェントグループと Fleet は、デスクトップまたは Web の Piarium Agent プロファイルで実行します。このコンパニオンは、チャット、ファイル、コンテキストをエディター内に保ちます。',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'セッションサイドバーのサイズを調整',
   'vscodeLayout.actions.settingsAria': '設定',
   'vscodeLayout.quota.title': 'レート制限',

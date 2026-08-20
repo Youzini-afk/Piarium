@@ -3052,6 +3052,7 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.archiveAllError": "Error al archivar {count} sesión(es)",
   "vscodeLayout.actions.cancel": "Cancelar",
   "vscodeLayout.actions.openAgentManagerAria": "Abrir gestor de agentes",
+  "vscodeLayout.agentManager.companionHint": "Los grupos de agentes y Fleet se ejecutan en el perfil Agent de Piarium en escritorio o web. Este compañero conserva el chat, los archivos y el contexto en el editor.",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Ajustar tamaño del panel de sesiones",
   "vscodeLayout.actions.settingsAria": "Configuración",
   "vscodeLayout.quota.title": "Límites de tasa",

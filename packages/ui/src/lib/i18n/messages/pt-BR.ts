@@ -3051,6 +3051,7 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.cancel": "Cancelar",
   "vscodeLayout.actions.newSessionAria": "Nova sessão",
   "vscodeLayout.actions.openAgentManagerAria": "Abrir gerenciador de agentes",
+  "vscodeLayout.agentManager.companionHint": "Grupos de agentes e o Fleet são executados no perfil Agent do Piarium no desktop ou na web. Este companion mantém o chat, os arquivos e o contexto no editor.",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Ajustar tamanho do painel de sessões",
   "vscodeLayout.actions.settingsAria": "Configurações",
   "vscodeLayout.quota.title": "Limites de taxa",

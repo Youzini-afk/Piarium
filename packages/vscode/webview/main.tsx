@@ -11,7 +11,6 @@ import {
 import { configurePiRuntimeSurface } from '@piarium/ui/lib/pi-runtime/client';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
-type PanelType = 'chat' | 'agentManager' | 'settings';
 
 declare const __PIARIUM_WEBVIEW_BUILD_TIME__: string;
 
@@ -24,17 +23,12 @@ declare global {
       light?: Record<string, unknown>;
     } | null;
     __PIARIUM_CONNECTION__?: { error?: string; status: ConnectionStatus };
-    __PIARIUM_PANEL_TYPE__?: PanelType;
     __VSCODE_CONFIG__?: {
       arch?: string;
       connectionStatus?: string;
       extensionVersion?: string;
-      initialSessionId?: string | null;
-      initialSettingsPage?: string | null;
-      panelType?: PanelType;
       platform?: string;
       theme?: string;
-      viewMode?: 'sidebar' | 'editor';
       workspaceFolder: string;
       workspaceFolders?: Array<{ name: string; path: string }>;
     };
@@ -45,7 +39,6 @@ console.log('[Piarium] VS Code webview starting...');
 console.log('[Piarium] VS Code webview build:', __PIARIUM_WEBVIEW_BUILD_TIME__);
 
 window.__PIARIUM_RUNTIME_APIS__ = createVSCodeAPIs();
-window.__PIARIUM_PANEL_TYPE__ = window.__VSCODE_CONFIG__?.panelType || 'chat';
 window.__PIARIUM_CONNECTION__ = {
   status: (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting',
 };
@@ -302,6 +295,18 @@ onCommand('newSession', (payload) => {
     await ensurePiSession({ directory, forceNew: true });
     navigate('chat');
   })().catch((error) => console.error('[Piarium] Failed to create session:', error));
+});
+
+onCommand('openSession', (payload) => {
+  const sessionId = typeof (payload as { sessionId?: unknown } | undefined)?.sessionId === 'string'
+    ? (payload as { sessionId: string }).sessionId.trim()
+    : '';
+  if (!sessionId) return;
+  void (async () => {
+    const { usePiSessionStore } = await import('@/stores/usePiSessionStore');
+    await usePiSessionStore.getState().openSession({ sessionId });
+    navigate('chat');
+  })().catch((error) => console.error('[Piarium] Failed to open session:', error));
 });
 
 onCommand('showSettings', () => navigate('settings'));

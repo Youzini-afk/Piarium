@@ -6,7 +6,7 @@ The extension host is the trusted boundary. It owns the bundled Pi runtime, work
 
 ## Startup and Pi runtime
 
-- `extension.ts` registers Piarium views and commands, creates the panel providers, and owns activation and disposal.
+- `extension.ts` registers the companion sidebar, commands, URI handler, and owns activation and disposal.
 - `piRuntime.ts` resolves the Node executable and staged Pi host, starts one runtime broker, serializes restart/dispose, and exposes connection state.
 - `piRuntimeWebviewBridge.ts` connects an individual webview to the broker protocol and forwards only protocol messages.
 - `webviewHtml.ts` produces the CSP-constrained bootstrap document and injects non-secret workspace/runtime presentation state.
@@ -32,14 +32,14 @@ Worktree creation has three observable phases: `directory-created`, `git-ready`,
 
 Generated worktrees use the Piarium data directory and default `piarium/<name>` branches. The project key is derived from the canonical repository path. The service does not write `.git/opencode`, consume OpenCode project storage, or mirror sandbox metadata into another engine's schema.
 
-## Webview surfaces
+## Companion surface
 
-- `ChatViewProvider.ts`: sidebar chat and workspace/editor context synchronization.
-- `SessionEditorPanelProvider.ts`: session tabs in the editor area.
-- `AgentManagerPanelProvider.ts`: agent-group panel.
-- `SettingsPanelProvider.ts`: Piarium Settings panel.
+- `ChatViewProvider.ts`: sidebar chat, Settings, session switching, and workspace/editor context synchronization.
+- `companion-uri.ts`: `vscode://youzini-afk.piarium/chat` deep-link parsing. Unknown paths fail visibly and do not open a second workbench.
 
-Each surface owns a separate Pi runtime bridge connection and shares the same host lifecycle. Settings updates are broadcast to the other active Piarium webviews after the authoritative write succeeds.
+The official IDE Workbench and Agent Profile Fleet UI are not hosted in VS Code. Settings, session switching, and chat all use this single sidebar webview. The extension host still owns filesystem, Git, documents, search, language, and the bundled Pi runtime.
+
+Settings updates are broadcast back into the sidebar webview after the authoritative write succeeds.
 
 ## Validation
 
