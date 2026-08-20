@@ -73,6 +73,31 @@ advance independently.
 See [maintained extension compatibility](docs/extension-compatibility.md) for the currently verified
 versions and exact evidence.
 
+## Build Piarium extensions
+
+Piarium application extensions and Pi packages are separate product objects: the former extend the
+Piarium workbench, surfaces, and trusted Host, while the latter execute inside the Pi agent. The public
+npm toolchain requires neither a Piarium source checkout nor imports from the product's private UI:
+
+- `@piarium/extension-contract`: manifest, contribution, service, routing, and discovery contracts plus JSON Schema;
+- `@piarium/extension-sdk`: framework-neutral Surface, isolated-realm, and Host authoring APIs;
+- `@piarium/extension-react`: optional React 19 adapter;
+- `@piarium/extension-surface`: lower-level lifecycle and registries for advanced tests or alternate hosts;
+- `@piarium/extension-cli`: project initialization, validation, building, and conformance testing.
+
+Create a complete extension project:
+
+```sh
+npx @piarium/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
+cd my-extension
+npm install
+npx piarium-extension build
+npx piarium-extension test
+```
+
+See the [Piarium extension authoring guide](docs/piarium-extension-authoring.md) for the complete
+manifest, capability, lifecycle, storage, publishing, and testing contracts.
+
 ## Download Desktop
 
 The Windows x64 and ARM64 desktop installers are published through

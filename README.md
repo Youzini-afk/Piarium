@@ -67,6 +67,30 @@ Piarium 不会 fork 这些扩展，也不会复制它们的私有状态。集成
 
 当前验证过的版本和具体证据见[扩展兼容性记录](docs/extension-compatibility.md)。
 
+## 开发 Piarium 扩展
+
+Piarium 应用扩展与 Pi 插件是两个独立的产品对象：前者扩展 Piarium 的工作台、页面和可信宿主，
+后者运行在 Pi 智能体中。公开的 npm 工具链不要求检出 Piarium 源码，也不要求扩展导入产品私有 UI：
+
+- `@piarium/extension-contract`：清单、贡献、服务、路由和发现协议及 JSON Schema；
+- `@piarium/extension-sdk`：与 UI 框架无关的 Surface、隔离运行域和 Host 开发 API；
+- `@piarium/extension-react`：可选的 React 19 适配器；
+- `@piarium/extension-surface`：供高级测试和替代宿主使用的底层生命周期与注册表；
+- `@piarium/extension-cli`：项目初始化、检查、构建和一致性测试。
+
+创建一个完整的扩展项目：
+
+```sh
+npx @piarium/extension-cli init ./my-extension --id dev.example.my-extension --name "My Extension"
+cd my-extension
+npm install
+npx piarium-extension build
+npx piarium-extension test
+```
+
+完整的清单格式、能力、生命周期、存储、发布和测试说明见
+[Piarium 扩展开发指南](docs/piarium-extension-authoring.md)。
+
 ## 下载桌面版
 
 Windows x64 和 ARM64 桌面安装包发布在
