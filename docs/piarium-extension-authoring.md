@@ -415,3 +415,33 @@ first-class workflow even when no catalog contains the extension.
 
 Piarium's complete lifecycle, trust, data-ownership, contribution, workbench, and routing architecture
 is recorded in [piarium-extension-platform.md](piarium-extension-platform.md).
+
+## Piarium public tooling releases
+
+Piarium maintainers publish the five public authoring packages as one exact-version set:
+`extension-contract`, `extension-surface`, `extension-sdk`, `extension-react`, and `extension-cli`.
+Prepare the next version with:
+
+```sh
+bun run release:npm:prepare 0.1.1
+```
+
+This updates all five manifests and their exact internal dependency versions, then refreshes the Bun
+lockfile. Review and commit those changes on `main`. Pushing the matching dedicated tag starts the
+release:
+
+```sh
+git tag -a npm-v0.1.1 -m "Publish Piarium npm tooling 0.1.1"
+git push origin npm-v0.1.1
+```
+
+`.github/workflows/npm-publish.yml` accepts only `npm-v*` tags whose source commit is already on
+`main`. It tests and builds the public packages, packs the exact tarballs, installs and exercises them
+in a disposable project, preserves the artifacts in GitHub Actions, and publishes in dependency
+order. A rerun skips a version only when npm reports the same immutable integrity; an existing version
+with different bytes fails closed.
+
+The workflow uses npm Trusted Publishing with GitHub OIDC. It has no `NPM_TOKEN`, browser approval, or
+GitHub Environment gate. Each package trusts repository `Youzini-afk/Piarium`, workflow filename
+`npm-publish.yml`, no environment claim, and the `npm publish` action. GitHub obtains a short-lived
+credential for each run, and npm attaches provenance automatically.
