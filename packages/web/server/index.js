@@ -795,14 +795,21 @@ async function main(options = {}) {
       piariumVersion: PIARIUM_VERSION,
     });
   }
+  const workspaceConfig = createWorkspaceConfig({
+    env: process.env,
+    cwd: process.cwd(),
+    pathModule: path,
+    osModule: os,
+  });
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
+    maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: createDocumentRootGuard({
       fsPromises,
       pathModule: path,
       readSettings: readSettingsFromDiskMigrated,
-      getWorkspaceRoot: () => createWorkspaceConfig({ env: process.env, cwd: process.cwd(), pathModule: path, osModule: os }).root,
+      getWorkspaceRoot: () => workspaceConfig.root,
     }),
   });
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));

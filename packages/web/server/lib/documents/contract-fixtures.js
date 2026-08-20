@@ -29,7 +29,8 @@ export const createDocumentAuthorityHarness = async (overrides = {}) => {
   const dataDir = path.join(root, 'data');
   await fs.promises.mkdir(workspaceRoot, { recursive: true });
   let trusted = overrides.trusted ?? true;
-  const allowedRoot = overrides.allowedRoot ?? workspaceRoot;
+  const allowedRootInput = overrides.allowedRoot ?? workspaceRoot;
+  const allowedRoot = await fs.promises.realpath(allowedRootInput);
   const authority = createDocumentAuthority({
     hostId: overrides.hostId ?? '11111111-1111-4111-8111-111111111111',
     dataDir,

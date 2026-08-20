@@ -28,7 +28,7 @@ export const useDocumentMeta = (identity: DocumentIdentity | undefined): Documen
 
 export const useDirtyResourceIds = (workspaceId: string | undefined): ReadonlySet<string> => (
   React.useSyncExternalStore(
-    (onStoreChange) => (workspaceId ? getDocumentRegistry().subscribeAll(onStoreChange) : () => undefined),
+    (onStoreChange) => (workspaceId ? getDocumentRegistry().subscribeDirty(workspaceId, onStoreChange) : () => undefined),
     () => (workspaceId ? getDocumentRegistry().dirtyResourceIds(workspaceId) : EMPTY_DIRTY_IDS),
     () => EMPTY_DIRTY_IDS,
   )

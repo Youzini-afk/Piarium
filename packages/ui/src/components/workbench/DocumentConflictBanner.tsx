@@ -26,7 +26,9 @@ export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ 
   const agent = record.externalSource === 'agent';
 
   const save = (): void => {
-    void getDocumentRegistry().save(identity);
+    void getDocumentRegistry().save(identity, record.status === 'deleted'
+      ? { recreateDeleted: true }
+      : { overwriteConflict: true });
   };
 
   return (

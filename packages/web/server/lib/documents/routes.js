@@ -68,6 +68,12 @@ export const registerDocumentRoutes = (app, {
       return res.status(400).json({ error: 'workspaceId is required', reason: 'failed' });
     }
 
+    try {
+      await documents.inspectWorkspace(workspaceId);
+    } catch (error) {
+      return sendError(res, error);
+    }
+
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');

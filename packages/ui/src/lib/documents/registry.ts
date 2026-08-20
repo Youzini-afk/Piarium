@@ -21,6 +21,8 @@ import {
 
 export type DocumentListener = (record: DocumentRecord) => void;
 
+const EMPTY_RESOURCE_IDS: ReadonlySet<string> = new Set();
+
 type RegistryOptions = {
   documents: DocumentsAPI;
   getGeneration?: () => number;
@@ -56,6 +58,24 @@ const emptyRecord = (identity: DocumentIdentity, generation: number): DocumentRe
 
 const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): DocumentRecord => {
   if (result.status === 'missing') {
+    if (record.baseRevision !== null) {
+      const ancestorContent = record.conflict?.ancestorContent ?? record.baseContent;
+      const ancestorRevision = record.conflict?.ancestorRevision ?? record.baseRevision;
+      return {
+        ...record,
+        status: 'deleted',
+        byteLength: 0,
+        errorMessage: null,
+        conflict: record.dirty
+          ? {
+              diskRevision: 'missing',
+              ancestorContent,
+              ancestorRevision,
+              diskContent: '',
+            }
+          : null,
+      };
+    }
     return {
       ...record,
       status: 'missing',
@@ -148,10 +168,13 @@ export class DocumentRegistry {
   private readonly journalDebounceMs: number;
   private readonly records = new Map<string, DocumentRecord>();
   private readonly listeners = new Map<string, Set<DocumentListener>>();
-  private readonly globalListeners = new Set<() => void>();
   private readonly dirtyIdsByWorkspace = new Map<string, Set<string>>();
+  private readonly dirtyListenersByWorkspace = new Map<string, Set<() => void>>();
+  private readonly workspaceListeners = new Map<string, Set<() => void>>();
+  private readonly workspaceVersions = new Map<string, number>();
   private readonly watches = new Map<string, Subscription>();
   private readonly journalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly journalOperations = new Map<string, Promise<void>>();
   private disposed = false;
 
   constructor(options: RegistryOptions) {
@@ -182,33 +205,34 @@ export class DocumentRegistry {
     };
   }
 
-  subscribeAll(listener: () => void): () => void {
-    this.globalListeners.add(listener);
+  subscribeDirty(workspaceId: string, listener: () => void): () => void {
+    const listeners = this.dirtyListenersByWorkspace.get(workspaceId) ?? new Set();
+    listeners.add(listener);
+    this.dirtyListenersByWorkspace.set(workspaceId, listeners);
     return () => {
-      this.globalListeners.delete(listener);
+      const current = this.dirtyListenersByWorkspace.get(workspaceId);
+      current?.delete(listener);
+      if (current?.size === 0) this.dirtyListenersByWorkspace.delete(workspaceId);
     };
   }
 
+  subscribeWorkspace(workspaceId: string, listener: () => void): () => void {
+    const listeners = this.workspaceListeners.get(workspaceId) ?? new Set();
+    listeners.add(listener);
+    this.workspaceListeners.set(workspaceId, listeners);
+    return () => {
+      const current = this.workspaceListeners.get(workspaceId);
+      current?.delete(listener);
+      if (current?.size === 0) this.workspaceListeners.delete(workspaceId);
+    };
+  }
+
+  workspaceVersion(workspaceId: string): number {
+    return this.workspaceVersions.get(workspaceId) ?? 0;
+  }
+
   dirtyResourceIds(workspaceId: string): ReadonlySet<string> {
-    const next = new Set<string>();
-    for (const record of this.records.values()) {
-      if (record.identity.workspaceId === workspaceId && record.dirty) {
-        next.add(record.identity.resourceId);
-      }
-    }
-    const previous = this.dirtyIdsByWorkspace.get(workspaceId);
-    if (previous && previous.size === next.size) {
-      let same = true;
-      for (const id of previous) {
-        if (!next.has(id)) {
-          same = false;
-          break;
-        }
-      }
-      if (same) return previous;
-    }
-    this.dirtyIdsByWorkspace.set(workspaceId, next);
-    return next;
+    return this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
   }
 
   async open(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
@@ -301,13 +325,18 @@ export class DocumentRegistry {
     return next;
   }
 
-  async save(identity: DocumentIdentity): Promise<DocumentRecord> {
+  async save(
+    identity: DocumentIdentity,
+    options: { overwriteConflict?: boolean; recreateDeleted?: boolean } = {},
+  ): Promise<DocumentRecord> {
     this.assertActive();
     const generation = this.getGeneration();
     const current = this.records.get(documentKey(identity));
     if (!current) throw new DocumentsError('Document is not open', { reason: 'failed' });
     if (!current.dirty) return current;
     if (current.status === 'binary' || current.status === 'unsupported-encoding') return current;
+    if (current.status === 'conflict' && !options.overwriteConflict) return current;
+    if (current.status === 'deleted' && !options.recreateDeleted) return current;
     const operationId = crypto.randomUUID();
     const capturedEdit = current.localEditRevision;
     const content = serializeEditorContent(current.buffer, current.lineEnding);
@@ -323,9 +352,7 @@ export class DocumentRegistry {
         content,
         encoding: current.encoding,
         bom: current.bom,
-        expectedRevision: current.status === 'deleted' || current.status === 'missing' || current.baseRevision === null
-          ? null
-          : current.baseRevision,
+        expectedRevision: options.recreateDeleted || current.baseRevision === null ? null : current.baseRevision,
         operationId,
       });
       if (this.disposed || generation !== this.getGeneration()) return current;
@@ -372,7 +399,8 @@ export class DocumentRegistry {
         saved.dirty = saved.buffer !== saved.baseContent;
       }
       this.commit(saved);
-      await this.clearJournal(saved);
+      if (saved.dirty) this.scheduleJournal(saved);
+      else await this.clearJournal(saved);
       return saved;
     } catch (error) {
       if (this.disposed || generation !== this.getGeneration()) return current;
@@ -431,25 +459,32 @@ export class DocumentRegistry {
 
   async applyMerged(identity: DocumentIdentity, merged: string): Promise<DocumentRecord> {
     this.applyTransaction(identity, merged, { origin: 'merge' });
-    return this.save(identity);
+    return this.save(identity, { overwriteConflict: true });
   }
 
-  handleWatchEvent(event: PiariumWorkspaceFileEvent): void {
-    if (event.kind === 'reset') return;
+  handleWatchEvent(event: PiariumWorkspaceFileEvent, resetWorkspaceId?: string): void {
+    if (event.kind === 'reset') {
+      const records = [...this.records.values()].filter((record) => (
+        !resetWorkspaceId || record.identity.workspaceId === resetWorkspaceId
+      ));
+      for (const record of records) {
+        if (record.status === 'loading') continue;
+        void this.open(record.identity, { reload: true });
+      }
+      return;
+    }
     const identity = event.kind === 'moved' ? event.from : event.resource;
     const current = this.records.get(documentKey(identity));
     if (!current) return;
     if (event.kind === 'deleted') {
-      this.commit({
-        ...current,
-        status: 'deleted',
-        baseRevision: current.dirty ? current.baseRevision : null,
-      });
+      const deleted = applyRead(current, { status: 'missing', resource: current.identity });
+      const externalSource = peekAgentFileChangeHint(current.identity) ? 'agent' : 'disk';
+      this.commit({ ...deleted, externalSource });
       return;
     }
     if (event.kind === 'moved') {
       const previousKey = documentKey(identity);
-      this.records.delete(previousKey);
+      this.removeRecord(current);
       const moved: DocumentRecord = {
         ...current,
         identity: event.resource,
@@ -477,30 +512,101 @@ export class DocumentRegistry {
     }
   }
 
+  async flushRecoveryJournals(): Promise<void> {
+    if (this.disposed) return;
+    const dirtyRecords = [...this.records.values()].filter((record) => record.dirty);
+    for (const record of dirtyRecords) {
+      const key = documentKey(record.identity);
+      const timer = this.journalTimers.get(key);
+      if (timer) clearTimeout(timer);
+      this.journalTimers.delete(key);
+    }
+    const results = await Promise.allSettled(dirtyRecords.map((record) => (
+      this.enqueueJournal(record.identity, () => this.writeJournalRecord(record, true))
+    )));
+    for (const result of results) {
+      if (result.status === 'rejected') this.reportJournalFailure(result.reason);
+    }
+  }
+
   dispose(): void {
+    if (this.disposed) return;
+    const dirtyRecords = [...this.records.values()].filter((record) => record.dirty);
     this.disposed = true;
     for (const timer of this.journalTimers.values()) clearTimeout(timer);
     this.journalTimers.clear();
     for (const watch of this.watches.values()) watch.close();
     this.watches.clear();
     this.listeners.clear();
+    this.dirtyListenersByWorkspace.clear();
+    this.workspaceListeners.clear();
+    for (const record of dirtyRecords) {
+      void this.enqueueJournal(record.identity, () => this.writeJournalRecord(record, false))
+        .catch((error) => this.reportJournalFailure(error));
+    }
     this.records.clear();
+    this.dirtyIdsByWorkspace.clear();
+    this.workspaceVersions.clear();
   }
 
   private commit(record: DocumentRecord): void {
     const key = documentKey(record.identity);
+    const previous = this.records.get(key);
     this.records.set(key, record);
+    if (previous?.dirty !== record.dirty) {
+      this.updateDirtyIndex(record.identity, record.dirty);
+    } else if (!previous && record.dirty) {
+      this.updateDirtyIndex(record.identity, true);
+    }
     const set = this.listeners.get(key);
     if (set) {
       for (const listener of set) listener(record);
     }
-    for (const listener of this.globalListeners) listener();
+    if (
+      !previous
+      || previous.status !== record.status
+      || previous.dirty !== record.dirty
+      || previous.saving !== record.saving
+      || previous.baseRevision !== record.baseRevision
+      || previous.errorMessage !== record.errorMessage
+      || previous.externalSource !== record.externalSource
+      || previous.conflict !== record.conflict
+    ) {
+      this.notifyWorkspace(record.identity.workspaceId);
+    }
+  }
+
+  private removeRecord(record: DocumentRecord): void {
+    this.records.delete(documentKey(record.identity));
+    if (record.dirty) this.updateDirtyIndex(record.identity, false);
+    this.notifyWorkspace(record.identity.workspaceId);
+  }
+
+  private updateDirtyIndex(identity: DocumentIdentity, dirty: boolean): void {
+    const previous = this.dirtyIdsByWorkspace.get(identity.workspaceId) ?? EMPTY_RESOURCE_IDS;
+    const next = new Set(previous);
+    if (dirty) next.add(identity.resourceId);
+    else next.delete(identity.resourceId);
+    if (previous.size === next.size && [...previous].every((resourceId) => next.has(resourceId))) return;
+    this.dirtyIdsByWorkspace.set(identity.workspaceId, next);
+    const listeners = this.dirtyListenersByWorkspace.get(identity.workspaceId);
+    if (listeners) {
+      for (const listener of listeners) listener();
+    }
+  }
+
+  private notifyWorkspace(workspaceId: string): void {
+    this.workspaceVersions.set(workspaceId, (this.workspaceVersions.get(workspaceId) ?? 0) + 1);
+    const listeners = this.workspaceListeners.get(workspaceId);
+    if (listeners) {
+      for (const listener of listeners) listener();
+    }
   }
 
   private ensureWatch(workspaceId: string): void {
     if (this.watches.has(workspaceId)) return;
     const subscription = this.documents.watch(workspaceId, (event) => {
-      this.handleWatchEvent(event);
+      this.handleWatchEvent(event, workspaceId);
     });
     this.watches.set(workspaceId, subscription);
   }
@@ -510,13 +616,14 @@ export class DocumentRegistry {
     const existing = this.journalTimers.get(key);
     if (existing) clearTimeout(existing);
     if (!record.dirty) {
-      void this.clearJournal(record);
+      void this.clearJournal(record).catch((error) => this.reportJournalFailure(error));
       return;
     }
     const generation = record.connectionGeneration;
     this.journalTimers.set(key, setTimeout(() => {
       this.journalTimers.delete(key);
-      void this.flushJournal(record.identity, generation);
+      void this.enqueueJournal(record.identity, () => this.flushJournal(record.identity, generation))
+        .catch((error) => this.reportJournalFailure(error));
     }, this.journalDebounceMs));
   }
 
@@ -524,41 +631,83 @@ export class DocumentRegistry {
     if (this.disposed || generation !== this.getGeneration()) return;
     const record = this.records.get(documentKey(identity));
     if (!record?.dirty) return;
-    const written = await this.documents.writeRecoveryJournal({
-      workspaceId: identity.workspaceId,
+    await this.writeJournalRecord(record, true);
+  }
+
+  private async writeJournalRecord(record: DocumentRecord, updateRegistry: boolean): Promise<void> {
+    const request = {
+      workspaceId: record.identity.workspaceId,
       recoverySessionId: this.recoverySessionId,
-      resource: identity,
+      resource: record.identity,
       content: serializeEditorContent(record.buffer, record.lineEnding),
       encoding: record.encoding,
       bom: record.bom,
       baseRevision: record.baseRevision,
       expectedRevision: record.recoveryJournalRevision,
-    });
-    if (written.status === 'written') {
-      const latest = this.records.get(documentKey(identity));
-      if (!latest) return;
-      this.records.set(documentKey(identity), {
-        ...latest,
-        recoveryJournalId: written.journal.journalId,
-        recoveryJournalRevision: written.journal.revision,
+    };
+    let written = await this.documents.writeRecoveryJournal(request);
+    if (written.status === 'conflict') {
+      written = await this.documents.writeRecoveryJournal({
+        ...request,
+        expectedRevision: written.journal.revision,
       });
+    } else if (written.status === 'missing' && request.expectedRevision !== null) {
+      written = await this.documents.writeRecoveryJournal({ ...request, expectedRevision: null });
     }
+    if (written.status !== 'written' || !updateRegistry || this.disposed) return;
+    const latest = this.records.get(documentKey(record.identity));
+    if (!latest) return;
+    this.commit({
+      ...latest,
+      recoveryJournalId: written.journal.journalId,
+      recoveryJournalRevision: written.journal.revision,
+    });
   }
 
   private async clearJournal(record: DocumentRecord): Promise<void> {
-    if (!record.recoveryJournalId) return;
-    await this.documents.deleteRecoveryJournal({
-      journalId: record.recoveryJournalId,
-      expectedRevision: 1,
-    }).catch(() => undefined);
-    const latest = this.records.get(documentKey(record.identity));
-    if (latest) {
-      this.records.set(documentKey(record.identity), {
-        ...latest,
+    const timer = this.journalTimers.get(documentKey(record.identity));
+    if (timer) clearTimeout(timer);
+    this.journalTimers.delete(documentKey(record.identity));
+    await this.enqueueJournal(record.identity, async () => {
+      const latest = this.records.get(documentKey(record.identity));
+      if (!latest?.recoveryJournalId || latest.recoveryJournalRevision === null) return;
+      const result = await this.documents.deleteRecoveryJournal({
+        journalId: latest.recoveryJournalId,
+        expectedRevision: latest.recoveryJournalRevision,
+      });
+      const current = this.records.get(documentKey(record.identity));
+      if (!current) return;
+      if (result.status === 'conflict') {
+        this.commit({
+          ...current,
+          recoveryJournalId: result.journal.journalId,
+          recoveryJournalRevision: result.journal.revision,
+        });
+        return;
+      }
+      this.commit({
+        ...current,
         recoveryJournalId: null,
         recoveryJournalRevision: null,
       });
-    }
+    });
+  }
+
+  private enqueueJournal(identity: DocumentIdentity, operation: () => Promise<void>): Promise<void> {
+    const key = documentKey(identity);
+    const previous = this.journalOperations.get(key) ?? Promise.resolve();
+    const current = previous.catch((error) => {
+      this.reportJournalFailure(error);
+    }).then(operation);
+    this.journalOperations.set(key, current);
+    void current.finally(() => {
+      if (this.journalOperations.get(key) === current) this.journalOperations.delete(key);
+    }).catch(() => undefined);
+    return current;
+  }
+
+  private reportJournalFailure(error: unknown): void {
+    console.error('[Documents] Failed to persist recovery journal:', error);
   }
 
   private async restoreJournalIfNeeded(record: DocumentRecord): Promise<void> {
@@ -577,16 +726,21 @@ export class DocumentRegistry {
     const latest = this.records.get(documentKey(record.identity));
     if (!latest || latest.dirty) return;
     const buffer = normalizeEditorLineEndings(loaded.content);
+    const withJournal: DocumentRecord = {
+      ...latest,
+      recoveryJournalId: loaded.journal.journalId,
+      recoveryJournalRevision: loaded.journal.revision,
+    };
     if (buffer === latest.baseContent) {
-      await this.clearJournal(latest);
+      this.commit(withJournal);
+      await this.clearJournal(withJournal);
       return;
     }
     this.commit({
-      ...latest,
+      ...withJournal,
       buffer,
       dirty: true,
       localEditRevision: latest.localEditRevision + 1,
-      recoveryJournalId: match.journalId,
       lastOrigin: 'recovery',
       lastChanges: null,
     });

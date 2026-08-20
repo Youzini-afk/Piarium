@@ -61,4 +61,30 @@ describe('createWebDocumentsAPI', () => {
     expect(JSON.stringify(query)).not.toMatch(/token|bearer|password/i);
     subscription.close();
   });
+
+  it('reconnects an ended watch and tells consumers to resynchronize', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    const api = createWebDocumentsAPI();
+    runtimeFetchMock
+      .mockResolvedValueOnce(new Response('', { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+      .mockResolvedValueOnce(new Response(new ReadableStream(), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }));
+    const events: unknown[] = [];
+    const subscription = api.watch('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', (event) => events.push(event));
+    await vi.waitFor(() => expect(events).toContainEqual({ kind: 'reset', sequence: 0, reason: 'reconnected' }), {
+      timeout: 2_000,
+    });
+    subscription.close();
+  });
+
+  it('does not turn a malformed recovery response into an empty list', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    const api = createWebDocumentsAPI();
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({}));
+    await expect(api.listRecoveryJournals({
+      workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    })).rejects.toBeInstanceOf(DocumentsError);
+  });
 });

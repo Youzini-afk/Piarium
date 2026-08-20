@@ -38,4 +38,20 @@ describe('document routes', () => {
       await harness.cleanup();
     }
   });
+
+  it('rejects an unknown watch workspace before opening an event stream', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const app = express();
+      registerDocumentRoutes(app, { documents: harness.authority });
+      const response = await request(app)
+        .get('/api/documents/watch')
+        .query({ workspaceId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' })
+        .expect(404);
+      expect(response.headers['content-type']).toMatch(/application\/json/);
+      expect(response.body.reason).toBe('failed');
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });

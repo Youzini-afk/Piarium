@@ -149,12 +149,24 @@ const createMemoryDocuments = () => {
       } };
     },
     deleteRecoveryJournal: async (request) => {
+      const current = journals.get(request.journalId);
+      if (!current) return { status: 'missing' };
+      if (current.revision !== request.expectedRevision) {
+        return { status: 'conflict', journal: {
+          journalId: current.journalId,
+          resource: current.resource,
+          revision: current.revision,
+          baseRevision: current.baseRevision,
+          updatedAt: '2026-08-20T00:00:00.000Z',
+          byteLength: current.content.length,
+        } };
+      }
       journals.delete(request.journalId);
       return { status: 'deleted' };
     },
   };
 
-  return { api, files, emit };
+  return { api, files, journals, emit };
 };
 
 describe('DocumentRegistry', () => {
@@ -258,7 +270,7 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
-  test('deleted watch events keep dirty buffers', async () => {
+  test('deleted watch events keep dirty buffers and require explicit recreation', async () => {
     const { api, files } = createMemoryDocuments();
     const identity = resource();
     await api.write({ resource: identity, content: 'keep', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
@@ -269,10 +281,52 @@ describe('DocumentRegistry', () => {
     registry.handleWatchEvent({ kind: 'deleted', sequence: 1, resource: identity });
     expect(registry.get(identity)?.status).toBe('deleted');
     expect(registry.get(identity)?.buffer).toBe('kept');
-    const saved = await registry.save(identity);
+    const blocked = await registry.save(identity);
+    expect(blocked.status).toBe('deleted');
+    expect(blocked.dirty).toBe(true);
+    expect(files.has(documentKey(identity))).toBe(false);
+    const saved = await registry.save(identity, { recreateDeleted: true });
     expect(saved.status).toBe('ready');
     expect(saved.dirty).toBe(false);
     expect(files.get(documentKey(identity))?.content).toBe('kept');
+    registry.dispose();
+  });
+
+  test('reset events re-read open documents and preserve dirty conflicts', async () => {
+    const { api, files } = createMemoryDocuments();
+    const clean = resource('clean.txt');
+    const dirty = resource('dirty.txt');
+    await api.write({ resource: clean, content: 'one', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ resource: dirty, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    await registry.open(clean);
+    await registry.open(dirty);
+    registry.applyTransaction(dirty, 'local', { origin: 'view' });
+    files.set(documentKey(clean), { content: 'two', revision: 'external-clean' });
+    files.set(documentKey(dirty), { content: 'disk', revision: 'external-dirty' });
+    registry.handleWatchEvent({ kind: 'reset', sequence: 1, reason: 'reconnected' }, clean.workspaceId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(registry.get(clean)?.buffer).toBe('two');
+    expect(registry.get(dirty)?.buffer).toBe('local');
+    expect(registry.get(dirty)?.status).toBe('conflict');
+    registry.dispose();
+  });
+
+  test('dirty subscriptions only publish dirty-set membership changes', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    await registry.open(identity);
+    let updates = 0;
+    const unsubscribe = registry.subscribeDirty(identity.workspaceId, () => { updates += 1; });
+    registry.applyTransaction(identity, 'first', { origin: 'view' });
+    registry.applyTransaction(identity, 'second', { origin: 'view' });
+    expect(updates).toBe(1);
+    expect(registry.dirtyResourceIds(identity.workspaceId)).toEqual(new Set([identity.resourceId]));
+    await registry.save(identity);
+    expect(updates).toBe(2);
+    unsubscribe();
     registry.dispose();
   });
 
@@ -325,5 +379,26 @@ describe('DocumentRegistry', () => {
     expect(files.get(documentKey(identity))?.content).toBe('disk');
     registry.dispose();
     restored.dispose();
+  });
+
+  test('clears the current recovery revision after repeated journal writes', async () => {
+    const { api, journals } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ resource: identity, content: 'disk', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    const registry = new DocumentRegistry({
+      documents: api,
+      getGeneration: () => 1,
+      recoverySessionId: 'session',
+      journalDebounceMs: 0,
+    });
+    await registry.open(identity);
+    registry.applyTransaction(identity, 'draft-one', { origin: 'view' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    registry.applyTransaction(identity, 'draft-two', { origin: 'view' });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect([...journals.values()][0]?.revision).toBe(2);
+    await registry.save(identity);
+    expect(journals.size).toBe(0);
+    registry.dispose();
   });
 });

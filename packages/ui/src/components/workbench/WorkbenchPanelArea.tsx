@@ -56,12 +56,9 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
     () => [],
   );
   const documentEpoch = React.useSyncExternalStore(
-    (onStoreChange) => getDocumentRegistry().subscribeAll(onStoreChange),
-    () => {
-      const dirty = getDocumentRegistry().dirtyResourceIds(workspaceId);
-      return `${dirty.size}:${hints.length}`;
-    },
-    () => '0',
+    (onStoreChange) => getDocumentRegistry().subscribeWorkspace(workspaceId, onStoreChange),
+    () => getDocumentRegistry().workspaceVersion(workspaceId),
+    () => 0,
   );
   const problems = getWorkbenchProblems(workspaceId);
   const output = getWorkbenchOutput(workspaceId);

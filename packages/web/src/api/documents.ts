@@ -50,6 +50,61 @@ const postJson = async (path: string, body: unknown): Promise<unknown> => {
   return response.json();
 };
 
+const isResource = (value: unknown): value is PiariumResourceReference => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.workspaceId === 'string' && typeof candidate.resourceId === 'string';
+};
+
+const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new DocumentsError('Document watch returned an invalid event', { reason: 'failed' });
+  }
+  const event = value as Record<string, unknown>;
+  if (
+    !Number.isSafeInteger(event.sequence)
+    || Number(event.sequence) < 0
+    || typeof event.kind !== 'string'
+    || Object.hasOwn(event, 'content')
+  ) {
+    throw new DocumentsError('Document watch returned an invalid event', { reason: 'failed' });
+  }
+  if (event.kind === 'reset') {
+    if (!['overflow', 'reconnected', 'authority-changed'].includes(String(event.reason))) {
+      throw new DocumentsError('Document watch returned an invalid reset event', { reason: 'failed' });
+    }
+    return event as PiariumWorkspaceFileEvent;
+  }
+  if (!isResource(event.resource)) {
+    throw new DocumentsError('Document watch returned an invalid resource event', { reason: 'failed' });
+  }
+  if (event.revision !== undefined && typeof event.revision !== 'string') {
+    throw new DocumentsError('Document watch returned an invalid revision', { reason: 'failed' });
+  }
+  if (event.kind === 'moved') {
+    if (!isResource(event.from)) {
+      throw new DocumentsError('Document watch returned an invalid move event', { reason: 'failed' });
+    }
+    return event as PiariumWorkspaceFileEvent;
+  }
+  if (!['created', 'changed', 'deleted'].includes(event.kind)) {
+    throw new DocumentsError('Document watch returned an unknown event', { reason: 'failed' });
+  }
+  return event as PiariumWorkspaceFileEvent;
+};
+
+const waitForReconnect = (signal: AbortSignal, delayMs: number): Promise<void> => new Promise((resolve) => {
+  if (signal.aborted) {
+    resolve();
+    return;
+  }
+  const timer = setTimeout(resolve, delayMs);
+  signal.addEventListener('abort', () => {
+    clearTimeout(timer);
+    resolve();
+  }, { once: true });
+});
+
 const readSseEvents = async (
   response: Response,
   listener: (event: PiariumWorkspaceFileEvent) => void,
@@ -68,8 +123,7 @@ const readSseEvents = async (
     for (const chunk of chunks) {
       const line = chunk.split('\n').find((entry) => entry.startsWith('data: '));
       if (!line) continue;
-      const event = JSON.parse(line.slice(6)) as PiariumWorkspaceFileEvent;
-      if (JSON.stringify(event).includes('"content":')) continue;
+      const event = parseWorkspaceFileEvent(JSON.parse(line.slice(6)));
       listener(event);
     }
   }
@@ -92,31 +146,52 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
       if (options.signal.aborted) controller.abort();
       else options.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }
-    const unsubscribe = subscribeRuntimeEndpointWillChange(() => controller.abort());
+    const unsubscribe = subscribeRuntimeEndpointWillChange(() => {
+      listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
+      controller.abort();
+    });
     void (async () => {
-      try {
-        assertGeneration(generation);
-        const response = await runtimeFetch('/api/documents/watch', {
-          headers: { Accept: 'text/event-stream' },
-          query: { workspaceId },
-          signal: controller.signal,
-        });
-        assertGeneration(generation);
-        if (!response.ok) {
-          throw new DocumentsError('Document watch failed', {
-            reason: 'failed',
-            status: response.status,
+      let reconnectDelayMs = 250;
+      let reconnecting = false;
+      while (!controller.signal.aborted) {
+        try {
+          assertGeneration(generation);
+          const response = await runtimeFetch('/api/documents/watch', {
+            headers: { Accept: 'text/event-stream' },
+            query: { workspaceId },
+            signal: controller.signal,
           });
+          assertGeneration(generation);
+          if (!response.ok) {
+            throw new DocumentsError('Document watch failed', {
+              reason: 'failed',
+              status: response.status,
+            });
+          }
+          if (reconnecting) {
+            listener({ kind: 'reset', sequence: 0, reason: 'reconnected' });
+            reconnecting = false;
+          }
+          reconnectDelayMs = 250;
+          await readSseEvents(response, listener, controller.signal);
+          if (!controller.signal.aborted) throw new DocumentsError('Document watch ended', { reason: 'failed' });
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          if (getRuntimeEndpointGeneration() !== generation) {
+            listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
+            break;
+          }
+          const status = error instanceof DocumentsError ? error.status : undefined;
+          if (typeof status === 'number' && status < 500) {
+            listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
+            break;
+          }
+          reconnecting = true;
+          await waitForReconnect(controller.signal, reconnectDelayMs);
+          reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5_000);
         }
-        await readSseEvents(response, listener, controller.signal);
-      } catch {
-        if (controller.signal.aborted) return;
-        if (getRuntimeEndpointGeneration() !== generation) {
-          listener({ kind: 'reset', sequence: 0, reason: 'authority-changed' });
-        }
-      } finally {
-        unsubscribe();
       }
+      unsubscribe();
     })();
     return {
       close() {
@@ -127,7 +202,10 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
   },
   listRecoveryJournals: async (request) => {
     const payload = await postJson('/api/documents/recovery/list', request) as { journals?: PiariumDocumentRecoveryJournalSummary[] };
-    return Array.isArray(payload.journals) ? payload.journals : [];
+    if (!Array.isArray(payload.journals)) {
+      throw new DocumentsError('Document recovery list returned an invalid response', { reason: 'failed' });
+    }
+    return payload.journals;
   },
   readRecoveryJournal: (journalId) => postJson('/api/documents/recovery/read', { journalId }) as Promise<PiariumDocumentRecoveryReadResult>,
   writeRecoveryJournal: (request: PiariumDocumentRecoveryWriteRequest) => (

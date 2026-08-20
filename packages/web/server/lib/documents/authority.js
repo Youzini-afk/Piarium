@@ -12,8 +12,6 @@ import {
   looksLikeFilesystemWorkspaceScopeId,
 } from './workspace-registry.js';
 
-const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
-
 const resourceKey = (resource) => `${resource.workspaceId}\0${resource.resourceId}`;
 
 const toIso = (mtimeMs) => new Date(mtimeMs).toISOString();
@@ -43,8 +41,8 @@ export const createDocumentAuthority = (options) => {
     pathModule = path,
     isTrusted = async () => true,
     isAllowedRoot = async () => true,
-    maxReadBytes = DEFAULT_MAX_BYTES,
-    overflowLimit = 256,
+    maxReadBytes = Number.POSITIVE_INFINITY,
+    overflowLimit,
   } = options;
 
   const registry = createWorkspaceRegistry({
