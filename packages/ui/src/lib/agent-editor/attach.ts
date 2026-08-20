@@ -22,6 +22,7 @@ export const attachEditorContext = (input: {
   diagnosticMessage?: string;
   patch?: string;
   label?: string;
+  text?: string;
 }): EditorContextAttachment | { status: 'wrong-runtime' } | { status: 'missing-document' } => {
   const runtimeKey = getRuntimeKey();
   const identity = { workspaceId: input.workspaceId, resourceId: input.resourceId };
@@ -52,6 +53,7 @@ export const attachEditorContext = (input: {
   if (text !== undefined) attachment.text = text;
   if (input.diagnosticMessage) attachment.diagnosticMessage = input.diagnosticMessage;
   if (input.patch) attachment.patch = input.patch;
+  if (input.text !== undefined) attachment.text = input.text;
   return addEditorContextAttachment(attachment);
 };
 

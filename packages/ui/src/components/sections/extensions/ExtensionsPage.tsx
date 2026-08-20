@@ -65,6 +65,9 @@ import {
   describeWorkbenchContributionPlacement,
   workbenchInspectorOwnsDocuments,
   workbenchInspectorOwnsLanguage,
+  workbenchInspectorOwnsDebugCapability,
+  workbenchInspectorOwnsTestCapability,
+  workbenchInspectorOwnsRun,
 } from '@/lib/extensions/workbench-inspector';
 
 const STATUS_KEYS: Readonly<Record<PiariumExtensionActualStatus, I18nKey>> = {
@@ -611,6 +614,11 @@ const ExtensionCard: React.FC<{
   ));
   const languageOwner = liveHostServices.some((service) => workbenchInspectorOwnsLanguage(service.descriptor.id))
     || entry.capabilityGrants.some((grant) => grant.capability === 'workspace.language' && grant.granted);
+  const debugOwner = liveHostServices.some((service) => workbenchInspectorOwnsRun(service.descriptor.id))
+    || entry.capabilityGrants.some((grant) => (
+      (workbenchInspectorOwnsDebugCapability(grant.capability) || workbenchInspectorOwnsTestCapability(grant.capability))
+      && grant.granted
+    ));
   const decisions = new Map(candidate?.capabilityGrants.map((grant) => [capabilityKey(grant), grant.granted]) ?? []);
   const review = async (reference: PiariumExtensionCapabilityReference, granted: boolean): Promise<void> => {
     if (!candidate) return;
@@ -904,6 +912,12 @@ const ExtensionCard: React.FC<{
                 <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.languageOwner')}</div>
                 <div className="mt-1 typography-micro text-muted-foreground">
                   {languageOwner ? t('settings.piarium.extensions.status.active') : t('settings.piarium.extensions.inspector.none')}
+                </div>
+              </div>
+              <div>
+                <div className="typography-ui-label text-foreground">{t('settings.piarium.extensions.inspector.debugOwner')}</div>
+                <div className="mt-1 typography-micro text-muted-foreground">
+                  {debugOwner ? t('settings.piarium.extensions.status.active') : t('settings.piarium.extensions.inspector.none')}
                 </div>
               </div>
               <div>

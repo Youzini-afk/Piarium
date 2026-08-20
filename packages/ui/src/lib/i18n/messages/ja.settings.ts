@@ -2878,6 +2878,7 @@ export const settingsDict = {
   'settings.piarium.extensions.inspector.replaces': '{target} を置き換え',
   'settings.piarium.extensions.inspector.documentOwner': 'ドキュメントサービス',
   'settings.piarium.extensions.inspector.languageOwner': '言語サービス',
+  'settings.piarium.extensions.inspector.debugOwner': '実行とデバッグ',
   'settings.piarium.extensions.inspector.cleanup': 'クリーンアップ',
   'settings.piarium.extensions.inspector.none': 'なし',
   'settings.piarium.extensions.remove.title': '{name} を削除しますか？',

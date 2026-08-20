@@ -61,6 +61,30 @@ describe('unsaved attachment projection', () => {
     expect(unsaved).toContain('Pi file tools cannot see it on disk');
     expect(unsaved).toContain('const value = 1;');
   });
+
+  test('test failure and stack citations are text only and do not imply process capability', () => {
+    const projected = projectEditorContextAttachments('', [
+      attachment({
+        kind: 'test-failure',
+        diagnosticMessage: 'expected 2, got 3',
+        text: 'Error: expected 2, got 3\n    at fail.test.js:1:1',
+        label: 'fails',
+        resourceId: 'fail.test.js',
+      }),
+      attachment({
+        id: 'att-stack',
+        kind: 'stack',
+        diagnosticMessage: 'fixtureMain:1',
+        label: 'fixtureMain',
+        resourceId: 'app.js',
+        range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1 },
+      }),
+    ]);
+    expect(projected).toContain('Attached test failure');
+    expect(projected).toContain('does not grant process, debug, or test-runner capability');
+    expect(projected).toContain('Attached stack frame');
+    expect(projected).toContain('does not grant process or debugger capability');
+  });
 });
 
 describe('agent file change hints', () => {

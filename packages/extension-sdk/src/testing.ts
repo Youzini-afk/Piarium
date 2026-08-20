@@ -27,6 +27,9 @@ import type {
 import {
   PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY,
   PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY,
+  PIARIUM_WORKSPACE_DEBUG_CAPABILITY,
+  PIARIUM_WORKSPACE_TEST_CAPABILITY,
+  PIARIUM_WORKSPACE_TASKS_CAPABILITY,
   createWorkspaceDocumentsClient,
   defineSurfaceMount,
 } from "./index.js";
@@ -130,6 +133,23 @@ const createConformanceCapabilities = () => {
         providers.clear();
         return { status: "disposed" };
       }
+    }
+    if (capability === PIARIUM_WORKSPACE_TASKS_CAPABILITY) {
+      if (method === "list") return { status: "empty", configurations: [] };
+      if (method === "run") return { status: "running" };
+      if (method === "disposeWorkspace") return { status: "disposed" };
+    }
+    if (capability === PIARIUM_WORKSPACE_DEBUG_CAPABILITY) {
+      const record = asRecord(params) ?? {};
+      if (method === "registerAdapter") return { status: "registered", adapterId: String(record.adapterId ?? "") };
+      if (method === "unregisterAdapter") return { status: "unregistered", adapterId: String(record.adapterId ?? "") };
+      if (method === "getStatus") return { status: "absent" };
+    }
+    if (capability === PIARIUM_WORKSPACE_TEST_CAPABILITY) {
+      const record = asRecord(params) ?? {};
+      if (method === "registerProvider") return { status: "registered", providerId: String(record.providerId ?? "") };
+      if (method === "unregisterProvider") return { status: "unregistered", providerId: String(record.providerId ?? "") };
+      if (method === "discover") return { status: "empty", tests: [] };
     }
     throw new Error(`Conformance capability is not provided: ${capability}.${method}`);
   };

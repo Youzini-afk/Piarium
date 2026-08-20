@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 const HEADER_DELIMITER = Buffer.from('\r\n\r\n');
 
 const extractContentLength = (header) => {
@@ -7,8 +9,15 @@ const extractContentLength = (header) => {
 
 const writeJsonRpcMessage = (output, message) => {
   const payload = Buffer.from(JSON.stringify(message), 'utf8');
-  output.write(`Content-Length: ${payload.length}\r\n\r\n`);
-  output.write(payload);
+  const frame = Buffer.concat([
+    Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`, 'utf8'),
+    payload,
+  ]);
+  if (typeof output.fd === 'number') {
+    fs.writeSync(output.fd, frame);
+    return;
+  }
+  output.write(frame);
 };
 
 const attachJsonRpcReader = (input, onMessage) => {

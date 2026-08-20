@@ -218,6 +218,9 @@ export const resolveHostExtensionModule = (
 export const PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY = "workspace.documents";
 export const PIARIUM_WORKSPACE_SEARCH_CAPABILITY = "workspace.search";
 export const PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY = "workspace.language";
+export const PIARIUM_WORKSPACE_TASKS_CAPABILITY = "workspace.tasks";
+export const PIARIUM_WORKSPACE_DEBUG_CAPABILITY = "workspace.debug";
+export const PIARIUM_WORKSPACE_TEST_CAPABILITY = "workspace.test";
 
 export {
   PIARIUM_WORKBENCH_CONTEXT_KEYS,
@@ -311,5 +314,117 @@ export const defineLanguageProvider = (
   await createWorkspaceLanguageClient(context.capabilities).registerProvider({
     ...descriptor,
     source: descriptor.source ?? "extension",
+  });
+});
+
+export const callWorkspaceDebug = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  method: string,
+  params: JsonValue,
+): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_DEBUG_CAPABILITY, method, params);
+
+export const callWorkspaceTest = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  method: string,
+  params: JsonValue,
+): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_TEST_CAPABILITY, method, params);
+
+export const callWorkspaceTasks = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  method: string,
+  params: JsonValue,
+): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_TASKS_CAPABILITY, method, params);
+
+export type PiariumDebugAdapterDescriptor = {
+  adapterId: string;
+  args?: readonly string[];
+  command: string;
+  languageIds?: readonly string[];
+  source?: string;
+  workspaceId?: string;
+};
+
+export type PiariumTestProviderDescriptor = {
+  args?: readonly string[];
+  command?: string;
+  kind?: string;
+  providerId: string;
+  source?: string;
+  workspaceId?: string;
+};
+
+const debugAdapterParams = (descriptor: PiariumDebugAdapterDescriptor): JsonObject => {
+  const params: JsonObject = {
+    adapterId: descriptor.adapterId,
+    command: descriptor.command,
+  };
+  if (descriptor.args) params.args = [...descriptor.args];
+  if (descriptor.languageIds) params.languageIds = [...descriptor.languageIds];
+  if (descriptor.source) params.source = descriptor.source;
+  if (descriptor.workspaceId) params.workspaceId = descriptor.workspaceId;
+  return params;
+};
+
+const testProviderParams = (descriptor: PiariumTestProviderDescriptor): JsonObject => {
+  const params: JsonObject = { providerId: descriptor.providerId };
+  if (descriptor.command) params.command = descriptor.command;
+  if (descriptor.args) params.args = [...descriptor.args];
+  if (descriptor.kind) params.kind = descriptor.kind;
+  if (descriptor.source) params.source = descriptor.source;
+  if (descriptor.workspaceId) params.workspaceId = descriptor.workspaceId;
+  return params;
+};
+
+export interface PiariumWorkspaceDebugClient {
+  getStatus(workspaceId: string): Promise<JsonValue>;
+  registerAdapter(descriptor: PiariumDebugAdapterDescriptor): Promise<JsonValue>;
+  unregisterAdapter(adapterId: string): Promise<JsonValue>;
+}
+
+export interface PiariumWorkspaceTestClient {
+  discover(workspaceId: string): Promise<JsonValue>;
+  registerProvider(descriptor: PiariumTestProviderDescriptor): Promise<JsonValue>;
+  unregisterProvider(providerId: string): Promise<JsonValue>;
+}
+
+export const createWorkspaceDebugClient = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+): PiariumWorkspaceDebugClient => ({
+  registerAdapter: (descriptor) => callWorkspaceDebug(capabilities, "registerAdapter", debugAdapterParams(descriptor)),
+  unregisterAdapter: (adapterId) => callWorkspaceDebug(capabilities, "unregisterAdapter", { adapterId }),
+  getStatus: (workspaceId) => callWorkspaceDebug(capabilities, "getStatus", { workspaceId }),
+});
+
+export const createWorkspaceTestClient = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+): PiariumWorkspaceTestClient => ({
+  registerProvider: (descriptor) => callWorkspaceTest(capabilities, "registerProvider", testProviderParams(descriptor)),
+  unregisterProvider: (providerId) => callWorkspaceTest(capabilities, "unregisterProvider", { providerId }),
+  discover: (workspaceId) => callWorkspaceTest(capabilities, "discover", { workspaceId }),
+});
+
+export const defineDebugAdapter = (
+  descriptor: PiariumDebugAdapterDescriptor,
+): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  const client = createWorkspaceDebugClient(context.capabilities);
+  await client.registerAdapter({
+    ...descriptor,
+    source: descriptor.source ?? "extension",
+  });
+  context.effect(() => {
+    void client.unregisterAdapter(descriptor.adapterId);
+  });
+});
+
+export const defineTestProvider = (
+  descriptor: PiariumTestProviderDescriptor,
+): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  const client = createWorkspaceTestClient(context.capabilities);
+  await client.registerProvider({
+    ...descriptor,
+    source: descriptor.source ?? "extension",
+  });
+  context.effect(() => {
+    void client.unregisterProvider(descriptor.providerId);
   });
 });

@@ -3202,6 +3202,7 @@ export const settingsDict = {
   'settings.piarium.extensions.inspector.replaces': '替换 {target}',
   'settings.piarium.extensions.inspector.documentOwner': '文档服务',
   'settings.piarium.extensions.inspector.languageOwner': '语言服务',
+  'settings.piarium.extensions.inspector.debugOwner': '运行和调试',
   'settings.piarium.extensions.inspector.cleanup': '清理',
   'settings.piarium.extensions.inspector.none': '无',
   'settings.piarium.extensions.remove.title': '卸载 {name}？',

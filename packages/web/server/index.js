@@ -20,6 +20,12 @@ import { createDocumentAuthority } from './lib/documents/authority.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
 import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
+import { createRunRuntime } from './lib/run/runtime.js';
+import {
+  createWorkspaceDebugCapabilityHandler,
+  createWorkspaceTasksCapabilityHandler,
+  createWorkspaceTestCapabilityHandler,
+} from './lib/run/capability.js';
 import { createWorkspaceContentSearch } from './lib/search/content.js';
 import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
@@ -825,6 +831,25 @@ async function main(options = {}) {
     'workspace.language',
     createLanguageCapabilityHandler(languageSupervisor),
   );
+  const runRuntime = createRunRuntime({
+    documents: documentsAuthority,
+    spawn,
+    pathModule: path,
+    env: process.env,
+    isTrusted: async () => false,
+  });
+  const unregisterTasksCapability = extensionRuntime.capabilities.register(
+    'workspace.tasks',
+    createWorkspaceTasksCapabilityHandler(runRuntime.tasks),
+  );
+  const unregisterDebugCapability = extensionRuntime.capabilities.register(
+    'workspace.debug',
+    createWorkspaceDebugCapabilityHandler(runRuntime.debug),
+  );
+  const unregisterTestCapability = extensionRuntime.capabilities.register(
+    'workspace.test',
+    createWorkspaceTestCapabilityHandler(runRuntime.tests),
+  );
   const unregisterPiRuntimeCapability = extensionRuntime.capabilities.register('pi-runtime', async (method, value) => {
     if (method !== 'request' || !value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error('The pi-runtime capability expects a request object');
@@ -999,6 +1024,7 @@ async function main(options = {}) {
     uiAuthController,
     documents: documentsAuthority,
     languageSupervisor,
+    runRuntime,
     reloadRuntimeConfiguration: async () => { await piRuntimeLifecycle.ensureActiveBroker(); },
   });
 
@@ -1085,7 +1111,11 @@ async function main(options = {}) {
       unregisterDocumentsCapability();
       unregisterSearchCapability();
       unregisterLanguageCapability();
+      unregisterTasksCapability();
+      unregisterDebugCapability();
+      unregisterTestCapability();
       await languageSupervisor.dispose();
+      await runRuntime.dispose();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       realtimeProxyRuntime.stop();

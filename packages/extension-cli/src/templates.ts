@@ -1,4 +1,4 @@
-export const INIT_TEMPLATES = ["surface", "shell", "editor", "view", "language"] as const;
+export const INIT_TEMPLATES = ["surface", "shell", "editor", "view", "language", "debug", "test"] as const;
 export type InitTemplate = (typeof INIT_TEMPLATES)[number];
 
 export const isInitTemplate = (value: string): value is InitTemplate => (
@@ -70,40 +70,75 @@ npx piarium-extension test
 Import \`@piarium/extension-sdk\` and \`@piarium/extension-contract\` only. Do not import Piarium's React product UI.
 `;
 
+const brokeredHostFiles = (options: {
+  capability: string;
+  description: string;
+  hostSource: string;
+  id: string;
+  name: string;
+  summary: string;
+}): Record<string, string> => ({
+  "piarium.extension.json": json({
+    $schema: "https://raw.githubusercontent.com/Youzini-afk/Piarium/main/packages/extension-contract/schema/piarium.extension.schema.json",
+    schemaVersion: 1,
+    id: options.id,
+    version: "0.1.0",
+    displayName: options.name,
+    metadata: { description: options.description },
+    engines: { piarium: "*" },
+    capabilities: { host: [options.capability] },
+    entrypoints: {
+      host: { file: "dist/host.cjs", mode: "brokered", activation: ["workspace-match"] },
+    },
+  }),
+  "package.json": packageJson({
+    id: options.id,
+    name: options.name,
+    extraEntrypoints: { host: { source: "src/host.ts" } },
+  }),
+  "tsconfig.json": tsconfig(),
+  "src/host.ts": options.hostSource,
+  "README.md": readme({
+    name: options.name,
+    summary: options.summary,
+  }),
+});
+
 export const createInitFiles = (options: {
   id: string;
   name: string;
   template: InitTemplate;
 }): Record<string, string> => {
   const surfaceEntrypointId = `${options.id}.surface`;
-  const hostEntrypointId = "host";
   if (options.template === "language") {
-    return {
-      "piarium.extension.json": json({
-        $schema: "https://raw.githubusercontent.com/Youzini-afk/Piarium/main/packages/extension-contract/schema/piarium.extension.schema.json",
-        schemaVersion: 1,
-        id: options.id,
-        version: "0.1.0",
-        displayName: options.name,
-        metadata: { description: `${options.name} language provider` },
-        engines: { piarium: "*" },
-        capabilities: { host: ["workspace.language"] },
-        entrypoints: {
-          host: { file: "dist/host.cjs", mode: "brokered", activation: ["workspace-match"] },
-        },
-      }),
-      "package.json": packageJson({
-        id: options.id,
-        name: options.name,
-        extraEntrypoints: { [hostEntrypointId]: { source: "src/host.ts" } },
-      }),
-      "tsconfig.json": tsconfig(),
-      "src/host.ts": `import { defineLanguageProvider } from "@piarium/extension-sdk";\n\nexport default defineLanguageProvider({\n  providerId: ${JSON.stringify(`${options.id}.markdown`)},\n  command: "node",\n  args: ["./language-server.mjs"],\n  languageIds: ["markdown"],\n});\n`,
-      "README.md": readme({
-        name: options.name,
-        summary: "A brokered Host language provider. The Application Host spawns the server; this extension never starts a debugger or language process in the renderer.",
-      }),
-    };
+    return brokeredHostFiles({
+      id: options.id,
+      name: options.name,
+      capability: "workspace.language",
+      description: `${options.name} language provider`,
+      hostSource: `import { defineLanguageProvider } from "@piarium/extension-sdk";\n\nexport default defineLanguageProvider({\n  providerId: ${JSON.stringify(`${options.id}.markdown`)},\n  command: "node",\n  args: ["./language-server.mjs"],\n  languageIds: ["markdown"],\n});\n`,
+      summary: "A brokered Host language provider. The Application Host spawns the server; this extension never starts a debugger or language process in the renderer.",
+    });
+  }
+  if (options.template === "debug") {
+    return brokeredHostFiles({
+      id: options.id,
+      name: options.name,
+      capability: "workspace.debug",
+      description: `${options.name} debug adapter`,
+      hostSource: `import { defineDebugAdapter } from "@piarium/extension-sdk";\n\nexport default defineDebugAdapter({\n  adapterId: ${JSON.stringify(`${options.id}.node`)},\n  command: "node",\n  args: ["./debug-adapter.mjs"],\n  languageIds: ["javascript"],\n});\n`,
+      summary: "A brokered Host debug adapter. The Application Host spawns the DAP process; this extension never starts a debugger in the renderer.",
+    });
+  }
+  if (options.template === "test") {
+    return brokeredHostFiles({
+      id: options.id,
+      name: options.name,
+      capability: "workspace.test",
+      description: `${options.name} test provider`,
+      hostSource: `import { defineTestProvider } from "@piarium/extension-sdk";\n\nexport default defineTestProvider({\n  providerId: ${JSON.stringify(`${options.id}.node-test`)},\n  command: "node",\n  args: ["./test-adapter.mjs"],\n  kind: "tap",\n});\n`,
+      summary: "A brokered Host test provider. The Application Host spawns the test adapter; this extension never starts a test runner in the renderer.",
+    });
   }
 
   const contribution = options.template === "shell"

@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { CliOutput, type CliConsole } from "./cli-output.js";
 
 const usage = `Usage:
-  piarium-extension init [dir] --id <extension-id> --name <display-name> [--template surface|shell|editor|view|language]
+  piarium-extension init [dir] --id <extension-id> --name <display-name> [--template surface|shell|editor|view|language|debug|test]
   piarium-extension check [dir]
   piarium-extension build [dir]
   piarium-extension test [dir]
@@ -53,7 +53,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
       if (value === "--id") result.id = next;
       else if (value === "--name") result.name = next;
       else {
-        if (!isInitTemplate(next)) throw new Error(`Unknown init template "${next}". Use surface, shell, editor, view, or language.`);
+        if (!isInitTemplate(next)) throw new Error(`Unknown init template "${next}". Use surface, shell, editor, view, language, debug, or test.`);
         result.template = next;
       }
       index += 1;
@@ -68,7 +68,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
       if (option === "--id") result.id = optionValue;
       else if (option === "--name") result.name = optionValue;
       else {
-        if (!isInitTemplate(optionValue)) throw new Error(`Unknown init template "${optionValue}". Use surface, shell, editor, view, or language.`);
+        if (!isInitTemplate(optionValue)) throw new Error(`Unknown init template "${optionValue}". Use surface, shell, editor, view, language, debug, or test.`);
         result.template = optionValue;
       }
       continue;

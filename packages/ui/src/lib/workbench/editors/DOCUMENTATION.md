@@ -27,6 +27,12 @@ and layout snapshot.
 Language diagnostics publish into the Problems panel through the language-services registry.
 Stale diagnostic versions are dropped. Hidden search views do not start language servers.
 
+Run, debug, and test live in `lib/run-debug`. The Application Host owns DAP adapters, test
+providers, and task processes; renderers never start a debugger. `acquireRunDebugView` opens
+SSE subscriptions only while a Run view is visible. Hidden views drop those listeners and
+do not keep refreshing. Agent attachments may cite a test failure or stack frame as prompt
+text; they never grant process, debug, or test-runner capability.
+
 Agent/editor coordination lives in `lib/agent-editor`: attachments are runtime+session scoped,
 unsaved snapshots are explicit prompt text, tool path hints never override DocumentsAPI watches,
 and patch accept/reject writes use expected revision.

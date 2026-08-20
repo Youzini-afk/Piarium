@@ -24,6 +24,9 @@ import { createWebPiRuntimeAPI } from './piRuntime';
 import { createWebDocumentsAPI } from './documents';
 import { createWebWorkspaceSearchAPI } from './workspace-search';
 import { createWebLanguageServicesAPI } from './language';
+import { createWebWorkspaceTasksAPI } from './tasks';
+import { createWebWorkspaceDebugAPI } from './debug';
+import { createWebWorkspaceTestAPI } from './tests';
 
 export interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -54,6 +57,9 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
     documents: createWebDocumentsAPI(),
     workspaceSearch: createWebWorkspaceSearchAPI(),
     language: createWebLanguageServicesAPI(),
+    tasks: createWebWorkspaceTasksAPI(),
+    debug: createWebWorkspaceDebugAPI(),
+    tests: createWebWorkspaceTestAPI(),
     settings: createWebSettingsAPI(),
     permissions: createWebPermissionsAPI(),
     notifications: createWebNotificationsAPI(),

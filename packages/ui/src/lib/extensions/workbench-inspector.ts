@@ -1,5 +1,5 @@
 import type { PiariumExtensionStaticContribution } from '@piarium/extension-contract';
-import { PIARIUM_LANGUAGE_SERVICE_ID } from '@piarium/extension-contract';
+import { PIARIUM_DEBUG_SERVICE_ID, PIARIUM_LANGUAGE_SERVICE_ID, PIARIUM_TASKS_SERVICE_ID, PIARIUM_TEST_SERVICE_ID } from '@piarium/extension-contract';
 
 type WorkbenchInspectorContribution = {
   generation?: number;
@@ -26,6 +26,20 @@ export const workbenchInspectorOwnsLanguage = (serviceId: string): boolean => (
   serviceId === PIARIUM_LANGUAGE_SERVICE_ID
 );
 
+export const workbenchInspectorOwnsRun = (serviceId: string): boolean => (
+  serviceId === PIARIUM_DEBUG_SERVICE_ID
+  || serviceId === PIARIUM_TEST_SERVICE_ID
+  || serviceId === PIARIUM_TASKS_SERVICE_ID
+);
+
 export const workbenchInspectorOwnsDocuments = (capability: string): boolean => (
   capability === 'workspace.documents'
+);
+
+export const workbenchInspectorOwnsDebugCapability = (capability: string): boolean => (
+  capability === 'workspace.debug'
+);
+
+export const workbenchInspectorOwnsTestCapability = (capability: string): boolean => (
+  capability === 'workspace.test'
 );

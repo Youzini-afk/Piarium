@@ -245,6 +245,55 @@ test("typed document and language clients plus workbench mounts are public SDK c
   ]);
 });
 
+test("debug and test host helpers register through capabilities and unregister on dispose", async () => {
+  const {
+    createWorkspaceDebugClient,
+    createWorkspaceTestClient,
+    callWorkspaceTasks,
+    defineDebugAdapter,
+    defineTestProvider,
+    PIARIUM_WORKBENCH_CONTEXT_KEYS,
+    PIARIUM_WORKSPACE_DEBUG_CAPABILITY,
+    PIARIUM_WORKSPACE_TASKS_CAPABILITY,
+    PIARIUM_WORKSPACE_TEST_CAPABILITY,
+  } = await import("../src/index.js");
+  assert.equal(PIARIUM_WORKSPACE_DEBUG_CAPABILITY, "workspace.debug");
+  assert.equal(PIARIUM_WORKSPACE_TEST_CAPABILITY, "workspace.test");
+  assert.equal(PIARIUM_WORKSPACE_TASKS_CAPABILITY, "workspace.tasks");
+  assert.equal(PIARIUM_WORKBENCH_CONTEXT_KEYS.debugIsPaused, "debugIsPaused");
+  const calls: Array<[string, string]> = [];
+  const capabilities = {
+    call: async (capability: string, method: string) => {
+      calls.push([capability, method]);
+      return { status: "ok" };
+    },
+  };
+  await createWorkspaceDebugClient(capabilities).registerAdapter({
+    adapterId: "node",
+    command: "node",
+  });
+  await createWorkspaceTestClient(capabilities).registerProvider({
+    providerId: "node-test",
+    command: "node",
+  });
+  await callWorkspaceTasks(capabilities, "list", { workspaceId: "ws" });
+  const debugResult = await runHostExtensionConformance({
+    activation: defineDebugAdapter({ adapterId: "node", command: "node" }).activate,
+    extensionId: "dev.example.debug",
+  });
+  const testResult = await runHostExtensionConformance({
+    activation: defineTestProvider({ providerId: "node-test", command: "node" }).activate,
+    extensionId: "dev.example.test",
+  });
+  assert.ok(debugResult.registeredDisposers >= 1);
+  assert.ok(testResult.registeredDisposers >= 1);
+  assert.deepEqual(calls, [
+    ["workspace.debug", "registerAdapter"],
+    ["workspace.test", "registerProvider"],
+    ["workspace.tasks", "list"],
+  ]);
+});
+
 test("workbench conformance covers async mount abort, profile switch, and resource conflict", async () => {
   const {
     runIsolatedDocumentConflictConformance,

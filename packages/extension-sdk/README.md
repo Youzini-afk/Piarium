@@ -31,6 +31,12 @@ host-owned search and language services. `defineLanguageProvider` registers a Ho
 Language servers are spawned only in the application host; untrusted workspaces cannot execute
 project-provided server commands. Search failures are distinct from zero matches.
 
+`callWorkspaceDebug` / `createWorkspaceDebugClient` / `defineDebugAdapter` and
+`callWorkspaceTest` / `createWorkspaceTestClient` / `defineTestProvider` register Host-side
+debug adapters and test providers. Those processes are spawned only in the application host.
+`defineDebugAdapter` and `defineTestProvider` unregister on dispose through `context.effect`.
+Renderers never start a debugger, test runner, or task process.
+
 Public workbench constants (`PIARIUM_WORKBENCH_REPLACEMENT_TARGETS`, `PIARIUM_WORKBENCH_SLOTS`,
 `PIARIUM_WORKBENCH_CONTEXT_KEYS`) are re-exported from this package. `defineShellMount`,
 `defineViewMount`, and `defineEditorMount` are typed aliases of `defineSurfaceMount`.

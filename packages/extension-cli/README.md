@@ -20,7 +20,7 @@ line. Validation and non-zero failure exit codes are identical in human, non-TTY
 modes.
 
 `init` is non-interactive. Both `--id` and `--name` are required, and an existing non-empty target is
-never overwritten. `--template` selects `surface` (default), `shell`, `editor`, `view`, or `language`.
+never overwritten. `--template` selects `surface` (default), `shell`, `editor`, `view`, `language`, `debug`, or `test`.
 The generated project contains a public manifest, package metadata, TypeScript configuration, and the
 matching Surface or Host entrypoint.
 

@@ -49,6 +49,10 @@ export const PIARIUM_WORKBENCH_CONTEXT_KEYS = {
   editorHasSelection: "editorHasSelection",
   editorIsDirty: "editorIsDirty",
   editorIsOpen: "editorIsOpen",
+  debugIsActive: "debugIsActive",
+  debugIsPaused: "debugIsPaused",
+  testHasFailure: "testHasFailure",
+  taskIsRunning: "taskIsRunning",
 } as const;
 
 export type PiariumWorkbenchShellStatus = "builtin" | "disabled" | "failed" | "missing" | "ready";

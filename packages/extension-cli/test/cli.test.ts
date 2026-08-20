@@ -23,7 +23,7 @@ test("init writes a standalone managed Surface template and refuses overwrite", 
   );
 });
 
-test("init templates cover shell, editor, view, and language workbench seams", async () => {
+test("init templates cover shell, editor, view, language, debug, and test workbench seams", async () => {
   const root = await temporaryDirectory();
   const shell = await initProject({
     directory: join(root, "shell"),
@@ -59,6 +59,28 @@ test("init templates cover shell, editor, view, and language workbench seams", a
   assert.match(host, /defineLanguageProvider/);
   const checked = await checkProject(language.directory);
   assert.deepEqual(checked.missingFiles, ["dist/host.cjs"]);
+
+  const debug = await initProject({
+    directory: join(root, "debug"),
+    id: "dev.example.debug",
+    name: "Node Debug",
+    template: "debug",
+  });
+  const debugHost = await readFile(join(debug.directory, "src/host.ts"), "utf8");
+  assert.match(debugHost, /defineDebugAdapter/);
+  const debugManifest = await readFile(join(debug.directory, "piarium.extension.json"), "utf8");
+  assert.match(debugManifest, /workspace\.debug/);
+
+  const tests = await initProject({
+    directory: join(root, "test"),
+    id: "dev.example.test",
+    name: "Node Tests",
+    template: "test",
+  });
+  const testHost = await readFile(join(tests.directory, "src/host.ts"), "utf8");
+  assert.match(testHost, /defineTestProvider/);
+  const testManifest = await readFile(join(tests.directory, "piarium.extension.json"), "utf8");
+  assert.match(testManifest, /workspace\.test/);
 });
 
 

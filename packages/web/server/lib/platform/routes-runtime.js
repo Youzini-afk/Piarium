@@ -14,6 +14,7 @@ import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
 import { registerDocumentRoutes } from '../documents/routes.js';
 import { registerWorkspaceSearchRoutes } from '../search/routes.js';
 import { registerLanguageRoutes } from '../lsp/routes.js';
+import { registerRunRoutes } from '../run/routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerPiRuntimeHttpRoute } from './pi-runtime-http-route.js';
@@ -88,6 +89,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       uiAuthController,
       documents,
       languageSupervisor,
+      runRuntime,
     } = dependencies;
 
     registerExtensionRoutes(app, { extensionCatalog, extensionPackages, extensionRuntime, uiAuthController });
@@ -211,6 +213,14 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
     }
     if (languageSupervisor) {
       registerLanguageRoutes(app, { language: languageSupervisor, uiAuthController });
+    }
+    if (runRuntime) {
+      registerRunRoutes(app, {
+        tasks: runRuntime.tasks,
+        debug: runRuntime.debug,
+        tests: runRuntime.tests,
+        uiAuthController,
+      });
     }
   };
 

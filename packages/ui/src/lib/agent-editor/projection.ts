@@ -23,6 +23,24 @@ const formatOne = (attachment: EditorContextAttachment): string => {
       attachment.range ? `- Line: ${attachment.range.startLine}` : '',
     ].filter(Boolean).join('\n');
   }
+  if (attachment.kind === 'test-failure') {
+    return [
+      `Attached test failure for \`${attachment.label}\`:`,
+      pathLine,
+      `- Message: ${attachment.diagnosticMessage ?? attachment.label}`,
+      attachment.text ? languageFence('', attachment.text) : '',
+      'This is citation text only. It does not grant process, debug, or test-runner capability.',
+    ].filter(Boolean).join('\n');
+  }
+  if (attachment.kind === 'stack') {
+    return [
+      `Attached stack frame for \`${attachment.label}\`:`,
+      pathLine,
+      `- Frame: ${attachment.diagnosticMessage ?? attachment.label}`,
+      attachment.range ? `- Line: ${attachment.range.startLine}` : '',
+      'This is citation text only. It does not grant process or debugger capability.',
+    ].filter(Boolean).join('\n');
+  }
   if (attachment.kind === 'diff') {
     const patch = attachment.patch ?? '';
     return [

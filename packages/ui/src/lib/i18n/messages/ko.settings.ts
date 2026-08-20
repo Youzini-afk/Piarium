@@ -3202,6 +3202,7 @@ export const settingsDict = {
   'settings.piarium.extensions.inspector.replaces': '{target} 대체',
   'settings.piarium.extensions.inspector.documentOwner': '문서 서비스',
   'settings.piarium.extensions.inspector.languageOwner': '언어 서비스',
+  'settings.piarium.extensions.inspector.debugOwner': '실행 및 디버그',
   'settings.piarium.extensions.inspector.cleanup': '정리',
   'settings.piarium.extensions.inspector.none': '없음',
   'settings.piarium.extensions.remove.title': '{name}을(를) 제거할까요?',

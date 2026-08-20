@@ -47,6 +47,8 @@ Optional `--template` values:
 | `editor` | Custom editor contribution on `workbench.editor.actions` |
 | `view` | Sidebar view on `workbench.primary-sidebar.views` |
 | `language` | Brokered Host language provider using `defineLanguageProvider` |
+| `debug` | Brokered Host debug adapter using `defineDebugAdapter` |
+| `test` | Brokered Host test provider using `defineTestProvider` |
 
 Shell, editor, and view templates import only `@piarium/extension-sdk` and
 `@piarium/extension-contract`. They must not import Piarium's React product UI. Documents, terminals,
@@ -60,6 +62,8 @@ and sessions stay in Core even when a community Shell fully redraws the chrome.
 - `defineSurfaceMount` / `defineShellMount` / `defineViewMount` / `defineEditorMount` for DOM, Canvas, or any framework
 - `createWorkspaceDocumentsClient` for resource-scoped, revisioned document reads and writes
 - `createWorkspaceLanguageClient` / `defineLanguageProvider` to register a Host-side language server
+- `createWorkspaceDebugClient` / `defineDebugAdapter` to register a Host-side debug adapter
+- `createWorkspaceTestClient` / `defineTestProvider` to register a Host-side test provider
 - `@piarium/extension-sdk/testing` fixtures for enable/disable leak checks, async mount abort, profile switch without mutating desired enablement, and expected-revision document conflict
 
 `@piarium/extension-react` remains optional. `defineReactShell`, `defineReactView`, and
@@ -379,7 +383,7 @@ The Extension Inspector uses public host and Surface state. It shows:
 - Host and Surface owner realms, generation, current status, update timestamp, and cleanup generation;
 - manifest and live dynamic contributions, including slot placement and replacement targets;
 - the active Shell contribution and whether the inspected extension owns it;
-- document and language service ownership from granted capabilities and live Host providers;
+- document, language, debug, and test service ownership from granted capabilities and live Host providers;
 - live Host and Surface service providers;
 - required services and companion Pi-package metadata;
 - capability decisions and extension-attributed catalog/runtime diagnostics.

@@ -1,3 +1,6 @@
 export const PIARIUM_WORKSPACE_SEARCH_SERVICE_ID = "piarium.workspace.search";
 export const PIARIUM_LANGUAGE_SERVICE_ID = "piarium.language";
+export const PIARIUM_TASKS_SERVICE_ID = "piarium.tasks";
+export const PIARIUM_DEBUG_SERVICE_ID = "piarium.debug";
+export const PIARIUM_TEST_SERVICE_ID = "piarium.test";
 export const PIARIUM_CORE_SERVICE_VERSION = 1 as const;

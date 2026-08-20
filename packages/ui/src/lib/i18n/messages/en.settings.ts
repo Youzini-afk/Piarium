@@ -3202,6 +3202,7 @@ export const settingsDict = {
   'settings.piarium.extensions.inspector.replaces': 'replaces {target}',
   'settings.piarium.extensions.inspector.documentOwner': 'Document service',
   'settings.piarium.extensions.inspector.languageOwner': 'Language service',
+  'settings.piarium.extensions.inspector.debugOwner': 'Run and debug',
   'settings.piarium.extensions.inspector.cleanup': 'cleanup',
   'settings.piarium.extensions.inspector.none': 'None',
   'settings.piarium.extensions.remove.title': 'Remove {name}?',

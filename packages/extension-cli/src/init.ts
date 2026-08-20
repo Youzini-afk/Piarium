@@ -17,7 +17,7 @@ export const initProject = async (options: InitOptions): Promise<{ directory: st
   if (!options.name.trim()) throw new Error("--name must be a non-empty display name");
   const template = options.template ?? "surface";
   if (!isInitTemplate(template)) {
-    throw new Error(`Unknown init template "${String(template)}". Use surface, shell, editor, view, or language.`);
+    throw new Error(`Unknown init template "${String(template)}". Use surface, shell, editor, view, language, debug, or test.`);
   }
   const directory = options.directory ?? ".";
   await mkdir(directory, { recursive: true });

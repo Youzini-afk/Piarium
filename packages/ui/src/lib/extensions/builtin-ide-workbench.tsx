@@ -56,6 +56,7 @@ import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { FileSearchResult, WorkspaceContentSearchHit } from '@/lib/api/types';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
+import { IdeRunPanel } from '@/components/workbench/IdeRunPanel';
 
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((module) => ({ default: module.FilesView })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
@@ -318,16 +319,6 @@ const IdeExtensionsPanel: React.FC = () => {
           </ul>
         )}
       </div>
-    </div>
-  );
-};
-
-const IdeRunPanel: React.FC = () => {
-  const { t } = useI18n();
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2 p-3 typography-ui">
-      <p className="font-medium text-foreground">{t('workbench.ide.run.unavailableTitle')}</p>
-      <p className="text-muted-foreground">{t('workbench.ide.run.unavailableDescription')}</p>
     </div>
   );
 };

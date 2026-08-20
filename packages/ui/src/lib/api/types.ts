@@ -1945,6 +1945,158 @@ export interface LanguageServicesAPI {
   disposeWorkspace(workspaceId: string): Promise<void>;
 }
 
+export type PiariumTaskConfigurationType = 'node' | 'process' | 'npm';
+
+export type PiariumTaskConfiguration = {
+  id: string;
+  label: string;
+  type: PiariumTaskConfigurationType;
+  script?: string;
+  command?: string;
+  args?: string[];
+};
+
+export type PiariumTaskListResult =
+  | { status: 'ready'; workspaceId: string; configurations: PiariumTaskConfiguration[] }
+  | { status: 'failure'; workspaceId: string; message: string; configurations: [] };
+
+export type PiariumTaskRunStatus =
+  | { status: 'running' | 'stopped' | 'failed'; workspaceId: string; runId?: string; taskId?: string; generation?: number; message?: string; exitCode?: number };
+
+export type PiariumTaskEvent =
+  | { kind: 'status'; snapshot: PiariumTaskRunStatus }
+  | { kind: 'output'; runId: string; channel: string; text: string };
+
+export interface WorkspaceTasksAPI {
+  list(workspaceId: string): Promise<PiariumTaskListResult>;
+  run(request: { workspaceId: string; taskId: string }): Promise<PiariumTaskRunStatus>;
+  cancel(request: { workspaceId: string; runId: string }): Promise<PiariumTaskRunStatus>;
+  subscribe(
+    workspaceId: string,
+    listener: (event: PiariumTaskEvent) => void,
+    options?: { signal?: AbortSignal },
+  ): Subscription;
+  disposeWorkspace(workspaceId: string): Promise<void>;
+}
+
+export type PiariumDebugSessionStatus =
+  | { status: 'absent'; workspaceId: string; message?: string }
+  | {
+      status: 'starting' | 'running' | 'paused' | 'stopped' | 'failed';
+      workspaceId: string;
+      sessionId?: string;
+      generation?: number;
+      adapterId?: string;
+      message?: string;
+      reason?: string;
+    };
+
+export type PiariumBreakpoint = {
+  resourceId: string;
+  line: number;
+};
+
+export type PiariumDebugThread = {
+  id: number;
+  name: string;
+};
+
+export type PiariumDebugStackFrame = {
+  id: number;
+  name: string;
+  line: number;
+  column: number;
+  resourceId?: string;
+};
+
+export type PiariumDebugScope = {
+  name: string;
+  variablesReference: number;
+};
+
+export type PiariumDebugVariable = {
+  name: string;
+  value: string;
+  variablesReference: number;
+  type?: string;
+};
+
+export type PiariumDebugFeatureResult<T> =
+  | { status: 'ready'; workspaceId: string; sessionId?: string; generation?: number; value: T }
+  | { status: 'absent'; workspaceId?: string }
+  | { status: 'failed'; workspaceId?: string; sessionId?: string; generation?: number; message: string };
+
+export type PiariumDebugEvent =
+  | { kind: 'status'; snapshot: PiariumDebugSessionStatus }
+  | { kind: 'output'; sessionId: string; channel: string; text: string };
+
+export interface WorkspaceDebugAPI {
+  getStatus(workspaceId: string): Promise<PiariumDebugSessionStatus>;
+  listBreakpoints(workspaceId: string): Promise<{ status: 'ready'; workspaceId: string; breakpoints: PiariumBreakpoint[] }>;
+  setBreakpoints(request: { workspaceId: string; resourceId: string; lines: number[] }): Promise<{
+    status: 'ready';
+    workspaceId: string;
+    breakpoints: PiariumBreakpoint[];
+  }>;
+  start(request: { workspaceId: string; program?: string; languageId?: string; adapterId?: string }): Promise<PiariumDebugSessionStatus>;
+  stop(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
+  continue(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
+  pause(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
+  stepOver(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
+  stepIn(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
+  stepOut(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
+  getThreads(request: { workspaceId: string }): Promise<PiariumDebugFeatureResult<PiariumDebugThread[]>>;
+  getStack(request: { workspaceId: string; threadId: number }): Promise<PiariumDebugFeatureResult<PiariumDebugStackFrame[]>>;
+  getScopes(request: { workspaceId: string; frameId: number }): Promise<PiariumDebugFeatureResult<PiariumDebugScope[]>>;
+  getVariables(request: { workspaceId: string; variablesReference: number }): Promise<PiariumDebugFeatureResult<PiariumDebugVariable[]>>;
+  evaluate(request: { workspaceId: string; expression: string; frameId?: number }): Promise<PiariumDebugFeatureResult<string>>;
+  listWatch(workspaceId: string): Promise<{ status: 'ready'; workspaceId: string; expressions: string[] }>;
+  addWatch(request: { workspaceId: string; expression: string }): Promise<{ status: 'ready' | 'failed'; workspaceId: string; expressions?: string[]; message?: string }>;
+  removeWatch(request: { workspaceId: string; expression: string }): Promise<{ status: 'ready'; workspaceId: string; expressions: string[] }>;
+  subscribe(
+    workspaceId: string,
+    listener: (event: PiariumDebugEvent) => void,
+    options?: { signal?: AbortSignal },
+  ): Subscription;
+  disposeWorkspace(workspaceId: string): Promise<void>;
+}
+
+export type PiariumTestItem = {
+  id: string;
+  label: string;
+  resourceId?: string;
+  line?: number;
+  status?: 'running' | 'passed' | 'failed';
+  message?: string;
+  stack?: string;
+};
+
+export type PiariumTestDiscoverResult =
+  | { status: 'ready' | 'empty' | 'absent'; workspaceId: string; tests: PiariumTestItem[] }
+  | { status: 'failure'; workspaceId: string; message: string; tests: [] };
+
+export type PiariumTestRunStatus =
+  | { status: 'absent' | 'idle' | 'empty' | 'running' | 'stopped' | 'failed'; workspaceId: string; runId?: string; generation?: number; providerId?: string; message?: string };
+
+export type PiariumTestEvent =
+  | { kind: 'status'; snapshot: PiariumTestRunStatus }
+  | { kind: 'test'; test: PiariumTestItem }
+  | { kind: 'output'; channel: string; runId?: string; text: string }
+  | { kind: 'finished'; results?: PiariumTestItem[] };
+
+export interface WorkspaceTestAPI {
+  discover(request: { workspaceId: string; providerId?: string }): Promise<PiariumTestDiscoverResult>;
+  run(request: { workspaceId: string; testIds?: string[]; providerId?: string }): Promise<PiariumTestRunStatus>;
+  cancel(request: { workspaceId: string }): Promise<PiariumTestRunStatus>;
+  getStatus(workspaceId: string): Promise<PiariumTestRunStatus>;
+  subscribe(
+    workspaceId: string,
+    listener: (event: PiariumTestEvent) => void,
+    options?: { signal?: AbortSignal },
+  ): Subscription;
+  disposeWorkspace(workspaceId: string): Promise<void>;
+}
+
 export interface RuntimeAPIs {
   runtime: RuntimeDescriptor;
   piRuntime?: PiRuntimeManagementAPI;
@@ -1955,6 +2107,9 @@ export interface RuntimeAPIs {
   documents: DocumentsAPI;
   workspaceSearch: WorkspaceSearchAPI;
   language: LanguageServicesAPI;
+  tasks: WorkspaceTasksAPI;
+  debug: WorkspaceDebugAPI;
+  tests: WorkspaceTestAPI;
   settings: SettingsAPI;
   permissions: PermissionsAPI;
   notifications: NotificationsAPI;

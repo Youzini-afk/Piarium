@@ -5,6 +5,7 @@ import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { resetDocumentRegistry } from '@/lib/documents/session';
 import { resetLanguageServices } from '@/lib/language-services/session';
+import { resetRunDebugServices } from '@/lib/run-debug/session';
 import { resetAgentEditorCoordination } from '@/lib/agent-editor/session';
 import { resetEditorWorkbenchForRuntimeSwitch } from '@/lib/workbench/editors/session';
 import { resetIdeWorkbenchLayoutForRuntimeSwitch } from '@/lib/workbench/ide-layout';
@@ -33,6 +34,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetIdeWorkbenchLayoutForRuntimeSwitch();
   resetDocumentRegistry();
   resetLanguageServices();
+  resetRunDebugServices();
   resetAgentEditorCoordination();
   useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   queueMicrotask(() => void syncDesktopSettings());

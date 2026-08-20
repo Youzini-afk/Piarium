@@ -1,6 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
   listEditorContextAttachments,
@@ -13,8 +13,10 @@ type EditorContextAttachmentChipsProps = {
   sessionId: string | null | undefined;
 };
 
-const labelFor = (attachment: EditorContextAttachment): 'workbench.attachment.chipUnsaved' | 'workbench.attachment.chipSaved' | 'workbench.attachment.chipSelection' | 'workbench.attachment.chipDiagnostic' | 'workbench.attachment.chipDiff' => {
+const labelFor = (attachment: EditorContextAttachment): I18nKey => {
   if (attachment.kind === 'diagnostic') return 'workbench.attachment.chipDiagnostic';
+  if (attachment.kind === 'test-failure') return 'workbench.attachment.chipTestFailure';
+  if (attachment.kind === 'stack') return 'workbench.attachment.chipStack';
   if (attachment.kind === 'diff') return 'workbench.attachment.chipDiff';
   if (attachment.kind === 'selection') return 'workbench.attachment.chipSelection';
   return attachment.source === 'unsaved-buffer' ? 'workbench.attachment.chipUnsaved' : 'workbench.attachment.chipSaved';

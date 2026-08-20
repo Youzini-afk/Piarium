@@ -1,6 +1,6 @@
 import type { DocumentIdentity } from '@/lib/documents/types';
 
-export type EditorContextAttachmentKind = 'editor' | 'selection' | 'diagnostic' | 'diff';
+export type EditorContextAttachmentKind = 'editor' | 'selection' | 'diagnostic' | 'diff' | 'test-failure' | 'stack';
 export type EditorContextAttachmentSource = 'saved' | 'unsaved-buffer';
 
 export type EditorContextRange = {
