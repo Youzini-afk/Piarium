@@ -9,6 +9,10 @@ import type {
 export const PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION = 1 as const;
 
 export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID = "default";
+export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL = "Agent";
+export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID = "piarium.builtin.agent-workspace";
+export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID = "piarium.builtin.agent-workspace.shell";
+export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
 
 export const PIARIUM_WORKBENCH_REPLACEMENT_TARGETS = {
   agents: "agents.workbench",
@@ -350,13 +354,66 @@ export const parsePiariumWorkbenchProfileApplyRequest = (value: unknown): Piariu
 
 export const defaultPiariumWorkbenchProfileDocument = (): PiariumWorkbenchProfileDocument => ({
   activeProfileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-  layouts: [],
+  layouts: PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES.map((surface) => ({
+    profileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+    references: [],
+    replacementSelections: {
+      [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+    },
+    scope: "distribution",
+    scopeId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+    surface,
+  })),
   profileSelections: { users: {}, workspaces: {} },
-  profiles: [{ id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: "Default" }],
+  profiles: [{ id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL }],
   revision: 0,
   schemaVersion: PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
   updatedAt: new Date(0).toISOString(),
 });
+
+export const migratePiariumWorkbenchProfileDocument = (
+  document: PiariumWorkbenchProfileDocument,
+): boolean => {
+  let changed = false;
+  const profile = document.profiles.find((candidate) => candidate.id === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  if (profile && profile.label === "Default") {
+    profile.label = PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL;
+    changed = true;
+  }
+  for (const surface of PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES) {
+    const index = document.layouts.findIndex((layer) => (
+      layer.profileId === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID
+      && layer.scope === "distribution"
+      && layer.scopeId === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID
+      && layer.surface === surface
+    ));
+    if (index === -1) {
+      document.layouts.push({
+        profileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+        references: [],
+        replacementSelections: {
+          [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+        },
+        scope: "distribution",
+        scopeId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+        surface,
+      });
+      changed = true;
+      continue;
+    }
+    const layer = document.layouts[index];
+    if (!layer || layer.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]) continue;
+    document.layouts[index] = {
+      ...layer,
+      replacementSelections: {
+        ...layer.replacementSelections,
+        [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+      },
+    };
+    changed = true;
+  }
+  return changed;
+};
 
 export const resolvePiariumWorkbenchLayout = (
   documentValue: PiariumWorkbenchProfileDocument | unknown,

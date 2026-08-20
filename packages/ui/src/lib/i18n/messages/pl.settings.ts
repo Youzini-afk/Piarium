@@ -3138,6 +3138,8 @@ export const settingsDict = {
   'settings.piarium.extensions.routing.status.unavailable': 'Dostawca niedostępny',
   'settings.piarium.extensions.workbench.title': 'Obszar roboczy',
   'settings.piarium.extensions.workbench.profile': 'Profil',
+  'settings.piarium.extensions.workbench.profile.agent': 'Agent',
+  'settings.piarium.extensions.workbench.extension.agentWorkspace': 'Przestrzeń robocza agenta',
   'settings.piarium.extensions.workbench.builtin': 'Wbudowane',
   'settings.piarium.extensions.workbench.createProfile': 'Utwórz profil',
   'settings.piarium.extensions.workbench.removeProfile': 'Usuń profil',

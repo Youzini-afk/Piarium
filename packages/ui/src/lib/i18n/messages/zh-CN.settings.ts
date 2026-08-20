@@ -3137,6 +3137,8 @@ export const settingsDict = {
   'settings.piarium.extensions.routing.status.unavailable': '提供方不可用',
   'settings.piarium.extensions.workbench.title': '工作台',
   'settings.piarium.extensions.workbench.profile': '配置档案',
+  'settings.piarium.extensions.workbench.profile.agent': '智能体',
+  'settings.piarium.extensions.workbench.extension.agentWorkspace': '智能体工作区',
   'settings.piarium.extensions.workbench.builtin': '内建实现',
   'settings.piarium.extensions.workbench.createProfile': '新建配置方案',
   'settings.piarium.extensions.workbench.removeProfile': '删除配置方案',

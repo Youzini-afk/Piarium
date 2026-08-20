@@ -1,5 +1,4 @@
 import React from 'react';
-import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatView } from '@/components/views/ChatView';
 import {
   isEmbeddedSessionChatReady,
@@ -748,7 +747,7 @@ function App({ apis }: AppProps) {
             <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
               <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
               <WorkbenchProfileBridge />
-              <WorkbenchShellHost fallback={<MainLayout />} />
+              <WorkbenchShellHost />
               <Toaster />
               {!isBootShell && (
                 <>

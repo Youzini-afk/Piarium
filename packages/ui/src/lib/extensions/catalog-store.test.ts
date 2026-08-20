@@ -260,6 +260,38 @@ for (const deleteData of [false, true] as const) {
   });
 }
 
+test('setEnabled only mutates catalog desired state', async () => {
+  const current = snapshot();
+  const calls: unknown[] = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __PIARIUM_RUNTIME_APIS__: {
+        extensions: {
+          hostState: async () => current,
+          setEnabled: async (extensionId: string, enabled: boolean, expectedRevision: number) => {
+            calls.push([extensionId, enabled, expectedRevision]);
+            return {
+              ...current.catalog,
+              extensions: current.catalog.extensions.map((entry) => (
+                entry.manifest.id === extensionId
+                  ? { ...entry, desired: { ...entry.desired, enabled, revision: entry.desired.revision + 1 } }
+                  : entry
+              )),
+              revision: current.catalog.revision + 1,
+            };
+          },
+          waitForHostState: () => new Promise(() => undefined),
+        },
+      },
+    },
+  });
+  const { setPiariumExtensionEnabled } = await import('./catalog-store');
+  await setPiariumExtensionEnabled('piarium.builtin.agent-workspace', false);
+  expect(calls).toEqual([['piarium.builtin.agent-workspace', false, 1]]);
+  expect(refreshCount).toBe(0);
+});
+
 test('exposes catalog watch generation so in-flight shell candidates can abort', async () => {
   const {
     getPiariumExtensionCatalogWatchGeneration,

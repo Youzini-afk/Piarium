@@ -23,6 +23,8 @@ or built-in source specifiers and remain optional installation shortcuts rather 
 
 Stable workbench replacement targets and contribution slots, including `view` and `editor` kinds,
 live in this package. Application surfaces import those constants; they must not keep a second
-string table.
+string table. The distribution Agent profile keeps the stable ID `default` and the English fallback
+label `Agent`; official UI localizes that name. Its default `workbench.shell` contribution is
+`piarium.builtin.agent-workspace.shell`.
 
 See the complete [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

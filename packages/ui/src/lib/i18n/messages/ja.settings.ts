@@ -2813,6 +2813,8 @@ export const settingsDict = {
   'settings.piarium.extensions.routing.status.unavailable': 'プロバイダーを利用できません',
   'settings.piarium.extensions.workbench.title': 'ワークベンチ',
   'settings.piarium.extensions.workbench.profile': 'プロファイル',
+  'settings.piarium.extensions.workbench.profile.agent': 'エージェント',
+  'settings.piarium.extensions.workbench.extension.agentWorkspace': 'エージェントワークスペース',
   'settings.piarium.extensions.workbench.builtin': '組み込み',
   'settings.piarium.extensions.workbench.createProfile': 'プロファイルを作成',
   'settings.piarium.extensions.workbench.removeProfile': 'プロファイルを削除',

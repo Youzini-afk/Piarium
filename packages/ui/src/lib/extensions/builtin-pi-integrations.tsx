@@ -39,6 +39,7 @@ import type {
   PiPluginSettingsAdapterRenderProps,
   PiSettingsPanelImplementation,
 } from './pi-integration-registry';
+import { AgentWorkspaceShell } from './builtin-agent-workspace';
 import {
   WorkbenchOwnedView,
   WORKBENCH_REPLACEMENT_TARGETS,
@@ -156,6 +157,7 @@ const contributionImplementation = (
     return { render: () => <RecoverySettings /> } satisfies PiSettingsPanelImplementation;
   }
   const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
+  if (contribution?.kind === 'shell') return { framework: 'react-19', Component: AgentWorkspaceShell };
   if (contribution?.kind === 'settings-page') return pageImplementation(definition);
   if (contribution?.kind === 'panel' && contribution.data.contract === 'pi-plugin-settings-adapter/v1') {
     return adapterImplementation(String(contribution.data.adapterId));

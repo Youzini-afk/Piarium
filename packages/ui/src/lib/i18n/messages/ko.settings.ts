@@ -3137,6 +3137,8 @@ export const settingsDict = {
   'settings.piarium.extensions.routing.status.unavailable': '공급자를 사용할 수 없음',
   'settings.piarium.extensions.workbench.title': '워크벤치',
   'settings.piarium.extensions.workbench.profile': '프로필',
+  'settings.piarium.extensions.workbench.profile.agent': '에이전트',
+  'settings.piarium.extensions.workbench.extension.agentWorkspace': '에이전트 워크스페이스',
   'settings.piarium.extensions.workbench.builtin': '기본 제공',
   'settings.piarium.extensions.workbench.createProfile': '프로필 만들기',
   'settings.piarium.extensions.workbench.removeProfile': '프로필 제거',

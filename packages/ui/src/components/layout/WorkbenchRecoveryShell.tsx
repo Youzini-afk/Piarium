@@ -8,6 +8,7 @@ import {
   setPiariumExtensionEnabled,
   usePiariumExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
+import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -68,7 +69,7 @@ export const WorkbenchRecoveryShell: React.FC<{
               </SelectTrigger>
               <SelectContent>
                 {profiles.map((profile) => (
-                  <SelectItem key={profile.id} value={profile.id}>{profile.label}</SelectItem>
+                  <SelectItem key={profile.id} value={profile.id}>{workbenchProfileLabel(profile, t)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

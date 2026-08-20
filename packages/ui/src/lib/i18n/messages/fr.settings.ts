@@ -3020,6 +3020,8 @@ export const settingsDict = {
   'settings.piarium.extensions.routing.status.unavailable': 'Fournisseur indisponible',
   'settings.piarium.extensions.workbench.title': 'Espace de travail',
   'settings.piarium.extensions.workbench.profile': 'Profil',
+  'settings.piarium.extensions.workbench.profile.agent': 'Agent',
+  'settings.piarium.extensions.workbench.extension.agentWorkspace': 'Espace de travail Agent',
   'settings.piarium.extensions.workbench.builtin': 'Intégré',
   'settings.piarium.extensions.workbench.createProfile': 'Créer un profil',
   'settings.piarium.extensions.workbench.removeProfile': 'Supprimer le profil',

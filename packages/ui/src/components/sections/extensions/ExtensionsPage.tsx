@@ -60,6 +60,7 @@ import {
   WorkbenchShellUnavailableError,
 } from '@/lib/extensions/workbench-registry';
 import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
+import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 
 const STATUS_KEYS: Readonly<Record<PiariumExtensionActualStatus, I18nKey>> = {
   active: 'settings.piarium.extensions.status.active',
@@ -228,7 +229,7 @@ const WorkbenchProfileSection: React.FC = () => {
               <SelectTrigger className="min-w-0 flex-1" disabled={profileBusy}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {workbench.document.profiles.map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.id}>{candidate.label}</SelectItem>
+                  <SelectItem key={candidate.id} value={candidate.id}>{workbenchProfileLabel(candidate, t)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -288,7 +289,7 @@ const WorkbenchProfileSection: React.FC = () => {
             {installedExtensions.map((entry) => (
               <label key={entry.manifest.id} className="flex min-w-0 items-center justify-between gap-3 rounded-md bg-interactive-hover px-2.5 py-2">
                 <span className="min-w-0 truncate typography-meta text-foreground">
-                  {entry.manifest.displayName ?? entry.manifest.id}
+                  {workbenchExtensionDisplayName(entry, t)}
                 </span>
                 <Switch
                   checked={selectedExtensions.has(entry.manifest.id)}
@@ -373,7 +374,7 @@ const WorkbenchProfileSection: React.FC = () => {
 
       <Dialog open={removeOpen} onOpenChange={(open) => !profileBusy && setRemoveOpen(open)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{t('settings.piarium.extensions.workbench.removeProfileNamed', { name: profile.label })}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('settings.piarium.extensions.workbench.removeProfileNamed', { name: workbenchProfileLabel(profile, t) })}</DialogTitle></DialogHeader>
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={profileBusy} onClick={() => setRemoveOpen(false)}>
               {t('settings.common.actions.cancel')}
@@ -471,7 +472,7 @@ const ServiceRoutingSection: React.FC = () => {
   const editableScopeKey = serviceRoutingScopeKey(editableScope);
   const extensionNames = new Map(snapshot.catalog.extensions.map((entry) => [
     entry.manifest.id,
-    entry.manifest.displayName ?? entry.manifest.id,
+    workbenchExtensionDisplayName(entry, t),
   ]));
 
   const selectProvider = async (
@@ -621,7 +622,7 @@ const ExtensionCard: React.FC<{
                   : 'size-4 text-muted-foreground'}
             />
             <span className="typography-ui-label text-foreground">
-              {entry.manifest.displayName ?? entry.manifest.id}
+              {workbenchExtensionDisplayName(entry, t)}
             </span>
             <span className="rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
               {t(STATUS_KEYS[status])}
@@ -640,7 +641,7 @@ const ExtensionCard: React.FC<{
             void setPiariumExtensionEnabled(entry.manifest.id, enabled).catch(() => undefined);
           }}
           aria-label={t('settings.piarium.extensions.actions.activationAria', {
-            name: entry.manifest.displayName ?? entry.manifest.id,
+            name: workbenchExtensionDisplayName(entry, t),
           })}
         />
       </div>
@@ -782,7 +783,7 @@ const ExtensionCard: React.FC<{
       <Dialog open={inspectOpen} onOpenChange={setInspectOpen}>
         <DialogContent className="max-h-[min(80vh,48rem)] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{entry.manifest.displayName ?? entry.manifest.id}</DialogTitle>
+            <DialogTitle>{workbenchExtensionDisplayName(entry, t)}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 @xl:grid-cols-2">
             <div className="space-y-2">
@@ -910,7 +911,7 @@ const ExtensionCard: React.FC<{
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{t('settings.piarium.extensions.remove.title', {
-              name: entry.manifest.displayName ?? entry.manifest.id,
+              name: workbenchExtensionDisplayName(entry, t),
             })}</DialogTitle>
             <DialogDescription>{t('settings.piarium.extensions.remove.storageScope')}</DialogDescription>
           </DialogHeader>

@@ -3137,6 +3137,8 @@ export const settingsDict = {
   'settings.piarium.extensions.routing.status.unavailable': 'Provider unavailable',
   'settings.piarium.extensions.workbench.title': 'Workbench',
   'settings.piarium.extensions.workbench.profile': 'Profile',
+  'settings.piarium.extensions.workbench.profile.agent': 'Agent',
+  'settings.piarium.extensions.workbench.extension.agentWorkspace': 'Agent Workspace',
   'settings.piarium.extensions.workbench.builtin': 'Built-in',
   'settings.piarium.extensions.workbench.createProfile': 'Create profile',
   'settings.piarium.extensions.workbench.removeProfile': 'Remove profile',

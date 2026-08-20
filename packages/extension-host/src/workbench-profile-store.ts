@@ -1,6 +1,7 @@
 import {
   PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
   defaultPiariumWorkbenchProfileDocument,
+  migratePiariumWorkbenchProfileDocument,
   parsePiariumWorkbenchLayoutUpdateRequest,
   parsePiariumWorkbenchProfileRemoveRequest,
   parsePiariumWorkbenchProfileSelectionRequest,
@@ -55,8 +56,9 @@ export class WorkbenchProfileStore {
     const snapshot = await this.#load();
     if (!snapshot.authoritative) return snapshot;
     const document = structuredClone(snapshot.document);
-    const changed = await this.#migrateWorkspaceScopes(document);
-    if (!changed) return snapshot;
+    const workspaceChanged = await this.#migrateWorkspaceScopes(document);
+    const agentChanged = migratePiariumWorkbenchProfileDocument(document);
+    if (!workspaceChanged && !agentChanged) return snapshot;
     return this.#persist(document, snapshot.document.revision);
   }
 
@@ -203,6 +205,7 @@ export class WorkbenchProfileStore {
     if (!current.authoritative) throw new Error("Cannot update stale workbench profile state");
     const document = structuredClone(current.document);
     await this.#migrateWorkspaceScopes(document);
+    migratePiariumWorkbenchProfileDocument(document);
     await mutate(document);
     return this.#persist(document, expectedRevision);
   }

@@ -56,6 +56,10 @@ import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 
 import { PiAppEffects } from './PiAppEffects';
+import { bindMobileWorkspaceShell } from './mobileWorkspaceShell';
+import { WorkbenchProfileBridge } from '@/lib/extensions/workbench-registry';
+import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
+import { MOBILE_WORKSPACE_DISCONNECTED_EVENT } from '@/lib/extensions/builtin-agent-workspace';
 import { MobileChangesSurface } from './MobileChangesSurface';
 import { MobileFilesSurface } from './MobileFilesSurface';
 import { BusyDots } from '@/components/chat/message/parts/BusyDots';
@@ -2676,6 +2680,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   );
 };
 
+bindMobileWorkspaceShell((props) => <MobileShell {...props} />);
+
 export function MobileApp({ apis }: MobileAppProps) {
   const { t } = useI18n();
   const piCatalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
@@ -2697,6 +2703,12 @@ export function MobileApp({ apis }: MobileAppProps) {
   const autoConnectLabel = React.useMemo(() => getAutoConnectTargetLabel(), []);
   const isNativeMobileApp = React.useMemo(() => isCapacitorMobileApp(), []);
   const nativeResumeValidationSeqRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const onDisconnected = () => setConnectionEpoch((value) => value + 1);
+    window.addEventListener(MOBILE_WORKSPACE_DISCONNECTED_EVENT, onDisconnected);
+    return () => window.removeEventListener(MOBILE_WORKSPACE_DISCONNECTED_EVENT, onDisconnected);
+  }, []);
 
   const handleNativeResume = React.useCallback(() => {
     const apiBaseUrl = getRuntimeApiBaseUrl();
@@ -3043,10 +3055,8 @@ export function MobileApp({ apis }: MobileAppProps) {
             <PiAppEffects backgroundWorkEnabled={piCatalogLoaded} />
             <PiInteractionHost />
             <MobileAppUpdateToast />
-            <MobileShell onActiveConnectionDeleted={() => {
-              switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
-              setConnectionEpoch((value) => value + 1);
-            }} />
+            <WorkbenchProfileBridge />
+            <WorkbenchShellHost />
             <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
             {piCatalogLoaded ? <ConfigUpdateOverlay /> : null}
           </div>
