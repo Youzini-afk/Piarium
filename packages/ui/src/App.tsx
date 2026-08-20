@@ -65,9 +65,8 @@ import {
 import { toast } from '@/components/ui';
 import {
   WorkbenchProfileBridge,
-  WorkbenchReplacement,
-  WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
+import { WorkbenchShellHost } from '@/lib/extensions/workbench-shell-host';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -749,10 +748,7 @@ function App({ apis }: AppProps) {
             <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
               <PiAppEffects backgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
               <WorkbenchProfileBridge />
-              <WorkbenchReplacement
-                target={WORKBENCH_REPLACEMENT_TARGETS.shell}
-                fallback={<MainLayout />}
-              />
+              <WorkbenchShellHost fallback={<MainLayout />} />
               <Toaster />
               {!isBootShell && (
                 <>

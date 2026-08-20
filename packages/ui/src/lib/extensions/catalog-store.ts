@@ -340,6 +340,8 @@ export const subscribePiariumExtensionCatalog = (listener: () => void): (() => v
 
 export const getPiariumExtensionCatalogState = (): PiariumExtensionCatalogStoreState => state;
 
+export const getPiariumExtensionCatalogWatchGeneration = (): number => generation;
+
 export const resetPiariumExtensionCatalogForTests = (): void => {
   generation += 1;
   watchController?.abort('Piarium extension catalog reset');

@@ -1139,7 +1139,10 @@ through the application-host extension API and converge through the existing hos
 The React workbench applies the resolved profile to the Surface Registry atomically. The default
 `MainLayout` remains the built-in fallback above the boot/recovery kernel, while
 `workbench.shell`, `sessions.navigator`, `chat.timeline`, `chat.composer`, `agents.workbench`,
-`mcp.workbench`, `workspace.explorer`, and `settings.workbench` are live replacement points. Panels,
+`mcp.workbench`, `workspace.explorer`, `settings.workbench`, `workbench.activity`,
+`workbench.primary-sidebar`, `workbench.editor`, `workbench.secondary-sidebar`, `workbench.panel`,
+and `workbench.status` are live replacement points. `view` and `editor` contribution kinds extend
+the existing command, page, panel, shell, and renderer kinds. Panels,
 message and tool renderers, composer actions, and session-row decorations are additive contribution
 slots. Disabling or losing the selected contribution therefore unmounts only that owner generation,
 keeps the selected contribution ID and layout record, and immediately renders the built-in fallback.

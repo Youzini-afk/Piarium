@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/ui';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
+  SettingsFieldRow,
   SettingsRadioGroup,
   SettingsRadioOption,
   SettingsSection,
@@ -44,6 +45,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   resolvePiariumExtensionServiceRouting,
   resolvePiariumWorkbenchLayout,
+  resolvePiariumWorkbenchProfile,
   serviceRoutingScopeKey,
 } from '@piarium/extension-contract';
 import {
@@ -54,6 +56,7 @@ import {
   upsertWorkbenchProfile,
   useSurfaceRegistrySnapshot,
   WORKBENCH_REPLACEMENT_TARGETS,
+  WorkbenchShellUnavailableError,
 } from '@/lib/extensions/workbench-registry';
 import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 
@@ -93,6 +96,20 @@ const WORKBENCH_TARGET_LABELS: Readonly<Record<string, I18nKey>> = {
   [WORKBENCH_REPLACEMENT_TARGETS.mcp]: 'settings.piarium.extensions.workbench.target.mcp',
   [WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer]: 'settings.piarium.extensions.workbench.target.explorer',
   [WORKBENCH_REPLACEMENT_TARGETS.settings]: 'settings.piarium.extensions.workbench.target.settings',
+  [WORKBENCH_REPLACEMENT_TARGETS.activity]: 'settings.piarium.extensions.workbench.target.activity',
+  [WORKBENCH_REPLACEMENT_TARGETS.primarySidebar]: 'settings.piarium.extensions.workbench.target.primarySidebar',
+  [WORKBENCH_REPLACEMENT_TARGETS.editor]: 'settings.piarium.extensions.workbench.target.editor',
+  [WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar]: 'settings.piarium.extensions.workbench.target.secondarySidebar',
+  [WORKBENCH_REPLACEMENT_TARGETS.panel]: 'settings.piarium.extensions.workbench.target.panel',
+  [WORKBENCH_REPLACEMENT_TARGETS.status]: 'settings.piarium.extensions.workbench.target.status',
+};
+
+const SHELL_STATUS_KEYS: Readonly<Record<ReturnType<typeof resolvePiariumWorkbenchProfile>['status'], I18nKey>> = {
+  builtin: 'settings.piarium.extensions.workbench.shellStatus.builtin',
+  ready: 'settings.piarium.extensions.workbench.shellStatus.ready',
+  missing: 'settings.piarium.extensions.workbench.shellStatus.missing',
+  disabled: 'settings.piarium.extensions.workbench.shellStatus.disabled',
+  failed: 'settings.piarium.extensions.workbench.shellStatus.failed',
 };
 
 const WorkbenchProfileSection: React.FC = () => {
@@ -104,9 +121,15 @@ const WorkbenchProfileSection: React.FC = () => {
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [profileName, setProfileName] = React.useState('');
   const [profileBusy, setProfileBusy] = React.useState(false);
+  const [pendingUnavailable, setPendingUnavailable] = React.useState<WorkbenchShellUnavailableError | null>(null);
   const workbench = catalog.snapshot?.workbench;
-  if (!workbench?.authoritative) return null;
+  if (!workbench?.authoritative || !catalog.snapshot) return null;
   const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
+    surface: piariumSurfaceRuntime.surface,
+    userId: 'default',
+    ...(currentDirectory ? { workspaceId: currentDirectory } : {}),
+  });
+  const profileResolution = resolvePiariumWorkbenchProfile(workbench.document, catalog.snapshot.catalog, {
     surface: piariumSurfaceRuntime.surface,
     userId: 'default',
     ...(currentDirectory ? { workspaceId: currentDirectory } : {}),
@@ -132,6 +155,24 @@ const WorkbenchProfileSection: React.FC = () => {
   ])];
   const run = (operation: Promise<void>) => {
     void operation.catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
+  };
+  const requestProfile = async (
+    profileId: string,
+    options?: { enableShell?: boolean; persistUnavailable?: boolean },
+  ): Promise<void> => {
+    setProfileBusy(true);
+    try {
+      await selectActiveWorkbenchProfile(profileId, currentDirectory || undefined, options);
+      setPendingUnavailable(null);
+    } catch (error) {
+      if (error instanceof WorkbenchShellUnavailableError) {
+        setPendingUnavailable(error);
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProfileBusy(false);
+    }
   };
   const updateExtensionSet = async (extensionId: string, enabled: boolean): Promise<void> => {
     const next = new Set(selectedExtensions);
@@ -161,7 +202,7 @@ const WorkbenchProfileSection: React.FC = () => {
     setProfileBusy(true);
     try {
       await upsertWorkbenchProfile({ extensionIds: [...selectedExtensions].sort(), id, label });
-      await selectActiveWorkbenchProfile(id, currentDirectory || undefined);
+      await requestProfile(id);
       setProfileName('');
       setCreateOpen(false);
     } catch (error) {
@@ -173,14 +214,17 @@ const WorkbenchProfileSection: React.FC = () => {
   return (
     <SettingsSection title={t('settings.piarium.extensions.workbench.title')} settingsItem="extensions.workbench">
       <div className="space-y-3">
-        <div className="grid gap-2 @xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.8fr)] @xl:items-center">
-          <span className="typography-ui-label text-foreground">{t('settings.piarium.extensions.workbench.profile')}</span>
-          <div className="flex min-w-0 gap-2">
+        <SettingsFieldRow
+          label={t('settings.piarium.extensions.workbench.profile')}
+          settingsItem="extensions.workbench.profile"
+          controlClassName="w-full max-w-none"
+        >
+          <div className="flex min-w-0 w-full gap-2">
             <Select
               value={resolved.profileId}
-              onValueChange={(profileId) => run(selectActiveWorkbenchProfile(profileId, currentDirectory || undefined))}
+              onValueChange={(profileId) => { void requestProfile(profileId); }}
             >
-              <SelectTrigger className="min-w-0 flex-1"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="min-w-0 flex-1" disabled={profileBusy}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {workbench.document.profiles.map((candidate) => (
                   <SelectItem key={candidate.id} value={candidate.id}>{candidate.label}</SelectItem>
@@ -196,8 +240,32 @@ const WorkbenchProfileSection: React.FC = () => {
               </Button>
             ) : null}
           </div>
-        </div>
-        <div className="rounded-lg border border-border/60 px-3 py-3">
+        </SettingsFieldRow>
+        <SettingsFieldRow
+          label={t('settings.piarium.extensions.workbench.selectedShell')}
+          settingsItem="extensions.workbench.shell"
+          controlClassName="w-full max-w-none"
+        >
+          <div className="flex min-w-0 w-full flex-col items-start gap-2 @xl:items-end">
+            <span className="typography-meta text-muted-foreground">
+              {profileResolution.shellContributionId ?? t('settings.piarium.extensions.workbench.builtin')}
+              {' · '}
+              {t(SHELL_STATUS_KEYS[profileResolution.status])}
+            </span>
+            {profileResolution.status === 'disabled' && profileResolution.shellExtensionId ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={profileBusy}
+                onClick={() => { void requestProfile(resolved.profileId, { enableShell: true }); }}
+              >
+                {t('settings.piarium.extensions.workbench.enableAndSwitch')}
+              </Button>
+            ) : null}
+          </div>
+        </SettingsFieldRow>
+        <div className="rounded-lg border border-border/60 px-3 py-3" data-settings-item="extensions.workbench.extensionSet">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="typography-ui-label text-foreground">{t('settings.piarium.extensions.workbench.extensionSet')}</span>
             <Button
@@ -321,6 +389,41 @@ const WorkbenchProfileSection: React.FC = () => {
               }}
             >
               {t('settings.piarium.extensions.workbench.removeProfile')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(pendingUnavailable)} onOpenChange={(open) => !profileBusy && !open && setPendingUnavailable(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('settings.piarium.extensions.workbench.shellUnavailableTitle')}</DialogTitle>
+            <DialogDescription>{t('settings.piarium.extensions.workbench.shellUnavailableDescription')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="ghost" disabled={profileBusy} onClick={() => setPendingUnavailable(null)}>
+              {t('settings.common.actions.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={profileBusy || !pendingUnavailable}
+              onClick={() => {
+                if (!pendingUnavailable) return;
+                void requestProfile(pendingUnavailable.profileId, { persistUnavailable: true });
+              }}
+            >
+              {t('settings.piarium.extensions.workbench.selectWithoutEnabling')}
+            </Button>
+            <Button
+              type="button"
+              disabled={profileBusy || !pendingUnavailable}
+              onClick={() => {
+                if (!pendingUnavailable) return;
+                void requestProfile(pendingUnavailable.profileId, { enableShell: true });
+              }}
+            >
+              {t('settings.piarium.extensions.workbench.enableAndSwitch')}
             </Button>
           </DialogFooter>
         </DialogContent>

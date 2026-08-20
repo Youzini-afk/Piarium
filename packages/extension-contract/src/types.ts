@@ -51,6 +51,7 @@ export interface PiariumExtensionServiceProvision {
 export type PiariumExtensionContributionKind =
   | "command"
   | "composer-action"
+  | "editor"
   | "keybinding"
   | "menu-item"
   | "message-renderer"
@@ -61,7 +62,8 @@ export type PiariumExtensionContributionKind =
   | "shell"
   | "sidebar"
   | "status-item"
-  | "tool-renderer";
+  | "tool-renderer"
+  | "view";
 
 export interface PiariumExtensionContributionPlacement {
   after?: string[];

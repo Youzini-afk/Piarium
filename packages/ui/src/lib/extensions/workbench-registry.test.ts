@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'bun:test';
 import type { SurfaceContribution, SurfaceOwnerIdentity } from '@piarium/extension-surface';
+import { startWorkbenchMountSession } from './workbench-mount';
 
 mock.module('@/hooks/useProviderLogo', () => ({
   preloadProviderLogos: () => undefined,
@@ -7,7 +8,6 @@ mock.module('@/hooks/useProviderLogo', () => ({
 }));
 
 const {
-  startWorkbenchMountSession,
   triggerVisibleSurfaceContributions,
   workbenchContributionInstanceKey,
 } = await import('./workbench-registry');

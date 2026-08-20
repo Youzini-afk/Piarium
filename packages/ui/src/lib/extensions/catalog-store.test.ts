@@ -259,3 +259,13 @@ for (const deleteData of [false, true] as const) {
     expect(refreshCount).toBe(1);
   });
 }
+
+test('exposes catalog watch generation so in-flight shell candidates can abort', async () => {
+  const {
+    getPiariumExtensionCatalogWatchGeneration,
+    resetPiariumExtensionCatalogForTests,
+  } = await import('./catalog-store');
+  const before = getPiariumExtensionCatalogWatchGeneration();
+  resetPiariumExtensionCatalogForTests();
+  expect(getPiariumExtensionCatalogWatchGeneration()).toBeGreaterThan(before);
+});

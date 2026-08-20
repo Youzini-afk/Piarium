@@ -4,9 +4,10 @@ import type { ComponentType } from 'react';
 import type {
   PiariumExtensionContributionKind,
   PiariumWorkbenchDistributionProfile,
-  PiariumWorkbenchLayoutLayer,
 } from '@piarium/extension-contract';
-import { resolvePiariumWorkbenchLayout } from '@piarium/extension-contract';
+import {
+  resolvePiariumWorkbenchLayout,
+} from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
@@ -14,47 +15,25 @@ import {
   refreshPiariumExtensionCatalog,
   usePiariumExtensionCatalog,
 } from './catalog-store';
+import {
+  startWorkbenchMountSession,
+  type WorkbenchMountImplementation,
+} from './workbench-mount';
 import { piariumSurfaceRuntime } from './surface-runtime';
 
-export const WORKBENCH_REPLACEMENT_TARGETS = {
-  agents: 'agents.workbench',
-  chatComposer: 'chat.composer',
-  chatTimeline: 'chat.timeline',
-  mcp: 'mcp.workbench',
-  sessionNavigator: 'sessions.navigator',
-  settings: 'settings.workbench',
-  shell: 'workbench.shell',
-  workspaceExplorer: 'workspace.explorer',
-} as const;
+export { PIARIUM_WORKBENCH_REPLACEMENT_TARGETS as WORKBENCH_REPLACEMENT_TARGETS } from '@piarium/extension-contract';
+export { startWorkbenchMountSession } from './workbench-mount';
+export {
+  selectActiveWorkbenchProfile,
+  setWorkbenchReplacementSelection,
+  WorkbenchShellUnavailableError,
+} from './workbench-shell-transition';
 
 type RenderImplementation<TProps extends object> = {
   render(props: TProps): React.ReactNode;
 };
 
-type MountDisposer = () => void | Promise<void>;
-
-interface MountContext<TProps extends object> {
-  readonly contributionId: string;
-  readonly owner: Readonly<SurfaceContribution['owner']>;
-  readonly props: Readonly<TProps>;
-  reportError(error: unknown): void;
-  readonly signal: AbortSignal;
-}
-
-type MountImplementation<TProps extends object> = {
-  mount(
-    container: HTMLElement,
-    context: MountContext<TProps>,
-  ): void | MountDisposer | Promise<void | MountDisposer>;
-};
-
-type WorkbenchMountFailurePhase = 'dispose' | 'mount' | 'render';
-
-interface WorkbenchMountSession {
-  dispose(reason?: unknown): Promise<void>;
-  readonly mounted: Promise<void>;
-  readonly signal: AbortSignal;
-}
+type MountImplementation<TProps extends object> = WorkbenchMountImplementation<TProps>;
 
 interface ReactContribution<TProps extends object> {
   Component: ComponentType<TProps>;
@@ -97,54 +76,6 @@ const isMountImplementation = <TProps extends object>(
 ): value is MountImplementation<TProps> => (
   typeof value === 'object' && value !== null && typeof (value as { mount?: unknown }).mount === 'function'
 );
-
-export const startWorkbenchMountSession = <TProps extends object>(options: {
-  container: HTMLElement;
-  contributionId: string;
-  implementation: MountImplementation<TProps>;
-  onError(error: unknown, phase: WorkbenchMountFailurePhase): void;
-  owner: SurfaceContribution['owner'];
-  props: TProps;
-}): WorkbenchMountSession => {
-  const controller = new AbortController();
-  let disposer: MountDisposer | undefined;
-  let disposal: Promise<void> | null = null;
-  const mounted = Promise.resolve().then(async () => {
-    const returned = await options.implementation.mount(options.container, {
-      contributionId: options.contributionId,
-      owner: { ...options.owner },
-      props: options.props,
-      reportError: (error) => options.onError(error, 'render'),
-      signal: controller.signal,
-    });
-    if (returned !== undefined && typeof returned !== 'function') {
-      throw new TypeError(`Surface contribution ${options.contributionId} mount must return a disposer or undefined`);
-    }
-    disposer = typeof returned === 'function' ? returned : undefined;
-  }).catch((error: unknown) => {
-    options.onError(error, 'mount');
-  });
-
-  return {
-    mounted,
-    signal: controller.signal,
-    dispose: (reason) => {
-      if (disposal) return disposal;
-      controller.abort(reason);
-      disposal = mounted.then(async () => {
-        if (!disposer) return;
-        const current = disposer;
-        disposer = undefined;
-        try {
-          await current();
-        } catch (error) {
-          options.onError(error, 'dispose');
-        }
-      });
-      return disposal;
-    },
-  };
-};
 
 export const workbenchContributionInstanceKey = (contribution: SurfaceContribution): string => {
   const { owner } = contribution;
@@ -347,12 +278,14 @@ const selectedReplacement = (
 ));
 
 export const WorkbenchReplacement: React.FC<{
+  errorFallback?: React.ReactNode;
   fallback: React.ReactNode;
   target: string;
-}> = ({ fallback, target }) => {
+}> = ({ errorFallback, fallback, target }) => {
   const snapshot = useSurfaceRegistrySnapshot();
   const mountProps = React.useMemo<MountReplacementProps>(() => ({ target }), [target]);
   const contribution = selectedReplacement(snapshot, target);
+  const failureFallback = errorFallback ?? fallback;
   useVisibleContributionActivation(contribution ? [contribution] : []);
   if (!contribution) return <>{fallback}</>;
   const contributionKey = workbenchContributionInstanceKey(contribution);
@@ -362,14 +295,14 @@ export const WorkbenchReplacement: React.FC<{
         key={contributionKey}
         className="h-full min-h-0 w-full min-w-0"
         contribution={contribution}
-        fallback={fallback}
+        fallback={failureFallback}
         implementation={contribution.implementation}
         props={mountProps}
       />
     );
   }
   return (
-    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={fallback}>
+    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={failureFallback}>
       <WorkbenchRenderImplementation
         fallbackOnEmpty={fallback}
         implementation={contribution.implementation}
@@ -511,60 +444,6 @@ export const renderFirstWorkbenchMatch = <TInput,>(
     if (renderer.implementation.matches(input)) return renderer.implementation.render(input);
   }
   return undefined;
-};
-
-export const setWorkbenchReplacementSelection = async (
-  target: string,
-  contributionId: string | null,
-  options?: { scope?: 'user' | 'workspace'; scopeId?: string },
-): Promise<void> => {
-  const state = getPiariumExtensionCatalogState();
-  const snapshot = state.snapshot?.workbench;
-  if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
-  const scope = options?.scope ?? (options?.scopeId ? 'workspace' : 'user');
-  const scopeId = options?.scopeId ?? 'default';
-  const resolved = resolvePiariumWorkbenchLayout(snapshot.document, {
-    surface: piariumSurfaceRuntime.surface,
-    userId: 'default',
-    ...(scope === 'workspace' ? { workspaceId: scopeId } : {}),
-  });
-  const currentLayer = snapshot.document.layouts.find((layer) => (
-    layer.profileId === resolved.profileId
-    && layer.surface === piariumSurfaceRuntime.surface
-    && layer.scope === scope
-    && layer.scopeId === scopeId
-  ));
-  const replacementSelections = { ...(currentLayer?.replacementSelections ?? {}) };
-  if (contributionId === null) delete replacementSelections[target];
-  else replacementSelections[target] = contributionId;
-  const layer: PiariumWorkbenchLayoutLayer = {
-    profileId: resolved.profileId,
-    references: currentLayer?.references ?? [],
-    replacementSelections,
-    scope,
-    scopeId,
-    surface: piariumSurfaceRuntime.surface,
-  };
-  await window.__PIARIUM_RUNTIME_APIS__?.extensions.updateWorkbenchLayout({
-    expectedRevision: snapshot.document.revision,
-    layer,
-  });
-  await refreshPiariumExtensionCatalog();
-};
-
-export const selectActiveWorkbenchProfile = async (
-  profileId: string,
-  workspaceId?: string,
-): Promise<void> => {
-  const snapshot = getPiariumExtensionCatalogState().snapshot?.workbench;
-  if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
-  await window.__PIARIUM_RUNTIME_APIS__?.extensions.selectWorkbenchProfile({
-    expectedRevision: snapshot.document.revision,
-    profileId,
-    scope: workspaceId ? 'workspace' : 'user',
-    scopeId: workspaceId ?? 'default',
-  });
-  await refreshPiariumExtensionCatalog();
 };
 
 export const upsertWorkbenchProfile = async (

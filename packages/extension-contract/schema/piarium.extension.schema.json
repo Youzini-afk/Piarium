@@ -137,9 +137,9 @@
           "id": { "$ref": "#/$defs/id" },
           "kind": {
             "enum": [
-              "command", "composer-action", "keybinding", "menu-item", "message-renderer",
+              "command", "composer-action", "editor", "keybinding", "menu-item", "message-renderer",
               "page", "panel", "session-decoration", "settings-page", "shell", "sidebar",
-              "status-item", "tool-renderer"
+              "status-item", "tool-renderer", "view"
             ]
           },
           "supports": {

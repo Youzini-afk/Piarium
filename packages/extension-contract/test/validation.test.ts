@@ -235,3 +235,13 @@ test("validates public catalog snapshots before a surface accepts them", () => {
     snapshot: { schemaVersion: 1, extensions: [] },
   }), PiariumExtensionContractError);
 });
+
+test("accepts view and editor contribution kinds", () => {
+  const source = manifest();
+  source.contributions = [
+    { ...source.contributions[0]!, id: "dev.example.memory-workbench.panel-view", kind: "view" },
+    { ...source.contributions[0]!, id: "dev.example.memory-workbench.markdown", kind: "editor" },
+  ];
+  const parsed = parsePiariumExtensionManifest(source);
+  assert.deepEqual(parsed.contributions?.map((item) => item.kind), ["view", "editor"]);
+});

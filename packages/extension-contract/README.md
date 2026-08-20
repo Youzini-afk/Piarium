@@ -21,4 +21,8 @@ The package publishes editor schemas at `@piarium/extension-contract/schema/mani
 `@piarium/extension-contract/schema/discovery`. Discovery documents contain ordinary npm, Git, local,
 or built-in source specifiers and remain optional installation shortcuts rather than an allowlist.
 
+Stable workbench replacement targets and contribution slots, including `view` and `editor` kinds,
+live in this package. Application surfaces import those constants; they must not keep a second
+string table.
+
 See the complete [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

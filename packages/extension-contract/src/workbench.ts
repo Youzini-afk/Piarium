@@ -1,10 +1,50 @@
 import type {
   PiariumApplicationSurface,
+  PiariumExtensionCatalogEntry,
+  PiariumExtensionCatalogSnapshot,
   PiariumExtensionDiagnostic,
   PiariumExtensionStorageSnapshot,
 } from "./types.js";
 
 export const PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION = 1 as const;
+
+export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID = "default";
+
+export const PIARIUM_WORKBENCH_REPLACEMENT_TARGETS = {
+  agents: "agents.workbench",
+  chatComposer: "chat.composer",
+  chatTimeline: "chat.timeline",
+  mcp: "mcp.workbench",
+  sessionNavigator: "sessions.navigator",
+  settings: "settings.workbench",
+  shell: "workbench.shell",
+  workspaceExplorer: "workspace.explorer",
+  activity: "workbench.activity",
+  primarySidebar: "workbench.primary-sidebar",
+  editor: "workbench.editor",
+  secondarySidebar: "workbench.secondary-sidebar",
+  panel: "workbench.panel",
+  status: "workbench.status",
+} as const;
+
+export const PIARIUM_WORKBENCH_SLOTS = {
+  activityItems: "workbench.activity.items",
+  primarySidebarViews: "workbench.primary-sidebar.views",
+  editorActions: "workbench.editor.actions",
+  secondarySidebarViews: "workbench.secondary-sidebar.views",
+  panelViews: "workbench.panel.views",
+  statusItems: "workbench.status.items",
+} as const;
+
+export type PiariumWorkbenchShellStatus = "builtin" | "disabled" | "failed" | "missing" | "ready";
+
+export interface PiariumWorkbenchResolvedProfile {
+  layout: PiariumWorkbenchResolvedLayout;
+  profileId: string;
+  shellContributionId?: string;
+  shellExtensionId?: string;
+  status: PiariumWorkbenchShellStatus;
+}
 
 export type PiariumWorkbenchLayoutScope = "distribution" | "user" | "workspace";
 
@@ -309,10 +349,10 @@ export const parsePiariumWorkbenchProfileApplyRequest = (value: unknown): Piariu
 };
 
 export const defaultPiariumWorkbenchProfileDocument = (): PiariumWorkbenchProfileDocument => ({
-  activeProfileId: "default",
+  activeProfileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
   layouts: [],
   profileSelections: { users: {}, workspaces: {} },
-  profiles: [{ id: "default", label: "Default" }],
+  profiles: [{ id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: "Default" }],
   revision: 0,
   schemaVersion: PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
   updatedAt: new Date(0).toISOString(),
@@ -353,6 +393,75 @@ export const resolvePiariumWorkbenchLayout = (
     Object.assign(replacementSelections, layer.replacementSelections);
   }
   return { profileId: profileIdValue, references: [...references.values()], replacementSelections };
+};
+
+const catalogExtensions = (
+  catalog: Pick<PiariumExtensionCatalogSnapshot, "extensions"> | readonly PiariumExtensionCatalogEntry[],
+): readonly PiariumExtensionCatalogEntry[] => (
+  "extensions" in catalog ? catalog.extensions : catalog
+);
+
+export const inspectPiariumWorkbenchShell = (
+  replacementSelections: Readonly<Record<string, string>>,
+  catalog: Pick<PiariumExtensionCatalogSnapshot, "extensions"> | readonly PiariumExtensionCatalogEntry[],
+  surface: PiariumApplicationSurface,
+): Pick<PiariumWorkbenchResolvedProfile, "shellContributionId" | "shellExtensionId" | "status"> => {
+  const shellContributionId = replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]?.trim();
+  if (!shellContributionId) return { status: "builtin" };
+  const extensions = catalogExtensions(catalog);
+  for (const entry of extensions) {
+    const contribution = entry.manifest.contributions?.find((item) => item.id === shellContributionId);
+    if (!contribution || !contribution.supports.includes(surface)) continue;
+    if (!entry.desired.enabled) {
+      return { status: "disabled", shellContributionId, shellExtensionId: entry.manifest.id };
+    }
+    if (entry.actual.some((state) => state.status === "failed")) {
+      return { status: "failed", shellContributionId, shellExtensionId: entry.manifest.id };
+    }
+    return { status: "ready", shellContributionId, shellExtensionId: entry.manifest.id };
+  }
+  return { status: "missing", shellContributionId };
+};
+
+export const resolvePiariumWorkbenchLayoutForProfile = (
+  documentValue: PiariumWorkbenchProfileDocument | unknown,
+  context: PiariumWorkbenchResolutionContext,
+  profileIdValue: string,
+): PiariumWorkbenchResolvedLayout => {
+  const document = parsePiariumWorkbenchProfileDocument(documentValue);
+  const selected = profileId(profileIdValue, "profileId");
+  if (!document.profiles.some((profile) => profile.id === selected)) {
+    throw new Error(`Workbench profile is not installed: ${selected}`);
+  }
+  const userId = text(context.userId, "userId");
+  const workspaceId = context.workspaceId?.trim() || undefined;
+  const nextDocument: PiariumWorkbenchProfileDocument = {
+    ...document,
+    activeProfileId: selected,
+    profileSelections: {
+      users: workspaceId ? document.profileSelections.users : { ...document.profileSelections.users, [userId]: selected },
+      workspaces: workspaceId
+        ? { ...document.profileSelections.workspaces, [workspaceId]: selected }
+        : document.profileSelections.workspaces,
+    },
+  };
+  return resolvePiariumWorkbenchLayout(nextDocument, context);
+};
+
+export const resolvePiariumWorkbenchProfile = (
+  documentValue: PiariumWorkbenchProfileDocument | unknown,
+  catalog: Pick<PiariumExtensionCatalogSnapshot, "extensions"> | readonly PiariumExtensionCatalogEntry[],
+  context: PiariumWorkbenchResolutionContext,
+): PiariumWorkbenchResolvedProfile => {
+  const layout = resolvePiariumWorkbenchLayout(documentValue, context);
+  const inspected = inspectPiariumWorkbenchShell(layout.replacementSelections, catalog, context.surface);
+  return {
+    layout,
+    profileId: layout.profileId,
+    status: inspected.status,
+    ...(inspected.shellContributionId ? { shellContributionId: inspected.shellContributionId } : {}),
+    ...(inspected.shellExtensionId ? { shellExtensionId: inspected.shellExtensionId } : {}),
+  };
 };
 
 export const workbenchDocumentFromStorage = (

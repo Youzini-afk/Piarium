@@ -77,6 +77,7 @@ const ACTIVATION_EVENTS = new Set<PiariumExtensionActivationEvent>([
 const CONTRIBUTION_KINDS = new Set<PiariumExtensionContributionKind>([
   "command",
   "composer-action",
+  "editor",
   "keybinding",
   "menu-item",
   "message-renderer",
@@ -88,6 +89,7 @@ const CONTRIBUTION_KINDS = new Set<PiariumExtensionContributionKind>([
   "sidebar",
   "status-item",
   "tool-renderer",
+  "view",
 ]);
 const SOURCE_KINDS = new Set(["builtin", "git", "local", "npm"]);
 const ACTUAL_STATUSES = new Set<PiariumExtensionActualStatus>([

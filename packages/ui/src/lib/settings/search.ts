@@ -678,6 +678,30 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf', 'background tasks', 'fleet'],
   },
   {
+    id: 'extensions.workbench',
+    page: 'extensions',
+    titleKey: 'settings.piarium.extensions.workbench.title',
+    keywords: ['profile', 'shell', 'layout', 'workbench'],
+  },
+  {
+    id: 'extensions.workbench.profile',
+    page: 'extensions',
+    titleKey: 'settings.piarium.extensions.workbench.profile',
+    keywords: ['profile', 'agent', 'ide', 'layout'],
+  },
+  {
+    id: 'extensions.workbench.shell',
+    page: 'extensions',
+    titleKey: 'settings.piarium.extensions.workbench.selectedShell',
+    keywords: ['shell', 'recovery', 'enable', 'disable'],
+  },
+  {
+    id: 'extensions.workbench.extensionSet',
+    page: 'extensions',
+    titleKey: 'settings.piarium.extensions.workbench.extensionSet',
+    keywords: ['apply', 'enable', 'extensions', 'set'],
+  },
+  {
     id: 'plugin-settings.configuration',
     page: 'plugin-settings',
     titleKey: 'settings.piarium.pluginSettings.integrations.title',
