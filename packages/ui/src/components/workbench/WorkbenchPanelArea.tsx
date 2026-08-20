@@ -12,6 +12,7 @@ import {
   setWorkbenchPanelLayout,
   subscribeWorkbenchPanels,
 } from '@/lib/workbench/editors/panels';
+import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import type { WorkbenchPanelId, WorkbenchPanelLayout } from '@/lib/workbench/editors/types';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -91,7 +92,27 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
             ) : (
               <ul className="flex flex-col gap-1">
                 {problems.status === 'ready' ? problems.items.map((item, index) => (
-                  <li key={`${item.resourceId}:${index}`}>{item.message}</li>
+                  <li key={`${item.resourceId}:${item.line ?? 0}:${index}`}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto w-full justify-start whitespace-normal py-1 text-left"
+                      aria-label={t('workbench.panel.problemsOpenAria', { resourceId: item.resourceId })}
+                      onClick={() => openWorkbenchEditor(workspaceId, item.resourceId)}
+                    >
+                      {typeof item.line === 'number'
+                        ? t('workbench.panel.problemsItemAtLine', {
+                          resourceId: item.resourceId,
+                          line: item.line,
+                          message: item.message,
+                        })
+                        : t('workbench.panel.problemsItem', {
+                          resourceId: item.resourceId,
+                          message: item.message,
+                        })}
+                    </Button>
+                  </li>
                 )) : null}
               </ul>
             )}

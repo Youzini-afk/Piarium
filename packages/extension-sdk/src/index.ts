@@ -216,9 +216,23 @@ export const resolveHostExtensionModule = (
 };
 
 export const PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY = "workspace.documents";
+export const PIARIUM_WORKSPACE_SEARCH_CAPABILITY = "workspace.search";
+export const PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY = "workspace.language";
 
 export const callWorkspaceDocuments = (
   capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
   method: string,
   params: JsonValue,
 ): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY, method, params);
+
+export const callWorkspaceSearch = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  method: string,
+  params: JsonValue,
+): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_SEARCH_CAPABILITY, method, params);
+
+export const callWorkspaceLanguage = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  method: string,
+  params: JsonValue,
+): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY, method, params);

@@ -5,7 +5,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 
 ## Entrypoints and structure
 - `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
-- `packages/web/server/lib/fs/search.js`: fuzzy filesystem search runtime used by non-FS routes (for example project icon discovery).
+- `packages/web/server/lib/fs/search.js`: fuzzy filesystem search runtime used by workspace search and other non-FS routes (for example project icon discovery).
 
 ## Public exports
 - `registerFsRoutes(app, dependencies)` from `routes.js`
@@ -32,7 +32,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
 - `index.js` no longer owns FS route handlers or FS exec job state.
 
-Revisioned document read/write, watch, and recovery journals belong to `packages/web/server/lib/documents/`. Files UI still uses `/api/fs/*` until that later migration.
+File-name search for the workbench lives at `GET /api/find/file` in `packages/web/server/lib/search/`. Content search is `POST /api/workspace/search/content`. Both stay on the application host.
 
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.

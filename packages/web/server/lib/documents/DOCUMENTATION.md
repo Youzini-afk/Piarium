@@ -8,7 +8,7 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 
 ## Entrypoints
 
-- `authority.js`: `createDocumentAuthority(options)` — workspace identity, revisioned read/write/move/delete, watch, recovery journals.
+- `authority.js`: `createDocumentAuthority(options)` — workspace identity, revisioned read/write/move/delete, watch, recovery journals. `inspectWorkspace(workspaceId)` returns `{ workspaceId, hostId, root }` for trusted host collaborators (search and language). It is not a renderer DocumentsAPI method.
 - `routes.js`: `registerDocumentRoutes(app, { documents, uiAuthController })` — authenticated `/api/documents/*` routes.
 - `capability.js`: `createDocumentsCapabilityHandler(authority)` — resource-scoped `workspace.documents` Host capability.
 - `contract-fixtures.js`: shared Web/VS Code contract tests.

@@ -4,6 +4,7 @@ import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { resetDocumentRegistry } from '@/lib/documents/session';
+import { resetLanguageServices } from '@/lib/language-services/session';
 import { resetEditorWorkbenchForRuntimeSwitch } from '@/lib/workbench/editors/session';
 import { resetIdeWorkbenchLayoutForRuntimeSwitch } from '@/lib/workbench/ide-layout';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -30,6 +31,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetEditorWorkbenchForRuntimeSwitch(detail.runtimeKey);
   resetIdeWorkbenchLayoutForRuntimeSwitch();
   resetDocumentRegistry();
+  resetLanguageServices();
   useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   queueMicrotask(() => void syncDesktopSettings());
 };

@@ -29,4 +29,7 @@ label `Agent`; official UI localizes that name. Its default `workbench.shell` co
 and `piarium.builtin.ide-workbench.shell` on web and desktop only. Selecting a profile does not
 enable or disable extensions.
 
+Core workbench services use versioned IDs `piarium.workspace.search` and `piarium.language`.
+Those IDs identify Host services; they are not a second plugin manager.
+
 See the complete [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

@@ -23,3 +23,6 @@ not per keystroke. Document dirty buffers remain in the Document Registry.
 The Agent Files surface and the official IDE Workbench both mount this kernel. Explorer, split
 groups, and `useFilesViewTabsStore` remain shared navigation; each shell owns only its chrome
 and layout snapshot.
+
+Language diagnostics publish into the Problems panel through the language-services registry.
+Stale diagnostic versions are dropped. Hidden search views do not start language servers.

@@ -12,6 +12,8 @@ import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSmartSearchRoutes } from '../smart-search/routes.js';
 import { registerWorkspaceRoutes } from '../workspace/workspace-routes.js';
 import { registerDocumentRoutes } from '../documents/routes.js';
+import { registerWorkspaceSearchRoutes } from '../search/routes.js';
+import { registerLanguageRoutes } from '../lsp/routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerPiRuntimeHttpRoute } from './pi-runtime-http-route.js';
@@ -85,6 +87,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       extensionRuntime,
       uiAuthController,
       documents,
+      languageSupervisor,
     } = dependencies;
 
     registerExtensionRoutes(app, { extensionCatalog, extensionPackages, extensionRuntime, uiAuthController });
@@ -193,6 +196,21 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
     });
     if (documents) {
       registerDocumentRoutes(app, { documents, uiAuthController });
+      registerWorkspaceSearchRoutes(app, {
+        documents,
+        uiAuthController,
+        fsPromises,
+        path,
+        os,
+        spawn,
+        resolveGitBinaryForSpawn,
+        normalizeDirectoryPath,
+        resolveProjectDirectory,
+        env: process.env,
+      });
+    }
+    if (languageSupervisor) {
+      registerLanguageRoutes(app, { language: languageSupervisor, uiAuthController });
     }
   };
 

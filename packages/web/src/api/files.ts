@@ -131,8 +131,14 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to search files');
+      const error = await response.json().catch(() => ({ error: response.statusText })) as {
+        error?: string;
+        reason?: unknown;
+      };
+      throw new FilesystemError(error.error || 'Failed to search files', {
+        reason: parseFilesystemErrorReason(error.reason),
+        status: response.status,
+      });
     }
 
     const result = (await response.json()) as string[];

@@ -25,3 +25,7 @@ harnesses with real owner cleanup semantics. See the complete
 Granted Host extensions can call `workspace.documents` through `callWorkspaceDocuments` for
 resource-scoped, revisioned document access. The capability never returns file bodies in watch
 events, and it cannot escape the workspace the application host resolved.
+
+`callWorkspaceSearch` and `callWorkspaceLanguage` reach the host-owned search and language
+services. Language servers are spawned only in the application host; untrusted workspaces cannot
+execute project-provided server commands. Search failures are distinct from zero matches.

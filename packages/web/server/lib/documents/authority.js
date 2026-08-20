@@ -400,6 +400,22 @@ export const createDocumentAuthority = (options) => {
   return {
     hostId,
     resolveWorkspace,
+    inspectWorkspace: async (workspaceId) => {
+      try {
+        const workspace = await loadWorkspace(workspaceId);
+        return {
+          workspaceId: workspace.workspaceId,
+          hostId,
+          root: workspace.root,
+        };
+      } catch (error) {
+        fail(error);
+      }
+      throw new DocumentAuthorityError('Workspace is not registered on this application host', {
+        code: 'failed',
+        statusCode: 404,
+      });
+    },
     resolveScopeId,
     read,
     write,

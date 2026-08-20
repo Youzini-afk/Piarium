@@ -18,6 +18,9 @@ import {
 } from '@piarium/extension-host';
 import { createDocumentAuthority } from './lib/documents/authority.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
+import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
+import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
+import { createWorkspaceContentSearch } from './lib/search/content.js';
 import { createDocumentRootGuard } from './lib/documents/allowed-roots.js';
 import { createWorkspaceConfig } from './lib/workspace/workspace-config.js';
 
@@ -797,9 +800,30 @@ async function main(options = {}) {
     }),
   });
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));
+  const languageSupervisor = createLanguageSupervisor({
+    documents: documentsAuthority,
+    spawn,
+    pathModule: path,
+    env: process.env,
+    isTrusted: async () => false,
+  });
+  const workspaceContentSearch = createWorkspaceContentSearch({
+    documents: documentsAuthority,
+    spawn,
+    pathModule: path,
+    env: process.env,
+  });
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
+  );
+  const unregisterSearchCapability = extensionRuntime.capabilities.register(
+    'workspace.search',
+    createWorkspaceSearchCapabilityHandler(workspaceContentSearch),
+  );
+  const unregisterLanguageCapability = extensionRuntime.capabilities.register(
+    'workspace.language',
+    createLanguageCapabilityHandler(languageSupervisor),
   );
   const unregisterPiRuntimeCapability = extensionRuntime.capabilities.register('pi-runtime', async (method, value) => {
     if (method !== 'request' || !value || typeof value !== 'object' || Array.isArray(value)) {
@@ -974,6 +998,7 @@ async function main(options = {}) {
     extensionRuntime,
     uiAuthController,
     documents: documentsAuthority,
+    languageSupervisor,
     reloadRuntimeConfiguration: async () => { await piRuntimeLifecycle.ensureActiveBroker(); },
   });
 
@@ -1058,6 +1083,9 @@ async function main(options = {}) {
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
       unregisterDocumentsCapability();
+      unregisterSearchCapability();
+      unregisterLanguageCapability();
+      await languageSupervisor.dispose();
       await piRuntimeGateway.stop();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       realtimeProxyRuntime.stop();

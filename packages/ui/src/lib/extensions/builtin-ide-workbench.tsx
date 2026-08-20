@@ -54,19 +54,33 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { FileSearchResult } from '@/lib/api/types';
+import type { FileSearchResult, WorkspaceContentSearchHit } from '@/lib/api/types';
+import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((module) => ({ default: module.FilesView })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then((module) => ({ default: module.SettingsWindow })));
 const FleetPage = lazyWithChunkRecovery(() => import('@/components/sections/fleet').then((module) => ({ default: module.FleetPage })));
 
-type SearchViewState =
+type SearchMode = 'files' | 'content';
+
+type FileSearchViewState =
   | { status: 'idle' }
   | { status: 'searching' }
   | { status: 'empty' }
   | { status: 'ready'; hits: FileSearchResult[] }
   | { status: 'failure'; message: string };
+
+type ContentSearchViewState =
+  | { status: 'idle' }
+  | { status: 'searching' }
+  | { status: 'empty' }
+  | { status: 'ready'; hits: WorkspaceContentSearchHit[] }
+  | { status: 'failure'; message: string };
+
+const joinWorkspacePath = (directory: string, resourceId: string): string => (
+  `${directory.replace(/\\/g, '/').replace(/\/$/, '')}/${resourceId.replace(/\\/g, '/')}`
+);
 
 const ACTIVITIES: ReadonlyArray<{ id: IdeWorkbenchActivityId; icon: IconName; labelKey: I18nKey; ariaKey: I18nKey }> = [
   { id: 'explorer', icon: 'folder-3', labelKey: 'workbench.ide.activity.explorer', ariaKey: 'workbench.ide.activity.explorerAria' },
@@ -88,30 +102,31 @@ const clamp = (value: number, min: number, max: number): number => Math.min(max,
 const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory }) => {
   const { t } = useI18n();
   const files = useRuntimeAPIs().files;
+  const workspaceSearch = useRuntimeAPIs().workspaceSearch;
+  const workspaceId = useWorkbenchWorkspaceId();
+  const [mode, setMode] = React.useState<SearchMode>('files');
   const [query, setQuery] = React.useState('');
-  const [state, setState] = React.useState<SearchViewState>({ status: 'idle' });
+  const [fileState, setFileState] = React.useState<FileSearchViewState>({ status: 'idle' });
+  const [contentState, setContentState] = React.useState<ContentSearchViewState>({ status: 'idle' });
 
   React.useEffect(() => {
     const normalized = query.trim();
-    if (!directory) {
-      setState({ status: 'idle' });
-      return;
-    }
-    if (!normalized) {
-      setState({ status: 'idle' });
-      return;
+    if (mode !== 'files') return undefined;
+    if (!directory || !normalized) {
+      setFileState({ status: 'idle' });
+      return undefined;
     }
     let cancelled = false;
     const timeoutId = window.setTimeout(() => {
-      setState({ status: 'searching' });
+      setFileState({ status: 'searching' });
       void files.search({ directory, query: normalized, maxResults: 80 })
         .then((hits) => {
           if (cancelled) return;
-          setState(hits.length === 0 ? { status: 'empty' } : { status: 'ready', hits });
+          setFileState(hits.length === 0 ? { status: 'empty' } : { status: 'ready', hits });
         })
         .catch((error) => {
           if (cancelled) return;
-          setState({
+          setFileState({
             status: 'failure',
             message: error instanceof Error ? error.message : String(error),
           });
@@ -121,46 +136,143 @@ const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [directory, files, query]);
+  }, [directory, files, mode, query]);
 
-  const openHit = (path: string) => {
+  React.useEffect(() => {
+    const normalized = query.trim();
+    if (mode !== 'content') return undefined;
+    if (!directory || !workspaceId || !normalized) {
+      setContentState({ status: 'idle' });
+      return undefined;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      setContentState({ status: 'searching' });
+      void workspaceSearch.searchContent(
+        { workspaceId, query: normalized, maxResults: 80 },
+        { signal: controller.signal },
+      ).then((result) => {
+        if (cancelled) return;
+        if (result.status === 'cancelled') return;
+        if (result.status === 'failure') {
+          setContentState({ status: 'failure', message: result.message });
+          return;
+        }
+        if (result.status === 'empty') {
+          setContentState({ status: 'empty' });
+          return;
+        }
+        setContentState({ status: 'ready', hits: result.hits });
+      }).catch((error) => {
+        if (cancelled || controller.signal.aborted) return;
+        setContentState({
+          status: 'failure',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [directory, mode, query, workspaceId, workspaceSearch]);
+
+  const openFileHit = (path: string) => {
     if (!directory) return;
     const tabs = useFilesViewTabsStore.getState();
     tabs.addOpenPath(directory, path);
     tabs.setSelectedPath(directory, path);
   };
 
+  const openContentHit = (hit: WorkspaceContentSearchHit) => {
+    if (!directory || !workspaceId) return;
+    openWorkbenchEditor(workspaceId, hit.resource.resourceId);
+    const path = joinWorkspacePath(directory, hit.resource.resourceId);
+    const tabs = useFilesViewTabsStore.getState();
+    tabs.addOpenPath(directory, path);
+    tabs.setSelectedPath(directory, path);
+  };
+
+  const activeState = mode === 'files' ? fileState : contentState;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border/60 p-2">
+      <div className="flex flex-col gap-2 border-b border-border/60 p-2">
+        <div className="flex gap-1">
+          <Button
+            type="button"
+            variant="chip"
+            size="xs"
+            aria-pressed={mode === 'files'}
+            onClick={() => setMode('files')}
+          >
+            {t('workbench.ide.search.filesTab')}
+          </Button>
+          <Button
+            type="button"
+            variant="chip"
+            size="xs"
+            aria-pressed={mode === 'content'}
+            onClick={() => setMode('content')}
+          >
+            {t('workbench.ide.search.contentTab')}
+          </Button>
+        </div>
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={t('workbench.ide.search.placeholder')}
-          aria-label={t('workbench.ide.activity.search')}
+          placeholder={t(mode === 'files' ? 'workbench.ide.search.placeholder' : 'workbench.ide.search.contentPlaceholder')}
+          aria-label={t(mode === 'files' ? 'workbench.ide.search.filesAria' : 'workbench.ide.search.contentAria')}
         />
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2 typography-ui">
-        {!directory ? (
-          <p className="text-muted-foreground">{t('workbench.ide.search.noWorkspace')}</p>
-        ) : state.status === 'searching' ? (
+        {!directory || (mode === 'content' && !workspaceId) ? (
+          <p className="text-muted-foreground">
+            {t(mode === 'files' ? 'workbench.ide.search.noWorkspace' : 'workbench.ide.search.contentNoWorkspace')}
+          </p>
+        ) : activeState.status === 'searching' ? (
           <p className="text-muted-foreground">{t('workbench.ide.search.searching')}</p>
-        ) : state.status === 'failure' ? (
-          <p className="text-[color:var(--status-error)]">{t('workbench.ide.search.failed', { message: state.message })}</p>
-        ) : state.status === 'empty' ? (
-          <p className="text-muted-foreground">{t('workbench.ide.search.empty')}</p>
-        ) : state.status === 'ready' ? (
+        ) : activeState.status === 'failure' ? (
+          <p className="text-[color:var(--status-error)]">
+            {t(mode === 'files' ? 'workbench.ide.search.failed' : 'workbench.ide.search.contentFailed', { message: activeState.message })}
+          </p>
+        ) : activeState.status === 'empty' ? (
+          <p className="text-muted-foreground">
+            {t(mode === 'files' ? 'workbench.ide.search.empty' : 'workbench.ide.search.contentEmpty')}
+          </p>
+        ) : fileState.status === 'ready' && mode === 'files' ? (
           <ul className="flex flex-col gap-1">
-            {state.hits.map((hit) => (
+            {fileState.hits.map((hit) => (
               <li key={hit.path}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   className="h-auto w-full justify-start whitespace-normal py-1.5 text-left"
-                  onClick={() => openHit(hit.path)}
+                  onClick={() => openFileHit(hit.path)}
                 >
                   {hit.path}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : contentState.status === 'ready' && mode === 'content' ? (
+          <ul className="flex flex-col gap-1">
+            {contentState.hits.map((hit) => (
+              <li key={`${hit.resource.resourceId}:${hit.line}:${hit.column}`}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto w-full justify-start whitespace-normal py-1.5 text-left"
+                  onClick={() => openContentHit(hit)}
+                >
+                  <span className="flex min-w-0 flex-col">
+                    <span>{hit.resource.resourceId}:{hit.line}</span>
+                    <span className="truncate text-muted-foreground">{hit.preview}</span>
+                  </span>
                 </Button>
               </li>
             ))}

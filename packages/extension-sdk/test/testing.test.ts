@@ -169,3 +169,27 @@ test("workspace.documents capability helper forwards resource-scoped calls", asy
   ]]);
   assert.equal((result as { status?: string }).status, "missing");
 });
+
+test("workspace.search and workspace.language capability helpers forward host calls", async () => {
+  const {
+    callWorkspaceLanguage,
+    callWorkspaceSearch,
+    PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY,
+    PIARIUM_WORKSPACE_SEARCH_CAPABILITY,
+  } = await import("../src/index.js");
+  assert.equal(PIARIUM_WORKSPACE_SEARCH_CAPABILITY, "workspace.search");
+  assert.equal(PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY, "workspace.language");
+  const calls: Array<[string, string, unknown]> = [];
+  const client = {
+    call: async (capability: string, method: string, params: unknown) => {
+      calls.push([capability, method, params]);
+      return { status: "absent" };
+    },
+  };
+  await callWorkspaceSearch(client, "searchContent", { workspaceId: "ws", query: "todo" });
+  await callWorkspaceLanguage(client, "getStatus", { workspaceId: "ws", languageId: "typescript" });
+  assert.deepEqual(calls, [
+    ["workspace.search", "searchContent", { workspaceId: "ws", query: "todo" }],
+    ["workspace.language", "getStatus", { workspaceId: "ws", languageId: "typescript" }],
+  ]);
+});

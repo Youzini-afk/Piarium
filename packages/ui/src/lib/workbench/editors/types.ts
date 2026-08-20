@@ -82,7 +82,16 @@ export type WorkbenchPanelLayout = {
 
 export type WorkbenchProblemsSnapshot =
   | { status: 'empty' }
-  | { status: 'ready'; items: Array<{ resourceId: string; message: string; severity: 'error' | 'warning' | 'info' }> }
+  | {
+      status: 'ready';
+      items: Array<{
+        resourceId: string;
+        message: string;
+        severity: 'error' | 'warning' | 'info';
+        line?: number;
+        column?: number;
+      }>;
+    }
   | { status: 'failure'; errorMessage: string };
 
 export type WorkbenchOutputSnapshot =

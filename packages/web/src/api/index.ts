@@ -22,6 +22,8 @@ import { createWebClientAuthAPI } from './clientAuth';
 import { createWebExtensionsAPI } from './extensions';
 import { createWebPiRuntimeAPI } from './piRuntime';
 import { createWebDocumentsAPI } from './documents';
+import { createWebWorkspaceSearchAPI } from './workspace-search';
+import { createWebLanguageServicesAPI } from './language';
 
 export interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -50,6 +52,8 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
     workspace: createWebWorkspaceAPI(),
     files: createWebFilesAPI({ urls: activeUrls, getDirectory: () => useDirectoryStore.getState().currentDirectory }),
     documents: createWebDocumentsAPI(),
+    workspaceSearch: createWebWorkspaceSearchAPI(),
+    language: createWebLanguageServicesAPI(),
     settings: createWebSettingsAPI(),
     permissions: createWebPermissionsAPI(),
     notifications: createWebNotificationsAPI(),

@@ -10,6 +10,8 @@ import { createVSCodeGitHubAPI } from './github';
 import { createVSCodeNotificationsAPI } from './notifications';
 import { createVSCodeWorkspaceAPI } from './workspace';
 import { createVSCodeDocumentsAPI } from './documents';
+import { createVSCodeWorkspaceSearchAPI } from './workspace-search';
+import { createVSCodeLanguageServicesAPI } from './language';
 import { createVSCodeExtensionsAPI } from './extensions';
 import { createVSCodePiRuntimeAPI } from './piRuntime';
 
@@ -37,6 +39,8 @@ export const createVSCodeAPIs = (): RuntimeAPIs => ({
   workspace: createVSCodeWorkspaceAPI(),
   files: createVSCodeFilesAPI(),
   documents: createVSCodeDocumentsAPI(),
+  workspaceSearch: createVSCodeWorkspaceSearchAPI(),
+  language: createVSCodeLanguageServicesAPI(),
   settings: createVSCodeSettingsAPI(),
   permissions: createVSCodePermissionsAPI(),
   notifications: createVSCodeNotificationsAPI(),
