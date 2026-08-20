@@ -8,6 +8,7 @@ import type {
   PiariumExtensionServiceRoutingContext,
 } from '@piarium/extension-contract';
 import { serviceRoutingRuleKey } from '@piarium/extension-contract';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { refreshSurfaceExtensions, surfaceExtensionLoader } from './managed-runtime';
 
 export interface PiariumExtensionCatalogStoreState {
@@ -51,7 +52,7 @@ const defaultWatchRetry = (attempt: number, signal: AbortSignal): Promise<void> 
 });
 
 const extensionsApi = () => {
-  const api = typeof window === 'undefined' ? undefined : window.__PIARIUM_RUNTIME_APIS__?.extensions;
+  const api = getRegisteredRuntimeAPIs()?.extensions;
   if (!api) throw new Error('Piarium application-host extension API is unavailable');
   return api;
 };

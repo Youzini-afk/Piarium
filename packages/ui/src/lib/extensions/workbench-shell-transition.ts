@@ -12,6 +12,7 @@ import {
   type PiariumWorkbenchShellStatus,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import type { PiariumExtensionCatalogStoreState } from './catalog-store';
 import {
   getPiariumExtensionCatalogState,
@@ -20,6 +21,10 @@ import {
   setPiariumExtensionEnabled,
 } from './catalog-store';
 import { startWorkbenchMountSession } from './workbench-mount';
+import {
+  stageWorkbenchShellRender,
+  type WorkbenchShellRenderStagingHandle,
+} from './workbench-shell-staging-store';
 import { piariumSurfaceRuntime } from './surface-runtime';
 
 export type WorkbenchShellUnavailableStatus = Extract<PiariumWorkbenchShellStatus, 'disabled' | 'failed' | 'missing'>;
@@ -66,6 +71,10 @@ export interface WorkbenchShellTransitionDependencies {
   refreshCatalog(): Promise<void>;
   selectProfile(request: PiariumWorkbenchProfileSelectionRequest): Promise<void>;
   setEnabled(extensionId: string, enabled: boolean): Promise<void>;
+  stageRender(
+    contribution: SurfaceContribution,
+    props: Readonly<Record<string, unknown>>,
+  ): Promise<WorkbenchShellRenderStagingHandle>;
   startMount: typeof startWorkbenchMountSession;
   triggerActivation(contributionId: string, extensionId: string): Promise<void>;
   triggerVisible(contributions: readonly SurfaceContribution[]): Promise<void>;
@@ -85,7 +94,7 @@ interface MountImplementation<TProps extends object> {
   ): void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>;
 }
 
-type StagingSession = ReturnType<typeof startWorkbenchMountSession>;
+type StagingSession = Pick<ReturnType<typeof startWorkbenchMountSession>, 'dispose'>;
 
 let transitionQueue: Promise<void> = Promise.resolve();
 
@@ -110,8 +119,14 @@ const isMountImplementation = <TProps extends object>(
 const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransitionDependencies => ({
   createMountContainer: () => {
     const element = document.createElement('div');
-    element.hidden = true;
     element.setAttribute('data-piarium-workbench-shell-staging', '');
+    Object.assign(element.style, {
+      inset: '0',
+      pointerEvents: 'none',
+      position: 'fixed',
+      visibility: 'hidden',
+      zIndex: '-1',
+    });
     document.body.append(element);
     return element;
   },
@@ -121,9 +136,12 @@ const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransit
   getSurfaceSnapshot: () => piariumSurfaceRuntime.getSnapshot(),
   refreshCatalog: refreshPiariumExtensionCatalog,
   selectProfile: async (request) => {
-    await window.__PIARIUM_RUNTIME_APIS__?.extensions.selectWorkbenchProfile(request);
+    const extensions = getRegisteredRuntimeAPIs()?.extensions;
+    if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+    await extensions.selectWorkbenchProfile(request);
   },
   setEnabled: setPiariumExtensionEnabled,
+  stageRender: stageWorkbenchShellRender,
   startMount: startWorkbenchMountSession,
   triggerActivation: async (contributionId, extensionId) => {
     const { surfaceExtensionLoader } = await import('./managed-runtime');
@@ -144,7 +162,9 @@ const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransit
     }
   },
   updateLayout: async (request) => {
-    await window.__PIARIUM_RUNTIME_APIS__?.extensions.updateWorkbenchLayout(request);
+    const extensions = getRegisteredRuntimeAPIs()?.extensions;
+    if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+    await extensions.updateWorkbenchLayout(request);
   },
 });
 
@@ -202,8 +222,14 @@ const proveShellReady = async (
     contribution = findContribution(deps.getSurfaceSnapshot(), contributionId);
   }
   if (!contribution) throw new Error(`Workbench shell contribution did not activate: ${contributionId}`);
-  if (isDeclarativeImplementation(contribution.implementation) || !isMountImplementation(contribution.implementation)) {
-    return { container: null, session: null };
+  if (isDeclarativeImplementation(contribution.implementation)) {
+    throw new Error(`Workbench shell contribution did not activate: ${contributionId}`);
+  }
+  const props = { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell };
+  if (!isMountImplementation(contribution.implementation)) {
+    const session = await deps.stageRender(contribution, props);
+    assertSameIdentity(captured, deps);
+    return { container: null, session };
   }
   const container = deps.createMountContainer();
   let failed: unknown;
@@ -212,7 +238,7 @@ const proveShellReady = async (
     contributionId,
     implementation: contribution.implementation,
     owner: contribution.owner,
-    props: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
+    props,
     onError: (error, phase) => {
       if (phase !== 'dispose') failed = error;
     },
@@ -289,19 +315,23 @@ const commitCandidateShell = async (
     persist(expectedRevision: number): Promise<void>;
   },
 ): Promise<void> => {
-  const snapshot = requireAuthoritativeWorkbench(deps);
-  let inspected = inspectPiariumWorkbenchShell(
-    input.replacementSelections,
-    snapshot.catalog.extensions,
-    deps.getSurface(),
-  );
+  const inspectShell = (): ReturnType<typeof inspectPiariumWorkbenchShell> => {
+    const current = requireAuthoritativeWorkbench(deps);
+    const surface = deps.getSurfaceSnapshot();
+    return inspectPiariumWorkbenchShell(
+      input.replacementSelections,
+      current.catalog.extensions,
+      deps.getSurface(),
+      {
+        hostId: current.catalog.hostId,
+        realmIds: surface.actual.map((state) => state.realmId),
+      },
+    );
+  };
+  let inspected = inspectShell();
   if (input.enableShell && inspected.status === 'disabled' && inspected.shellExtensionId) {
     await deps.setEnabled(inspected.shellExtensionId, true);
-    inspected = inspectPiariumWorkbenchShell(
-      input.replacementSelections,
-      requireAuthoritativeWorkbench(deps).catalog.extensions,
-      deps.getSurface(),
-    );
+    inspected = inspectShell();
   }
   const captured = captureIdentity(deps);
   if (inspected.status === 'builtin') {

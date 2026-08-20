@@ -518,6 +518,7 @@ export const inspectPiariumWorkbenchShell = (
   replacementSelections: Readonly<Record<string, string>>,
   catalog: Pick<PiariumExtensionCatalogSnapshot, "extensions"> | readonly PiariumExtensionCatalogEntry[],
   surface: PiariumApplicationSurface,
+  actualScope?: { hostId?: string; realmIds?: readonly string[] },
 ): Pick<PiariumWorkbenchResolvedProfile, "shellContributionId" | "shellExtensionId" | "status"> => {
   const shellContributionId = replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]?.trim();
   if (!shellContributionId) return { status: "builtin" };
@@ -528,7 +529,17 @@ export const inspectPiariumWorkbenchShell = (
     if (!entry.desired.enabled) {
       return { status: "disabled", shellContributionId, shellExtensionId: entry.manifest.id };
     }
-    if (entry.actual.some((state) => state.status === "failed")) {
+    if (entry.actual.some((state) => (
+      state.status === "failed"
+      && (
+        actualScope === undefined
+        || (
+          state.desiredRevision === entry.desired.revision
+          && (actualScope.hostId === undefined || state.hostId === actualScope.hostId)
+          && (state.realmKind === "host" || actualScope.realmIds?.includes(state.realmId) === true)
+        )
+      )
+    ))) {
       return { status: "failed", shellContributionId, shellExtensionId: entry.manifest.id };
     }
     return { status: "ready", shellContributionId, shellExtensionId: entry.manifest.id };

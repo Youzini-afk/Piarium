@@ -152,6 +152,7 @@ const createDeps = (options: {
   enabled: string[];
   persistedProfiles: string[];
   mounts: number;
+  renders: number;
   disposed: number;
 } => {
   const snapshot = hostSnapshot(options.entry);
@@ -160,6 +161,7 @@ const createDeps = (options: {
   const enabled: string[] = [];
   const persistedProfiles: string[] = [];
   let mounts = 0;
+  let renders = 0;
   let disposed = 0;
   const deps: WorkbenchShellTransitionDependencies = {
     createMountContainer: () => ({ remove() {} } as HTMLElement),
@@ -180,6 +182,17 @@ const createDeps = (options: {
       enabled.push(extensionId);
       snapshot.catalog.extensions[0]!.desired.enabled = nextEnabled;
     },
+    stageRender: async (stagedContribution, props) => {
+      renders += 1;
+      const implementation = stagedContribution.implementation as {
+        render?(value: Readonly<Record<string, unknown>>): unknown;
+      };
+      const rendered = implementation.render?.(props);
+      if (rendered === null || rendered === undefined) throw new Error('shell rendered no content');
+      return {
+        dispose: async () => { disposed += 1; },
+      };
+    },
     startMount: (mountOptions) => {
       mounts += 1;
       const session = startWorkbenchMountSession(mountOptions);
@@ -194,7 +207,7 @@ const createDeps = (options: {
     },
     triggerActivation: async () => {
       await options.activate?.();
-      contributions = [contribution(options.implementation ?? { render: () => null })];
+      contributions = [contribution(options.implementation ?? { render: () => 'ready' })];
     },
     triggerVisible: async () => undefined,
     updateLayout: async () => undefined,
@@ -204,6 +217,7 @@ const createDeps = (options: {
     enabled,
     persistedProfiles,
     get mounts() { return mounts; },
+    get renders() { return renders; },
     get disposed() { return disposed; },
   };
 };
@@ -216,10 +230,12 @@ test('does not persist a disabled shell profile and does not enable extensions',
 });
 
 test('enable-and-switch turns the shell on and commits after a render-ready candidate', async () => {
-  const harness = createDeps({ entry: shellEntry(false), implementation: { render: () => null } });
+  const harness = createDeps({ entry: shellEntry(false), implementation: { render: () => 'ready' } });
   await runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, { enableShell: true });
   expect(harness.enabled).toEqual([shellExtensionId]);
   expect(harness.persistedProfiles).toEqual(['studio']);
+  expect(harness.renders).toBe(1);
+  expect(harness.disposed).toBe(1);
 });
 
 test('select-without-enabling persists a disabled shell without changing enablement', async () => {
@@ -253,11 +269,21 @@ test('keeps the previous profile when candidate mount fails', async () => {
   expect(harness.disposed).toBe(1);
 });
 
+test('keeps the previous profile when a render candidate fails', async () => {
+  const harness = createDeps({
+    entry: shellEntry(true),
+    implementation: { render: () => { throw new Error('render failed'); } },
+  });
+  await expect(runSelectActiveWorkbenchProfile(harness.deps, 'studio')).rejects.toThrow('render failed');
+  expect(harness.persistedProfiles).toEqual([]);
+  expect(harness.renders).toBe(1);
+});
+
 test('rejects a candidate after the catalog generation changes', async () => {
   let generation = 1;
   const harness = createDeps({
     entry: shellEntry(true),
-    implementation: { render: () => null },
+    implementation: { render: () => 'ready' },
     activate: async () => {
       generation = 2;
     },

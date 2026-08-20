@@ -4,13 +4,14 @@ import {
   type SurfaceOwnerHandle,
 } from '@piarium/extension-surface';
 import type { PiariumApplicationSurface } from '@piarium/extension-contract';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 const FALLBACK_HOST_ID = '00000000-0000-4000-8000-000000000000';
 
 const readSurface = (): PiariumApplicationSurface => {
   if (typeof window === 'undefined') return 'web';
   if (window.__PIARIUM_SURFACE__ === 'mobile') return 'mobile';
-  const runtime = window.__PIARIUM_RUNTIME_APIS__?.runtime;
+  const runtime = getRegisteredRuntimeAPIs()?.runtime;
   if (runtime?.isVSCode) return 'vscode';
   if (runtime?.isDesktop) return 'desktop';
   return 'web';
@@ -27,7 +28,7 @@ let hostIdPromise: Promise<string> | null = null;
 
 const resolveHostId = async (): Promise<string> => {
   if (typeof window === 'undefined') return FALLBACK_HOST_ID;
-  const result = await window.__PIARIUM_RUNTIME_APIS__?.extensions.catalog().catch(() => null);
+  const result = await getRegisteredRuntimeAPIs()?.extensions.catalog().catch(() => null);
   return result?.supported === true && result.status === 'ready'
     ? result.snapshot.hostId
     : FALLBACK_HOST_ID;

@@ -9,12 +9,13 @@ import {
   resolvePiariumWorkbenchLayout,
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import {
   getPiariumExtensionCatalogState,
   refreshPiariumExtensionCatalog,
   usePiariumExtensionCatalog,
 } from './catalog-store';
-import { useWorkbenchWorkspaceId } from './workbench-workspace';
+import { useWorkbenchWorkspace } from './workbench-workspace';
 import {
   startWorkbenchMountSession,
   type WorkbenchMountImplementation,
@@ -256,17 +257,19 @@ const useVisibleContributionActivation = (contributions: readonly SurfaceContrib
 
 export const WorkbenchProfileBridge: React.FC = () => {
   const catalog = usePiariumExtensionCatalog();
-  const workspaceId = useWorkbenchWorkspaceId();
+  const workspace = useWorkbenchWorkspace();
+  const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
   const workbench = catalog.snapshot?.workbench;
   React.useEffect(() => {
     if (!workbench?.authoritative) return;
+    if (workspace.status === 'loading' || workspace.status === 'error') return;
     const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
       surface: piariumSurfaceRuntime.surface,
       userId: 'default',
       ...(workspaceId ? { workspaceId } : {}),
     });
     piariumSurfaceRuntime.setWorkbenchState(resolved.references, resolved.replacementSelections);
-  }, [workspaceId, workbench]);
+  }, [workspace.status, workspaceId, workbench]);
   return null;
 };
 
@@ -451,7 +454,9 @@ export const upsertWorkbenchProfile = async (
 ): Promise<void> => {
   const snapshot = getPiariumExtensionCatalogState().snapshot?.workbench;
   if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
-  await window.__PIARIUM_RUNTIME_APIS__?.extensions.upsertWorkbenchProfile({
+  const extensions = getRegisteredRuntimeAPIs()?.extensions;
+  if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+  await extensions.upsertWorkbenchProfile({
     expectedRevision: snapshot.document.revision,
     profile,
   });
@@ -461,7 +466,9 @@ export const upsertWorkbenchProfile = async (
 export const removeWorkbenchProfile = async (profileId: string): Promise<void> => {
   const snapshot = getPiariumExtensionCatalogState().snapshot?.workbench;
   if (!snapshot?.authoritative) throw new Error('Workbench profile state is unavailable');
-  await window.__PIARIUM_RUNTIME_APIS__?.extensions.removeWorkbenchProfile({
+  const extensions = getRegisteredRuntimeAPIs()?.extensions;
+  if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+  await extensions.removeWorkbenchProfile({
     expectedRevision: snapshot.document.revision,
     profileId,
   });
@@ -471,7 +478,9 @@ export const removeWorkbenchProfile = async (profileId: string): Promise<void> =
 export const applyWorkbenchProfile = async (profileId: string): Promise<void> => {
   const snapshot = getPiariumExtensionCatalogState().snapshot;
   if (!snapshot?.workbench.authoritative) throw new Error('Workbench profile state is unavailable');
-  await window.__PIARIUM_RUNTIME_APIS__?.extensions.applyWorkbenchProfile({
+  const extensions = getRegisteredRuntimeAPIs()?.extensions;
+  if (!extensions) throw new Error('Piarium Extensions runtime is unavailable');
+  await extensions.applyWorkbenchProfile({
     expectedCatalogRevision: snapshot.catalog.revision,
     profileId,
   });

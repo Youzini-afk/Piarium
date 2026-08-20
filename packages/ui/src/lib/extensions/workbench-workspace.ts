@@ -1,35 +1,104 @@
 import React from 'react';
+import type { DocumentsAPI } from '@/lib/api/types';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
-export const useWorkbenchWorkspaceId = (): string | undefined => {
+export type WorkbenchWorkspaceResolution =
+  | { directory: null; key: string; status: 'none' }
+  | { directory: string; key: string; status: 'loading' }
+  | { directory: string; errorMessage: string; key: string; status: 'error' }
+  | { directory: string; key: string; status: 'ready'; workspaceId: string };
+
+export type WorkbenchWorkspaceState = WorkbenchWorkspaceResolution & {
+  retry(): void;
+};
+
+const NONE: WorkbenchWorkspaceResolution = { directory: null, key: 'none', status: 'none' };
+let currentResolution: WorkbenchWorkspaceResolution = NONE;
+let requestGeneration = 0;
+const listeners = new Set<() => void>();
+
+const publish = (next: WorkbenchWorkspaceResolution): void => {
+  currentResolution = next;
+  for (const listener of listeners) listener();
+};
+
+const subscribe = (listener: () => void): (() => void) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+
+const snapshot = (): WorkbenchWorkspaceResolution => currentResolution;
+
+const workspaceKey = (directory: string, generation: number): string => `${generation}\0${directory}`;
+
+const ensureResolution = (
+  documents: DocumentsAPI,
+  directory: string | null,
+  generation: number,
+  force = false,
+): void => {
+  if (!directory) {
+    requestGeneration += 1;
+    if (currentResolution.status !== 'none') publish(NONE);
+    return;
+  }
+  const key = workspaceKey(directory, generation);
+  if (!force && currentResolution.key === key) return;
+  const request = ++requestGeneration;
+  publish({ directory, key, status: 'loading' });
+  void documents.resolveWorkspace({ path: directory }).then((identity) => {
+    if (
+      request !== requestGeneration
+      || generation !== getRuntimeEndpointGeneration()
+      || currentResolution.key !== key
+    ) return;
+    publish({ directory, key, status: 'ready', workspaceId: identity.workspaceId });
+  }).catch((error) => {
+    if (
+      request !== requestGeneration
+      || generation !== getRuntimeEndpointGeneration()
+      || currentResolution.key !== key
+    ) return;
+    publish({
+      directory,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      key,
+      status: 'error',
+    });
+  });
+};
+
+export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
   const documents = useRuntimeAPIs().documents;
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const [workspaceId, setWorkspaceId] = React.useState<string | undefined>();
+  const currentDirectory = useDirectoryStore((state) => state.currentDirectory || null);
   const [runtimeEpoch, setRuntimeEpoch] = React.useState(0);
 
   React.useEffect(() => subscribeRuntimeEndpointChanged(() => {
     setRuntimeEpoch((value) => value + 1);
   }), []);
 
-  React.useEffect(() => {
-    if (!currentDirectory) {
-      setWorkspaceId(undefined);
-      return;
-    }
-    const generation = getRuntimeEndpointGeneration();
-    let cancelled = false;
-    void documents.resolveWorkspace({ path: currentDirectory }).then((identity) => {
-      if (cancelled || generation !== getRuntimeEndpointGeneration()) return;
-      setWorkspaceId(identity.workspaceId);
-    }).catch(() => {
-      if (!cancelled) setWorkspaceId(undefined);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentDirectory, documents, runtimeEpoch]);
+  const generation = getRuntimeEndpointGeneration();
+  const expectedKey = currentDirectory ? workspaceKey(currentDirectory, generation) : NONE.key;
+  const resolved = React.useSyncExternalStore(subscribe, snapshot, snapshot);
 
-  return workspaceId;
+  React.useEffect(() => {
+    ensureResolution(documents, currentDirectory, generation);
+  }, [currentDirectory, documents, generation, runtimeEpoch]);
+
+  const effective = resolved.key === expectedKey
+    ? resolved
+    : currentDirectory
+      ? { directory: currentDirectory, key: expectedKey, status: 'loading' } as const
+      : NONE;
+  const retry = React.useCallback(() => {
+    ensureResolution(documents, currentDirectory, getRuntimeEndpointGeneration(), true);
+  }, [currentDirectory, documents]);
+  return { ...effective, retry };
+};
+
+export const useWorkbenchWorkspaceId = (): string | undefined => {
+  const workspace = useWorkbenchWorkspace();
+  return workspace.status === 'ready' ? workspace.workspaceId : undefined;
 };

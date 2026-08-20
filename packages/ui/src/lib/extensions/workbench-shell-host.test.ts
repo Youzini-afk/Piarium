@@ -11,9 +11,33 @@ import {
   PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   PIARIUM_WORKBENCH_IDE_PROFILE_ID,
 } from '@piarium/extension-contract';
+import type { SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import { resolveWorkbenchShellView } from './workbench-shell-view';
 
 const hostId = '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a';
+
+const surfaceSnapshot = (failed = false): SurfaceRegistrySnapshot => ({
+  actual: failed ? [{
+    desiredRevision: 1,
+    diagnostics: [],
+    entrypointId: 'main',
+    extensionId: PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+    extensionVersion: '1.0.0',
+    generation: 1,
+    hostId,
+    realmId: 'surface',
+    realmKind: 'surface',
+    status: 'failed',
+    updatedAt: '2026-08-20T00:00:00.000Z',
+  }] : [],
+  contributions: [],
+  layoutReferences: [],
+  replacementSelections: {},
+  revision: 1,
+  serviceSelections: {},
+  services: [],
+  visibleContributions: [],
+});
 
 const agentEntry = (enabled: boolean, failed = false): PiariumExtensionCatalogEntry => ({
   actual: failed
@@ -105,6 +129,25 @@ test('a failed Agent Workspace actual state stays in Recovery', () => {
   const failed = resolveWorkbenchShellView(hostSnapshot(agentEntry(true, true)), 'web');
   expect(failed.view).toBe('recovery');
   expect(failed.resolved?.status).toBe('failed');
+});
+
+test('a failed Surface in another window does not put this window in Recovery', () => {
+  const foreignFailure = resolveWorkbenchShellView(
+    hostSnapshot(agentEntry(true, true)),
+    'web',
+    undefined,
+    surfaceSnapshot(false),
+  );
+  expect(foreignFailure.view).toBe('ready');
+
+  const localFailure = resolveWorkbenchShellView(
+    hostSnapshot(agentEntry(true, true)),
+    'web',
+    undefined,
+    surfaceSnapshot(true),
+  );
+  expect(localFailure.view).toBe('recovery');
+  expect(localFailure.resolved?.status).toBe('failed');
 });
 
 test('the IDE profile is ready on web and recovers on mobile where it has no shell', () => {

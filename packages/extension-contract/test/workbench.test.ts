@@ -207,6 +207,24 @@ test("workbench profile resolution inspects shell availability without mutating 
     extensionId: "dev.example.workbench",
   }).actual;
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, context).status, "failed");
+  assert.equal(inspectPiariumWorkbenchShell(
+    candidate.replacementSelections,
+    extensions,
+    "web",
+    {
+      hostId: "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a",
+      realmIds: ["another-surface"],
+    },
+  ).status, "ready");
+  assert.equal(inspectPiariumWorkbenchShell(
+    candidate.replacementSelections,
+    extensions,
+    "web",
+    {
+      hostId: "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a",
+      realmIds: ["surface"],
+    },
+  ).status, "failed");
   assert.equal(resolvePiariumWorkbenchProfile(document, [], context).status, "missing");
 });
 

@@ -10,15 +10,14 @@ import {
 } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 
 export const WorkbenchRecoveryShell: React.FC<{
   resolved: PiariumWorkbenchResolvedProfile;
-}> = ({ resolved }) => {
+  workspaceId?: string;
+}> = ({ resolved, workspaceId }) => {
   const { t } = useI18n();
   const catalog = usePiariumExtensionCatalog();
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const [busy, setBusy] = React.useState(false);
@@ -61,7 +60,7 @@ export const WorkbenchRecoveryShell: React.FC<{
               value={resolved.profileId}
               onValueChange={(profileId) => {
                 if (profileId === resolved.profileId) return;
-                void run(() => selectActiveWorkbenchProfile(profileId, currentDirectory || undefined));
+                void run(() => selectActiveWorkbenchProfile(profileId, workspaceId));
               }}
             >
               <SelectTrigger aria-label={t('workbench.recovery.chooseProfile')} disabled={busy}>

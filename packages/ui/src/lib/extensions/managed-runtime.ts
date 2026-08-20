@@ -1,5 +1,6 @@
 import { SurfaceExtensionLoader } from '@piarium/extension-loader';
 import type { RuntimeContextTarget } from '@piarium/protocol';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
@@ -7,7 +8,7 @@ import { piariumSurfaceRuntime } from './surface-runtime';
 import { startBuiltinPiariumExtensions } from './builtin-surface-manager';
 
 const runtimeExtensions = () => {
-  const extensions = typeof window !== 'undefined' ? window.__PIARIUM_RUNTIME_APIS__?.extensions : undefined;
+  const extensions = getRegisteredRuntimeAPIs()?.extensions;
   if (!extensions) throw new Error('Piarium application-host extension API is unavailable');
   return extensions;
 };

@@ -3,6 +3,7 @@ import type {
   PiariumExtensionCatalogEntry,
 } from '@piarium/extension-contract';
 import type { SurfaceOwnerIdentity } from '@piarium/extension-surface';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import {
   BUILTIN_PI_INTEGRATION_DEFINITIONS,
   activateBuiltinPiIntegration,
@@ -48,7 +49,7 @@ const controllerFor = (extensionId: string): ControllerState => {
 };
 
 const extensionsApi = () => (
-  typeof window === 'undefined' ? undefined : window.__PIARIUM_RUNTIME_APIS__?.extensions
+  getRegisteredRuntimeAPIs()?.extensions
 );
 
 const reportActual = async (entry: PiariumExtensionCatalogEntry): Promise<void> => {
@@ -142,7 +143,7 @@ const reconcile = (): Promise<void> => {
 
 export const startBuiltinPiariumExtensions = (): Promise<void> => {
   if (startPromise) return startPromise;
-  if (typeof window === 'undefined' || !window.__PIARIUM_RUNTIME_APIS__?.extensions) return Promise.resolve();
+  if (!extensionsApi()) return Promise.resolve();
   unsubscribe ??= subscribePiariumExtensionCatalog(() => {
     void reconcile().catch((error) => {
       console.error('[Piarium Extensions] Failed to reconcile a built-in integration:', error);
