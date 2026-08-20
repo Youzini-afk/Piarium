@@ -19,6 +19,10 @@ test('withdraws and restores built-in command contributions without a document r
     'toggle-terminal',
     'context-usage',
     'open-settings',
+    'split-editor',
+    'split-editor-orthogonal',
+    'close-editor',
+    'save-active-file',
   ]);
   expect(registrations[3]?.meta.mobileTitleKey).toBe('commandPalette.item.showSessionSwitcher');
 
@@ -26,7 +30,7 @@ test('withdraws and restores built-in command contributions without a document r
   expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot())).toEqual([]);
 
   await setBuiltinWorkbenchCommandsEnabled(true);
-  expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot()).length).toBe(7);
+  expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot()).length).toBe(11);
 });
 
 test('a declarative command activates and executes the latest dynamic implementation', async () => {

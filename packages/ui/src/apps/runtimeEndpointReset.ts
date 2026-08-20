@@ -4,6 +4,7 @@ import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { resetDocumentRegistry } from '@/lib/documents/session';
+import { resetEditorWorkbenchForRuntimeSwitch } from '@/lib/workbench/editors/session';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useGitStore } from '@/stores/useGitStore';
@@ -25,6 +26,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
   useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  resetEditorWorkbenchForRuntimeSwitch(detail.runtimeKey);
   resetDocumentRegistry();
   useUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
   queueMicrotask(() => void syncDesktopSettings());

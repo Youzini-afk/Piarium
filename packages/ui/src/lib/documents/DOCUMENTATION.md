@@ -9,6 +9,7 @@ external registry, not in Zustand or Local Storage.
 - `path.ts` — workspace-relative resource IDs
 - `workspace-text.ts` — non-editor text read/write through DocumentsAPI
 
-Files UI still owns tree/tab navigation. Document records survive Profile/Settings remounts until
-application-host endpoint switch. `FilesAPI` and `WorkspaceAPI` no longer expose text read/write;
-editors and helpers use DocumentsAPI only.
+Files UI still owns tree and Agent tab navigation. Split groups, preview/pinned tabs, and per-view
+cursor restore live in the Editor Workbench Kernel. Document records survive Profile/Settings
+remounts until application-host endpoint switch. `FilesAPI` and `WorkspaceAPI` no longer expose
+text read/write; editors and helpers use DocumentsAPI only.

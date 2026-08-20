@@ -1,0 +1,111 @@
+import React from 'react';
+
+import { cn } from '@/lib/utils';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
+import {
+  peekWorkbenchPanelLayout,
+  getWorkbenchOutput,
+  getWorkbenchProblems,
+  setWorkbenchPanelLayout,
+  subscribeWorkbenchPanels,
+} from '@/lib/workbench/editors/panels';
+import type { WorkbenchPanelId, WorkbenchPanelLayout } from '@/lib/workbench/editors/types';
+import { useUIStore } from '@/stores/useUIStore';
+
+type WorkbenchPanelAreaProps = {
+  workspaceId: string;
+  directory: string;
+};
+
+const PANEL_IDS: WorkbenchPanelId[] = ['terminal', 'problems', 'output'];
+
+const PANEL_TITLE_KEYS: Record<WorkbenchPanelId, I18nKey> = {
+  terminal: 'workbench.panel.terminal',
+  problems: 'workbench.panel.problems',
+  output: 'workbench.panel.output',
+};
+
+const HIDDEN_LAYOUT: WorkbenchPanelLayout = {
+  workspaceId: '',
+  visible: false,
+  activePanelId: 'terminal',
+  size: 0.3,
+};
+
+export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspaceId, directory }) => {
+  const { t } = useI18n();
+  const layout = React.useSyncExternalStore(
+    subscribeWorkbenchPanels,
+    () => peekWorkbenchPanelLayout(workspaceId) ?? HIDDEN_LAYOUT,
+    () => HIDDEN_LAYOUT,
+  );
+  const problems = getWorkbenchProblems(workspaceId);
+  const output = getWorkbenchOutput(workspaceId);
+
+  if (!layout.visible) return null;
+
+  return (
+    <section
+      className="flex min-h-0 flex-col border-t border-border/60 bg-background"
+      style={{ height: `${Math.round(layout.size * 100)}%` }}
+    >
+      <div className="flex items-center gap-1 border-b border-border/40 px-2 py-1">
+        {PANEL_IDS.map((panelId) => (
+          <Button
+            key={panelId}
+            variant="ghost"
+            size="xs"
+            aria-pressed={layout.activePanelId === panelId}
+            onClick={() => {
+              setWorkbenchPanelLayout(workspaceId, { activePanelId: panelId });
+              if (panelId === 'terminal') useUIStore.getState().openContextSurface(directory, 'terminal');
+            }}
+            className={cn(layout.activePanelId === panelId && 'bg-[var(--interactive-selection)]')}
+          >
+            {t(PANEL_TITLE_KEYS[panelId])}
+          </Button>
+        ))}
+        <Button
+          variant="ghost"
+          size="xs"
+          className="ml-auto"
+          onClick={() => setWorkbenchPanelLayout(workspaceId, { visible: false })}
+          aria-label={t('filesView.editor.closeFileAria', { name: t(PANEL_TITLE_KEYS[layout.activePanelId]) })}
+        >
+          <Icon name="close" className="size-3.5" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-3 typography-ui text-muted-foreground">
+        {layout.activePanelId === 'terminal' ? <div>{t('workbench.panel.terminal')}</div> : null}
+        {layout.activePanelId === 'problems' ? (
+          problems.status === 'failure' ? (
+            <div className="text-[color:var(--status-error)]">{t('workbench.panel.problemsFailed', { message: problems.errorMessage })}</div>
+          ) : problems.status === 'empty' || (problems.status === 'ready' && problems.items.length === 0) ? (
+            <div>{t('workbench.panel.problemsEmpty')}</div>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {problems.status === 'ready' ? problems.items.map((item, index) => (
+                <li key={`${item.resourceId}:${index}`}>{item.message}</li>
+              )) : null}
+            </ul>
+          )
+        ) : null}
+        {layout.activePanelId === 'output' ? (
+          output.status === 'failure' ? (
+            <div className="text-[color:var(--status-error)]">{t('workbench.panel.outputFailed', { message: output.errorMessage })}</div>
+          ) : output.status === 'empty' || (output.status === 'ready' && output.channels.length === 0) ? (
+            <div>{t('workbench.panel.outputEmpty')}</div>
+          ) : (
+            <ul>
+              {output.status === 'ready' ? output.channels.map((channel) => (
+                <li key={channel.id}>{channel.title}</li>
+              )) : null}
+            </ul>
+          )
+        ) : null}
+      </div>
+    </section>
+  );
+};

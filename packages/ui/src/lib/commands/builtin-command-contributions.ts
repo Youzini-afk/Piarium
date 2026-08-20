@@ -4,6 +4,14 @@ import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavig
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useUIStore } from '@/stores/useUIStore';
+import { getDocumentRegistry } from '@/lib/documents/session';
+import { activeEditorTab } from '@/lib/workbench/editors/groups';
+import {
+  closeWorkbenchEditor,
+  ensureEditorWorkbench,
+  getActiveWorkbenchWorkspaceId,
+  splitActiveEditor,
+} from '@/lib/workbench/editors/session';
 import type { WorkbenchCommandImplementation, WorkbenchCommandMeta } from './surface-command-types';
 
 export const BUILTIN_COMMANDS_EXTENSION_ID = 'piarium.builtin.commands';
@@ -22,7 +30,7 @@ const reportFailure = (title: string, error: unknown): void => {
   toast.error(title, { description: error instanceof Error ? error.message : String(error) });
 };
 
-export const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
+const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
   command({ commandId: 'new-session', titleKey: 'commandPalette.item.newSession', icon: 'add', shortcutId: 'new_chat', keywords: ['new', 'session'], order: 0 }, async () => {
     try {
       await startPiSessionDraftFromNavigation();
@@ -53,6 +61,33 @@ export const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
   }),
   command({ commandId: 'open-settings', titleKey: 'commandPalette.item.openSettings', icon: 'settings-3', shortcutId: 'open_settings', keywords: ['settings', 'preferences'], order: 6 }, () => {
     useUIStore.getState().setSettingsDialogOpen(true);
+  }),
+  command({ commandId: 'split-editor', titleKey: 'commandPalette.item.splitEditor', icon: 'split-cells-horizontal', keywords: ['split', 'editor'], order: 7 }, () => {
+    const workspaceId = getActiveWorkbenchWorkspaceId();
+    if (workspaceId) splitActiveEditor(workspaceId, 'vertical');
+  }),
+  command({ commandId: 'split-editor-orthogonal', titleKey: 'commandPalette.item.splitEditorOrthogonal', icon: 'split-cells-horizontal', keywords: ['split', 'editor', 'horizontal'], order: 8 }, () => {
+    const workspaceId = getActiveWorkbenchWorkspaceId();
+    if (workspaceId) splitActiveEditor(workspaceId, 'horizontal');
+  }),
+  command({ commandId: 'close-editor', titleKey: 'commandPalette.item.closeEditor', icon: 'close', keywords: ['close', 'editor'], order: 9 }, () => {
+    const workspaceId = getActiveWorkbenchWorkspaceId();
+    if (!workspaceId) return;
+    const tab = activeEditorTab(ensureEditorWorkbench(workspaceId));
+    if (tab) closeWorkbenchEditor(workspaceId, tab.tabId);
+  }),
+  command({ commandId: 'save-active-file', titleKey: 'commandPalette.item.saveActiveFile', icon: 'save-3', keywords: ['save', 'file', 'editor'], order: 10 }, () => {
+    const workspaceId = getActiveWorkbenchWorkspaceId();
+    if (!workspaceId) return;
+    const tab = activeEditorTab(ensureEditorWorkbench(workspaceId));
+    if (!tab) return;
+    try {
+      void getDocumentRegistry().save({ workspaceId, resourceId: tab.resourceId }).catch((error) => {
+        reportFailure('Failed to save file', error);
+      });
+    } catch (error) {
+      reportFailure('Failed to save file', error);
+    }
   }),
 ];
 
