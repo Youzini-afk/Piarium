@@ -12,6 +12,7 @@ export interface PiActiveEditorFile {
   fileSize: number | null;
   relativePath: string;
   selection: PiEditorSelection | null;
+  dirty: boolean;
 }
 
 interface PiEditorContextStoreState {
@@ -63,6 +64,7 @@ export const normalizePiActiveEditorFile = (value: unknown): PiActiveEditorFile 
     fileSize,
     relativePath,
     selection: normalizeSelection(record.selection),
+    dirty: record.dirty === true,
   };
 };
 
@@ -83,6 +85,7 @@ const sameActiveEditorFile = (left: PiActiveEditorFile | null, right: PiActiveEd
     && left.filePath === right.filePath
     && left.fileSize === right.fileSize
     && left.relativePath === right.relativePath
+    && left.dirty === right.dirty
     && sameSelection(left.selection, right.selection))
 );
 

@@ -3,6 +3,10 @@ export type EditorViewState = {
   cursorColumn?: number;
   scrollTop?: number;
   scrollLeft?: number;
+  selectionStartLine?: number;
+  selectionStartColumn?: number;
+  selectionEndLine?: number;
+  selectionEndColumn?: number;
   foldedLines?: number[];
   previewMode?: 'preview' | 'edit' | 'tree' | 'text';
 };
@@ -71,7 +75,7 @@ export const BUILTIN_EDITOR_PROVIDER_IDS = {
 
 export type BuiltinEditorProviderId = typeof BUILTIN_EDITOR_PROVIDER_IDS[keyof typeof BUILTIN_EDITOR_PROVIDER_IDS];
 
-export type WorkbenchPanelId = 'terminal' | 'problems' | 'output';
+export type WorkbenchPanelId = 'terminal' | 'problems' | 'output' | 'changes';
 
 export type WorkbenchPanelLayout = {
   workspaceId: string;

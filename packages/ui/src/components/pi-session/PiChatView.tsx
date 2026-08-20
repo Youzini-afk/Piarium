@@ -37,6 +37,8 @@ import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { joinPiDraftInstructions } from '@/lib/pi-runtime/sessionDrafts';
 import { recoveryModeForStatus, supportsPiRecoveryAction } from '@/lib/pi-runtime/recovery';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
+import { consumeEditorContextAttachments, restoreEditorContextAttachments } from '@/lib/agent-editor/attachments';
+import { projectEditorContextAttachments } from '@/lib/agent-editor/projection';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
@@ -190,6 +192,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     const inlineDraftTarget = { directory: snapshot.cwd, sessionKey: sessionId };
     const inlineDraftStore = useInlineCommentDraftStore.getState();
     let inlineDrafts: ReturnType<typeof inlineDraftStore.consumeDrafts> = [];
+    let editorAttachments: ReturnType<typeof consumeEditorContextAttachments> = [];
     let consumedGoalArm: { armed: boolean; objectiveOverride: string | null } = {
       armed: false,
       objectiveOverride: null,
@@ -210,8 +213,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       }
       inlineDrafts = inlineDraftStore.consumeDrafts(inlineDraftTarget);
       promptText = appendInlineComments(promptText, inlineDrafts);
+      editorAttachments = consumeEditorContextAttachments(draftRuntimeKey, sessionId);
+      promptText = projectEditorContextAttachments(promptText, editorAttachments);
       if (!promptText.trim() && currentDraft.images.length === 0) {
         inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
+        restoreEditorContextAttachments(editorAttachments);
         return;
       }
       consumedGoalArm = useSessionGoalArmStore.getState().consume();
@@ -241,6 +247,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       clearPiDraft(sessionId, draftRuntimeKey);
     } catch (error) {
       if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
+      restoreEditorContextAttachments(editorAttachments);
       if (startedGoalId) {
         await mutateFeatures(
           sessionId,

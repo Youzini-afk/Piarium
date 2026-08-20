@@ -15,18 +15,24 @@ import {
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import type { WorkbenchPanelId, WorkbenchPanelLayout } from '@/lib/workbench/editors/types';
 import { useUIStore } from '@/stores/useUIStore';
+import { listAgentFileChangeHints, subscribeAgentFileChangeHints } from '@/lib/agent-editor/hints';
+import { getDocumentRegistry } from '@/lib/documents/session';
+import { useDirtyResourceIds } from '@/lib/documents/hooks';
+import { peekEditorSessionLink, revealResourceInEditor } from '@/lib/agent-editor/navigation';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 type WorkbenchPanelAreaProps = {
   workspaceId: string;
   directory: string;
 };
 
-const PANEL_IDS: WorkbenchPanelId[] = ['terminal', 'problems', 'output'];
+const PANEL_IDS: WorkbenchPanelId[] = ['terminal', 'problems', 'output', 'changes'];
 
 const PANEL_TITLE_KEYS: Record<WorkbenchPanelId, I18nKey> = {
   terminal: 'workbench.panel.terminal',
   problems: 'workbench.panel.problems',
   output: 'workbench.panel.output',
+  changes: 'workbench.panel.changes',
 };
 
 const HIDDEN_LAYOUT: WorkbenchPanelLayout = {
@@ -42,6 +48,20 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
     subscribeWorkbenchPanels,
     () => peekWorkbenchPanelLayout(workspaceId) ?? HIDDEN_LAYOUT,
     () => HIDDEN_LAYOUT,
+  );
+  const dirtyIds = useDirtyResourceIds(workspaceId);
+  const hints = React.useSyncExternalStore(
+    subscribeAgentFileChangeHints,
+    () => listAgentFileChangeHints(workspaceId),
+    () => [],
+  );
+  const documentEpoch = React.useSyncExternalStore(
+    (onStoreChange) => getDocumentRegistry().subscribeAll(onStoreChange),
+    () => {
+      const dirty = getDocumentRegistry().dirtyResourceIds(workspaceId);
+      return `${dirty.size}:${hints.length}`;
+    },
+    () => '0',
   );
   const problems = getWorkbenchProblems(workspaceId);
   const output = getWorkbenchOutput(workspaceId);
@@ -131,6 +151,63 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
                 )) : null}
               </ul>
             )}
+          </div>
+        ) : null}
+        {layout.activePanelId === 'changes' ? (
+          <div className="h-full overflow-auto p-3 typography-ui text-muted-foreground">
+            {(() => {
+              const ids = new Set<string>([...dirtyIds]);
+              for (const hint of hints) ids.add(hint.resourceId);
+              const resourceIds = [...ids].sort();
+              if (resourceIds.length === 0) return <div>{t('workbench.panel.changesEmpty')}</div>;
+              return (
+                <ul className="flex flex-col gap-1">
+                  {resourceIds.map((resourceId) => {
+                    const meta = getDocumentRegistry().meta({ workspaceId, resourceId });
+                    const hint = hints.find((item) => item.resourceId === resourceId);
+                    const link = peekEditorSessionLink({ workspaceId, resourceId });
+                    const stateLabel = meta?.status === 'conflict'
+                      ? t('workbench.panel.changesConflict')
+                      : meta?.dirty
+                        ? t('workbench.panel.changesDirty')
+                        : hint
+                          ? t('workbench.panel.changesAgent')
+                          : t('workbench.panel.changesOpen');
+                    return (
+                      <li key={resourceId}>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto w-full justify-start whitespace-normal py-1 text-left"
+                          aria-label={t('workbench.panel.changesOpenAria', { resourceId })}
+                          onClick={() => {
+                            revealResourceInEditor({
+                              workspaceId,
+                              resourceId,
+                              workspaceRoot: directory,
+                              ...(link?.sessionId ? { sessionId: link.sessionId } : {}),
+                              ...(link?.entryId ? { entryId: link.entryId } : {}),
+                              ...(hint?.toolCallId ? { toolCallId: hint.toolCallId } : {}),
+                            });
+                            if (link?.entryId) {
+                              void usePiSessionStore.getState().navigateSession(link.sessionId, link.entryId);
+                            }
+                          }}
+                        >
+                          {t('workbench.panel.changesItem', {
+                            resourceId,
+                            state: stateLabel,
+                            revision: meta?.baseRevision ?? hint?.toolCallId ?? '—',
+                          })}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+            <span className="hidden">{documentEpoch}</span>
           </div>
         ) : null}
       </div>

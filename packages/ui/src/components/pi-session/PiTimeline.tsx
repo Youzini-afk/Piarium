@@ -18,6 +18,11 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import type { EditorAPI } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
+import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
+import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
+import { PatchHunkReview } from '@/components/workbench/PatchHunkReview';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import type { PiToolExecutionState } from '@/stores/usePiSessionStore';
 import { PiExtensionStatusCard } from './PiExtensionStatusCard';
 import {
@@ -306,6 +311,8 @@ const PiToolCard: React.FC<{
     execution?: PiToolExecutionState;
     result?: PiToolResultMessage;
   }>('tool-renderer', 'chat.timeline.tools');
+  const workspaceId = useWorkbenchWorkspaceId();
+  const sessionId = usePiSessionStore((state) => state.currentSessionId);
   const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, editor, execution, result });
   if (extensionRendered !== undefined) return <>{extensionRendered}</>;
   const status = result
@@ -361,26 +368,53 @@ const PiToolCard: React.FC<{
           </div>
         ) : null}
         {applyPatchFiles.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {applyPatchFiles.map((file) => (
+                <button
+                  key={file.filePath}
+                  type="button"
+                  disabled={file.deleted}
+                  onClick={() => {
+                    const resourceId = resourceIdFromWorkspacePath(cwd, file.filePath)
+                      ?? file.filePath.replace(/\\/g, '/');
+                    if (workspaceId) {
+                      revealResourceInEditor({
+                        workspaceId,
+                        resourceId,
+                        workspaceRoot: cwd,
+                        ...(sessionId ? { sessionId } : {}),
+                        ...(call.id ? { toolCallId: call.id } : {}),
+                        ...(editor ? { editor } : {}),
+                      });
+                    }
+                    if (!editor) return;
+                    const absolutePath = toAbsoluteFilePath(cwd, file.filePath);
+                    if (file.patch) {
+                      void editor.openDiff('', absolutePath, `${file.filePath} (changes)`, { patch: file.patch });
+                    } else {
+                      void editor.openFile(absolutePath);
+                    }
+                  }}
+                  className="inline-flex min-w-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-default disabled:opacity-50"
+                >
+                  <Icon name="file-code" className="size-3.5 shrink-0" />
+                  <span className="max-w-64 truncate">{file.filePath}</span>
+                </button>
+              ))}
+            </div>
             {applyPatchFiles.map((file) => (
-              <button
-                key={file.filePath}
-                type="button"
-                disabled={file.deleted || !editor}
-                onClick={() => {
-                  if (!editor) return;
-                  const absolutePath = toAbsoluteFilePath(cwd, file.filePath);
-                  if (file.patch) {
-                    void editor.openDiff('', absolutePath, `${file.filePath} (changes)`, { patch: file.patch });
-                  } else {
-                    void editor.openFile(absolutePath);
-                  }
-                }}
-                className="inline-flex min-w-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-default disabled:opacity-50"
-              >
-                <Icon name="file-code" className="size-3.5 shrink-0" />
-                <span className="max-w-64 truncate">{file.filePath}</span>
-              </button>
+              file.patch ? (
+                <PatchHunkReview
+                  key={`review:${file.filePath}`}
+                  cwd={cwd}
+                  filePath={file.filePath}
+                  patch={file.patch}
+                  {...(editor ? { editor } : {})}
+                  {...(sessionId ? { sessionId } : {})}
+                  {...(call.id ? { toolCallId: call.id } : {})}
+                />
+              ) : null
             ))}
           </div>
         ) : null}

@@ -68,6 +68,7 @@ import { setWorkbenchContextKey } from '@/lib/workbench/editors/context-keys';
 import { registerWorkbenchMenuItem } from '@/lib/workbench/editors/menus';
 import { EditorGroupsLayout } from '@/components/workbench/EditorGroupsLayout';
 import { ResourceEditorHost } from '@/components/workbench/ResourceEditorHost';
+import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { FilesExplorer, ScrollingFileName } from '@/components/workbench/FilesExplorer';
 import { WorkbenchPanelArea } from '@/components/workbench/WorkbenchPanelArea';
 import { EditorView } from '@codemirror/view';
@@ -3068,42 +3069,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden"
     >
       {selectedDocumentIdentity && (selectedDocument?.status === 'conflict' || selectedDocument?.status === 'deleted') ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-status-warning/30 bg-status-warning/10 px-3 py-2">
-          <div className="min-w-0 flex-1">
-            <div className="typography-ui-label font-medium text-status-warning">
-              {t(selectedDocument.status === 'deleted' ? 'filesView.document.deleted.title' : 'filesView.document.conflict.title')}
-            </div>
-            <div className="typography-meta text-muted-foreground">
-              {t(selectedDocument.status === 'deleted' ? 'filesView.document.deleted.description' : 'filesView.document.conflict.description')}
-            </div>
-          </div>
-          {selectedDocument.status === 'conflict' ? (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => getDocumentRegistry().discard(selectedDocumentIdentity)}
-              >
-                {t('filesView.document.conflict.reloadDisk')}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void saveDraft()}
-              >
-                {t('filesView.document.conflict.keepEdits')}
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void saveDraft()}
-            >
-              {t('filesView.editor.saveFile')}
-            </Button>
-          )}
-        </div>
+        <DocumentConflictBanner identity={selectedDocumentIdentity} />
       ) : null}
       <div className={cn('flex flex-col flex-shrink-0', showEditorTabsRow && 'border-b border-border/40')}>
         {/* Row 1: Tabs */}

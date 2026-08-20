@@ -4,6 +4,7 @@ import type { Extension } from '@codemirror/state';
 
 import { Button } from '@/components/ui/button';
 import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
+import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -26,6 +27,7 @@ import {
 } from '@/lib/workbench/editors/providers';
 import { patchEditorViewState } from '@/lib/workbench/editors/session';
 import { applyEditorViewState, captureEditorViewState } from '@/lib/workbench/editors/view-state';
+import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
 import type { DocumentIdentity } from '@/lib/documents/types';
 
 type ResourceEditorHostProps = {
@@ -95,9 +97,30 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const viewStateExtension = React.useMemo<Extension>(() => (
     EditorView.updateListener.of((update) => {
       if (!update.selectionSet && !update.viewportChanged) return;
-      patchEditorViewState(workspaceId, tab.viewId, captureEditorViewState(update.view));
+      const viewState = captureEditorViewState(update.view);
+      patchEditorViewState(workspaceId, tab.viewId, viewState);
+      if (!update.selectionSet) return;
+      const open = getDocumentRegistry().get(identity);
+      const range = update.state.selection.main;
+      const hasText = range.from !== range.to;
+      const fromLine = update.state.doc.lineAt(range.from);
+      const toLine = update.state.doc.lineAt(range.to);
+      usePiEditorContextStore.getState().setActiveEditorFile({
+        fileName: tab.resourceId.split('/').pop() || tab.resourceId,
+        filePath: path,
+        fileSize: open?.byteLength ?? null,
+        relativePath: tab.resourceId,
+        selection: hasText
+          ? {
+            startLine: fromLine.number,
+            endLine: toLine.number,
+            text: update.state.sliceDoc(range.from, range.to),
+          }
+          : null,
+        dirty: open?.dirty === true,
+      });
     })
-  ), [tab.viewId, workspaceId]);
+  ), [identity, path, tab.resourceId, tab.viewId, workspaceId]);
 
   if (selection.status === 'none' && !isEditorProviderEnabled(BUILTIN_EDITOR_PROVIDER_IDS.text)) {
     return (
@@ -219,12 +242,17 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   return (
     <HostFrame chooser={ambiguousChooser}>
-      <DocumentCodeMirror
-        identity={identity}
-        className="h-full"
-        extensions={[viewStateExtension]}
-        onViewReady={(view) => applyEditorViewState(view, tab.viewState)}
-      />
+      <div className="flex h-full min-h-0 flex-col">
+        <DocumentConflictBanner identity={identity} />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <DocumentCodeMirror
+            identity={identity}
+            className="h-full"
+            extensions={[viewStateExtension]}
+            onViewReady={(view) => applyEditorViewState(view, tab.viewState)}
+          />
+        </div>
+      </div>
     </HostFrame>
   );
 };

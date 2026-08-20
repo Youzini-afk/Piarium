@@ -7,6 +7,7 @@ const file = {
   fileSize: 120,
   relativePath: 'src/agent.ts',
   selection: { endLine: 9, startLine: 7, text: 'const agent = createAgent();' },
+  dirty: false,
 };
 
 describe('Pi active editor context', () => {

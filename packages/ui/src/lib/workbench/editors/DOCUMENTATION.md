@@ -26,3 +26,7 @@ and layout snapshot.
 
 Language diagnostics publish into the Problems panel through the language-services registry.
 Stale diagnostic versions are dropped. Hidden search views do not start language servers.
+
+Agent/editor coordination lives in `lib/agent-editor`: attachments are runtime+session scoped,
+unsaved snapshots are explicit prompt text, tool path hints never override DocumentsAPI watches,
+and patch accept/reject writes use expected revision.

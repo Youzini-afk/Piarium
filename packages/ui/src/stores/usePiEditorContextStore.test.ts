@@ -15,6 +15,7 @@ describe('Pi editor context store', () => {
       fileSize: 42,
       relativePath: 'example.ts',
       selection: { endLine: 4, startLine: 2, text: 'const value = 1;' },
+      dirty: false,
     });
     expect(normalizePiActiveEditorFile({ fileName: 'missing-path.ts' })).toBeNull();
   });

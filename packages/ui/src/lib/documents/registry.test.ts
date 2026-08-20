@@ -204,6 +204,8 @@ describe('DocumentRegistry', () => {
     await registry.reload(identity);
     expect(registry.get(identity)?.status).toBe('conflict');
     expect(registry.get(identity)?.buffer).toBe('local');
+    expect(registry.get(identity)?.conflict?.ancestorContent).toBe('two');
+    expect(registry.get(identity)?.conflict?.diskContent).toBe('disk');
     registry.dispose();
   });
 

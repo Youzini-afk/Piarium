@@ -6,6 +6,7 @@ import type {
   Subscription,
 } from '@/lib/api/types';
 import { DocumentsError } from '@/lib/api/documents-errors';
+import { peekAgentFileChangeHint } from '@/lib/agent-editor/hints';
 import { getRuntimeEndpointGeneration } from '@/lib/runtime-switch';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending';
 import { getDocumentRecoverySessionId } from './recovery-session';
@@ -50,6 +51,7 @@ const emptyRecord = (identity: DocumentIdentity, generation: number): DocumentRe
   recoveryJournalRevision: null,
   lastOrigin: null,
   lastChanges: null,
+  externalSource: null,
 });
 
 const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): DocumentRecord => {
@@ -103,6 +105,8 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
     };
   }
   if (record.dirty && record.buffer !== normalized) {
+    const ancestorContent = record.conflict?.ancestorContent ?? record.baseContent;
+    const ancestorRevision = record.conflict?.ancestorRevision ?? record.baseRevision;
     return {
       ...record,
       status: 'conflict',
@@ -112,7 +116,12 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
       bom: result.bom,
       lineEnding,
       byteLength: result.byteLength,
-      conflict: { diskRevision: result.revision },
+      conflict: {
+        diskRevision: result.revision,
+        ancestorContent,
+        ancestorRevision,
+        diskContent: normalized,
+      },
       errorMessage: null,
     };
   }
@@ -336,6 +345,9 @@ export class DocumentRegistry {
           status: 'conflict',
           conflict: {
             diskRevision: disk.status === 'missing' ? 'missing' : disk.revision,
+            ancestorContent: latest.conflict?.ancestorContent ?? latest.baseContent,
+            ancestorRevision: latest.conflict?.ancestorRevision ?? latest.baseRevision,
+            diskContent: disk.status === 'ready' ? normalizeEditorLineEndings(disk.content) : '',
           },
         });
         return this.records.get(documentKey(identity)) ?? latest;
@@ -417,6 +429,11 @@ export class DocumentRegistry {
     return next;
   }
 
+  async applyMerged(identity: DocumentIdentity, merged: string): Promise<DocumentRecord> {
+    this.applyTransaction(identity, merged, { origin: 'merge' });
+    return this.save(identity);
+  }
+
   handleWatchEvent(event: PiariumWorkspaceFileEvent): void {
     if (event.kind === 'reset') return;
     const identity = event.kind === 'moved' ? event.from : event.resource;
@@ -449,7 +466,14 @@ export class DocumentRegistry {
     if (event.kind === 'changed' || event.kind === 'created') {
       if (current.saving || current.status === 'loading') return;
       if (event.revision && event.revision === current.baseRevision) return;
-      void this.open(current.identity, { reload: true });
+      void this.open(current.identity, { reload: true }).then((record) => {
+        if (this.disposed) return;
+        const latest = this.records.get(documentKey(record.identity));
+        if (!latest) return;
+        const externalSource = peekAgentFileChangeHint(record.identity) ? 'agent' : 'disk';
+        if (latest.externalSource === externalSource) return;
+        this.commit({ ...latest, externalSource });
+      });
     }
   }
 

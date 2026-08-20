@@ -38,8 +38,9 @@ describe('workbench panels', () => {
   });
 
   test('showing a panel does not invent problem or output records', () => {
-    showWorkbenchPanel('ws-panels', 'problems');
+    showWorkbenchPanel('ws-panels', 'changes');
     expect(peekWorkbenchPanelLayout('ws-panels')?.visible).toBe(true);
+    expect(peekWorkbenchPanelLayout('ws-panels')?.activePanelId).toBe('changes');
     expect(getWorkbenchProblems('ws-panels').status).toBe('empty');
   });
 });

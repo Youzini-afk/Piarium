@@ -2,14 +2,24 @@ import { EditorView } from '@codemirror/view';
 import type { EditorViewState } from './types';
 
 export const captureEditorViewState = (view: EditorView): EditorViewState => {
-  const line = view.state.doc.lineAt(view.state.selection.main.head);
-  const column = line.from === line.to ? 1 : (view.state.selection.main.head - line.from + 1);
-  return {
-    cursorLine: line.number,
+  const range = view.state.selection.main;
+  const headLine = view.state.doc.lineAt(range.head);
+  const column = headLine.from === headLine.to ? 1 : (range.head - headLine.from + 1);
+  const fromLine = view.state.doc.lineAt(range.from);
+  const toLine = view.state.doc.lineAt(range.to);
+  const next: EditorViewState = {
+    cursorLine: headLine.number,
     cursorColumn: column,
     scrollTop: view.scrollDOM.scrollTop,
     scrollLeft: view.scrollDOM.scrollLeft,
   };
+  if (range.from !== range.to) {
+    next.selectionStartLine = fromLine.number;
+    next.selectionStartColumn = range.from - fromLine.from + 1;
+    next.selectionEndLine = toLine.number;
+    next.selectionEndColumn = range.to - toLine.from + 1;
+  }
+  return next;
 };
 
 export const applyEditorViewState = (view: EditorView, viewState: EditorViewState): void => {

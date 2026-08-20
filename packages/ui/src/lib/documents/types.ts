@@ -28,7 +28,12 @@ export type DocumentChange = {
 
 export type DocumentConflictState = {
   diskRevision: string;
+  ancestorContent: string;
+  ancestorRevision: string | null;
+  diskContent: string;
 };
+
+export type DocumentExternalSource = 'agent' | 'disk' | null;
 
 export type DocumentRecord = {
   identity: DocumentIdentity;
@@ -52,6 +57,7 @@ export type DocumentRecord = {
   recoveryJournalRevision: number | null;
   lastOrigin: string | null;
   lastChanges: DocumentChange[] | null;
+  externalSource: DocumentExternalSource;
 };
 
 export type DocumentMeta = {
@@ -67,6 +73,7 @@ export type DocumentMeta = {
   byteLength: number;
   errorMessage: string | null;
   conflict: DocumentConflictState | null;
+  externalSource: DocumentExternalSource;
 };
 
 export const toDocumentMeta = (record: DocumentRecord): DocumentMeta => ({
@@ -82,4 +89,5 @@ export const toDocumentMeta = (record: DocumentRecord): DocumentMeta => ({
   byteLength: record.byteLength,
   errorMessage: record.errorMessage,
   conflict: record.conflict,
+  externalSource: record.externalSource,
 });

@@ -29,6 +29,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getMagicPromptDefinition } from '@/lib/magicPrompts';
 import type { Snippet } from '@/types/snippet';
 import { PiActiveEditorContextSuggestion } from './PiActiveEditorContextSuggestion';
+import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { PiGoalButton } from './PiGoalControls';
 import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 
@@ -248,6 +249,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
           </div>
         )}
 
+        {snapshot ? <EditorContextAttachmentChips sessionId={snapshot.sessionId} /> : null}
         {snapshot ? <PiActiveEditorContextSuggestion snapshot={snapshot} /> : null}
 
         <div
