@@ -681,7 +681,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'extensions.workbench',
     page: 'extensions',
     titleKey: 'settings.piarium.extensions.workbench.title',
-    keywords: ['profile', 'shell', 'layout', 'workbench'],
+    keywords: ['profile', 'shell', 'layout', 'workbench', 'ide'],
   },
   {
     id: 'extensions.workbench.profile',

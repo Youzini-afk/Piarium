@@ -86,7 +86,8 @@ test("missing storage keeps the Agent default document without persisting a migr
   assert.equal(missing.storageState, "missing");
   assert.equal(missing.document.revision, 0);
   assert.equal(missing.document.profiles[0]?.label, "Agent");
-  assert.equal(missing.document.layouts.length, 3);
+  assert.equal(missing.document.profiles.length, 2);
+  assert.equal(missing.document.layouts.length, 5);
   const again = await store.read();
   assert.equal(again.storageState, "missing");
   assert.equal(again.document.revision, 0);
@@ -122,12 +123,56 @@ test("migrates persisted Default profiles onto Agent Workspace without replacing
   assert.equal(migrated.storageState, "ready");
   assert.equal(migrated.document.revision, 2);
   assert.equal(migrated.document.profiles[0]?.label, "Agent");
-  const bySurface = Object.fromEntries(
-    migrated.document.layouts.map((layer) => [layer.surface, layer.replacementSelections["workbench.shell"]]),
+  const shellByProfileSurface = Object.fromEntries(
+    migrated.document.layouts.map((layer) => (
+      [`${layer.profileId}:${layer.surface}`, layer.replacementSelections["workbench.shell"]]
+    )),
   );
-  assert.equal(bySurface.web, "dev.example.community.shell");
-  assert.equal(bySurface.desktop, "piarium.builtin.agent-workspace.shell");
-  assert.equal(bySurface.mobile, "piarium.builtin.agent-workspace.shell");
+  assert.equal(shellByProfileSurface["default:web"], "dev.example.community.shell");
+  assert.equal(shellByProfileSurface["default:desktop"], "piarium.builtin.agent-workspace.shell");
+  assert.equal(shellByProfileSurface["default:mobile"], "piarium.builtin.agent-workspace.shell");
+  assert.equal(shellByProfileSurface["piarium.ide:web"], "piarium.builtin.ide-workbench.shell");
+  assert.equal(shellByProfileSurface["piarium.ide:desktop"], "piarium.builtin.ide-workbench.shell");
   const unchanged = await store.read();
   assert.equal(unchanged.document.revision, migrated.document.revision);
+});
+
+test("migrates Agent shells without replacing a chosen IDE shell", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "piarium-workbench-ide-migrate-"));
+  directories.push(dataDir);
+  const storage = new ExtensionStorageStore(dataDir);
+  await storage.update({
+    extensionId: "piarium.core.workbench",
+    key: "profiles",
+    scope: "application",
+  }, 0, 1, {
+    activeProfileId: "default",
+    layouts: [{
+      profileId: "piarium.ide",
+      references: [],
+      replacementSelections: { "workbench.shell": "dev.example.community.ide" },
+      scope: "distribution",
+      scopeId: "piarium.ide",
+      surface: "web",
+    }],
+    profileSelections: { users: {}, workspaces: {} },
+    profiles: [
+      { id: "default", label: "Agent" },
+      { id: "piarium.ide", label: "IDE" },
+    ],
+  });
+  const store = new WorkbenchProfileStore({
+    hostId: "2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a",
+    storage,
+  });
+  const migrated = await store.read();
+  const webIde = migrated.document.layouts.find((layer) => (
+    layer.profileId === "piarium.ide" && layer.surface === "web"
+  ));
+  assert.equal(webIde?.replacementSelections["workbench.shell"], "dev.example.community.ide");
+  const desktopIde = migrated.document.layouts.find((layer) => (
+    layer.profileId === "piarium.ide" && layer.surface === "desktop"
+  ));
+  assert.equal(desktopIde?.replacementSelections["workbench.shell"], "piarium.builtin.ide-workbench.shell");
+  assert.equal(migrated.document.activeProfileId, "default");
 });

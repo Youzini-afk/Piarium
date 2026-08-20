@@ -9,6 +9,7 @@ import {
   PIARIUM_BUILTIN_RECOVERY_EXTENSION,
   type PiariumBuiltinExtensionDefinition,
 } from '@piarium/extension-builtins';
+import { PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID } from '@piarium/extension-contract';
 import type { SurfaceActivation, SurfaceActivationContext } from '@piarium/extension-surface';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
@@ -40,6 +41,7 @@ import type {
   PiSettingsPanelImplementation,
 } from './pi-integration-registry';
 import { AgentWorkspaceShell } from './builtin-agent-workspace';
+import { IdeWorkbenchShell } from './builtin-ide-workbench';
 import {
   WorkbenchOwnedView,
   WORKBENCH_REPLACEMENT_TARGETS,
@@ -157,7 +159,12 @@ const contributionImplementation = (
     return { render: () => <RecoverySettings /> } satisfies PiSettingsPanelImplementation;
   }
   const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
-  if (contribution?.kind === 'shell') return { framework: 'react-19', Component: AgentWorkspaceShell };
+  if (contribution?.kind === 'shell') {
+    const Component = definition.manifest.id === PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID
+      ? IdeWorkbenchShell
+      : AgentWorkspaceShell;
+    return { framework: 'react-19', Component };
+  }
   if (contribution?.kind === 'settings-page') return pageImplementation(definition);
   if (contribution?.kind === 'panel' && contribution.data.contract === 'pi-plugin-settings-adapter/v1') {
     return adapterImplementation(String(contribution.data.adapterId));

@@ -7,6 +7,9 @@ import {
   defaultPiariumWorkbenchProfileDocument,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  PIARIUM_WORKBENCH_IDE_PROFILE_ID,
 } from '@piarium/extension-contract';
 import { resolveWorkbenchShellView } from './workbench-shell-view';
 
@@ -102,4 +105,34 @@ test('a failed Agent Workspace actual state stays in Recovery', () => {
   const failed = resolveWorkbenchShellView(hostSnapshot(agentEntry(true, true)), 'web');
   expect(failed.view).toBe('recovery');
   expect(failed.resolved?.status).toBe('failed');
+});
+
+test('the IDE profile is ready on web and recovers on mobile where it has no shell', () => {
+  const ideEntry: PiariumExtensionCatalogEntry = {
+    ...agentEntry(true),
+    manifest: {
+      ...agentEntry(true).manifest,
+      id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+      contributions: [{
+        contractVersion: 1,
+        data: {},
+        id: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+        kind: 'shell',
+        replacement: { target: 'workbench.shell' },
+        supports: ['web', 'desktop'],
+      }],
+    },
+    source: { display: 'IDE Workbench', kind: 'builtin' },
+  };
+  const snapshot = hostSnapshot(ideEntry);
+  snapshot.workbench.document = {
+    ...snapshot.workbench.document,
+    activeProfileId: PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+  };
+  const web = resolveWorkbenchShellView(snapshot, 'web');
+  expect(web.view).toBe('ready');
+  expect(web.resolved?.shellContributionId).toBe(PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  const mobile = resolveWorkbenchShellView(snapshot, 'mobile');
+  expect(mobile.view).toBe('recovery');
+  expect(mobile.resolved?.status).toBe('builtin');
 });

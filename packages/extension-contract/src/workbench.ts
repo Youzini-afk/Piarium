@@ -10,9 +10,14 @@ export const PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION = 1 as const;
 
 export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID = "default";
 export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL = "Agent";
+export const PIARIUM_WORKBENCH_IDE_PROFILE_ID = "piarium.ide";
+export const PIARIUM_WORKBENCH_IDE_PROFILE_LABEL = "IDE";
 export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID = "piarium.builtin.agent-workspace";
 export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID = "piarium.builtin.agent-workspace.shell";
 export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
+export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID = "piarium.builtin.ide-workbench";
+export const PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID = "piarium.builtin.ide-workbench.shell";
+export const PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES: PiariumApplicationSurface[] = ["web", "desktop"];
 
 export const PIARIUM_WORKBENCH_REPLACEMENT_TARGETS = {
   agents: "agents.workbench",
@@ -352,20 +357,77 @@ export const parsePiariumWorkbenchProfileApplyRequest = (value: unknown): Piariu
   };
 };
 
+const distributionShellLayer = (
+  profileId: string,
+  surface: PiariumApplicationSurface,
+  shellContributionId: string,
+): PiariumWorkbenchLayoutLayer => ({
+  profileId,
+  references: [],
+  replacementSelections: {
+    [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId,
+  },
+  scope: "distribution",
+  scopeId: profileId,
+  surface,
+});
+
+const ensureDistributionShellLayouts = (
+  document: PiariumWorkbenchProfileDocument,
+  profileId: string,
+  surfaces: readonly PiariumApplicationSurface[],
+  shellContributionId: string,
+): boolean => {
+  let changed = false;
+  for (const surface of surfaces) {
+    const index = document.layouts.findIndex((layer) => (
+      layer.profileId === profileId
+      && layer.scope === "distribution"
+      && layer.scopeId === profileId
+      && layer.surface === surface
+    ));
+    if (index === -1) {
+      document.layouts.push(distributionShellLayer(profileId, surface, shellContributionId));
+      changed = true;
+      continue;
+    }
+    const layer = document.layouts[index];
+    if (!layer || layer.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]) continue;
+    document.layouts[index] = {
+      ...layer,
+      replacementSelections: {
+        ...layer.replacementSelections,
+        [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: shellContributionId,
+      },
+    };
+    changed = true;
+  }
+  return changed;
+};
+
 export const defaultPiariumWorkbenchProfileDocument = (): PiariumWorkbenchProfileDocument => ({
   activeProfileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-  layouts: PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES.map((surface) => ({
-    profileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-    references: [],
-    replacementSelections: {
-      [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-    },
-    scope: "distribution",
-    scopeId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-    surface,
-  })),
+  layouts: [
+    ...PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES.map((surface) => (
+      distributionShellLayer(
+        PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+        surface,
+        PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+      )
+    )),
+    ...PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES.map((surface) => (
+      distributionShellLayer(
+        PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+        surface,
+        PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+      )
+    )),
+  ],
   profileSelections: { users: {}, workspaces: {} },
-  profiles: [{ id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL }],
+  profiles: [
+    { id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL },
+    { id: PIARIUM_WORKBENCH_IDE_PROFILE_ID, label: PIARIUM_WORKBENCH_IDE_PROFILE_LABEL },
+  ],
   revision: 0,
   schemaVersion: PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
   updatedAt: new Date(0).toISOString(),
@@ -380,38 +442,22 @@ export const migratePiariumWorkbenchProfileDocument = (
     profile.label = PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL;
     changed = true;
   }
-  for (const surface of PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES) {
-    const index = document.layouts.findIndex((layer) => (
-      layer.profileId === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID
-      && layer.scope === "distribution"
-      && layer.scopeId === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID
-      && layer.surface === surface
-    ));
-    if (index === -1) {
-      document.layouts.push({
-        profileId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-        references: [],
-        replacementSelections: {
-          [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-        },
-        scope: "distribution",
-        scopeId: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
-        surface,
-      });
-      changed = true;
-      continue;
-    }
-    const layer = document.layouts[index];
-    if (!layer || layer.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]) continue;
-    document.layouts[index] = {
-      ...layer,
-      replacementSelections: {
-        ...layer.replacementSelections,
-        [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
-      },
-    };
+  if (!document.profiles.some((candidate) => candidate.id === PIARIUM_WORKBENCH_IDE_PROFILE_ID)) {
+    document.profiles.push({ id: PIARIUM_WORKBENCH_IDE_PROFILE_ID, label: PIARIUM_WORKBENCH_IDE_PROFILE_LABEL });
     changed = true;
   }
+  changed = ensureDistributionShellLayouts(
+    document,
+    PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
+    PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
+    PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  ) || changed;
+  changed = ensureDistributionShellLayouts(
+    document,
+    PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+    PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
+    PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  ) || changed;
   return changed;
 };
 

@@ -3140,6 +3140,8 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.profile': 'Profil',
   'settings.piarium.extensions.workbench.profile.agent': 'Agent',
   'settings.piarium.extensions.workbench.extension.agentWorkspace': 'Przestrzeń robocza agenta',
+  'settings.piarium.extensions.workbench.profile.ide': 'IDE',
+  'settings.piarium.extensions.workbench.extension.ideWorkbench': 'Środowisko IDE',
   'settings.piarium.extensions.workbench.builtin': 'Wbudowane',
   'settings.piarium.extensions.workbench.createProfile': 'Utwórz profil',
   'settings.piarium.extensions.workbench.removeProfile': 'Usuń profil',

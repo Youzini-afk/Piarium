@@ -25,6 +25,8 @@ Stable workbench replacement targets and contribution slots, including `view` an
 live in this package. Application surfaces import those constants; they must not keep a second
 string table. The distribution Agent profile keeps the stable ID `default` and the English fallback
 label `Agent`; official UI localizes that name. Its default `workbench.shell` contribution is
-`piarium.builtin.agent-workspace.shell`.
+`piarium.builtin.agent-workspace.shell`. The optional IDE profile uses the stable ID `piarium.ide`
+and `piarium.builtin.ide-workbench.shell` on web and desktop only. Selecting a profile does not
+enable or disable extensions.
 
 See the complete [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

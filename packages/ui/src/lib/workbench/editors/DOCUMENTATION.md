@@ -20,5 +20,6 @@ this kernel; they do not own document buffers, disk revisions, or layout schema.
 High-frequency cursor/scroll state stays on the tab `viewState` in memory. Snapshots are explicit,
 not per keystroke. Document dirty buffers remain in the Document Registry.
 
-The Agent Files surface adapts onto this kernel: the explorer is shared, split groups use kernel
-tabs, and `useFilesViewTabsStore` remains the Agent navigation API until a later Shell owns layout.
+The Agent Files surface and the official IDE Workbench both mount this kernel. Explorer, split
+groups, and `useFilesViewTabsStore` remain shared navigation; each shell owns only its chrome
+and layout snapshot.

@@ -3139,6 +3139,8 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.profile': 'Профіль',
   'settings.piarium.extensions.workbench.profile.agent': 'Агент',
   'settings.piarium.extensions.workbench.extension.agentWorkspace': 'Робочий простір агента',
+  'settings.piarium.extensions.workbench.profile.ide': 'IDE',
+  'settings.piarium.extensions.workbench.extension.ideWorkbench': 'Робоча область IDE',
   'settings.piarium.extensions.workbench.builtin': 'Вбудовано',
   'settings.piarium.extensions.workbench.createProfile': 'Створити профіль',
   'settings.piarium.extensions.workbench.removeProfile': 'Видалити профіль',

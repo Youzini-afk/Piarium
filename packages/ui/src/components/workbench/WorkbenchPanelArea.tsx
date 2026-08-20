@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { TerminalView } from '@/components/views/TerminalView';
 import { cn } from '@/lib/utils';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -77,33 +78,39 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
           <Icon name="close" className="size-3.5" />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3 typography-ui text-muted-foreground">
-        {layout.activePanelId === 'terminal' ? <div>{t('workbench.panel.terminal')}</div> : null}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <div className={cn('h-full min-h-0', layout.activePanelId !== 'terminal' && 'hidden')}>
+          <TerminalView visible={layout.activePanelId === 'terminal'} />
+        </div>
         {layout.activePanelId === 'problems' ? (
-          problems.status === 'failure' ? (
-            <div className="text-[color:var(--status-error)]">{t('workbench.panel.problemsFailed', { message: problems.errorMessage })}</div>
-          ) : problems.status === 'empty' || (problems.status === 'ready' && problems.items.length === 0) ? (
-            <div>{t('workbench.panel.problemsEmpty')}</div>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {problems.status === 'ready' ? problems.items.map((item, index) => (
-                <li key={`${item.resourceId}:${index}`}>{item.message}</li>
-              )) : null}
-            </ul>
-          )
+          <div className="h-full overflow-auto p-3 typography-ui text-muted-foreground">
+            {problems.status === 'failure' ? (
+              <div className="text-[color:var(--status-error)]">{t('workbench.panel.problemsFailed', { message: problems.errorMessage })}</div>
+            ) : problems.status === 'empty' || (problems.status === 'ready' && problems.items.length === 0) ? (
+              <div>{t('workbench.panel.problemsEmpty')}</div>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {problems.status === 'ready' ? problems.items.map((item, index) => (
+                  <li key={`${item.resourceId}:${index}`}>{item.message}</li>
+                )) : null}
+              </ul>
+            )}
+          </div>
         ) : null}
         {layout.activePanelId === 'output' ? (
-          output.status === 'failure' ? (
-            <div className="text-[color:var(--status-error)]">{t('workbench.panel.outputFailed', { message: output.errorMessage })}</div>
-          ) : output.status === 'empty' || (output.status === 'ready' && output.channels.length === 0) ? (
-            <div>{t('workbench.panel.outputEmpty')}</div>
-          ) : (
-            <ul>
-              {output.status === 'ready' ? output.channels.map((channel) => (
-                <li key={channel.id}>{channel.title}</li>
-              )) : null}
-            </ul>
-          )
+          <div className="h-full overflow-auto p-3 typography-ui text-muted-foreground">
+            {output.status === 'failure' ? (
+              <div className="text-[color:var(--status-error)]">{t('workbench.panel.outputFailed', { message: output.errorMessage })}</div>
+            ) : output.status === 'empty' || (output.status === 'ready' && output.channels.length === 0) ? (
+              <div>{t('workbench.panel.outputEmpty')}</div>
+            ) : (
+              <ul>
+                {output.status === 'ready' ? output.channels.map((channel) => (
+                  <li key={channel.id}>{channel.title}</li>
+                )) : null}
+              </ul>
+            )}
+          </div>
         ) : null}
       </div>
     </section>

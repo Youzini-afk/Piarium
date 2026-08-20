@@ -10,8 +10,13 @@ import {
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
   PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
   PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL,
+  PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+  PIARIUM_WORKBENCH_IDE_PROFILE_LABEL,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
   PIARIUM_WORKBENCH_SLOTS,
   resolvePiariumWorkbenchLayout,
@@ -209,8 +214,9 @@ test("default Agent profile seeds the official shell on web, desktop, and mobile
   assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
   assert.equal(document.profiles[0]?.label, PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL);
   assert.equal(document.revision, 0);
+  const agentLayouts = document.layouts.filter((layer) => layer.profileId === PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
   assert.deepEqual(
-    document.layouts.map((layer) => layer.surface).sort(),
+    agentLayouts.map((layer) => layer.surface).sort(),
     [...PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES].sort(),
   );
   for (const surface of PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES) {
@@ -222,6 +228,41 @@ test("default Agent profile seeds the official shell on web, desktop, and mobile
   }
   const vscode = resolvePiariumWorkbenchLayout(document, { surface: "vscode", userId: "default" });
   assert.equal(vscode.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], undefined);
+  assert.equal(migratePiariumWorkbenchProfileDocument(document), false);
+});
+
+test("distribution includes an optional IDE profile without making it active", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.ok(document.profiles.some((profile) => (
+    profile.id === PIARIUM_WORKBENCH_IDE_PROFILE_ID && profile.label === PIARIUM_WORKBENCH_IDE_PROFILE_LABEL
+  )));
+  for (const surface of PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES) {
+    const resolved = resolvePiariumWorkbenchLayoutForProfile(document, { surface, userId: "default" }, PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+    assert.equal(
+      resolved.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell],
+      PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    );
+  }
+  const mobileIde = resolvePiariumWorkbenchLayoutForProfile(
+    document,
+    { surface: "mobile", userId: "default" },
+    PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+  );
+  assert.equal(mobileIde.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], undefined);
+});
+
+test("migrates missing IDE profiles without changing the active Agent selection", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  document.profiles = document.profiles.filter((profile) => profile.id !== PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+  document.layouts = document.layouts.filter((layer) => layer.profileId !== PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+  assert.equal(migratePiariumWorkbenchProfileDocument(document), true);
+  assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
+  assert.ok(document.profiles.some((profile) => profile.id === PIARIUM_WORKBENCH_IDE_PROFILE_ID));
+  const web = document.layouts.find((layer) => (
+    layer.profileId === PIARIUM_WORKBENCH_IDE_PROFILE_ID && layer.surface === "web"
+  ));
+  assert.equal(web?.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
   assert.equal(migratePiariumWorkbenchProfileDocument(document), false);
 });
 
@@ -238,11 +279,37 @@ test("migrates the legacy Default profile onto Agent Workspace without clobberin
   }];
   assert.equal(migratePiariumWorkbenchProfileDocument(document), true);
   assert.equal(document.profiles[0]?.label, PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL);
-  const bySurface = Object.fromEntries(document.layouts.map((layer) => [layer.surface, layer.replacementSelections]));
-  assert.equal(bySurface.web?.[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], "dev.example.community.shell");
-  assert.equal(bySurface.desktop?.[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
-  assert.equal(bySurface.mobile?.[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  const shellByProfileSurface = Object.fromEntries(document.layouts.map((layer) => (
+    [`${layer.profileId}:${layer.surface}`, layer.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]]
+  )));
+  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID}:web`], "dev.example.community.shell");
+  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID}:desktop`], PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID}:mobile`], PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_IDE_PROFILE_ID}:web`], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_IDE_PROFILE_ID}:desktop`], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
   assert.equal(migratePiariumWorkbenchProfileDocument(document), false);
+});
+
+test("migrates missing Agent shells without replacing a chosen IDE shell", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  document.layouts = [{
+    profileId: PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+    references: [],
+    replacementSelections: { [PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell]: "dev.example.community.ide" },
+    scope: "distribution",
+    scopeId: PIARIUM_WORKBENCH_IDE_PROFILE_ID,
+    surface: "web",
+  }];
+  assert.equal(migratePiariumWorkbenchProfileDocument(document), true);
+  const webIde = document.layouts.find((layer) => (
+    layer.profileId === PIARIUM_WORKBENCH_IDE_PROFILE_ID && layer.surface === "web"
+  ));
+  assert.equal(webIde?.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], "dev.example.community.ide");
+  const desktopIde = document.layouts.find((layer) => (
+    layer.profileId === PIARIUM_WORKBENCH_IDE_PROFILE_ID && layer.surface === "desktop"
+  ));
+  assert.equal(desktopIde?.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(document.activeProfileId, PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID);
 });
 
 test("resolves the official Agent Workspace shell without mutating enablement", () => {
@@ -264,4 +331,23 @@ test("resolves the official Agent Workspace shell without mutating enablement", 
   assert.equal(ready.status, "ready");
   assert.equal(ready.shellContributionId, PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
   assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "vscode", userId: "default" }).status, "builtin");
+});
+
+test("resolves the official IDE Workbench on web and desktop without forcing mobile", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  document.activeProfileId = PIARIUM_WORKBENCH_IDE_PROFILE_ID;
+  const extensions = [catalogEntry({
+    enabled: false,
+    contributionId: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    extensionId: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+    supports: ["web", "desktop"],
+  })];
+  const web = resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" });
+  assert.equal(web.status, "disabled");
+  assert.equal(web.shellContributionId, PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(extensions[0]?.desired.enabled, false);
+  extensions[0]!.desired.enabled = true;
+  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "web", userId: "default" }).status, "ready");
+  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "desktop", userId: "default" }).status, "ready");
+  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "mobile", userId: "default" }).status, "builtin");
 });

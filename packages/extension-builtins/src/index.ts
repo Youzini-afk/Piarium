@@ -8,6 +8,9 @@ import {
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
 } from "@piarium/extension-contract";
 
@@ -82,25 +85,29 @@ const definition = (input: {
   displayName: string;
   id: string;
   piPackages?: string[];
-}): PiariumBuiltinExtensionDefinition => ({
-  enabledByDefault: true,
-  manifest: {
-    contributions: input.contributions,
-    displayName: input.displayName,
-    engines: { piarium: "*" },
-    entrypoints: {
-      surfaces: [{
-        id: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
-        mode: "declarative",
-        supports: PIARIUM_INTEGRATION_SURFACES,
-      }],
+  supports?: PiariumApplicationSurface[];
+}): PiariumBuiltinExtensionDefinition => {
+  const supports = input.supports ?? PIARIUM_INTEGRATION_SURFACES;
+  return {
+    enabledByDefault: true,
+    manifest: {
+      contributions: input.contributions,
+      displayName: input.displayName,
+      engines: { piarium: "*" },
+      entrypoints: {
+        surfaces: [{
+          id: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
+          mode: "declarative",
+          supports,
+        }],
+      },
+      id: input.id,
+      ...(input.piPackages ? { integrates: { piPackages: input.piPackages } } : {}),
+      schemaVersion: 1,
+      version: PIARIUM_BUILTIN_EXTENSION_VERSION,
     },
-    id: input.id,
-    ...(input.piPackages ? { integrates: { piPackages: input.piPackages } } : {}),
-    schemaVersion: 1,
-    version: PIARIUM_BUILTIN_EXTENSION_VERSION,
-  },
-});
+  };
+};
 
 export const PIARIUM_BUILTIN_AGENTS_EXTENSION = definition({
   id: "piarium.builtin.pi-agents",
@@ -198,6 +205,21 @@ export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION = definition({
   }],
 });
 
+export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION = definition({
+  id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  displayName: "IDE Workbench",
+  supports: PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
+  contributions: [{
+    contractVersion: 1,
+    data: {},
+    entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
+    id: PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+    kind: "shell",
+    replacement: { target: PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell },
+    supports: PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
+  }],
+});
+
 const pluginAdapter = (
   suffix: string,
   displayName: string,
@@ -233,6 +255,7 @@ export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
 
 export const PIARIUM_BUILTIN_EXTENSION_DEFINITIONS: readonly PiariumBuiltinExtensionDefinition[] = [
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION,
   PIARIUM_BUILTIN_AGENTS_EXTENSION,
   PIARIUM_BUILTIN_FLEET_EXTENSION,
   PIARIUM_BUILTIN_MCP_EXTENSION,
