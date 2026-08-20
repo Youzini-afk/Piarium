@@ -64,14 +64,6 @@ const workspaceApi: WorkspaceAPI = {
     calls.push({ name: "deleteEntry", path, payload: options });
     return { success: true, trashed: options?.permanent ? false : true };
   },
-  async readFile(path) {
-    calls.push({ name: "readFile", path });
-    return { content: "", path: `/workspace/${path}`, relativePath: path, mtimeMs: 1 };
-  },
-  async writeFile(path, content, expectedMtimeMs) {
-    calls.push({ name: "writeFile", path, payload: { content, expectedMtimeMs } });
-    return { success: true, entry: makeEntry(path.split("/").pop() || path, path, "file") };
-  },
   async upload(path) {
     calls.push({ name: "upload", path });
     return { success: true, entries: [] };

@@ -1,16 +1,25 @@
 import React from 'react';
 import { useUIStore } from '@/stores/useUIStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
+import { pickWorkspaceRoot } from '@/lib/documents/path';
+import { resolveTextDocumentIdentity } from '@/lib/documents/workspace-text';
+import { getDocumentRegistry } from '@/lib/documents/session';
+import { useDocumentRecord } from '@/lib/documents/hooks';
+import type { DocumentIdentity } from '@/lib/documents/types';
 import { DiagramEditor, type DiagramEditorHandle } from '@/components/diagram';
 import { Icon } from '@/components/icon/Icon';
 
 export function DiagramView() {
   const { t } = useI18n();
-  const { files } = useRuntimeAPIs();
+  const { documents } = useRuntimeAPIs();
+  const currentDirectory = useEffectiveDirectory() ?? '';
 
   const [filePath, setFilePath] = React.useState<string | null>(null);
-  const [xml, setXml] = React.useState('');
+  const [identity, setIdentity] = React.useState<DocumentIdentity | undefined>(undefined);
+  const record = useDocumentRecord(identity);
+  const xml = record?.buffer ?? '';
   const [loading, setLoading] = React.useState(true);
   const editorRef = React.useRef<DiagramEditorHandle>(null);
   const pendingDiagramFile = useUIStore((state) => state.pendingDiagramFile);
@@ -19,16 +28,20 @@ export function DiagramView() {
     setLoading(true);
     setFilePath(path);
     try {
-      const result = await files?.readFile?.(path);
-      if (result) {
-        setXml(result.content);
+      const root = pickWorkspaceRoot(path, [currentDirectory]);
+      if (!root) {
+        setIdentity(undefined);
+        return;
       }
+      const next = await resolveTextDocumentIdentity(documents, root, path);
+      await getDocumentRegistry().open(next);
+      setIdentity(next);
     } catch {
-      setXml('');
+      setIdentity(undefined);
     } finally {
       setLoading(false);
     }
-  }, [files]);
+  }, [currentDirectory, documents]);
 
   React.useEffect(() => {
     if (!pendingDiagramFile) {
@@ -42,11 +55,10 @@ export function DiagramView() {
 
   const saveDiagram = React.useCallback(async () => {
     const newXml = editorRef.current?.getXml();
-    if (filePath && files?.writeFile && newXml && newXml !== xml) {
-      await files.writeFile(filePath, newXml);
-      setXml(newXml);
-    }
-  }, [filePath, files, xml]);
+    if (!identity || !newXml || newXml === xml) return;
+    getDocumentRegistry().applyTransaction(identity, newXml, { origin: 'diagram-view' });
+    await getDocumentRegistry().save(identity);
+  }, [identity, xml]);
 
   const fileName = filePath ? filePath.split('/').pop() || filePath : '';
 
@@ -91,11 +103,13 @@ export function DiagramView() {
         </button>
       </div>
       <div className="flex-1 min-h-0">
-        <DiagramEditor
-          ref={editorRef}
-          xml={xml}
-          className="h-full"
-        />
+        {identity ? (
+          <DiagramEditor
+            ref={editorRef}
+            xml={xml}
+            className="h-full"
+          />
+        ) : null}
       </div>
     </div>
   );

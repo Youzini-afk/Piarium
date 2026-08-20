@@ -926,7 +926,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     flushContent = false,
 }) => {
     const { t } = useI18n();
-    const { git, files } = useRuntimeAPIs();
+    const { git, documents } = useRuntimeAPIs();
     const effectiveDirectory = useEffectiveDirectory();
     const openContextSurface = useUIStore((state) => state.openContextSurface);
     const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
@@ -1464,7 +1464,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 : getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified));
 
             const absolutePath = toAbsolutePath(effectiveDirectory, filePath);
-            const openValidation = await validateContextFileOpen(files, absolutePath, { directory: effectiveDirectory });
+            const openValidation = await validateContextFileOpen(documents, absolutePath, { directory: effectiveDirectory });
             if (!openValidation.ok) {
                 toast.error(getContextFileOpenFailureMessage(openValidation.reason));
                 return;
@@ -1479,7 +1479,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } finally {
             setOpeningEditorFilePath((current) => (current === filePath ? null : current));
         }
-    }, [activeDiffStaged, effectiveDirectory, files, git, openContextFileAtLine, setDiff]);
+    }, [activeDiffStaged, documents, effectiveDirectory, git, openContextFileAtLine, setDiff]);
 
     const renderStackedDiffView = () => {
         if (!effectiveDirectory) return null;

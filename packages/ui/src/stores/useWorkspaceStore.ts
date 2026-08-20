@@ -70,8 +70,6 @@ type WorkspaceStore = {
   moveEntry: (from: string, to: string) => Promise<WorkspaceEntry | null>;
   renameEntry: (path: string, name: string) => Promise<WorkspaceEntry | null>;
   deleteEntry: (path: string, options?: { permanent?: boolean }) => Promise<boolean>;
-  readFile: (path: string) => Promise<{ content: string; mtimeMs: number } | null>;
-  writeFile: (path: string, content: string, expectedMtimeMs?: number | null) => Promise<WorkspaceEntry | null>;
   uploadFiles: (path: string, files: WorkspaceUploadFile[]) => Promise<WorkspaceEntry[]>;
   downloadFile: (path: string) => Promise<void>;
   previewArchive: (path: string) => Promise<WorkspaceArchivePreview | null>;
@@ -344,24 +342,6 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         return true;
       });
       return result === true;
-    },
-
-    readFile: async (path: string) => {
-      const target = normalizeWorkspacePath(path);
-      return withAction(`read:${target}`, async () => {
-        const result = await getWorkspaceAPI().readFile(target);
-        return { content: result.content, mtimeMs: result.mtimeMs };
-      });
-    },
-
-    writeFile: async (path: string, content: string, expectedMtimeMs?: number | null) => {
-      const target = normalizeWorkspacePath(path);
-      const parent = parentPathOf(target);
-      return withAction(`write:${target}`, async () => {
-        const response = await getWorkspaceAPI().writeFile(target, content, expectedMtimeMs);
-        await get().loadDirectory(parent);
-        return response.entry;
-      });
     },
 
     uploadFiles: async (path: string, files: WorkspaceUploadFile[]) => {

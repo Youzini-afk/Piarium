@@ -1,9 +1,10 @@
-import type { FilesAPI } from '@/lib/api/types';
+import type { DocumentsAPI } from '@/lib/api/types';
 import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { DocumentsError } from '@/lib/api/documents-errors';
+import { readWorkspaceTextFile } from '@/lib/documents/workspace-text';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
@@ -15,10 +16,13 @@ export type ContextFileOpenValidationResult =
   | { ok: false; reason: ContextFileOpenFailureReason };
 
 export type ContextFileOpenOptions = {
-  directory?: string;
+  directory: string;
 };
 
 const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
+  if (error instanceof DocumentsError && error.reason === 'path-escape') {
+    return 'unreadable';
+  }
   const message = error instanceof Error ? error.message : String(error ?? '');
   const normalized = message.toLowerCase();
 
@@ -28,41 +32,12 @@ const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
     || normalized.includes('enoent')
     || normalized.includes('no such file')
     || normalized.includes('does not exist')
+    || normalized.includes('missing')
   ) {
     return 'missing';
   }
 
   return 'unreadable';
-};
-
-const readFileContent = async (
-  files: FilesAPI,
-  path: string,
-  options?: ContextFileOpenOptions,
-): Promise<string> => {
-  if (files.readFile) {
-    const result = await files.readFile(path, {
-      optional: true,
-      directory: options?.directory,
-    });
-    return result.content ?? '';
-  }
-
-  const params = new URLSearchParams({ path, optional: 'true' });
-  if (options?.directory) {
-    params.set('directory', options.directory);
-  }
-  const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
-    // Avoid conditional requests (304 + empty body).
-    cache: 'no-store',
-    headers: options?.directory ? { 'x-piarium-directory': options.directory } : undefined,
-  });
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error((errorPayload as { error?: string }).error || 'Failed to read file');
-  }
-
-  return response.text();
 };
 
 /**
@@ -71,16 +46,19 @@ const readFileContent = async (
  * preview or the cannot-preview empty state — never by decoding them as editable text here.
  */
 export const validateContextFileOpen = async (
-  files: FilesAPI,
+  documents: DocumentsAPI,
   path: string,
-  options?: ContextFileOpenOptions,
+  options: ContextFileOpenOptions,
 ): Promise<ContextFileOpenValidationResult> => {
   if (isBinaryFile(path) || isPdfFile(path) || isImageFile(path)) {
     return { ok: true };
   }
 
   try {
-    const content = await readFileContent(files, path, options);
+    const content = await readWorkspaceTextFile(documents, options.directory, path);
+    if (content === null) {
+      return { ok: false, reason: 'missing' };
+    }
     if (looksLikeBinaryText(content)) {
       return { ok: false, reason: 'binary' };
     }

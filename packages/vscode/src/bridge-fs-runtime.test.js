@@ -112,28 +112,10 @@ describe('bridge fs exec git read cache', () => {
   });
 });
 
-describe('bridge fs read/stat directory resolution', () => {
+describe('bridge fs stat directory resolution', () => {
   beforeEach(() => {
     deps.resolveFileReadPath.mockReset?.();
     deps.resolveFileReadPath = mock(() => ({ ok: false, status: 404, error: 'not found' }));
-  });
-
-  it('resolves a relative read path against the supplied directory', async () => {
-    await handleFsBridgeMessage({ id: '1', type: 'api:fs:read', payload: { path: 'file.txt', directory: '/base' } }, deps);
-
-    expect(deps.resolveFileReadPath).toHaveBeenCalledWith('/base/file.txt');
-  });
-
-  it('keeps absolute read paths unchanged even when a directory is supplied', async () => {
-    await handleFsBridgeMessage({ id: '1', type: 'api:fs:read', payload: { path: '/abs/file.txt', directory: '/base' } }, deps);
-
-    expect(deps.resolveFileReadPath).toHaveBeenCalledWith('/abs/file.txt');
-  });
-
-  it('resolves relative read paths against the workspace root when no directory is supplied', async () => {
-    await handleFsBridgeMessage({ id: '1', type: 'api:fs:read', payload: { path: 'file.txt' } }, deps);
-
-    expect(deps.resolveFileReadPath).toHaveBeenCalledWith('/workspace/file.txt');
   });
 
   it('resolves a relative stat path against the supplied directory', async () => {
@@ -142,11 +124,16 @@ describe('bridge fs read/stat directory resolution', () => {
     expect(deps.resolveFileReadPath).toHaveBeenCalledWith('/base/file.txt');
   });
 
-  it('returns an error when a read path is missing', async () => {
-    const response = await handleFsBridgeMessage({ id: '1', type: 'api:fs:read', payload: {} }, deps);
+  it('keeps absolute stat paths unchanged even when a directory is supplied', async () => {
+    await handleFsBridgeMessage({ id: '1', type: 'api:fs:stat', payload: { path: '/abs/file.txt', directory: '/base' } }, deps);
 
-    expect(response.success).toBe(false);
-    expect(response.error).toBe('Path is required');
+    expect(deps.resolveFileReadPath).toHaveBeenCalledWith('/abs/file.txt');
+  });
+
+  it('resolves relative stat paths against the workspace root when no directory is supplied', async () => {
+    await handleFsBridgeMessage({ id: '1', type: 'api:fs:stat', payload: { path: 'file.txt' } }, deps);
+
+    expect(deps.resolveFileReadPath).toHaveBeenCalledWith('/workspace/file.txt');
   });
 
   it('returns an error when a stat path is missing', async () => {

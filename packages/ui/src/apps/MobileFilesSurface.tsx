@@ -26,6 +26,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { readWorkspaceTextFile } from '@/lib/documents/workspace-text';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { getImageMimeType, getLanguageFromExtension, isBinaryFile, isImageFile, isPdfFile, isSvgFile, looksLikeBinaryText } from '@/lib/toolHelpers';
@@ -85,7 +86,7 @@ type MobileFilesSurfaceProps = {
 
 export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose }) => {
   const { t } = useI18n();
-  const { files } = useRuntimeAPIs();
+  const { files, documents } = useRuntimeAPIs();
   const root = normalizePath(useEffectiveDirectory() ?? null);
   const [route, setRoute] = React.useState<MobileFilesRoute>(() => ({ type: 'browser', directory: root }));
   const [entries, setEntries] = React.useState<FileListEntry[]>([]);
@@ -213,7 +214,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
       return;
     }
 
-    if (!files.readFile) {
+    if (!root) {
       setFileError(t('mobile.files.error.readUnavailable'));
       setIsLoadingFile(false);
       return;
@@ -221,17 +222,21 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
 
     let cancelled = false;
     setIsLoadingFile(true);
-    void files.readFile(route.path)
-      .then((result) => {
+    void readWorkspaceTextFile(documents, root, route.path)
+      .then((content) => {
         if (cancelled) return;
-        if (looksLikeBinaryText(result.content)) {
+        if (content === null) {
+          setFileError(t('filesView.error.readFileFailed'));
+          return;
+        }
+        if (looksLikeBinaryText(content)) {
           setBinaryBlocked(true);
           setFileContent('');
           return;
         }
-        setFileContent(result.content.length > MAX_MOBILE_FILE_CHARS
-          ? `${result.content.slice(0, MAX_MOBILE_FILE_CHARS)}\n\n${t('mobile.files.file.truncated')}`
-          : result.content);
+        setFileContent(content.length > MAX_MOBILE_FILE_CHARS
+          ? `${content.slice(0, MAX_MOBILE_FILE_CHARS)}\n\n${t('mobile.files.file.truncated')}`
+          : content);
       })
       .catch((error) => {
         if (!cancelled) setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -243,7 +248,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
     return () => {
       cancelled = true;
     };
-  }, [files, root, route, t]);
+  }, [documents, root, route, t]);
 
   const openDirectory = (directory: string) => {
     setQuery('');

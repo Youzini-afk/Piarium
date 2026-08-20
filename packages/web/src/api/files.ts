@@ -195,53 +195,6 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     };
   },
 
-  async readFile(path: string, options): Promise<{ content: string; path: string }> {
-    const target = normalizePath(path);
-    const params = new URLSearchParams({ path: target });
-    if (options?.allowOutsideWorkspace) {
-      params.set('allowOutsideWorkspace', 'true');
-    }
-    if (options?.outsideFileGrant) {
-      params.set('outsideFileGrant', options.outsideFileGrant);
-    }
-    if (options?.optional) {
-      params.set('optional', 'true');
-    }
-    const response = await runtimeFetch('/api/fs/read', {
-      query: params,
-      cache: options?.optional ? 'no-store' : 'default',
-      headers: directoryHeaders(getDirectory, options?.directory),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to read file');
-    }
-
-    const content = await response.text();
-    return { content, path: target };
-  },
-
-  async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
-    const target = normalizePath(path);
-    const response = await runtimeFetch('/api/fs/write', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...directoryHeaders(getDirectory) },
-      body: JSON.stringify({ path: target, content }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to write file');
-    }
-
-    const result = await response.json().catch(() => ({}));
-    return {
-      success: Boolean((result as { success?: boolean }).success),
-      path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : target,
-    };
-  },
-
   async delete(path: string): Promise<{ success: boolean }> {
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/delete', {

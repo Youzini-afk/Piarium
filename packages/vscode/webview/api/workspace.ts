@@ -13,8 +13,6 @@ export const createVSCodeWorkspaceAPI = (): WorkspaceAPI => ({
   createFile: unsupported,
   move: unsupported,
   deleteEntry: unsupported,
-  readFile: unsupported,
-  writeFile: unsupported,
   upload: unsupported,
   download: unsupported,
   previewArchive: unsupported,

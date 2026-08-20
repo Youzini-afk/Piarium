@@ -30,8 +30,6 @@ const safeTrashName = (name) => {
   return cleaned || 'entry';
 };
 
-const isLikelyTextBuffer = (buffer) => !buffer.subarray(0, Math.min(buffer.length, 4096)).includes(0);
-
 async function readGitSummary(absolutePath) {
   try {
     const git = await import('../git/index.js');
@@ -226,78 +224,6 @@ export const createWorkspaceFile = async (relativePathValue, config, dependencie
   }
   await fsPromises.mkdir(pathModule.dirname(resolved.absolutePath), { recursive: true });
   await fsPromises.writeFile(resolved.absolutePath, String(content ?? ''), { flag: 'wx' });
-  return {
-    success: true,
-    entry: await createWorkspaceEntry(resolved.absolutePath, {
-      rootPath: resolved.rootPath,
-      fsPromises,
-      pathModule,
-    }),
-  };
-};
-
-export const readWorkspaceFile = async (relativePathValue, config, dependencies = {}) => {
-  const {
-    fsPromises = fs.promises,
-    pathModule = path,
-  } = dependencies;
-  await ensureWorkspaceRoot(config, fsPromises);
-  const resolved = await resolveWorkspacePath(relativePathValue, {
-    root: config.root,
-    fsPromises,
-    pathModule,
-  });
-  const stat = await fsPromises.stat(resolved.absolutePath);
-  if (!stat.isFile()) {
-    throw new WorkspacePathError('Path is not a file');
-  }
-  if (stat.size > config.maxReadBytes) {
-    throw new WorkspacePayloadTooLargeError('File is too large to read as text');
-  }
-  const buffer = await fsPromises.readFile(resolved.absolutePath);
-  if (!isLikelyTextBuffer(buffer)) {
-    throw new WorkspacePathError('Binary files cannot be read as text', 415);
-  }
-  return {
-    content: buffer.toString('utf8'),
-    path: resolved.absolutePath,
-    relativePath: resolved.relativePath,
-    mtimeMs: stat.mtimeMs,
-  };
-};
-
-export const writeWorkspaceFile = async (relativePathValue, content, config, dependencies = {}) => {
-  const {
-    expectedMtimeMs = null,
-    fsPromises = fs.promises,
-    pathModule = path,
-  } = dependencies;
-  await ensureWorkspaceRoot(config, fsPromises);
-  const resolved = await resolveWorkspacePath(relativePathValue, {
-    root: config.root,
-    fsPromises,
-    pathModule,
-    allowMissing: true,
-  });
-  if (!resolved.relativePath) {
-    throw new WorkspacePathError('Cannot write the workspace root as a file');
-  }
-
-  const currentStat = await fsPromises.stat(resolved.absolutePath).catch((error) => {
-    if (error?.code === 'ENOENT') return null;
-    throw error;
-  });
-  if (currentStat && typeof expectedMtimeMs === 'number' && Number.isFinite(expectedMtimeMs)) {
-    if (Math.abs(currentStat.mtimeMs - expectedMtimeMs) > 2) {
-      throw new WorkspaceConflictError('File was modified outside Piarium');
-    }
-  }
-  if (currentStat && !currentStat.isFile()) {
-    throw new WorkspacePathError('Path is not a file');
-  }
-
-  await fsPromises.mkdir(pathModule.dirname(resolved.absolutePath), { recursive: true });
-  await fsPromises.writeFile(resolved.absolutePath, String(content ?? ''), 'utf8');
   return {
     success: true,
     entry: await createWorkspaceEntry(resolved.absolutePath, {

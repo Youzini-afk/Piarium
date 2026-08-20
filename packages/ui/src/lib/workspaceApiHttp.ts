@@ -13,7 +13,6 @@ import type {
   WorkspaceListResult,
   WorkspaceMutationResult,
   WorkspaceProjectOpenResult,
-  WorkspaceReadResult,
   WorkspaceRootInfo,
   WorkspaceUploadFile,
   WorkspaceUploadResult,
@@ -150,26 +149,6 @@ export const createWorkspaceHttpAPI = (): WorkspaceAPI => ({
         }),
       },
       'Failed to delete workspace entry',
-    );
-  },
-
-  readFile(path: string): Promise<WorkspaceReadResult> {
-    return getJson('/read', { path: normalizeWorkspacePath(path) });
-  },
-
-  writeFile(path: string, content: string, expectedMtimeMs?: number | null): Promise<WorkspaceMutationResult> {
-    return jsonRequest(
-      buildUrl('/write'),
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path: normalizeWorkspacePath(path),
-          content,
-          expectedMtimeMs: typeof expectedMtimeMs === 'number' ? expectedMtimeMs : null,
-        }),
-      },
-      'Failed to write workspace file',
     );
   },
 

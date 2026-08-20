@@ -112,27 +112,6 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async readFile(path: string, options?: FileReadOptions): Promise<{ content: string; path: string }> {
-    const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ content: string; path: string }>('api:fs:read', {
-      path: target,
-      directory: options?.directory,
-    });
-    return {
-      content: typeof data?.content === 'string' ? data.content : '',
-      path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
-    };
-  },
-
-  async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
-    const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ success: boolean; path: string }>('api:fs:write', { path: target, content });
-    return {
-      success: Boolean(data?.success),
-      path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
-    };
-  },
-
   async revealPath(path: string): Promise<{ success: boolean }> {
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{ success?: boolean }>('api:fs:reveal', { path: target });

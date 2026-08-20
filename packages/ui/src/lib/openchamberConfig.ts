@@ -6,6 +6,9 @@
 
 import type { FilesAPI } from './api/types';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { pickWorkspaceRoot } from './documents/path';
+import { readWorkspaceTextFile, writeWorkspaceTextFile } from './documents/workspace-text';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { getDesktopHomeDirectory } from './desktop';
 import { isVSCodeRuntime } from './desktop';
 import { sanitizeStarterRefs, type DraftStarterRef } from './draftStarters';
@@ -160,49 +163,34 @@ const mkdirp = async (path: string): Promise<boolean> => {
   return Boolean(res.ok);
 };
 
-const readTextFile = async (path: string): Promise<string | null> => {
-  const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.readFile) {
-    try {
-      const result = await runtimeFiles.readFile(path);
-      const content = typeof result?.content === 'string' ? result.content : '';
-      return content;
-    } catch {
-      return null;
-    }
-  }
+const workspaceRootForPath = async (path: string): Promise<{ documents: NonNullable<ReturnType<typeof getRegisteredRuntimeAPIs>>['documents']; root: string } | null> => {
+  const apis = getRegisteredRuntimeAPIs();
+  if (!apis?.documents) return null;
+  const home = await apis.files.getHomeDirectory().catch(() => '');
+  const current = useDirectoryStore.getState().currentDirectory;
+  const root = pickWorkspaceRoot(path, [current, home]);
+  if (!root) return null;
+  return { documents: apis.documents, root };
+};
 
+const readTextFile = async (path: string): Promise<string | null> => {
+  const resolved = await workspaceRootForPath(path);
+  if (!resolved) return null;
   try {
-    const response = await runtimeFetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`,
-      {
-        // Avoid conditional requests (304 + empty body).
-        cache: 'no-store',
-      }
-    );
-    if (!response.ok) {
-      return null;
-    }
-    return await response.text();
+    return await readWorkspaceTextFile(resolved.documents, resolved.root, path);
   } catch {
     return null;
   }
 };
 
 const writeTextFile = async (path: string, content: string): Promise<boolean> => {
-  const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.writeFile) {
-    try {
-      const result = await runtimeFiles.writeFile(path, content);
-      if (result?.success) {
-        return true;
-      }
-    } catch {
-      // fall through
-    }
+  const resolved = await workspaceRootForPath(path);
+  if (!resolved) return false;
+  try {
+    return await writeWorkspaceTextFile(resolved.documents, resolved.root, path, content);
+  } catch {
+    return false;
   }
-
-  const res = await postJson<{ success?: boolean }>(`${getBaseUrl()}/fs/write`, { path, content });
-  return Boolean(res.ok);
 };
 
 const resolveHomeDirectory = async (): Promise<string | null> => {

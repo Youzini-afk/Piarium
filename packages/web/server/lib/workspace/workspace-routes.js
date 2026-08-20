@@ -17,10 +17,8 @@ import {
   getWorkspaceRootInfo,
   listWorkspaceDirectory,
   moveWorkspaceEntry,
-  readWorkspaceFile,
   uploadWorkspaceFiles,
   uploadWorkspaceMultipartFiles,
-  writeWorkspaceFile,
 } from './filesystem.js';
 import { getWorkspaceDownloadInfo, resolveWorkspaceDownload } from './download.js';
 import {
@@ -244,28 +242,6 @@ export const registerWorkspaceRoutes = (app, dependencies = {}) => {
       res.json(await deleteWorkspaceEntry(getRequestPath(req), context.config, {
         ...context,
         permanent: req.body?.permanent === true,
-      }));
-    } catch (error) {
-      sendError(res, error);
-    }
-  });
-
-  app.get('/api/workspace/read', async (req, res) => {
-    try {
-      res.json(await readWorkspaceFile(getRequestPath(req), context.config, context));
-    } catch (error) {
-      sendError(res, error);
-    }
-  });
-
-  app.put('/api/workspace/write', async (req, res) => {
-    try {
-      const expectedMtimeMs = typeof req.body?.expectedMtimeMs === 'number'
-        ? req.body.expectedMtimeMs
-        : null;
-      res.json(await writeWorkspaceFile(getRequestPath(req), req.body?.content ?? '', context.config, {
-        ...context,
-        expectedMtimeMs,
       }));
     } catch (error) {
       sendError(res, error);

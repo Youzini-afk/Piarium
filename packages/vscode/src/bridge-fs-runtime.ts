@@ -253,30 +253,6 @@ export async function handleFsBridgeMessage(
       return { id, type, success: true, data: { home: deps.normalizeFsPath(os.homedir()) } };
     }
 
-    case 'api:fs:read': {
-      const { path: target, directory } = (payload as { path: string; directory?: string }) || {};
-      if (!target) {
-        return { id, type, success: false, error: 'Path is required' };
-      }
-
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-      const baseDirectory = directory ? deps.resolveUserPath(directory, workspaceRoot) : workspaceRoot;
-      const resolvedTarget = deps.resolveUserPath(target, baseDirectory);
-
-      const resolution = await deps.resolveFileReadPath(resolvedTarget);
-      if (!resolution.ok) {
-        return { id, type, success: false, error: resolution.error };
-      }
-
-      try {
-        const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
-        return { id, type, success: true, data: { content, path: deps.normalizeFsPath(resolution.resolvedPath) } };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to read file';
-        return { id, type, success: false, error: message };
-      }
-    }
-
     case 'api:fs:stat': {
       const { path: target, directory } = (payload as { path: string; directory?: string }) || {};
       if (!target) {
@@ -311,32 +287,6 @@ export async function handleFsBridgeMessage(
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to stat file';
-        return { id, type, success: false, error: message };
-      }
-    }
-
-    case 'api:fs:write': {
-      const { path: targetPath, content } = (payload as { path: string; content: string }) || {};
-      if (!targetPath) {
-        return { id, type, success: false, error: 'Path is required' };
-      }
-      if (typeof content !== 'string') {
-        return { id, type, success: false, error: 'Content is required' };
-      }
-      try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedPath = deps.resolveUserPath(targetPath, workspaceRoot);
-        const uri = vscode.Uri.file(resolvedPath);
-        const parentUri = vscode.Uri.file(path.dirname(resolvedPath));
-        try {
-          await vscode.workspace.fs.createDirectory(parentUri);
-        } catch {
-          // Directory may already exist
-        }
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-        return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedPath) } };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to write file';
         return { id, type, success: false, error: message };
       }
     }

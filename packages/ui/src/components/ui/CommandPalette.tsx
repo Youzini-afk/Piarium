@@ -103,7 +103,7 @@ export const CommandPalette: React.FC = () => {
   const projects = useProjectsStore((s) => s.projects);
   const effectiveDirectory = useEffectiveDirectory();
   const searchFiles = useFileSearchStore((s) => s.searchFiles);
-  const { files: filesApi, git: gitApi } = useRuntimeAPIs();
+  const { documents, git: gitApi } = useRuntimeAPIs();
   const ensureGitStatus = useGitStore((s) => s.ensureStatus);
   const { isMobile } = useDeviceInfo();
   const { runtimeTarget: mcpRuntimeTarget, targetKey: mcpTargetKey } = useResourceRuntimeTarget();
@@ -405,7 +405,7 @@ export const CommandPalette: React.FC = () => {
   const handleOpenFile = React.useCallback(
     async (filePath: string) => {
       if (!currentRoot) return;
-      const validation = await validateContextFileOpen(filesApi, filePath, { directory: currentRoot });
+      const validation = await validateContextFileOpen(documents, filePath, { directory: currentRoot });
       if (!validation.ok) {
         toast.error(getContextFileOpenFailureMessage(validation.reason));
         return;
@@ -413,7 +413,7 @@ export const CommandPalette: React.FC = () => {
       openContextFile(currentRoot, filePath);
       close();
     },
-    [currentRoot, filesApi, openContextFile, close],
+    [currentRoot, documents, openContextFile, close],
   );
 
   const handleOpenProject = React.useCallback(

@@ -1,37 +1,54 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { FilesAPI } from '@/lib/api/types';
+import type { DocumentsAPI, PiariumDocumentReadResult, PiariumResourceReference } from '@/lib/api/types';
 import { validateContextFileOpen } from './contextFileOpenGuard';
 
-const filesApi = (content: string): FilesAPI =>
-  ({
-    listDirectory: async () => ({ directory: '/', entries: [] }),
-    readFile: async () => ({ content, path: '/x' }),
-  }) as unknown as FilesAPI;
+const resource = (resourceId: string): PiariumResourceReference => ({
+  workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  resourceId,
+});
+
+const documentsApi = (content: string | null): DocumentsAPI => ({
+  resolveWorkspace: async () => ({ workspaceId: resource('').workspaceId, hostId: 'host-1' }),
+  read: async (ref) => {
+    if (content === null) return { status: 'missing', resource: ref };
+    return {
+      status: 'ready',
+      resource: ref,
+      revision: 'd1_1',
+      content,
+      encoding: 'utf-8',
+      bom: false,
+      byteLength: content.length,
+    } satisfies PiariumDocumentReadResult;
+  },
+  write: async () => ({ status: 'written', revision: 'd1_1', byteLength: 0 }),
+  move: async () => ({ status: 'missing', resource: resource('x') }),
+  delete: async (request) => ({ status: 'deleted', resource: request.resource }),
+  watch: () => ({ close: () => undefined }),
+  listRecoveryJournals: async () => [],
+  readRecoveryJournal: async (journalId) => ({ status: 'missing', journalId }),
+  writeRecoveryJournal: async () => ({ status: 'missing', journalId: '' }),
+  deleteRecoveryJournal: async () => ({ status: 'missing' }),
+});
 
 describe('validateContextFileOpen', () => {
   test('allows known binaries through without reading text', async () => {
-    const files = {
-      listDirectory: async () => ({ directory: '/', entries: [] }),
-      readFile: async () => {
-        throw new Error('should not read binary as text');
-      },
-    } as unknown as FilesAPI;
-
-    expect(await validateContextFileOpen(files, '/repo/docs/report.pdf')).toEqual({ ok: true });
-    expect(await validateContextFileOpen(files, '/repo/docs/report.docx')).toEqual({ ok: true });
-    expect(await validateContextFileOpen(files, '/repo/docs/pixel.png')).toEqual({ ok: true });
-    expect(await validateContextFileOpen(files, '/repo/bin/archive.zip')).toEqual({ ok: true });
+    const documents = documentsApi('should not be used');
+    expect(await validateContextFileOpen(documents, '/repo/docs/report.pdf', { directory: '/repo' })).toEqual({ ok: true });
+    expect(await validateContextFileOpen(documents, '/repo/docs/report.docx', { directory: '/repo' })).toEqual({ ok: true });
+    expect(await validateContextFileOpen(documents, '/repo/docs/pixel.png', { directory: '/repo' })).toEqual({ ok: true });
+    expect(await validateContextFileOpen(documents, '/repo/bin/archive.zip', { directory: '/repo' })).toEqual({ ok: true });
   });
 
   test('rejects text payloads that look binary', async () => {
-    expect(await validateContextFileOpen(filesApi('%PDF-1.7\nbinary'), '/repo/mystery.bin.bak')).toEqual({
+    expect(await validateContextFileOpen(documentsApi('%PDF-1.7\nbinary'), '/repo/mystery.bin.bak', { directory: '/repo' })).toEqual({
       ok: false,
       reason: 'binary',
     });
   });
 
   test('allows ordinary text files', async () => {
-    expect(await validateContextFileOpen(filesApi('hello\nworld\n'), '/repo/notes.txt')).toEqual({ ok: true });
+    expect(await validateContextFileOpen(documentsApi('hello\nworld\n'), '/repo/notes.txt', { directory: '/repo' })).toEqual({ ok: true });
   });
 });

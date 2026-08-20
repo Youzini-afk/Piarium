@@ -30,6 +30,9 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
+import { getDocumentRegistry } from '@/lib/documents/session';
+import { documentIdentityForPath } from '@/lib/documents/path';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -428,7 +431,8 @@ const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
 
 export const SidebarFilesTree: React.FC = () => {
   const { t } = useI18n();
-  const { files, runtime } = useRuntimeAPIs();
+  const { files, documents, runtime } = useRuntimeAPIs();
+  const workspaceId = useWorkbenchWorkspaceId();
   const isBrowserClient = isBrowserClientRuntime(runtime.platform);
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
@@ -538,7 +542,7 @@ export const SidebarFilesTree: React.FC = () => {
   const [dialogInputValue, setDialogInputValue] = React.useState('');
   const [isDialogSubmitting, setIsDialogSubmitting] = React.useState(false);
 
-  const canCreateFile = Boolean(files.writeFile);
+  const canCreateFile = Boolean(workspaceId);
   const canCreateFolder = Boolean(files.createDirectory);
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
@@ -870,7 +874,7 @@ export const SidebarFilesTree: React.FC = () => {
   const handleOpenFile = React.useCallback(async (node: FileNode) => {
     if (!root) return;
 
-    const openValidation = await validateContextFileOpen(files, node.path, { directory: root });
+    const openValidation = await validateContextFileOpen(documents, node.path, { directory: root });
     if (!openValidation.ok) {
       toast.error(getContextFileOpenFailureMessage(openValidation.reason));
       return;
@@ -879,7 +883,7 @@ export const SidebarFilesTree: React.FC = () => {
     setSelectedPath(root, node.path);
     addOpenPath(root, node.path);
     openContextFile(root, node.path);
-  }, [addOpenPath, files, openContextFile, root, setSelectedPath]);
+  }, [addOpenPath, documents, openContextFile, root, setSelectedPath]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);
@@ -907,7 +911,7 @@ export const SidebarFilesTree: React.FC = () => {
         done();
         return;
       }
-      if (!files.writeFile) {
+      if (!workspaceId) {
         toast.error(t('sidebarFilesTree.toast.writeNotSupported'));
         done();
         return;
@@ -916,13 +920,17 @@ export const SidebarFilesTree: React.FC = () => {
       const parentPath = dialogData.path;
       const prefix = parentPath ? `${parentPath}/` : '';
       const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
+      const identity = documentIdentityForPath(workspaceId, root, newPath);
+      if (!identity) {
+        toast.error(t('filesView.document.outsideWorkspace'));
+        done();
+        return;
+      }
 
-      await files.writeFile(newPath, '')
-        .then(async (result) => {
-          if (result.success) {
-            toast.success(t('sidebarFilesTree.toast.fileCreated'));
-            await refreshDirectory(parentPath);
-          }
+      await getDocumentRegistry().create(identity, '')
+        .then(async () => {
+          toast.success(t('sidebarFilesTree.toast.fileCreated'));
+          await refreshDirectory(parentPath);
           closeDialog();
         })
         .catch(() => toast.error(t('sidebarFilesTree.toast.operationFailed')))
@@ -1019,7 +1027,7 @@ export const SidebarFilesTree: React.FC = () => {
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath, t]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath, t, workspaceId]);
 
   // --- Tree rendering (matching FilesView with indent guides) ---
 

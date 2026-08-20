@@ -1,6 +1,5 @@
 import React from 'react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
+import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -31,7 +30,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { pickWorkspaceRoot } from '@/lib/documents/path';
+import { resolveTextDocumentIdentity } from '@/lib/documents/workspace-text';
+import { getDocumentRegistry } from '@/lib/documents/session';
+import { useDocumentRecord } from '@/lib/documents/hooks';
+import type { DocumentIdentity } from '@/lib/documents/types';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -190,13 +193,15 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const [isPlanSendSubmitting, setIsPlanSendSubmitting] = React.useState(false);
 
   const [resolvedPath, setResolvedPath] = React.useState<string | null>(null);
+  const [planIdentity, setPlanIdentity] = React.useState<DocumentIdentity | undefined>(undefined);
+  const planRecord = useDocumentRecord(planIdentity);
+  const content = planRecord?.buffer ?? '';
   const displayPath = React.useMemo(() => {
     if (!resolvedPath || !sessionDirectory || !homeDirectory) {
       return resolvedPath;
     }
     return toDisplayPath(resolvedPath, { currentDirectory: sessionDirectory, homeDirectory });
   }, [resolvedPath, sessionDirectory, homeDirectory]);
-  const [content, setContent] = React.useState<string>('');
   const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
   const showMessageTTSButtons = usePreferencesStore((state) => state.showMessageTTSButtons);
   const [saveError, setSaveError] = React.useState<string | null>(null);
@@ -371,51 +376,45 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     // Saved project plans opened via context panel should work even when session plan mode is off.
     if (!planModeEnabled && !targetPath) {
       setResolvedPath(null);
-      setContent('');
+      setPlanIdentity(undefined);
       setLoading(false);
       return;
     }
 
     let cancelled = false;
 
-    const readText = async (path: string): Promise<string> => {
-      if (runtimeApis.files?.readFile) {
-        const result = await runtimeApis.files.readFile(path);
-        return result?.content ?? '';
+    const openPlan = async (path: string): Promise<DocumentIdentity> => {
+      const root = pickWorkspaceRoot(path, [sessionDirectory, homeDirectory, effectiveDirectory]);
+      if (!root) {
+        throw new Error(t('filesView.document.outsideWorkspace'));
       }
-
-      const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
-      if (runtimeFiles?.readFile) {
-        const result = await runtimeFiles.readFile(path, { optional: true });
-        return result?.content ?? '';
+      const identity = await resolveTextDocumentIdentity(runtimeApis.documents, root, path);
+      const record = await getDocumentRegistry().open(identity);
+      if (record.status === 'missing' && !record.dirty) {
+        throw new Error(t('filesView.error.readFileFailed'));
       }
-
-      const response = await runtimeFetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
-        // Avoid conditional requests (304 + empty body).
-        cache: 'no-store',
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to read plan file (${response.status})`);
+      if (record.status === 'error' || record.status === 'binary' || record.status === 'unsupported-encoding') {
+        throw new Error(record.errorMessage ?? t('filesView.error.readFileFailed'));
       }
-      return response.text();
+      return identity;
     };
 
     const run = async () => {
       setResolvedPath(null);
-      setContent('');
+      setPlanIdentity(undefined);
       setSaveError(null);
 
       if (targetPath) {
         setLoading(true);
         try {
-          const text = await readText(targetPath);
+          const identity = await openPlan(targetPath);
           if (cancelled) return;
           setResolvedPath(targetPath);
-          setContent(text);
+          setPlanIdentity(identity);
         } catch {
           if (cancelled) return;
           setResolvedPath(null);
-          setContent('');
+          setPlanIdentity(undefined);
         } finally {
           if (!cancelled) setLoading(false);
         }
@@ -424,7 +423,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
 
       if (!sessionPlanSlug || !Number.isFinite(sessionCreatedAt) || !sessionDirectory) {
         setResolvedPath(null);
-        setContent('');
+        setPlanIdentity(undefined);
         return;
       }
 
@@ -435,10 +434,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         const homePath = resolveTilde(buildHomePlanPath(sessionCreatedAt, sessionPlanSlug), homeDirectory || null);
 
         let resolved: string | null = null;
-        let text: string | null = null;
+        let identity: DocumentIdentity | undefined;
 
         try {
-          text = await readText(repoPath);
+          identity = await openPlan(repoPath);
           resolved = repoPath;
         } catch {
           // ignore
@@ -446,7 +445,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
 
         if (!resolved) {
           try {
-            text = await readText(homePath);
+            identity = await openPlan(homePath);
             resolved = homePath;
           } catch {
             // ignore
@@ -455,18 +454,18 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
 
         if (cancelled) return;
 
-        if (!resolved || text === null) {
+        if (!resolved || !identity) {
           setResolvedPath(null);
-          setContent('');
+          setPlanIdentity(undefined);
           return;
         }
 
         setResolvedPath(resolved);
-        setContent(text);
+        setPlanIdentity(identity);
       } catch {
         if (cancelled) return;
         setResolvedPath(null);
-        setContent('');
+        setPlanIdentity(undefined);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -477,31 +476,19 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       cancelled = true;
     };
-  }, [homeDirectory, planModeEnabled, runtimeApis.files, sessionCreatedAt, sessionDirectory, sessionPlanSlug, targetPath]);
+  }, [effectiveDirectory, homeDirectory, planModeEnabled, runtimeApis.documents, sessionCreatedAt, sessionDirectory, sessionPlanSlug, t, targetPath]);
 
   React.useEffect(() => {
-    if (!resolvedPath) {
-      setSaveError(null);
+    if (!planIdentity || !planRecord?.dirty) {
       return;
     }
 
     const controller = window.setTimeout(async () => {
       setSaveError(null);
       try {
-        if (runtimeApis.files?.writeFile) {
-          const result = await runtimeApis.files.writeFile(resolvedPath, content);
-          if (!result?.success) {
-            throw new Error(t('planView.error.writeFailed'));
-          }
-        } else {
-          const response = await runtimeFetch('/api/fs/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: resolvedPath, content }),
-          });
-          if (!response.ok) {
-            throw new Error(t('planView.error.writePlanFileFailed', { status: response.status }));
-          }
+        const saved = await getDocumentRegistry().save(planIdentity);
+        if (saved.status === 'conflict' || saved.status === 'error') {
+          throw new Error(saved.errorMessage ?? t('planView.error.writeFailed'));
         }
       } catch (error) {
         setSaveError(error instanceof Error ? error.message : t('planView.error.saveFailed'));
@@ -511,7 +498,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       window.clearTimeout(controller);
     };
-  }, [content, resolvedPath, runtimeApis.files, t]);
+  }, [planIdentity, planRecord?.dirty, planRecord?.localEditRevision, t]);
 
   React.useEffect(() => {
     return () => {
@@ -789,11 +776,10 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                       <SimpleMarkdownRenderer content={content} className="typography-markdown-body" enableFileReferences={false} />
                     </ErrorBoundary>
                   </div>
-                ) : (
+                ) : planIdentity ? (
                   <div className="relative h-full" ref={editorWrapperRef}>
-                    <CodeMirrorEditor
-                      value={content}
-                      onChange={setContent}
+                    <DocumentCodeMirror
+                      identity={planIdentity}
                       readOnly={false}
                       className="h-full"
                       extensions={editorExtensions}
@@ -873,7 +859,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
                     }}
                   />
                 </div>
-                )}
+                ) : null}
               </div>
             </div>
           )}

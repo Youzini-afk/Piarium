@@ -1,6 +1,8 @@
 import type { OpenChamberProjectAction } from './openchamberConfig';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { pickWorkspaceRoot } from './documents/path';
+import { readWorkspaceTextFile } from './documents/workspace-text';
 
 type DevServerInfo = {
   command: string;
@@ -168,36 +170,11 @@ async function detectPackageManager(directory: string): Promise<PackageManager> 
 }
 
 async function readOptionalTextFile(path: string, directory?: string): Promise<string | null> {
-  if (directory?.trim()) {
-    try {
-      const params = new URLSearchParams({ path, directory, optional: 'true' });
-      const response = await runtimeFetch(`/api/fs/read?${params.toString()}`, {
-        cache: 'no-store',
-      });
-      if (response.ok) {
-        return response.text();
-      }
-    } catch {
-      // Fall through to the registered files API for runtimes that do not expose HTTP fs routes.
-    }
-  }
-
-  const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
-  if (runtimeFiles?.readFile) {
-    try {
-      const result = await runtimeFiles.readFile(path, { optional: true });
-      return typeof result?.content === 'string' ? result.content : null;
-    } catch {
-      return null;
-    }
-  }
-
+  const documents = getRegisteredRuntimeAPIs()?.documents;
+  const root = pickWorkspaceRoot(path, [directory]);
+  if (!documents || !root) return null;
   try {
-    const response = await runtimeFetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
-      cache: 'no-store',
-    });
-    if (!response.ok) return null;
-    return response.text();
+    return await readWorkspaceTextFile(documents, root, path);
   } catch {
     return null;
   }

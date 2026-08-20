@@ -630,15 +630,14 @@ export interface FileReadOptions {
   directory?: string;
 }
 
+/** Browse, binary preview, and tree CRUD. Text content is DocumentsAPI. */
 export interface FilesAPI {
   getHomeDirectory(): Promise<string>;
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
   createDirectory(path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<{ success: boolean; path: string }>;
   statFile?(path: string, options?: FileReadOptions): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
-  readFile?(path: string, options?: FileReadOptions): Promise<{ content: string; path: string }>;
   readFileBinary?(path: string, options?: FileReadOptions): Promise<{ dataUrl: string; path: string }>;
-  writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;
   delete?(path: string): Promise<{ success: boolean }>;
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
   revealPath?(path: string): Promise<{ success: boolean }>;
@@ -890,13 +889,6 @@ export interface WorkspaceListResult {
   entries: WorkspaceEntry[];
 }
 
-export interface WorkspaceReadResult {
-  content: string;
-  path: string;
-  relativePath: string;
-  mtimeMs: number;
-}
-
 export interface WorkspaceMutationResult {
   success: boolean;
   entry: WorkspaceEntry;
@@ -988,8 +980,6 @@ export interface WorkspaceAPI {
   createFile(path: string, content?: string): Promise<WorkspaceMutationResult>;
   move(from: string, to: string): Promise<WorkspaceMutationResult>;
   deleteEntry(path: string, options?: { permanent?: boolean }): Promise<WorkspaceDeleteResult>;
-  readFile(path: string): Promise<WorkspaceReadResult>;
-  writeFile(path: string, content: string, expectedMtimeMs?: number | null): Promise<WorkspaceMutationResult>;
   upload(path: string, files: WorkspaceUploadFile[]): Promise<WorkspaceUploadResult>;
   download(path: string): Promise<void>;
   previewArchive(path: string): Promise<WorkspaceArchivePreview>;

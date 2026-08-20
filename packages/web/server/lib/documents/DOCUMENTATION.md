@@ -2,7 +2,9 @@
 
 Application-host authority for revisioned workspace documents, file watches, and crash-recovery journals.
 
-This module is independent of `FilesAPI` / `WorkspaceAPI` text editors. Existing Files UI continues to use `/api/fs/*` until a later phase migrates those consumers.
+This module is the application-host authority for revisioned workspace documents, file watches, and crash-recovery journals.
+
+Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains browse/binary/CRUD, and `WorkspaceAPI` remains project/tree/git/upload. Neither exposes a duplicate text read/write shape.
 
 ## Entrypoints
 

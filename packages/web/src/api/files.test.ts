@@ -98,7 +98,7 @@ describe('createWebFilesAPI', () => {
     });
   });
 
-  it('uses per-call workspace directory for stat and read requests', async () => {
+  it('uses per-call workspace directory for stat requests', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });
 
@@ -107,15 +107,6 @@ describe('createWebFilesAPI', () => {
 
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/stat', {
       query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
-      headers: { 'x-piarium-directory': '/worktree-a' },
-    });
-
-    runtimeFetchMock.mockResolvedValueOnce(new Response('content'));
-    await api.readFile?.('/worktree-b/file.txt', { directory: '/worktree-a' });
-
-    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/read', {
-      query: new URLSearchParams({ path: '/worktree-b/file.txt' }),
-      cache: 'default',
       headers: { 'x-piarium-directory': '/worktree-a' },
     });
   });

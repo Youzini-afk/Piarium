@@ -159,42 +159,6 @@ describe('workspace routes', () => {
     expect(fs.existsSync(path.join(workspaceRoot, '.trash'))).toBe(true);
   });
 
-  it('rejects writes when expectedMtimeMs no longer matches disk state', async () => {
-    const app = await createApp();
-    fs.mkdirSync(path.join(workspaceRoot, 'demo'), { recursive: true });
-    const filePath = path.join(workspaceRoot, 'demo', 'note.txt');
-    fs.writeFileSync(filePath, 'first');
-    const originalMtime = fs.statSync(filePath).mtimeMs;
-    fs.writeFileSync(filePath, 'external change');
-    const shiftedMtime = new Date(originalMtime + 60_000);
-    fs.utimesSync(filePath, shiftedMtime, shiftedMtime);
-
-    const response = await request(app)
-      .put('/api/workspace/write')
-      .send({
-        path: 'demo/note.txt',
-        content: 'openchamber change',
-        expectedMtimeMs: originalMtime,
-      })
-      .expect(409);
-
-    expect(response.body.error).toMatch(/modified/i);
-    expect(fs.readFileSync(filePath, 'utf8')).toBe('external change');
-  });
-
-  it('refuses to read files larger than the configured text limit', async () => {
-    const app = await createApp({ PIARIUM_WORKSPACE_MAX_READ_MB: '0.0001' });
-    fs.mkdirSync(path.join(workspaceRoot, 'demo'), { recursive: true });
-    fs.writeFileSync(path.join(workspaceRoot, 'demo', 'big.txt'), 'x'.repeat(1024));
-
-    const response = await request(app)
-      .get('/api/workspace/read')
-      .query({ path: 'demo/big.txt' })
-      .expect(413);
-
-    expect(response.body.error).toMatch(/too large/i);
-  });
-
   it('uploads zip archives through multipart without extracting them', async () => {
     const app = await createApp();
     const zip = new AdmZip();

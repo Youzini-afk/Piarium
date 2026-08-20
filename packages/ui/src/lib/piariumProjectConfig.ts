@@ -1,4 +1,7 @@
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { pickWorkspaceRoot } from './documents/path';
+import { readWorkspaceTextFile, writeWorkspaceTextFile } from './documents/workspace-text';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export interface PiariumProjectRef {
   id: string;
@@ -30,13 +33,24 @@ const configPath = (project: PiariumProjectRef): string => {
   return home ? join(home, '.config', 'piarium', 'projects', `${encodeURIComponent(project.id)}.json`) : '';
 };
 
+const workspaceAccess = async (target: string) => {
+  const apis = getRegisteredRuntimeAPIs();
+  if (!apis?.documents || !target) return null;
+  const home = await apis.files.getHomeDirectory().catch(() => getUserHome());
+  const current = useDirectoryStore.getState().currentDirectory;
+  const root = pickWorkspaceRoot(target, [home, current]);
+  if (!root) return null;
+  return { documents: apis.documents, files: apis.files, root };
+};
+
 const readConfig = async (project: PiariumProjectRef): Promise<PiariumProjectConfig> => {
-  const files = getRegisteredRuntimeAPIs()?.files;
   const target = configPath(project);
-  if (!files?.readFile || !target) return {};
-  const readFile = files.readFile.bind(files);
+  const access = await workspaceAccess(target);
+  if (!access) return {};
   try {
-    const parsed = JSON.parse((await readFile(target)).content) as unknown;
+    const raw = await readWorkspaceTextFile(access.documents, access.root, target);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
       ? parsed as PiariumProjectConfig
       : {};
@@ -46,13 +60,13 @@ const readConfig = async (project: PiariumProjectRef): Promise<PiariumProjectCon
 };
 
 const writeConfig = async (project: PiariumProjectRef, patch: Partial<PiariumProjectConfig>): Promise<boolean> => {
-  const files = getRegisteredRuntimeAPIs()?.files;
   const target = configPath(project);
-  if (!files?.writeFile || !target) return false;
-  const writeFile = files.writeFile.bind(files);
+  const access = await workspaceAccess(target);
+  if (!access) return false;
   const next = { ...await readConfig(project), ...patch, projectPath: normalize(project.path) };
-  await files.createDirectory(target.slice(0, target.lastIndexOf('/')));
-  return (await writeFile(target, `${JSON.stringify(next, null, 2)}\n`)).success;
+  const parent = target.slice(0, target.lastIndexOf('/'));
+  await access.files.createDirectory(parent);
+  return writeWorkspaceTextFile(access.documents, access.root, target, `${JSON.stringify(next, null, 2)}\n`);
 };
 
 export const getWorktreeSetupCommands = async (project: PiariumProjectRef): Promise<string[]> => {
