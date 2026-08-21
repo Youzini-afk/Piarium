@@ -796,7 +796,6 @@ async function main(options = {}) {
       piariumVersion: PIARIUM_VERSION,
     });
   }
-  const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
     cwd: process.cwd(),
@@ -887,6 +886,7 @@ async function main(options = {}) {
   await extensionRuntime.start().catch((error) => {
     console.warn('[Piarium Extensions] Host reconciliation failed:', error?.message || error);
   });
+  const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
   const sessionNames = new Map();
   const sessionSnapshots = new Map();
