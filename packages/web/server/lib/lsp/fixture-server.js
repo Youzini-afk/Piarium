@@ -2,6 +2,36 @@ import { createJsonRpcServer } from './jsonrpc.js';
 
 const files = new Map();
 
+const positionToOffset = (text, position) => {
+  const targetLine = Math.max(0, position?.line ?? 0);
+  const targetCharacter = Math.max(0, position?.character ?? 0);
+  let offset = 0;
+  let line = 0;
+  while (line < targetLine && offset < text.length) {
+    const newline = text.indexOf('\n', offset);
+    if (newline < 0) return text.length;
+    offset = newline + 1;
+    line += 1;
+  }
+  const lineEnd = text.indexOf('\n', offset);
+  const max = lineEnd < 0 ? text.length : lineEnd;
+  return Math.min(offset + targetCharacter, max);
+};
+
+const applyContentChanges = (content, changes) => {
+  let next = content;
+  for (const change of changes) {
+    if (!change?.range) {
+      next = typeof change?.text === 'string' ? change.text : next;
+      continue;
+    }
+    const from = positionToOffset(next, change.range.start);
+    const to = positionToOffset(next, change.range.end);
+    next = `${next.slice(0, from)}${typeof change.text === 'string' ? change.text : ''}${next.slice(to)}`;
+  }
+  return next;
+};
+
 const publish = (server, uri, version, text) => {
   const diagnostics = [];
   if (text.includes('FIXTURE_ERROR')) {
@@ -86,8 +116,8 @@ const server = createJsonRpcServer({
     if (method === 'textDocument/didChange') {
       const uri = params?.textDocument?.uri;
       const version = params?.textDocument?.version ?? 0;
-      const change = Array.isArray(params?.contentChanges) ? params.contentChanges[params.contentChanges.length - 1] : null;
-      const text = typeof change?.text === 'string' ? change.text : files.get(uri)?.text ?? '';
+      const changes = Array.isArray(params?.contentChanges) ? params.contentChanges : [];
+      const text = applyContentChanges(files.get(uri)?.text ?? '', changes);
       files.set(uri, { text, version });
       publish(server, uri, text.includes('FIXTURE_STALE_DIAG') ? 0 : version, text);
     }

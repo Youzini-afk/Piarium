@@ -130,7 +130,7 @@ export type BlockWidgetDef = {
 
 type CodeMirrorEditorProps = {
   value: string;
-  onChange: (value: string) => void;
+  onChange: (value: string, changes?: CodeMirrorTextChange[]) => void;
   extensions?: Extension[];
   className?: string;
   readOnly?: boolean;
@@ -143,6 +143,12 @@ type CodeMirrorEditorProps = {
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
   vimMode?: boolean;
+};
+
+export type CodeMirrorTextChange = {
+  from: number;
+  to: number;
+  insert: string;
 };
 
 const lineNumbersCompartment = new Compartment();
@@ -393,8 +399,19 @@ export function CodeMirrorEditor({
             return;
           }
           const next = update.state.doc.toString();
+          if (next === valueRef.current) {
+            syncPortalWidgets(blockWidgetsRef.current);
+            return;
+          }
+          const changes: CodeMirrorTextChange[] = [];
+          update.changes.iterChanges((from, to, _fromAfter, _toAfter, inserted) => {
+            changes.push({ from, to, insert: inserted.toString() });
+          });
+          // LSP applies an array of incremental changes in order. Applying edits from
+          // the end of the original document keeps every following offset valid.
+          changes.sort((left, right) => right.from - left.from || right.to - left.to);
           valueRef.current = next;
-          onChangeRef.current(next);
+          onChangeRef.current(next, changes);
           syncPortalWidgets(blockWidgetsRef.current);
         }),
         editableCompartment.of(EditorView.editable.of(!readOnly)),

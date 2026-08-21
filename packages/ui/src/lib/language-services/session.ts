@@ -23,7 +23,9 @@ type OpenEditor = {
 let bound: LanguageServicesAPI | null = null;
 const openEditors = new Map<string, OpenEditor>();
 const workspaceSubscriptions = new Map<string, Subscription>();
+const documentSyncQueues = new Map<string, Promise<void>>();
 let unsubscribeEndpoint: (() => void) | null = null;
+let syncEpoch = 0;
 
 const editorKey = (identity: DocumentIdentity): string => `${identity.workspaceId}\0${identity.resourceId}`;
 
@@ -59,8 +61,9 @@ const ensureWorkspaceSubscription = (workspaceId: string): void => {
   workspaceSubscriptions.set(workspaceId, bound.subscribe(workspaceId, handleEvent));
 };
 
-const syncOpen = async (identity: DocumentIdentity, languageId: string, reason: 'open' | 'change' | 'close'): Promise<void> => {
-  if (!bound) return;
+const enqueueDocumentSync = (identity: DocumentIdentity, languageId: string, reason: 'open' | 'change' | 'close'): void => {
+  const language = bound;
+  if (!language) return;
   let record;
   try {
     record = getDocumentRegistry().get(identity);
@@ -73,18 +76,33 @@ const syncOpen = async (identity: DocumentIdentity, languageId: string, reason: 
     documentVersion: record?.localEditRevision ?? 0,
     reason,
   };
-  try {
-    if (reason !== 'close' && record?.buffer !== undefined) {
-      await bound.syncDocument({ ...request, content: record.buffer });
-      return;
-    }
-    await bound.syncDocument(request);
-  } catch (error) {
-    if (error instanceof LanguageServicesError && error.reason === 'stale-completion') return;
-  }
+  const payload = reason === 'change' && record?.lastChanges?.length
+    ? { ...request, changes: record.lastChanges.map((change) => ({ ...change })) }
+    : reason !== 'close' && record?.buffer !== undefined
+      ? { ...request, content: record.buffer }
+      : request;
+  const key = editorKey(identity);
+  const epoch = syncEpoch;
+  const previous = documentSyncQueues.get(key) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      if (bound !== language || syncEpoch !== epoch) return;
+      try {
+        await language.syncDocument(payload);
+      } catch (error) {
+        if (error instanceof LanguageServicesError && error.reason === 'stale-completion') return;
+      }
+    })
+    .finally(() => {
+      if (documentSyncQueues.get(key) === next) documentSyncQueues.delete(key);
+    });
+  documentSyncQueues.set(key, next);
 };
 
 const resetLocalLanguageState = (): void => {
+  syncEpoch += 1;
+  documentSyncQueues.clear();
   unsubscribeEndpoint?.();
   unsubscribeEndpoint = null;
   const workspaceIds = collectWorkspaceIds();
@@ -127,13 +145,13 @@ export const acquireLanguageDocument = (identity: DocumentIdentity): void => {
   }
   openEditors.set(key, { identity, languageId, count: 1 });
   ensureWorkspaceSubscription(identity.workspaceId);
-  void syncOpen(identity, languageId, 'open');
+  enqueueDocumentSync(identity, languageId, 'open');
 };
 
 export const notifyLanguageDocumentChange = (identity: DocumentIdentity): void => {
   const open = openEditors.get(editorKey(identity));
   if (!open) return;
-  void syncOpen(identity, open.languageId, 'change');
+  enqueueDocumentSync(identity, open.languageId, 'change');
 };
 
 export const releaseLanguageDocument = (identity: DocumentIdentity): void => {
@@ -143,7 +161,7 @@ export const releaseLanguageDocument = (identity: DocumentIdentity): void => {
   existing.count -= 1;
   if (existing.count > 0) return;
   openEditors.delete(key);
-  void syncOpen(identity, existing.languageId, 'close');
+  enqueueDocumentSync(identity, existing.languageId, 'close');
 };
 
 export const resetLanguageServices = (): void => {

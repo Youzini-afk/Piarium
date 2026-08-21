@@ -386,17 +386,20 @@ export const createLanguageSupervisor = ({
       });
       return { status: 'synced', documentVersion: request.documentVersion };
     }
+    const incrementalChanges = Array.isArray(request.changes)
+      ? [...request.changes].sort((left, right) => right.from - left.from || right.to - left.to)
+      : [];
     const nextContent = request.content
-      ?? (Array.isArray(request.changes) && open.content !== undefined
-        ? request.changes.reduce((text, change) => `${text.slice(0, change.from)}${change.insert}${text.slice(change.to)}`, open.content)
+      ?? (incrementalChanges.length > 0 && open.content !== undefined
+        ? incrementalChanges.reduce((text, change) => `${text.slice(0, change.from)}${change.insert}${text.slice(change.to)}`, open.content)
         : open.content);
     record.documents.set(resourceId, { documentVersion: request.documentVersion, content: nextContent ?? '' });
     if (request.reason === 'save') {
       record.rpc.notify('textDocument/didSave', { textDocument: { uri } });
       return { status: 'synced', documentVersion: request.documentVersion };
     }
-    const contentChanges = Array.isArray(request.changes) && request.changes.length > 0 && open.content
-      ? request.changes.map((change) => ({
+    const contentChanges = incrementalChanges.length > 0 && open.content !== undefined
+      ? incrementalChanges.map((change) => ({
           range: rangeFromOffsets(open.content, change.from, change.to),
           text: change.insert,
         }))

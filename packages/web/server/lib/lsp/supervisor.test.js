@@ -115,6 +115,47 @@ describe('language supervisor', () => {
     }
   });
 
+  it('applies multiple incremental edits against the same document version', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      language.registerProvider(fixtureProvider());
+      const events = [];
+      language.subscribe(harness.identity.workspaceId, (event) => events.push(event));
+      const resource = harness.resource('incremental.ts');
+      await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'xFIXTURE_ERROXy',
+      });
+      await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        reason: 'change',
+        changes: [
+          { from: 0, to: 1, insert: '' },
+          { from: 13, to: 15, insert: 'R' },
+        ],
+      });
+      await waitUntil(() => events.some((event) => (
+        event.kind === 'diagnostics'
+        && event.resourceId === 'incremental.ts'
+        && event.items.some((item) => item.message === 'fixture error' && item.documentVersion === 2)
+      )));
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
   it('publishes versioned diagnostics and isolates a crashed language session', async () => {
     const harness = await createDocumentAuthorityHarness();
     const language = createLanguageSupervisor({

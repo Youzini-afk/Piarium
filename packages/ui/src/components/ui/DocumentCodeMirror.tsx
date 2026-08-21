@@ -1,5 +1,5 @@
 import React from 'react';
-import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
+import { CodeMirrorEditor, type CodeMirrorTextChange } from '@/components/ui/CodeMirrorEditor';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import { useDocumentLanguageExtensions } from '@/lib/codemirror/language-client';
@@ -30,9 +30,9 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
     return () => releaseLanguageDocument(identity);
   }, [identity]);
 
-  const handleChange = React.useCallback((value: string) => {
+  const handleChange = React.useCallback((value: string, changes?: CodeMirrorTextChange[]) => {
     if (!identity) return;
-    getDocumentRegistry().applyTransaction(identity, value, { origin });
+    getDocumentRegistry().applyTransaction(identity, value, { origin, changes });
     notifyLanguageDocumentChange(identity);
   }, [identity, origin]);
 
