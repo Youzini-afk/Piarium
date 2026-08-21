@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles/fonts'
 import './index.css'
-import App from './App.tsx'
+import { PiariumApplication } from './apps/PiariumApplication'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
@@ -54,7 +54,7 @@ createRoot(rootElement).render(
       <ThemeSystemProvider>
         <ThemeProvider>
           <SessionAuthGate apis={runtimeAPIs}>
-            <App apis={runtimeAPIs} />
+            <PiariumApplication apis={runtimeAPIs} />
           </SessionAuthGate>
         </ThemeProvider>
       </ThemeSystemProvider>

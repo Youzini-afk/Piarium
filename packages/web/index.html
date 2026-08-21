@@ -573,25 +573,6 @@
       </div>
     </div>
 
-    <script>
-      // Fallback: hide loading screen after 10 seconds if React fails to load.
-      // Desktop shells manage their own splash via the injected boot outcome;
-      // do not force-remove for desktop windows.
-      setTimeout(function() {
-        if (typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string' && window.__PIARIUM_LOCAL_ORIGIN__.length > 0) {
-          return;
-        }
-        var loading = document.getElementById('initial-loading');
-        if (loading) {
-          console.warn('Loading screen timeout - forcing hide after 10s');
-          loading.classList.add('fade-out');
-          setTimeout(function() {
-            loading.remove();
-          }, 300);
-        }
-      }, 10000);
-    </script>
-
     <!-- Nerd Fonts are terminal-only. Expose an idempotent first-use loader so
          a normal chat/settings startup does not download them. -->
     <script>
