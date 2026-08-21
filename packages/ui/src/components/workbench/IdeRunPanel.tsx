@@ -57,6 +57,9 @@ export const IdeRunPanel: React.FC = () => {
   const [consoleLines, setConsoleLines] = React.useState<string[]>([]);
   const [consoleDraft, setConsoleDraft] = React.useState('');
   const [program, setProgram] = React.useState('debuggee.js');
+  const refreshGenerationRef = React.useRef(0);
+  const workspaceIdRef = React.useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
   const uiEpoch = React.useSyncExternalStore(subscribeRunDebugUi, () => peekLastTestFailure(workspaceId ?? '')?.id ?? '', () => '');
 
   React.useEffect(() => {
@@ -69,48 +72,60 @@ export const IdeRunPanel: React.FC = () => {
 
   const refresh = React.useCallback(async () => {
     if (!workspaceId) return;
+    const generation = ++refreshGenerationRef.current;
+    const isCurrent = () => (
+      refreshGenerationRef.current === generation && workspaceIdRef.current === workspaceId
+    );
     setTasks({ status: 'loading' });
     setTests({ status: 'loading' });
     try {
       const listed = await apis.tasks.list(workspaceId);
+      if (!isCurrent()) return;
       if (listed.status === 'failure') setTasks({ status: 'failure', message: listed.message });
       else if (listed.configurations.length === 0) setTasks({ status: 'empty' });
       else setTasks({ status: 'ready', configurations: listed.configurations });
     } catch (error) {
-      if (!ignoreStale(error)) {
+      if (isCurrent() && !ignoreStale(error)) {
         setTasks({ status: 'failure', message: error instanceof Error ? error.message : 'failed' });
       }
     }
     try {
       const discovered = await apis.tests.discover({ workspaceId });
+      if (!isCurrent()) return;
       if (discovered.status === 'failure') setTests({ status: 'failure', message: discovered.message });
       else if (discovered.status === 'empty' || discovered.tests.length === 0) setTests({ status: 'empty' });
       else setTests({ status: 'ready', tests: discovered.tests });
     } catch (error) {
-      if (!ignoreStale(error)) {
+      if (isCurrent() && !ignoreStale(error)) {
         setTests({ status: 'failure', message: error instanceof Error ? error.message : 'failed' });
       }
     }
     try {
       const status = await apis.debug.getStatus(workspaceId);
+      if (!isCurrent()) return;
       setDebugStatus(status);
       const listedBreakpoints = await apis.debug.listBreakpoints(workspaceId);
+      if (!isCurrent()) return;
       setBreakpoints(listedBreakpoints.breakpoints);
       const listedWatch = await apis.debug.listWatch(workspaceId);
+      if (!isCurrent()) return;
       setWatch(listedWatch.expressions);
       if (status.status === 'paused') {
         const frames = await apis.debug.getStack({ workspaceId, threadId: 1 });
+        if (!isCurrent()) return;
         if (frames.status === 'ready') {
           setStack(frames.value);
           const top = frames.value[0];
           if (top) rememberStackFrame(workspaceId, top);
           if (top) {
             const scopes = await apis.debug.getScopes({ workspaceId, frameId: top.id });
+            if (!isCurrent()) return;
             if (scopes.status === 'ready' && scopes.value[0]) {
               const vars = await apis.debug.getVariables({
                 workspaceId,
                 variablesReference: scopes.value[0].variablesReference,
               });
+              if (!isCurrent()) return;
               if (vars.status === 'ready') setVariables(vars.value);
             }
           }
@@ -120,11 +135,23 @@ export const IdeRunPanel: React.FC = () => {
         setVariables([]);
       }
     } catch (error) {
-      if (!ignoreStale(error)) {
+      if (isCurrent() && !ignoreStale(error)) {
         setDebugStatus({ status: 'failed', workspaceId, message: error instanceof Error ? error.message : 'failed' });
       }
     }
   }, [apis.debug, apis.tasks, apis.tests, workspaceId]);
+
+  React.useEffect(() => {
+    refreshGenerationRef.current += 1;
+    setTasks({ status: 'idle' });
+    setTests({ status: 'idle' });
+    setDebugStatus(null);
+    setBreakpoints([]);
+    setStack([]);
+    setVariables([]);
+    setWatch([]);
+    setConsoleLines([]);
+  }, [workspaceId]);
 
   React.useEffect(() => {
     void refresh();
@@ -134,10 +161,12 @@ export const IdeRunPanel: React.FC = () => {
     if (!workspaceId) return undefined;
     const close = [
       apis.tasks.subscribe(workspaceId, (event) => {
-        if (event.kind === 'output') setConsoleLines((lines) => [...lines.slice(-200), event.text]);
+        if (workspaceIdRef.current !== workspaceId) return;
+        if (event.kind === 'output') setConsoleLines((lines) => [...lines, event.text]);
       }),
       apis.debug.subscribe(workspaceId, (event) => {
-        if (event.kind === 'output') setConsoleLines((lines) => [...lines.slice(-200), event.text]);
+        if (workspaceIdRef.current !== workspaceId) return;
+        if (event.kind === 'output') setConsoleLines((lines) => [...lines, event.text]);
         if (event.kind === 'status') {
           setDebugStatus(event.snapshot);
           setWorkbenchContextKey('debugIsActive', event.snapshot.status === 'running' || event.snapshot.status === 'paused' || event.snapshot.status === 'starting');
@@ -148,7 +177,8 @@ export const IdeRunPanel: React.FC = () => {
         }
       }),
       apis.tests.subscribe(workspaceId, (event) => {
-        if (event.kind === 'output') setConsoleLines((lines) => [...lines.slice(-200), event.text]);
+        if (workspaceIdRef.current !== workspaceId) return;
+        if (event.kind === 'output') setConsoleLines((lines) => [...lines, event.text]);
         if (event.kind === 'test' && event.test.status) {
           setTests((current) => {
             if (current.status !== 'ready') return current;
@@ -194,6 +224,7 @@ export const IdeRunPanel: React.FC = () => {
                   size="sm"
                   className="h-auto w-full justify-start"
                   onClick={() => {
+                    setConsoleLines([]);
                     void apis.tasks.run({ workspaceId, taskId: item.id });
                   }}
                 >
@@ -210,7 +241,10 @@ export const IdeRunPanel: React.FC = () => {
       <section className="mb-4">
         <div className="mb-2 font-medium text-foreground">{t('workbench.ide.debug.title')}</div>
         <div className="mb-2 flex flex-wrap gap-1">
-          <Button type="button" size="xs" onClick={() => void apis.debug.start({ workspaceId, program, languageId: 'javascript' })}>
+          <Button type="button" size="xs" onClick={() => {
+            setConsoleLines([]);
+            void apis.debug.start({ workspaceId, program, languageId: 'javascript' });
+          }}>
             {t('workbench.ide.debug.start')}
           </Button>
           <Button type="button" size="xs" variant="ghost" onClick={() => void apis.debug.stop({ workspaceId })}>
@@ -333,7 +367,10 @@ export const IdeRunPanel: React.FC = () => {
           <span className="font-medium text-foreground">{t('workbench.ide.tests.title')}</span>
           <div className="flex gap-1">
             <Button type="button" size="xs" variant="ghost" onClick={() => void refresh()}>{t('workbench.ide.tests.discover')}</Button>
-            <Button type="button" size="xs" onClick={() => void apis.tests.run({ workspaceId })}>{t('workbench.ide.tests.run')}</Button>
+            <Button type="button" size="xs" onClick={() => {
+              setConsoleLines([]);
+              void apis.tests.run({ workspaceId });
+            }}>{t('workbench.ide.tests.run')}</Button>
           </div>
         </div>
         {tests.status === 'failure' ? (
@@ -351,6 +388,7 @@ export const IdeRunPanel: React.FC = () => {
                   className="h-auto w-full justify-start"
                   onClick={() => {
                     if (item.resourceId) openWorkbenchEditor(workspaceId, item.resourceId);
+                    setConsoleLines([]);
                     void apis.tests.run({ workspaceId, testIds: [item.id] });
                   }}
                 >
