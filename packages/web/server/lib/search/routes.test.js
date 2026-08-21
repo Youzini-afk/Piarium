@@ -76,6 +76,7 @@ describe('workspace search routes', () => {
   it('streams content batches and a terminal result over NDJSON', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
       const app = express();
       app.use(express.json());
       registerWorkspaceSearchRoutes(app, {
@@ -86,7 +87,7 @@ describe('workspace search routes', () => {
         spawn: () => {
           const child = createFakeChild();
           queueMicrotask(() => {
-            finishWithOutput(child, `${matchLine(path.join(harness.workspaceRoot, 'alpha.ts'), 'alpha')}\n`);
+            finishWithOutput(child, `${matchLine(path.join(workspace.root, 'alpha.ts'), 'alpha')}\n`);
           });
           return child;
         },

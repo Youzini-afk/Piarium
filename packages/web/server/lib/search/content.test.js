@@ -37,7 +37,8 @@ describe('workspace content search', () => {
   it('returns ready hits, empty success, and failure without mapping errors to empty', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {
-      const notePath = path.join(harness.workspaceRoot, 'note.txt');
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+      const notePath = path.join(workspace.root, 'note.txt');
       let mode = 'ready';
       const search = createWorkspaceContentSearch({
         documents: harness.authority,
@@ -134,8 +135,9 @@ describe('workspace content search', () => {
   it('streams results and stops ripgrep at the requested global result count', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {
-      const firstPath = path.join(harness.workspaceRoot, 'first.txt');
-      const secondPath = path.join(harness.workspaceRoot, 'second.txt');
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+      const firstPath = path.join(workspace.root, 'first.txt');
+      const secondPath = path.join(workspace.root, 'second.txt');
       let child;
       let args;
       const search = createWorkspaceContentSearch({
@@ -171,8 +173,9 @@ describe('workspace content search', () => {
   it('emits natural stream batches without applying an implicit global result cap', async () => {
     const harness = await createDocumentAuthorityHarness();
     try {
-      const firstPath = path.join(harness.workspaceRoot, 'first.txt');
-      const secondPath = path.join(harness.workspaceRoot, 'second.txt');
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+      const firstPath = path.join(workspace.root, 'first.txt');
+      const secondPath = path.join(workspace.root, 'second.txt');
       const batches = [];
       const search = createWorkspaceContentSearch({
         documents: harness.authority,
