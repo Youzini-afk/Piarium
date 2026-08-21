@@ -51,4 +51,8 @@ describe('validateContextFileOpen', () => {
   test('allows ordinary text files', async () => {
     expect(await validateContextFileOpen(documentsApi('hello\nworld\n'), '/repo/notes.txt', { directory: '/repo' })).toEqual({ ok: true });
   });
+
+  test('does not impose the retired 5000-line editor limit', async () => {
+    expect(await validateContextFileOpen(documentsApi('line\n'.repeat(5_001)), '/repo/generated.txt', { directory: '/repo' })).toEqual({ ok: true });
+  });
 });

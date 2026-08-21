@@ -3033,7 +3033,6 @@ export const dict: Record<I18nKey, string> = {
   'common.relative.daysAgoCompact': '{count}d ago',
   'common.relative.weeksAgoCompact': '{count}w ago',
   'common.relative.yearsAgoCompact': '{count}y ago',
-  'contextFileOpen.failure.tooLarge': 'File is too large to open (>{count} lines)',
   'contextFileOpen.failure.missing': 'File not found',
   'contextFileOpen.failure.unreadable': 'Failed to open file',
   'quota.window.5h': '5-Hour',

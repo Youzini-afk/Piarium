@@ -2769,7 +2769,6 @@ export const dict = {
   'common.relative.daysAgoCompact': '{count} j',
   'common.relative.weeksAgoCompact': '{count} sem',
   'common.relative.yearsAgoCompact': '{count} a',
-  'contextFileOpen.failure.tooLarge': 'Le fichier est trop volumineux pour être ouvert (> {count} lignes)',
   'contextFileOpen.failure.missing': 'Fichier introuvable',
   'contextFileOpen.failure.unreadable': 'Impossible d’ouvrir le fichier',
   'quota.window.5h': '5 heures',

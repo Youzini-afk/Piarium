@@ -889,12 +889,6 @@ export const SidebarFilesTree: React.FC<{
   const handleOpenFile = React.useCallback(async (node: FileNode) => {
     if (!root) return;
 
-    const openValidation = await validateContextFileOpen(documents, node.path, { directory: root });
-    if (!openValidation.ok) {
-      toast.error(getContextFileOpenFailureMessage(openValidation.reason));
-      return;
-    }
-
     if (openTarget === 'editor' && workspaceId) {
       const resourceId = resourceIdFromWorkspacePath(root, node.path);
       if (resourceId) {
@@ -903,6 +897,13 @@ export const SidebarFilesTree: React.FC<{
       }
       return;
     }
+
+    const openValidation = await validateContextFileOpen(documents, node.path, { directory: root });
+    if (!openValidation.ok) {
+      toast.error(getContextFileOpenFailureMessage(openValidation.reason));
+      return;
+    }
+
     openContextFile(root, node.path);
   }, [documents, onEditorOpen, openContextFile, openTarget, root, workspaceId]);
 

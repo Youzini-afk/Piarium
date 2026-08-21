@@ -51,6 +51,9 @@ import {
   refreshMcpSettingsAvailability,
   useMcpSettingsAvailabilityState,
 } from '@/lib/settings/mcp-availability';
+import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
+import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
+import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 
 const EMPTY_PINNED_SESSION_IDS = new Set<string>();
 
@@ -78,7 +81,9 @@ const normalizePath = (value: string): string => {
   return normalized;
 };
 
-export const CommandPalette: React.FC = () => {
+export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }> = ({
+  fileOpenTarget = 'context',
+}) => {
   const { t } = useI18n();
 
   const isCommandPaletteOpen = useUIStore((s) => s.isCommandPaletteOpen);
@@ -86,6 +91,7 @@ export const CommandPalette: React.FC = () => {
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
   const openContextFile = useUIStore((s) => s.openContextFile);
+  const workspaceId = useWorkbenchWorkspaceId();
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
 
   const sessionSummaries = usePiSessionStore(React.useCallback(
@@ -405,6 +411,16 @@ export const CommandPalette: React.FC = () => {
   const handleOpenFile = React.useCallback(
     async (filePath: string) => {
       if (!currentRoot) return;
+      if (fileOpenTarget === 'editor' && workspaceId) {
+        const resourceId = resourceIdFromWorkspacePath(currentRoot, filePath);
+        if (!resourceId) {
+          toast.error(getContextFileOpenFailureMessage('unreadable'));
+          return;
+        }
+        openWorkbenchEditor(workspaceId, resourceId);
+        close();
+        return;
+      }
       const validation = await validateContextFileOpen(documents, filePath, { directory: currentRoot });
       if (!validation.ok) {
         toast.error(getContextFileOpenFailureMessage(validation.reason));
@@ -413,7 +429,7 @@ export const CommandPalette: React.FC = () => {
       openContextFile(currentRoot, filePath);
       close();
     },
-    [currentRoot, documents, openContextFile, close],
+    [close, currentRoot, documents, fileOpenTarget, openContextFile, workspaceId],
   );
 
   const handleOpenProject = React.useCallback(

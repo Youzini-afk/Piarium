@@ -89,6 +89,7 @@ type GitViewProps = {
   isFollowingSessionDirectory?: boolean;
   onDirectoryChange?: (directory: string) => void;
   onFollowSessionDirectory?: () => void;
+  onViewDiff?: (path: string, staged: boolean) => void;
 };
 
 const GIT_RECONCILE_DELAY_MS = 15000;
@@ -218,6 +219,7 @@ export const GitView: React.FC<GitViewProps> = ({
   isFollowingSessionDirectory = false,
   onDirectoryChange,
   onFollowSessionDirectory,
+  onViewDiff,
 }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
@@ -1705,12 +1707,16 @@ export const GitView: React.FC<GitViewProps> = ({
   );
 
   const handleViewChangeDiff = React.useCallback((path: string, staged: boolean) => {
+    if (onViewDiff) {
+      onViewDiff(path, staged);
+      return;
+    }
     if (currentDirectory && !isMobile) {
       openContextDiff(currentDirectory, path, staged);
       return;
     }
     navigateToDiff(path, staged);
-  }, [currentDirectory, isMobile, navigateToDiff, openContextDiff]);
+  }, [currentDirectory, isMobile, navigateToDiff, onViewDiff, openContextDiff]);
 
   const openStashes = React.useCallback(() => setIsStashesDialogOpen(true), []);
 

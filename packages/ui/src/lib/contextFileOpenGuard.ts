@@ -1,6 +1,4 @@
 import type { DocumentsAPI } from '@/lib/api/types';
-import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
-import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { DocumentsError } from '@/lib/api/documents-errors';
@@ -9,7 +7,7 @@ import { readWorkspaceTextFile } from '@/lib/documents/workspace-text';
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 
-export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable' | 'binary';
+export type ContextFileOpenFailureReason = 'missing' | 'unreadable' | 'binary';
 
 export type ContextFileOpenValidationResult =
   | { ok: true }
@@ -62,11 +60,6 @@ export const validateContextFileOpen = async (
     if (looksLikeBinaryText(content)) {
       return { ok: false, reason: 'binary' };
     }
-    const lineCount = countLinesWithLimit(content, MAX_OPEN_FILE_LINES);
-    if (lineCount > MAX_OPEN_FILE_LINES) {
-      return { ok: false, reason: 'too-large' };
-    }
-
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: classifyReadError(error) };
@@ -74,11 +67,6 @@ export const validateContextFileOpen = async (
 };
 
 export const getContextFileOpenFailureMessage = (reason: ContextFileOpenFailureReason): string => {
-  if (reason === 'too-large') {
-    const lines = MAX_OPEN_FILE_LINES.toLocaleString(getCurrentIntlLocale());
-    return t('contextFileOpen.failure.tooLarge', { count: lines });
-  }
-
   if (reason === 'missing') {
     return t('contextFileOpen.failure.missing');
   }

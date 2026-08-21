@@ -362,6 +362,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setCommandPaletteOpen = useUIStore((state) => state.setCommandPaletteOpen);
+  const openContextDiff = useUIStore((state) => state.openContextDiff);
   const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
   const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
   const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
@@ -456,7 +457,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         data-page-scroll-lock="true"
         className="flex h-[100dvh] min-h-0 flex-col bg-background"
       >
-        <CommandPalette />
+        <CommandPalette fileOpenTarget="editor" />
         <PiInteractionHost />
         <HelpDialog />
         <WorkspaceOverlays />
@@ -608,7 +609,14 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 {layout.activity === 'search' ? <IdeSearchPanel directory={directory} /> : null}
                 {layout.activity === 'git' ? (
                   <React.Suspense fallback={null}>
-                    <GitView isActive />
+                    <GitView
+                      isActive
+                      onViewDiff={(path, staged) => {
+                        if (!directory) return;
+                        openContextDiff(directory, path, staged);
+                        patchLayout({ secondaryView: 'context', secondaryVisible: true });
+                      }}
+                    />
                   </React.Suspense>
                 ) : null}
                 {layout.activity === 'run' ? <IdeRunPanel /> : null}

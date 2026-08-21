@@ -3014,7 +3014,6 @@ export const dict: Record<I18nKey, string> = {
   'common.relative.daysAgoCompact': '{count}日前',
   'common.relative.weeksAgoCompact': '{count}週前',
   'common.relative.yearsAgoCompact': '{count}年前',
-  'contextFileOpen.failure.tooLarge': 'ファイルが大きすぎて開けません（>{count}行）',
   'contextFileOpen.failure.missing': 'ファイルが見つかりません',
   'contextFileOpen.failure.unreadable': 'ファイルを開けませんでした',
   'quota.window.5h': '5時間',
