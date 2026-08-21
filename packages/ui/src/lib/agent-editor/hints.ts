@@ -5,6 +5,8 @@ import type { AgentFileChangeHint, AgentFileChangeKind, ToolFileChange } from '.
 
 const listeners = new Set<() => void>();
 const hints = new Map<string, AgentFileChangeHint>();
+let snapshotRevision = 0;
+const snapshotCache = new Map<string, { revision: number; value: AgentFileChangeHint[] }>();
 
 const hintKey = (workspaceId: string, resourceId: string): string => `${workspaceId}\0${resourceId}`;
 
@@ -19,6 +21,8 @@ const resourceIdForHint = (workspaceRoot: string, filePath: string): string | un
 };
 
 const emit = (): void => {
+  snapshotRevision += 1;
+  snapshotCache.clear();
   for (const listener of listeners) listener();
 };
 
@@ -92,11 +96,15 @@ export const subscribeAgentFileChangeHints = (listener: () => void): (() => void
 };
 
 export const listAgentFileChangeHints = (workspaceId: string): AgentFileChangeHint[] => {
+  const cached = snapshotCache.get(workspaceId);
+  if (cached?.revision === snapshotRevision) return cached.value;
   const items: AgentFileChangeHint[] = [];
   for (const hint of hints.values()) {
     if (hint.workspaceId === workspaceId) items.push(hint);
   }
-  return items.sort((left, right) => right.at - left.at || left.resourceId.localeCompare(right.resourceId));
+  const value = items.sort((left, right) => right.at - left.at || left.resourceId.localeCompare(right.resourceId));
+  snapshotCache.set(workspaceId, { revision: snapshotRevision, value });
+  return value;
 };
 
 export const peekAgentFileChangeHint = (identity: DocumentIdentity): AgentFileChangeHint | undefined => (

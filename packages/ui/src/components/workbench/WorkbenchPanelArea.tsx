@@ -42,6 +42,8 @@ const HIDDEN_LAYOUT: WorkbenchPanelLayout = {
   size: 0.3,
 };
 
+const EMPTY_HINTS: ReturnType<typeof listAgentFileChangeHints> = [];
+
 export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspaceId, directory }) => {
   const { t } = useI18n();
   const layout = React.useSyncExternalStore(
@@ -53,7 +55,7 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
   const hints = React.useSyncExternalStore(
     subscribeAgentFileChangeHints,
     () => listAgentFileChangeHints(workspaceId),
-    () => [],
+    () => EMPTY_HINTS,
   );
   const documentEpoch = React.useSyncExternalStore(
     (onStoreChange) => getDocumentRegistry().subscribeWorkspace(workspaceId, onStoreChange),
