@@ -61,6 +61,7 @@ export interface BrokeredHostEntrypointArtifact {
   artifactIntegrity: string;
   integrity: string;
   modulePath: string;
+  packageRoot: string;
 }
 
 export interface ExtensionArtifactStoreOptions {
@@ -497,7 +498,12 @@ export class ExtensionArtifactStore {
     const { index, root } = await this.#readVerifiedIndex(artifactRoot, artifactIntegrity, expectedManifest);
     if (!index.host) throw new Error("Host entrypoint is not present in the artifact");
     const { path, record } = await this.#readVerifiedFile(root, index, index.host.module);
-    return { artifactIntegrity, integrity: record.integrity, modulePath: path };
+    return {
+      artifactIntegrity,
+      integrity: record.integrity,
+      modulePath: path,
+      packageRoot: join(root, "package"),
+    };
   }
 
   async #readVerifiedIndex(

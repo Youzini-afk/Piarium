@@ -22,7 +22,10 @@ modes.
 `init` is non-interactive. Both `--id` and `--name` are required, and an existing non-empty target is
 never overwritten. `--template` selects `surface` (default), `shell`, `editor`, `view`, `language`, `debug`, or `test`.
 The generated project contains a public manifest, package metadata, TypeScript configuration, and the
-matching Surface or Host entrypoint.
+matching Surface or Host entrypoint. Language and debug templates also include a runnable packaged
+protocol adapter under `runtime/`; the Host resolves it through `context.assets.path`, so it works from
+local, npm, and immutable artifact installations. The test template uses Piarium's native Node test
+provider and does not generate a redundant adapter process.
 
 `check` parses the manifest with `@piarium/extension-contract`, checks that the manifest version and
 `package.json` version agree, and checks every declared Host or executable Surface file. Errors name

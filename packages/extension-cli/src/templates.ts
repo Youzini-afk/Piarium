@@ -10,6 +10,7 @@ const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 const packageJson = (options: {
   extraDependencies?: Record<string, string>;
   extraEntrypoints?: Record<string, { source: string }>;
+  extraPublishedFiles?: string[];
   id: string;
   name: string;
 }): string => json({
@@ -18,7 +19,7 @@ const packageJson = (options: {
   private: false,
   type: "module",
   description: `${options.name} Piarium extension`,
-  files: ["dist", "piarium.extension.json"],
+  files: ["dist", ...(options.extraPublishedFiles ?? []), "piarium.extension.json"],
   scripts: {
     build: "piarium-extension build",
     check: "piarium-extension check",
@@ -76,6 +77,7 @@ const brokeredHostFiles = (options: {
   hostSource: string;
   id: string;
   name: string;
+  runtimeFiles?: Record<string, string>;
   summary: string;
 }): Record<string, string> => ({
   "piarium.extension.json": json({
@@ -95,14 +97,173 @@ const brokeredHostFiles = (options: {
     id: options.id,
     name: options.name,
     extraEntrypoints: { host: { source: "src/host.ts" } },
+    ...(options.runtimeFiles ? { extraPublishedFiles: ["runtime"] } : {}),
   }),
   "tsconfig.json": tsconfig(),
   "src/host.ts": options.hostSource,
+  ...options.runtimeFiles,
   "README.md": readme({
     name: options.name,
     summary: options.summary,
   }),
 });
+
+const languageServerRuntime = `const documents = new Map();
+let buffer = Buffer.alloc(0);
+
+const send = (message) => {
+  const payload = Buffer.from(JSON.stringify(message), "utf8");
+  process.stdout.write(Buffer.concat([
+    Buffer.from(\`Content-Length: \${payload.length}\\r\\n\\r\\n\`, "utf8"),
+    payload,
+  ]));
+};
+
+const positionToOffset = (text, position) => {
+  const lines = text.split("\\n");
+  let offset = 0;
+  for (let line = 0; line < Math.min(position?.line ?? 0, lines.length - 1); line += 1) {
+    offset += lines[line].length + 1;
+  }
+  return Math.min(offset + Math.max(0, position?.character ?? 0), text.length);
+};
+
+const applyChanges = (content, changes) => {
+  let next = content;
+  for (const change of changes) {
+    if (!change.range) {
+      next = change.text ?? next;
+      continue;
+    }
+    const from = positionToOffset(next, change.range.start);
+    const to = positionToOffset(next, change.range.end);
+    next = \`\${next.slice(0, from)}\${change.text ?? ""}\${next.slice(to)}\`;
+  }
+  return next;
+};
+
+const respond = (id, result) => send({ jsonrpc: "2.0", id, result });
+
+const handle = async (message) => {
+  if (message.method === "initialize" && message.id !== undefined) {
+    respond(message.id, { capabilities: { hoverProvider: true, textDocumentSync: 2 } });
+    return;
+  }
+  if (message.method === "shutdown" && message.id !== undefined) {
+    respond(message.id, null);
+    return;
+  }
+  if (message.method === "textDocument/hover" && message.id !== undefined) {
+    respond(message.id, { contents: { kind: "markdown", value: "Piarium language provider" } });
+    return;
+  }
+  if (message.method === "textDocument/didOpen") {
+    documents.set(message.params?.textDocument?.uri, message.params?.textDocument?.text ?? "");
+    return;
+  }
+  if (message.method === "textDocument/didChange") {
+    const uri = message.params?.textDocument?.uri;
+    documents.set(uri, applyChanges(documents.get(uri) ?? "", message.params?.contentChanges ?? []));
+    return;
+  }
+  if (message.method === "exit") process.exit(0);
+  if (message.id !== undefined) respond(message.id, null);
+};
+
+process.stdin.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (true) {
+    const headerEnd = buffer.indexOf("\\r\\n\\r\\n");
+    if (headerEnd < 0) return;
+    const match = /Content-Length:\\s*(\\d+)/i.exec(buffer.subarray(0, headerEnd).toString("utf8"));
+    if (!match) { buffer = buffer.subarray(headerEnd + 4); continue; }
+    const length = Number(match[1]);
+    const bodyStart = headerEnd + 4;
+    if (buffer.length < bodyStart + length) return;
+    const body = buffer.subarray(bodyStart, bodyStart + length).toString("utf8");
+    buffer = buffer.subarray(bodyStart + length);
+    void handle(JSON.parse(body));
+  }
+});
+`;
+
+const debugAdapterRuntime = `let buffer = Buffer.alloc(0);
+let nextSeq = 1;
+let program = "";
+let breakpoints = [];
+
+const send = (message) => {
+  const payload = Buffer.from(JSON.stringify({ seq: nextSeq++, ...message }), "utf8");
+  process.stdout.write(Buffer.concat([
+    Buffer.from(\`Content-Length: \${payload.length}\\r\\n\\r\\n\`, "utf8"),
+    payload,
+  ]));
+};
+const event = (name, body = {}) => send({ type: "event", event: name, body });
+const respond = (request, body = {}) => send({
+  type: "response",
+  request_seq: request.seq,
+  success: true,
+  command: request.command,
+  body,
+});
+
+const handle = (request) => {
+  const args = request.arguments ?? {};
+  if (request.command === "initialize") {
+    respond(request, { supportsConfigurationDoneRequest: true, supportsEvaluateForHovers: true });
+    event("initialized");
+    return;
+  }
+  if (request.command === "launch") { program = args.program ?? ""; respond(request); return; }
+  if (request.command === "setBreakpoints") {
+    breakpoints = (args.breakpoints ?? []).map(({ line }) => ({ line, verified: true }));
+    respond(request, { breakpoints });
+    return;
+  }
+  if (request.command === "configurationDone") {
+    respond(request);
+    event("stopped", { reason: "entry", threadId: 1, allThreadsStopped: true });
+    return;
+  }
+  if (request.command === "threads") { respond(request, { threads: [{ id: 1, name: "main" }] }); return; }
+  if (request.command === "stackTrace") {
+    respond(request, { stackFrames: [{ id: 1, name: "main", line: breakpoints[0]?.line ?? 1, column: 1, source: { path: program } }], totalFrames: 1 });
+    return;
+  }
+  if (request.command === "scopes") { respond(request, { scopes: [{ name: "Locals", variablesReference: 1, expensive: false }] }); return; }
+  if (request.command === "variables") { respond(request, { variables: [] }); return; }
+  if (request.command === "evaluate") { respond(request, { result: String(args.expression ?? "undefined"), variablesReference: 0 }); return; }
+  if (["continue", "next", "stepIn", "stepOut"].includes(request.command)) {
+    respond(request, { allThreadsContinued: true });
+    event("terminated");
+    return;
+  }
+  if (request.command === "pause") { respond(request); event("stopped", { reason: "pause", threadId: 1, allThreadsStopped: true }); return; }
+  if (request.command === "disconnect" || request.command === "terminate") {
+    respond(request);
+    setImmediate(() => process.exit(0));
+    return;
+  }
+  respond(request);
+};
+
+process.stdin.on("data", (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+  while (true) {
+    const headerEnd = buffer.indexOf("\\r\\n\\r\\n");
+    if (headerEnd < 0) return;
+    const match = /Content-Length:\\s*(\\d+)/i.exec(buffer.subarray(0, headerEnd).toString("utf8"));
+    if (!match) { buffer = buffer.subarray(headerEnd + 4); continue; }
+    const length = Number(match[1]);
+    const bodyStart = headerEnd + 4;
+    if (buffer.length < bodyStart + length) return;
+    const body = buffer.subarray(bodyStart, bodyStart + length).toString("utf8");
+    buffer = buffer.subarray(bodyStart + length);
+    handle(JSON.parse(body));
+  }
+});
+`;
 
 export const createInitFiles = (options: {
   id: string;
@@ -116,7 +277,8 @@ export const createInitFiles = (options: {
       name: options.name,
       capability: "workspace.language",
       description: `${options.name} language provider`,
-      hostSource: `import { defineLanguageProvider } from "@piarium/extension-sdk";\n\nexport default defineLanguageProvider({\n  providerId: ${JSON.stringify(`${options.id}.markdown`)},\n  command: "node",\n  args: ["./language-server.mjs"],\n  languageIds: ["markdown"],\n});\n`,
+      hostSource: `import { defineLanguageProvider } from "@piarium/extension-sdk";\n\nexport default defineLanguageProvider((context) => ({\n  providerId: ${JSON.stringify(`${options.id}.markdown`)},\n  command: process.execPath,\n  args: [context.assets.path("runtime/language-server.mjs")],\n  languageIds: ["markdown"],\n}));\n`,
+      runtimeFiles: { "runtime/language-server.mjs": languageServerRuntime },
       summary: "A brokered Host language provider. The Application Host spawns the server; this extension never starts a debugger or language process in the renderer.",
     });
   }
@@ -126,7 +288,8 @@ export const createInitFiles = (options: {
       name: options.name,
       capability: "workspace.debug",
       description: `${options.name} debug adapter`,
-      hostSource: `import { defineDebugAdapter } from "@piarium/extension-sdk";\n\nexport default defineDebugAdapter({\n  adapterId: ${JSON.stringify(`${options.id}.node`)},\n  command: "node",\n  args: ["./debug-adapter.mjs"],\n  languageIds: ["javascript"],\n});\n`,
+      hostSource: `import { defineDebugAdapter } from "@piarium/extension-sdk";\n\nexport default defineDebugAdapter((context) => ({\n  adapterId: ${JSON.stringify(`${options.id}.node`)},\n  command: process.execPath,\n  args: [context.assets.path("runtime/debug-adapter.mjs")],\n  languageIds: ["javascript"],\n}));\n`,
+      runtimeFiles: { "runtime/debug-adapter.mjs": debugAdapterRuntime },
       summary: "A brokered Host debug adapter. The Application Host spawns the DAP process; this extension never starts a debugger in the renderer.",
     });
   }
@@ -136,7 +299,7 @@ export const createInitFiles = (options: {
       name: options.name,
       capability: "workspace.test",
       description: `${options.name} test provider`,
-      hostSource: `import { defineTestProvider } from "@piarium/extension-sdk";\n\nexport default defineTestProvider({\n  providerId: ${JSON.stringify(`${options.id}.node-test`)},\n  command: "node",\n  args: ["./test-adapter.mjs"],\n  kind: "tap",\n});\n`,
+      hostSource: `import { defineTestProvider } from "@piarium/extension-sdk";\n\nexport default defineTestProvider({\n  providerId: ${JSON.stringify(`${options.id}.node-test`)},\n  kind: "node-test",\n});\n`,
       summary: "A brokered Host test provider. The Application Host spawns the test adapter; this extension never starts a test runner in the renderer.",
     });
   }

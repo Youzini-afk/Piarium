@@ -134,7 +134,11 @@ export const testProject = async (directory = "."): Promise<TestResult> => {
     if (!hostEntrypoint.file) throw new Error("Host entrypoint does not declare a file");
     const module = await moduleFromFile(entrypointTargetPath(project, hostEntrypoint.file));
     const extension = resolveHostExtensionModule(module);
-    await runHostExtensionConformance({ activation: extension.activate, extensionId: project.manifest.id });
+    await runHostExtensionConformance({
+      activation: extension.activate,
+      extensionId: project.manifest.id,
+      packageRoot: project.directory,
+    });
     host = "passed";
   }
   return { host, project, surfaces };

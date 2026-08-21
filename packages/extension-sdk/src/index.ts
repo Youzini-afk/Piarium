@@ -206,7 +206,13 @@ export interface PiariumHostStorageClient extends PiariumHostStorageDocumentClie
   open(request: PiariumExtensionStorageOpenRequest): Promise<PiariumHostStorageDocumentClient>;
 }
 
+export interface PiariumHostAssets {
+  /** Resolve a forward-slash package-relative file to its immutable local path. */
+  path(logicalPath: string): string;
+}
+
 export interface PiariumBrokeredHostContext {
+  readonly assets: PiariumHostAssets;
   readonly capabilities: PiariumHostCapabilityClient;
   effect(disposer: () => void | Promise<void>): void;
   readonly services: {
@@ -321,6 +327,10 @@ export type PiariumLanguageProviderDescriptor = {
   workspaceId?: string;
 };
 
+export type PiariumHostDescriptorFactory<TDescriptor> = (
+  context: PiariumBrokeredHostContext,
+) => TDescriptor | Promise<TDescriptor>;
+
 export interface PiariumWorkspaceLanguageClient {
   disposeWorkspace(workspaceId: string): Promise<JsonValue>;
   getStatus(workspaceId: string, languageId?: string): Promise<JsonValue>;
@@ -353,8 +363,9 @@ export const createWorkspaceLanguageClient = (
 });
 
 export const defineLanguageProvider = (
-  descriptor: PiariumLanguageProviderDescriptor,
+  input: PiariumLanguageProviderDescriptor | PiariumHostDescriptorFactory<PiariumLanguageProviderDescriptor>,
 ): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  const descriptor = typeof input === "function" ? await input(context) : input;
   const client = createWorkspaceLanguageClient(context.capabilities);
   await client.registerProvider({
     ...descriptor,
@@ -450,8 +461,9 @@ export const createWorkspaceTestClient = (
 });
 
 export const defineDebugAdapter = (
-  descriptor: PiariumDebugAdapterDescriptor,
+  input: PiariumDebugAdapterDescriptor | PiariumHostDescriptorFactory<PiariumDebugAdapterDescriptor>,
 ): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  const descriptor = typeof input === "function" ? await input(context) : input;
   const client = createWorkspaceDebugClient(context.capabilities);
   await client.registerAdapter({
     ...descriptor,
@@ -461,8 +473,9 @@ export const defineDebugAdapter = (
 });
 
 export const defineTestProvider = (
-  descriptor: PiariumTestProviderDescriptor,
+  input: PiariumTestProviderDescriptor | PiariumHostDescriptorFactory<PiariumTestProviderDescriptor>,
 ): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
+  const descriptor = typeof input === "function" ? await input(context) : input;
   const client = createWorkspaceTestClient(context.capabilities);
   await client.registerProvider({
     ...descriptor,

@@ -44,7 +44,7 @@ Optional `--template` values:
 | --- | --- |
 | `surface` | Default managed Surface page contribution |
 | `shell` | Framework-neutral `workbench.shell` replacement using `defineShellMount` |
-| `editor` | Custom editor contribution on `workbench.editor.actions` |
+| `editor` | Custom resource editor selected by language or filename |
 | `view` | Sidebar view on `workbench.primary-sidebar.views` |
 | `language` | Brokered Host language provider using `defineLanguageProvider` |
 | `debug` | Brokered Host debug adapter using `defineDebugAdapter` |
@@ -68,6 +68,12 @@ and sessions stay in Core even when a community Shell fully redraws the chrome.
 
 `@piarium/extension-react` remains optional. `defineReactShell`, `defineReactView`, and
 `defineReactEditor` wrap the same mount contract.
+
+Language, debug, and test helpers accept either a static descriptor or a function receiving the
+brokered Host context. Use `context.assets.path("runtime/server.mjs")` for an executable shipped in the
+extension package. Piarium resolves the path inside the immutable selected artifact; it is not relative
+to the workspace, application process, or private artifact layout. Package-relative paths cannot
+escape the extension package.
 
 An `editor` contribution declares at least one `data.languageIds` or `data.filenames` selector and may
 set a finite `data.priority`. It is a resource provider, not a toolbar action, so it does not need a
@@ -315,6 +321,10 @@ isolated module into the one final IIFE owned by its iframe/Worker realm.
 The output format follows the target extension (`.cjs` or `.mjs`) and otherwise `package.json`'s
 `type`. In a `"type": "module"` package, use a `.cjs` manifest target when the published entrypoint
 must be CommonJS.
+
+Files listed by `package.json.files` alongside `dist` remain package assets. The generated language
+and debug templates publish their runnable starter adapter under `runtime/` and resolve it with the
+Host asset API. The generated Node test template uses `kind: "node-test"`, so it needs no extra process.
 
 ## Check and test
 

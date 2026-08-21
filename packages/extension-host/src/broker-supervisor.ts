@@ -743,7 +743,11 @@ export class BrokeredHostSupervisor {
         };
       }
       storageSession.snapshot = storageSnapshot;
-      const activation = await broker.request("activate", { modulePath: artifact.modulePath, storage: storageSnapshot }) as BrokerActivationResult;
+      const activation = await broker.request("activate", {
+        modulePath: artifact.modulePath,
+        packageRoot: artifact.packageRoot,
+        storage: storageSnapshot,
+      }) as BrokerActivationResult;
       if (crashed) throw crashed;
       const provisions = this.#provisions(owner, broker, activation.provisions, selection.manifest);
       return {

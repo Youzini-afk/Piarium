@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,43 @@ import { testProject } from "../src/test-command.js";
 import { runCli } from "../src/cli.js";
 
 const temporaryDirectory = async (): Promise<string> => mkdtemp(join(tmpdir(), "piarium-extension-cli-test-"));
+
+const exchangeProtocolFrame = async (script: string, message: unknown): Promise<Record<string, unknown>> => {
+  const child = spawn(process.execPath, [script], { stdio: ["pipe", "pipe", "pipe"] });
+  const payload = Buffer.from(JSON.stringify(message), "utf8");
+  const response = await new Promise<Record<string, unknown>>((resolve, reject) => {
+    let settled = false;
+    let buffer = Buffer.alloc(0);
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+      child.kill();
+    };
+    const timer = setTimeout(() => finish(() => reject(new Error(`Protocol fixture did not respond: ${script}`))), 5_000);
+    child.once("error", (error) => finish(() => reject(error)));
+    child.once("exit", (code) => {
+      if (!settled) finish(() => reject(new Error(`Protocol fixture exited before responding (${code ?? "unknown"}): ${script}`)));
+    });
+    child.stdout.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      const headerEnd = buffer.indexOf("\r\n\r\n");
+      if (headerEnd < 0) return;
+      const match = /Content-Length:\s*(\d+)/i.exec(buffer.subarray(0, headerEnd).toString("utf8"));
+      if (!match) return;
+      const length = Number(match[1]);
+      const start = headerEnd + 4;
+      if (buffer.length < start + length) return;
+      finish(() => resolve(JSON.parse(buffer.subarray(start, start + length).toString("utf8")) as Record<string, unknown>));
+    });
+    child.stdin.write(Buffer.concat([
+      Buffer.from(`Content-Length: ${payload.length}\r\n\r\n`, "utf8"),
+      payload,
+    ]));
+  });
+  return response;
+};
 
 test("init writes a standalone managed Surface template and refuses overwrite", async () => {
   const root = await temporaryDirectory();
@@ -62,6 +100,19 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   });
   const host = await readFile(join(language.directory, "src/host.ts"), "utf8");
   assert.match(host, /defineLanguageProvider/);
+  assert.match(host, /context\.assets\.path\("runtime\/language-server\.mjs"\)/);
+  const languageRuntime = join(language.directory, "runtime/language-server.mjs");
+  await readFile(languageRuntime, "utf8");
+  const languageInitialize = await exchangeProtocolFrame(languageRuntime, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {},
+  });
+  assert.equal(languageInitialize.jsonrpc, "2.0");
+  assert.equal(languageInitialize.id, 1);
+  const languagePackage = JSON.parse(await readFile(join(language.directory, "package.json"), "utf8")) as { files?: string[] };
+  assert.ok(languagePackage.files?.includes("runtime"));
   const checked = await checkProject(language.directory);
   assert.deepEqual(checked.missingFiles, ["dist/host.cjs"]);
 
@@ -73,6 +124,18 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   });
   const debugHost = await readFile(join(debug.directory, "src/host.ts"), "utf8");
   assert.match(debugHost, /defineDebugAdapter/);
+  assert.match(debugHost, /context\.assets\.path\("runtime\/debug-adapter\.mjs"\)/);
+  const debugRuntime = join(debug.directory, "runtime/debug-adapter.mjs");
+  await readFile(debugRuntime, "utf8");
+  const debugInitialize = await exchangeProtocolFrame(debugRuntime, {
+    seq: 1,
+    type: "request",
+    command: "initialize",
+    arguments: { clientID: "test" },
+  });
+  assert.equal(debugInitialize.type, "response");
+  assert.equal(debugInitialize.request_seq, 1);
+  assert.equal(debugInitialize.success, true);
   const debugManifest = await readFile(join(debug.directory, "piarium.extension.json"), "utf8");
   assert.match(debugManifest, /workspace\.debug/);
 
@@ -84,6 +147,8 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   });
   const testHost = await readFile(join(tests.directory, "src/host.ts"), "utf8");
   assert.match(testHost, /defineTestProvider/);
+  assert.match(testHost, /kind:\s*"node-test"/);
+  assert.doesNotMatch(testHost, /test-adapter\.mjs/);
   const testManifest = await readFile(join(tests.directory, "piarium.extension.json"), "utf8");
   assert.match(testManifest, /workspace\.test/);
 });

@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { isAbsolute, relative, resolve } from "node:path";
 import type {
   JsonObject,
   JsonValue,
@@ -13,6 +14,7 @@ interface NativeHostExtension {
 }
 
 interface NativeHostContext {
+  assets: { path(logicalPath: string): string };
   capabilities: { call(capability: string, method: string, params: JsonValue): Promise<JsonValue> };
   effect(disposer: () => void | Promise<void>): void;
   services: {
@@ -27,6 +29,21 @@ interface NativeHostContext {
     update(data: JsonObject, expectedRevision?: number): Promise<PiariumExtensionStorageSnapshot>;
   };
 }
+
+const packageAssetPath = (packageRoot: string, logicalPath: string): string => {
+  if (!packageRoot || !isAbsolute(packageRoot)) {
+    throw new Error("Host package root is unavailable");
+  }
+  if (!logicalPath || logicalPath.includes("\\") || logicalPath.includes("\0") || isAbsolute(logicalPath)) {
+    throw new Error("Host asset path must be a non-empty package-relative path");
+  }
+  const target = resolve(packageRoot, ...logicalPath.split("/"));
+  const fromRoot = relative(packageRoot, target);
+  if (!fromRoot || fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
+    throw new Error(`Host asset path escapes the extension package: ${logicalPath}`);
+  }
+  return target;
+};
 
 interface NativeStorageDocumentClient {
   readonly snapshot: PiariumExtensionStorageSnapshot;
@@ -141,7 +158,11 @@ export class NativeHostTransport implements BrokeredHostTransport {
           { key: "state", scope: "application" },
           params.storage as PiariumExtensionStorageSnapshot,
         );
+        const packageRoot = String(params.packageRoot ?? "");
         const context: NativeHostContext = {
+          assets: {
+            path: (logicalPath) => packageAssetPath(packageRoot, logicalPath),
+          },
           capabilities: {
             call: (capability, capabilityMethod, capabilityParams) => this.#requestFromExtension(
               "capability.call",

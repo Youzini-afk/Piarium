@@ -37,6 +37,10 @@ debug adapters and test providers. Those processes are spawned only in the appli
 `defineDebugAdapter` and `defineTestProvider` unregister on dispose through `context.effect`.
 Renderers never start a debugger, test runner, or task process.
 
+Brokered Host code resolves packaged executables with `context.assets.path("runtime/tool.mjs")`.
+The returned path belongs to the immutable selected package artifact and does not depend on the
+workspace working directory. Provider helpers accept either a descriptor or a context factory.
+
 Public workbench constants (`PIARIUM_WORKBENCH_REPLACEMENT_TARGETS`, `PIARIUM_WORKBENCH_SLOTS`,
 `PIARIUM_WORKBENCH_CONTEXT_KEYS`) are re-exported from this package. `defineShellMount`,
 and `defineViewMount` share the generic mount contract. `defineEditorMount` additionally types

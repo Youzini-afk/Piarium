@@ -37,6 +37,8 @@ const writeHostExtension = async (
     provides: { services: [{ id: serviceId, version: 1 }] },
   }), "utf8");
   await writeFile(join(directory, "package.json"), JSON.stringify({ name: extensionId, version }), "utf8");
+  await mkdir(join(directory, "runtime"), { recursive: true });
+  await writeFile(join(directory, "runtime", "tool.mjs"), "export {};\n", "utf8");
   await writeFile(join(directory, "host.cjs"), `
 module.exports = {
   migrate(input) {
@@ -46,6 +48,7 @@ module.exports = {
     context.services.provide({ id: '${serviceId}', version: 1 }, {
       read() { return context.storage.snapshot.document.data.value || '${version}'; },
       generation() { return '${version}'; },
+      assetPath() { return context.assets.path('runtime/tool.mjs'); },
       async write(value) { await context.storage.update({ value }); return value; },
       crash() { setTimeout(() => process.exit(17), 100); return 'crashing'; }
     });
@@ -147,6 +150,9 @@ test("brokered Host storage, migration rollback, services, and crash isolation p
     });
     assert.equal(installed.extensions[0]?.selectedVersion, "1.0.0");
     assert.equal(await runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }), "1.0.0");
+    const assetPath = await runtime.invokeService({ args: [], method: "assetPath", serviceId, version: 1 });
+    assert.equal(typeof assetPath, "string");
+    assert.match(String(assetPath).replaceAll("\\", "/"), /\/package\/runtime\/tool\.mjs$/);
     assert.equal(await runtime.invokeService({ args: ["persisted"], method: "write", serviceId, version: 1 }), "persisted");
     assert.equal(await runtime.invokeService({ args: [], method: "read", serviceId, version: 1 }), "persisted");
 

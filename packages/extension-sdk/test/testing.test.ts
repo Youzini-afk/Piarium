@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 import { SurfaceExtensionRuntime } from "@piarium/extension-surface";
 import {
@@ -231,12 +232,21 @@ test("typed document and language clients plus workbench mounts are public SDK c
     languageIds: ["markdown"],
     providerId: "md",
   });
-  const provider = defineLanguageProvider({
-    command: "node",
-    languageIds: ["markdown"],
-    providerId: "md",
+  const packageRoot = join(process.cwd(), "extension-fixture");
+  const provider = defineLanguageProvider((context) => {
+    assert.equal(context.assets.path("runtime/server.mjs"), join(packageRoot, "runtime", "server.mjs"));
+    assert.throws(() => context.assets.path("../outside.mjs"), /escapes the extension package/);
+    return {
+      command: "node",
+      languageIds: ["markdown"],
+      providerId: "md",
+    };
   });
-  await runHostExtensionConformance({ activation: provider.activate, extensionId: "dev.example.language" });
+  await runHostExtensionConformance({
+    activation: provider.activate,
+    extensionId: "dev.example.language",
+    packageRoot,
+  });
   assert.equal(typeof defineShellMount, "function");
   assert.equal(typeof defineEditorMount, "function");
   const editorMount = defineEditorMount((_container, mount) => {

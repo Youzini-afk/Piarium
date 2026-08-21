@@ -322,6 +322,8 @@ test("authenticates the complete artifact index and rejects corrupt cache reuse"
     integrity,
     slot: "selected",
   });
+  const hostArtifact = await packages.resolveBrokeredHostEntrypoint(id, "selected", integrity);
+  assert.equal(await realpath(hostArtifact.packageRoot), await realpath(join(artifactRoot, "package")));
 
   const manifestTamper = structuredClone(originalIndex);
   manifestTamper.manifest.displayName = "Tampered snapshot";

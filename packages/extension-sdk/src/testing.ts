@@ -24,6 +24,7 @@ import type {
   PiariumHostServiceHandler,
   PiariumIsolatedSurfaceExtension,
 } from "./index.js";
+import { isAbsolute, relative, resolve } from "node:path";
 import {
   PIARIUM_WORKSPACE_DOCUMENTS_CAPABILITY,
   PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY,
@@ -222,6 +223,7 @@ export const runHostExtensionConformance = async (options: {
   activation: PiariumBrokeredHostExtension["activate"];
   extensionId: string;
   initialData?: JsonObject;
+  packageRoot?: string;
   storageSchemaVersion?: number;
 }): Promise<HostConformanceResult> => {
   const controller = new AbortController();
@@ -284,7 +286,21 @@ export const runHostExtensionConformance = async (options: {
     scope: "application",
   });
   const capabilities = createConformanceCapabilities();
+  const packageRoot = resolve(options.packageRoot ?? process.cwd());
   const context: PiariumBrokeredHostContext = {
+    assets: {
+      path: (logicalPath) => {
+        if (!logicalPath || logicalPath.includes("\\") || logicalPath.includes("\0") || isAbsolute(logicalPath)) {
+          throw new Error("Host asset path must be a non-empty package-relative path");
+        }
+        const target = resolve(packageRoot, ...logicalPath.split("/"));
+        const fromRoot = relative(packageRoot, target);
+        if (!fromRoot || fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
+          throw new Error(`Host asset path escapes the extension package: ${logicalPath}`);
+        }
+        return target;
+      },
+    },
     capabilities: {
       call: (capability, method, params) => capabilities.call(capability, method, params),
     },

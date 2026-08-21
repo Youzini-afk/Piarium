@@ -14,6 +14,10 @@ Each project can `npx piarium-extension build` and `npx piarium-extension test` 
 public SDK packages. Isolated document edits use the granted `workspace.documents` capability;
 disable destroys the isolated realm and leaves Core document/layout state in place.
 
+Language and debug projects include their starter protocol process in `runtime/`. Their Host
+entrypoint resolves that immutable package file with `context.assets.path`; it is never resolved
+relative to the user's workspace. The test template registers the built-in Node test provider.
+
 The generated custom-editor template is functional: it subscribes to Piarium's shared document,
 updates the authoritative unsaved buffer with an expected document version, and saves through the
 same controller. It does not create a second tab or file-content store.

@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const pending = new Map();
@@ -17,6 +18,21 @@ const send = (message) => {
 
 const errorMessage = (error) => error instanceof Error ? error.message : String(error);
 const storageKey = (address) => `${address?.scope || ''}\0${address?.key || ''}`;
+
+const packageAssetPath = (packageRoot, logicalPath) => {
+  if (!packageRoot || !isAbsolute(packageRoot)) {
+    throw new Error('Host package root is unavailable');
+  }
+  if (typeof logicalPath !== 'string' || logicalPath.length === 0 || logicalPath.includes('\\') || logicalPath.includes('\0') || isAbsolute(logicalPath)) {
+    throw new Error('Host asset path must be a non-empty package-relative path');
+  }
+  const target = resolve(packageRoot, ...logicalPath.split('/'));
+  const fromRoot = relative(packageRoot, target);
+  if (!fromRoot || fromRoot.startsWith('..') || isAbsolute(fromRoot)) {
+    throw new Error(`Host asset path escapes the extension package: ${logicalPath}`);
+  }
+  return target;
+};
 
 const createStorageClient = (request, initialSnapshot) => {
   const state = { snapshot: initialSnapshot };
@@ -102,7 +118,11 @@ const handleParentRequest = async (message) => {
         { key: 'state', scope: 'application' },
         message.params.storage,
       );
+      const packageRoot = String(message.params?.packageRoot || '');
       const context = {
+        assets: {
+          path: (logicalPath) => packageAssetPath(packageRoot, logicalPath),
+        },
         capabilities: {
           call: (capability, method, params) => requestParent('capability.call', { capability, method, params }),
         },
