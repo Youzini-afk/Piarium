@@ -43,9 +43,9 @@ import {
   mcpServerCommandArgument,
   parseMcpAdapterStatus,
   type McpAdapterServerSnapshot,
-  type McpAdapterServerStatus,
 } from './mcpAdapterStatus';
 import { McpStructuredConfigEditor } from './McpStructuredConfigEditor';
+import { McpServerStatusBadge } from './McpServerStatusBadge';
 import {
   canLeaveMcpConfigSource,
   mcpSourceBoundSnapshot,
@@ -59,22 +59,6 @@ import {
   setMcpCatalogEditorDirty,
   useMcpCatalogState,
 } from './mcp-catalog-store';
-
-const statusTone = (status: McpAdapterServerStatus): string => {
-  if (status === 'connected') return 'text-[var(--status-success)] bg-[var(--status-success)]/10';
-  if (status === 'failed') return 'text-[var(--status-error)] bg-[var(--status-error)]/10';
-  if (status === 'needs-auth') return 'text-[var(--status-warning)] bg-[var(--status-warning)]/10';
-  return 'text-muted-foreground bg-muted';
-};
-
-const statusLabelKey: Record<McpAdapterServerStatus, string> = {
-  cached: 'settings.piarium.mcp.runtime.status.cached',
-  connected: 'settings.piarium.mcp.runtime.status.connected',
-  disabled: 'settings.piarium.mcp.runtime.status.disabled',
-  failed: 'settings.piarium.mcp.runtime.status.failed',
-  'needs-auth': 'settings.piarium.mcp.runtime.status.needsAuth',
-  'not-connected': 'settings.piarium.mcp.runtime.status.notConnected',
-};
 
 const transportLabelKey = (kind: PiMcpConfigServer['transport']['kind']): string => (
   `settings.piarium.mcp.structured.transport.${kind === 'stdio'
@@ -551,9 +535,7 @@ export const McpPage: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-2">
                   <code className="typography-ui-label text-foreground">{selectedServer.name}</code>
                   {liveServer ? (
-                    <span className={cn('rounded-full px-2 py-0.5 typography-micro font-medium', statusTone(liveServer.status))}>
-                      {t(statusLabelKey[liveServer.status] as never)}
-                    </span>
+                    <McpServerStatusBadge status={liveServer.status} />
                   ) : null}
                 </div>
                 <div className="space-y-1 typography-meta text-muted-foreground">

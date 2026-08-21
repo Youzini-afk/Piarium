@@ -15,8 +15,26 @@ describe('IDE workbench layout document', () => {
     const projection = projectIdeWorkbenchLayout(parsed);
     expect(projection.activity).toBe('explorer');
     expect(projection.primaryVisible).toBe(true);
-    expect(projection.secondaryView).toBe('agent');
+    expect(projection.secondaryView).toBe('session');
     expect(projection.secondaryVisible).toBe(true);
+  });
+
+  test('migrates retired secondary views to sessions without dropping extension views', () => {
+    const legacy = structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT);
+    const secondary = legacy.nodes[IDE_LAYOUT_NODE_IDS.secondary];
+    if (!secondary || secondary.kind !== 'stack') throw new Error('expected secondary stack');
+    secondary.activeViewId = 'fleet';
+    secondary.viewIds = ['agent', 'context', 'fleet', 'recovery', 'example.extension-view'];
+
+    const parsed = parseIdeWorkbenchLayout(legacy);
+    const migrated = parsed.nodes[IDE_LAYOUT_NODE_IDS.secondary];
+    expect(migrated?.kind).toBe('stack');
+    expect(migrated?.kind === 'stack' ? migrated.activeViewId : undefined).toBe('session');
+    expect(migrated?.kind === 'stack' ? migrated.viewIds : []).toEqual([
+      'session',
+      'context',
+      'example.extension-view',
+    ]);
   });
 
   test('missing references and cycles are malformed rather than rewritten to defaults', () => {

@@ -14,9 +14,9 @@ import type { IconName } from '@/components/icon/icons';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
+import { McpQuickPopover } from '@/components/sections/mcp/McpQuickPopover';
 import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
-import { PiRecoveryPanel } from '@/components/layout/PiRecoveryPanel';
 import { ChatView } from '@/components/views/ChatView';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
@@ -69,8 +69,6 @@ import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then((module) => ({ default: module.SettingsWindow })));
-const FleetPage = lazyWithChunkRecovery(() => import('@/components/sections/fleet').then((module) => ({ default: module.FleetPage })));
-
 type SearchMode = 'files' | 'content';
 
 type FileSearchViewState =
@@ -143,10 +141,8 @@ const ACTIVITIES: ReadonlyArray<{ id: IdeWorkbenchActivityId; icon: IconName; la
 ];
 
 const SECONDARY_VIEWS: ReadonlyArray<{ id: IdeWorkbenchSecondaryId; labelKey: I18nKey }> = [
-  { id: 'agent', labelKey: 'workbench.ide.secondary.agent' },
+  { id: 'session', labelKey: 'workbench.ide.secondary.session' },
   { id: 'context', labelKey: 'workbench.ide.secondary.context' },
-  { id: 'fleet', labelKey: 'workbench.ide.secondary.fleet' },
-  { id: 'recovery', labelKey: 'workbench.ide.secondary.recovery' },
 ];
 
 const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory }) => {
@@ -518,6 +514,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               </TooltipTrigger>
               <TooltipContent>{t('workbench.ide.commandPalette')}</TooltipContent>
             </Tooltip>
+            <McpQuickPopover />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -686,9 +683,9 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 </div>
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                   <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews} />
-                  <div className={cn('h-full min-h-0', layout.secondaryView !== 'agent' && 'hidden')}>
+                  <div className={cn('h-full min-h-0', layout.secondaryView !== 'session' && 'hidden')}>
                     <ErrorBoundary>
-                      <ChatView active={layout.secondaryView === 'agent'} showWorkStatus />
+                      <ChatView active={layout.secondaryView === 'session'} showWorkStatus />
                     </ErrorBoundary>
                   </div>
                   {layout.secondaryView === 'context' ? (
@@ -697,10 +694,6 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                       fallback={<ProjectContextPanel />}
                     />
                   ) : null}
-                  {layout.secondaryView === 'fleet' ? (
-                    <React.Suspense fallback={null}><FleetPage /></React.Suspense>
-                  ) : null}
-                  {layout.secondaryView === 'recovery' ? <PiRecoveryPanel /> : null}
                 </div>
               </aside>
             </>

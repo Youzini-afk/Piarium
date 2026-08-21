@@ -12,7 +12,7 @@ const IDE_WORKBENCH_LAYOUT_VERSION = 1 as const;
 const WRITE_COALESCE_MS = 250;
 
 export type IdeWorkbenchActivityId = 'explorer' | 'search' | 'git' | 'run' | 'extensions';
-export type IdeWorkbenchSecondaryId = 'agent' | 'context' | 'fleet' | 'recovery';
+export type IdeWorkbenchSecondaryId = 'session' | 'context';
 
 export type PiariumIdeLayoutNode =
   | {
@@ -74,7 +74,8 @@ export const IDE_LAYOUT_NODE_IDS = {
 } as const;
 
 const ACTIVITY_VIEW_IDS: IdeWorkbenchActivityId[] = ['explorer', 'search', 'git', 'run', 'extensions'];
-const SECONDARY_VIEW_IDS: IdeWorkbenchSecondaryId[] = ['agent', 'context', 'fleet', 'recovery'];
+const SECONDARY_VIEW_IDS: IdeWorkbenchSecondaryId[] = ['session', 'context'];
+const RETIRED_SECONDARY_VIEW_IDS = new Set(['agent', 'fleet', 'recovery']);
 const BOTTOM_VIEW_IDS = ['terminal', 'problems', 'output', 'tasks'];
 
 export const DEFAULT_IDE_WORKBENCH_LAYOUT: PiariumIdeLayoutDocument = {
@@ -113,7 +114,7 @@ export const DEFAULT_IDE_WORKBENCH_LAYOUT: PiariumIdeLayoutDocument = {
     [IDE_LAYOUT_NODE_IDS.secondary]: {
       id: IDE_LAYOUT_NODE_IDS.secondary,
       kind: 'stack',
-      activeViewId: 'agent',
+      activeViewId: 'session',
       viewIds: SECONDARY_VIEW_IDS,
       visible: true,
     },
@@ -184,6 +185,18 @@ export const parseIdeWorkbenchLayout = (value: unknown): PiariumIdeLayoutDocumen
     throw new Error('Malformed IDE layout visibility');
   }
   const nodes = Object.fromEntries(Object.entries(value.nodes).map(([key, node]) => [key, parseNode(node, key)]));
+  const secondary = nodes[IDE_LAYOUT_NODE_IDS.secondary];
+  if (secondary?.kind === 'stack') {
+    const preserved = secondary.viewIds.filter((viewId) => (
+      !SECONDARY_VIEW_IDS.includes(viewId as IdeWorkbenchSecondaryId)
+      && !RETIRED_SECONDARY_VIEW_IDS.has(viewId)
+    ));
+    nodes[IDE_LAYOUT_NODE_IDS.secondary] = {
+      ...secondary,
+      activeViewId: secondary.activeViewId === 'context' ? 'context' : 'session',
+      viewIds: [...SECONDARY_VIEW_IDS, ...preserved],
+    };
+  }
   if (!nodes[value.rootId]) throw new Error('IDE layout root is missing');
   for (const node of Object.values(nodes)) {
     if (node.kind === 'split' && node.children.some((child) => !nodes[child])) {
@@ -252,7 +265,7 @@ export const projectIdeWorkbenchLayout = (document: PiariumIdeLayoutDocument): I
     primaryVisible: primary.visible,
     secondaryView: SECONDARY_VIEW_IDS.includes(secondary.activeViewId as IdeWorkbenchSecondaryId)
       ? secondary.activeViewId as IdeWorkbenchSecondaryId
-      : 'agent',
+      : 'session',
     secondaryVisible: secondary.visible,
     statusVisible: document.statusVisible,
   };
