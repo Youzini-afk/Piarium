@@ -18,6 +18,10 @@ const createFakeChild = () => {
   return child;
 };
 
+const finishWithOutput = (child, output, code = 0) => {
+  child.stdout.end(output, () => child.emit('close', code));
+};
+
 const matchLine = (absolutePath, preview) => JSON.stringify({
   type: 'match',
   data: {
@@ -46,8 +50,7 @@ describe('workspace content search', () => {
           const child = createFakeChild();
           queueMicrotask(() => {
             if (mode === 'ready') {
-              child.stdout.write(`${matchLine(notePath, 'todo item')}\n`);
-              child.emit('close', 0);
+              finishWithOutput(child, `${matchLine(notePath, 'todo item')}\n`);
               return;
             }
             if (mode === 'empty') {
@@ -143,7 +146,7 @@ describe('workspace content search', () => {
           queueMicrotask(() => {
             const output = `${matchLine(firstPath, 'first')}\n${matchLine(secondPath, 'second')}\n`;
             child.stdout.write(output.slice(0, 17));
-            child.stdout.write(output.slice(17));
+            finishWithOutput(child, output.slice(17));
           });
           return child;
         },
@@ -176,8 +179,7 @@ describe('workspace content search', () => {
         spawn: () => {
           const child = createFakeChild();
           queueMicrotask(() => {
-            child.stdout.write(`${matchLine(firstPath, 'first')}\n${matchLine(secondPath, 'second')}\n`);
-            child.emit('close', 0);
+            finishWithOutput(child, `${matchLine(firstPath, 'first')}\n${matchLine(secondPath, 'second')}\n`);
           });
           return child;
         },

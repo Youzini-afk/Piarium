@@ -18,6 +18,10 @@ const createFakeChild = () => {
   return child;
 };
 
+const finishWithOutput = (child, output, code = 0) => {
+  child.stdout.end(output, () => child.emit('close', code));
+};
+
 const matchLine = (absolutePath, preview) => JSON.stringify({
   type: 'match',
   data: {
@@ -81,8 +85,7 @@ describe('workspace search routes', () => {
         spawn: () => {
           const child = createFakeChild();
           queueMicrotask(() => {
-            child.stdout.write(`${matchLine(path.join(harness.workspaceRoot, 'alpha.ts'), 'alpha')}\n`);
-            child.emit('close', 0);
+            finishWithOutput(child, `${matchLine(path.join(harness.workspaceRoot, 'alpha.ts'), 'alpha')}\n`);
           });
           return child;
         },
