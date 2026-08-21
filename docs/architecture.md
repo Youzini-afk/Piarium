@@ -1,8 +1,8 @@
 # Piarium architecture
 
-Status: Pi-native engine cutover complete; plugin product surfaces and Windows release in progress
+Status: Pi-native engine and composable workbench delivered; Windows release in progress
 
-Last updated: 2026-08-19
+Last updated: 2026-08-21
 
 ## 1. Context
 
@@ -41,11 +41,16 @@ execution into an untrusted renderer.
 ## 4. Process model
 
 ```text
-OpenChamber-derived React renderer
+React renderer: Workbench Profile selects a shell extension
+    |- shared kernel: Document Registry, Editor Workbench, Pi session state
     |
-    | authenticated Piarium v1 WebSocket/postMessage surface protocol
+    | authenticated HTTP + SSE to the application host (documents, search,
+    | language, tasks, debug, tests)
+    | authenticated Piarium v1 WebSocket/postMessage surface protocol (Pi runtime)
     v
-OpenChamber-derived Electron/web shell + Piarium broker
+Application host: web/Electron shell + Piarium broker + extension host
+    |- LSP, DAP, test, and task supervisors
+    |- revisioned document authority and recovery journals
     |
     | Piarium protocol v1 over a private child-process IPC pipe
     v
@@ -57,16 +62,22 @@ Pi session worker (Node >=22.19)
     `- recovery capability adapter
 ```
 
+Electron does not add a parallel backend. It hosts the Web application host in-process, so the
+desktop renderer reaches the same HTTP/SSE/WebSocket surfaces over loopback rather than through a
+separate Electron IPC protocol. Only genuinely native capability — windows, menus, dialogs,
+notifications, updater — crosses the Electron preload boundary.
+
 ### 4.1 Renderer
 
-The renderer contains presentation and local view state only. It never imports Pi packages, reads
-credential files, or spawns commands. Current production roots do not load third-party Piarium
-Surface modules; the separately designed Piarium extension platform will add declared managed,
-isolated, and explicitly trusted Surface entrypoints without moving Pi extension execution into the
-renderer. Every native operation crosses a typed preload or runtime capability. OpenCode SDK types are removed from feature code rather
-than preserved behind a compatibility facade. The former SDK client, sync stores, optimistic
-session graph, old chat composer/turn projection, and old session sidebar have no parallel copy:
-their unreachable source and tests were deleted after all four production roots passed type,
+The renderer contains presentation, local view state, and the shared client-side kernel. It never
+imports Pi packages, reads credential files, or spawns commands. Production roots now mount a
+Workbench Profile whose shell is a Piarium extension, and the extension platform supports
+declarative, managed, isolated, and explicitly trusted-native Surface entrypoints. None of those
+modes authorize loading Pi extension code or private plugin state in the renderer. Every native
+operation crosses a typed preload or runtime capability. OpenCode SDK types are removed from feature
+code rather than preserved behind a compatibility facade. The former SDK client, sync stores,
+optimistic session graph, old chat composer/turn projection, and old session sidebar have no parallel
+copy: their unreachable source and tests were deleted after all four production roots passed type,
 lint, test, and bundle validation.
 
 Composer drafts are keyed by Pi runtime and session. Workspace surfaces may seed visible text and
@@ -172,6 +183,65 @@ the complete settings, package, model, extension event-bus, and custom UI surfac
 product. Pi's newer transport-neutral protocol is intentionally tracked, but its experimental
 server backend and current command set are not yet sufficient as the sole product foundation.
 
+### 4.5 Composable workbench and document authority
+
+The product UI is not a fixed shell. A Workbench Profile selects which extension provides
+`workbench.shell` and which contributions fill the activity bar, sidebars, editor area, panel, and
+status bar. Two profiles ship: `default` (Agent Workspace, labelled `Agent`) and `piarium.ide` (IDE
+Workbench). Both shells are ordinary built-in Piarium extensions —
+`piarium.builtin.agent-workspace` and `piarium.builtin.ide-workbench` — so a community extension can
+replace either one, or any individual seam, without a product build. There is no global `ideMode`
+branch. `@piarium/extension-contract` is the single owner of the target, slot, and context-key
+constants, and the profile document is revisioned so every mutation is expected-revision checked.
+
+Profile and layout resolution is layered. Layout layers merge `distribution → user → workspace`, and
+profile selection resolves `workspace → user → active`. Shell state is reported truthfully as
+`builtin`, `disabled`, `failed`, `missing`, or `ready`. A shell transition stages the candidate and
+commits the selection only after it mounts, so a failed, superseded, or revision-conflicting
+candidate leaves the previous generation active instead of producing a blank window. When no shell is
+active the fixed recovery path stays reachable. The IDE's own layout is a separate versioned
+split/stack/editor-area document held by the `piarium.workbench.layout` v1 host service in profile-
+and workspace-scoped extension storage; missing and empty documents fall back to the distribution
+default without writing it, while malformed or failed reads keep the last valid in-memory document
+and raise a diagnostic rather than overwriting host state.
+
+Text content has one authority. The application host owns a revisioned document service with
+workspace resolve, read, write, move, delete, an SSE watch, and crash-recovery journals, exposed
+through authenticated routes and a resource-scoped `workspace.documents` capability. Revisions are
+opaque and writes are expected-revision checked. Workspace identities and journals are scoped per
+application host, so another host never inherits a same-path selection. Watch events carry resource
+metadata only; file bodies never reach logs, event payloads, or URLs. `FilesAPI` remains
+browse/binary/CRUD and `WorkspaceAPI` remains project/tree/git/upload — the duplicate text
+read/write shapes were deleted rather than kept as alternates.
+
+On the client, a per-document registry keyed by `{workspaceId, resourceId}` holds buffers. It keeps
+`missing`, `binary`, `unsupported-encoding`, `deleted`, `error`, and `conflict` distinguishable from a
+successful empty read, models a real three-way conflict of ancestor plus disk against the live
+buffer, attributes external change to `agent` or `disk`, preserves edits typed while a save is in
+flight, and preserves encoding, BOM, and line endings. Editor groups, tabs, providers, commands,
+context keys, and the panel container live in a shared Editor Workbench Kernel that any shell mounts;
+high-frequency cursor and scroll state stays in memory rather than in broad shared state or
+per-keystroke persistence.
+
+Search, language, task, debug, and test capability is host-owned. The application host runs the LSP
+supervisor and a standard Debug Adapter Protocol implementation with its adapters, test providers,
+and task processes under workspace trust and owner generations; renderers send typed requests and
+never start a process. Language failures are typed and distinguishable — including
+`stale-completion`, `untrusted`, and `unsupported` — stale results are rejected, and hidden views
+perform no background work. Agent file changes reconcile with open editors explicitly: attachments
+are runtime- and session-scoped, unsaved buffers become explicit prompt text rather than implicit
+context, and patch accept/reject uses expected-revision writes so an agent edit cannot silently
+overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never
+confers process, debug, or test-runner capability.
+
+Surface parity is explicit rather than assumed. Agent Workspace declares web, desktop, and mobile;
+the official IDE Workbench declares web and desktop only. VS Code is a companion that opens Piarium,
+sends editor context, and bridges the workspace; run, debug, and test stay truthfully
+`absent`/`unsupported` there and the official IDE chrome is not loaded into its webview. See
+[vscode-companion.md](vscode-companion.md). The full workbench contract, performance requirements,
+and per-slice acceptance criteria are in
+[composable-workbench-execution-plan.md](composable-workbench-execution-plan.md).
+
 ## 5. Versioned host protocol
 
 `@piarium/protocol` defines the private worker JSONL envelopes and the message-oriented surface
@@ -222,6 +292,11 @@ accepted. UI disables unavailable actions instead of guessing from runtime versi
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
+| Workspace text documents | Application-host document authority; the file on disk | One revisioned read/write/watch path with opaque revisions; never a second text shape in `FilesAPI`/`WorkspaceAPI` |
+| Workspace identity and document recovery journals | Per-host records below `PIARIUM_DATA_DIR` | Scoped to the owning application host; another host never inherits a same-path selection |
+| Workbench profiles and layout layers | Revisioned profile document in extension host storage | Expected-revision mutations; distribution/user/workspace layering; profile selection never silently changes the desired extension set |
+| IDE editor layout | `piarium.workbench.layout` v1 service, profile- and workspace-scoped | Missing/empty use the distribution default without writing it; malformed keeps the last valid document and raises a diagnostic |
+| Open editors and unsaved buffers | Client Document Registry and Editor Workbench Kernel | Dirty buffers and view state are client-owned; disk revisions stay host-owned |
 
 ## 7. Pi extension integration architecture
 
@@ -318,12 +393,16 @@ the previous selected version and active generation. Web, bundled Electron, and 
 loader contract; VS Code owns its catalog in extension global storage and retains its no-blob-script
 CSP.
 
-The target platform makes built-in pages and workflows replaceable above a narrow recovery kernel,
-supports declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and
-defines truthful dynamic-disable guarantees for each mode. Its full target architecture and phased
-migration are specified in [piarium-extension-platform.md](piarium-extension-platform.md). None of
-those entrypoints authorize loading Pi extension code or private plugin state in the
-renderer.
+The platform makes built-in pages and workflows replaceable above a narrow recovery kernel, supports
+declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and defines
+truthful dynamic-disable guarantees for each mode. Its target architecture is specified in
+[piarium-extension-platform.md](piarium-extension-platform.md). None of those entrypoints authorize
+loading Pi extension code or private plugin state in the renderer.
+
+The workbench shell itself is now the largest consumer of this platform: both first-party working
+shapes are built-in extensions selected by profile, and the public authoring surface ships through
+`@piarium/extension-sdk`, `@piarium/extension-react`, and `@piarium/extension-cli` templates. See
+section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md).
 
 ## 8. Recovery model
 

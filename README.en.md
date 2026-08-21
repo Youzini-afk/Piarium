@@ -13,12 +13,18 @@ English | [简体中文](README.md)
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
-**A Pi-native workspace for coding agents, built for local work and usable across desktop, web,
-editors, and mobile clients.**
+**A Pi-native, recomposable workspace for coding agents: built for local work and usable across
+desktop, web, editors, and mobile clients.**
 
 Piarium turns the [Pi coding agent](https://github.com/earendil-works/pi) into a complete product
 workspace. It uses Pi's public SDK, session tree, package manager, and extension model directly—no
 terminal scraping and no permanent OpenCode compatibility layer.
+
+Its interface is not a fixed shell. Piarium ships two first-party working shapes — an **Agent
+Workspace** centered on sessions, tasks, and context, and an **IDE Workbench** centered on editors,
+search, Git, diagnostics, and debugging with the agent as a dockable panel — and both are ordinary
+Piarium extensions selected by a Workbench Profile, so you can replace either one or any individual
+part of it.
 
 > [!IMPORTANT]
 > Piarium is pre-1.0 and under active development. Product surfaces and the private runtime protocol
@@ -41,8 +47,17 @@ terminal scraping and no permanent OpenCode compatibility layer.
   plugins that own that history.
 - **Custom providers:** configure Pi-native provider layers, authentication, model discovery, and
   custom endpoints without mirroring credentials into renderer storage.
-- **Multiple product surfaces:** a shared React UI powers Electron, Web, VS Code, and the Capacitor
-  mobile shell through explicit runtime capabilities.
+- **A recomposable workbench:** pick the Agent or IDE profile, or build your own. Replace the whole
+  shell or just the navigation, editor, panel, composer, timeline, or status bar, and mix first-party
+  with community contributions. Switching happens live, without reloading documents, restarting the
+  Pi runtime, or losing shared workspace state.
+- **Editor-grade infrastructure:** one revisioned document authority with real conflict handling,
+  shared editor groups on CodeMirror 6, workspace search, host-owned language servers, and a
+  standards-conformant debug adapter. Agent edits reconcile with your unsaved buffers instead of
+  overwriting them.
+- **Multiple product surfaces:** a shared React UI powers Electron, Web, and the Capacitor mobile
+  shell through explicit runtime capabilities, with VS Code as a companion that brings editor context
+  to Piarium rather than a second workbench.
 - **Cloud and remote operation:** authenticated WebSocket access, relay/tunnel support,
   multi-architecture containers, and atomic SSH deployment with health validation and rollback.
 
@@ -173,8 +188,9 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 Open `http://127.0.0.1:3000` and use the generated password. Put a TLS reverse proxy or an approved
-tunnel in front of any Internet-facing deployment. For production, set `PIARIUM_IMAGE` to a tested
-immutable digest instead of relying on a floating tag.
+tunnel in front of any Internet-facing deployment; see [reverse proxy setup](docs/REVERSE_PROXY.md)
+for the required forwarding rules. For production, set `PIARIUM_IMAGE` to a tested immutable digest
+instead of relying on a floating tag.
 
 If the agent needs to compile Python, Java, Go, or Rust inside the container, apply the toolbelt
 overlay:
@@ -191,9 +207,13 @@ complete persistent-path, environment, container, and SSH rollback contract is d
 
 ```mermaid
 flowchart LR
-    S["Electron / Web / VS Code / Mobile"] --> C["@piarium/runtime-client"]
+    S["Renderer: a Workbench Profile selects the shell extension"] --> C["@piarium/runtime-client"]
+    S --> D["Documents, search, language, and run APIs"]
     C --> T["Authenticated WebSocket or editor transport"]
-    T --> B["@piarium/runtime-broker"]
+    T --> A["Application host: the @piarium/web service"]
+    D --> A
+    A --> B["@piarium/runtime-broker"]
+    A --> L["LSP, DAP, test, and task supervisors"]
     B --> H["Isolated @piarium/pi-host workers"]
     H --> P["Pi SDK + trusted Pi packages"]
 ```
@@ -201,6 +221,12 @@ flowchart LR
 The broker owns a catalog worker plus per-session workers. A renderer reload does not terminate an
 active task, and a Pi worker failure does not crash the renderer. Protocol DTOs cross the process
 boundary; SDK callbacks, credential objects, and extension implementation details do not.
+
+The application host is the single trusted backend. It owns the revisioned document authority,
+workspace search, language servers, and debug/test/task processes, so renderers send typed requests
+and never start a process. Electron runs that same host in its main process rather than adding a
+parallel desktop backend; only native capability such as windows, menus, and dialogs crosses the
+Electron preload boundary.
 
 Third-party Pi packages are executable code with the user's operating-system permissions. Piarium
 shows observed capabilities and gates project-local executable resources, but it does not claim to
@@ -220,8 +246,14 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 | `packages/runtime-client` | Browser-safe runtime request/event client |
 | `packages/runtime-broker` | Catalog/session worker ownership, routing, and shutdown |
 | `packages/pi-host` | Isolated Node worker embedding the Pi SDK and extensions |
+| `packages/extension-contract` | Manifest, contribution, workbench, service, and discovery contracts |
+| `packages/extension-surface` | Framework-neutral owner scopes and transactional Surface registries |
+| `packages/extension-sdk`, `-react`, `-cli` | Public authoring SDK, React adapter, and author tooling |
+| `packages/extension-host` | Trusted application-host catalog, artifacts, storage, and services |
+| `packages/extension-loader` | Authenticated managed Surface module loader and isolated realms |
+| `packages/extension-builtins` | Manifests for Piarium's built-in extensions, including both shells |
 | `packages/docs` | User-facing documentation site source |
-| `docs` | Architecture, migration, recovery, plugin, cloud, and security contracts |
+| `docs` | Architecture, workbench, migration, recovery, plugin, cloud, and security contracts |
 | `scripts` | Development, release, cloud build, deployment, and validation tooling |
 
 ## Development and validation
@@ -253,6 +285,9 @@ Before contributing, read [CONTRIBUTING.en.md](.github/CONTRIBUTING.en.md) and t
 
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
+- [Composable workbench and IDE contract](docs/composable-workbench-execution-plan.md)
+- [Piarium extension platform](docs/piarium-extension-platform.md)
+- [VS Code companion migration](docs/vscode-companion.md)
 - [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)
 - [Plugin GUI and ownership design](docs/plugin-gui-design.md)
 - [Recovery model](docs/recovery.md)

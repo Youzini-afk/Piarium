@@ -1,6 +1,32 @@
 # Delivery roadmap
 
-Each phase is a separately tested, committed, and pushed recovery point.
+Status: Pi-native engine and composable workbench delivered; Windows release is the open boundary
+
+Last updated: 2026-08-21
+
+Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
+ledger, not a specification: it records what shipped and what remains. The Git history is the
+authoritative record of delivery, and each phase names the design document that owns its contract.
+
+## Phase status
+
+| Phase | Scope | Status |
+| --- | --- | --- |
+| 0 | Foundation: contracts, workspaces, bounded JSONL protocol | Complete |
+| 1 | Pi host: runtime discovery, SDK worker lifecycle, sessions | Complete |
+| 2 | Desktop integration prototype | Superseded by Phase 4 |
+| 3 | Recovery semantics prototype | Superseded by Phase 6 |
+| 4 | OpenChamber fork product base | Complete |
+| 5 | Direct Pi-native engine migration | Complete |
+| 6 | Recovery UX and ecosystem integrations | Complete |
+| 7 | Windows release | **In progress** — the only open product boundary |
+| 8 | OpenChamber upstream capability absorption | Complete |
+| 9 | Piarium extension platform | Complete |
+| 10 | Composable workbench and IDE Workbench | Delivered; convergence run unrecorded |
+
+Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
+retained contracts, but their implementations were deliberately removed rather than maintained in
+parallel; do not treat them as live design authority.
 
 ## Phase 0 — Foundation (complete)
 
@@ -34,7 +60,9 @@ with a fake provider, exercises extension UI, and shuts down without a child pro
 
 Acceptance: the prototype proved the broker/preload/session path before its temporary shell was
 removed in favor of the imported OpenChamber product base. Its protocol and host work continue in
-the maintained packages rather than a parallel desktop application.
+the maintained packages rather than a parallel desktop application. The prototype's process and
+security boundary is recorded in [phase-2-desktop.md](phase-2-desktop.md); read it as provenance for
+the retained Electron boundary, not as the current desktop specification.
 
 ## Phase 3 — Recovery semantics prototype (superseded)
 
@@ -61,7 +89,12 @@ acceptance is now the plugin-backed Phase 6 contract below.
 Acceptance: the imported product shell builds in Piarium and fork-specific regression coverage is
 retained before engine surgery begins.
 
-## Phase 5 — Direct Pi-native engine migration
+## Phase 5 — Direct Pi-native engine migration (complete)
+
+This phase replaced the imported OpenCode engine with Piarium-owned Pi contracts. The architectural
+result is specified in [architecture.md](architecture.md); the source and non-regression contract is
+[openchamber-pi-migration.md](openchamber-pi-migration.md). The entries below are the delivery
+record, kept at full detail because each one names an ownership decision that is still binding.
 
 - Implemented foundation: reusable Pi protocol client, browser-safe surface client, and
   catalog/per-session worker broker; Electron owns its handshake, packaged entry verification,
@@ -171,10 +204,14 @@ retained before engine surgery begins.
 Acceptance: the OpenChamber-derived product runs its complete chat/session/provider journey on Pi
 without starting or bundling OpenCode and without a permanent OpenCode compatibility facade.
 
-## Phase 6 — Recovery UX and ecosystem integrations
+## Phase 6 — Recovery UX and ecosystem integrations (complete)
 
-Implementation follows the native-ownership and per-adapter acceptance contract in
-[plugin-gui-design.md](plugin-gui-design.md).
+This phase built the recovery interaction model and the first-class plugin adapters without forking
+any plugin. Implementation follows the native-ownership and per-adapter acceptance contract in
+[plugin-gui-design.md](plugin-gui-design.md); the per-adapter delivery contract is
+[community-extension-adaptation-execution-plan.md](community-extension-adaptation-execution-plan.md);
+currently verified plugin versions and their evidence live in
+[extension-compatibility.md](extension-compatibility.md).
 
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across
   application settings; manage `pi-workspace-history` and `pi-wtf` through Pi's native package
@@ -291,6 +328,11 @@ an integration smoke test without exposing credentials.
 
 ## Phase 7 — Windows release (in progress)
 
+This is the only open product boundary. Desktop runtime discovery, install planning, and the unsigned
+x64 pipeline are done; the remaining work is installer graph hygiene, an optional offline
+distribution, and clean-profile release journeys. Packaging commands and signing live in
+[packages/electron/README.md](../packages/electron/README.md).
+
 - Implemented: Electron's Node mode hosts the compiled Piarium Host bootstrap and broker; running the
   desktop shell requires no separate Node download. Windows product/installer identity and GitHub
   updater metadata target `Youzini-afk/Piarium`.
@@ -382,3 +424,141 @@ activation/update leaves no partial effects and preserves the previous generatio
 Piarium extension lifecycle/configuration remain independent; every shared contract has explicit
 Web, Electron, VS Code, hosted-mobile, Capacitor, and headless behavior; the recovery kernel can
 always enter safe mode with non-kernel extensions disabled.
+## Phase 10 — Composable workbench and IDE Workbench (delivered)
+
+The complete target architecture, product decisions, and per-slice acceptance contract are specified
+in [composable-workbench-execution-plan.md](composable-workbench-execution-plan.md). That plan uses
+its own internal slice numbering 1–11; the numbering below matches it so the two documents can be
+read together.
+
+This phase turned Piarium from a fixed agent workspace into a workspace platform whose entire UI can
+be recomposed or replaced by Piarium extensions, and delivered two first-party working shapes on top
+of it:
+
+- **Agent Workspace** — sessions, tasks, Fleet, context, and recovery at the center.
+- **IDE Workbench** — projects, editors, search, Git, terminal, diagnostics, and debugging at the
+  center, with the agent as a first-class dockable panel.
+
+Neither is a hard-coded mode. Both are ordinary first-party Piarium extensions selected through a
+Workbench Profile. There is no global `ideMode`/`agentMode` branch, no second application, and no
+fork of Code OSS. CodeMirror 6 remains the single editor engine; Monaco is not maintained in
+parallel. Pi Packages and Pi Plugin Settings keep their independent lifecycle and native authority
+and are not folded into the Piarium extension lifecycle.
+
+Stable identities established by this phase:
+
+| Identity | Value |
+| --- | --- |
+| Agent profile | `default`, label `Agent` |
+| IDE profile | `piarium.ide`, label `IDE` |
+| Agent Workspace extension | `piarium.builtin.agent-workspace` |
+| IDE Workbench extension | `piarium.builtin.ide-workbench` |
+| Declared shell surfaces | Agent: web, desktop, mobile. IDE: web, desktop only |
+| IDE layout service | `piarium.workbench.layout` v1 |
+| Profile document schema | `PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION = 1` |
+
+Each built-in shell contribution is its extension ID suffixed with `.shell`.
+
+### Delivered slices
+
+1. **Workbench composition foundation.** `@piarium/extension-contract` is the single owner of the
+   workbench seams: replacement targets (including `workbench.shell`, `activity`, `primary-sidebar`,
+   `editor`, `secondary-sidebar`, `panel`, `status` alongside the existing agent-era targets),
+   contribution slots, and editor/debug/test/task context keys. The profile document carries a
+   revision and every mutation is `expectedRevision`-checked. Layout layers merge
+   `distribution → user → workspace`; profile selection resolves `workspace → user → active`. Shell
+   state is reported truthfully as one of `builtin`, `disabled`, `failed`, `missing`, or `ready`.
+   `@piarium/extension-host` persists the document, the Web application host serves it, and the UI
+   stages a candidate shell and only commits the selection after it mounts, so a failed or superseded
+   candidate leaves the previous shell active. Profile selection never silently changes the desired
+   extension set.
+2. **Workspace identity and DocumentsAPI.** The application host owns one revisioned document
+   authority (`packages/web/server/lib/documents`) with workspace resolve/read/write/move/delete, an
+   SSE watch, and crash-recovery journals behind authenticated `/api/documents/*` routes plus a
+   resource-scoped `workspace.documents` host capability. Revisions are opaque and writes are
+   expected-revision checked. Workspace IDs and journals are scoped per application host, so another
+   host never inherits a same-path selection. Watch events carry resource metadata only; file bodies
+   never reach logs, event payloads, or URLs. Shared contract fixtures hold Web and VS Code to the
+   same behavior, and Electron continues to reuse the Web host in-process instead of gaining a
+   generic filesystem IPC. `FilesAPI` stays browse/binary/CRUD and `WorkspaceAPI` stays
+   project/tree/git/upload; the duplicate text read/write shapes were deleted rather than kept.
+3. **Document Registry and editor migration.** A per-document external store
+   (`packages/ui/src/lib/documents`) became the only client-side text authority, keyed by
+   `{workspaceId, resourceId}`. It distinguishes `missing`, `binary`, `unsupported-encoding`,
+   `deleted`, `error`, and `conflict` from a successful empty read; models a real three-way conflict
+   (ancestor plus disk versus live buffer); attributes external change to `agent` or `disk`; and
+   preserves edits typed while a save is in flight. Encoding, BOM, and line endings are preserved.
+   Crash recovery restores drafts without silently writing to disk.
+4. **Editor Workbench Kernel.** Editor groups, tabs, preview/pinned state, resource providers,
+   owner-scoped commands, context keys, menus, and the terminal/problems/output panel container were
+   extracted into a shared kernel any shell can mount. High-frequency cursor and scroll state stays
+   in memory on the tab view state; snapshots are explicit and structurally debounced rather than
+   per-keystroke; dirty buffers remain in the Document Registry. `FilesView` became a composition of
+   the sidebar tree and the shared editor area with no second document or tab model, and legacy open
+   paths migrate once into the kernel.
+5. **Agent Workspace as a built-in extension.** The existing default workspace was re-registered as
+   an ordinary built-in Piarium extension contributing a shell, rather than remaining the hard-coded
+   application root.
+6. **Official IDE Workbench profile.** The IDE shell ships as a built-in extension declaring web and
+   desktop support only; mobile and VS Code deliberately do not claim it. Its layout is a versioned
+   split/stack/editor-area document in profile- and workspace-scoped extension storage: missing and
+   empty documents fall back to the distribution default without writing it, while malformed or
+   failed reads keep the last valid in-memory document and raise a diagnostic instead of overwriting
+   host state. Existing profile documents are migrated in place to gain the IDE profile and its
+   distribution shell layers.
+7. **Search and language services.** Streaming workspace content search and a host-owned language
+   service supervisor (JSON-RPC transport, server registry, TypeScript server and service, capability
+   gating, fixture server) landed in the application host, with a renderer-side registry that binds
+   diagnostics into the Problems panel and into CodeMirror. Failures are typed and distinguishable —
+   `failed`, `untrusted`, `stale-completion`, `unsupported` — stale diagnostic versions are dropped,
+   and hidden views start no language servers.
+8. **Agent and editor transactions.** Agent file changes and open editors are reconciled explicitly
+   (`packages/ui/src/lib/agent-editor`): attachments are runtime- and session-scoped, unsaved buffers
+   become explicit prompt text rather than implicit context, tool path hints never override
+   DocumentsAPI watches, and patch accept/reject writes go through expected-revision writes so an
+   agent edit cannot silently overwrite a dirty buffer.
+9. **Public Workbench SDK.** The workbench authoring surface was exposed through the existing
+   published packages — `@piarium/extension-sdk` (plus its testing entry), `@piarium/extension-react`,
+   and `@piarium/extension-cli` project templates — rather than by adding another package. Authoring
+   documentation, runnable examples, and a public-state Extension Inspector in Extensions settings
+   shipped with it, localized across every shipped locale.
+10. **Run, debug, and test workbench.** The application host owns task processes, test providers, and
+    a standard Debug Adapter Protocol implementation with content-length framing, a debug supervisor,
+    and a Node adapter; `RuntimeAPIs` gained `tasks`, `debug`, and `tests`. Renderers never start a
+    debugger or a task process. Run views hold SSE subscriptions only while visible and drop them
+    when hidden. Agent attachments may quote a test failure or stack frame as prompt text but never
+    confer process, debug, or test-runner capability.
+11. **VS Code Companion transition.** With the official IDE covering the editor path on Web and
+    Electron, the VS Code extension was reduced to a companion: it opens and focuses Piarium, sends
+    editor context, switches sessions, and keeps the workspace bridge. The parallel Settings panel,
+    session editor tabs, and agent-management shell were removed rather than maintained as a second
+    product UI. Run, debug, and test remain truthfully `absent`/`unsupported` there, and the official
+    IDE chrome is not loaded into the VS Code webview. The migration contract, including deep links
+    and the keep/migrate/refuse disposition, is [vscode-companion.md](vscode-companion.md).
+
+### Hardening after the slices
+
+Follow-up work made several invariants explicit rather than incidental: document authority
+invariants, transactional workbench shell transitions, the editor workbench as the authoritative tab
+owner, per-provider workbench lifecycle isolation, public editor contribution mounting,
+revision-safe agent editor merges, durability-aware runtime switches, incremental editor change
+synchronization, standards-conformant debug adapter behavior, authoritative run panel state,
+complete streaming search results, IDE file actions routed through workbench owners, built-in
+workbench service initialization ordered after reconciliation, and cloud workspace restore after
+authentication.
+
+Acceptance: Agent and IDE both register as ordinary built-in extension manifests with no `ideMode`
+ownership branch; profile selection and extension-set application stay separate and separately
+failable; a shell commits only after its candidate is ready and the recovery path stays reachable
+when no shell is active; one DocumentsAPI owns content with expected-revision atomic writes and
+distinguishable missing/empty/binary/failure/conflict states; editor groups, multiple dirty
+documents, and multiple views of one document behave correctly across a profile switch; hidden views
+perform no background work; language, debug, and test results are provider-isolated with stale
+results rejected and project trust enforced at the host; and no Pi plugin private state is copied
+into the renderer.
+
+Not yet recorded: the plan's final convergence verification run (full workspace type-check/lint,
+public package build/pack/conformance, production Web build, Electron bundled and Windows
+package/smoke, hosted cloud smoke, mobile Agent Profile smoke, VS Code Companion package, and a
+`dead-code` plus docs validation pass) has no evidence in this repository. Treat Phase 10 as
+delivered but not release-verified until that run is recorded here.
