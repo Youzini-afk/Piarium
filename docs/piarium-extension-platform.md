@@ -2,7 +2,7 @@
 
 Status: implemented through Phase I
 
-Last updated: 2026-08-14
+Last updated: 2026-08-21
 
 ## 1. Decision
 

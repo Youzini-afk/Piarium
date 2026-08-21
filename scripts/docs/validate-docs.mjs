@@ -1,5 +1,17 @@
-import { readdir, readFile } from "node:fs/promises"
+import { execFile } from "node:child_process"
+import { readdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
+import { promisify } from "node:util"
+
+import {
+  REQUIRED_STATUS_HEADER_DOCS,
+  checkLastUpdated,
+  collectLocalLinkTargets,
+  findOrphanDocs,
+  readStatusHeader,
+} from "./engineering-docs.mjs"
+
+const execFileAsync = promisify(execFile)
 
 const repoRoot = path.resolve(import.meta.dirname, "..", "..")
 const docsRoot = path.join(repoRoot, "packages", "docs")
@@ -40,6 +52,136 @@ function hasFrontmatterKey(content, key) {
   return new RegExp(`^${key}:\\s*.+$`, "m").test(hit[1])
 }
 
+async function git(args) {
+  try {
+    const { stdout } = await execFileAsync("git", args, { cwd: repoRoot })
+    return stdout
+  } catch {
+    return null
+  }
+}
+
+/** Engineering docs are the repo-level contracts, not the user-facing docs site. */
+async function engineeringDocPaths() {
+  const tracked = await git(["ls-files", "--", "AGENTS.md", "README.md", "README.en.md", "docs"])
+  if (tracked === null) return null
+  return tracked
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith(".md"))
+}
+
+async function exists(absolutePath) {
+  try {
+    await stat(absolutePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Validate the engineering docs: link integrity, honest status headers, and no orphaned documents.
+ * Skipped with a notice when git is unavailable, since file discovery and dates both depend on it.
+ */
+async function validateEngineeringDocs(errors) {
+  const files = await engineeringDocPaths()
+  if (files === null || files.length === 0) {
+    console.log("Engineering docs validation skipped: git file listing unavailable.")
+    return { checked: 0, links: 0 }
+  }
+
+  const modified = new Set(
+    (await git(["diff", "--name-only", "HEAD"]) ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+  )
+  const today = new Date().toISOString().slice(0, 10)
+
+  // A shallow clone has no per-file history: git reports the single fetched commit for every path,
+  // which would fail every document whose header predates it. Skip the date comparison instead of
+  // reporting dates we cannot actually determine.
+  const shallow = (await git(["rev-parse", "--is-shallow-repository"]))?.trim() === "true"
+  if (shallow) {
+    console.log("Engineering docs: 'Last updated' comparison skipped on a shallow clone.")
+  }
+
+  const referencedPaths = new Set()
+  let linkCount = 0
+
+  for (const file of files) {
+    const body = await readFile(path.join(repoRoot, file), "utf8")
+    const fileDir = path.posix.dirname(file)
+
+    for (const target of collectLocalLinkTargets(body)) {
+      linkCount += 1
+      const resolved = path.posix.normalize(path.posix.join(fileDir, target))
+      if (!(await exists(path.join(repoRoot, resolved)))) {
+        errors.push(`${file}: link target does not exist: ${target}`)
+        continue
+      }
+      // A self-link must not let a document vouch for its own reachability.
+      if (resolved !== file) referencedPaths.add(resolved)
+    }
+
+    const { status, lastUpdated } = readStatusHeader(body)
+    if (REQUIRED_STATUS_HEADER_DOCS.includes(file)) {
+      if (status === null) errors.push(`${file}: missing a 'Status:' header line`)
+      if (lastUpdated === null) errors.push(`${file}: missing a 'Last updated:' header line`)
+    }
+
+    const lastCommitDate = shallow
+      ? null
+      : (await git(["log", "-1", "--format=%ad", "--date=short", "--", file]))?.trim() || null
+
+    const problem = checkLastUpdated({
+      lastUpdated,
+      lastCommitDate,
+      hasUncommittedChanges: modified.has(file),
+      today,
+    })
+    if (problem) errors.push(`${file}: ${problem}`)
+  }
+
+  // A document nothing links to cannot be noticed when it goes stale. `docs/` is the index surface,
+  // so only require inbound references there; READMEs and AGENTS.md are entry points by definition.
+  const candidates = files.filter((file) => file.startsWith("docs/"))
+  const reachable = new Set(referencedPaths)
+  for (const extra of await extraReferenceSources()) reachable.add(extra)
+
+  for (const orphan of findOrphanDocs({ candidates, referencedPaths: reachable })) {
+    errors.push(
+      `${orphan}: no other document, page, or source file links to it. `
+      + "Link it from docs/roadmap.md, docs/architecture.md, or a README so it cannot drift unnoticed.",
+    )
+  }
+
+  return { checked: files.length, links: linkCount }
+}
+
+/**
+ * Reference targets from outside the engineering docs: the docs site, skills, and source comments
+ * all legitimately anchor a document.
+ */
+async function extraReferenceSources() {
+  const listed = await git(["ls-files", "packages/docs", ".agents", ".github"])
+  if (listed === null) return []
+  const paths = listed.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
+  const referenced = new Set()
+
+  for (const file of paths) {
+    if (!/\.(md|mdx|json|ts|tsx|js|mjs|yml|yaml)$/.test(file)) continue
+    const body = await readFile(path.join(repoRoot, file), "utf8").catch(() => null)
+    if (body === null) continue
+    for (const match of body.matchAll(/(?:\.\.\/)*(?:docs\/)?([A-Za-z0-9._-]+\.md)\b/g)) {
+      referenced.add(`docs/${match[1]}`)
+    }
+  }
+
+  return [...referenced]
+}
+
 async function run() {
   const filePaths = (await walk(contentRoot)).filter((p) => p.endsWith(".mdx"))
   const routeSet = new Set()
@@ -71,6 +213,8 @@ async function run() {
     }
   }
 
+  const engineering = await validateEngineeringDocs(errors)
+
   if (errors.length > 0) {
     console.error("Docs validation failed:")
     for (const error of errors) {
@@ -79,7 +223,10 @@ async function run() {
     process.exit(1)
   }
 
-  console.log(`Docs validation passed: ${filePaths.length} pages, ${links.length} sidebar links.`)
+  console.log(
+    `Docs validation passed: ${filePaths.length} pages, ${links.length} sidebar links, `
+    + `${engineering.checked} engineering docs, ${engineering.links} local links.`,
+  )
 }
 
 run().catch((error) => {
