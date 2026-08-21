@@ -334,6 +334,7 @@ export class DocumentRegistry {
     const current = this.records.get(documentKey(identity));
     if (!current) throw new DocumentsError('Document is not open', { reason: 'failed' });
     if (!current.dirty) return current;
+    if (current.saving) return current;
     if (current.status === 'binary' || current.status === 'unsupported-encoding') return current;
     if (current.status === 'conflict' && !options.overwriteConflict) return current;
     if (current.status === 'deleted' && !options.recreateDeleted) return current;
@@ -524,9 +525,14 @@ export class DocumentRegistry {
     const results = await Promise.allSettled(dirtyRecords.map((record) => (
       this.enqueueJournal(record.identity, () => this.writeJournalRecord(record, true))
     )));
+    const failures: unknown[] = [];
     for (const result of results) {
-      if (result.status === 'rejected') this.reportJournalFailure(result.reason);
+      if (result.status === 'rejected') {
+        failures.push(result.reason);
+        this.reportJournalFailure(result.reason);
+      }
     }
+    if (failures.length > 0) throw new AggregateError(failures, 'Failed to persist document recovery journals');
   }
 
   dispose(): void {

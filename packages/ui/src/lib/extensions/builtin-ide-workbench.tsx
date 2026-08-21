@@ -12,6 +12,7 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
 import { PiRecoveryPanel } from '@/components/layout/PiRecoveryPanel';
 import { ChatView } from '@/components/views/ChatView';
@@ -43,22 +44,27 @@ import { usePiariumExtensionCatalog } from './catalog-store';
 import { useWorkbenchWorkspaceId } from './workbench-workspace';
 import {
   DEFAULT_IDE_WORKBENCH_LAYOUT,
-  hydrateIdeWorkbenchLayout,
-  schedulePersistedIdeWorkbenchLayout,
+  flushPersistedIdeWorkbenchLayout,
+  IDE_LAYOUT_NODE_IDS,
+  patchIdeWorkbenchLayout,
+  projectIdeWorkbenchLayout,
+  retryIdeWorkbenchLayout,
+  updateIdeLayoutNode,
   type IdeWorkbenchActivityId,
-  type IdeWorkbenchLayoutState,
+  type IdeWorkbenchLayoutProjection,
   type IdeWorkbenchSecondaryId,
 } from '@/lib/workbench/ide-layout';
+import { useIdeWorkbenchLayout } from '@/lib/workbench/useIdeWorkbenchLayout';
 import { showWorkbenchPanel } from '@/lib/workbench/editors/panels';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { FileSearchResult, WorkspaceContentSearchHit } from '@/lib/api/types';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import { IdeRunPanel } from '@/components/workbench/IdeRunPanel';
+import { EditorWorkbenchArea } from '@/components/workbench/EditorWorkbenchArea';
+import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 
-const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((module) => ({ default: module.FilesView })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then((module) => ({ default: module.SettingsWindow })));
 const FleetPage = lazyWithChunkRecovery(() => import('@/components/sections/fleet').then((module) => ({ default: module.FleetPage })));
@@ -79,10 +85,6 @@ type ContentSearchViewState =
   | { status: 'ready'; hits: WorkspaceContentSearchHit[] }
   | { status: 'failure'; message: string };
 
-const joinWorkspacePath = (directory: string, resourceId: string): string => (
-  `${directory.replace(/\\/g, '/').replace(/\/$/, '')}/${resourceId.replace(/\\/g, '/')}`
-);
-
 const ACTIVITIES: ReadonlyArray<{ id: IdeWorkbenchActivityId; icon: IconName; labelKey: I18nKey; ariaKey: I18nKey }> = [
   { id: 'explorer', icon: 'folder-3', labelKey: 'workbench.ide.activity.explorer', ariaKey: 'workbench.ide.activity.explorerAria' },
   { id: 'search', icon: 'search', labelKey: 'workbench.ide.activity.search', ariaKey: 'workbench.ide.activity.searchAria' },
@@ -97,8 +99,6 @@ const SECONDARY_VIEWS: ReadonlyArray<{ id: IdeWorkbenchSecondaryId; labelKey: I1
   { id: 'fleet', labelKey: 'workbench.ide.secondary.fleet' },
   { id: 'recovery', labelKey: 'workbench.ide.secondary.recovery' },
 ];
-
-const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, Math.round(value)));
 
 const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory }) => {
   const { t } = useI18n();
@@ -181,19 +181,14 @@ const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory
   }, [directory, mode, query, workspaceId, workspaceSearch]);
 
   const openFileHit = (path: string) => {
-    if (!directory) return;
-    const tabs = useFilesViewTabsStore.getState();
-    tabs.addOpenPath(directory, path);
-    tabs.setSelectedPath(directory, path);
+    if (!directory || !workspaceId) return;
+    const resourceId = resourceIdFromWorkspacePath(directory, path);
+    if (resourceId) openWorkbenchEditor(workspaceId, resourceId);
   };
 
   const openContentHit = (hit: WorkspaceContentSearchHit) => {
     if (!directory || !workspaceId) return;
     openWorkbenchEditor(workspaceId, hit.resource.resourceId);
-    const path = joinWorkspacePath(directory, hit.resource.resourceId);
-    const tabs = useFilesViewTabsStore.getState();
-    tabs.addOpenPath(directory, path);
-    tabs.setSelectedPath(directory, path);
   };
 
   const activeState = mode === 'files' ? fileState : contentState;
@@ -340,60 +335,78 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
   const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(isSettingsDialogOpen);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
-  const [layout, setLayout] = React.useState<IdeWorkbenchLayoutState>(DEFAULT_IDE_WORKBENCH_LAYOUT);
-  const persistWorkspaceId = workspaceId ?? '_none';
-  const skipPersistRef = React.useRef(true);
+  const layoutState = useIdeWorkbenchLayout(workspaceId);
+  const layoutDocument = layoutState?.document ?? DEFAULT_IDE_WORKBENCH_LAYOUT;
+  const layout = React.useMemo(() => projectIdeWorkbenchLayout(layoutDocument), [layoutDocument]);
+  const mainAreaRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (isSettingsDialogOpen) setSettingsWindowMounted(true);
   }, [isSettingsDialogOpen]);
 
-  React.useEffect(() => {
-    skipPersistRef.current = true;
-    setLayout(hydrateIdeWorkbenchLayout(persistWorkspaceId));
-  }, [persistWorkspaceId]);
-
-  React.useEffect(() => {
-    if (skipPersistRef.current) {
-      skipPersistRef.current = false;
-      return;
-    }
-    schedulePersistedIdeWorkbenchLayout(persistWorkspaceId, layout);
-  }, [layout, persistWorkspaceId]);
-
   React.useEffect(() => workspaceEvents.onDirectoryRequest(() => {
     setDirectoryDialogOpen(true);
   }), []);
 
-  const patchLayout = React.useCallback((patch: Partial<IdeWorkbenchLayoutState>) => {
-    setLayout((current) => ({ ...current, ...patch }));
-  }, []);
+  const patchLayout = React.useCallback((patch: Partial<Pick<
+    IdeWorkbenchLayoutProjection,
+    'activity' | 'primaryVisible' | 'secondaryView' | 'secondaryVisible'
+  >>) => {
+    if (!workspaceId) return;
+    patchIdeWorkbenchLayout(workspaceId, (document) => {
+      let next = document;
+      const primary = next.nodes[IDE_LAYOUT_NODE_IDS.primary];
+      if (primary?.kind === 'stack' && (patch.activity !== undefined || patch.primaryVisible !== undefined)) {
+        next = updateIdeLayoutNode(next, {
+          ...primary,
+          ...(patch.activity !== undefined ? { activeViewId: patch.activity } : {}),
+          ...(patch.primaryVisible !== undefined ? { visible: patch.primaryVisible } : {}),
+        });
+      }
+      const secondary = next.nodes[IDE_LAYOUT_NODE_IDS.secondary];
+      if (secondary?.kind === 'stack' && (patch.secondaryView !== undefined || patch.secondaryVisible !== undefined)) {
+        next = updateIdeLayoutNode(next, {
+          ...secondary,
+          ...(patch.secondaryView !== undefined ? { activeViewId: patch.secondaryView } : {}),
+          ...(patch.secondaryVisible !== undefined ? { visible: patch.secondaryVisible } : {}),
+        });
+      }
+      return next;
+    });
+  }, [workspaceId]);
 
   const startResize = React.useCallback((side: 'primary' | 'secondary') => (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = side === 'primary' ? layout.primaryWidth : layout.secondaryWidth;
+    const size = mainAreaRef.current?.clientWidth ?? 0;
+    const startWeights = layout.mainWeights;
     const onMove = (moveEvent: MouseEvent) => {
-      const delta = moveEvent.clientX - startX;
-      if (side === 'primary') {
-        patchLayout({ primaryWidth: clamp(startWidth + delta, 180, 520) });
-        return;
-      }
-      patchLayout({ secondaryWidth: clamp(startWidth - delta, 240, 640) });
+      if (!workspaceId || size <= 0) return;
+      const delta = (moveEvent.clientX - startX) / size;
+      patchIdeWorkbenchLayout(workspaceId, (document) => {
+        const rootNode = document.nodes[IDE_LAYOUT_NODE_IDS.root];
+        if (!rootNode || rootNode.kind !== 'split' || rootNode.weights.length !== 3) return document;
+        const [primaryWeight, centerWeight, secondaryWeight] = startWeights;
+        const weights = side === 'primary'
+          ? [Math.max(0, primaryWeight + delta), Math.max(0, centerWeight - delta), secondaryWeight]
+          : [primaryWeight, Math.max(0, centerWeight + delta), Math.max(0, secondaryWeight - delta)];
+        if (weights.every((weight) => weight === 0)) return document;
+        return updateIdeLayoutNode(document, { ...rootNode, weights });
+      });
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (workspaceId) void flushPersistedIdeWorkbenchLayout(workspaceId);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [layout.primaryWidth, layout.secondaryWidth, patchLayout]);
+  }, [layout.mainWeights, workspaceId]);
 
   const workspaceLabel = directory
     ? formatDirectoryName(directory, homeDirectory)
     : t('workbench.ide.status.noWorkspace');
-  const showExplorerTree = layout.activity === 'explorer' && layout.primaryVisible;
-  const showPrimarySidebar = layout.primaryVisible && layout.activity !== 'explorer';
+  const showPrimarySidebar = layout.primaryVisible;
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -490,7 +503,20 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        {layoutState?.errorMessage ? (
+          <div className="flex shrink-0 items-center gap-2 border-b border-status-warning/30 bg-status-warning/10 px-3 py-1 typography-meta text-status-warning">
+            <Icon name="error-warning" className="size-3.5" />
+            <span className="min-w-0 truncate" title={layoutState.errorMessage}>{layoutState.errorMessage}</span>
+            {workspaceId ? (
+              <Button type="button" variant="ghost" size="xs" className="ml-auto" onClick={() => retryIdeWorkbenchLayout(workspaceId)}>
+                {t('startup.initRecovery.retry')}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div ref={mainAreaRef} className="flex min-h-0 flex-1 overflow-hidden">
+          {layout.activityVisible ? (
           <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-2" aria-label={t('workbench.ide.title')}>
             {ACTIVITIES.map((item) => (
               <Tooltip key={item.id}>
@@ -537,14 +563,16 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               </Tooltip>
             </div>
           </nav>
+          ) : null}
 
           {showPrimarySidebar ? (
             <>
               <aside
-                className="flex min-h-0 shrink-0 flex-col border-r border-border bg-sidebar"
-                style={{ width: layout.primaryWidth }}
+                className="flex min-h-0 min-w-0 flex-col border-r border-border bg-sidebar"
+                style={{ flex: `${layout.mainWeights[0]} 1 0%` }}
               >
                 <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.primarySidebarViews} />
+                {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" /> : null}
                 {layout.activity === 'search' ? <IdeSearchPanel directory={directory} /> : null}
                 {layout.activity === 'git' ? (
                   <React.Suspense fallback={null}>
@@ -563,11 +591,12 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             </>
           ) : null}
 
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div
+            className="relative flex min-h-0 min-w-0 flex-col overflow-hidden"
+            style={{ flex: `${layout.mainWeights[1]} 1 0%` }}
+          >
             <main className="relative min-h-0 flex-1 overflow-hidden">
-              <React.Suspense fallback={<div className="h-full bg-background" />}>
-                {showExplorerTree ? <FilesView /> : <FilesView mode="editor-only" />}
-              </React.Suspense>
+              <EditorWorkbenchArea />
               {isMultiRunLauncherOpen ? (
                 <div className="absolute inset-0 z-10 bg-background">
                   <ErrorBoundary>
@@ -595,8 +624,8 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 onMouseDown={startResize('secondary')}
               />
               <aside
-                className="flex min-h-0 shrink-0 flex-col border-l border-border bg-sidebar"
-                style={{ width: layout.secondaryWidth }}
+                className="flex min-h-0 min-w-0 flex-col border-l border-border bg-sidebar"
+                style={{ flex: `${layout.mainWeights[2]} 1 0%` }}
               >
                 <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/60 px-1 py-1">
                   {SECONDARY_VIEWS.map((item) => (
@@ -636,6 +665,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           ) : null}
         </div>
 
+        {layout.statusVisible ? (
         <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-border px-3 typography-micro text-muted-foreground">
           <span className="truncate">{workspaceLabel}</span>
           <span className="truncate">{branchLabel || t('workbench.ide.status.noBranch')}</span>
@@ -652,6 +682,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           ) : null}
           <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.statusItems} />
         </footer>
+        ) : null}
 
         {settingsWindowMounted ? (
           <WorkbenchReplacement

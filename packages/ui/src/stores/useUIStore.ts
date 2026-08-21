@@ -9,7 +9,6 @@ import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOpt
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
-import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import type { RecoveryPreference } from '@piarium/protocol';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
@@ -1400,9 +1399,6 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          const closingTab = get().contextPanelByDirectory[normalizedDirectory]?.tabs
-            .find((tab) => tab.id === normalizedTabID);
-
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
@@ -1418,11 +1414,6 @@ export const useUIStore = create<UIStore>()(
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
           });
 
-          // Keep the editor's own open-file state in sync so a reopened
-          // editor surface does not resurrect the closed file.
-          if (closingTab?.mode === 'file' && closingTab.targetPath) {
-            useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, closingTab.targetPath);
-          }
         },
 
         closeContextPanel: (directory) => {

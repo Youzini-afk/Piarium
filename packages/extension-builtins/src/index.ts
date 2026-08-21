@@ -11,6 +11,8 @@ import {
   PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
+  PIARIUM_CORE_SERVICE_VERSION,
+  PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
 } from "@piarium/extension-contract";
 
@@ -85,6 +87,7 @@ const definition = (input: {
   displayName: string;
   id: string;
   piPackages?: string[];
+  provides?: PiariumExtensionManifest['provides'];
   supports?: PiariumApplicationSurface[];
 }): PiariumBuiltinExtensionDefinition => {
   const supports = input.supports ?? PIARIUM_INTEGRATION_SURFACES;
@@ -103,6 +106,7 @@ const definition = (input: {
       },
       id: input.id,
       ...(input.piPackages ? { integrates: { piPackages: input.piPackages } } : {}),
+      ...(input.provides ? { provides: input.provides } : {}),
       schemaVersion: 1,
       version: PIARIUM_BUILTIN_EXTENSION_VERSION,
     },
@@ -209,6 +213,13 @@ export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION = definition({
   id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
   displayName: "IDE Workbench",
   supports: PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
+  provides: {
+    services: [{
+      id: PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
+      multiple: true,
+      version: PIARIUM_CORE_SERVICE_VERSION,
+    }],
+  },
   contributions: [{
     contractVersion: 1,
     data: {},

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { EditorAPI, RuntimeAPIs } from './api/types';
 import { openFileInMainEditor } from './openFileInMainEditor';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { setWorkbenchWorkspaceResolutionForTests } from '@/lib/extensions/workbench-workspace';
+import { activeEditorTab } from '@/lib/workbench/editors/groups';
+import { peekEditorWorkbench, resetEditorWorkbenchForTests } from '@/lib/workbench/editors/session';
 import { useUIStore } from '@/stores/useUIStore';
 
 const resetStores = () => {
-  useFilesViewTabsStore.setState({ byRoot: {} });
+  resetEditorWorkbenchForTests();
+  setWorkbenchWorkspaceResolutionForTests();
   useUIStore.setState({
     activeMainTab: 'chat',
     pendingFileFocusPath: null,
@@ -62,17 +65,19 @@ describe('openFileInMainEditor', () => {
       expect(opened).toBe(true);
       expect(calls).toEqual([{ path: '/repo/src/index.ts', line: 7, column: 3 }]);
       expect(useUIStore.getState().activeMainTab).toBe('chat');
-      expect(useFilesViewTabsStore.getState().byRoot).toEqual({});
+      expect(peekEditorWorkbench('workspace-1')).toBeUndefined();
     });
   });
 
   test('opens files in the shared files view outside VS Code', async () => {
     await withWindowRuntime(null, () => {
+      setWorkbenchWorkspaceResolutionForTests('/repo', 'workspace-1');
       const opened = openFileInMainEditor('/repo', '/repo/src/index.ts');
 
       expect(opened).toBe(true);
       expect(useUIStore.getState().activeMainTab).toBe('files');
-      expect(useFilesViewTabsStore.getState().byRoot['/repo']?.selectedPath).toBe('/repo/src/index.ts');
+      const workbench = peekEditorWorkbench('workspace-1');
+      expect(workbench ? activeEditorTab(workbench)?.resourceId : undefined).toBe('src/index.ts');
     });
   });
 });

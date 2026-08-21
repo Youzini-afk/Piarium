@@ -345,7 +345,7 @@ export const setEditorSplitRatio = (
   splitId: string,
   ratio: number,
 ): EditorWorkbenchState => {
-  const clamped = Math.min(0.8, Math.max(0.2, ratio));
+  const clamped = Math.min(1, Math.max(0, ratio));
   const apply = (node: EditorGroupNode): EditorGroupNode => {
     if (isLeaf(node)) return node;
     if (node.splitId === splitId) return { ...node, ratio: clamped };
@@ -385,3 +385,42 @@ export const findEditorTabsByResource = (
 ): EditorTab[] => (
   listEditorGroups(node).flatMap((group) => group.tabs.filter((tab) => tab.resourceId === resourceId))
 );
+
+const resourceWithinPrefix = (resourceId: string, prefix: string): boolean => (
+  resourceId === prefix || resourceId.startsWith(`${prefix.replace(/\/$/, '')}/`)
+);
+
+export const closeEditorTabsByResourcePrefix = (
+  state: EditorWorkbenchState,
+  prefix: string,
+): EditorWorkbenchState => {
+  let next = state;
+  const tabIds = listEditorGroups(state.tree).flatMap((group) => group.tabs
+    .filter((tab) => resourceWithinPrefix(tab.resourceId, prefix))
+    .map((tab) => tab.tabId));
+  for (const tabId of tabIds) next = closeEditorTab(next, tabId);
+  return next;
+};
+
+export const renameEditorResourcePrefix = (
+  state: EditorWorkbenchState,
+  from: string,
+  to: string,
+  providerFor: (resourceId: string) => string,
+): EditorWorkbenchState => {
+  const renameNode = (node: EditorGroupNode): EditorGroupNode => {
+    if (node.type === 'split') {
+      return { ...node, first: renameNode(node.first), second: renameNode(node.second) };
+    }
+    return {
+      ...node,
+      tabs: node.tabs.map((tab) => {
+        if (!resourceWithinPrefix(tab.resourceId, from)) return tab;
+        const suffix = tab.resourceId.slice(from.length).replace(/^\//, '');
+        const resourceId = suffix ? `${to.replace(/\/$/, '')}/${suffix}` : to;
+        return { ...tab, resourceId, providerId: providerFor(resourceId) };
+      }),
+    };
+  };
+  return { ...state, tree: renameNode(state.tree) };
+};

@@ -3,6 +3,8 @@ import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
+import { Icon } from '@/components/icon/Icon';
 import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
 import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
@@ -17,7 +19,7 @@ import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { isDrawioFile, isImageFile, isPdfFile, isSvgFile } from '@/lib/toolHelpers';
 import { useI18n } from '@/lib/i18n';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
-import type { EditorTab } from '@/lib/workbench/editors/types';
+import type { EditorTab, EditorViewState } from '@/lib/workbench/editors/types';
 import {
   getEditorProvidersRevision,
   isEditorProviderEnabled,
@@ -25,12 +27,15 @@ import {
   setUserEditorAssociation,
   subscribeEditorProviders,
 } from '@/lib/workbench/editors/providers';
-import { patchEditorViewState } from '@/lib/workbench/editors/session';
+import { patchEditorViewState, setEditorPreviewMode } from '@/lib/workbench/editors/session';
 import { applyEditorViewState, captureEditorViewState } from '@/lib/workbench/editors/view-state';
 import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
 import type { DocumentIdentity } from '@/lib/documents/types';
+import { useUIStore } from '@/stores/useUIStore';
+import { getModifierLabel } from '@/lib/utils';
 
 type ResourceEditorHostProps = {
+  onViewStateChange?(viewState: EditorViewState): void;
   workspaceId: string;
   workspaceRoot: string;
   tab: EditorTab;
@@ -45,14 +50,20 @@ const TEXT_PROVIDERS = new Set<string>([
   BUILTIN_EDITOR_PROVIDER_IDS.diff,
 ]);
 
-const HostFrame: React.FC<{ chooser: React.ReactNode; children: React.ReactNode }> = ({ chooser, children }) => (
+const HostFrame: React.FC<{
+  chooser: React.ReactNode;
+  toolbar?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ chooser, toolbar, children }) => (
   <div className="flex h-full min-h-0 flex-col">
     {chooser}
+    {toolbar}
     <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
   </div>
 );
 
 export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
+  onViewStateChange,
   workspaceId,
   workspaceRoot,
   tab,
@@ -73,11 +84,23 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const needsText = TEXT_PROVIDERS.has(activeProviderId) && isEditorProviderEnabled(activeProviderId);
   const record = useDocumentRecord(needsText ? identity : undefined);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState('');
+  const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
+  const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
 
   React.useEffect(() => {
     if (!needsText) return;
     void getDocumentRegistry().open(identity).catch(() => undefined);
   }, [identity, needsText]);
+
+  React.useEffect(() => {
+    if (!autoSaveEnabled || !record?.dirty || record.saving || record.status !== 'ready') return;
+    const timer = setTimeout(() => {
+      void getDocumentRegistry().save(identity).catch((error) => {
+        console.error('[Editor] Auto-save failed:', error);
+      });
+    }, 1_500);
+    return () => clearTimeout(timer);
+  }, [autoSaveEnabled, identity, record?.dirty, record?.localEditRevision, record?.saving, record?.status]);
 
   React.useEffect(() => {
     if (activeProviderId !== BUILTIN_EDITOR_PROVIDER_IDS.image || isSvgFile(path) || !runtime.isDesktop) {
@@ -98,7 +121,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     EditorView.updateListener.of((update) => {
       if (!update.selectionSet && !update.viewportChanged) return;
       const viewState = captureEditorViewState(update.view);
-      patchEditorViewState(workspaceId, tab.viewId, viewState);
+      if (onViewStateChange) onViewStateChange(viewState);
+      else patchEditorViewState(workspaceId, tab.viewId, viewState);
       if (!update.selectionSet) return;
       const open = getDocumentRegistry().get(identity);
       const range = update.state.selection.main;
@@ -120,7 +144,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         dirty: open?.dirty === true,
       });
     })
-  ), [identity, path, tab.resourceId, tab.viewId, workspaceId]);
+  ), [identity, onViewStateChange, path, tab.resourceId, tab.viewId, workspaceId]);
 
   if (selection.status === 'none' && !isEditorProviderEnabled(BUILTIN_EDITOR_PROVIDER_IDS.text)) {
     return (
@@ -146,12 +170,105 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     </div>
   ) : null;
 
+  const setMode = (previewMode: 'preview' | 'edit' | 'tree' | 'text'): void => {
+    if (onViewStateChange) onViewStateChange({ previewMode });
+    else setEditorPreviewMode(workspaceId, tab.viewId, previewMode);
+  };
+  const modeToggle = (() => {
+    if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.json) {
+      const tree = tab.viewState.previewMode !== 'text';
+      return (
+        <Button type="button" variant="ghost" size="xs" onClick={() => setMode(tree ? 'text' : 'tree')}>
+          {t(tree ? 'filesView.editor.switchToTextView' : 'filesView.editor.switchToTreeView')}
+        </Button>
+      );
+    }
+    if (
+      activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.markdown
+      || activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.html
+      || activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.drawio
+    ) {
+      const preview = tab.viewState.previewMode !== 'edit';
+      return (
+        <Button type="button" variant="ghost" size="xs" onClick={() => setMode(preview ? 'edit' : 'preview')}>
+          {t(preview ? 'filesView.editor.switchToEditMode' : 'filesView.editor.switchToPreviewMode')}
+        </Button>
+      );
+    }
+    return null;
+  })();
+  const toolbar = needsText ? (
+    <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">
+      {modeToggle}
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        className="ml-auto size-7 p-0"
+        disabled={!record?.dirty || record.saving}
+        title={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
+        aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
+        onClick={() => {
+          void getDocumentRegistry().save(identity).catch((error) => {
+            toast.error(error instanceof Error ? error.message : String(error));
+          });
+        }}
+      >
+        <Icon name={record?.saving ? 'loader-4' : 'save-3'} className={record?.saving ? 'size-4 animate-spin' : 'size-4'} />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        className="size-7 p-0"
+        aria-pressed={autoSaveEnabled}
+        title={t(autoSaveEnabled ? 'filesView.editor.autoSaveOn' : 'filesView.editor.manualSave')}
+        aria-label={t(autoSaveEnabled ? 'filesView.editor.autoSaveOn' : 'filesView.editor.manualSave')}
+        onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
+      >
+        <Icon name={autoSaveEnabled ? 'file-check-fill' : 'file-check'} className="size-4" />
+      </Button>
+    </div>
+  ) : null;
+
+  if (needsText && (!record || record.status === 'loading' || record.status === 'unloaded')) {
+    return (
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
+        <div className="flex h-full items-center justify-center typography-ui text-muted-foreground">
+          {t('filesView.state.loading')}
+        </div>
+      </HostFrame>
+    );
+  }
+
+  if (record?.status === 'binary' || record?.status === 'unsupported-encoding') {
+    return (
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
+        <div className="flex h-full items-center justify-center p-4 text-center typography-ui text-muted-foreground">
+          {record.status === 'binary'
+            ? t('filesView.editor.binaryFileDescription')
+            : t('filesView.error.previewUnavailable')}
+        </div>
+      </HostFrame>
+    );
+  }
+
+  if (record?.status === 'error') {
+    return (
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
+        <div className="flex h-full items-center justify-center p-4 text-center typography-ui text-status-error">
+          {record.errorMessage ?? t('filesView.error.previewUnavailable')}
+        </div>
+      </HostFrame>
+    );
+  }
+
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.image) {
     const src = runtime.isDesktop && !isSvgFile(path)
       ? desktopImageSrc
       : getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="flex h-full items-center justify-center p-3">
           <img src={src} alt={tab.resourceId} className="max-h-full max-w-full object-contain rounded-md border border-border/30" />
         </div>
@@ -162,7 +279,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.pdf || isPdfFile(path)) {
     const src = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <iframe title={tab.resourceId} src={src} className="h-full w-full border-0" />
       </HostFrame>
     );
@@ -172,7 +289,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.markdown && tab.viewState.previewMode !== 'edit') {
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="h-full overflow-auto p-3">
           <ErrorBoundary fallback={<div className="p-3 typography-ui text-status-error">{t('filesView.error.previewUnavailable')}</div>}>
             <SimpleMarkdownRenderer content={buffer} className="typography-markdown-body" stripFrontmatter enableFileReferences={false} />
@@ -184,7 +301,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.json && tab.viewState.previewMode !== 'text') {
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="h-full overflow-auto">
           <JsonTreeView jsonString={buffer} maxHeight="100%" initiallyExpandedDepth={2} />
         </div>
@@ -196,7 +313,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     const encoded = path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
     const src = getRuntimeUrlResolver().authenticatedAsset(`/api/fs/serve${encoded.startsWith('/') ? encoded : `/${encoded}`}`);
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <iframe title={tab.resourceId} src={src} className="h-full w-full border-none" sandbox="allow-scripts allow-same-origin allow-forms" />
       </HostFrame>
     );
@@ -204,7 +321,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.drawio && isDrawioFile(path) && tab.viewState.previewMode !== 'edit') {
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
           <DiagramEditor
             xml={buffer}
@@ -217,7 +334,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.diff) {
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="flex h-full min-h-0 flex-col overflow-hidden">
           <div className="border-b border-border/40 px-3 py-1.5 typography-meta text-muted-foreground">
             {t('filesView.editor.diffAgainstDisk')}
@@ -232,7 +349,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 
   if (isImageFile(path) && activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.text) {
     return (
-      <HostFrame chooser={ambiguousChooser}>
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="flex h-full items-center justify-center p-3 typography-ui text-muted-foreground">
           {t('filesView.editor.cannotPreviewBinary')}
         </div>
@@ -241,7 +358,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   }
 
   return (
-    <HostFrame chooser={ambiguousChooser}>
+    <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
       <div className="flex h-full min-h-0 flex-col">
         <DocumentConflictBanner identity={identity} />
         <div className="min-h-0 flex-1 overflow-hidden">

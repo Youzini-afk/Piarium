@@ -56,10 +56,9 @@ If the sidebar webview is not ready, commands fail visibly. They do not open a f
 
 - Settings: use the in-sidebar Settings view. The separate Settings editor panel is removed.
 - Session editor tabs: use the sidebar. Commands that opened editor tabs now focus the sidebar.
-- Agent groups / Fleet: use the Piarium Agent Profile on desktop or web. The companion shows that
-  instruction instead of opening a second Agent Manager surface. Fleet already lives in Settings on
-  those surfaces. The Agent Groups view (`AgentManagerView`) is not remounted in VS Code; it remains
-  available for Agent Workspace rather than as a second workbench.
+- Agents / Fleet: use the Piarium Agent Profile on desktop or web. The companion shows that
+  instruction instead of opening a second management surface. The obsolete Agent Groups workbench
+  was removed; the maintained Agents catalog and Fleet runtime pages remain the product authorities.
 
 ### Refuse
 

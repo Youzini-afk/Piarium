@@ -32,10 +32,21 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { getDocumentRegistry } from '@/lib/documents/session';
-import { documentIdentityForPath } from '@/lib/documents/path';
+import {
+  documentIdentityForPath,
+  resourceIdFromWorkspacePath,
+  workspacePathFromResourceId,
+} from '@/lib/documents/path';
+import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
+import { activeEditorTab } from '@/lib/workbench/editors/groups';
+import {
+  closeWorkbenchEditorsByResourcePrefix,
+  openWorkbenchEditor,
+  renameWorkbenchResourcePrefix,
+} from '@/lib/workbench/editors/session';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { useFilesExplorerStore } from '@/stores/useFilesExplorerStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStatus } from '@/stores/useGitStore';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -429,7 +440,10 @@ const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
 
 // --- Main component ---
 
-export const SidebarFilesTree: React.FC = () => {
+export const SidebarFilesTree: React.FC<{
+  onEditorOpen?(): void;
+  openTarget?: 'context' | 'editor';
+}> = ({ onEditorOpen, openTarget = 'context' }) => {
   const { t } = useI18n();
   const { files, documents, runtime } = useRuntimeAPIs();
   const workspaceId = useWorkbenchWorkspaceId();
@@ -456,7 +470,7 @@ export const SidebarFilesTree: React.FC = () => {
 
   // Hydrate the per-root cache on mount or root change. The cache is
   // module-scoped so it survives close-and-reopen of the right sidebar;
-  // expanded paths are already persisted via useFilesViewTabsStore, so
+  // expanded paths are already persisted by the Explorer store, so
   // combining the two means the tree re-paints with cached data instead
   // of blanking out and re-listing every directory.
   React.useEffect(() => {
@@ -513,7 +527,7 @@ export const SidebarFilesTree: React.FC = () => {
   // rehydrates instantly.
   React.useEffect(() => () => {
     if (!root) return;
-    const cache = fileTreeCacheByRoot.get(root);
+    const cache = fileTreeCacheByRoot.get(fileTreeCacheKey(root));
     if (cache && cache.loadedDirs.size === 0 && Object.keys(cache.childrenByDir).length === 0) {
       dropCacheForRoot(root);
     }
@@ -521,13 +535,14 @@ export const SidebarFilesTree: React.FC = () => {
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const EMPTY_CONTEXT_TABS: Array<{ mode: string; targetPath: string | null }> = React.useMemo(() => [], []);
-  const expandedPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
-  const selectedPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.selectedPath ?? null) : null));
-  const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
-  const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
-  const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
-  const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
-  const collapseAllExpandedPaths = useFilesViewTabsStore((state) => state.collapseAllExpandedPaths);
+  const expandedPaths = useFilesExplorerStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
+  const toggleExpandedPath = useFilesExplorerStore((state) => state.toggleExpandedPath);
+  const collapseAllExpandedPaths = useFilesExplorerStore((state) => state.collapseAllExpandedPaths);
+  const removeExpandedPathsByPrefix = useFilesExplorerStore((state) => state.removeExpandedPathsByPrefix);
+  const renameExpandedPathsByPrefix = useFilesExplorerStore((state) => state.renameExpandedPathsByPrefix);
+  const editorWorkbench = useEditorWorkbench(workspaceId);
+  const selectedResourceId = editorWorkbench ? activeEditorTab(editorWorkbench)?.resourceId ?? null : null;
+  const selectedPath = root && selectedResourceId ? workspacePathFromResourceId(root, selectedResourceId) : null;
   const contextTabs = useUIStore((state) => (root ? (state.contextPanelByDirectory[root]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
   const openContextFilePaths = React.useMemo(() => new Set(
     contextTabs
@@ -646,7 +661,7 @@ export const SidebarFilesTree: React.FC = () => {
       // cached children visible while re-fetching so the tree stays expanded
       // and does not flash/collapse. Read expanded paths from the store at
       // call time so this callback stays stable when directories are toggled.
-      const currentExpanded = useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths ?? [];
+      const currentExpanded = useFilesExplorerStore.getState().byRoot[root]?.expandedPaths ?? [];
       const normalizedExpanded = currentExpanded
         .map((p) => normalizePath(p))
         .filter((normalized): normalized is string =>
@@ -880,10 +895,16 @@ export const SidebarFilesTree: React.FC = () => {
       return;
     }
 
-    setSelectedPath(root, node.path);
-    addOpenPath(root, node.path);
+    if (openTarget === 'editor' && workspaceId) {
+      const resourceId = resourceIdFromWorkspacePath(root, node.path);
+      if (resourceId) {
+        openWorkbenchEditor(workspaceId, resourceId);
+        onEditorOpen?.();
+      }
+      return;
+    }
     openContextFile(root, node.path);
-  }, [addOpenPath, documents, openContextFile, root, setSelectedPath]);
+  }, [documents, onEditorOpen, openContextFile, openTarget, root, workspaceId]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);
@@ -984,12 +1005,12 @@ export const SidebarFilesTree: React.FC = () => {
           if (result.success) {
             toast.success(t('sidebarFilesTree.toast.renamedSuccessfully'));
             await refreshDirectory(parentDir);
-            if (root) {
-              removeOpenPathsByPrefix(root, oldPath);
+            if (root && workspaceId) {
+              const from = resourceIdFromWorkspacePath(root, oldPath);
+              const to = resourceIdFromWorkspacePath(root, newPath);
+              if (from !== null && to !== null) renameWorkbenchResourcePrefix(workspaceId, from, to);
             }
-            if (selectedPath === oldPath || (selectedPath && selectedPath.startsWith(`${oldPath}/`))) {
-              setSelectedPath(root, null);
-            }
+            if (root) renameExpandedPathsByPrefix(root, oldPath, newPath);
           }
           closeDialog();
         })
@@ -1012,12 +1033,11 @@ export const SidebarFilesTree: React.FC = () => {
           if (result.success) {
             toast.success(t('sidebarFilesTree.toast.deletedSuccessfully'));
             await refreshDirectory(parentDir);
-            if (root) {
-              removeOpenPathsByPrefix(root, deletedPath);
+            if (root && workspaceId) {
+              const resourceId = resourceIdFromWorkspacePath(root, deletedPath);
+              if (resourceId !== null) closeWorkbenchEditorsByResourcePrefix(workspaceId, resourceId);
             }
-            if (selectedPath === deletedPath || (selectedPath && selectedPath.startsWith(deletedPath + '/'))) {
-              setSelectedPath(root, null);
-            }
+            if (root) removeExpandedPathsByPrefix(root, deletedPath);
           }
           closeDialog();
         })
@@ -1027,7 +1047,7 @@ export const SidebarFilesTree: React.FC = () => {
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath, t, workspaceId]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeExpandedPathsByPrefix, renameExpandedPathsByPrefix, root, t, workspaceId]);
 
   // --- Tree rendering (matching FilesView with indent guides) ---
 

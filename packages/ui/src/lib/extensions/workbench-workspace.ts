@@ -33,6 +33,35 @@ const snapshot = (): WorkbenchWorkspaceResolution => currentResolution;
 
 const workspaceKey = (directory: string, generation: number): string => `${generation}\0${directory}`;
 
+const comparableDirectory = (value: string): string => {
+  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+  return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized;
+};
+
+export const getResolvedWorkbenchWorkspaceId = (directory: string): string | undefined => (
+  currentResolution.status === 'ready'
+  && comparableDirectory(currentResolution.directory) === comparableDirectory(directory)
+    ? currentResolution.workspaceId
+    : undefined
+);
+
+export const setWorkbenchWorkspaceResolutionForTests = (
+  directory?: string,
+  workspaceId?: string,
+): void => {
+  requestGeneration += 1;
+  if (!directory || !workspaceId) {
+    publish(NONE);
+    return;
+  }
+  publish({
+    directory,
+    key: workspaceKey(directory, getRuntimeEndpointGeneration()),
+    status: 'ready',
+    workspaceId,
+  });
+};
+
 const ensureResolution = (
   documents: DocumentsAPI,
   directory: string | null,

@@ -1,4 +1,5 @@
 import type { DocumentsAPI } from '@/lib/api/types';
+import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DocumentRegistry } from './registry';
 
 let active: DocumentRegistry | null = null;
@@ -6,7 +7,9 @@ let bound: DocumentsAPI | null = null;
 let lifecycleBound = false;
 
 const flushRecovery = (): void => {
-  void active?.flushRecoveryJournals();
+  void active?.flushRecoveryJournals().catch((error) => {
+    console.error('[Documents] Failed to flush recovery journals:', error);
+  });
 };
 
 const bindRecoveryLifecycle = (): void => {
@@ -16,6 +19,7 @@ const bindRecoveryLifecycle = (): void => {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushRecovery();
   });
+  subscribeRuntimeEndpointWillChange(flushRecovery);
 };
 
 export const bindDocumentRegistry = (documents: DocumentsAPI): DocumentRegistry => {

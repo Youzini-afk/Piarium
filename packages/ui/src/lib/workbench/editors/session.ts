@@ -3,11 +3,13 @@ import { restoreEditorWorkbenchSnapshot } from './snapshot';
 import {
   closeEditorGroup,
   closeEditorTab,
+  closeEditorTabsByResourcePrefix,
   createEmptyEditorWorkbench,
   listOpenResourceIds,
   moveEditorTab,
   openEditor,
   pinEditorTab,
+  renameEditorResourcePrefix,
   setActiveEditor,
   setEditorSplitRatio,
   splitEditorGroup,
@@ -166,6 +168,21 @@ export const closeWorkbenchEditor = (workspaceId: string, tabId: string): Editor
   replaceEditorWorkbench(closeEditorTab(ensureEditorWorkbench(workspaceId), tabId))
 );
 
+export const closeWorkbenchEditorsByResourcePrefix = (
+  workspaceId: string,
+  prefix: string,
+): EditorWorkbenchState => replaceEditorWorkbench(
+  closeEditorTabsByResourcePrefix(ensureEditorWorkbench(workspaceId), prefix),
+);
+
+export const renameWorkbenchResourcePrefix = (
+  workspaceId: string,
+  from: string,
+  to: string,
+): EditorWorkbenchState => replaceEditorWorkbench(
+  renameEditorResourcePrefix(ensureEditorWorkbench(workspaceId), from, to, resolveEditorProviderId),
+);
+
 export const pinWorkbenchEditor = (workspaceId: string, tabId: string, pinned = true): EditorWorkbenchState => (
   replaceEditorWorkbench(pinEditorTab(ensureEditorWorkbench(workspaceId), tabId, pinned))
 );
@@ -217,6 +234,14 @@ export const patchEditorViewState = (
   session.byWorkspace.set(workspaceId, next);
   rememberLastGoodEditorWorkbench(next);
 };
+
+export const setEditorPreviewMode = (
+  workspaceId: string,
+  viewId: string,
+  previewMode: NonNullable<EditorViewState['previewMode']>,
+): EditorWorkbenchState => replaceEditorWorkbench(
+  updateEditorViewState(ensureEditorWorkbench(workspaceId), viewId, { previewMode }),
+);
 
 export const listWorkbenchOpenResourceIds = (workspaceId: string): string[] => {
   const state = session.byWorkspace.get(workspaceId);

@@ -14,7 +14,6 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { addPiDraftImageFile, usePiDraftStore } from '@/stores/usePiDraftStore';
@@ -56,7 +55,7 @@ import {
 // exists, preserving the existing state behavior.
 const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((module) => ({ default: module.WalkthroughView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((module) => ({ default: module.DiffView })));
-const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((module) => ({ default: module.FilesView })));
+const ContextResourceEditor = lazyWithChunkRecovery(() => import('@/components/workbench/ContextResourceEditor').then((module) => ({ default: module.ContextResourceEditor })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/PullRequestView').then((module) => ({ default: module.PullRequestView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
@@ -2234,7 +2233,6 @@ export const ContextPanel: React.FC = () => {
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
-  const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const openContextPreview = useUIStore((state) => state.openContextPreview);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
   const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
@@ -2451,18 +2449,6 @@ export const ContextPanel: React.FC = () => {
     event.stopPropagation();
     handleClose();
   }, [handleClose]);
-
-  React.useEffect(() => {
-    if (!directoryKey || !activeTab) {
-      return;
-    }
-
-    if (activeTab.mode === 'file' && activeTab.targetPath) {
-      setSelectedFilePath(directoryKey, activeTab.targetPath, { allowOutsideRoot: true });
-      return;
-    }
-
-  }, [activeTab, directoryKey, setSelectedFilePath]);
 
   const chatTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'chat'),
@@ -2891,7 +2877,13 @@ export const ContextPanel: React.FC = () => {
             <div className="h-full min-w-0 flex-1">
               {hasOpenEditorFile ? (
                 <React.Suspense fallback={null}>
-                  <FilesView mode="editor-only" />
+                  {activeTab?.targetPath && directoryKey ? (
+                    <ContextResourceEditor
+                      filePath={activeTab.targetPath}
+                      viewId={activeTab.id}
+                      workspaceRoot={directoryKey}
+                    />
+                  ) : null}
                 </React.Suspense>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">

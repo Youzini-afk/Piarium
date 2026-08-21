@@ -4,7 +4,10 @@ import { cn, truncatePathMiddle } from '@/lib/utils';
 import { useFileSearchStore, type PiariumFileSearchHit } from '@/stores/useFileSearchStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
+import { useEditorWorkbench } from '@/lib/workbench/editors/hooks';
+import { activeEditorTab, listOpenResourceIds } from '@/lib/workbench/editors/groups';
+import { workspacePathFromResourceId } from '@/lib/documents/path';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { listPiAgentProviders } from '@/lib/pi-runtime/agent-providers';
@@ -54,12 +57,18 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     const candidate = activeProjectPath || currentDirectory;
     return candidate ? candidate.replace(/\\/g, '/').replace(/\/+$/, '') : null;
   }, [activeProjectPath, currentDirectory]);
-  const projectTabs = useFilesViewTabsStore(
-    React.useCallback(
-      (state) => (projectRoot ? state.byRoot[projectRoot] : undefined),
-      [projectRoot],
-    ),
-  );
+  const workspaceId = useWorkbenchWorkspaceId();
+  const editorWorkbench = useEditorWorkbench(workspaceId);
+  const projectTabs = React.useMemo(() => {
+    if (!projectRoot || !editorWorkbench) return undefined;
+    const active = activeEditorTab(editorWorkbench);
+    return {
+      selectedPath: active ? workspacePathFromResourceId(projectRoot, active.resourceId) : null,
+      openPaths: listOpenResourceIds(editorWorkbench.tree).map((resourceId) => (
+        workspacePathFromResourceId(projectRoot, resourceId)
+      )),
+    };
+  }, [editorWorkbench, projectRoot]);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const debouncedQuery = useDebouncedValue(searchQuery, 180);

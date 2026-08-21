@@ -1,5 +1,8 @@
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { getResolvedWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
+import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
+import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import { useUIStore } from '@/stores/useUIStore';
 
 type OpenFileInMainEditorOptions = {
@@ -47,8 +50,7 @@ const getVSCodeRuntimeEditor = (): RuntimeAPIs['editor'] | undefined => {
     return undefined;
   }
 
-  const apis = (window as typeof window & { __PIARIUM_RUNTIME_APIS__?: RuntimeAPIs })
-    .__PIARIUM_RUNTIME_APIS__;
+  const apis = getRegisteredRuntimeAPIs();
   if (!apis?.runtime?.isVSCode || !apis.editor?.openFile) {
     return undefined;
   }
@@ -81,9 +83,10 @@ export const openFileInMainEditor = (
     return false;
   }
 
-  const filesViewTabsStore = useFilesViewTabsStore.getState();
-  filesViewTabsStore.setSelectedPath(root, targetPath);
-  filesViewTabsStore.addOpenPath(root, targetPath);
+  const workspaceId = getResolvedWorkbenchWorkspaceId(root);
+  const resourceId = resourceIdFromWorkspacePath(root, targetPath);
+  if (!workspaceId || !resourceId) return false;
+  openWorkbenchEditor(workspaceId, resourceId);
 
   const uiStore = useUIStore.getState();
   if (Number.isFinite(options.line ?? Number.NaN)) {

@@ -2,7 +2,7 @@ import type { RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
 import { syncDesktopSettings } from '@/lib/persistence';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { useFilesExplorerStore } from '@/stores/useFilesExplorerStore';
 import { resetDocumentRegistry } from '@/lib/documents/session';
 import { resetLanguageServices } from '@/lib/language-services/session';
 import { resetRunDebugServices } from '@/lib/run-debug/session';
@@ -29,7 +29,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useGitStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
   useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
-  useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  useFilesExplorerStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   resetEditorWorkbenchForRuntimeSwitch(detail.runtimeKey);
   resetIdeWorkbenchLayoutForRuntimeSwitch();
   resetDocumentRegistry();

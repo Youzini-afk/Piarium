@@ -1,0 +1,57 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
+} from '@piarium/extension-contract';
+import {
+  createWorkbenchLayoutServiceHandler,
+  registerBuiltinWorkbenchLayoutService,
+} from './workbench-layout-service.js';
+
+describe('built-in workbench layout service', () => {
+  it('derives the extension namespace and profile/workspace scope on the Host', async () => {
+    const storage = {
+      read: vi.fn(async (address) => ({ address, authoritative: true, diagnostics: [], document: { data: {}, revision: 0, schemaVersion: 0, updatedAt: '' }, exists: false, storageState: 'missing' })),
+      update: vi.fn(async (address, expectedRevision, schemaVersion, document) => ({ address, expectedRevision, schemaVersion, document })),
+    };
+    const handler = createWorkbenchLayoutServiceHandler(storage);
+    const read = await handler('read', [{ profileId: 'piarium.ide', workspaceId: 'workspace-1' }]);
+    expect(read.address).toMatchObject({
+      extensionId: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+      scope: 'workspace',
+    });
+    await handler('write', [{
+      profileId: 'piarium.ide',
+      workspaceId: 'workspace-1',
+      expectedRevision: 3,
+      document: { schemaVersion: 1 },
+    }]);
+    expect(storage.update).toHaveBeenCalledWith(read.address, 3, 1, { schemaVersion: 1 });
+  });
+
+  it('registers a multi-provider service and drains it on shutdown', async () => {
+    let provision;
+    const services = {
+      replaceOwner: vi.fn(async (_owner, next) => { [provision] = next; }),
+      drainOwner: vi.fn(async () => undefined),
+      removeOwner: vi.fn(),
+    };
+    const dispose = await registerBuiltinWorkbenchLayoutService({
+      catalog: {
+        snapshot: vi.fn(async () => ({
+          extensions: [{ manifest: { id: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID, version: '0.1.0' } }],
+        })),
+      },
+      services,
+      storage: { read: vi.fn(), update: vi.fn() },
+    });
+    expect(provision.descriptor).toEqual({
+      id: PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
+      multiple: true,
+      version: 1,
+    });
+    await dispose();
+    expect(services.drainOwner).toHaveBeenCalledTimes(1);
+    expect(services.removeOwner).toHaveBeenCalledTimes(1);
+  });
+});

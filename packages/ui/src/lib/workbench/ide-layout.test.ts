@@ -1,119 +1,53 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_IDE_WORKBENCH_LAYOUT,
-  flushPersistedIdeWorkbenchLayout,
-  hydrateIdeWorkbenchLayout,
-  ideWorkbenchLayoutPersistKey,
-  lastGoodIdeWorkbenchLayout,
-  rememberLastGoodIdeWorkbenchLayout,
-  resetIdeWorkbenchLayoutForRuntimeSwitch,
-  setIdeWorkbenchLayoutPersistBackendForTests,
-  writePersistedIdeWorkbenchLayout,
+  IDE_LAYOUT_NODE_IDS,
+  parseIdeWorkbenchLayout,
+  projectIdeWorkbenchLayout,
+  updateIdeLayoutNode,
 } from './ide-layout';
 
-const memoryStore = (): {
-  store: Map<string, string>;
-  writes: string[];
-  backend: {
-    getItem(key: string): string | null;
-    setItem(key: string, value: string): void;
-    removeItem(key: string): void;
-  };
-} => {
-  const store = new Map<string, string>();
-  const writes: string[] = [];
-  return {
-    store,
-    writes,
-    backend: {
-      getItem: (key) => store.get(key) ?? null,
-      setItem: (key, value) => {
-        writes.push(key);
-        store.set(key, value);
-      },
-      removeItem: (key) => {
-        store.delete(key);
-      },
-    },
-  };
-};
-
-afterEach(() => {
-  resetIdeWorkbenchLayoutForRuntimeSwitch();
-  setIdeWorkbenchLayoutPersistBackendForTests(undefined);
-});
-
-describe('IDE workbench layout persist', () => {
-  test('missing and empty snapshots hydrate to the default without writing', () => {
-    const { store, writes, backend } = memoryStore();
-    setIdeWorkbenchLayoutPersistBackendForTests(backend);
-    expect(hydrateIdeWorkbenchLayout('ws-missing')).toEqual(DEFAULT_IDE_WORKBENCH_LAYOUT);
-    store.set(ideWorkbenchLayoutPersistKey('ws-empty'), '');
-    expect(hydrateIdeWorkbenchLayout('ws-empty')).toEqual(DEFAULT_IDE_WORKBENCH_LAYOUT);
-    expect(writes).toEqual([]);
+describe('IDE workbench layout document', () => {
+  test('the distribution default is a split/stack/editor graph', () => {
+    const parsed = parseIdeWorkbenchLayout(structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT));
+    expect(parsed.rootId).toBe(IDE_LAYOUT_NODE_IDS.root);
+    expect(parsed.nodes[IDE_LAYOUT_NODE_IDS.editor]?.kind).toBe('editor-area');
+    const projection = projectIdeWorkbenchLayout(parsed);
+    expect(projection.activity).toBe('explorer');
+    expect(projection.primaryVisible).toBe(true);
+    expect(projection.secondaryView).toBe('agent');
+    expect(projection.secondaryVisible).toBe(true);
   });
 
-  test('failure and malformed snapshots keep last-good and do not write empty over the failed snapshot', () => {
-    const { store, writes, backend } = memoryStore();
-    setIdeWorkbenchLayoutPersistBackendForTests(backend);
-    const workspaceId = 'ws-fail';
-    writePersistedIdeWorkbenchLayout(workspaceId, {
-      ...DEFAULT_IDE_WORKBENCH_LAYOUT,
-      activity: 'git',
-      primaryWidth: 320,
-    });
-    const key = ideWorkbenchLayoutPersistKey(workspaceId);
-    const lastGood = lastGoodIdeWorkbenchLayout(workspaceId);
-    if (!lastGood) throw new Error('expected last-good');
-    resetIdeWorkbenchLayoutForRuntimeSwitch();
-    rememberLastGoodIdeWorkbenchLayout(workspaceId, lastGood);
+  test('missing references and cycles are malformed rather than rewritten to defaults', () => {
+    const missing = structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT);
+    const root = missing.nodes[IDE_LAYOUT_NODE_IDS.root];
+    if (!root || root.kind !== 'split') throw new Error('expected root split');
+    root.children[0] = 'missing.node';
+    expect(() => parseIdeWorkbenchLayout(missing)).toThrow('missing node');
 
-    let shouldFail = true;
-    setIdeWorkbenchLayoutPersistBackendForTests({
-      getItem: () => {
-        if (shouldFail) throw new Error('disk');
-        return store.get(key) ?? null;
-      },
-      setItem: (itemKey, value) => {
-        writes.push(itemKey);
-        store.set(itemKey, value);
-      },
-      removeItem: (itemKey) => {
-        store.delete(itemKey);
-      },
-    });
-    const writeCount = writes.length;
-    expect(hydrateIdeWorkbenchLayout(workspaceId).activity).toBe('git');
-    expect(writes.length).toBe(writeCount);
-
-    resetIdeWorkbenchLayoutForRuntimeSwitch();
-    store.set(key, '{');
-    shouldFail = false;
-    setIdeWorkbenchLayoutPersistBackendForTests({
-      getItem: () => store.get(key) ?? null,
-      setItem: (itemKey, value) => {
-        writes.push(`overwrite:${itemKey}`);
-        store.set(itemKey, value);
-      },
-      removeItem: (itemKey) => {
-        store.delete(itemKey);
-      },
-    });
-    expect(hydrateIdeWorkbenchLayout(workspaceId)).toEqual(DEFAULT_IDE_WORKBENCH_LAYOUT);
-    expect(store.get(key)).toBe('{');
-    expect(writes.some((entry) => entry.startsWith('overwrite:'))).toBe(false);
+    const cyclic = structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT);
+    const center = cyclic.nodes[IDE_LAYOUT_NODE_IDS.center];
+    if (!center || center.kind !== 'split') throw new Error('expected center split');
+    center.children[0] = IDE_LAYOUT_NODE_IDS.root;
+    expect(() => parseIdeWorkbenchLayout(cyclic)).toThrow('cycle');
   });
 
-  test('flush writes the last-good layout for the current workspace', () => {
-    const { store, backend } = memoryStore();
-    setIdeWorkbenchLayoutPersistBackendForTests(backend);
-    const workspaceId = 'ws-flush';
-    rememberLastGoodIdeWorkbenchLayout(workspaceId, {
-      ...DEFAULT_IDE_WORKBENCH_LAYOUT,
-      secondaryView: 'fleet',
+  test('stack visibility and active views project without deleting other view references', () => {
+    const primary = DEFAULT_IDE_WORKBENCH_LAYOUT.nodes[IDE_LAYOUT_NODE_IDS.primary];
+    if (!primary || primary.kind !== 'stack') throw new Error('expected primary stack');
+    const document = updateIdeLayoutNode(structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT), {
+      ...primary,
+      activeViewId: 'git',
+      visible: false,
     });
-    flushPersistedIdeWorkbenchLayout(workspaceId);
-    const raw = store.get(ideWorkbenchLayoutPersistKey(workspaceId));
-    expect(raw).toContain('"fleet"');
+    const projection = projectIdeWorkbenchLayout(parseIdeWorkbenchLayout(document));
+    expect(projection.activity).toBe('git');
+    expect(projection.primaryVisible).toBe(false);
+    const updatedPrimary = document.nodes[IDE_LAYOUT_NODE_IDS.primary];
+    expect(updatedPrimary?.kind).toBe('stack');
+    expect(updatedPrimary?.kind === 'stack' ? updatedPrimary.viewIds : []).toEqual([
+      'explorer', 'search', 'git', 'run', 'extensions',
+    ]);
   });
 });

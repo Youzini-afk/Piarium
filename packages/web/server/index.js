@@ -17,6 +17,7 @@ import {
   ExtensionPackageManager,
 } from '@piarium/extension-host';
 import { createDocumentAuthority } from './lib/documents/authority.js';
+import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbench-layout-service.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
 import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
@@ -795,6 +796,7 @@ async function main(options = {}) {
       piariumVersion: PIARIUM_VERSION,
     });
   }
+  const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
     cwd: process.cwd(),
@@ -1113,6 +1115,7 @@ async function main(options = {}) {
     stop: async (shutdownOptions = {}) => {
       piSessionAutomation.stop();
       brokerUnsubscribe();
+      await unregisterWorkbenchLayoutService();
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
       unregisterDocumentsCapability();
