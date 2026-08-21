@@ -75,11 +75,12 @@ export const attachActiveEditorContext = (input: {
       kind: 'selection',
       range: {
         startLine: file.selection.startLine,
-        startColumn: 1,
+        startColumn: file.selection.startColumn ?? 1,
         endLine: file.selection.endLine,
-        endColumn: 1,
+        endColumn: file.selection.endColumn ?? 1,
       },
       label: file.relativePath,
+      text: file.selection.text,
     });
     if (!('status' in fromRegistry) || fromRegistry.status !== 'missing-document') return fromRegistry;
     const runtimeKey = getRuntimeKey();
@@ -96,9 +97,9 @@ export const attachActiveEditorContext = (input: {
       kind: 'selection',
       range: {
         startLine: file.selection.startLine,
-        startColumn: 1,
+        startColumn: file.selection.startColumn ?? 1,
         endLine: file.selection.endLine,
-        endColumn: 1,
+        endColumn: file.selection.endColumn ?? 1,
       },
       languageId: languageIdFromResourceId(resourceId),
       text: file.selection.text,

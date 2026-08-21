@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 
 export interface PiEditorSelection {
+  endColumn?: number;
   endLine: number;
+  startColumn?: number;
   startLine: number;
   text: string;
 }
@@ -40,7 +42,13 @@ const normalizeSelection = (value: unknown): PiEditorSelection | null => {
     || selection.text.length === 0
   ) return null;
   return {
+    ...(Number.isInteger(selection.endColumn) && Number(selection.endColumn) >= 1
+      ? { endColumn: Number(selection.endColumn) }
+      : {}),
     endLine: endLine as number,
+    ...(Number.isInteger(selection.startColumn) && Number(selection.startColumn) >= 1
+      ? { startColumn: Number(selection.startColumn) }
+      : {}),
     startLine: startLine as number,
     text: selection.text,
   };
@@ -74,6 +82,8 @@ const sameSelection = (left: PiEditorSelection | null, right: PiEditorSelection 
     && right !== null
     && left.startLine === right.startLine
     && left.endLine === right.endLine
+    && left.startColumn === right.startColumn
+    && left.endColumn === right.endColumn
     && left.text === right.text)
 );
 

@@ -241,7 +241,9 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         selection: hasText
           ? {
             startLine: fromLine.number,
+            startColumn: range.from - fromLine.from + 1,
             endLine: toLine.number,
+            endColumn: range.to - toLine.from + 1,
             text: update.state.sliceDoc(range.from, range.to),
           }
           : null,

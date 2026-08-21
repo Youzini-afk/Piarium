@@ -45,6 +45,22 @@ describe('editor context attachments', () => {
   test('rejects attachments captured for another runtime', () => {
     expect(addEditorContextAttachment(attachment({ runtimeKey: 'other-host' }))).toEqual({ status: 'wrong-runtime' });
   });
+
+  test('refreshes the same logical attachment instead of retaining a stale buffer snapshot', () => {
+    addEditorContextAttachment(attachment({ source: 'unsaved-buffer', text: 'old', localEditRevision: 3 }));
+    const refreshed = addEditorContextAttachment(attachment({
+      id: 'att-new',
+      source: 'unsaved-buffer',
+      text: 'new',
+      localEditRevision: 4,
+    }));
+    expect('status' in refreshed).toBe(false);
+    if ('status' in refreshed) throw new Error(refreshed.status);
+    expect(refreshed.id).toBe('att-1');
+    expect(refreshed.text).toBe('new');
+    expect(refreshed.localEditRevision).toBe(4);
+    expect(listEditorContextAttachments(runtimeKey, 'session-a')).toHaveLength(1);
+  });
 });
 
 describe('unsaved attachment projection', () => {
@@ -110,6 +126,18 @@ describe('agent file change hints', () => {
     });
     expect(peekAgentFileChangeHint({ workspaceId: 'ws-1', resourceId: 'src/a.ts' })?.toolCallId).toBe('tool-1');
   });
+
+  test('does not project tool paths outside the authoritative workspace', () => {
+    expect(recordHintsFromToolCall({
+      runtimeKey,
+      sessionId: 'session-a',
+      toolCallId: 'tool-outside',
+      toolName: 'write',
+      args: { path: '../outside.txt' },
+      workspaceId: 'ws-1',
+      workspaceRoot: '/workspace',
+    })).toEqual([]);
+  });
 });
 
 describe('patch hunk apply and revert', () => {
@@ -145,6 +173,35 @@ describe('three-way merge', () => {
     expect(applyMergeDecisions(computeThreeWayMerge('base', 'ours', 'theirs'), [
       { index: 0, choice: 'theirs' },
     ])).toBe('theirs');
+  });
+
+  test('merges independent line edits and preserves trailing newlines', () => {
+    const regions = computeThreeWayMerge(
+      'alpha\nbeta\ngamma\n',
+      'ALPHA\nbeta\ngamma\n',
+      'alpha\nbeta\nGAMMA\n',
+    );
+    expect(regions).toEqual([
+      { kind: 'ours', text: 'ALPHA\n' },
+      { kind: 'same', text: 'beta\n' },
+      { kind: 'theirs', text: 'GAMMA\n' },
+    ]);
+    expect(applyMergeDecisions(regions, [])).toBe('ALPHA\nbeta\nGAMMA\n');
+  });
+
+  test('requires an explicit decision for every overlapping region', () => {
+    const regions = computeThreeWayMerge(
+      'alpha\nbeta\ngamma\n',
+      'ours-a\nbeta\nours-g\n',
+      'theirs-a\nbeta\ntheirs-g\n',
+    );
+    expect(regions.filter((region) => region.kind === 'conflict')).toHaveLength(2);
+    expect(() => applyMergeDecisions(regions, [{ index: 0, choice: 'ours' }]))
+      .toThrow(/has no decision/);
+    expect(applyMergeDecisions(regions, [
+      { index: 0, choice: 'ours' },
+      { index: 2, choice: 'theirs' },
+    ])).toBe('ours-a\nbeta\ntheirs-g\n');
   });
 });
 

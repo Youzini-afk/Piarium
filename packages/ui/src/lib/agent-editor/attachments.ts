@@ -26,18 +26,32 @@ export const addEditorContextAttachment = (
   attachment: EditorContextAttachment,
 ): EditorContextAttachment | { status: 'wrong-runtime' } => {
   if (attachment.runtimeKey !== getRuntimeKey()) return { status: 'wrong-runtime' };
-  const duplicate = attachments.find((item) => (
+  const logicalIndex = attachments.findIndex((item) => (
     item.runtimeKey === attachment.runtimeKey
     && item.sessionId === attachment.sessionId
     && item.kind === attachment.kind
     && item.resourceId === attachment.resourceId
     && item.source === attachment.source
     && item.range?.startLine === attachment.range?.startLine
+    && item.range?.startColumn === attachment.range?.startColumn
     && item.range?.endLine === attachment.range?.endLine
+    && item.range?.endColumn === attachment.range?.endColumn
     && item.diagnosticMessage === attachment.diagnosticMessage
     && item.patch === attachment.patch
   ));
-  if (duplicate) return duplicate;
+  const previous = logicalIndex >= 0 ? attachments[logicalIndex] : undefined;
+  if (
+    previous
+    && previous.documentRevision === attachment.documentRevision
+    && previous.localEditRevision === attachment.localEditRevision
+    && previous.text === attachment.text
+  ) return previous;
+  if (previous) {
+    const updated = { ...attachment, id: previous.id };
+    attachments = attachments.map((item, index) => index === logicalIndex ? updated : item);
+    emit();
+    return updated;
+  }
   attachments = [...attachments, attachment];
   emit();
   return attachment;

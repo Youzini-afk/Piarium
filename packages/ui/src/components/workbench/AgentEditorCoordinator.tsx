@@ -58,7 +58,9 @@ export const AgentEditorCoordinator: React.FC = () => {
     const selection = hasRange
       ? {
         startLine: tab.viewState.selectionStartLine as number,
+        startColumn: tab.viewState.selectionStartColumn ?? 1,
         endLine: tab.viewState.selectionEndLine as number,
+        endColumn: tab.viewState.selectionEndColumn ?? 1,
         text: sliceDocumentRange(record.buffer, {
           startLine: tab.viewState.selectionStartLine as number,
           startColumn: tab.viewState.selectionStartColumn ?? 1,

@@ -15,7 +15,13 @@ export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ 
   const { t } = useI18n();
   const record = useDocumentRecord(identity);
   const [mergeOpen, setMergeOpen] = React.useState(false);
-  const [edited, setEdited] = React.useState('');
+  const [edited, setEdited] = React.useState<Record<number, string>>({});
+  const [decisions, setDecisions] = React.useState<MergeRegionDecision[]>([]);
+
+  React.useEffect(() => {
+    setEdited({});
+    setDecisions([]);
+  }, [identity.resourceId, identity.workspaceId, record?.conflict?.diskRevision, record?.localEditRevision]);
 
   if (!record || (record.status !== 'conflict' && record.status !== 'deleted')) return null;
 
@@ -24,6 +30,11 @@ export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ 
     ? computeThreeWayMerge(conflict.ancestorContent, record.buffer, conflict.diskContent)
     : [];
   const agent = record.externalSource === 'agent';
+  const conflictIndexes = regions.flatMap((region, index) => region.kind === 'conflict' ? [index] : []);
+  const allConflictsDecided = conflictIndexes.every((index) => decisions.some((decision) => decision.index === index));
+  const choose = (decision: MergeRegionDecision): void => {
+    setDecisions((current) => [...current.filter((item) => item.index !== decision.index), decision]);
+  };
 
   const save = (): void => {
     void getDocumentRegistry().save(identity, record.status === 'deleted'
@@ -85,42 +96,48 @@ export const DocumentConflictBanner: React.FC<DocumentConflictBannerProps> = ({ 
                 <Button
                   variant="outline"
                   size="xs"
-                  onClick={() => {
-                    const decisions: MergeRegionDecision[] = [{ index, choice: 'ours' }];
-                    void getDocumentRegistry().applyMerged(identity, applyMergeDecisions(regions, decisions));
-                  }}
+                  aria-pressed={decisions.some((decision) => decision.index === index && decision.choice === 'ours')}
+                  onClick={() => choose({ index, choice: 'ours' })}
                 >
                   {t('filesView.document.conflict.acceptOurs')}
                 </Button>
                 <Button
                   variant="outline"
                   size="xs"
-                  onClick={() => {
-                    const decisions: MergeRegionDecision[] = [{ index, choice: 'theirs' }];
-                    void getDocumentRegistry().applyMerged(identity, applyMergeDecisions(regions, decisions));
-                  }}
+                  aria-pressed={decisions.some((decision) => decision.index === index && decision.choice === 'theirs')}
+                  onClick={() => choose({ index, choice: 'theirs' })}
                 >
                   {t('filesView.document.conflict.acceptTheirs')}
                 </Button>
                 <textarea
                   className="min-h-20 w-full rounded-md border border-border/60 bg-background p-2 typography-micro"
-                  value={edited || region.ours}
-                  onChange={(event) => setEdited(event.target.value)}
+                  value={edited[index] ?? region.ours}
+                  onChange={(event) => setEdited((current) => ({ ...current, [index]: event.target.value }))}
                   aria-label={t('filesView.document.conflict.editHunk')}
                 />
                 <Button
                   variant="outline"
                   size="xs"
-                  onClick={() => {
-                    const decisions: MergeRegionDecision[] = [{ index, choice: 'edit', edited: edited || region.ours }];
-                    void getDocumentRegistry().applyMerged(identity, applyMergeDecisions(regions, decisions));
-                  }}
+                  aria-pressed={decisions.some((decision) => decision.index === index && decision.choice === 'edit')}
+                  onClick={() => choose({ index, choice: 'edit', edited: edited[index] ?? region.ours })}
                 >
                   {t('filesView.document.conflict.applyEdited')}
                 </Button>
               </div>
             );
           })}
+          <div className="md:col-span-3 flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!allConflictsDecided}
+              onClick={() => {
+                void getDocumentRegistry().applyMerged(identity, applyMergeDecisions(regions, decisions));
+              }}
+            >
+              {t('filesView.document.conflict.merge')}
+            </Button>
+          </div>
         </div>
       ) : null}
     </div>

@@ -8,6 +8,16 @@ const hints = new Map<string, AgentFileChangeHint>();
 
 const hintKey = (workspaceId: string, resourceId: string): string => `${workspaceId}\0${resourceId}`;
 
+const resourceIdForHint = (workspaceRoot: string, filePath: string): string | undefined => {
+  const fromAbsolute = resourceIdFromWorkspacePath(workspaceRoot, filePath);
+  if (fromAbsolute !== null) return fromAbsolute || undefined;
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (!normalized || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) return undefined;
+  const segments = normalized.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return undefined;
+  return segments.join('/');
+};
+
 const emit = (): void => {
   for (const listener of listeners) listener();
 };
@@ -123,10 +133,10 @@ export const recordHintsFromToolCall = (input: {
 }): AgentFileChangeHint[] => {
   const recorded: AgentFileChangeHint[] = [];
   for (const change of extractToolFileChanges(input.toolName, input.args)) {
-    const resourceId = resourceIdFromWorkspacePath(input.workspaceRoot, change.path)
-      ?? change.path.replace(/\\/g, '/').replace(/^\.\//, '');
+    const resourceId = resourceIdForHint(input.workspaceRoot, change.path);
+    if (!resourceId) continue;
     const fromResourceId = change.fromPath
-      ? resourceIdFromWorkspacePath(input.workspaceRoot, change.fromPath) ?? change.fromPath.replace(/\\/g, '/')
+      ? resourceIdForHint(input.workspaceRoot, change.fromPath)
       : undefined;
     const hint: AgentFileChangeHint = {
       runtimeKey: input.runtimeKey,
