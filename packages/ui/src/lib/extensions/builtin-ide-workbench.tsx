@@ -13,6 +13,7 @@ import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
 import { PiRecoveryPanel } from '@/components/layout/PiRecoveryPanel';
@@ -500,6 +501,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               />
             </div>
           ) : null}
+          <WorkbenchProfileSwitcher />
           <div className="min-w-0 truncate typography-ui-label text-foreground">{workspaceLabel}</div>
           <div className="ml-auto flex app-region-no-drag items-center gap-1">
             <Tooltip>

@@ -10,6 +10,7 @@ import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControl
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
+import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 
 const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors';
@@ -135,6 +136,8 @@ export const TitlebarLeftControls: React.FC = () => {
             className={isSidebarOpen ? 'oc-vibrancy-pill' : undefined}
           />
         ) : null}
+
+        <WorkbenchProfileSwitcher className={isSidebarOpen ? 'oc-vibrancy-pill' : undefined} />
       </div>
     </div>
   );

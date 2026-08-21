@@ -59,7 +59,6 @@ export class WorkbenchShellTransitionAbortedError extends Error {
 
 export interface WorkbenchProfileTransitionOptions {
   enableShell?: boolean;
-  persistUnavailable?: boolean;
 }
 
 export interface WorkbenchShellTransitionDependencies {
@@ -309,7 +308,6 @@ const commitCandidateShell = async (
   deps: WorkbenchShellTransitionDependencies,
   input: {
     enableShell?: boolean;
-    persistUnavailable?: boolean;
     profileId: string;
     replacementSelections: Readonly<Record<string, string>>;
     persist(expectedRevision: number): Promise<void>;
@@ -328,42 +326,52 @@ const commitCandidateShell = async (
       },
     );
   };
-  let inspected = inspectShell();
-  if (input.enableShell && inspected.status === 'disabled' && inspected.shellExtensionId) {
-    await deps.setEnabled(inspected.shellExtensionId, true);
-    inspected = inspectShell();
-  }
-  const captured = captureIdentity(deps);
-  if (inspected.status === 'builtin') {
-    await input.persist(captured.revision);
-    return;
-  }
-  if (inspected.status === 'missing' || inspected.status === 'disabled' || inspected.status === 'failed') {
-    if (input.persistUnavailable) {
+  let autoEnabledExtensionId: string | undefined;
+  let committed = false;
+  try {
+    let inspected = inspectShell();
+    if (input.enableShell && inspected.status === 'disabled' && inspected.shellExtensionId) {
+      await deps.setEnabled(inspected.shellExtensionId, true);
+      autoEnabledExtensionId = inspected.shellExtensionId;
+      inspected = inspectShell();
+    }
+    const captured = captureIdentity(deps);
+    if (inspected.status === 'builtin') {
       await input.persist(captured.revision);
+      committed = true;
       return;
     }
-    throw new WorkbenchShellUnavailableError({
-      profileId: input.profileId,
-      shellContributionId: inspected.shellContributionId ?? '',
-      status: inspected.status,
-      ...(inspected.shellExtensionId ? { shellExtensionId: inspected.shellExtensionId } : {}),
-    });
-  }
-  const staging = await proveShellReady(
-    inspected.shellContributionId ?? '',
-    inspected.shellExtensionId,
-    deps,
-    captured,
-  );
-  try {
-    assertSameIdentity(captured, deps);
-    await input.persist(captured.revision);
-  } catch (error) {
+    if (inspected.status === 'missing' || inspected.status === 'disabled' || inspected.status === 'failed') {
+      throw new WorkbenchShellUnavailableError({
+        profileId: input.profileId,
+        shellContributionId: inspected.shellContributionId ?? '',
+        status: inspected.status,
+        ...(inspected.shellExtensionId ? { shellExtensionId: inspected.shellExtensionId } : {}),
+      });
+    }
+    const staging = await proveShellReady(
+      inspected.shellContributionId ?? '',
+      inspected.shellExtensionId,
+      deps,
+      captured,
+    );
+    try {
+      assertSameIdentity(captured, deps);
+      await input.persist(captured.revision);
+      committed = true;
+    } catch (error) {
+      await releaseStaging(staging.session, staging.container);
+      throw error;
+    }
     await releaseStaging(staging.session, staging.container);
+  } catch (error) {
+    if (autoEnabledExtensionId && !committed) {
+      await deps.setEnabled(autoEnabledExtensionId, false).catch((rollbackError) => {
+        console.error('[Piarium Extensions] Failed to roll back workbench shell enablement:', rollbackError);
+      });
+    }
     throw error;
   }
-  await releaseStaging(staging.session, staging.container);
 };
 
 export const runSelectActiveWorkbenchProfile = (
@@ -383,7 +391,6 @@ export const runSelectActiveWorkbenchProfile = (
     profileId,
     replacementSelections: layout.replacementSelections,
     ...(options?.enableShell ? { enableShell: true } : {}),
-    ...(options?.persistUnavailable ? { persistUnavailable: true } : {}),
   });
 });
 

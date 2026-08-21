@@ -5,7 +5,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import {
-  setPiariumExtensionEnabled,
   usePiariumExtensionCatalog,
 } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
@@ -47,9 +46,11 @@ export const WorkbenchRecoveryShell: React.FC<{
               type="button"
               disabled={busy}
               onClick={() => {
-                const extensionId = resolved.shellExtensionId;
-                if (!extensionId) return;
-                void run(() => setPiariumExtensionEnabled(extensionId, true));
+                void run(() => selectActiveWorkbenchProfile(
+                  resolved.profileId,
+                  workspaceId,
+                  { enableShell: true },
+                ));
               }}
             >
               {t('workbench.recovery.reenable')}
@@ -60,7 +61,7 @@ export const WorkbenchRecoveryShell: React.FC<{
               value={resolved.profileId}
               onValueChange={(profileId) => {
                 if (profileId === resolved.profileId) return;
-                void run(() => selectActiveWorkbenchProfile(profileId, workspaceId));
+                void run(() => selectActiveWorkbenchProfile(profileId, workspaceId, { enableShell: true }));
               }}
             >
               <SelectTrigger aria-label={t('workbench.recovery.chooseProfile')} disabled={busy}>

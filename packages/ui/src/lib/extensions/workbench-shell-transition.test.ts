@@ -238,13 +238,6 @@ test('enable-and-switch turns the shell on and commits after a render-ready cand
   expect(harness.disposed).toBe(1);
 });
 
-test('select-without-enabling persists a disabled shell without changing enablement', async () => {
-  const harness = createDeps({ entry: shellEntry(false) });
-  await runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, { persistUnavailable: true });
-  expect(harness.enabled).toEqual([]);
-  expect(harness.persistedProfiles).toEqual(['studio']);
-});
-
 test('sync, async, and isolated mounts commit only after they become ready', async () => {
   for (const implementation of [
     { mount: () => () => undefined },
@@ -267,6 +260,23 @@ test('keeps the previous profile when candidate mount fails', async () => {
   await expect(runSelectActiveWorkbenchProfile(harness.deps, 'studio')).rejects.toThrow('mount failed');
   expect(harness.persistedProfiles).toEqual([]);
   expect(harness.disposed).toBe(1);
+});
+
+test('rolls back automatic enablement when the candidate shell fails to mount', async () => {
+  const entry = shellEntry(false);
+  const harness = createDeps({
+    entry,
+    implementation: { mount: () => { throw new Error('mount failed'); } },
+  });
+  await expect(runSelectActiveWorkbenchProfile(
+    harness.deps,
+    'studio',
+    undefined,
+    { enableShell: true },
+  )).rejects.toThrow('mount failed');
+  expect(harness.enabled).toEqual([shellExtensionId, shellExtensionId]);
+  expect(entry.desired.enabled).toBe(false);
+  expect(harness.persistedProfiles).toEqual([]);
 });
 
 test('keeps the previous profile when a render candidate fails', async () => {

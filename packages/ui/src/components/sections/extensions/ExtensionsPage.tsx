@@ -57,7 +57,6 @@ import {
   upsertWorkbenchProfile,
   useSurfaceRegistrySnapshot,
   WORKBENCH_REPLACEMENT_TARGETS,
-  WorkbenchShellUnavailableError,
 } from '@/lib/extensions/workbench-registry';
 import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { workbenchExtensionDisplayName, workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
@@ -131,7 +130,6 @@ const WorkbenchProfileSection: React.FC = () => {
   const [removeOpen, setRemoveOpen] = React.useState(false);
   const [profileName, setProfileName] = React.useState('');
   const [profileBusy, setProfileBusy] = React.useState(false);
-  const [pendingUnavailable, setPendingUnavailable] = React.useState<WorkbenchShellUnavailableError | null>(null);
   const workbench = catalog.snapshot?.workbench;
   if (!workbench?.authoritative || !catalog.snapshot) return null;
   const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
@@ -166,19 +164,11 @@ const WorkbenchProfileSection: React.FC = () => {
   const run = (operation: Promise<void>) => {
     void operation.catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
-  const requestProfile = async (
-    profileId: string,
-    options?: { enableShell?: boolean; persistUnavailable?: boolean },
-  ): Promise<void> => {
+  const requestProfile = async (profileId: string): Promise<void> => {
     setProfileBusy(true);
     try {
-      await selectActiveWorkbenchProfile(profileId, workspaceId, options);
-      setPendingUnavailable(null);
+      await selectActiveWorkbenchProfile(profileId, workspaceId, { enableShell: true });
     } catch (error) {
-      if (error instanceof WorkbenchShellUnavailableError) {
-        setPendingUnavailable(error);
-        return;
-      }
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setProfileBusy(false);
@@ -268,7 +258,7 @@ const WorkbenchProfileSection: React.FC = () => {
                 size="xs"
                 variant="outline"
                 disabled={profileBusy}
-                onClick={() => { void requestProfile(resolved.profileId, { enableShell: true }); }}
+                onClick={() => { void requestProfile(resolved.profileId); }}
               >
                 {t('settings.piarium.extensions.workbench.enableAndSwitch')}
               </Button>
@@ -404,40 +394,6 @@ const WorkbenchProfileSection: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(pendingUnavailable)} onOpenChange={(open) => !profileBusy && !open && setPendingUnavailable(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t('settings.piarium.extensions.workbench.shellUnavailableTitle')}</DialogTitle>
-            <DialogDescription>{t('settings.piarium.extensions.workbench.shellUnavailableDescription')}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="ghost" disabled={profileBusy} onClick={() => setPendingUnavailable(null)}>
-              {t('settings.common.actions.cancel')}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={profileBusy || !pendingUnavailable}
-              onClick={() => {
-                if (!pendingUnavailable) return;
-                void requestProfile(pendingUnavailable.profileId, { persistUnavailable: true });
-              }}
-            >
-              {t('settings.piarium.extensions.workbench.selectWithoutEnabling')}
-            </Button>
-            <Button
-              type="button"
-              disabled={profileBusy || !pendingUnavailable}
-              onClick={() => {
-                if (!pendingUnavailable) return;
-                void requestProfile(pendingUnavailable.profileId, { enableShell: true });
-              }}
-            >
-              {t('settings.piarium.extensions.workbench.enableAndSwitch')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </SettingsSection>
   );
 };
