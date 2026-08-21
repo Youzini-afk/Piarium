@@ -7,9 +7,8 @@ import { SessionAuthGate } from './components/auth/SessionAuthGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
 import './lib/debug'
-import { syncDesktopSettings, initializeAppearancePreferences } from './lib/persistence'
+import { initializeAppearancePreferences } from './lib/persistence'
 import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
-import { applyPersistedDirectoryPreferences } from './lib/directoryPersistence'
 import { startTypographyWatcher } from './lib/typographyWatcher'
 import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
 import { initializeLocale, I18nProvider } from './lib/i18n'
@@ -31,15 +30,11 @@ initializeLocale();
 // and hydrates once persisted preferences are applied. Users with non-default
 // themes may briefly see default appearance on cold start; accepted trade-off
 // for faster time-to-first-paint.
-void initializeAppearancePreferences().then(async () => {
-  try {
-    await syncDesktopSettings();
-    await applyPersistedDirectoryPreferences(runtimeAPIs);
-  } catch (err) {
-    console.error('[main] settings init failed:', err);
-  }
-
-  // Start watchers regardless of whether secondary settings succeed.
+void initializeAppearancePreferences().then(() => {
+  // Server-backed settings and the authoritative workspace are restored by
+  // SessionAuthGate only after authentication. Starting that work here sent
+  // unauthenticated writes and let the Workbench mount against an unresolved
+  // directory.
   startAppearanceAutoSave();
   startModelPrefsAutoSave();
   startTypographyWatcher();

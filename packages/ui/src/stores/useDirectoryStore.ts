@@ -173,7 +173,9 @@ const persistResolvedHome = (resolved: string) => {
   if (typeof window !== 'undefined') {
     safeStorage.setItem('homeDirectory', resolved);
   }
-  void updateDesktopSettings({ homeDirectory: resolved });
+  // Home is derived from the active Host. Persisting it back into shared
+  // settings during module initialization caused unauthenticated writes on a
+  // password-protected Web runtime and could replay one Host's path to another.
   return resolved;
 };
 
@@ -398,7 +400,6 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
         }
 
-        void updateDesktopSettings({ homeDirectory: resolvedHome });
       }
     }),
     {

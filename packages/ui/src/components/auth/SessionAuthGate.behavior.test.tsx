@@ -18,12 +18,18 @@ let currentRecord: HookRecord | null = null;
 let hookIndex = 0;
 let pendingEffects: Array<() => void> = [];
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
 
 afterEach(() => {
   if (originalWindow) {
     Object.defineProperty(globalThis, 'window', originalWindow);
   } else {
     Reflect.deleteProperty(globalThis, 'window');
+  }
+  if (originalDocument) {
+    Object.defineProperty(globalThis, 'document', originalDocument);
+  } else {
+    Reflect.deleteProperty(globalThis, 'document');
   }
 });
 
@@ -32,8 +38,14 @@ const resetHarness = () => {
   currentRecord = null;
   hookIndex = 0;
   pendingEffects = [];
+  desktopShell = false;
+  vscodeRuntime = false;
   runtimeApiBaseUrl = '';
   runtimeKey = 'local';
+  runtimeStatusCode = 401;
+  restoreDirectoryPreferences = () => Promise.resolve();
+  initialLoadingFaded = false;
+  initialLoadingRemoved = false;
   runtimeEndpointChangedListener = null;
   desktopInvoke = async () => null;
   desktopHostsGetCalls = 0;
@@ -52,6 +64,17 @@ const resetHarness = () => {
         return 0;
       },
       clearTimeout: () => undefined,
+    },
+  });
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      getElementById: (id: string) => id === 'initial-loading'
+        ? {
+            classList: { add: () => { initialLoadingFaded = true; } },
+            remove: () => { initialLoadingRemoved = true; },
+          }
+        : null,
     },
   });
 };
@@ -180,14 +203,19 @@ const reactJsxRuntime = {
 };
 
 let desktopShell = false;
+let vscodeRuntime = false;
 let runtimeFetchRejects = true;
 let runtimeApiBaseUrl = '';
 let runtimeKey = 'local';
+let runtimeStatusCode = 401;
+let restoreDirectoryPreferences: () => Promise<void> = () => Promise.resolve();
 let runtimeEndpointChangedListener: (() => void) | null = null;
 let desktopInvoke: () => Promise<unknown> = async () => null;
 let desktopHostsGetCalls = 0;
 let desktopHostsSetCalls = 0;
 let runtimeSwitchCalls = 0;
+let initialLoadingFaded = false;
+let initialLoadingRemoved = false;
 
 mock.module('react/jsx-runtime', () => reactJsxRuntime);
 mock.module('react/jsx-dev-runtime', () => reactJsxRuntime);
@@ -247,7 +275,7 @@ mock.module('@/lib/i18n', () => ({
 mock.module('@/lib/desktop', () => ({
   invokeDesktop: () => desktopInvoke(),
   isDesktopShell: mock(() => desktopShell),
-  isVSCodeRuntime: mock(() => false),
+  isVSCodeRuntime: mock(() => vscodeRuntime),
 }));
 
 mock.module('@/lib/persistence', () => ({
@@ -256,7 +284,7 @@ mock.module('@/lib/persistence', () => ({
 }));
 
 mock.module('@/lib/directoryPersistence', () => ({
-  applyPersistedDirectoryPreferences: mock(() => Promise.resolve()),
+  applyPersistedDirectoryPreferences: mock(() => restoreDirectoryPreferences()),
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
@@ -265,8 +293,8 @@ mock.module('@/lib/runtime-fetch', () => ({
       throw new Error('offline');
     }
 
-    return new Response(JSON.stringify({ authenticated: false }), {
-      status: 401,
+    return new Response(JSON.stringify({ authenticated: runtimeStatusCode === 200 }), {
+      status: runtimeStatusCode,
       headers: { 'content-type': 'application/json' },
     });
   }),
@@ -285,7 +313,7 @@ mock.module('@/lib/runtime-switch', () => ({
       if (runtimeEndpointChangedListener === listener) runtimeEndpointChangedListener = null;
     };
   },
-  switchRuntimeEndpoint: () => { runtimeSwitchCalls += 1; },
+  switchRuntimeEndpointSafely: async () => { runtimeSwitchCalls += 1; },
 }));
 
 mock.module('@/lib/desktopHosts', () => ({
@@ -384,6 +412,46 @@ describe('SessionAuthGate status-check failure behavior', () => {
 
     expect(text).toContain('sessionAuth.locked.unlockTitle');
     expect(text).not.toContain('sessionAuth.error.networkTitle');
+    expect(initialLoadingFaded).toBe(true);
+    expect(initialLoadingRemoved).toBe(true);
+  });
+
+  test('waits for authenticated settings and workspace restoration before mounting the app', async () => {
+    resetHarness();
+    desktopShell = false;
+    runtimeFetchRejects = false;
+    runtimeStatusCode = 200;
+    let finishRestore = () => {};
+    restoreDirectoryPreferences = () => new Promise<void>((resolve) => { finishRestore = resolve; });
+
+    const loadingTree = await renderGate();
+    expect(collectText(loadingTree)).not.toContain('child');
+
+    finishRestore();
+    await Promise.resolve();
+    await Promise.resolve();
+    const readyTree = await renderGate();
+    await flushEffects();
+
+    expect(collectText(readyTree)).toContain('child');
+  });
+
+  test('restores settings before mounting a runtime that skips web authentication', async () => {
+    resetHarness();
+    vscodeRuntime = true;
+    let finishRestore = () => {};
+    restoreDirectoryPreferences = () => new Promise<void>((resolve) => { finishRestore = resolve; });
+
+    const loadingTree = await renderGate();
+    expect(collectText(loadingTree)).not.toContain('child');
+
+    finishRestore();
+    await Promise.resolve();
+    await Promise.resolve();
+    const readyTree = await renderGate();
+    await flushEffects();
+
+    expect(collectText(readyTree)).toContain('child');
   });
 
   test('discards a password completion after switching to another host', async () => {

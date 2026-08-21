@@ -352,8 +352,13 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const [isPasskeyBusy, setIsPasskeyBusy] = React.useState(false);
   const [trustDevice, setTrustDevice] = React.useState<boolean>(() => readStoredTrustDevice());
   const [activePasskeyAction, setActivePasskeyAction] = React.useState<'auth' | 'register' | null>(null);
+  const [preferencesReady, setPreferencesReady] = React.useState(false);
   const passwordInputRef = React.useRef<HTMLInputElement | null>(null);
-  const hasResyncedRef = React.useRef(skipAuth);
+  const hasResyncedRef = React.useRef(false);
+  const preferencesSyncRef = React.useRef<{
+    promise: Promise<void>;
+    runtime: RuntimeIdentity;
+  } | null>(null);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -548,6 +553,9 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setIsSubmitting(false);
       setActivePasskeyAction(null);
       setIsPasskeyBusy(false);
+      hasResyncedRef.current = false;
+      preferencesSyncRef.current = null;
+      setPreferencesReady(false);
       resetTransientRetry();
       setState('pending');
       void checkStatus();
@@ -557,6 +565,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   React.useEffect(() => {
     if (!skipAuth && state === 'locked') {
       hasResyncedRef.current = false;
+      preferencesSyncRef.current = null;
+      setPreferencesReady(false);
     }
   }, [skipAuth, state]);
 
@@ -568,18 +578,40 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   }, [state]);
 
   React.useEffect(() => {
-    if (skipAuth) {
-      return;
-    }
     if (state === 'authenticated' && !hasResyncedRef.current) {
-      hasResyncedRef.current = true;
-      void (async () => {
-        await initializeAppearancePreferences();
-        await syncDesktopSettings();
-        await applyPersistedDirectoryPreferences(apis);
-      })();
+      const runtime = captureRuntimeIdentity();
+      setPreferencesReady(false);
+      const existing = preferencesSyncRef.current;
+      const promise = existing && runtimeIdentityMatches(existing.runtime, runtime)
+        ? existing.promise
+        : (async () => {
+            await initializeAppearancePreferences();
+            await syncDesktopSettings();
+            await applyPersistedDirectoryPreferences(apis);
+          })();
+      preferencesSyncRef.current = { promise, runtime };
+      void promise.catch((error) => {
+        if (isRuntimeIdentityActive(runtime)) {
+          console.warn('Failed to restore authenticated preferences:', error);
+        }
+      }).finally(() => {
+        if (!isRuntimeIdentityActive(runtime)) return;
+        hasResyncedRef.current = true;
+        setPreferencesReady(true);
+      });
     }
-  }, [apis, skipAuth, state]);
+  }, [apis, state]);
+
+  React.useEffect(() => {
+    if (state !== 'locked' && state !== 'error' && state !== 'rate-limited') return;
+    const loadingElement = typeof document === 'undefined'
+      ? null
+      : document.getElementById('initial-loading');
+    if (!loadingElement) return;
+    loadingElement.classList.add('fade-out');
+    const timer = window.setTimeout(() => loadingElement.remove(), 300);
+    return () => window.clearTimeout(timer);
+  }, [state]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -834,6 +866,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const canUsePasskey = canOfferPasskeySetup && passkeyStatus.hasPasskeys;
 
   if (state === 'pending') {
+    return <LoadingScreen />;
+  }
+
+  if (state === 'authenticated' && !preferencesReady) {
     return <LoadingScreen />;
   }
 

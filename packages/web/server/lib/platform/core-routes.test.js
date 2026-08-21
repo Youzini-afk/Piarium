@@ -2,11 +2,32 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from './tunnel-auth.js';
-import { registerAuthAndAccessRoutes, registerServerStatusRoutes } from './core-routes.js';
+import {
+  registerAuthAndAccessRoutes,
+  registerCommonRequestMiddleware,
+  registerServerStatusRoutes,
+} from './core-routes.js';
 
 describe('core-routes', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each([
+    '/api/documents/workspace/resolve',
+    '/api/language/sync',
+    '/api/tasks/run',
+    '/api/debug/start',
+    '/api/tests/run',
+  ])('parses JSON bodies for workbench endpoint %s', async (endpoint) => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.post(endpoint, (req, res) => res.json(req.body));
+
+    await request(app)
+      .post(endpoint)
+      .send({ path: '/workspace', workspaceId: 'workspace-1' })
+      .expect(200, { path: '/workspace', workspaceId: 'workspace-1' });
   });
 
   it('reports service addresses from the active server and tunnel owners', async () => {

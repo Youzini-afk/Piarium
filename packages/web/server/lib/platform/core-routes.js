@@ -1162,6 +1162,11 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
       req.path.startsWith('/api/workspace') ||
+      req.path.startsWith('/api/documents') ||
+      req.path.startsWith('/api/language') ||
+      req.path.startsWith('/api/tasks') ||
+      req.path.startsWith('/api/debug') ||
+      req.path.startsWith('/api/tests') ||
       req.path.startsWith('/api/magic-prompts') ||
       req.path.startsWith('/api/prompts') ||
       req.path.startsWith('/api/terminal') ||
