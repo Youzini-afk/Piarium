@@ -1,4 +1,3 @@
-const DEFAULT_MAX_RESULTS = 200;
 const CONTENT_SEARCH_EXCLUDED_GLOBS = [
   '!**/node_modules/**',
   '!**/.git/**',
@@ -77,7 +76,7 @@ export const createWorkspaceContentSearch = ({
 
     const maxResults = Number.isFinite(request?.maxResults) && request.maxResults > 0
       ? Math.floor(request.maxResults)
-      : DEFAULT_MAX_RESULTS;
+      : null;
     const args = [
       '--json',
       '--line-number',
@@ -109,7 +108,25 @@ export const createWorkspaceContentSearch = ({
 
       let settled = false;
       let stdoutBuffer = '';
-      const hits = [];
+      const hits = options.collect === false ? null : [];
+      let hitCount = 0;
+      const publish = (batch) => {
+        if (batch.length === 0) return false;
+        const remaining = maxResults === null ? batch.length : Math.max(0, maxResults - hitCount);
+        const accepted = remaining >= batch.length ? batch : batch.slice(0, remaining);
+        if (accepted.length === 0) return maxResults !== null && hitCount >= maxResults;
+        hitCount += accepted.length;
+        hits?.push(...accepted);
+        const writable = options.onBatch?.(accepted);
+        if (writable === false && typeof options.onDrain === 'function') {
+          child.stdout.pause();
+          void options.onDrain().then(() => {
+            if (!settled && !signal?.aborted) child.stdout.resume();
+          }).catch(onAbort);
+        }
+        return maxResults !== null && hitCount >= maxResults;
+      };
+      const ready = () => ({ status: 'ready', generation, hits: hits ?? [] });
       const finish = (result) => {
         if (settled) return;
         settled = true;
@@ -136,22 +153,22 @@ export const createWorkspaceContentSearch = ({
       child.stdout.on('data', (chunk) => {
         if (settled) return;
         stdoutBuffer += chunk;
+        const batch = [];
         let newline = stdoutBuffer.indexOf('\n');
         while (newline >= 0) {
           const line = stdoutBuffer.slice(0, newline);
           stdoutBuffer = stdoutBuffer.slice(newline + 1);
           const hit = line ? parseRipgrepMatch(line, workspaceId, workspace.root, pathModule) : null;
-          if (hit) hits.push(hit);
-          if (hits.length >= maxResults) {
-            finish({ status: 'ready', generation, hits });
-            try {
-              child.kill();
-            } catch {
-              // Process may have exited after emitting the final requested result.
-            }
-            return;
-          }
+          if (hit) batch.push(hit);
           newline = stdoutBuffer.indexOf('\n');
+        }
+        if (publish(batch)) {
+          finish(ready());
+          try {
+            child.kill();
+          } catch {
+            // Process may have exited after emitting the final requested result.
+          }
         }
       });
       child.stderr.on('data', () => {
@@ -169,13 +186,13 @@ export const createWorkspaceContentSearch = ({
         }
         if (stdoutBuffer) {
           const hit = parseRipgrepMatch(stdoutBuffer, workspaceId, workspace.root, pathModule);
-          if (hit) hits.push(hit);
+          if (hit) publish([hit]);
         }
-        if (hits.length === 0) {
+        if (hitCount === 0) {
           finish({ status: 'empty', generation });
           return;
         }
-        finish({ status: 'ready', generation, hits });
+        finish(ready());
       });
 
       if (signal) {

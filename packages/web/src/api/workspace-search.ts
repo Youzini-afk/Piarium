@@ -1,6 +1,7 @@
 import type {
   WorkspaceContentSearchRequest,
   WorkspaceContentSearchResult,
+  WorkspaceContentSearchHit,
   WorkspaceSearchAPI,
 } from '@piarium/ui/lib/api/types';
 import { WorkspaceSearchError, parseWorkspaceSearchFailureReason } from '@piarium/ui/lib/api/search-errors';
@@ -13,6 +14,55 @@ const assertGeneration = (generation: number): void => {
   }
 };
 
+const readNdjsonSearch = async (
+  response: Response,
+  generation: number,
+  onBatch?: (hits: WorkspaceContentSearchHit[]) => void,
+): Promise<WorkspaceContentSearchResult> => {
+  if (!response.body) throw new WorkspaceSearchError('Workspace search returned no stream', { reason: 'failed' });
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const hits: Extract<WorkspaceContentSearchResult, { status: 'ready' }>['hits'] = [];
+  let finalResult: WorkspaceContentSearchResult | null = null;
+  const consume = (line: string) => {
+    if (!line.trim()) return;
+    const frame = JSON.parse(line) as {
+      type?: unknown;
+      hits?: unknown;
+      result?: WorkspaceContentSearchResult;
+    };
+    assertGeneration(generation);
+    if (frame.type === 'batch' && Array.isArray(frame.hits)) {
+      const batch = frame.hits as typeof hits;
+      hits.push(...batch);
+      onBatch?.(batch);
+      return;
+    }
+    if (frame.type === 'result' && frame.result && typeof frame.result.status === 'string') {
+      finalResult = frame.result.status === 'ready'
+        ? { status: 'ready', generation, hits: [...hits] }
+        : frame.result;
+      return;
+    }
+    throw new WorkspaceSearchError('Workspace search returned an invalid stream frame', { reason: 'failed' });
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    let newline = buffer.indexOf('\n');
+    while (newline >= 0) {
+      consume(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf('\n');
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) consume(buffer);
+  if (!finalResult) throw new WorkspaceSearchError('Workspace search stream ended without a result', { reason: 'failed' });
+  return finalResult;
+};
+
 export const createWebWorkspaceSearchAPI = (): WorkspaceSearchAPI => ({
   async searchContent(request: WorkspaceContentSearchRequest, options): Promise<WorkspaceContentSearchResult> {
     const generation = getRuntimeEndpointGeneration();
@@ -20,7 +70,7 @@ export const createWebWorkspaceSearchAPI = (): WorkspaceSearchAPI => ({
       const response = await runtimeFetch('/api/workspace/search/content', {
         method: 'POST',
         headers: {
-          Accept: 'application/json',
+          Accept: 'application/x-ndjson, application/json',
           'Content-Type': 'application/json',
           'x-piarium-generation': String(generation),
         },
@@ -46,6 +96,9 @@ export const createWebWorkspaceSearchAPI = (): WorkspaceSearchAPI => ({
           reason: parseWorkspaceSearchFailureReason(error.reason),
           status: response.status,
         });
+      }
+      if (response.headers.get('content-type')?.includes('application/x-ndjson')) {
+        return await readNdjsonSearch(response, generation, options?.onBatch);
       }
       const payload = await response.json() as WorkspaceContentSearchResult;
       if (!payload || typeof payload !== 'object' || typeof payload.status !== 'string') {

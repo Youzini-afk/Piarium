@@ -634,7 +634,7 @@ export interface FileReadOptions {
 export interface FilesAPI {
   getHomeDirectory(): Promise<string>;
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
-  search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
+  search(payload: FileSearchQuery, options?: { signal?: AbortSignal }): Promise<FileSearchResult[]>;
   createDirectory(path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<{ success: boolean; path: string }>;
   statFile?(path: string, options?: FileReadOptions): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
   readFileBinary?(path: string, options?: FileReadOptions): Promise<{ dataUrl: string; path: string }>;
@@ -1829,7 +1829,10 @@ export interface WorkspaceContentSearchRequest {
 export interface WorkspaceSearchAPI {
   searchContent(
     request: WorkspaceContentSearchRequest,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal;
+      onBatch?: (hits: WorkspaceContentSearchHit[]) => void;
+    },
   ): Promise<WorkspaceContentSearchResult>;
 }
 

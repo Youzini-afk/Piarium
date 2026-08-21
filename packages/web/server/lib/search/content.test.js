@@ -163,4 +163,39 @@ describe('workspace content search', () => {
       await harness.cleanup();
     }
   });
+
+  it('emits natural stream batches without applying an implicit global result cap', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const firstPath = path.join(harness.workspaceRoot, 'first.txt');
+      const secondPath = path.join(harness.workspaceRoot, 'second.txt');
+      const batches = [];
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: () => {
+          const child = createFakeChild();
+          queueMicrotask(() => {
+            child.stdout.write(`${matchLine(firstPath, 'first')}\n${matchLine(secondPath, 'second')}\n`);
+            child.emit('close', 0);
+          });
+          return child;
+        },
+      });
+
+      const result = await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'match',
+      }, {
+        collect: false,
+        generation: 6,
+        onBatch: (hits) => batches.push(hits),
+      });
+
+      expect(result).toEqual({ status: 'ready', generation: 6, hits: [] });
+      expect(batches.flat().map((hit) => hit.preview)).toEqual(['first', 'second']);
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });

@@ -74,6 +74,12 @@ export const registerWorkspaceSearchRoutes = (app, {
   });
 
   app.get('/api/find/file', requireAuth, async (req, res) => {
+    const controller = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    req.on('aborted', onClose);
+    res.on('close', onClose);
     try {
       const query = typeof req.query?.query === 'string' ? req.query.query : '';
       const directory = await resolveSearchDirectory({
@@ -89,16 +95,21 @@ export const registerWorkspaceSearchRoutes = (app, {
       const respectGitignore = req.query?.respectGitignore !== 'false';
       const files = await fileSearch.searchFilesystemFiles(directory, {
         query,
-        limit: Number.isFinite(limit) && limit > 0 ? limit : 80,
+        ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
         includeHidden,
         respectGitignore,
+        signal: controller.signal,
       });
       return res.json(files.map((file) => file.relativePath));
     } catch (error) {
+      if (controller.signal.aborted) return;
       if (error?.code === 'path-escape') {
         return res.status(403).json({ error: error.message, reason: 'path-escape' });
       }
       return sendError(res, error);
+    } finally {
+      req.off?.('aborted', onClose);
+      res.off?.('close', onClose);
     }
   });
 
@@ -112,6 +123,29 @@ export const registerWorkspaceSearchRoutes = (app, {
     req.on('aborted', onClose);
     res.on('close', onClose);
     try {
+      const stream = String(req.headers.accept ?? '').includes('application/x-ndjson');
+      if (stream) {
+        res.status(200);
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.flushHeaders?.();
+        const result = await contentSearch.searchContent(body, {
+          collect: false,
+          generation: Number.isFinite(generation) ? generation : 0,
+          signal: controller.signal,
+          onBatch: (hits) => (
+            res.writableEnded || res.write(`${JSON.stringify({ type: 'batch', hits })}\n`)
+          ),
+          onDrain: () => new Promise((resolve) => res.once('drain', resolve)),
+        });
+        if (!res.writableEnded) {
+          const finalResult = result.status === 'ready'
+            ? { status: 'ready', generation: result.generation }
+            : result;
+          res.end(`${JSON.stringify({ type: 'result', result: finalResult })}\n`);
+        }
+        return;
+      }
       const result = await contentSearch.searchContent(body, {
         generation: Number.isFinite(generation) ? generation : 0,
         signal: controller.signal,

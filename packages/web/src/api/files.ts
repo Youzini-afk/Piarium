@@ -109,7 +109,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     return toDirectoryListResult(target, result);
   },
 
-  async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
+  async search(payload: FileSearchQuery, options?: { signal?: AbortSignal }): Promise<FileSearchResult[]> {
     const params = new URLSearchParams();
 
     const directory = normalizePath(payload.directory);
@@ -128,6 +128,7 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     const response = await runtimeFetch('/api/find/file', {
       query: params,
       headers: directoryHeaders(getDirectory),
+      signal: options?.signal,
     });
 
     if (!response.ok) {

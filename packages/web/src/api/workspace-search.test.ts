@@ -53,4 +53,26 @@ describe('createWebWorkspaceSearchAPI', () => {
       generation: getRuntimeEndpointGeneration(),
     });
   });
+
+  it('reports streamed batches before returning the complete ready result', async () => {
+    const { createWebWorkspaceSearchAPI } = await import('./workspace-search');
+    const generation = getRuntimeEndpointGeneration();
+    const hit = {
+      resource: { workspaceId: 'ws', resourceId: 'note.ts' },
+      line: 2,
+      column: 1,
+      preview: 'todo',
+    };
+    runtimeFetchMock.mockResolvedValueOnce(new Response([
+      JSON.stringify({ type: 'batch', hits: [hit] }),
+      JSON.stringify({ type: 'result', result: { status: 'ready', generation } }),
+      '',
+    ].join('\n'), { headers: { 'content-type': 'application/x-ndjson' } }));
+    const batches: unknown[] = [];
+    await expect(createWebWorkspaceSearchAPI().searchContent(
+      { workspaceId: 'ws', query: 'todo' },
+      { onBatch: (items) => batches.push(items) },
+    )).resolves.toEqual({ status: 'ready', generation, hits: [hit] });
+    expect(batches).toEqual([[hit]]);
+  });
 });

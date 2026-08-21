@@ -97,17 +97,21 @@ const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
 
 export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {
   const searchFilesystemFiles = async (rootPath, options) => {
-    const { limit, query, includeHidden, respectGitignore } = options;
+    const { limit, query, includeHidden, respectGitignore, signal } = options;
     const includeHiddenEntries = Boolean(includeHidden);
     const normalizedQuery = query.trim().toLowerCase();
     const matchAll = normalizedQuery.length === 0;
     const queue = [rootPath];
     const visited = new Set([rootPath]);
     const shouldRespectGitignore = respectGitignore !== false;
-    const collectLimit = matchAll ? limit : Math.max(limit * 3, 200);
+    const requestedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
+    const collectLimit = requestedLimit === null
+      ? Number.POSITIVE_INFINITY
+      : matchAll ? requestedLimit : Math.max(requestedLimit * 3, 200);
     const candidates = [];
 
     while (queue.length > 0 && candidates.length < collectLimit) {
+      if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
       const batch = queue.splice(0, FILE_SEARCH_MAX_CONCURRENCY);
 
       const dirResults = await Promise.all(
@@ -149,6 +153,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
           }
         })
       );
+      if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
 
       for (const { dir: currentDir, dirents, ignoredPaths } of dirResults) {
         for (const dirent of dirents) {
@@ -224,7 +229,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
       });
     }
 
-    return candidates.slice(0, limit).map(({ name, path: filePath, relativePath, extension }) => ({
+    const selected = requestedLimit === null ? candidates : candidates.slice(0, requestedLimit);
+    return selected.map(({ name, path: filePath, relativePath, extension }) => ({
       name,
       path: filePath,
       relativePath,
