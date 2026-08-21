@@ -26,6 +26,24 @@ describe('workspace language capability', () => {
       expect(status.status).toBe('absent');
       await expect(call('watch', {})).rejects.toThrow(/does not implement watch/);
 
+      const ownerA = { extensionId: 'dev.example.a', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
+      const ownerB = { extensionId: 'dev.example.b', extensionVersion: '1.0.0', entrypointId: 'host', generation: 1 };
+      await call('registerProvider', {
+        providerId: 'shared',
+        command: 'server-a',
+        languageIds: ['typescript'],
+        source: 'builtin',
+      }, { owner: ownerA });
+      await expect(call('registerProvider', {
+        providerId: 'shared',
+        command: 'server-b',
+        languageIds: ['typescript'],
+      }, { owner: ownerB })).rejects.toThrow(/already owned/);
+      expect(await call('unregisterProvider', { providerId: 'shared' }, { owner: ownerB }))
+        .toMatchObject({ status: 'not-owned' });
+      expect(await call('unregisterProvider', { providerId: 'shared' }, { owner: ownerA }))
+        .toMatchObject({ status: 'unregistered' });
+
       const app = express();
       app.use(express.json());
       registerLanguageRoutes(app, { language });

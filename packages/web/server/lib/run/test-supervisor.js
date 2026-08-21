@@ -4,6 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { createJsonRpcClient } from '../lsp/jsonrpc.js';
 import { walkWorkspaceTestFiles } from './walk.js';
 
+const ownerScopeKey = (owner) => owner
+  ? `${owner.extensionId}\0${owner.entrypointId}`
+  : 'piarium.host';
+const exactOwnerKey = (owner) => owner
+  ? `${ownerScopeKey(owner)}\0${owner.generation}`
+  : 'piarium.host\0host';
+
 const waitForChildExit = (child) => new Promise((resolve) => {
   if (!child || child.exitCode !== null || child.signalCode) {
     resolve();
@@ -68,6 +75,7 @@ export const createTestSupervisor = ({
   const workspaceListeners = new Map();
   const pendingExits = new Set();
   const generations = new Map();
+  const discoveryGenerations = new Map();
 
   const nextGeneration = (workspaceId) => {
     const next = (generations.get(workspaceId) ?? 0) + 1;
@@ -102,6 +110,7 @@ export const createTestSupervisor = ({
   };
 
   const disposeChild = (record) => {
+    if (record) record.cancelled = true;
     if (!record?.child) return;
     try {
       record.rpc?.notify('cancel');
@@ -168,6 +177,8 @@ export const createTestSupervisor = ({
 
   const discover = async (request) => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : request;
+    const discoveryGeneration = (discoveryGenerations.get(workspaceId) ?? 0) + 1;
+    discoveryGenerations.set(workspaceId, discoveryGeneration);
     const provider = findProvider(workspaceId, request?.providerId);
     if (!provider) {
       return { status: 'absent', workspaceId, tests: [] };
@@ -193,6 +204,9 @@ export const createTestSupervisor = ({
     }
     if (provider.kind === 'node-test') {
       const tests = await discoverBuiltin(workspace);
+      if (discoveryGenerations.get(workspaceId) !== discoveryGeneration) {
+        return { status: 'cancelled', workspaceId, tests: [] };
+      }
       trees.set(workspaceId, tests);
       return { status: tests.length > 0 ? 'ready' : 'empty', workspaceId, tests };
     }
@@ -208,6 +222,14 @@ export const createTestSupervisor = ({
       };
     }
     try {
+      if (!providers.includes(provider)) {
+        return {
+          status: 'failure',
+          workspaceId,
+          message: 'Test provider changed during discovery',
+          tests: [],
+        };
+      }
       const raw = await processPair.rpc.request('discover');
       const tests = Array.isArray(raw?.tests) ? raw.tests.map((item) => {
         const mapped = {
@@ -218,6 +240,9 @@ export const createTestSupervisor = ({
         if (Number.isFinite(item?.line)) mapped.line = item.line;
         return mapped;
       }).filter((item) => item.id) : [];
+      if (discoveryGenerations.get(workspaceId) !== discoveryGeneration) {
+        return { status: 'cancelled', workspaceId, tests: [] };
+      }
       trees.set(workspaceId, tests);
       return { status: tests.length > 0 ? 'ready' : 'empty', workspaceId, tests };
     } catch (error) {
@@ -251,6 +276,7 @@ export const createTestSupervisor = ({
       : discovered;
     const results = [];
     for (const item of selected) {
+      if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
       emit(record.workspaceId, { kind: 'test', test: { ...item, status: 'running' } });
       const filePath = pathModule.join(workspace.root, item.resourceId);
       const chunks = [];
@@ -272,6 +298,7 @@ export const createTestSupervisor = ({
         child.once('exit', (exitCode) => resolve(exitCode ?? 1));
       });
       record.child = null;
+      if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
       const parsed = parseTap(chunks.join(''), item.resourceId);
       if (parsed.length === 0) {
         const fallback = {
@@ -288,6 +315,7 @@ export const createTestSupervisor = ({
         }
       }
     }
+    if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
     record.status = results.some((item) => item.status === 'failed') ? 'failed' : 'stopped';
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
     emit(record.workspaceId, { kind: 'finished', results });
@@ -298,6 +326,12 @@ export const createTestSupervisor = ({
     const processPair = await startProviderProcess(provider, workspace);
     record.child = processPair.child;
     record.rpc = processPair.rpc;
+    if (sessions.get(record.workspaceId) !== record || !providers.includes(provider)) {
+      disposeChild(record);
+      record.status = 'stopped';
+      record.message = 'Test provider changed during startup';
+      return snapshotFor(record);
+    }
     processPair.child.on('exit', (code) => {
       if (record.child !== processPair.child) return;
       record.child = null;
@@ -309,6 +343,12 @@ export const createTestSupervisor = ({
       }
     });
     processPair.rpc.onNotification((method, params) => {
+      if (
+        record.cancelled
+        || sessions.get(record.workspaceId) !== record
+        || record.child !== processPair.child
+        || record.rpc !== processPair.rpc
+      ) return;
       if (method === 'test/started' && params?.id) {
         emit(record.workspaceId, { kind: 'test', test: { id: params.id, label: params.label ?? params.id, status: 'running' } });
       }
@@ -351,11 +391,11 @@ export const createTestSupervisor = ({
         message: error instanceof Error ? error.message : 'Workspace is unavailable',
       };
     }
-    if (provider.source === 'workspace' && !await isTrusted(workspace.root)) {
+    if (!await isTrusted(workspace.root)) {
       return {
         status: 'failed',
         workspaceId,
-        message: 'Untrusted workspace cannot execute project-provided test providers',
+        message: 'Untrusted workspace cannot run tests',
       };
     }
     const existing = sessions.get(workspaceId);
@@ -367,11 +407,13 @@ export const createTestSupervisor = ({
       workspaceId,
       runId: randomUUID(),
       providerId: provider.providerId,
+      providerOwnerKey: provider.ownerKey,
       generation: nextGeneration(workspaceId),
       status: 'running',
       message: '',
       child: null,
       rpc: null,
+      cancelled: false,
     };
     sessions.set(workspaceId, record);
     emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
@@ -389,16 +431,20 @@ export const createTestSupervisor = ({
   };
 
   return {
-    registerProvider(descriptor) {
+    registerProvider(descriptor, owner) {
       if (!descriptor?.providerId) throw new Error('Test provider requires providerId');
       const next = {
         providerId: descriptor.providerId,
         kind: descriptor.kind === 'node-test' ? 'node-test' : 'adapter',
         command: typeof descriptor.command === 'string' ? descriptor.command : '',
         args: Array.isArray(descriptor.args) ? descriptor.args : [],
-        source: descriptor.source === 'workspace' || descriptor.source === 'extension' || descriptor.source === 'builtin'
-          ? descriptor.source
-          : 'host',
+        source: owner
+          ? 'extension'
+          : (descriptor.source === 'workspace' || descriptor.source === 'extension' || descriptor.source === 'builtin'
+            ? descriptor.source
+            : 'host'),
+        ownerScopeKey: ownerScopeKey(owner),
+        ownerKey: exactOwnerKey(owner),
       };
       if (typeof descriptor.workspaceId === 'string' && descriptor.workspaceId) {
         next.workspaceId = descriptor.workspaceId;
@@ -407,12 +453,29 @@ export const createTestSupervisor = ({
       if (next.kind === 'adapter' && !next.command) {
         throw new Error('Test provider requires command');
       }
-      providers.push(next);
+      const existingIndex = providers.findIndex((provider) => provider.providerId === next.providerId);
+      const existing = existingIndex >= 0 ? providers[existingIndex] : null;
+      if (existing && existing.ownerScopeKey !== next.ownerScopeKey) {
+        throw new Error(`Test provider ID is already owned: ${next.providerId}`);
+      }
+      if (existingIndex >= 0) providers.splice(existingIndex, 1, next);
+      else providers.push(next);
+      if (existing) {
+        for (const [workspaceId, record] of sessions) {
+          if (record.providerId !== existing.providerId) continue;
+          disposeChild(record);
+          sessions.delete(workspaceId);
+          trees.delete(workspaceId);
+        }
+      }
       return { status: 'registered', providerId: next.providerId };
     },
-    async unregisterProvider(providerId) {
-      const index = providers.findIndex((item) => item.providerId === providerId);
-      if (index >= 0) providers.splice(index, 1);
+    async unregisterProvider(providerId, owner) {
+      const index = providers.findIndex((item) => (
+        item.providerId === providerId && item.ownerKey === exactOwnerKey(owner)
+      ));
+      if (index < 0) return { status: 'not-owned', providerId };
+      providers.splice(index, 1);
       for (const [workspaceId, record] of sessions) {
         if (record.providerId !== providerId) continue;
         disposeChild(record);
@@ -464,6 +527,7 @@ export const createTestSupervisor = ({
         sessions.delete(workspaceId);
       }
       trees.delete(workspaceId);
+      discoveryGenerations.delete(workspaceId);
       workspaceListeners.delete(workspaceId);
       await Promise.all([...pendingExits]);
     },
@@ -472,6 +536,7 @@ export const createTestSupervisor = ({
       sessions.clear();
       providers.length = 0;
       trees.clear();
+      discoveryGenerations.clear();
       workspaceListeners.clear();
       await Promise.all([...pendingExits]);
     },

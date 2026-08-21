@@ -84,8 +84,6 @@ export const createWorkspaceContentSearch = ({
       '--no-heading',
       '--color',
       'never',
-      '--max-count',
-      String(maxResults),
       ...CONTENT_SEARCH_EXCLUDED_GLOBS.flatMap((glob) => ['--glob', glob]),
     ];
     if (request?.includeHidden) args.push('--hidden');
@@ -110,7 +108,8 @@ export const createWorkspaceContentSearch = ({
       }
 
       let settled = false;
-      let stdout = '';
+      let stdoutBuffer = '';
+      const hits = [];
       const finish = (result) => {
         if (settled) return;
         settled = true;
@@ -135,7 +134,25 @@ export const createWorkspaceContentSearch = ({
       });
       child.stdout.setEncoding('utf8');
       child.stdout.on('data', (chunk) => {
-        stdout += chunk;
+        if (settled) return;
+        stdoutBuffer += chunk;
+        let newline = stdoutBuffer.indexOf('\n');
+        while (newline >= 0) {
+          const line = stdoutBuffer.slice(0, newline);
+          stdoutBuffer = stdoutBuffer.slice(newline + 1);
+          const hit = line ? parseRipgrepMatch(line, workspaceId, workspace.root, pathModule) : null;
+          if (hit) hits.push(hit);
+          if (hits.length >= maxResults) {
+            finish({ status: 'ready', generation, hits });
+            try {
+              child.kill();
+            } catch {
+              // Process may have exited after emitting the final requested result.
+            }
+            return;
+          }
+          newline = stdoutBuffer.indexOf('\n');
+        }
       });
       child.stderr.on('data', () => {
         // Search diagnostics stay on the host. File bodies are not logged.
@@ -150,13 +167,9 @@ export const createWorkspaceContentSearch = ({
           finish({ status: 'failure', generation, message: 'Content search failed' });
           return;
         }
-        const hits = [];
-        for (const line of stdout.split('\n')) {
-          if (!line) continue;
-          const hit = parseRipgrepMatch(line, workspaceId, workspace.root, pathModule);
-          if (!hit) continue;
-          hits.push(hit);
-          if (hits.length >= maxResults) break;
+        if (stdoutBuffer) {
+          const hit = parseRipgrepMatch(stdoutBuffer, workspaceId, workspace.root, pathModule);
+          if (hit) hits.push(hit);
         }
         if (hits.length === 0) {
           finish({ status: 'empty', generation });

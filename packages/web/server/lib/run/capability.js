@@ -46,7 +46,7 @@ const workspaceIdOf = (params) => {
   return '';
 };
 
-const dispatch = (owner, methods, serviceId) => async (method, params) => {
+const dispatch = (owner, methods, serviceId) => async (method, params, context) => {
   if (!methods.has(method)) {
     throw new Error(`${serviceId} does not implement ${method}`);
   }
@@ -58,6 +58,10 @@ const dispatch = (owner, methods, serviceId) => async (method, params) => {
     }
     return owner[method](workspaceId);
   }
+  if (method === 'registerAdapter') return owner.registerAdapter(params, context?.owner);
+  if (method === 'unregisterAdapter') return owner.unregisterAdapter(params?.adapterId, context?.owner);
+  if (method === 'registerProvider') return owner.registerProvider(params, context?.owner);
+  if (method === 'unregisterProvider') return owner.unregisterProvider(params?.providerId, context?.owner);
   return owner[method](params);
 };
 

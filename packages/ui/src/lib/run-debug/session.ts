@@ -25,6 +25,8 @@ const subscriptions = new Map<string, Subscription[]>();
 let unsubscribeEndpoint: (() => void) | null = null;
 const lastTestFailure = new Map<string, PiariumTestItem>();
 const lastStackFrame = new Map<string, PiariumDebugStackFrame>();
+const activeTaskRuns = new Map<string, Set<string>>();
+const debugStatuses = new Map<string, 'starting' | 'running' | 'paused'>();
 const listeners = new Set<() => void>();
 
 const emit = (): void => {
@@ -35,15 +37,28 @@ const collectWorkspaceIds = (): string[] => [...new Set([...viewCounts.keys(), .
 
 const handleDebugEvent = (workspaceId: string, event: PiariumDebugEvent): void => {
   if (event.kind === 'status') {
-    setWorkbenchContextKey('debugIsActive', event.snapshot.status === 'running' || event.snapshot.status === 'paused' || event.snapshot.status === 'starting');
-    setWorkbenchContextKey('debugIsPaused', event.snapshot.status === 'paused');
+    const status = event.snapshot.status;
+    if (status === 'running' || status === 'paused' || status === 'starting') {
+      debugStatuses.set(workspaceId, status);
+    } else {
+      debugStatuses.delete(workspaceId);
+    }
+    setWorkbenchContextKey('debugIsActive', debugStatuses.size > 0);
+    setWorkbenchContextKey('debugIsPaused', [...debugStatuses.values()].some((value) => value === 'paused'));
     emit();
   }
 };
 
 const handleTaskEvent = (event: PiariumTaskEvent): void => {
   if (event.kind === 'status') {
-    setWorkbenchContextKey('taskIsRunning', event.snapshot.status === 'running');
+    const workspaceId = event.snapshot.workspaceId;
+    const active = activeTaskRuns.get(workspaceId) ?? new Set<string>();
+    const runId = event.snapshot.runId;
+    if (runId && event.snapshot.status === 'running') active.add(runId);
+    else if (runId) active.delete(runId);
+    if (active.size > 0) activeTaskRuns.set(workspaceId, active);
+    else activeTaskRuns.delete(workspaceId);
+    setWorkbenchContextKey('taskIsRunning', activeTaskRuns.size > 0);
     emit();
   }
 };
@@ -61,6 +76,11 @@ const closeSubscriptions = (workspaceId: string): void => {
   if (!current) return;
   for (const subscription of current) subscription.close();
   subscriptions.delete(workspaceId);
+  activeTaskRuns.delete(workspaceId);
+  debugStatuses.delete(workspaceId);
+  setWorkbenchContextKey('taskIsRunning', activeTaskRuns.size > 0);
+  setWorkbenchContextKey('debugIsActive', debugStatuses.size > 0);
+  setWorkbenchContextKey('debugIsPaused', [...debugStatuses.values()].some((value) => value === 'paused'));
 };
 
 const ensureSubscriptions = (workspaceId: string): void => {
@@ -79,6 +99,8 @@ const resetLocal = (): void => {
   viewCounts.clear();
   lastTestFailure.clear();
   lastStackFrame.clear();
+  activeTaskRuns.clear();
+  debugStatuses.clear();
   setWorkbenchContextKey('debugIsActive', false);
   setWorkbenchContextKey('debugIsPaused', false);
   setWorkbenchContextKey('testHasFailure', false);

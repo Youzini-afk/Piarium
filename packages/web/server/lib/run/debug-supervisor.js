@@ -5,6 +5,13 @@ import fs from 'node:fs';
 import { createJsonRpcClient } from '../lsp/jsonrpc.js';
 import { resolveWorkspacePath } from '../workspace/path-safety.js';
 
+const ownerScopeKey = (owner) => owner
+  ? `${owner.extensionId}\0${owner.entrypointId}`
+  : 'piarium.host';
+const exactOwnerKey = (owner) => owner
+  ? `${ownerScopeKey(owner)}\0${owner.generation}`
+  : 'piarium.host\0host';
+
 const waitForChildExit = (child) => new Promise((resolve) => {
   if (!child || child.exitCode !== null || child.signalCode) {
     resolve();
@@ -180,12 +187,12 @@ export const createDebugSupervisor = ({
         message: error instanceof Error ? error.message : 'Workspace is unavailable',
       };
     }
-    if (adapter.source === 'workspace' && !await isTrusted(workspace.root)) {
+    if (!await isTrusted(workspace.root)) {
       return {
         status: 'failed',
         workspaceId,
         adapterId: adapter.adapterId,
-        message: 'Untrusted workspace cannot execute project-provided debug adapters',
+        message: 'Untrusted workspace cannot start debug sessions',
       };
     }
     const programId = typeof request?.program === 'string' ? request.program : '';
@@ -211,6 +218,7 @@ export const createDebugSupervisor = ({
       workspaceId,
       sessionId,
       adapterId: adapter.adapterId,
+      adapterOwnerKey: adapter.ownerKey,
       generation: nextGeneration(workspaceId),
       status: 'starting',
       message: '',
@@ -237,6 +245,7 @@ export const createDebugSupervisor = ({
     const rpc = createJsonRpcClient({ input: child.stdout, output: child.stdin });
     record.rpc = rpc;
     rpc.onNotification((method, params) => {
+      if (sessions.get(workspaceId) !== record || record.child !== child || record.rpc !== rpc) return;
       if (method === 'stopped') {
         record.status = 'paused';
         if (typeof params?.reason === 'string') record.reason = params.reason;
@@ -299,6 +308,11 @@ export const createDebugSupervisor = ({
         });
       }
       await rpc.request('configurationDone');
+      if (sessions.get(workspaceId) !== record || !adapters.includes(adapter)) {
+        disposeRecord(record, 'Debug adapter changed during startup');
+        if (sessions.get(workspaceId) === record) sessions.delete(workspaceId);
+        return snapshotFor(record);
+      }
       if (record.status === 'starting') record.status = 'running';
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       return snapshotFor(record);
@@ -348,7 +362,7 @@ export const createDebugSupervisor = ({
   };
 
   return {
-    registerAdapter(descriptor) {
+    registerAdapter(descriptor, owner) {
       const languageIds = Array.isArray(descriptor?.languageIds)
         ? descriptor.languageIds.filter((id) => typeof id === 'string' && id)
         : [];
@@ -360,20 +374,40 @@ export const createDebugSupervisor = ({
         command: descriptor.command,
         args: Array.isArray(descriptor.args) ? descriptor.args : [],
         languageIds,
-        source: descriptor.source === 'workspace' || descriptor.source === 'extension' || descriptor.source === 'builtin'
-          ? descriptor.source
-          : 'host',
+        source: owner
+          ? 'extension'
+          : (descriptor.source === 'workspace' || descriptor.source === 'extension' || descriptor.source === 'builtin'
+            ? descriptor.source
+            : 'host'),
+        ownerScopeKey: ownerScopeKey(owner),
+        ownerKey: exactOwnerKey(owner),
       };
       if (typeof descriptor.workspaceId === 'string' && descriptor.workspaceId) {
         next.workspaceId = descriptor.workspaceId;
       }
       if (descriptor.env && typeof descriptor.env === 'object') next.env = descriptor.env;
-      adapters.push(next);
+      const existingIndex = adapters.findIndex((adapter) => adapter.adapterId === next.adapterId);
+      const existing = existingIndex >= 0 ? adapters[existingIndex] : null;
+      if (existing && existing.ownerScopeKey !== next.ownerScopeKey) {
+        throw new Error(`Debug adapter ID is already owned: ${next.adapterId}`);
+      }
+      if (existingIndex >= 0) adapters.splice(existingIndex, 1, next);
+      else adapters.push(next);
+      if (existing) {
+        for (const [workspaceId, record] of sessions) {
+          if (record.adapterId !== existing.adapterId) continue;
+          disposeRecord(record, 'Debug adapter updated');
+          sessions.delete(workspaceId);
+        }
+      }
       return { status: 'registered', adapterId: next.adapterId };
     },
-    async unregisterAdapter(adapterId) {
-      const index = adapters.findIndex((item) => item.adapterId === adapterId);
-      if (index >= 0) adapters.splice(index, 1);
+    async unregisterAdapter(adapterId, owner) {
+      const index = adapters.findIndex((item) => (
+        item.adapterId === adapterId && item.ownerKey === exactOwnerKey(owner)
+      ));
+      if (index < 0) return { status: 'not-owned', adapterId };
+      adapters.splice(index, 1);
       for (const [workspaceId, record] of sessions) {
         if (record.adapterId !== adapterId) continue;
         disposeRecord(record, 'Debug adapter disabled');

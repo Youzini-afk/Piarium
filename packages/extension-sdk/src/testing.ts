@@ -128,6 +128,11 @@ const createConformanceCapabilities = () => {
         providers.set(providerId, record);
         return { status: "registered", providerId };
       }
+      if (method === "unregisterProvider") {
+        const providerId = String(record.providerId ?? "");
+        providers.delete(providerId);
+        return { status: "unregistered", providerId };
+      }
       if (method === "getStatus") return { status: providers.size > 0 ? "ready" : "absent" };
       if (method === "disposeWorkspace") {
         providers.clear();

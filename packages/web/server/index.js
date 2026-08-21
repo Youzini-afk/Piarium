@@ -803,16 +803,17 @@ async function main(options = {}) {
     pathModule: path,
     osModule: os,
   });
+  const workspaceRootGuard = createDocumentRootGuard({
+    fsPromises,
+    pathModule: path,
+    readSettings: readSettingsFromDiskMigrated,
+    getWorkspaceRoot: () => workspaceConfig.root,
+  });
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: PIARIUM_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
-    isAllowedRoot: createDocumentRootGuard({
-      fsPromises,
-      pathModule: path,
-      readSettings: readSettingsFromDiskMigrated,
-      getWorkspaceRoot: () => workspaceConfig.root,
-    }),
+    isAllowedRoot: workspaceRootGuard,
   });
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));
   const languageSupervisor = createLanguageSupervisor({
@@ -820,7 +821,10 @@ async function main(options = {}) {
     spawn,
     pathModule: path,
     env: process.env,
-    isTrusted: async () => false,
+    // Workspaces become executable only after their canonical root is an
+    // explicit Piarium project/directory grant. The same Host guard owns file
+    // authority, so renderer or extension input cannot expand this boundary.
+    isTrusted: workspaceRootGuard,
   });
   const workspaceContentSearch = createWorkspaceContentSearch({
     documents: documentsAuthority,
@@ -845,7 +849,7 @@ async function main(options = {}) {
     spawn,
     pathModule: path,
     env: process.env,
-    isTrusted: async () => false,
+    isTrusted: workspaceRootGuard,
   });
   const unregisterTasksCapability = extensionRuntime.capabilities.register(
     'workspace.tasks',

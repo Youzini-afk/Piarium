@@ -21,9 +21,10 @@ const LANGUAGE_METHODS = new Set([
   'restart',
   'disposeWorkspace',
   'registerProvider',
+  'unregisterProvider',
 ]);
 
-export const createLanguageCapabilityHandler = (language) => async (method, params) => {
+export const createLanguageCapabilityHandler = (language) => async (method, params, context) => {
   if (!LANGUAGE_METHODS.has(method)) {
     throw new Error(`workspace.language does not implement ${method}`);
   }
@@ -34,8 +35,14 @@ export const createLanguageCapabilityHandler = (language) => async (method, para
     return language.restart(params?.workspaceId, params?.languageId);
   }
   if (method === 'disposeWorkspace') {
-    await language.disposeWorkspace(params?.workspaceId ?? params);
+    await language.disposeWorkspace(params?.workspaceId ?? params, context?.owner);
     return { status: 'disposed' };
+  }
+  if (method === 'registerProvider') {
+    return language.registerProvider(params, context?.owner);
+  }
+  if (method === 'unregisterProvider') {
+    return language.unregisterProvider(params?.providerId, context?.owner);
   }
   return language[method](params);
 };

@@ -4,6 +4,13 @@ import { createJsonRpcClient } from './jsonrpc.js';
 
 const sessionKey = (workspaceId, languageId) => `${workspaceId}\0${languageId}`;
 
+const ownerScopeKey = (owner) => owner
+  ? `${owner.extensionId}\0${owner.entrypointId}`
+  : 'piarium.host';
+const exactOwnerKey = (owner) => owner
+  ? `${ownerScopeKey(owner)}\0${owner.generation}`
+  : 'piarium.host\0host';
+
 const toFileUri = (absolutePath) => pathToFileURL(absolutePath).href;
 
 const offsetToPosition = (text, offset) => {
@@ -179,6 +186,7 @@ export const createLanguageSupervisor = ({
         workspaceId,
         languageId,
         providerId: provider.providerId,
+        providerOwnerKey: provider.ownerKey,
         generation: nextGeneration(key, existing),
         status: 'failed',
         message: error instanceof Error ? error.message : 'Workspace is unavailable',
@@ -197,6 +205,7 @@ export const createLanguageSupervisor = ({
         workspaceId,
         languageId,
         providerId: provider.providerId,
+        providerOwnerKey: provider.ownerKey,
         generation: nextGeneration(key, existing),
         status: 'failed',
         message: 'Untrusted workspace cannot execute project-provided language server commands',
@@ -214,6 +223,7 @@ export const createLanguageSupervisor = ({
       workspaceId,
       languageId,
       providerId: provider.providerId,
+      providerOwnerKey: provider.ownerKey,
       generation: nextGeneration(key, existing),
       status: 'starting',
       message: '',
@@ -241,6 +251,7 @@ export const createLanguageSupervisor = ({
     const rpc = createJsonRpcClient({ input: child.stdout, output: child.stdin });
     record.rpc = rpc;
     rpc.onNotification((method, params) => {
+      if (sessions.get(key) !== record || record.rpc !== rpc) return;
       if (method !== 'textDocument/publishDiagnostics') return;
       const uri = typeof params?.uri === 'string' ? params.uri : '';
       let absolutePath;
@@ -309,7 +320,11 @@ export const createLanguageSupervisor = ({
         workspaceFolders: [{ uri: toFileUri(workspace.root), name: pathModule.basename(workspace.root) }],
       });
       rpc.notify('initialized', {});
-      if (sessions.get(key) !== record) return record;
+      if (sessions.get(key) !== record || !providers.includes(provider)) {
+        disposeRecord(record, 'Language provider changed during startup');
+        if (sessions.get(key) === record) sessions.delete(key);
+        return record;
+      }
       record.status = 'ready';
       record.message = '';
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
@@ -425,6 +440,9 @@ export const createLanguageSupervisor = ({
         };
     try {
       const raw = await record.rpc.request(method, params);
+      if (sessions.get(sessionKey(workspaceId, languageId)) !== record) {
+        return { status: 'stale', documentVersion: open?.documentVersion ?? request.documentVersion ?? 0 };
+      }
       if (open && request.documentVersion !== open.documentVersion) {
         return { status: 'stale', documentVersion: open.documentVersion };
       }
@@ -440,7 +458,7 @@ export const createLanguageSupervisor = ({
   };
 
   return {
-    registerProvider(descriptor) {
+    registerProvider(descriptor, owner) {
       const languageIds = Array.isArray(descriptor?.languageIds)
         ? descriptor.languageIds.filter((id) => typeof id === 'string' && id)
         : [];
@@ -452,16 +470,50 @@ export const createLanguageSupervisor = ({
         command: descriptor.command,
         args: Array.isArray(descriptor.args) ? descriptor.args : [],
         languageIds,
-        source: descriptor.source === 'workspace' || descriptor.source === 'extension' || descriptor.source === 'builtin'
-          ? descriptor.source
-          : 'host',
+        source: owner
+          ? 'extension'
+          : (descriptor.source === 'workspace' || descriptor.source === 'extension' || descriptor.source === 'builtin'
+            ? descriptor.source
+            : 'host'),
+        ownerScopeKey: ownerScopeKey(owner),
+        ownerKey: exactOwnerKey(owner),
       };
       if (typeof descriptor.workspaceId === 'string' && descriptor.workspaceId) {
         next.workspaceId = descriptor.workspaceId;
       }
       if (descriptor.env && typeof descriptor.env === 'object') next.env = descriptor.env;
-      providers.push(next);
+      const existingIndex = providers.findIndex((provider) => provider.providerId === next.providerId);
+      const existing = existingIndex >= 0 ? providers[existingIndex] : null;
+      if (existing && existing.ownerScopeKey !== next.ownerScopeKey) {
+        throw new Error(`Language provider ID is already owned: ${next.providerId}`);
+      }
+      if (existingIndex >= 0) providers.splice(existingIndex, 1, next);
+      else providers.push(next);
+      if (existing) {
+        for (const [key, record] of sessions) {
+          if (record.providerId !== existing.providerId) continue;
+          disposeRecord(record, 'Language provider updated');
+          sessions.delete(key);
+          inflight.delete(key);
+        }
+      }
       return next;
+    },
+    async unregisterProvider(providerId, owner) {
+      const index = providers.findIndex((provider) => (
+        provider.providerId === providerId
+        && provider.ownerKey === exactOwnerKey(owner)
+      ));
+      if (index < 0) return { status: 'not-owned', providerId };
+      const [removed] = providers.splice(index, 1);
+      for (const [key, record] of sessions) {
+        if (record.providerId !== removed.providerId) continue;
+        disposeRecord(record, 'Language provider disabled');
+        sessions.delete(key);
+        inflight.delete(key);
+      }
+      await Promise.all([...pendingExits]);
+      return { status: 'unregistered', providerId };
     },
     getStatus,
     subscribe(workspaceId, listener) {
@@ -554,14 +606,16 @@ export const createLanguageSupervisor = ({
       const record = await ensureSession(workspaceId, languageId);
       return snapshotFor(record) ?? { status: 'absent', workspaceId, languageId };
     },
-    async disposeWorkspace(workspaceId) {
+    async disposeWorkspace(workspaceId, owner) {
+      const ownerKey = owner ? exactOwnerKey(owner) : null;
       for (const [key, record] of sessions) {
         if (record.workspaceId !== workspaceId) continue;
+        if (ownerKey && record.providerOwnerKey !== ownerKey) continue;
         disposeRecord(record, 'Workspace language services disposed');
         sessions.delete(key);
         inflight.delete(key);
       }
-      workspaceListeners.delete(workspaceId);
+      if (!ownerKey) workspaceListeners.delete(workspaceId);
       await Promise.all([...pendingExits]);
     },
     async dispose() {

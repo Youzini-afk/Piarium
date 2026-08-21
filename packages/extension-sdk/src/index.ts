@@ -283,6 +283,7 @@ export interface PiariumWorkspaceLanguageClient {
   disposeWorkspace(workspaceId: string): Promise<JsonValue>;
   getStatus(workspaceId: string, languageId?: string): Promise<JsonValue>;
   registerProvider(descriptor: PiariumLanguageProviderDescriptor): Promise<JsonValue>;
+  unregisterProvider(providerId: string): Promise<JsonValue>;
 }
 
 const languageProviderParams = (descriptor: PiariumLanguageProviderDescriptor): JsonObject => {
@@ -301,6 +302,7 @@ export const createWorkspaceLanguageClient = (
   capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
 ): PiariumWorkspaceLanguageClient => ({
   registerProvider: (descriptor) => callWorkspaceLanguage(capabilities, "registerProvider", languageProviderParams(descriptor)),
+  unregisterProvider: (providerId) => callWorkspaceLanguage(capabilities, "unregisterProvider", { providerId }),
   getStatus: (workspaceId, languageId) => callWorkspaceLanguage(capabilities, "getStatus", {
     workspaceId,
     ...(languageId ? { languageId } : {}),
@@ -311,10 +313,12 @@ export const createWorkspaceLanguageClient = (
 export const defineLanguageProvider = (
   descriptor: PiariumLanguageProviderDescriptor,
 ): PiariumBrokeredHostExtension => defineHostExtension(async (context) => {
-  await createWorkspaceLanguageClient(context.capabilities).registerProvider({
+  const client = createWorkspaceLanguageClient(context.capabilities);
+  await client.registerProvider({
     ...descriptor,
     source: descriptor.source ?? "extension",
   });
+  context.effect(async () => { await client.unregisterProvider(descriptor.providerId); });
 });
 
 export const callWorkspaceDebug = (
@@ -411,9 +415,7 @@ export const defineDebugAdapter = (
     ...descriptor,
     source: descriptor.source ?? "extension",
   });
-  context.effect(() => {
-    void client.unregisterAdapter(descriptor.adapterId);
-  });
+  context.effect(async () => { await client.unregisterAdapter(descriptor.adapterId); });
 });
 
 export const defineTestProvider = (
@@ -424,7 +426,5 @@ export const defineTestProvider = (
     ...descriptor,
     source: descriptor.source ?? "extension",
   });
-  context.effect(() => {
-    void client.unregisterProvider(descriptor.providerId);
-  });
+  context.effect(async () => { await client.unregisterProvider(descriptor.providerId); });
 });

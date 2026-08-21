@@ -126,4 +126,41 @@ describe('workspace content search', () => {
       await harness.cleanup();
     }
   });
+
+  it('streams results and stops ripgrep at the requested global result count', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const firstPath = path.join(harness.workspaceRoot, 'first.txt');
+      const secondPath = path.join(harness.workspaceRoot, 'second.txt');
+      let child;
+      let args;
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: (_command, nextArgs) => {
+          args = nextArgs;
+          child = createFakeChild();
+          queueMicrotask(() => {
+            const output = `${matchLine(firstPath, 'first')}\n${matchLine(secondPath, 'second')}\n`;
+            child.stdout.write(output.slice(0, 17));
+            child.stdout.write(output.slice(17));
+          });
+          return child;
+        },
+      });
+
+      const result = await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'match',
+        maxResults: 1,
+      }, { generation: 5 });
+
+      expect(result).toMatchObject({ status: 'ready', generation: 5, hits: [{ preview: 'first' }] });
+      expect(result.hits).toHaveLength(1);
+      expect(child.killed).toBe(true);
+      expect(args).not.toContain('--max-count');
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });

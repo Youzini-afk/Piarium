@@ -189,7 +189,7 @@ export const createWorkspaceTaskRunner = ({
         message: error instanceof Error ? error.message : 'Workspace is unavailable',
       };
     }
-    if (task.type !== 'node' && !await isTrusted(workspace.root)) {
+    if (!await isTrusted(workspace.root)) {
       return {
         status: 'failed',
         workspaceId,
