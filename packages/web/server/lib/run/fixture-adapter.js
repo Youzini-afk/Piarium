@@ -1,4 +1,4 @@
-import { createJsonRpcServer } from '../lsp/jsonrpc.js';
+import { createDapServer } from './dap.js';
 
 const threads = [{ id: 1, name: 'fixture' }];
 let breakpoints = [];
@@ -7,12 +7,15 @@ let paused = false;
 let generation = 0;
 let seq = 1;
 
-const server = createJsonRpcServer({
+const server = createDapServer({
   input: process.stdin,
   output: process.stdout,
   async onRequest(method, params) {
     if (method === 'initialize') {
       generation += 1;
+      if (process.env.PIARIUM_DAP_FIXTURE_CRASH === '1') {
+        setImmediate(() => process.exit(17));
+      }
       return {
         supportsConfigurationDoneRequest: true,
         supportsEvaluateForHovers: true,
@@ -80,11 +83,6 @@ const server = createJsonRpcServer({
       process.exit(0);
     }
     return {};
-  },
-  onNotification(method) {
-    if (method === 'initialized' && process.env.PIARIUM_DAP_FIXTURE_CRASH === '1') {
-      process.exit(17);
-    }
   },
 });
 

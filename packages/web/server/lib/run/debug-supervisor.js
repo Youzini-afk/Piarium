@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
-import { createJsonRpcClient } from '../lsp/jsonrpc.js';
+import { createDapClient } from './dap.js';
 import { resolveWorkspacePath } from '../workspace/path-safety.js';
 
 const ownerScopeKey = (owner) => owner
@@ -105,7 +105,7 @@ export const createDebugSupervisor = ({
   const disposeRecord = (record, reason = 'Debug session stopped') => {
     if (!record) return;
     try {
-      record.rpc?.notify('disconnect', { terminateDebuggee: true });
+      void record.rpc?.request('disconnect', { terminateDebuggee: true }).catch(() => undefined);
     } catch {
       // Adapter may already have exited.
     }
@@ -242,7 +242,7 @@ export const createDebugSupervisor = ({
       return snapshotFor(record);
     }
     record.child = child;
-    const rpc = createJsonRpcClient({ input: child.stdout, output: child.stdin });
+    const rpc = createDapClient({ input: child.stdout, output: child.stdin });
     record.rpc = rpc;
     rpc.onNotification((method, params) => {
       if (sessions.get(workspaceId) !== record || record.child !== child || record.rpc !== rpc) return;
@@ -285,16 +285,20 @@ export const createDebugSupervisor = ({
       record.rpc = null;
     });
     try {
-      await rpc.request('initialize', {
+      const initialized = rpc.waitForEvent('initialized');
+      const capabilities = await rpc.request('initialize', {
         adapterID: adapter.adapterId,
+        clientID: 'piarium',
+        clientName: 'Piarium',
         pathFormat: 'path',
         linesStartAt1: true,
         columnsStartAt1: true,
       });
-      rpc.notify('initialized');
       const launchParams = { cwd: workspace.root };
       if (programPath) launchParams.program = programPath;
-      await rpc.request('launch', launchParams);
+      const launch = rpc.request('launch', launchParams);
+      void launch.catch(() => undefined);
+      await initialized;
       const grouped = new Map();
       for (const item of listBreakpoints(workspaceId)) {
         const lines = grouped.get(item.resourceId) ?? [];
@@ -307,7 +311,10 @@ export const createDebugSupervisor = ({
           breakpoints: lines.map((line) => ({ line })),
         });
       }
-      await rpc.request('configurationDone');
+      if (capabilities?.supportsConfigurationDoneRequest === true) {
+        await rpc.request('configurationDone');
+      }
+      await launch;
       if (sessions.get(workspaceId) !== record || !adapters.includes(adapter)) {
         disposeRecord(record, 'Debug adapter changed during startup');
         if (sessions.get(workspaceId) === record) sessions.delete(workspaceId);

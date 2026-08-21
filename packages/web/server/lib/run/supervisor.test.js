@@ -337,19 +337,17 @@ describe('task runner and tests', () => {
         program: 'debuggee.js',
         languageId: 'javascript',
       });
-      expect(['paused', 'running', 'starting', 'failed']).toContain(started.status);
-      if (started.status !== 'failed') {
-        await waitUntil(() => (
-          runtime.debug.getStatus(harness.identity.workspaceId).status === 'paused'
-        ));
-        const stack = await runtime.debug.getStack({
-          workspaceId: harness.identity.workspaceId,
-          threadId: 1,
-        });
-        expect(stack.status).toBe('ready');
-        expect(stack.value.length).toBeGreaterThan(0);
-        await runtime.debug.continue({ workspaceId: harness.identity.workspaceId });
-      }
+      expect(['paused', 'running', 'starting']).toContain(started.status);
+      await waitUntil(() => (
+        runtime.debug.getStatus(harness.identity.workspaceId).status === 'paused'
+      ));
+      const stack = await runtime.debug.getStack({
+        workspaceId: harness.identity.workspaceId,
+        threadId: 1,
+      });
+      expect(stack.status).toBe('ready');
+      expect(stack.value.length).toBeGreaterThan(0);
+      await runtime.debug.continue({ workspaceId: harness.identity.workspaceId });
     } finally {
       await runtime.dispose();
       await harness.cleanup();

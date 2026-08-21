@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { createJsonRpcServer } from '../lsp/jsonrpc.js';
+import { createDapServer } from './dap.js';
 
 const INSPECTOR_URL = /ws:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+\/[0-9a-f-]+/i;
 
@@ -107,6 +107,8 @@ let program = '';
 let pausedEvent = null;
 let objectIdByRef = new Map();
 let nextVarRef = 2;
+const requestedBreakpoints = new Map();
+let configurationDoneRequested = false;
 
 const resetVariableRefs = () => {
   objectIdByRef = new Map();
@@ -134,7 +136,30 @@ const sourceFromCallFrame = (frame) => {
   }
 };
 
-const server = createJsonRpcServer({
+const applyBreakpoints = async (sourcePath, requested) => {
+  const url = sourcePath.startsWith('file:') ? sourcePath : pathToFileURL(sourcePath).href;
+  const breakpoints = [];
+  for (const item of requested) {
+    const line = Number(item?.line);
+    if (!Number.isFinite(line) || line < 1 || !cdp) {
+      breakpoints.push({ line, verified: false });
+      continue;
+    }
+    try {
+      await cdp.request('Debugger.setBreakpointByUrl', {
+        url,
+        lineNumber: line - 1,
+        columnNumber: 0,
+      });
+      breakpoints.push({ line, verified: true });
+    } catch {
+      breakpoints.push({ line, verified: false });
+    }
+  }
+  return breakpoints;
+};
+
+const server = createDapServer({
   input: process.stdin,
   output: process.stdout,
   async onRequest(method, params) {
@@ -185,33 +210,21 @@ const server = createJsonRpcServer({
       });
       await cdp.request('Debugger.enable');
       await cdp.request('Runtime.enable');
+      for (const [sourcePath, requested] of requestedBreakpoints) {
+        await applyBreakpoints(sourcePath, requested);
+      }
+      if (configurationDoneRequested) await cdp.request('Runtime.runIfWaitingForDebugger');
       return {};
     }
     if (method === 'setBreakpoints') {
       const sourcePath = typeof params?.source?.path === 'string' ? params.source.path : program;
-      const url = sourcePath.startsWith('file:') ? sourcePath : pathToFileURL(sourcePath).href;
       const requested = Array.isArray(params?.breakpoints) ? params.breakpoints : [];
-      const breakpoints = [];
-      for (const item of requested) {
-        const line = Number(item?.line);
-        if (!Number.isFinite(line) || line < 1 || !cdp) {
-          breakpoints.push({ line, verified: false });
-          continue;
-        }
-        try {
-          await cdp.request('Debugger.setBreakpointByUrl', {
-            url,
-            lineNumber: line - 1,
-            columnNumber: 0,
-          });
-          breakpoints.push({ line, verified: true });
-        } catch {
-          breakpoints.push({ line, verified: false });
-        }
-      }
+      requestedBreakpoints.set(sourcePath, requested);
+      const breakpoints = await applyBreakpoints(sourcePath, requested);
       return { breakpoints };
     }
     if (method === 'configurationDone') {
+      configurationDoneRequested = true;
       if (cdp) await cdp.request('Runtime.runIfWaitingForDebugger');
       return {};
     }
