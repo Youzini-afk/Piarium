@@ -3,9 +3,11 @@ import {
   getRuntimeApiBaseUrl,
   getRuntimeEndpointGeneration,
   getRuntimeKey,
+  registerRuntimeEndpointSwitchBlocker,
   subscribeRuntimeEndpointChanged,
   subscribeRuntimeEndpointWillChange,
   switchRuntimeEndpoint,
+  switchRuntimeEndpointSafely,
 } from './runtime-switch';
 import { clearRuntimeUrlAuthToken, setRuntimeExtraHeaders } from './runtime-auth';
 import {
@@ -15,6 +17,31 @@ import {
 } from './relay/runtime-tunnel';
 
 describe('runtime endpoint switching', () => {
+  test('awaits registered durability blockers before changing generation or endpoint', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-before.example', runtimeKey: 'runtime-before' });
+    let release: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    const calls: string[] = [];
+    const unregister = registerRuntimeEndpointSwitchBlocker(async (detail) => {
+      calls.push(`${detail.previousRuntimeKey}->${detail.runtimeKey}`);
+      await waiting;
+    });
+    const generationBefore = getRuntimeEndpointGeneration();
+    const switching = switchRuntimeEndpointSafely({
+      apiBaseUrl: 'https://runtime-after.example',
+      runtimeKey: 'runtime-after',
+    });
+    await Promise.resolve();
+    expect(getRuntimeKey()).toBe('runtime-before');
+    expect(getRuntimeEndpointGeneration()).toBe(generationBefore);
+    release?.();
+    await switching;
+    expect(getRuntimeKey()).toBe('runtime-after');
+    expect(getRuntimeEndpointGeneration()).toBe(generationBefore + 1);
+    expect(calls).toEqual(['runtime-before->runtime-after']);
+    unregister();
+  });
+
   test('exposes a credential-free copy of the active relay descriptor', () => {
     const descriptor = {
       relayUrl: 'wss://relay.example.com',

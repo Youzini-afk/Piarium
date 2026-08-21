@@ -67,7 +67,7 @@ import {
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -976,7 +976,7 @@ export const RemoteInstancesPage: React.FC = () => {
         setRemoteClients((clients) => clients.map((entry) => entry.id === client.id
           ? { ...entry, revokedAt: new Date().toISOString() }
           : entry));
-        switchRuntimeEndpoint({ apiBaseUrl: getRuntimeApiBaseUrl(), clientToken: null, runtimeKey: 'local' });
+        await switchRuntimeEndpointSafely({ apiBaseUrl: getRuntimeApiBaseUrl(), clientToken: null, runtimeKey: 'local' });
         return;
       }
       await loadRemoteClients();

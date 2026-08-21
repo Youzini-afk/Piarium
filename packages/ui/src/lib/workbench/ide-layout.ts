@@ -6,7 +6,7 @@ import {
   type JsonValue,
 } from '@piarium/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { getRuntimeKey, registerRuntimeEndpointSwitchBlocker } from '@/lib/runtime-switch';
 
 const IDE_WORKBENCH_LAYOUT_VERSION = 1 as const;
 const WRITE_COALESCE_MS = 250;
@@ -568,5 +568,5 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     });
     document.addEventListener('freeze', flush);
   }
-  subscribeRuntimeEndpointWillChange(flush);
+  registerRuntimeEndpointSwitchBlocker(() => flushPersistedIdeWorkbenchLayout());
 }

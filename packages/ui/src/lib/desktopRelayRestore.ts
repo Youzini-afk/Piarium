@@ -1,7 +1,7 @@
 import { isElectronShell } from '@/lib/desktop';
 import { desktopHostProbe, desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeKey, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
 
 // Let the post-switch bootstrap traffic settle before the background refresh.
 const CANDIDATE_REFRESH_DELAY_MS = 5_000;
@@ -80,7 +80,7 @@ export const refreshDesktopHostCandidates = async (hostId: string): Promise<void
     }).catch(() => ({ status: 'unreachable' as const, latencyMs: 0 }));
     if (probe.status === 'unreachable' || probe.status === 'wrong-service' || probe.status === 'incompatible') return;
     if (getRuntimeKey() !== runtimeKey) return; // user switched away meanwhile
-    switchRuntimeEndpoint({
+    await switchRuntimeEndpointSafely({
       apiBaseUrl: nextApiUrl,
       clientToken: host.clientToken || null,
       requestHeaders: host.requestHeaders || null,
@@ -125,30 +125,31 @@ export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise
   const runtimeKey = `host:${host.id}`;
   if (getRuntimeKey() === runtimeKey) return;
 
-  const switchToDirect = (url: string) => {
-    switchRuntimeEndpoint({
+  const switchToDirect = (url: string) => (
+    switchRuntimeEndpointSafely({
       apiBaseUrl: url,
       clientToken: host.clientToken || null,
       requestHeaders: host.requestHeaders || null,
       runtimeKey,
-    });
-  };
-  const switchToRelay = () => {
-    switchRuntimeEndpoint({
+    })
+  );
+  const switchToRelay = () => (
+    switchRuntimeEndpointSafely({
       apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
       clientToken: host.clientToken || null,
       runtimeKey,
       relay: host.relay ?? undefined,
-    });
+    }).then(() => {
     // On the relay because the stored direct address did not answer (yet) —
     // ask the server for its current LAN address in the background and
     // hot-switch back to direct if it simply moved (DHCP re-lease).
     scheduleDesktopHostCandidateRefresh(host.id);
-  };
+    })
+  );
 
   const directUrl = host.apiUrl ? normalizeHostUrl(getDesktopHostApiUrl(host)) : null;
   if (!directUrl) {
-    switchToRelay();
+    await switchToRelay();
     return;
   }
 
@@ -173,19 +174,19 @@ export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise
   ]);
   if (winner) {
     if (probeOk(winner)) {
-      switchToDirect(directUrl);
+      await switchToDirect(directUrl);
       return;
     }
-    switchToRelay();
+    await switchToRelay();
     return;
   }
 
   // Headstart expired: connect via relay now; adopt the direct transport if the
   // still-running probe succeeds a moment later.
-  switchToRelay();
+  await switchToRelay();
   void probePromise.then((probe) => {
     if (!probeOk(probe)) return;
     if (getRuntimeKey() !== runtimeKey) return; // user switched away meanwhile
-    switchToDirect(directUrl);
+    void switchToDirect(directUrl).catch(() => undefined);
   });
 };

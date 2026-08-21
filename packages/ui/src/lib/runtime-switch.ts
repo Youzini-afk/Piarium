@@ -16,12 +16,26 @@ export type RuntimeEndpointChangedDetail = {
   previousRuntimeKey: string;
 };
 
+export type RuntimeEndpointSwitchOptions = {
+  apiBaseUrl: string;
+  clientToken?: string | null;
+  relay?: RelayRuntimeDescriptor | null;
+  requestHeaders?: Record<string, string> | null;
+  runtimeKey?: string | null;
+};
+
+export type RuntimeEndpointSwitchBlocker = (
+  detail: RuntimeEndpointChangedDetail,
+) => void | Promise<void>;
+
 const RUNTIME_ENDPOINT_CHANGED_EVENT = 'piarium:runtime-endpoint-changed';
 const RUNTIME_ENDPOINT_WILL_CHANGE_EVENT = 'piarium:runtime-endpoint-will-change';
 
 let activeApiBaseUrl = '';
 let activeRuntimeKey = '';
 let runtimeEndpointGeneration = 1;
+const runtimeEndpointSwitchBlockers = new Set<RuntimeEndpointSwitchBlocker>();
+let safeSwitchQueue: Promise<void> = Promise.resolve();
 
 const setWindowRuntimeValue = <K extends '__PIARIUM_API_BASE_URL__' | '__PIARIUM_CLIENT_TOKEN__' | '__PIARIUM_RUNTIME_HEADERS__'>(
   runtimeWindow: typeof window & {
@@ -133,7 +147,7 @@ export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null;
   activeRuntimeKey = options.runtimeKey?.trim() || (sameOrigin(apiBaseUrl, readInjectedLocalOrigin()) ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl));
 };
 
-export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken?: string | null; runtimeKey?: string | null; requestHeaders?: Record<string, string> | null; relay?: RelayRuntimeDescriptor | null }): void => {
+export const switchRuntimeEndpoint = (options: RuntimeEndpointSwitchOptions): void => {
   const apiBaseUrl = options.apiBaseUrl.trim();
   const previousApiBaseUrl = getRuntimeApiBaseUrl();
   const previousRuntimeKey = getRuntimeKey();
@@ -172,6 +186,39 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
       detail,
     }));
   }
+};
+
+export const registerRuntimeEndpointSwitchBlocker = (
+  blocker: RuntimeEndpointSwitchBlocker,
+): (() => void) => {
+  runtimeEndpointSwitchBlockers.add(blocker);
+  return () => runtimeEndpointSwitchBlockers.delete(blocker);
+};
+
+export const switchRuntimeEndpointSafely = (
+  options: RuntimeEndpointSwitchOptions,
+  lifecycle?: { beforeCommit?(): void | Promise<void> },
+): Promise<void> => {
+  const requested: RuntimeEndpointSwitchOptions = {
+    ...options,
+    ...(options.requestHeaders ? { requestHeaders: { ...options.requestHeaders } } : {}),
+    ...(options.relay ? { relay: structuredClone(options.relay) } : {}),
+  };
+  const run = async () => {
+    const apiBaseUrl = requested.apiBaseUrl.trim();
+    const detail: RuntimeEndpointChangedDetail = {
+      apiBaseUrl,
+      previousApiBaseUrl: getRuntimeApiBaseUrl(),
+      runtimeKey: requested.runtimeKey?.trim() || normalizeRuntimeUrlKey(apiBaseUrl),
+      previousRuntimeKey: getRuntimeKey(),
+    };
+    await Promise.all([...runtimeEndpointSwitchBlockers].map((blocker) => blocker(detail)));
+    await lifecycle?.beforeCommit?.();
+    switchRuntimeEndpoint(requested);
+  };
+  const result = safeSwitchQueue.catch(() => undefined).then(run);
+  safeSwitchQueue = result;
+  return result;
 };
 
 export const subscribeRuntimeEndpointWillChange = (callback: (detail: RuntimeEndpointChangedDetail) => void): (() => void) => {

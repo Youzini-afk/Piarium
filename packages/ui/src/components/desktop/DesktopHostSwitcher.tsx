@@ -43,7 +43,7 @@ import {
 import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -521,26 +521,37 @@ export function DesktopHostSwitcherDialog({
   }, [open]);
 
   const handleSwitch = React.useCallback(async (host: DesktopHost) => {
+    const commitSwitch = async (switching: Promise<void>): Promise<boolean> => {
+      try {
+        await switching;
+        return true;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        setSwitchingHostId(null);
+        return false;
+      }
+    };
     // Relay legs ride the E2EE tunnel activated in-renderer via
     // switchRuntimeEndpoint({ relay }); the runtime fetch/socket layers route
     // through the tunnel from the singleton registry.
-    const activateRelay = (relay: NonNullable<DesktopHost['relay']>, liveTunnel?: ReturnType<typeof createRelayTunnelClient>) => {
-      // Adopt the probe's live tunnel (when it kept one) BEFORE the switch: the
-      // activate call inside switchRuntimeEndpoint sees an equal descriptor and
-      // reuses it — no second WebSocket connect + E2EE handshake.
-      if (liveTunnel) {
-        adoptRelayTunnel({ relayUrl: relay.relayUrl, serverId: relay.serverId, hostEncPubJwk: relay.hostEncPubJwk }, liveTunnel);
-      }
-      switchRuntimeEndpoint({
+    const activateRelay = (relay: NonNullable<DesktopHost['relay']>, liveTunnel?: ReturnType<typeof createRelayTunnelClient>) => (
+      switchRuntimeEndpointSafely({
         apiBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
         clientToken: host.clientToken || null,
         runtimeKey: runtimeKeyForHost(host),
         relay,
-      });
-      // On the relay: learn the server's current LAN address in the background
-      // and hot-switch back to direct if the stored one merely went stale.
-      scheduleDesktopHostCandidateRefresh(host.id);
-    };
+      }, {
+        beforeCommit: () => {
+          if (liveTunnel) {
+            adoptRelayTunnel({ relayUrl: relay.relayUrl, serverId: relay.serverId, hostEncPubJwk: relay.hostEncPubJwk }, liveTunnel);
+          }
+        },
+      }).then(() => {
+        // On the relay: learn the server's current LAN address in the background
+        // and hot-switch back to direct if the stored one merely went stale.
+        scheduleDesktopHostCandidateRefresh(host.id);
+      })
+    );
 
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
@@ -558,11 +569,11 @@ export function DesktopHostSwitcherDialog({
       const cached = statusById[host.id];
       if (cached?.status === 'ok') {
         if (cached.via === 'relay' && host.relay) {
-          activateRelay(host.relay);
+          if (!await commitSwitch(activateRelay(host.relay))) return;
         } else if (apiOrigin) {
-          switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
+          if (!await commitSwitch(switchRuntimeEndpointSafely({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) }))) return;
         } else if (host.relay) {
-          activateRelay(host.relay);
+          if (!await commitSwitch(activateRelay(host.relay))) return;
         }
         onHostSwitched?.();
         setSwitchingHostId(null);
@@ -597,9 +608,9 @@ export function DesktopHostSwitcherDialog({
         return;
       }
       if (transport === 'relay' && host.relay) {
-        activateRelay(host.relay, relayProbeTunnel);
+        if (!await commitSwitch(activateRelay(host.relay, relayProbeTunnel))) return;
       } else {
-        switchRuntimeEndpoint({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) });
+        if (!await commitSwitch(switchRuntimeEndpointSafely({ apiBaseUrl: apiOrigin, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null, runtimeKey: runtimeKeyForHost(host) }))) return;
       }
       onHostSwitched?.();
       setSwitchingHostId(null);
@@ -787,7 +798,12 @@ export function DesktopHostSwitcherDialog({
     const localTarget = toNavigationUrl(localOrigin);
     if (isElectronShell()) {
       const clientToken = await getLocalClientToken();
-      switchRuntimeEndpoint({ apiBaseUrl: localOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
+      try {
+        await switchRuntimeEndpointSafely({ apiBaseUrl: localOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+        return;
+      }
       onHostSwitched?.();
       return;
     }
@@ -1263,7 +1279,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
         throw new Error('Connected but missing forwarded URL');
       }
       if (isElectronShell()) {
-        switchRuntimeEndpoint({ apiBaseUrl: localUrl, clientToken: null, runtimeKey: `ssh:${hostId}` });
+        await switchRuntimeEndpointSafely({ apiBaseUrl: localUrl, clientToken: null, runtimeKey: `ssh:${hostId}` });
       } else {
         window.location.assign(toNavigationUrl(localUrl));
       }
@@ -1303,7 +1319,11 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
 
     if (isElectronShell()) {
       const clientToken = await getLocalClientToken();
-      switchRuntimeEndpoint({ apiBaseUrl: nextLocalOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
+      try {
+        await switchRuntimeEndpointSafely({ apiBaseUrl: nextLocalOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      }
     } else {
       window.location.assign(toNavigationUrl(nextLocalOrigin));
     }

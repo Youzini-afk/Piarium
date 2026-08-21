@@ -1,5 +1,5 @@
 import type { DocumentsAPI } from '@/lib/api/types';
-import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { registerRuntimeEndpointSwitchBlocker } from '@/lib/runtime-switch';
 import { DocumentRegistry } from './registry';
 
 let active: DocumentRegistry | null = null;
@@ -19,7 +19,9 @@ const bindRecoveryLifecycle = (): void => {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushRecovery();
   });
-  subscribeRuntimeEndpointWillChange(flushRecovery);
+  registerRuntimeEndpointSwitchBlocker(async () => {
+    await active?.flushRecoveryJournals();
+  });
 };
 
 export const bindDocumentRegistry = (documents: DocumentsAPI): DocumentRegistry => {

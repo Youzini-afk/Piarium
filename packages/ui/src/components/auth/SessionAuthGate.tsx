@@ -13,7 +13,7 @@ import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
@@ -243,7 +243,7 @@ const applyDesktopClientToken = async (
   if (!clientToken || !isRuntimeIdentityActive(runtime)) return false;
   if (!await persistDesktopClientToken(runtime, clientToken)) return false;
   if (!isRuntimeIdentityActive(runtime)) return false;
-  switchRuntimeEndpoint({
+  await switchRuntimeEndpointSafely({
     apiBaseUrl: runtime.apiBaseUrl,
     clientToken,
     requestHeaders: Object.keys(requestHeaders).length > 0 ? requestHeaders : null,

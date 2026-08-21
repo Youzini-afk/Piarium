@@ -38,7 +38,7 @@ import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useMobileAppViewport } from '@/lib/mobileAppRuntime';
 import { useMobileLayoutInfo, useMobileLayoutRootAttributes } from '@/lib/mobileLayoutTier';
@@ -2736,8 +2736,9 @@ export function MobileApp({ apis }: MobileAppProps) {
       void refreshGitHubAuthStatus(apis.github, { force: true });
     };
     const disconnect = () => {
-      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
-      setConnectionEpoch((value) => value + 1);
+      void switchRuntimeEndpointSafely({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' })
+        .then(() => setConnectionEpoch((value) => value + 1))
+        .catch((error) => console.error('[Mobile] Failed to persist state before disconnect:', error));
     };
 
     void reprobeActiveConnection().then((outcome) => {
@@ -2990,8 +2991,9 @@ export function MobileApp({ apis }: MobileAppProps) {
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
-                    setConnectionEpoch((value) => value + 1);
+                    void switchRuntimeEndpointSafely({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' })
+                      .then(() => setConnectionEpoch((value) => value + 1))
+                      .catch((error) => console.error('[Mobile] Failed to persist state before disconnect:', error));
                   }}
                 >
                   {t('mobile.connect.cancelPassword')}
