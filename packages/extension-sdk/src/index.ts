@@ -48,6 +48,44 @@ export interface PiariumSurfaceMountContext<TProps extends object = Record<strin
   readonly signal: AbortSignal;
 }
 
+export interface PiariumEditorDocumentSnapshot {
+  baseRevision: string | null;
+  content: string;
+  dirty: boolean;
+  documentVersion: number;
+  errorMessage?: string;
+  saving: boolean;
+  status: "binary" | "conflict" | "deleted" | "error" | "missing" | "ready" | "unsupported-encoding";
+}
+
+export type PiariumEditorDocumentUpdateResult =
+  | { status: "updated"; snapshot: PiariumEditorDocumentSnapshot }
+  | { status: "conflict"; snapshot: PiariumEditorDocumentSnapshot };
+
+export interface PiariumEditorDocumentController {
+  getSnapshot(): PiariumEditorDocumentSnapshot;
+  replaceContent(content: string, expectedDocumentVersion: number): Promise<PiariumEditorDocumentUpdateResult>;
+  save(expectedDocumentVersion: number): Promise<PiariumEditorDocumentUpdateResult>;
+  subscribe(listener: () => void): () => void;
+}
+
+export interface PiariumEditorMountProps {
+  document: PiariumEditorDocumentController;
+  providerId: string;
+  resource: { resourceId: string; workspaceId: string };
+  viewId: string;
+}
+
+export interface PiariumIsolatedEditorMountMessage {
+  contributionId: string;
+  props: {
+    providerId: string;
+    resource: { resourceId: string; workspaceId: string };
+    viewId: string;
+  };
+  type: "workbench.mount";
+}
+
 /** Framework-neutral runtime implementation for a DOM-backed contribution. */
 export interface PiariumSurfaceMountImplementation<TProps extends object = Record<string, unknown>> {
   mount(
@@ -232,7 +270,11 @@ export {
 
 export const defineShellMount = defineSurfaceMount;
 export const defineViewMount = defineSurfaceMount;
-export const defineEditorMount = defineSurfaceMount;
+export const defineEditorMount = (
+  implementation:
+    | PiariumSurfaceMount<PiariumEditorMountProps>
+    | PiariumSurfaceMountImplementation<PiariumEditorMountProps>,
+): PiariumSurfaceMountImplementation<PiariumEditorMountProps> => defineSurfaceMount(implementation);
 
 export const callWorkspaceDocuments = (
   capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,

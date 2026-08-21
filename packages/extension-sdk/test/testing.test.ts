@@ -239,6 +239,12 @@ test("typed document and language clients plus workbench mounts are public SDK c
   await runHostExtensionConformance({ activation: provider.activate, extensionId: "dev.example.language" });
   assert.equal(typeof defineShellMount, "function");
   assert.equal(typeof defineEditorMount, "function");
+  const editorMount = defineEditorMount((_container, mount) => {
+    const snapshot = mount.props.document.getSnapshot();
+    assert.equal(typeof snapshot.documentVersion, "number");
+    assert.equal(mount.props.resource.workspaceId, "ws");
+  });
+  assert.equal(typeof editorMount.mount, "function");
   assert.deepEqual(calls.slice(0, 2), [
     ["workspace.documents", "write"],
     ["workspace.language", "registerProvider"],

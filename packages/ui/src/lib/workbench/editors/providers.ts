@@ -3,6 +3,7 @@ import {
   type EditorProviderContribution,
   type EditorProviderSelection,
 } from './types';
+import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 
 const extensionOf = (resourceId: string): string => {
   const name = resourceId.split('/').pop() ?? resourceId;
@@ -13,8 +14,9 @@ const extensionOf = (resourceId: string): string => {
 const matches = (provider: EditorProviderContribution, resourceId: string): boolean => {
   const fileName = resourceId.split('/').pop() ?? resourceId;
   if (provider.filenames?.some((name) => name === fileName)) return true;
-  const language = extensionOf(resourceId);
-  return Boolean(language && provider.languages?.includes(language));
+  const extension = extensionOf(resourceId);
+  const languageId = languageIdFromResourceId(resourceId);
+  return Boolean(provider.languages?.some((language) => language === extension || language === languageId));
 };
 
 export const BUILTIN_EDITOR_PROVIDERS: EditorProviderContribution[] = [

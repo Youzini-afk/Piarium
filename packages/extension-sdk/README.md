@@ -39,4 +39,7 @@ Renderers never start a debugger, test runner, or task process.
 
 Public workbench constants (`PIARIUM_WORKBENCH_REPLACEMENT_TARGETS`, `PIARIUM_WORKBENCH_SLOTS`,
 `PIARIUM_WORKBENCH_CONTEXT_KEYS`) are re-exported from this package. `defineShellMount`,
-`defineViewMount`, and `defineEditorMount` are typed aliases of `defineSurfaceMount`.
+and `defineViewMount` share the generic mount contract. `defineEditorMount` additionally types
+`mount.props.resource`, `viewId`, and the stable document controller used to subscribe, update with an
+expected `documentVersion`, and save. Editor contributions declare `data.languageIds` or
+`data.filenames`; they are mounted as resource providers rather than in an action slot.

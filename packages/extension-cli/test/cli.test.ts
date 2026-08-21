@@ -37,12 +37,17 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
   assert.match(surface, /PIARIUM_WORKBENCH_REPLACEMENT_TARGETS/);
   assert.doesNotMatch(surface, /@piarium\/ui|@\/components/);
 
-  await initProject({
+  const editor = await initProject({
     directory: join(root, "editor"),
     id: "dev.example.editor",
     name: "Custom Editor",
     template: "editor",
   });
+  const editorSource = await readFile(join(editor.directory, "src/surface.ts"), "utf8");
+  assert.match(editorSource, /mount\.props\.document\.replaceContent/);
+  assert.match(editorSource, /mount\.props\.document\.save/);
+  assert.match(editorSource, /languageIds:\s*\["markdown"\]/);
+  assert.doesNotMatch(editorSource, /workbench\.editor\.actions|@piarium\/ui/);
   await initProject({
     directory: join(root, "view"),
     id: "dev.example.view",

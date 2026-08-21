@@ -353,6 +353,20 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
     if (!kind || !CONTRIBUTION_KINDS.has(kind as PiariumExtensionContributionKind)) issues.push(`${itemPath}.kind is unsupported`);
     const data = isRecord(raw.data) ? jsonValue(raw.data, `${itemPath}.data`, issues) as JsonObject : {};
     if (!isRecord(raw.data)) issues.push(`${itemPath}.data must be an object`);
+    if (kind === "editor") {
+      const languageIds = data.languageIds === undefined
+        ? []
+        : uniqueStrings(data.languageIds, `${itemPath}.data.languageIds`, issues);
+      const filenames = data.filenames === undefined
+        ? []
+        : uniqueStrings(data.filenames, `${itemPath}.data.filenames`, issues);
+      if (languageIds.length === 0 && filenames.length === 0) {
+        issues.push(`${itemPath}.data must declare languageIds or filenames`);
+      }
+      if (data.priority !== undefined && (typeof data.priority !== "number" || !Number.isFinite(data.priority))) {
+        issues.push(`${itemPath}.data.priority must be finite`);
+      }
+    }
     const contractVersion = positiveRevision(raw.contractVersion, `${itemPath}.contractVersion`, issues);
     const rawSupports = uniqueStrings(raw.supports, `${itemPath}.supports`, issues);
     const supports: PiariumApplicationSurface[] = [];

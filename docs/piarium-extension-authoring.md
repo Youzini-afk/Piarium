@@ -69,6 +69,20 @@ and sessions stay in Core even when a community Shell fully redraws the chrome.
 `@piarium/extension-react` remains optional. `defineReactShell`, `defineReactView`, and
 `defineReactEditor` wrap the same mount contract.
 
+An `editor` contribution declares at least one `data.languageIds` or `data.filenames` selector and may
+set a finite `data.priority`. It is a resource provider, not a toolbar action, so it does not need a
+Workbench slot. `defineEditorMount` receives a stable `mount.props.document` controller. Subscribe to
+it, read `getSnapshot()`, apply text with the current `documentVersion`, and save with the same
+expected version. Piarium keeps the buffer, dirty state, conflicts, recovery journal, and disk revision
+authoritative; the custom editor only owns its view. If the contribution is disabled, updated, or
+fails to mount, that editor view falls back locally without dropping the document or layout.
+
+An isolated iframe editor receives a `piarium-message` event whose value is a
+`PiariumIsolatedEditorMountMessage`. It then uses its granted `workspace.documents` Surface capability
+with the supplied resource identity. Reads include the current Piarium buffer and `documentVersion`;
+writes must include both `expectedRevision` and `expectedDocumentVersion`, so an isolated realm cannot
+silently overwrite a newer local edit.
+
 Do not publish a new npm tag from this handoff. The coordinated next public version is **0.2.0** for
 `extension-contract`, `extension-sdk`, `extension-react`, `extension-cli`, `extension-surface`, and
 `extension-host`. Wait for an explicit publish approval.

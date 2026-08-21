@@ -2,6 +2,7 @@
 import React from 'react';
 import type { ComponentType } from 'react';
 import type {
+  JsonValue,
   PiariumExtensionContributionKind,
   PiariumWorkbenchDistributionProfile,
 } from '@piarium/extension-contract';
@@ -209,6 +210,67 @@ const WorkbenchMountHost = <TProps extends object>({
     />
   );
 };
+
+const isMessageImplementation = (
+  value: unknown,
+): value is { postMessage(message: JsonValue): void } => (
+  typeof value === 'object'
+  && value !== null
+  && typeof (value as { postMessage?: unknown }).postMessage === 'function'
+);
+
+export function WorkbenchSurfaceContributionHost<TProps extends object>({
+  className,
+  contribution,
+  fallback,
+  isolatedProps,
+  props,
+}: {
+  className?: string;
+  contribution: SurfaceContribution;
+  fallback: React.ReactNode;
+  isolatedProps?: JsonValue;
+  props: TProps;
+}): React.ReactNode {
+  useVisibleContributionActivation([contribution]);
+  const contributionKey = workbenchContributionInstanceKey(contribution);
+  React.useEffect(() => {
+    if (isolatedProps === undefined || !isMessageImplementation(contribution.implementation)) return;
+    contribution.implementation.postMessage({
+      contributionId: contribution.descriptor.id,
+      props: isolatedProps,
+      type: 'workbench.mount',
+    });
+    return () => {
+      if (!isMessageImplementation(contribution.implementation)) return;
+      contribution.implementation.postMessage({
+        contributionId: contribution.descriptor.id,
+        type: 'workbench.unmount',
+      });
+    };
+  }, [contribution, isolatedProps]);
+  if (isMountImplementation<TProps>(contribution.implementation)) {
+    return (
+      <WorkbenchMountHost
+        key={contributionKey}
+        className={className}
+        contribution={contribution}
+        fallback={fallback}
+        implementation={contribution.implementation}
+        props={props}
+      />
+    );
+  }
+  return (
+    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={fallback}>
+      <WorkbenchRenderImplementation
+        fallbackOnEmpty={fallback}
+        implementation={contribution.implementation}
+        props={props}
+      />
+    </ContributionRenderBoundary>
+  );
+}
 
 export const useSurfaceRegistrySnapshot = (): SurfaceRegistrySnapshot => React.useSyncExternalStore(
   piariumSurfaceRuntime.subscribe,

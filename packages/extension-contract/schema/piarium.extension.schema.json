@@ -52,7 +52,33 @@
               }
             ]
           }
-        }
+        },
+        "allOf": [{
+          "if": { "properties": { "kind": { "const": "editor" } }, "required": ["kind"] },
+          "then": {
+            "properties": {
+              "data": {
+                "type": "object",
+                "properties": {
+                  "languageIds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "$ref": "#/$defs/text" }
+                  },
+                  "filenames": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": { "$ref": "#/$defs/text" }
+                  },
+                  "priority": { "type": "number" }
+                },
+                "anyOf": [{ "required": ["languageIds"] }, { "required": ["filenames"] }]
+              }
+            }
+          }
+        }]
       }
     },
     "requires": {

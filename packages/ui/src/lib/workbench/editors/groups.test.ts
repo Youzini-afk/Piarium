@@ -98,6 +98,10 @@ describe('editor providers', () => {
       { id: 'two', extensionId: 'b', enabled: true, languages: ['md'], priority: 5 },
     ])).toEqual({ status: 'ambiguous', providerIds: ['one', 'two'] });
 
+    expect(selectEditorProvider('note.md', [
+      { id: 'semantic-markdown', extensionId: 'c', enabled: true, languages: ['markdown'], priority: 10 },
+    ])).toEqual({ status: 'selected', providerId: 'semantic-markdown' });
+
     expect(selectEditorProvider('notes.txt')).toEqual({
       status: 'selected',
       providerId: BUILTIN_EDITOR_PROVIDER_IDS.text,

@@ -1,6 +1,7 @@
 import React from 'react';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import type { SurfaceContribution } from '@piarium/extension-surface';
 
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
@@ -33,13 +34,58 @@ import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { getModifierLabel } from '@/lib/utils';
+import {
+  WorkbenchSurfaceContributionHost,
+  useSurfaceRegistrySnapshot,
+} from '@/lib/extensions/workbench-registry';
+import type { DocumentRecord } from '@/lib/documents/types';
+import { listEditorProviders } from '@/lib/workbench/editors/providers';
 
 type ResourceEditorHostProps = {
+  excludedProviderIds?: readonly string[];
   onViewStateChange?(viewState: EditorViewState): void;
   workspaceId: string;
   workspaceRoot: string;
   tab: EditorTab;
 };
+
+type PublicDocumentSnapshot = {
+  baseRevision: string | null;
+  content: string;
+  dirty: boolean;
+  documentVersion: number;
+  errorMessage?: string;
+  saving: boolean;
+  status: 'binary' | 'conflict' | 'deleted' | 'error' | 'missing' | 'ready' | 'unsupported-encoding';
+};
+
+const publicDocumentSnapshot = (record: DocumentRecord | undefined): PublicDocumentSnapshot => {
+  const status = record && [
+    'binary',
+    'conflict',
+    'deleted',
+    'error',
+    'missing',
+    'ready',
+    'unsupported-encoding',
+  ].includes(record.status)
+    ? record.status as PublicDocumentSnapshot['status']
+    : 'error';
+  return {
+    baseRevision: record?.baseRevision ?? null,
+    content: record?.buffer ?? '',
+    dirty: record?.dirty ?? false,
+    documentVersion: record?.localEditRevision ?? 0,
+    saving: record?.saving ?? false,
+    status,
+    ...(record?.errorMessage ? { errorMessage: record.errorMessage } : {}),
+  };
+};
+
+const stringArray = (value: unknown): string[] => (
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length > 0) : []
+);
+const EMPTY_PROVIDER_IDS: readonly string[] = [];
 
 const TEXT_PROVIDERS = new Set<string>([
   BUILTIN_EDITOR_PROVIDER_IDS.text,
@@ -63,6 +109,7 @@ const HostFrame: React.FC<{
 );
 
 export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
+  excludedProviderIds = EMPTY_PROVIDER_IDS,
   onViewStateChange,
   workspaceId,
   workspaceRoot,
@@ -75,22 +122,79 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     () => ({ workspaceId, resourceId: tab.resourceId }),
     [tab.resourceId, workspaceId],
   );
+  const surfaceSnapshot = useSurfaceRegistrySnapshot();
+  const surfaceContributions = React.useMemo(() => surfaceSnapshot.visibleContributions.filter((contribution) => (
+    contribution.descriptor.kind === 'editor'
+    && !excludedProviderIds.includes(contribution.descriptor.id)
+  )), [excludedProviderIds, surfaceSnapshot.visibleContributions]);
+  const surfaceProviders = React.useMemo(() => surfaceContributions.map((contribution) => ({
+    id: contribution.descriptor.id,
+    extensionId: contribution.owner.extensionId,
+    enabled: true,
+    languages: stringArray(contribution.descriptor.data.languageIds),
+    filenames: stringArray(contribution.descriptor.data.filenames),
+    priority: typeof contribution.descriptor.data.priority === 'number'
+      && Number.isFinite(contribution.descriptor.data.priority)
+      ? contribution.descriptor.data.priority
+      : 50,
+  })), [surfaceContributions]);
+  const surfaceContributionById = React.useMemo(() => new Map<string, SurfaceContribution>(
+    surfaceContributions.map((contribution) => [contribution.descriptor.id, contribution]),
+  ), [surfaceContributions]);
   React.useSyncExternalStore(subscribeEditorProviders, getEditorProvidersRevision, () => 0);
-  const providerEnabled = isEditorProviderEnabled(tab.providerId);
-  const selection = selectEditorProvider(tab.resourceId);
-  const activeProviderId = providerEnabled ? tab.providerId : (
-    selection.status === 'selected' ? selection.providerId : BUILTIN_EDITOR_PROVIDER_IDS.text
-  );
+  const selection = selectEditorProvider(tab.resourceId, [...listEditorProviders(), ...surfaceProviders]);
+  const activeProviderId = selection.status === 'selected'
+    ? selection.providerId
+    : (isEditorProviderEnabled(tab.providerId) ? tab.providerId : BUILTIN_EDITOR_PROVIDER_IDS.text);
+  const surfaceContribution = surfaceContributionById.get(activeProviderId);
   const needsText = TEXT_PROVIDERS.has(activeProviderId) && isEditorProviderEnabled(activeProviderId);
-  const record = useDocumentRecord(needsText ? identity : undefined);
+  const needsDocument = needsText || Boolean(surfaceContribution);
+  const record = useDocumentRecord(needsDocument ? identity : undefined);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState('');
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
   const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
 
   React.useEffect(() => {
-    if (!needsText) return;
+    if (!needsDocument) return;
     void getDocumentRegistry().open(identity).catch(() => undefined);
-  }, [identity, needsText]);
+  }, [identity, needsDocument]);
+
+  const editorDocument = React.useMemo(() => ({
+    getSnapshot: (): PublicDocumentSnapshot => publicDocumentSnapshot(getDocumentRegistry().get(identity)),
+    subscribe: (listener: () => void) => getDocumentRegistry().subscribe(identity, () => listener()),
+    replaceContent: async (content: string, expectedDocumentVersion: number) => {
+      const registry = getDocumentRegistry();
+      const current = registry.get(identity) ?? await registry.open(identity);
+      if (current.localEditRevision !== expectedDocumentVersion) {
+        return { status: 'conflict' as const, snapshot: publicDocumentSnapshot(current) };
+      }
+      const next = registry.applyTransaction(identity, content, { origin: `editor:${activeProviderId}` });
+      return { status: 'updated' as const, snapshot: publicDocumentSnapshot(next) };
+    },
+    save: async (expectedDocumentVersion: number) => {
+      const registry = getDocumentRegistry();
+      const current = registry.get(identity) ?? await registry.open(identity);
+      if (current.localEditRevision !== expectedDocumentVersion) {
+        return { status: 'conflict' as const, snapshot: publicDocumentSnapshot(current) };
+      }
+      const next = await registry.save(identity);
+      return {
+        status: next.status === 'conflict' ? 'conflict' as const : 'updated' as const,
+        snapshot: publicDocumentSnapshot(next),
+      };
+    },
+  }), [activeProviderId, identity]);
+  const editorMountProps = React.useMemo(() => ({
+    document: editorDocument,
+    providerId: activeProviderId,
+    resource: identity,
+    viewId: tab.viewId,
+  }), [activeProviderId, editorDocument, identity, tab.viewId]);
+  const isolatedEditorProps = React.useMemo(() => ({
+    providerId: activeProviderId,
+    resource: identity,
+    viewId: tab.viewId,
+  }), [activeProviderId, identity, tab.viewId]);
 
   React.useEffect(() => {
     if (!autoSaveEnabled || !record?.dirty || record.saving || record.status !== 'ready') return;
@@ -231,13 +335,34 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     </div>
   ) : null;
 
-  if (needsText && (!record || record.status === 'loading' || record.status === 'unloaded')) {
+  if (needsDocument && (!record || record.status === 'loading' || record.status === 'unloaded')) {
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="flex h-full items-center justify-center typography-ui text-muted-foreground">
           {t('filesView.state.loading')}
         </div>
       </HostFrame>
+    );
+  }
+
+  if (surfaceContribution) {
+    const fallback = (
+      <ResourceEditorHost
+        excludedProviderIds={[...excludedProviderIds, activeProviderId]}
+        workspaceId={workspaceId}
+        workspaceRoot={workspaceRoot}
+        tab={tab}
+        {...(onViewStateChange ? { onViewStateChange } : {})}
+      />
+    );
+    return (
+      <WorkbenchSurfaceContributionHost
+        className="h-full min-h-0 w-full min-w-0"
+        contribution={surfaceContribution}
+        fallback={fallback}
+        isolatedProps={isolatedEditorProps}
+        props={editorMountProps}
+      />
     );
   }
 

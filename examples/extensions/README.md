@@ -14,5 +14,9 @@ Each project can `npx piarium-extension build` and `npx piarium-extension test` 
 public SDK packages. Isolated document edits use the granted `workspace.documents` capability;
 disable destroys the isolated realm and leaves Core document/layout state in place.
 
+The generated custom-editor template is functional: it subscribes to Piarium's shared document,
+updates the authoritative unsaved buffer with an expected document version, and saves through the
+same controller. It does not create a second tab or file-content store.
+
 The coordinated public version for this workbench SDK is 0.2.0. Do not npm tag or publish until that
 release is explicitly approved.

@@ -6,6 +6,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { piariumSurfaceRuntime } from './surface-runtime';
 import { startBuiltinPiariumExtensions } from './builtin-surface-manager';
+import { surfaceCapabilityRegistry } from './surface-capabilities';
 
 const runtimeExtensions = () => {
   const extensions = getRegisteredRuntimeAPIs()?.extensions;
@@ -44,6 +45,7 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
     selectCandidate: (request) => runtimeExtensions().selectCandidate(request),
     waitForHostState: (request, signal) => runtimeExtensions().waitForHostState(request, signal),
   },
+  capabilities: surfaceCapabilityRegistry,
   surface: piariumSurfaceRuntime.surface,
   surfaceRuntime: piariumSurfaceRuntime,
 });

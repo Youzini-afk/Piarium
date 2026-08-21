@@ -249,8 +249,27 @@ test("accepts view and editor contribution kinds", () => {
   const source = manifest();
   source.contributions = [
     { ...source.contributions[0]!, id: "dev.example.memory-workbench.panel-view", kind: "view" },
-    { ...source.contributions[0]!, id: "dev.example.memory-workbench.markdown", kind: "editor" },
+    {
+      ...source.contributions[0]!,
+      id: "dev.example.memory-workbench.markdown",
+      kind: "editor",
+      data: Object.assign({ route: "memory" }, { languageIds: ["markdown"], priority: 40 }),
+    },
   ];
   const parsed = parsePiariumExtensionManifest(source);
   assert.deepEqual(parsed.contributions?.map((item) => item.kind), ["view", "editor"]);
+});
+
+test("rejects editor contributions without a resource selector", () => {
+  const source = manifest();
+  source.contributions = [{
+    ...source.contributions[0]!,
+    id: "dev.example.memory-workbench.editor",
+    kind: "editor",
+    data: { route: "memory" },
+  }];
+  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
+    error instanceof PiariumExtensionContractError
+    && error.issues.some((issue) => issue.includes("languageIds or filenames"))
+  ));
 });
