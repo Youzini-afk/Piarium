@@ -19,7 +19,8 @@ const createFakeChild = () => {
 };
 
 const finishWithOutput = (child, output, code = 0) => {
-  child.stdout.end(output, () => child.emit('close', code));
+  child.stdout.once('end', () => child.emit('close', code));
+  child.stdout.end(output);
 };
 
 const matchLine = (absolutePath, preview) => JSON.stringify({
