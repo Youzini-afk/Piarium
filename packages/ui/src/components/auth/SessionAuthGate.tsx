@@ -9,7 +9,7 @@ import { invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
-import { PiariumLogo } from '@/components/ui/PiariumLogo';
+import { ApplicationLoadingScreen } from '@/components/ui/ApplicationLoadingScreen';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
@@ -286,11 +286,7 @@ const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   );
 };
 
-const LoadingScreen: React.FC = () => (
-  <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-    <PiariumLogo width={120} height={120} />
-  </div>
-);
+const LoadingScreen: React.FC = () => <ApplicationLoadingScreen />;
 
 const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter, children }) => {
   const { t } = useI18n();

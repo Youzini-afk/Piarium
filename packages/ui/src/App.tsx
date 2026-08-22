@@ -37,7 +37,8 @@ import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionR
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
+import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionOverlay';
+import { dismissInitialSplash, setInitialSplashStatus } from '@/lib/splash';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { PiariumDiagnosticsDialog } from '@/components/ui/PiariumDiagnosticsDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -189,6 +190,8 @@ const EmbeddedSessionChatContent: React.FC<{
 };
 
 function App({ apis }: AppProps) {
+  const { t } = useI18n();
+
   React.useEffect(() => {
     markStartupTrace('App:mounted');
     if (startupTraceEnabled()) {
@@ -355,51 +358,48 @@ function App({ apis }: AppProps) {
       return;
     }
 
-    const timer = setTimeout(() => {
-      const loadingElement = document.getElementById('initial-loading');
-      if (loadingElement) {
-        loadingElement.classList.add('fade-out');
-        setTimeout(() => {
-          loadingElement.remove();
-        }, 300);
-      }
-    }, 150);
+    // Held briefly so the mark's entrance is seen rather than skipped. A start fast enough to
+    // dismiss instantly reads as a flicker, which looks worse than a moment of waiting.
+    const timer = setTimeout(dismissInitialSplash, 150);
 
     return () => clearTimeout(timer);
   }, [bootOutcomeKnown, bootViewIsMain, desktopWorkspaceView, isDesktopRuntime, runtimeReady]);
 
-  // Deterministic malformed handling: update splash text so the user
-  // sees a specific error instead of a generic spinner, but do NOT
-  // dismiss the splash (that only happens on a valid outcome).
+  // Deterministic malformed handling: name the failure on the splash so the user sees something
+  // specific, but do NOT dismiss it. Only a valid boot outcome dismisses.
   React.useEffect(() => {
     if (!isDesktopRuntime || bootInjectionStatus !== 'malformed') {
       return;
     }
+    setInitialSplashStatus(t('splash.status.desktopFailed'));
+  }, [isDesktopRuntime, bootInjectionStatus, t]);
 
-    const loadingElement = document.getElementById('initial-loading');
-    if (loadingElement) {
-      loadingElement.textContent = 'Desktop startup failed — please restart the app.';
-    }
-  }, [isDesktopRuntime, bootInjectionStatus]);
-
-  // Non-desktop fallback: remove splash after 5 seconds even if init stalls.
+  // Non-desktop fallback: drop the splash after 5 seconds even if init stalls, so a hung runtime
+  // cannot hold the page behind a cover indefinitely.
   React.useEffect(() => {
     if (isDesktopRuntime) {
       return;
     }
 
     const fallbackTimer = setTimeout(() => {
-      const loadingElement = document.getElementById('initial-loading');
-      if (loadingElement && !runtimeReady) {
-        loadingElement.classList.add('fade-out');
-        setTimeout(() => {
-          loadingElement.remove();
-        }, 300);
-      }
+      if (!runtimeReady) dismissInitialSplash();
     }, 5000);
 
     return () => clearTimeout(fallbackTimer);
   }, [isDesktopRuntime, runtimeReady]);
+
+  // The splash has no measurable progress, only a sequence of gates, so it names the gate it is
+  // waiting on instead of inventing a percentage.
+  React.useEffect(() => {
+    if (runtimeReady) return;
+    if (isDesktopRuntime && !bootOutcomeKnown) {
+      setInitialSplashStatus(t('splash.status.startingDesktop'));
+      return;
+    }
+    setInitialSplashStatus(
+      piCatalogLoaded ? t('splash.status.preparingWorkspace') : t('splash.status.connectingRuntime'),
+    );
+  }, [bootOutcomeKnown, isDesktopRuntime, piCatalogLoaded, runtimeReady, t]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -607,11 +607,9 @@ function App({ apis }: AppProps) {
       const nextInterval = Math.min(BASE_INTERVAL * Math.pow(1.1, attempts), MAX_INTERVAL);
 
       if (attempts >= MAX_ATTEMPTS) {
-        // Max attempts reached - keep polling but show error
-        const loadingElement = document.getElementById('initial-loading');
-        if (loadingElement && !loadingElement.textContent?.includes('taking longer')) {
-          loadingElement.textContent = 'Desktop startup is taking longer than expected...';
-        }
+        // Max attempts reached: keep polling, but say so on the splash rather than leaving the user
+        // in front of a cover with no explanation.
+        setInitialSplashStatus(t('splash.status.desktopSlow'));
       }
 
       window.setTimeout(pollWithBackoff, nextInterval);
@@ -623,7 +621,7 @@ function App({ apis }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [isDesktopRuntime, bootInjectionStatus]);
+  }, [isDesktopRuntime, bootInjectionStatus, t]);
 
   const handleDesktopBootDismiss = React.useCallback(async () => {
     if (shouldRestartDesktopBootFlow({
@@ -751,7 +749,7 @@ function App({ apis }: AppProps) {
               <Toaster />
               {!isBootShell && (
                 <>
-                  <ConfigUpdateOverlay />
+                  <WorkbenchTransitionOverlay />
                   <AboutDialogWrapper />
                   <PiariumDiagnosticsDialog />
                 </>

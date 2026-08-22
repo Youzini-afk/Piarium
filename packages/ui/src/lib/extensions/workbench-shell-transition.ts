@@ -20,6 +20,11 @@ import {
   refreshPiariumExtensionCatalog,
   setPiariumExtensionEnabled,
 } from './catalog-store';
+import {
+  beginWorkbenchProfileTransition,
+  finishWorkbenchProfileTransition,
+  resolveTransitionDirection,
+} from '@/lib/workbench/profile-transition';
 import { startWorkbenchMountSession } from './workbench-mount';
 import {
   stageWorkbenchShellRender,
@@ -428,16 +433,44 @@ const runSetWorkbenchReplacementSelection = (
   });
 });
 
-export const selectActiveWorkbenchProfile = (
+/**
+ * The live switch. The transition cover is driven from here rather than from the switcher component,
+ * because the switcher is rendered inside the shell being replaced and stops existing partway
+ * through. `finish` runs for both outcomes: a rejected switch leaves the previous shell active and
+ * still has to drop the cover.
+ */
+export const selectActiveWorkbenchProfile = async (
   profileId: string,
   workspaceId?: string,
   options?: WorkbenchProfileTransitionOptions,
-): Promise<void> => runSelectActiveWorkbenchProfile(
-  createLiveWorkbenchShellTransitionDependencies(),
-  profileId,
-  workspaceId,
-  options,
-);
+): Promise<void> => {
+  const workbench = getPiariumExtensionCatalogState().snapshot?.workbench;
+  const profileIds = workbench?.document.profiles.map((profile) => profile.id) ?? [];
+  const fromProfileId = workbench?.authoritative
+    ? resolvePiariumWorkbenchLayout(workbench.document, {
+      surface: piariumSurfaceRuntime.surface,
+      userId: 'default',
+      ...(workspaceId ? { workspaceId } : {}),
+    }).profileId
+    : null;
+
+  beginWorkbenchProfileTransition({
+    direction: resolveTransitionDirection(profileIds, fromProfileId, profileId),
+    fromProfileId,
+    toProfileId: profileId,
+  });
+
+  try {
+    await runSelectActiveWorkbenchProfile(
+      createLiveWorkbenchShellTransitionDependencies(),
+      profileId,
+      workspaceId,
+      options,
+    );
+  } finally {
+    finishWorkbenchProfileTransition();
+  }
+};
 
 export const setWorkbenchReplacementSelection = (
   target: string,

@@ -9,7 +9,6 @@ import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwit
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
-import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -3060,7 +3059,6 @@ export function MobileApp({ apis }: MobileAppProps) {
             <WorkbenchProfileBridge />
             <WorkbenchShellHost />
             <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
-            {piCatalogLoaded ? <ConfigUpdateOverlay /> : null}
           </div>
         </TooltipProvider>
       </RuntimeAPIProvider>

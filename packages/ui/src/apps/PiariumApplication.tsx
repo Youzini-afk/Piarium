@@ -1,7 +1,7 @@
 import React from 'react';
 
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { PiariumLogo } from '@/components/ui/PiariumLogo';
+import { ApplicationLoadingScreen } from '@/components/ui/ApplicationLoadingScreen';
 
 const App = React.lazy(async () => {
   const [appModule, extensionRuntime] = await Promise.all([
@@ -13,12 +13,6 @@ const App = React.lazy(async () => {
   });
   return { default: appModule.default };
 });
-
-const ApplicationLoadingScreen: React.FC = () => (
-  <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-    <PiariumLogo width={120} height={120} />
-  </div>
-);
 
 export const PiariumApplication: React.FC<{ apis: RuntimeAPIs }> = ({ apis }) => (
   <React.Suspense fallback={<ApplicationLoadingScreen />}>
