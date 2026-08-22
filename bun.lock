@@ -23,7 +23,7 @@
         "@codemirror/language": "6.12.2",
         "@codemirror/lint": "6.9.5",
         "@codemirror/search": "^6.7.1",
-        "@codemirror/state": "^6.5.4",
+        "@codemirror/state": "^6.7.1",
         "@codemirror/view": "6.39.13",
         "@heroui/scroll-shadow": "^2.3.19",
         "@heroui/system": "^2.4.28",
@@ -96,7 +96,7 @@
     },
     "packages/electron": {
       "name": "@piarium/electron",
-      "version": "0.1.0",
+      "version": "0.6.0",
       "dependencies": {
         "@piarium/pi-host": "workspace:*",
         "@piarium/protocol": "workspace:*",
@@ -256,7 +256,7 @@
     },
     "packages/ui": {
       "name": "@piarium/ui",
-      "version": "0.1.0",
+      "version": "0.6.0",
       "dependencies": {
         "@aparajita/capacitor-secure-storage": "^8.0.0",
         "@base-ui/react": "^1.4.0",
@@ -284,7 +284,7 @@
         "@codemirror/legacy-modes": "^6.5.2",
         "@codemirror/lint": "6.9.5",
         "@codemirror/search": "^6.6.0",
-        "@codemirror/state": "^6.5.4",
+        "@codemirror/state": "^6.7.1",
         "@codemirror/view": "6.39.13",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -369,7 +369,7 @@
     },
     "packages/vscode": {
       "name": "piarium",
-      "version": "0.1.0",
+      "version": "0.6.0",
       "dependencies": {
         "@piarium/extension-contract": "workspace:*",
         "@piarium/extension-host": "workspace:*",
@@ -392,7 +392,7 @@
     },
     "packages/web": {
       "name": "@piarium/web",
-      "version": "0.1.0",
+      "version": "0.6.0",
       "bin": {
         "piarium": "./bin/cli.js",
       },
