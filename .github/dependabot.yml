@@ -4,8 +4,26 @@ updates:
     directory: /
     schedule:
       interval: weekly
-  - package-ecosystem: npm
+
+  # This workspace installs with Bun and CI runs `bun install --frozen-lockfile`. The `npm`
+  # ecosystem edits `package.json` without maintaining `bun.lock`, so every pull request it opened
+  # failed at install before a single real check ran. The `bun` ecosystem understands the text-based
+  # `bun.lock` and updates both.
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    groups:
+      # ESLint and its TypeScript plugins have to move together: a major on one is inconsistent with
+      # the others, so separate pull requests cannot pass individually.
+      eslint:
+        patterns:
+          - eslint
+          - '@eslint/*'
+          - eslint-plugin-*
+          - typescript-eslint
+      vitest:
+        patterns:
+          - vitest
+          - '@vitest/*'
