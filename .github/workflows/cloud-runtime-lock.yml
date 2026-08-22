@@ -90,7 +90,14 @@ jobs:
 
           # Only the second lockfile may travel with this commit. Anything else means the run did
           # more than the chore it is scoped to, and pushing it would hide that.
-          unexpected=$(git diff --name-only -- . ':!scripts/cloud-runtime.bun.lock')
+          # Compare content, not file modes. Installing a workspace sets the executable bit on
+          # declared `bin` entries, which shows up as a change with no added or removed lines and is
+          # never a reason to stop a lockfile refresh. `--numstat` reports `-` for binary files, so
+          # those still count as changed.
+          unexpected=$(
+            git diff --numstat -- . ':!scripts/cloud-runtime.bun.lock' \
+              | awk '$1 != "0" || $2 != "0" { print $3 }'
+          )
           if [ -n "$unexpected" ]; then
             echo "::error::Unexpected changes outside the cloud runtime lockfile:"
             echo "$unexpected"
