@@ -4,6 +4,14 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # The artifact actions must carry matching major versions, and the download action's v8 is the
+      # counterpart to the newer non-zipped upload behavior. Proposing one side alone is half a
+      # migration, so keep the pair in one pull request.
+      artifact-actions:
+        patterns:
+          - actions/upload-artifact
+          - actions/download-artifact
 
   # This workspace installs with Bun and CI runs `bun install --frozen-lockfile`. The `npm`
   # ecosystem edits `package.json` without maintaining `bun.lock`, so every pull request it opened
