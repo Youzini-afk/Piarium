@@ -1,6 +1,7 @@
 import { markBox } from './piarium-mark-perspective';
 import {
   CAMERA_FLOOR_TRANSFORM,
+  floorInscribedRadius,
   floorReach,
   HORIZON_RISE_PX,
 } from './piarium-splash-camera';
@@ -103,11 +104,32 @@ export const GROUND_REACH = floorReach(GROUND_BEHIND_PX, GROUND_AHEAD_PX);
  * above the origin.
  *
  * The far edge is a real edge, and on a tall window it lands mid-screen, so it has to be faded rather
- * than merely masked at the periphery. Fading over the outer half of the floor's depth puts the ramp
- * exactly where the rows are compressing hardest, which is what a horizon looks like anyway.
+ * than merely masked at the periphery. The ramp covers the last few rows, which are the ones already too
+ * compressed to read as separate cells — which is what a horizon looks like anyway.
  */
+const GROUND_FADE_ROWS = 4;
 export const GROUND_EDGE_RISE_PX = GROUND_REACH.farRise;
-export const GROUND_FADE_RISE_PX = floorReach(GROUND_BEHIND_PX / 2, GROUND_AHEAD_PX).farRise;
+export const GROUND_FADE_RISE_PX = floorReach(
+  GROUND_BEHIND_PX - GROUND_FADE_ROWS * CUBE_EDGE_PX,
+  GROUND_AHEAD_PX,
+).farRise;
+
+/**
+ * How far from the cube's feet the exit reveals the app one cell at a time.
+ *
+ * The floor's cells are the cover inside this radius: they are opaque, so as each one shrinks away the
+ * app shows through the hole it leaves. That only works where the screen is actually paved with cells at
+ * full opacity, which bounds the radius twice over — by the floor's projected outline, which is a
+ * quadrilateral and cannot reach the corners of a rectangular window, and by the horizon ramp, past which
+ * the cells are no longer opaque enough to hide anything.
+ *
+ * Beyond it the backdrop is the cover and resolves with a fade instead. That is the same region the
+ * peripheral falloff already treats as atmosphere, so a soft edge there is in keeping.
+ */
+export const GROUND_REVEAL_RADIUS_PX = Math.floor(Math.min(
+  floorInscribedRadius(GROUND_BEHIND_PX, GROUND_AHEAD_PX),
+  GROUND_FADE_RISE_PX,
+));
 
 const CELL_EXIT_MS = 460;
 const MARK_EXIT_MS = 460;
@@ -118,6 +140,18 @@ const MAX_CELL_DELAY_MS = 520;
 export const SPLASH_EXIT_DURATION_MS = MAX_CELL_DELAY_MS + Math.max(CELL_EXIT_MS, MARK_EXIT_MS);
 /** The reduced-motion path replaces every staged animation with one fade of the whole cover. */
 export const SPLASH_REDUCED_EXIT_DURATION_MS = 260;
+
+/**
+ * The reveal's own timings.
+ *
+ * The hole opens roughly as fast as the cell wave travels, so a cell has usually gone by the time the
+ * hole reaches it; the backdrop then fades once the hole has stopped growing, and finishes before the
+ * outermost cells do, so those are seen coming apart against the app rather than against flat colour.
+ */
+const REVEAL_MS = 440;
+const BACKDROP_FADE_MS = 300;
+/** Soft edge on the hole. Wide enough not to read as a circle, narrow enough not to leak past the cells. */
+const REVEAL_EDGE_PX = 64;
 
 /** Fraction of cells that join the idle breathing. */
 const BREATHE_SHARE = 0.1;
@@ -223,9 +257,11 @@ export interface SplashPlaneColors {
 export const PIARIUM_SPLASH_COLORS: SplashPlaneColors = {
   background: 'var(--splash-background, var(--color-background, #151313))',
   line: 'var(--splash-lattice-line, rgba(255, 255, 255, 0.22))',
-  // Kept faint. At the wash strength the faces use, a pulsing cell reads as a random bright tile rather
-  // than as the floor breathing.
-  cell: 'var(--splash-cell-pulse, rgba(255, 255, 255, 0.07))',
+  // Kept faint, and opaque: the cells are the cover, so a translucent pulse would open a hole in it at
+  // every peak. The token is the background with a little ink mixed in rather than ink over transparency,
+  // and the fallback is the plain background, so a host that forgets to define it loses the pulse instead
+  // of the cover.
+  cell: 'var(--splash-cell-pulse, var(--splash-background, #151313))',
   stroke: 'var(--splash-stroke)',
 };
 
@@ -323,15 +359,66 @@ to { opacity: 0; }
 .pi-splash-status { opacity: 0.5; }`
     : '';
 
+  // Percentages of the cover's own alpha would have to be re-derived per window; absolute radii keep the
+  // plateau exactly as wide as the region the reveal is allowed to open, which is a fixed number of pixels.
+  const falloff = [
+    `rgba(0,0,0,1) ${GROUND_REVEAL_RADIUS_PX}px`,
+    `rgba(0,0,0,0.55) ${GROUND_REVEAL_RADIUS_PX * 3}px`,
+    `rgba(0,0,0,0.3) ${GROUND_REVEAL_RADIUS_PX * 5}px`,
+  ].join(', ');
+  const vignette = `radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, ${falloff})`;
+  const hole = `radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,0) var(--pi-splash-open, 0px), rgba(0,0,0,1) calc(var(--pi-splash-open, 0px) + ${REVEAL_EDGE_PX}px))`;
+
   return `
 .pi-splash {
 position: fixed;
 inset: 0;
 z-index: 9998;
 overflow: hidden;
-background: ${colors.background};
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
+
+/* The cover is the floor's cells, not this element.
+   That is the whole exit: each cell is opaque, so when one shrinks away the app shows through the gap it
+   leaves, and the staggered delays turn that into a wave travelling out from the cube's feet. An opaque
+   container would have made the same wave reveal nothing — the lines would vanish and the screen would
+   stay a flat colour until the element was removed, which is a hard cut. */
+/* A registered custom property, so it interpolates. Read with a zero fallback too: without @property the
+   hole never opens and the backdrop resolves with its fade alone, which is the previous behaviour rather
+   than a hole in the middle of the cover. */
+@property --pi-splash-open {
+syntax: '<length>';
+inherits: false;
+initial-value: 0px;
+}
+/* The floor is a quadrilateral in projection and a window is a rectangle, so the cells cannot cover the
+   screen's corners. The backdrop covers everything they miss, and the hole opens from the cube's feet so
+   that where the cells *are* the cover, they are the only cover. */
+.pi-splash-backdrop {
+position: absolute;
+inset: 0;
+background: ${colors.background};
+-webkit-mask-image: ${hole};
+mask-image: ${hole};
+}
+/* Boot only, which is also the default: the three hosts that paint before any module is evaluated set no
+   mode, and boot is the only thing they cover. A profile switch sweeps its cells along one floor axis
+   instead of radiating, so a hole opening from the middle would be travelling the wrong way; there the
+   backdrop just fades and the sweep reads as a wipe over it. */
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
+animation:
+pi-splash-open ${REVEAL_MS}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out ${BACKDROP_FADE_MS}ms ${REVEAL_MS}ms ease both;
+}
+.pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {
+animation: pi-splash-backdrop-out ${REVEAL_MS + BACKDROP_FADE_MS}ms ease both;
+}
+@keyframes pi-splash-open {
+to { --pi-splash-open: ${GROUND_REVEAL_RADIUS_PX}px; }
+}
+@keyframes pi-splash-backdrop-out {
+to { opacity: 0; }
+}
 
 /* Two fades, on two untransformed wrappers, because they answer two different questions and a mask
    applies in its own element's coordinate space. Masking the floor itself meant a local circle came out
@@ -341,8 +428,8 @@ background: ${colors.background};
 position: absolute;
 inset: 0;
 overflow: hidden;
--webkit-mask-image: radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
-mask-image: radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+-webkit-mask-image: ${vignette};
+mask-image: ${vignette};
 }
 /* The horizon. Receding floor points crowd toward a line ${Math.round(HORIZON_RISE_PX)}px above the
    origin and never reach it, so a floor drawn to any finite depth always ends somewhere, and on a tall
@@ -367,18 +454,20 @@ grid-template-columns: ${GROUND_STYLE.gridTemplateColumns};
 grid-template-rows: ${GROUND_STYLE.gridTemplateRows};
 transform: ${GROUND_STYLE.transform};
 }
-/* Two edges per cell, so neighbours do not stack into a 2px rule. */
+/* Opaque, because these cells are the cover. Two edges each, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
+background: ${colors.background};
 box-shadow: inset -1px -1px 0 ${colors.line};
 }
 /* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
-   there is genuinely something to wait for. */
+   there is genuinely something to wait for. Both ends are opaque colours: a translucent pulse would have
+   punched a hole in the cover for half of every cycle. */
 .pi-splash-cell[data-breathe='true'] {
 animation: pi-splash-breathe 2.8s ease-in-out infinite;
 animation-delay: calc(1.2s + var(--pi-breathe-delay));
 }
 @keyframes pi-splash-breathe {
-0%, 100% { background: transparent; }
+0%, 100% { background: ${colors.background}; }
 50% { background: ${colors.cell}; }
 }
 /* Declared after the breathing rule so equal specificity lets the exit win without !important. */
@@ -397,7 +486,9 @@ ${markRules}
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
 .pi-splash-cell,
-.pi-splash[data-leaving='true'] .pi-splash-cell${reducedMarkRules} {
+.pi-splash[data-leaving='true'] .pi-splash-cell,
+.pi-splash[data-leaving='true'] .pi-splash-backdrop,
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop${reducedMarkRules} {
 animation: none;
 }${reducedStatusRule}
 .pi-splash { transition: opacity ${SPLASH_REDUCED_EXIT_DURATION_MS}ms ease; }

@@ -106,30 +106,57 @@ export interface FloorReach {
 }
 
 /**
- * How much screen a floor rectangle covers, measured from the origin.
+ * The projected outline of a floor rectangle: a quadrilateral.
  *
- * Only the four corners are examined, and that is exact rather than an approximation: a projective map
- * takes straight lines to straight lines, so the image of the rectangle is a quadrilateral, and the
- * extremes of a quadrilateral are its vertices. An earlier version sampled points along the boundary to
- * find the same four numbers.
+ * Only the four corners are needed, and that is exact rather than an approximation: a projective map
+ * takes straight lines to straight lines, so the image of a rectangle is a quadrilateral. An earlier
+ * version sampled points along the boundary to find the same four points.
  *
  * `far` and `near` are the rectangle's extents along the floor axes, away from and toward the viewer.
  * They differ because a receding floor needs far more room behind the origin than in front of it, and a
  * rectangle stretched equally in both directions would push its near corner through the camera.
  */
+const floorOutline = (far: number, near: number): Point2[] => [
+  projectPoint({ x: -far, y: -far, z: 0 }),
+  projectPoint({ x: near, y: -far, z: 0 }),
+  projectPoint({ x: near, y: near, z: 0 }),
+  projectPoint({ x: -far, y: near, z: 0 }),
+];
+
+/**
+ * How much screen a floor rectangle covers, measured from the origin.
+ *
+ * The extremes of a quadrilateral are its vertices, so this is the outline's corners and nothing else.
+ */
 export const floorReach = (far: number, near: number): FloorReach => {
-  const corners = [
-    projectPoint({ x: -far, y: -far, z: 0 }),
-    projectPoint({ x: near, y: -far, z: 0 }),
-    projectPoint({ x: near, y: near, z: 0 }),
-    projectPoint({ x: -far, y: near, z: 0 }),
-  ];
+  const corners = floorOutline(far, near);
 
   return {
     farRise: -Math.min(...corners.map((corner) => corner.y)),
     nearDrop: Math.max(...corners.map((corner) => corner.y)),
     halfWidth: Math.max(...corners.map((corner) => Math.abs(corner.x))),
   };
+};
+
+/**
+ * The largest circle centred on the origin that stays inside the floor's projected outline.
+ *
+ * The splash needs this because the projected floor is a quadrilateral and a window is a rectangle, so
+ * the floor cannot cover the corners of the screen. Inside this radius the screen is paved with floor
+ * cells and nothing else has to cover it; outside it, something does. The reach numbers are no help
+ * here — they are the outline's furthest points, and the question is about its nearest edge.
+ */
+export const floorInscribedRadius = (far: number, near: number): number => {
+  const corners = floorOutline(far, near);
+
+  return Math.min(...corners.map((corner, index) => {
+    const next = corners[(index + 1) % corners.length] as Point2;
+    const dx = next.x - corner.x;
+    const dy = next.y - corner.y;
+    // Perpendicular distance from the origin to the edge's line. The origin is inside the outline, so
+    // the nearest point on each edge is within the segment and the line distance is the segment distance.
+    return Math.abs(dx * corner.y - dy * corner.x) / Math.hypot(dx, dy);
+  }));
 };
 
 /** The CSS transform that puts a flat element into the floor plane under this same camera. */

@@ -6,6 +6,7 @@ import {
   CAMERA_FLOOR_TRANSFORM,
   HORIZON_RISE_PX,
   cameraDepth,
+  floorInscribedRadius,
   floorReach,
   projectPoint,
 } from './piarium-splash-camera';
@@ -14,9 +15,11 @@ import {
   GROUND_EDGE_RISE_PX,
   GROUND_FADE_RISE_PX,
   GROUND_REACH,
+  GROUND_REVEAL_RADIUS_PX,
   GROUND_SHAPE,
   PIARIUM_MARK_COLORS,
   PIARIUM_SPLASH_COLORS,
+  SPLASH_EXIT_DURATION_MS,
   buildSplashCells,
   splashGroundScript,
   splashPlaneCss,
@@ -236,6 +239,84 @@ describe('the floor covers the window it has to cover', () => {
   });
 });
 
+/**
+ * The exit is a reveal, not a fade.
+ *
+ * Each floor cell is opaque, so a cell shrinking away leaves a hole the app shows through, and the
+ * staggered delays make that a wave travelling out from the cube's feet. Getting this wrong is silent: an
+ * opaque container over the cells produces exactly the same cell animation and reveals nothing, which is
+ * what it did before — the lines vanished and the screen stayed flat colour until the element was removed.
+ */
+describe('the floor is the cover', () => {
+  const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
+
+  test('the cells are opaque', () => {
+    expect(css).toContain(`.pi-splash-cell {\nbackground: ${PIARIUM_SPLASH_COLORS.background};`);
+  });
+
+  test('the container is not, or the cells would reveal nothing', () => {
+    const container = css.slice(css.indexOf('.pi-splash {'), css.indexOf('.pi-splash[data-leaving'));
+    expect(container).not.toContain('background');
+  });
+
+  test('the breathing pulse stays opaque at both ends', () => {
+    // A wash over transparency would have punched a hole in the cover twice a cycle, on a tenth of the
+    // cells, while the splash was just sitting there waiting.
+    const keyframes = css.slice(css.indexOf('@keyframes pi-splash-breathe'));
+    expect(keyframes.slice(0, keyframes.indexOf('}\n}'))).not.toContain('transparent');
+  });
+
+  test('the backdrop covers what the floor cannot, and opens from the cube', () => {
+    expect(css).toContain(`.pi-splash-backdrop {\nposition: absolute;\ninset: 0;\nbackground: ${PIARIUM_SPLASH_COLORS.background};`);
+    expect(css).toContain('@property --pi-splash-open');
+    expect(css).toContain(`to { --pi-splash-open: ${GROUND_REVEAL_RADIUS_PX}px; }`);
+    // Registered with an initial value of zero and read with a zero fallback, so a browser without
+    // @property leaves the backdrop whole rather than leaving a hole in the middle of the cover.
+    expect(css).toContain('initial-value: 0px;');
+    expect(css).toContain('var(--pi-splash-open, 0px)');
+  });
+
+  test('the hole stops inside the region the cells actually pave at full opacity', () => {
+    // Two independent bounds, and the reveal has to respect the smaller. Past the floor's outline there
+    // are no cells to reveal through; past the horizon ramp the cells are no longer opaque.
+    const inscribed = floorInscribedRadius(
+      GROUND_SHAPE.offsetPx,
+      (GROUND_SHAPE.axis - GROUND_SHAPE.originCell - 0.5) * GROUND_SHAPE.cellPx,
+    );
+    expect(GROUND_REVEAL_RADIUS_PX).toBeLessThanOrEqual(inscribed);
+    expect(GROUND_REVEAL_RADIUS_PX).toBeLessThanOrEqual(GROUND_FADE_RISE_PX);
+    expect(GROUND_REVEAL_RADIUS_PX).toBeGreaterThan(CUBE_EDGE_PX);
+  });
+
+  test('the peripheral falloff is flat across the whole reveal', () => {
+    // It is a mask over the cells, so any softness inside the hole would let the app through cells that
+    // have not gone yet. Its plateau is the reveal radius, which is why the stops are absolute lengths
+    // rather than the shares of the window they used to be.
+    expect(css).toContain(`rgba(0,0,0,1) ${GROUND_REVEAL_RADIUS_PX}px`);
+  });
+
+  test('the backdrop finishes fading before the last cells do', () => {
+    // So the outermost cells are seen coming apart against the app rather than against flat colour.
+    const [, fadeMs, delayMs] = /pi-splash-backdrop-out (\d+)ms (\d+)ms/.exec(css)
+      ?.map(Number) as [number, number, number];
+    const [, openMs] = /pi-splash-open (\d+)ms/.exec(css)?.map(Number) as [number, number];
+    expect(delayMs).toBeGreaterThanOrEqual(openMs);
+    expect(delayMs + fadeMs).toBeLessThan(SPLASH_EXIT_DURATION_MS);
+  });
+
+  test('the reveal is boot-only, and boot is what a host gets by saying nothing', () => {
+    // A profile switch sweeps its cells along one axis, so a hole opening from the middle would travel the
+    // wrong way. The three hosts that paint pre-module set no mode and must still get the reveal.
+    expect(css).toContain(".pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {\nanimation:\npi-splash-open");
+    expect(css).toContain(".pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {\nanimation: pi-splash-backdrop-out");
+    for (const body of [readWebShell(), readMiniChat(), readWebview()]) {
+      const open = body.indexOf(`<div id="${INITIAL_SPLASH_IDS.root}"`);
+      expect(open).toBeGreaterThan(-1);
+      expect(body.slice(open, body.indexOf('>', open))).not.toContain('data-mode');
+    }
+  });
+});
+
 describe('exit choreography', () => {
   test('boot starts at the cell the cube stands on and ends at the far corner', () => {
     const cells = buildSplashCells('boot', 'forward', false);
@@ -366,16 +447,31 @@ describe('every splash host carries the same generated bytes', () => {
       expect(host.read()).toContain(INITIAL_SPLASH_IDS.leavingAttribute);
     });
 
-    test(`${host.name} nests the floor inside both fades`, () => {
-      // Screen-space vignette outside, horizon fade inside, floor innermost. Masking the floor itself is
-      // what cut the screen's corners first in an earlier attempt.
+    test(`${host.name} puts the backdrop under the floor, and the floor inside both fades`, () => {
+      // Backdrop first so the cells paint over it; then the screen-space falloff, then the horizon ramp,
+      // then the floor. Masking the floor itself is what cut the screen's corners first in an earlier
+      // attempt, and a backdrop painted after the cells would cover the holes they leave.
       const body = host.read();
+      const backdrop = body.indexOf('pi-splash-backdrop');
       const clip = body.indexOf('pi-splash-ground-clip');
       const horizon = body.indexOf('pi-splash-horizon');
       const ground = body.indexOf('class="pi-splash-ground"');
-      expect(clip).toBeGreaterThan(-1);
+      expect(backdrop).toBeGreaterThan(-1);
+      expect(clip).toBeGreaterThan(backdrop);
       expect(horizon).toBeGreaterThan(clip);
       expect(ground).toBeGreaterThan(horizon);
+    });
+
+    test(`${host.name} keeps the splash out of React's container`, () => {
+      // The regression that made every other part of this pointless. `createRoot()` empties its container
+      // on the first commit, so a splash inside #root was deleted the instant React mounted: the exit
+      // never ran, dismissInitialSplash() found nothing, and the status line went nowhere. Sibling, and
+      // ahead of #root so it paints as early as the parser reaches it.
+      const body = host.read();
+      const splash = body.indexOf(`id="${INITIAL_SPLASH_IDS.root}"`);
+      const container = body.indexOf('id="root"');
+      expect(splash).toBeGreaterThan(-1);
+      expect(container).toBeGreaterThan(splash);
     });
   }
 
@@ -413,8 +509,9 @@ describe('every splash host carries the same generated bytes', () => {
     expect(css).toContain('.pi-splash-glyph,');
   });
 
-  test('the cover is opaque, since a transparent one hides nothing', () => {
-    expect(splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: false }))
-      .toContain(`background: ${PIARIUM_SPLASH_COLORS.background};`);
+  test('the cover is opaque even with no cube on it, since a transparent one hides nothing', () => {
+    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: false });
+    expect(css).toContain(`.pi-splash-backdrop {\nposition: absolute;\ninset: 0;\nbackground: ${PIARIUM_SPLASH_COLORS.background};`);
+    expect(css).toContain(`.pi-splash-cell {\nbackground: ${PIARIUM_SPLASH_COLORS.background};`);
   });
 });

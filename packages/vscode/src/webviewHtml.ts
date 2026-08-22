@@ -46,7 +46,9 @@ const SPLASH_CSS = splashPlaneCss(
   {
     background: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
     line: 'var(--vscode-widget-border, var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.24)))',
-    cell: 'var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.14))',
+    // Opaque, because the floor's cells are the cover: a translucent pulse would open a hole in it at
+    // every peak. Mixed into the editor background rather than laid over it.
+    cell: 'color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-editor-background, var(--vscode-sideBar-background)))',
     stroke: 'var(--vscode-foreground)',
   },
   { withMark: true },
@@ -150,6 +152,7 @@ ${SPLASH_CSS}
 </head>
 <body>
   <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
+    <div class="pi-splash-backdrop" aria-hidden="true"></div>
     <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-ground">${GROUND_CELLS}</div></div></div>
     <span class="pi-splash-mark">${MARK.svg}</span>
     <div class="pi-splash-status">PIARIUM</div>

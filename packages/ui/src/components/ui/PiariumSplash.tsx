@@ -80,6 +80,9 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       aria-label={label}
     >
       <style>{STYLES}</style>
+      {/* The cover for everything the floor's cells cannot reach. A hole opens in it from the cube's feet
+          during the exit, so where the cells are the cover, they are the only cover. */}
+      <div className="pi-splash-backdrop" aria-hidden="true" />
       <div className="pi-splash-ground-clip" aria-hidden="true">
         <div className="pi-splash-horizon">
           <div className="pi-splash-ground">
