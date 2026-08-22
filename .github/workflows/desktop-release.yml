@@ -169,13 +169,24 @@ jobs:
           file "$executable" | grep -q "$expected_arch"
           native_modules="$(find "$app/Contents/Resources/app.asar.unpacked" -type f -name '*.node')"
           test -n "$native_modules"
-          printf '%s\n' "$native_modules" | grep -q "/better-sqlite3/prebuilds/darwin-${{ matrix.architecture }}.node$"
+          runtime_native_modules=''
+          while IFS= read -r native_module; do
+            if [[ "$native_module" == *'/prebuilds/'* ]] \
+              && [[ "$native_module" != *"/prebuilds/darwin-${{ matrix.architecture }}/"* ]] \
+              && [[ "$native_module" != *"/prebuilds/darwin-${{ matrix.architecture }}.node" ]]; then
+              continue
+            fi
+            runtime_native_modules="${runtime_native_modules}${runtime_native_modules:+$'\n'}${native_module}"
+          done <<< "$native_modules"
+          printf '%s\n' "$runtime_native_modules" | grep -q "/better-sqlite3/prebuilds/darwin-${{ matrix.architecture }}.node$"
           for required in pty.node sherpa-onnx.node; do
-            printf '%s\n' "$native_modules" | grep -q "/$required$"
+            printf '%s\n' "$runtime_native_modules" | grep -q "/$required$"
           done
           while IFS= read -r native_module; do
-            file "$native_module" | grep -q "$expected_arch"
-          done <<< "$native_modules"
+            description="$(file "$native_module")"
+            printf '%s\n' "$description"
+            grep -q "$expected_arch" <<< "$description"
+          done <<< "$runtime_native_modules"
           node .release-automation/packages/electron/scripts/smoke-desktop-unpacked.mjs "$executable"
 
       - name: Stage Windows release assets
