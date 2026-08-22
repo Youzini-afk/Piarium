@@ -43,6 +43,7 @@
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
+    "smoke:desktop:unpacked": "node ./scripts/smoke-desktop-unpacked.mjs",
     "smoke:win:unpacked": "node ./scripts/smoke-windows-unpacked.mjs",
     "test:architecture": "bun run prepare:pi-runtime && node --test ./pi-runtime.test.mjs ./startup-url-selection.test.mjs ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
     "test:updater": "node --test ./updater-capability.test.mjs ./updater-channel.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",

@@ -8,6 +8,9 @@ import { resolveTargetArchitecture } from './target-architecture.mjs';
 const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env };
 const builderArgs = process.argv.slice(2);
+const unsignedMacIndex = builderArgs.indexOf('--piarium-unsigned-mac');
+const unsignedMac = unsignedMacIndex >= 0;
+if (unsignedMac) builderArgs.splice(unsignedMacIndex, 1);
 const targetArchitecture = resolveTargetArchitecture({ environment: env, builderArgs });
 const require = createRequire(import.meta.url);
 const electronVersion = require('electron/package.json').version;
@@ -28,6 +31,12 @@ if (process.platform === 'win32' && env.WINDOWS_CSC_KEY_PASSWORD && !env.WIN_CSC
 if (process.platform === 'win32' && !env.CSC_LINK && !env.WIN_CSC_LINK) {
   env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
   console.log('[electron] Windows code signing disabled; building unsigned installer.');
+}
+
+if (unsignedMac) {
+  env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
+  builderArgs.push('--config=scripts/electron-builder.unsigned-mac.cjs');
+  console.log('[electron] macOS code signing and notarization disabled for this package.');
 }
 
 const bunBinaryCandidates = [

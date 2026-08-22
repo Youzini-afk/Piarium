@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -64,12 +65,38 @@ const serialize = (data) => {
 };
 
 const read = async (subdir, filename) => {
-  const filePath = path.join(dir, subdir, filename);
+  const artifactDirectory = path.join(dir, subdir);
+  const filePath = path.join(artifactDirectory, filename);
+  let content;
   try {
-    return parse(await fs.readFile(filePath, 'utf8'));
-  } catch {
-    return null;
+    content = await fs.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
   }
+
+  const manifest = parse(content);
+  if (manifest.version !== version) {
+    throw new Error(`${subdir}/${filename} targets ${manifest.version || '(missing version)'}, expected ${version}`);
+  }
+  if (manifest.files.length === 0) {
+    throw new Error(`${subdir}/${filename} does not contain a downloadable file`);
+  }
+  for (const entry of manifest.files) {
+    const parsedUrl = entry.url.includes('://') ? new URL(entry.url).pathname : entry.url;
+    const artifactName = path.posix.basename(decodeURIComponent(parsedUrl.replaceAll('\\', '/')));
+    if (!artifactName) throw new Error(`${subdir}/${filename} contains an invalid artifact URL`);
+    const artifactPath = path.join(artifactDirectory, artifactName);
+    const bytes = await fs.readFile(artifactPath).catch((error) => {
+      throw new Error(`${subdir}/${filename} references missing ${artifactName}: ${error.message}`);
+    });
+    if (bytes.length !== entry.size) {
+      throw new Error(`${artifactName} size mismatch: manifest ${entry.size}, artifact ${bytes.length}`);
+    }
+    const sha512 = crypto.createHash('sha512').update(bytes).digest('base64');
+    if (sha512 !== entry.sha512) throw new Error(`${artifactName} sha512 mismatch`);
+  }
+  return manifest;
 };
 
 const output = {};

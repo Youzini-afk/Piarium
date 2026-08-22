@@ -27,7 +27,7 @@ The preload bridge exposes desktop-only APIs to the web UI through `window.__PIA
 | `pi-runtime.mjs` | Resolves and starts the packaged Pi host through Electron's Node mode |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
-| `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing |
+| `scripts/package.mjs` | Runs `electron-builder`; release automation can explicitly select unsigned Windows or macOS packaging |
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
 
 ## Development
@@ -105,7 +105,10 @@ launched or modified.
 
 ## Platform Notes
 
-macOS packaging needs Xcode/build tools for notarized builds and icon asset compilation.
+macOS packages must be built on the matching native Intel or Apple Silicon runner. The public release
+workflow currently produces unsigned `dmg` and `zip` assets by explicitly disabling identity discovery,
+hardened runtime, DMG signing, and notarization. A future signed distribution can supply Apple signing
+credentials and restore those production signing options without changing the application payload.
 
 Windows packaging uses `electron-builder` with the NSIS target. For reliable native module rebuilds and NSIS installer creation, run Windows builds on a Windows runner or host. The default x64 path uses `node-pty`'s published N-API prebuild and therefore does not require Visual Studio's optional Spectre libraries; set `PIARIUM_REBUILD_NODE_PTY_FROM_SOURCE=1` only when intentionally testing its C++ source build. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
 
@@ -122,11 +125,17 @@ When these variables are absent, the build falls back to an unsigned NSIS instal
 
 ### Smoke Builds
 
-Run the `Windows Desktop Build` workflow on demand to package and smoke Windows x64, ARM64, or both
-on native GitHub Windows runners. The successful run publishes each installer, blockmap, and
-architecture-specific update manifest as a downloadable artifact. Build and smoke x64 locally with
-`bun run electron:build:win` and `bun run electron:smoke:win` when Visual Studio C++ Build Tools are
-available.
+Run the `Windows Desktop Build` workflow on demand for a focused Windows x64, ARM64, or dual-architecture
+build. For a release, run `Desktop Release Build` against an existing version tag. It builds and smokes
+Windows x64/ARM64, Linux x64/ARM64, and macOS Intel/Apple Silicon on matching native GitHub runners,
+assembles the architecture-specific updater channels, and can upload only the verified assets to an
+existing draft GitHub Release. Publishing the draft remains a separate deliberate action.
+
+The Linux and macOS smoke path starts the unpacked packaged application, waits for the renderer's
+`__piariumAppReady` signal, rejects the React error boundary, checks `/health`, and creates and closes a
+real terminal. Linux additionally verifies the AppImage, Electron executable, desktop identity, and
+packaged native module architecture. macOS checks the application executable and packaged `.node`
+modules before launch.
 
 Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 
@@ -137,6 +146,11 @@ After packaging, run `bun run --cwd packages/electron verify:linux-appimage`. Th
 Running a packaged Linux AppImage requires FUSE (`libfuse.so.2`, typically `libfuse2` / `libfuse2t64` on Debian/Ubuntu). Without FUSE, start with `APPIMAGE_EXTRACT_AND_RUN=1`. Keep the AppImage on a writable path so in-app updates can replace it.
 
 Linux updates are supported only when the packaged app is running from a writable AppImage. Update checks, downloads, and installation report an actionable error when `APPIMAGE` is missing, invalid, or read-only; a missing release feed (`latest-linux.yml` 404 before the first Linux publish) is treated as “no update available”. macOS and Windows updater behavior is unchanged. Release builds keep `latest-linux.yml` (x64) and `latest-linux-arm64.yml` separate and validate each manifest against its AppImage before upload. Linux AppImages download full updates (no `.blockmap` differential channel yet).
+
+macOS release jobs retain each native builder manifest until the final assembly job. That job verifies
+every referenced `zip`/`dmg` checksum and merges Intel and Apple Silicon entries into one
+`latest-mac.yml`, so both architectures use the standard Electron updater channel without overwriting
+one another.
 
 ### Updater End-to-End Fixture
 
