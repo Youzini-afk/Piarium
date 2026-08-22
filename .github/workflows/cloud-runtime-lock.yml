@@ -10,6 +10,10 @@ name: Cloud runtime lockfile
 # alternatives are `pull_request_target`, which would check out branch content and run an install
 # with a writable token, or a long-lived personal access token. Neither is worth it for a chore, so
 # this is dispatched deliberately and only then holds write access.
+#
+# One consequence to expect: GitHub does not start new workflow runs for a push made with
+# GITHUB_TOKEN, so the pull request's checks keep describing the previous commit after this runs.
+# Re-run them, or close and reopen the pull request, to get a verdict on the refreshed lockfile.
 
 on:
   workflow_dispatch:
@@ -115,3 +119,6 @@ jobs:
             -m 'The cloud runtime workspace keeps its own lockfile and CI verifies it frozen, so it has to move with the dependency bump in this pull request.'
           git push
           echo "Pushed a refreshed lockfile to pull request #$PR."
+          echo "::notice::A push made with GITHUB_TOKEN does not start new workflow runs, so the \
+          checks on #$PR still describe the previous commit. Re-run them, or close and reopen the \
+          pull request, to get a verdict on the refreshed lockfile."
