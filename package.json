@@ -220,7 +220,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.10.0",
-    "node-addon-api": "7.1.1",
+    "node-addon-api": "8.9.2",
     "nodemon": "^3.1.14",
     "patch-package": "^8.0.1",
     "sharp": "^0.35.3",
