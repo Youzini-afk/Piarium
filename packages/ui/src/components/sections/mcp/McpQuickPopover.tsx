@@ -1,8 +1,10 @@
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { Icon } from '@/components/icon/Icon';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import {
   refreshMcpSettingsAvailability,
@@ -63,24 +65,32 @@ export const McpQuickPopover: React.FC = () => {
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger
-        render={(
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="app-region-no-drag gap-1.5 px-2"
-            aria-label={t('settings.page.mcp.title')}
-          >
-            <Icon name="plug" className="size-4" />
-            <span>{t('settings.page.mcp.title')}</span>
-            <span
-              aria-hidden="true"
-              className={`size-1.5 rounded-full ${triggerStatusClass}`}
-            />
-          </Button>
-        )}
-      />
+      {/* Icon-only, so it sits in the workbench header action row like its neighbours. The MCP mark
+          is the same one the Agent header's services tabs use, the name survives on `aria-label` and
+          in the tooltip, and the status dot rides the corner of the icon because there is no longer
+          a text label for it to trail. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Popover.Trigger
+            render={(
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="app-region-no-drag relative"
+                aria-label={t('settings.page.mcp.title')}
+              >
+                <McpIcon className="size-4" />
+                <span
+                  aria-hidden="true"
+                  className={`absolute right-1 top-1 size-1.5 rounded-full ${triggerStatusClass}`}
+                />
+              </Button>
+            )}
+          />
+        </TooltipTrigger>
+        <TooltipContent>{t('settings.page.mcp.title')}</TooltipContent>
+      </Tooltip>
       <Popover.Portal>
         <Popover.Positioner align="end" sideOffset={6} className="app-region-no-drag z-50">
           <Popover.Popup

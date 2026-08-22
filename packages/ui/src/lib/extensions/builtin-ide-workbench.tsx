@@ -9,7 +9,6 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
@@ -343,6 +342,9 @@ const IdeExtensionsPanel: React.FC = () => {
   );
 };
 
+/** Ties the header's session button to the picker region it expands over the Agent column. */
+const SESSION_PICKER_REGION_ID = 'piarium-ide-session-picker';
+
 export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const { t } = useI18n();
   useUpdatePolling();
@@ -396,6 +398,23 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
       return next;
     });
   }, [workspaceId]);
+
+  // The picker covers the Agent column rather than floating over the workbench, so it only has
+  // somewhere to render once that column is visible. Opening it reveals the column; hiding the
+  // column takes the picker's host away, so drop the open flag with it instead of leaving a
+  // picker that reappears the next time the Agent sidebar comes back.
+  const toggleSessionPicker = React.useCallback(() => {
+    if (sessionPickerOpen) {
+      setSessionPickerOpen(false);
+      return;
+    }
+    patchLayout({ secondaryVisible: true });
+    setSessionPickerOpen(true);
+  }, [patchLayout, sessionPickerOpen]);
+
+  React.useEffect(() => {
+    if (!layout.secondaryVisible) setSessionPickerOpen(false);
+  }, [layout.secondaryVisible]);
 
   // Git diffs belong in the editor area. The Agent profile routes them through its tabbed context
   // panel, which the IDE shell does not mount, so the IDE opens a pinned diff provider tab instead.
@@ -471,16 +490,6 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           open={directoryDialogOpen}
           onOpenChange={setDirectoryDialogOpen}
         />
-        <Dialog open={sessionPickerOpen} onOpenChange={setSessionPickerOpen}>
-          <DialogContent className="h-[min(36rem,80vh)] max-w-md gap-0 overflow-hidden p-0">
-            <DialogTitle className="sr-only">{t('workbench.ide.sessions')}</DialogTitle>
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <ErrorBoundary>
-                <PiSessionSidebar onRequestClose={() => setSessionPickerOpen(false)} />
-              </ErrorBoundary>
-            </div>
-          </DialogContent>
-        </Dialog>
 
         <header
           className="app-region-drag flex h-12 shrink-0 items-center gap-2 border-b border-border px-2"
@@ -532,6 +541,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               </TooltipTrigger>
               <TooltipContent>{t('workbench.ide.commandPalette')}</TooltipContent>
             </Tooltip>
+            <McpQuickPopover />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -539,16 +549,15 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   variant="ghost"
                   size="icon"
                   aria-label={t('workbench.ide.sessionsAria')}
-                  aria-haspopup="dialog"
                   aria-expanded={sessionPickerOpen}
-                  onClick={() => setSessionPickerOpen(true)}
+                  aria-controls={SESSION_PICKER_REGION_ID}
+                  onClick={toggleSessionPicker}
                 >
                   <Icon name="list-unordered" className="size-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{t('workbench.ide.sessions')}</TooltipContent>
             </Tooltip>
-            <McpQuickPopover />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -703,6 +712,40 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                       <ChatView active showWorkStatus />
                     </ErrorBoundary>
                   </div>
+                  {sessionPickerOpen ? (
+                    <div
+                      id={SESSION_PICKER_REGION_ID}
+                      role="region"
+                      aria-label={t('workbench.ide.sessions')}
+                      className="absolute inset-0 z-10 flex flex-col bg-sidebar"
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Escape') return;
+                        event.stopPropagation();
+                        setSessionPickerOpen(false);
+                      }}
+                    >
+                      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2">
+                        <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+                          {t('workbench.ide.sessions')}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-6"
+                          aria-label={t('header.actions.closeSessionsAria')}
+                          onClick={() => setSessionPickerOpen(false)}
+                        >
+                          <Icon name="close" className="size-4" />
+                        </Button>
+                      </div>
+                      <div className="min-h-0 flex-1 overflow-hidden">
+                        <ErrorBoundary>
+                          <PiSessionSidebar onRequestClose={() => setSessionPickerOpen(false)} />
+                        </ErrorBoundary>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </aside>
             </>
