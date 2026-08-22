@@ -31,8 +31,8 @@ What is maintained instead:
 
 If you want a load check for one extension, the harness is still there:
 
-```powershell
-node scripts/smoke-extension.mjs D:\path\to\extension\index.ts
+```sh
+node scripts/smoke-extension.mjs <path-to-extension-entry>
 ```
 
 It creates an isolated agent directory and disposable workspace, loads one extension, lists its

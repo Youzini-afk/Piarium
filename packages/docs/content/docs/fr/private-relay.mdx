@@ -5,7 +5,7 @@ description: Joignez votre serveur Piarium depuis n’importe où via un relais 
 
 # Relais privé
 
-Le relais privé Piarium (Private Relay) permet à vos appareils associés de joindre votre serveur depuis n’importe où — réseau cellulaire, Wi-Fi de café, autre ville — sans ouvrir de ports, sans configurer de tunnel et sans exposer votre machine à internet. Il se gère tout seul : associer un appareil avec **Partout** dans [Connecter un appareil](/connect-devices/) suffit.
+Le relais privé Piarium (Private Relay) permet à vos appareils associés de joindre votre serveur depuis n’importe où — réseau cellulaire, Wi-Fi de café, autre ville — sans ouvrir de ports, sans configurer de tunnel et sans exposer votre machine à internet. Il se gère tout seul : associer un appareil avec **Partout** dans [Connecter un appareil](/fr/connect-devices/) suffit.
 
 ## Comment ça marche
 
@@ -18,7 +18,7 @@ Quand une connexion directe est disponible — vous êtes de retour à la maison
 Le relais est un coursier aveugle, pas un intermédiaire :
 
 - **Chiffré de bout en bout.** Votre appareil et votre serveur négocient les clés de chiffrement directement entre eux. Le relais transmet un trafic scellé dont il n’a pas les clés — il ne peut lire ni votre code, ni vos prompts, ni vos mots de passe.
-- **Seuls vos appareils peuvent se connecter.** Un appareil doit détenir un token émis par *votre* serveur via l’[association à usage unique](/connect-devices/). Personne ne peut découvrir votre serveur via le relais ni s’y connecter sans un token que vous avez créé — et vous pouvez révoquer n’importe quel token à tout moment.
+- **Seuls vos appareils peuvent se connecter.** Un appareil doit détenir un token émis par *votre* serveur via l’[association à usage unique](/fr/connect-devices/). Personne ne peut découvrir votre serveur via le relais ni s’y connecter sans un token que vous avez créé — et vous pouvez révoquer n’importe quel token à tout moment.
 - **Les liens d’association sont à usage unique.** Un QR code d’association fonctionne exactement une fois et expire s’il n’est pas utilisé ; un vieux lien qui fuite ne vaut donc rien.
 - **Rien n’est partagé sans votre accord.** Le relais reste éteint tant que vous ne l’activez pas ou que vous n’associez pas d’appareil via celui-ci, et vous pouvez le désactiver à tout moment — les appareils connectés à travers lui sont coupés immédiatement.
 
@@ -34,11 +34,11 @@ Le relais gère son propre cycle de vie — aucun interrupteur à retenir :
 ## Relais ou tunnel ?
 
 - Utilisez le **relais** pour joindre votre propre serveur depuis vos propres appareils associés. Zéro configuration, et rien n’est exposé publiquement.
-- Utilisez un [tunnel](/tunnels/) quand il vous faut une simple **URL publique** — par exemple pour ouvrir Piarium dans un navigateur ordinaire sur une machine que vous ne pouvez pas associer, ou pour partager l’accès derrière un [mot de passe UI](/security/).
+- Utilisez un [tunnel](/fr/tunnels/) quand il vous faut une simple **URL publique** — par exemple pour ouvrir Piarium dans un navigateur ordinaire sur une machine que vous ne pouvez pas associer, ou pour partager l’accès derrière un [mot de passe UI](/fr/security/).
 
 ## Pages liées
 
-- [Connecter un appareil](/connect-devices/) — associer un appareil avec un QR code à usage unique
-- [Applications mobiles](/mobile/) — installer l’application iOS ou Android
-- [Sécurité](/security/) — mots de passe, passkeys et bases de l’exposition
-- [Accès distant](/troubleshooting/remote-access/) — quand une connexion ne se termine pas
+- [Connecter un appareil](/fr/connect-devices/) — associer un appareil avec un QR code à usage unique
+- [Applications mobiles](/fr/mobile/) — installer l’application iOS ou Android
+- [Sécurité](/fr/security/) — mots de passe, passkeys et bases de l’exposition
+- [Accès distant](/fr/troubleshooting/remote-access/) — quand une connexion ne se termine pas

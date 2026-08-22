@@ -210,7 +210,7 @@ This phase built the recovery interaction model and the first-class plugin adapt
 any plugin. Implementation follows the native-ownership and per-adapter acceptance contract in
 [plugin-gui-design.md](plugin-gui-design.md); the per-adapter delivery contract is
 [community-extension-adaptation-execution-plan.md](community-extension-adaptation-execution-plan.md);
-currently verified plugin versions and their evidence live in
+the integration surface each adapter consumes is recorded in
 [extension-compatibility.md](extension-compatibility.md).
 
 - Implemented: persist the conversation-only, conversation+files, or always-ask policy across

@@ -17,7 +17,7 @@ piarium --ui-password be-creative-here
 
 Vous pouvez aussi le définir avec la variable d’environnement `PIARIUM_UI_PASSWORD` au lieu de le mettre en ligne de commande. Après connexion, Piarium mémorise l’appareil pendant un moment pour ne pas vous le redemander à chaque fois.
 
-Définissez toujours un mot de passe si l’instance est joignable par quelqu’un d’autre — surtout via un [tunnel](/tunnels/) ou internet public.
+Définissez toujours un mot de passe si l’instance est joignable par quelqu’un d’autre — surtout via un [tunnel](/fr/tunnels/) ou internet public.
 
 ## Passkeys
 
@@ -27,18 +27,18 @@ Les passkeys sont liées au mot de passe actuel. Si vous changez ou supprimez le
 
 ## Tokens d’appareil
 
-Les appareils associés via [Connecter un appareil](/connect-devices/) s’authentifient avec leurs propres tokens par appareil, pas avec le mot de passe UI. Les liens d’association sont à usage unique et expirent s’ils ne sont pas utilisés ; chaque appareil associé est listé dans **Paramètres → Instances distantes → Se connecter à ce serveur**, où vous pouvez révoquer n’importe lequel à tout moment. Les connexions hors du domicile passent par le [Relais privé](/private-relay/), qui est chiffré de bout en bout et ne peut pas lire votre trafic.
+Les appareils associés via [Connecter un appareil](/fr/connect-devices/) s’authentifient avec leurs propres tokens par appareil, pas avec le mot de passe UI. Les liens d’association sont à usage unique et expirent s’ils ne sont pas utilisés ; chaque appareil associé est listé dans **Paramètres → Instances distantes → Se connecter à ce serveur**, où vous pouvez révoquer n’importe lequel à tout moment. Les connexions hors du domicile passent par le [Relais privé](/fr/private-relay/), qui est chiffré de bout en bout et ne peut pas lire votre trafic.
 
 ## Avant de l’exposer
 
 - Par défaut, Piarium n’écoute que sur votre propre machine (`127.0.0.1`). Écouter plus largement demande un changement volontaire, et vous devriez définir un mot de passe d’abord.
-- Pour vos propres appareils, préférez l’[association](/connect-devices/) avec le [Relais privé](/private-relay/) — rien n’est exposé publiquement du tout.
-- S’il vous faut une URL publique, préférez un [tunnel](/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
-- Si vous placez Piarium derrière votre propre serveur HTTPS, consultez [Reverse proxy](/reverse-proxy/).
+- Pour vos propres appareils, préférez l’[association](/fr/connect-devices/) avec le [Relais privé](/fr/private-relay/) — rien n’est exposé publiquement du tout.
+- S’il vous faut une URL publique, préférez un [tunnel](/fr/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
+- Si vous placez Piarium derrière votre propre serveur HTTPS, consultez [Reverse proxy](/fr/reverse-proxy/).
 
 ## Pages liées
 
-- [Connecter un appareil](/connect-devices/) — association à usage unique et tokens par appareil
-- [Relais privé](/private-relay/) — accès chiffré de bout en bout depuis n’importe où
-- [Tunnels](/tunnels/) — exposer une URL publique quand il en faut une
-- [Reverse proxy](/reverse-proxy/) — exécuter Piarium derrière votre propre serveur
+- [Connecter un appareil](/fr/connect-devices/) — association à usage unique et tokens par appareil
+- [Relais privé](/fr/private-relay/) — accès chiffré de bout en bout depuis n’importe où
+- [Tunnels](/fr/tunnels/) — exposer une URL publique quand il en faut une
+- [Reverse proxy](/fr/reverse-proxy/) — exécuter Piarium derrière votre propre serveur

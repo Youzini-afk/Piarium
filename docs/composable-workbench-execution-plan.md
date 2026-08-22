@@ -1,10 +1,14 @@
-# Piarium 可组合工作台与 IDE 执行计划
+# Piarium 可组合工作台与 IDE 约定
 
-Status: execution handoff
+Status: 十一个切片已交付；本文是工作台的目标架构与归属约定
 
-Last updated: 2026-08-20
+Last updated: 2026-08-22
 
-Baseline reviewed: `3ce8368 docs: document public npm extension tooling`
+这份文档规定 Piarium 工作台的目标架构、已固定的产品决策,以及文档、编辑器、Profile、语言服务和
+调试各自的归属边界。它按十一个切片组织,因为实现是按这个顺序落地的;交付进度见
+[roadmap.md](roadmap.md) 的 Phase 10。切片编号只用于两份文档对读,不代表尚未完成的工作。
+
+正文为中文。英文读者可先看 [architecture.md](architecture.md) 第 4 节的工作台概述。
 
 ## 1. 目标
 
@@ -25,7 +29,7 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 
 ## 2. 已确定的产品决策
 
-以下决定不留给执行代理重新选择：
+以下决定已经固定,改动它们需要先改这张表：
 
 | 主题 | 决定 |
 | --- | --- |
@@ -612,7 +616,7 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 
 ## 14. 性能契约
 
-执行代理不得先用随意的实体上限隐藏性能问题。每个相关 Phase 先记录真实交互、代表性仓库和当前成本，再决定实现。
+不用随意的实体上限掩盖性能问题。先记录真实交互、代表性仓库和当前成本，再决定实现。
 
 结构性要求：
 
@@ -640,30 +644,20 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 - 扩展 disable 保留 storage/layout/document data；remove 时 retain/delete 只影响该扩展 namespace；
 - 不增加没有真实失败模式依据的文件大小、并发、扩展数、进程数或语言数限制。
 
-## 16. 执行纪律
+## 16. 验证强度按风险分配
 
-每个 Phase 独立 commit 并 push 到 `origin/main`。开始前检查最新 `HEAD`、`origin/main` 和工作树，保留用户及并行改动。不要 reset、clean、checkout 覆盖或新建替代 worktree。
-
-执行代理接手后先只提交本计划文档：
-
-```text
-docs: plan the composable Piarium workbench
-```
-
-该提交只需 `bun run docs:validate` 和 diff check，不要把 Phase 1 代码混入规划提交。
-
-验证遵循风险，不做形式化堆叠：
+每个切片独立成一个可回退的提交。验证跟着风险走，不靠重复次数堆证据：
 
 1. 迭代时只跑直接受影响的 focused tests；
-2. Phase 完成时跑 owning packages 的 type-check、lint 和契约测试；
-3. 改公共 contract/export 时跑其消费者 build/type-check，并在该 Phase 跑一次 `bun run dead-code`；
-4. UI Shell Phase 才跑 production Web build；
-5. Electron startup/package 边界变化时才跑 bundled dev/package smoke；
-6. 完整 workspace suite、Windows installer、Docker 和 CI 只在最终 convergence 跑一次；
-7. 每个 Phase 跑一次 `git diff --check`；
-8. 报告准确列出执行与未执行的检查，不以重复次数代替证据。
+2. 切片完成时跑归属包的 type-check、lint 和契约测试；
+3. 改公共 contract/export 时跑其消费者的 build/type-check，并跑一次 `bun run dead-code`；
+4. 只有改 UI Shell 的切片才跑 production Web build；
+5. 只有 Electron startup/package 边界变化时才跑 bundled dev/package smoke；
+6. 完整 workspace suite、Windows installer、Docker 和 CI 留到最终收敛；
+7. 每个切片跑一次 `git diff --check`；
+8. 准确记录哪些检查跑了、哪些没跑。
 
-公共 npm tooling 在契约稳定前使用 workspace source。Phase 9 完成后才准备一次协调版本；tag/publish 仍需用户批准。
+公共 npm tooling 在契约稳定前使用 workspace source，等整套工作台切片收敛后再准备协调版本。
 
 ## 17. Phase 1 — Workbench composition foundation
 
@@ -691,12 +685,6 @@ docs: plan the composable Piarium workbench
 - Profile selection 不修改 desired extension set；
 - application-host endpoint switch 拒绝旧 candidate completion；
 - 多窗口 actual state 分开。
-
-建议 commit：
-
-```text
-feat: establish composable workbench profiles
-```
 
 ## 18. Phase 2 — Workspace identity and DocumentsAPI
 
@@ -736,12 +724,6 @@ feat: establish composable workbench profiles
 - file content 不出现在日志/event；
 - 现有 FilesView 尚未迁移也不受行为回归。
 
-建议 commit：
-
-```text
-feat: add revisioned document authority
-```
-
 ## 19. Phase 3 — Document Registry and current editor migration
 
 ### 19.1 目标
@@ -768,12 +750,6 @@ feat: add revisioned document authority
 - crash 后恢复草稿但不自动写磁盘；
 - 同一文档两 view 内容同步，selection 独立；
 - 高速输入不触发全局 store/persistence 每键重写。
-
-建议 commit：
-
-```text
-feat: introduce shared document state
-```
 
 ## 20. Phase 4 — Editor Workbench Kernel
 
@@ -803,12 +779,6 @@ feat: introduce shared document state
 - no broad selector per keystroke；
 - 当前 Agent 产品文件、diff、terminal、Git 工作流不回归。
 
-建议 commit：
-
-```text
-feat: build the shared editor workbench
-```
-
 ## 21. Phase 5 — Agent Workspace as a built-in extension
 
 ### 21.1 目标
@@ -837,12 +807,6 @@ feat: build the shared editor workbench
 - application startup 只激活当前可见贡献。
 
 这一 Phase 跑一次 production Web build；若 App root/startup 改变，再跑 bundled Electron smoke，而不是整个安装包矩阵。
-
-建议 commit：
-
-```text
-feat: run Agent Workspace as a Piarium extension
-```
 
 ## 22. Phase 6 — Official IDE Workbench extension
 
@@ -880,12 +844,6 @@ feat: run Agent Workspace as a Piarium extension
 - 没有 LSP 时基础编辑、搜索、Git、终端和 Agent 仍可用，不显示伪造健康；
 - desktop/web production build 和一次真实浏览器交互检查通过。
 
-建议 commit：
-
-```text
-feat: add the optional IDE Workbench profile
-```
-
 ## 23. Phase 7 — Search and language-service infrastructure
 
 ### 23.1 目标
@@ -915,12 +873,6 @@ feat: add the optional IDE Workbench profile
 - application-host endpoint/workspace switch 回收旧进程和 listeners；
 - search failure 不显示“0 results”。
 
-建议 commit：
-
-```text
-feat: add extensible language services
-```
-
 ## 24. Phase 8 — Agent/editor transactions
 
 ### 24.1 目标
@@ -947,12 +899,6 @@ feat: add extensible language services
 - reject/accept 使用 expected revision，冲突不覆盖；
 - session/runtime switch 不把 attachment 发到错误 Agent；
 - 不复制 workspace-history、WTF 或其他 Pi 插件私有数据。
-
-建议 commit：
-
-```text
-feat: coordinate Agent and editor changes
-```
 
 ## 25. Phase 9 — Public Workbench SDK and ecosystem handoff
 
@@ -982,13 +928,7 @@ feat: coordinate Agent and editor changes
 - malformed/unknown contract 明确失败；
 - npm pack 内容和 public exports 与文档一致。
 
-不要在此 Phase 自动 tag/publish。完成 commit/push 后等待用户批准公共版本。
-
-建议 commit：
-
-```text
-feat: expose the composable workbench SDK
-```
+发布公共版本是独立决定，不随这一切片自动发生。
 
 ## 26. Phase 10 — Run, debug and test workbench
 
@@ -1014,12 +954,6 @@ feat: expose the composable workbench SDK
 - disable provider 清理 process/listener/view；
 - hidden views 没有持续刷新；
 - 远程 Web 与 Electron 复用 Host，renderer 不启动调试器。
-
-建议 commit：
-
-```text
-feat: add extensible run and debug workflows
-```
 
 ## 27. Phase 11 — VS Code Companion transition and convergence
 
@@ -1058,56 +992,54 @@ VS Code 扩展保留：
 - high-value GitHub CI；
 - `bun run dead-code` 和 docs validation。
 
-建议 commit：
+## 28. 跨切片的行为要求
 
-```text
-refactor: make VS Code a Piarium companion
-```
-
-## 28. 跨 Phase 验收矩阵
+下面是整套工作台必须同时成立的性质，跨切片有效。它们的权威证据是代码里的测试，不是这份文档里的
+勾选状态——本节曾经是一张逐项打勾的验收表，但打勾从未回填，所以那张表既不能证明完成、也不能证明
+未完成。要看某一条现在由什么守着，去对应包的测试和 `DOCUMENTATION.md`。
 
 ### Profile 与扩展
 
-- [ ] Agent 与 IDE 都通过普通 built-in extension manifest 注册；
-- [ ] 没有 `ideMode` 条件树成为第三个 ownership；
-- [ ] Profile 选择与 extension set apply 分离；
-- [ ] Shell candidate ready 后才提交 selection；
-- [ ] enable/disable/update 无 document reload；
-- [ ] 最后一个 Shell 被停用时 Recovery 可用；
-- [ ] 社区 Shell 可以不使用官方布局/React。
+- Agent 与 IDE 都通过普通 built-in extension manifest 注册；
+- 没有 `ideMode` 条件树成为第三个 ownership；
+- Profile 选择与 extension set apply 是两个可分别失败的动作；
+- Shell candidate ready 后才提交 selection；
+- enable/disable/update 不触发 document reload；
+- 最后一个 Shell 被停用时 Recovery 仍可用；
+- 社区 Shell 可以不使用官方布局或 React。
 
 ### 文档与文件
 
-- [ ] 一个 DocumentsAPI 内容权威；
-- [ ] expected revision + atomic write；
-- [ ] missing/empty/binary/failure 分开；
-- [ ] clean external update 与 dirty conflict；
-- [ ] save/load/hydration races；
-- [ ] move/delete/rename；
-- [ ] crash recovery；
-- [ ] application-host endpoint/workspace/multi-window isolation；
-- [ ] file contents 不进入日志。
+- 只有一个 DocumentsAPI 内容权威；
+- expected revision 加原子写入；
+- missing、empty、binary、failure 互相可区分；
+- clean external update 与 dirty conflict 分开处理；
+- save、load、hydration 的竞态有明确结果；
+- move、delete、rename 走同一套 revision 校验；
+- 崩溃后可恢复；
+- application-host endpoint、workspace、多窗口互相隔离；
+- 文件内容不进日志。
 
 ### Workbench
 
-- [ ] multiple dirty documents；
-- [ ] split/editor groups；
-- [ ] same document multiple views；
-- [ ] resource provider fallback；
-- [ ] Agent/IDE switch state preservation；
-- [ ] Shell-specific layout + shared editor state；
-- [ ] hidden views zero work；
-- [ ] keyboard/context/menu ownership。
+- 多个 dirty document 同时存在；
+- split 与 editor group；
+- 同一文档多个视图；
+- resource provider 有 fallback；
+- Agent/IDE 切换保留状态；
+- Shell 私有布局与共享编辑器状态并存；
+- 隐藏的视图不做后台工作；
+- 键盘、context key 和菜单有明确归属。
 
-### Agent/LSP/Debug
+### Agent、LSP 与调试
 
-- [ ] explicit unsaved attachment；
-- [ ] Agent write conflict；
-- [ ] stale language/debug result rejection；
-- [ ] provider isolation and cleanup；
-- [ ] project trust at Host；
-- [ ] remote runtime parity；
-- [ ] no Pi plugin private-state copy。
+- 未保存内容只在显式附加时进入 Agent；
+- Agent 写入遇到 dirty buffer 走冲突流程；
+- 过期的语言或调试结果被拒绝；
+- provider 相互隔离且能清理；
+- 项目信任在 Host 侧判定；
+- 远程运行时保持一致行为；
+- 不复制任何 Pi 插件的私有状态。
 
 ## 29. 主要风险与处理
 
@@ -1125,21 +1057,9 @@ refactor: make VS Code a Piarium companion
 | VS Code 永久双实现 | Phase 11 有进入门槛，达到后删除重复产品 UI |
 | 为大文件/仓库随意加小上限 | 先测量真实 scale，使用警告、按需加载、索引、背压或可配置策略 |
 
-## 30. 执行代理最终报告格式
+## 30. 最高风险的边界
 
-每完成一个 Phase，报告：
-
-- Phase 与 commit hash；
-- 是否 push 到 `origin/main`；
-- 改变的 authority、public contracts 和 persisted schema；
-- focused checks、package type-check/lint、runtime/build 检查及结果；
-- 明确未运行的检查；
-- missing/empty/failure、stale completion、rollback 是否覆盖；
-- 是否删除旧 owner/duplicate path；
-- 是否保留用户及并行改动；
-- 新增的用户可见行为和仍未覆盖的下一 Phase 能力。
-
-全部完成后，独立验收优先复核最高风险边界，而不是机械重跑全部命令：
+复核这套工作台时，按风险排序看下面这些边界，而不是机械重跑全部命令：
 
 1. Shell/Profile stage-and-commit 与 Recovery；
 2. Document revision/watch/conflict/recovery；

@@ -14,7 +14,7 @@ Pair another device — the mobile app, the desktop app, or a browser on another
 3. Pick where you'll use the device:
    - **This computer only** — for apps running on this same machine
    - **Home network only** — connects directly over your Wi-Fi; does not work away from this network
-   - **Anywhere** — works at home and away; away traffic goes through the [Private Relay](/private-relay/), an end-to-end encrypted tunnel with no setup needed
+   - **Anywhere** — works at home and away; away traffic goes through the [Private Relay](/en/private-relay/), an end-to-end encrypted tunnel with no setup needed
 4. Press **Create QR code**.
 5. On the other device, scan the code:
    - **mobile app** — tap **Scan QR code** on the connect screen (or in the instances list)
@@ -27,7 +27,7 @@ The dialog closes on its own as soon as the device connects, and the device appe
 - **The QR code is single-use.** It stops working the moment a device redeems it, and it expires on its own if never used.
 - **Each device gets its own token.** Scanning a code never exposes your UI password, and one device's token can't be used to impersonate another.
 - **You stay in control.** Every paired device is listed with its name, platform, and connection status — revoke any of them at any time.
-- **Away-from-home traffic is end-to-end encrypted.** With **Anywhere**, traffic outside your network rides the [Private Relay](/private-relay/), which cannot read what passes through it.
+- **Away-from-home traffic is end-to-end encrypted.** With **Anywhere**, traffic outside your network rides the [Private Relay](/en/private-relay/), which cannot read what passes through it.
 
 ## Manage paired devices
 
@@ -54,7 +54,7 @@ For a device that should connect from **anywhere** — the equivalent of picking
 piarium connect-url --relay --qr
 ```
 
-A `--relay` link carries both routes, just like the dialog: the device connects directly over your local network when it can reach the server, and falls back to the [Private Relay](/private-relay/) when away. The relay starts on its own: a running instance picks the link up within a minute, a stopped one on its next launch.
+A `--relay` link carries both routes, just like the dialog: the device connects directly over your local network when it can reach the server, and falls back to the [Private Relay](/en/private-relay/) when away. The relay starts on its own: a running instance picks the link up within a minute, a stopped one on its next launch.
 
 > The direct route only works if the server actually listens on your network. By default Piarium listens on the machine itself only — start it with `--lan` to make it reachable over Wi-Fi. The command warns you (`[LAN_UNREACHABLE]`) when the link's direct route won't be usable from other devices; a `--relay` link still works then, just always through the relay.
 
@@ -62,7 +62,7 @@ The printed link and QR code work exactly like the ones from the settings dialog
 
 ## Related
 
-- [Private Relay](/private-relay/) — how "Anywhere" connections work and what the relay can and cannot see
-- [Mobile Apps](/mobile/) — install the iOS or Android app
-- [Remote Instances](/remote-instances/) — connect the desktop app to servers over SSH or links
-- [Remote access](/troubleshooting/remote-access/) — when a device won't connect
+- [Private Relay](/en/private-relay/) — how "Anywhere" connections work and what the relay can and cannot see
+- [Mobile Apps](/en/mobile/) — install the iOS or Android app
+- [Remote Instances](/en/remote-instances/) — connect the desktop app to servers over SSH or links
+- [Remote access](/en/troubleshooting/remote-access/) — when a device won't connect

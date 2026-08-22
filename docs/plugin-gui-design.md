@@ -1,8 +1,8 @@
 # Pi ecosystem GUI design
 
-Status: implementation contract for Phase 6
+Status: implemented; this is the ownership contract adapters are held to
 
-Last updated: 2026-08-19
+Last updated: 2026-08-22
 
 ## 1. Purpose
 

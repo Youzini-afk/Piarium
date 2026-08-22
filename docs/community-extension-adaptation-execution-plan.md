@@ -1,6 +1,6 @@
 # Community extension adaptation execution plan
 
-Status: execution handoff
+Status: delivered; kept as the per-adapter ownership record
 
 Last updated: 2026-08-22
 
@@ -20,65 +20,34 @@ the ownership model already established in Piarium:
 - Unknown and future native fields round-trip unchanged. A plugin-specific Quick form and the raw
   Advanced editor are two views over one draft, one revision, and one save.
 
-This plan starts from the existing workspace at `D:\project\opencr\Piarium`. Do not reset, clean,
-checkout, or recreate the worktree: Phase 6 already has an uncommitted Hermes Memory candidate in
-it. Preserve every unrelated or parallel change.
+Each phase is delivered against the existing worktree and preserves unrelated or parallel changes.
 
-## 2. Current baseline and handoff state
+## 2. Delivery record
 
-`main` and `origin/main` currently point to:
+The adapters were delivered as separate phases, each one commit:
 
-```text
-7813d0e feat: adapt Agent Forge Tools
-```
+| Phase | Result |
+| --- | --- |
+| Compatibility baseline | Package-entry smoke evidence against the then-bundled Pi |
+| Native config synchronization | Revisioned drafts, external-change watches, dirty preservation |
+| `pi-lens` | Native global/ancestor-project authorities and command observation |
+| `@gotgenes/pi-permission-system` | Scoped native JSONC policy adapter |
+| `@cortexkit/aft-pi` | Native CortexKit authorities and session-worker cwd correctness |
+| `pi-hermes-memory` | Agent-root native authority, settings and runtime panels, all locales |
 
-Completed and pushed community phases:
+The integration surface each adapter consumes is recorded in
+[extension-compatibility.md](extension-compatibility.md). The sections below keep the per-adapter
+native-authority reasoning, because that is what a future adapter has to match.
 
-| Phase | Commit | Result |
-| --- | --- | --- |
-| Compatibility baseline | `ea18cd9` | Package-entry smoke evidence on the then-bundled Pi 0.84.1 |
-| Native config synchronization | `8411985` | Revisioned drafts, external-change watches, dirty preservation |
-| pi-lens | `e55d998` | Native global/ancestor-project authorities and command observation |
-| permission-system | `d0fc118` | Scoped native JSONC policy adapter |
-| Agent Forge Tools | `7813d0e` | Native CortexKit authorities and session-worker cwd correctness |
+## 3. Constraints that hold for every adapter
 
-The worktree contains an uncommitted Hermes Memory candidate. It already includes:
+- Adapters do not import a sibling package's `src` directory; they consume its public export.
+- An extension schema is not duplicated in the renderer.
+- Peer-dependency evidence is reported, not suppressed.
+- No compatibility branch is added for an old plugin protocol.
+- Full packaging, Docker, and Electron smoke belong to release convergence, not to an adapter change.
 
-- the Hermes Settings and runtime panels;
-- its config model and focused tests;
-- built-in adapter registration, navigation, search, recommendation, and runtime-status wiring;
-- real translations for all ten settings dictionaries;
-- compatibility and GUI-contract documentation;
-- a focused locale audit covering AFT and Hermes.
-
-Do not rewrite this candidate from scratch. First inspect `git diff` and continue it. The two known
-remaining defects are:
-
-1. `projectsMemoryDir` incorrectly rejects an absolute one-level directory under the active Pi agent
-   directory, although Hermes 0.9.6 accepts and normalizes it.
-2. `pi-integration-registry.test.ts` imports the source of `extension-builtins` directly, hiding stale
-   or missing package build output. It must test the public package export.
-
-## 3. Execution discipline
-
-Each phase below is one commit and one push to `origin/main`. Before starting the next phase:
-
-1. inspect the current diff and preserve unrelated changes;
-2. implement only that phase's stated authority and runtime contracts;
-3. run the listed focused checks, plus a type-check or lint only for packages whose public types or
-   source changed;
-4. run `git diff --check` once;
-5. commit and push;
-6. record the commit hash in this document or the final execution report.
-
-Do not run the full workspace suite after every phase. Full packaging, Docker, Electron smoke, and
-release workflows belong to final release convergence, not to an adapter form change.
-
-Do not solve a failing check by importing a sibling package's `src` directory, duplicating an
-extension schema in the renderer, suppressing peer-dependency evidence, or adding a compatibility
-branch for an old plugin protocol.
-
-## 4. Phase 6 — finish Hermes Memory
+## 4. `pi-hermes-memory`
 
 ### 4.1 Native authority
 
@@ -92,7 +61,7 @@ Its `AGENT_ROOT` is derived from `PI_CODING_AGENT_DIR`; Piarium already propagat
 agent directory through that variable. Make the Host resolve this authority rather than asking the
 renderer to guess the root.
 
-Required changes:
+How the authority is wired:
 
 - Add `hermes-memory-user` to `PiConfigTextAuthorityId` in
   `packages/protocol/src/types.ts`.
@@ -207,13 +176,9 @@ bun run --cwd packages/extension-builtins type-check
 bun run --cwd packages/ui type-check
 ```
 
-Run changed-file ESLint rather than the whole workspace. Commit and push as:
+Changed-file ESLint is enough here; the whole workspace is not.
 
-```text
-feat: adapt Hermes Memory
-```
-
-## 5. Phase 7 — provider-neutral Fleet and pi-background-tasks
+## 5. Provider-neutral Fleet and `pi-background-tasks`
 
 ### 5.1 Product result
 
@@ -430,13 +395,7 @@ Focused verification should cover the protocol types, both provider parsers, reg
 Host session lifecycle, runtime-dispatch validation, Fleet presentation/actions, recommendation, and
 i18n. Then type-check/lint only protocol, pi-host, runtime-broker, extension-builtins, and UI.
 
-Commit and push as:
-
-```text
-feat: integrate background tasks with Fleet
-```
-
-## 6. Phase 8 — RTK optimizer (complete)
+## 6. `pi-rtk-optimizer`
 
 `pi-rtk-optimizer@0.9.0` still publishes a peer range ending at Pi 0.80:
 
@@ -465,17 +424,9 @@ The native adapter provides:
 - do not claim the external `rtk` binary is available until the plugin reports it through a stable
   public contract; command presence proves only that the extension loaded.
 
-The phase commit is:
+## 7. Convergence before a community release
 
-```text
-feat: adapt the RTK optimizer
-```
-
-## 7. Phase 9 — convergence before community release
-
-This phase is documentation and release evidence, not another feature expansion.
-
-Required work:
+Convergence is documentation and release evidence, not another feature expansion. What it covers:
 
 - update `docs/extension-compatibility.md` with the exact versions and what was actually exercised;
 - update `docs/plugin-gui-design.md`, `docs/architecture.md`, and `docs/roadmap.md` so Fleet is no
@@ -490,29 +441,19 @@ Required work:
 - run the high-value CI workflow once and inspect its actual failing step rather than repeating local
   suites already covered by focused tests.
 
-Do not create a GitHub Release in this phase unless release version, changelog, installer set,
-checksums, and rollback tag have been separately approved. The output of this phase is a release
-candidate on `main` with truthful evidence.
+Publishing a GitHub Release is a separate decision that needs the release version, changelog,
+installer set, checksums, and rollback tag in hand. Convergence produces a release candidate on
+`main` with truthful evidence, nothing more.
 
-Commit and push as:
+## 8. The invariants worth re-checking
 
-```text
-docs: finalize community extension integrations
-```
+Reviewing this work is best spent on the three boundaries where a regression would be silent, rather
+than on re-running suites that focused tests already cover:
 
-## 8. Final execution report expected from the implementation agent
+- Hermes native authority and path parity between local and remote hosts;
+- Fleet EventBus ordering and session isolation;
+- the public-package build boundary, so an adapter manifest that exists only in `src` cannot appear
+  to work.
 
-Return one compact report containing:
-
-- each completed phase and commit hash;
-- whether each commit was pushed to `origin/main`;
-- the exact RTK gate result and source version checked;
-- focused checks run per phase and their pass/fail counts;
-- checks deliberately deferred to final convergence;
-- any unresolved product decision or upstream blocker;
-- confirmation that no private plugin database/artifact directory became a Piarium authority;
-- confirmation that no user or parallel worktree changes were reset or overwritten.
-
-After that report, an independent acceptance pass should inspect the commits and reproduce only the
-highest-risk invariants: Hermes authority/path parity, Fleet EventBus ordering/session isolation, and
-the public-package build boundary.
+No private plugin database or artifact directory is a Piarium authority. That is the property most
+easily lost to a convenience shortcut, and it is asserted in the adapter tests rather than here.

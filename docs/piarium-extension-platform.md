@@ -1,14 +1,14 @@
 # Piarium extension platform
 
-Status: implemented through Phase I
+Status: implemented; the public authoring toolchain is released on npm
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 ## 1. Decision
 
-Piarium will become a composable Pi-native workbench and extension platform. The product shipped by
-this repository is the default distribution of that platform, not a permanently fixed shell with a
-small set of add-on slots.
+Piarium is a composable Pi-native workbench and extension platform. The product shipped by this
+repository is the default distribution of that platform, not a permanently fixed shell with a small
+set of add-on slots.
 
 The target customization ceiling is deliberately high:
 

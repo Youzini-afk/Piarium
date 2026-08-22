@@ -1,4 +1,4 @@
-English | [简体中文](README.md)
+[简体中文](README.md) | [繁體中文](README.zh-TW.md) | English | [Français](README.fr.md) | [日本語](README.ja.md)
 
 # Piarium
 
@@ -85,8 +85,9 @@ advance independently.
 | `pi-background-tasks` | Fleet visibility, launch, bounded logs, and stop controls through the public EventBus contract |
 | `pi-rtk-optimizer` | Native strict-JSON RTK rewrite, output, read, and truncation configuration plus command availability |
 
-See [maintained extension compatibility](docs/extension-compatibility.md) for the currently verified
-versions and exact evidence.
+See [maintained extension integration](docs/extension-compatibility.md) for the commands, events, and
+native configuration each adapter consumes, and which files stay plugin-owned. Piarium does not
+certify plugin versions against Pi releases.
 
 ## Build Piarium extensions
 
@@ -285,7 +286,7 @@ Before contributing, read [CONTRIBUTING.en.md](.github/CONTRIBUTING.en.md) and t
 
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
-- [Composable workbench and IDE contract](docs/composable-workbench-execution-plan.md)
+- [Composable workbench and IDE contract](docs/composable-workbench-execution-plan.md) (Chinese)
 - [Piarium extension platform](docs/piarium-extension-platform.md)
 - [VS Code companion migration](docs/vscode-companion.md)
 - [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)

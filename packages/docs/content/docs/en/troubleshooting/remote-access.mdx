@@ -9,7 +9,7 @@ When you can't reach Piarium from your phone or another machine, the fix depends
 
 ## Check the basics first
 
-- open `http://localhost:3000` on the same computer first — if that fails, it's not a remote problem; see [troubleshooting](/troubleshooting/)
+- open `http://localhost:3000` on the same computer first — if that fails, it's not a remote problem; see [troubleshooting](/en/troubleshooting/)
 - confirm the server is running with `piarium status`
 
 ## Paired device won't connect
@@ -19,7 +19,7 @@ When you can't reach Piarium from your phone or another machine, the fix depends
 - for **Anywhere** pairing, check **Settings → Remote Instances → Piarium Relay** on the server: it should say **Connected**; if not, disable and re-enable it
 - if a device was **revoked**, its token is gone for good — pair it again with a new QR code
 
-See [Connect a Device](/connect-devices/) and [Private Relay](/private-relay/) for how these connections work.
+See [Connect a Device](/en/connect-devices/) and [Private Relay](/en/private-relay/) for how these connections work.
 
 ## Tunnel link doesn't work
 
@@ -27,11 +27,11 @@ See [Connect a Device](/connect-devices/) and [Private Relay](/private-relay/) f
 - restart the tunnel from the same instance and port
 - regenerate the connect link if the previous one was already used
 
-See [Tunnels](/tunnels/) for the full setup.
+See [Tunnels](/en/tunnels/) for the full setup.
 
 ## Remote instance won't connect (desktop)
 
-When a [remote instance](/remote-instances/) stalls, Piarium names the step that failed:
+When a [remote instance](/en/remote-instances/) stalls, Piarium names the step that failed:
 
 - **auth** — your SSH or UI password was rejected; re-enter it
 - **install / start** — Piarium couldn't set up or start the server on the remote machine; check that machine's requirements
@@ -39,9 +39,9 @@ When a [remote instance](/remote-instances/) stalls, Piarium names the step that
 
 ## Behind your own server
 
-If you put Piarium behind a reverse proxy and it loads oddly or won't connect, see [Reverse Proxy](/reverse-proxy/).
+If you put Piarium behind a reverse proxy and it loads oddly or won't connect, see [Reverse Proxy](/en/reverse-proxy/).
 
 ## Related
 
-- [Connect a Device](/connect-devices/) · [Private Relay](/private-relay/) · [Tunnels](/tunnels/) · [Remote Instances](/remote-instances/) · [Reverse Proxy](/reverse-proxy/)
-- [Security](/security/) — protect the UI before exposing it
+- [Connect a Device](/en/connect-devices/) · [Private Relay](/en/private-relay/) · [Tunnels](/en/tunnels/) · [Remote Instances](/en/remote-instances/) · [Reverse Proxy](/en/reverse-proxy/)
+- [Security](/en/security/) — protect the UI before exposing it

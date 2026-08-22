@@ -1,5 +1,5 @@
-name: 缺陷报告
-description: 功能坏了，或行为和预期不符
+name: 缺陷报告 / Bug report
+description: 功能坏了，或行为和预期不符 · Something is broken or behaves unexpectedly
 title: "[Bug]: "
 labels: ["bug"]
 body:
@@ -7,23 +7,26 @@ body:
     attributes:
       value: |
         感谢报告。请先搜索已有 Issue。不要包含密钥、提示词正文或私人文件内容。
+
+        Thanks for reporting. Please search existing issues first. Do not include secrets, prompt
+        bodies, or private file contents.
   - type: textarea
     id: what-happened
     attributes:
-      label: 实际发生了什么
-      description: 你看到了什么？
+      label: 实际发生了什么 / What happened
+      description: 你看到了什么？· What did you observe?
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: 你期望发生什么
+      label: 你期望发生什么 / What you expected
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
-      label: 复现步骤
+      label: 复现步骤 / Steps to reproduce
       placeholder: |
         1.
         2.
@@ -33,23 +36,23 @@ body:
   - type: dropdown
     id: surface
     attributes:
-      label: 产品端
+      label: 产品端 / Surface
       options:
         - Web
-        - 桌面端
+        - 桌面端 / Desktop
         - VS Code
-        - 移动端
+        - 移动端 / Mobile
         - CLI / Docker
-        - 不确定
+        - 不确定 / Not sure
     validations:
       required: true
   - type: input
     id: version
     attributes:
-      label: 版本或提交
-      placeholder: 0.1.0 或 git SHA
+      label: 版本或提交 / Version or commit
+      placeholder: 0.1.0 或 git SHA · 0.1.0 or a git SHA
   - type: textarea
     id: environment
     attributes:
-      label: 环境
-      placeholder: 操作系统、Node/Bun 版本、安装方式
+      label: 环境 / Environment
+      placeholder: 操作系统、Node/Bun 版本、安装方式 · OS, Node/Bun version, how you installed

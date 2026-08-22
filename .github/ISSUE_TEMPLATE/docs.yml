@@ -1,22 +1,24 @@
-name: 文档
-description: 文档页有误、缺失，或还在用旧品牌
+name: 文档 / Documentation
+description: 文档页有误、缺失，或还在用旧品牌 · A page is wrong, missing, or still uses old branding
 title: "[Docs]: "
 labels: ["documentation"]
 body:
   - type: input
     id: page
     attributes:
-      label: 页面
-      description: packages/docs/content/docs/ 下的路径，或侧边栏标题
+      label: 页面 / Page
+      description: >-
+        packages/docs/content/docs/ 下的路径，或侧边栏标题 ·
+        A path under packages/docs/content/docs/, or the sidebar title
     validations:
       required: true
   - type: textarea
     id: issue
     attributes:
-      label: 哪里不对
+      label: 哪里不对 / What is wrong
     validations:
       required: true
   - type: textarea
     id: suggested
     attributes:
-      label: 建议改法
+      label: 建议改法 / Suggested fix

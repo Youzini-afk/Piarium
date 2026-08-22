@@ -1,4 +1,4 @@
-[English](README.en.md) | 简体中文
+简体中文 | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [Français](README.fr.md) | [日本語](README.ja.md)
 
 # Piarium
 
@@ -76,7 +76,8 @@ Piarium 不会 fork 这些扩展，也不会复制它们的私有状态。集成
 | `pi-background-tasks` | 通过公开 EventBus 在 Fleet 中查看、启动、读取日志和停止后台任务 |
 | `pi-rtk-optimizer` | 原生严格 JSON 中的 RTK 改写、输出、读取和截断配置，以及命令可用状态 |
 
-当前验证过的版本和具体证据见[扩展兼容性记录](docs/extension-compatibility.md)。
+每个扩展的集成面——Piarium 读取或调用哪些命令、事件和原生配置，以及哪些文件仍归插件所有——记录在
+[扩展集成契约](docs/extension-compatibility.md)。Piarium 不逐版本认证插件与 Pi 的搭配。
 
 ## 开发 Piarium 扩展
 

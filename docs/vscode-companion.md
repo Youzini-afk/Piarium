@@ -1,6 +1,6 @@
 # VS Code Companion migration
 
-Status: Phase 11 authority
+Status: the companion boundary is in effect
 
 The official IDE Workbench now lives in Piarium Web and Electron (`piarium.ide`). The VS Code
 extension is a companion: it opens Piarium beside the editor, sends editor context, and keeps the

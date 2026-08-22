@@ -61,9 +61,14 @@ async function git(args) {
   }
 }
 
-/** Engineering docs are the repo-level contracts, not the user-facing docs site. */
+/**
+ * Engineering docs are the repo-level contracts, not the user-facing docs site.
+ *
+ * `README*.md` covers every root README translation, so a new language is validated the day it is
+ * added rather than the day someone notices its links rotted.
+ */
 async function engineeringDocPaths() {
-  const tracked = await git(["ls-files", "--", "AGENTS.md", "README.md", "README.en.md", "docs"])
+  const tracked = await git(["ls-files", "--", "AGENTS.md", "README*.md", "docs"])
   if (tracked === null) return null
   return tracked
     .split("\n")
@@ -182,22 +187,64 @@ async function extraReferenceSources() {
   return [...referenced]
 }
 
+/**
+ * Locale directories are the ones that carry their own landing page. `troubleshooting/` is nested
+ * content that every locale repeats, not a locale, so it must not be mistaken for one.
+ */
+async function siteLocales() {
+  const entries = await readdir(contentRoot, { withFileTypes: true })
+  const locales = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (await exists(path.join(contentRoot, entry.name, "index.mdx"))) locales.push(entry.name)
+  }
+  return locales
+}
+
+/** Absolute route targets from inline Markdown links, which is how the site cross-references pages. */
+function collectRouteLinks(body) {
+  return [...body.matchAll(/\[[^\]]*\]\((\/[^)\s]*)\)/g)].map((match) => match[1])
+}
+
 async function run() {
   const filePaths = (await walk(contentRoot)).filter((p) => p.endsWith(".mdx"))
   const routeSet = new Set()
   const errors = []
+  const locales = await siteLocales()
+  const pages = []
 
   for (const filePath of filePaths) {
     const body = await readFile(filePath, "utf8")
     const relative = toPosix(path.relative(repoRoot, filePath))
     const route = routeFromFile(filePath)
     routeSet.add(route)
+    pages.push({ body, relative, route })
 
     if (!hasFrontmatterKey(body, "title")) {
       errors.push(`${relative}: missing frontmatter key 'title'`)
     }
     if (!hasFrontmatterKey(body, "description")) {
       errors.push(`${relative}: missing frontmatter key 'description'`)
+    }
+  }
+
+  // A translated page that links to another locale silently drops the reader into a language they
+  // did not choose. Every locale carries the same page set, so the correct target always exists and
+  // a cross-locale link is always a mistake rather than a deliberate reference.
+  for (const { body, relative, route } of pages) {
+    const owner = locales.find((locale) => route.startsWith(`/${locale}/`)) ?? null
+    for (const target of collectRouteLinks(body)) {
+      if (!routeSet.has(target)) {
+        errors.push(`${relative}: link target is not a page: ${target}`)
+        continue
+      }
+      const linked = locales.find((locale) => target.startsWith(`/${locale}/`)) ?? null
+      if (linked === owner) continue
+      const expected = owner === null ? target.replace(`/${linked}/`, "/") : `/${owner}${target}`
+      errors.push(
+        `${relative}: links to the ${linked ?? "default"} locale: ${target}`
+        + `${routeSet.has(expected) ? ` (use ${expected})` : ""}`,
+      )
     }
   }
 

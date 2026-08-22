@@ -17,7 +17,7 @@ piarium --ui-password be-creative-here
 
 You can also set it with the `PIARIUM_UI_PASSWORD` environment variable instead of putting it on the command line. After signing in, Piarium remembers the device for a while so you're not asked every time.
 
-Always set a password if the instance is reachable by anyone else — especially over a [tunnel](/tunnels/) or the public internet.
+Always set a password if the instance is reachable by anyone else — especially over a [tunnel](/en/tunnels/) or the public internet.
 
 ## Passkeys
 
@@ -27,18 +27,18 @@ Passkeys are tied to the current password. If you change or remove the password,
 
 ## Device tokens
 
-Devices paired through [Connect a Device](/connect-devices/) authenticate with their own per-device tokens, not the UI password. Pairing links are single-use and expire if unused; every paired device is listed at **Settings → Remote Instances → Connect to this server**, where you can revoke any of them at any time. Away-from-home connections go through the [Private Relay](/private-relay/), which is end-to-end encrypted and cannot read your traffic.
+Devices paired through [Connect a Device](/en/connect-devices/) authenticate with their own per-device tokens, not the UI password. Pairing links are single-use and expire if unused; every paired device is listed at **Settings → Remote Instances → Connect to this server**, where you can revoke any of them at any time. Away-from-home connections go through the [Private Relay](/en/private-relay/), which is end-to-end encrypted and cannot read your traffic.
 
 ## Before you expose it
 
 - By default Piarium only listens on your own machine (`127.0.0.1`). It takes a deliberate change to listen more widely, and you should set a password first.
-- For your own devices, prefer [pairing](/connect-devices/) with the [Private Relay](/private-relay/) — nothing is exposed publicly at all.
-- If you need a public URL, prefer a [tunnel](/tunnels/) or a private network (like a VPN) over opening a port to the internet.
-- If you put Piarium behind your own HTTPS server, see [Reverse Proxy](/reverse-proxy/).
+- For your own devices, prefer [pairing](/en/connect-devices/) with the [Private Relay](/en/private-relay/) — nothing is exposed publicly at all.
+- If you need a public URL, prefer a [tunnel](/en/tunnels/) or a private network (like a VPN) over opening a port to the internet.
+- If you put Piarium behind your own HTTPS server, see [Reverse Proxy](/en/reverse-proxy/).
 
 ## Related
 
-- [Connect a Device](/connect-devices/) — one-time pairing and per-device tokens
-- [Private Relay](/private-relay/) — end-to-end encrypted access from anywhere
-- [Tunnels](/tunnels/) — expose a public URL when you need one
-- [Reverse Proxy](/reverse-proxy/) — run Piarium behind your own server
+- [Connect a Device](/en/connect-devices/) — one-time pairing and per-device tokens
+- [Private Relay](/en/private-relay/) — end-to-end encrypted access from anywhere
+- [Tunnels](/en/tunnels/) — expose a public URL when you need one
+- [Reverse Proxy](/en/reverse-proxy/) — run Piarium behind your own server

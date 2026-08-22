@@ -1,8 +1,8 @@
 # Piarium architecture
 
-Status: Pi-native engine and composable workbench delivered; Windows release in progress
+Status: Pi-native engine and composable workbench delivered; release hardening continues
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 ## 1. Context
 
@@ -11,9 +11,9 @@ product shell and custom capabilities are retained while its OpenCode engine, co
 terminology are directly replaced with Pi-native domain types and services. The source fork is a
 read-only input; all edits and history live in the Piarium repository.
 
-The first release targets a local Windows desktop. The process and protocol boundaries must also
-support a future remote host, browser client, and companion mobile client without moving extension
-execution into an untrusted renderer.
+Desktop was the first surface to ship, and Windows, Linux, and macOS packages are published from
+matching runners. The same process and protocol boundaries carry the remote host, browser client, and
+companion mobile client, so no surface moves extension execution into an untrusted renderer.
 
 ## 2. Goals
 
@@ -26,7 +26,7 @@ execution into an untrusted renderer.
 4. Make subagent work visible and controllable from its parent session.
 5. Integrate Magic Context, MCP, and Web Access without forking their core algorithms.
 6. Associate each user turn with a recoverable conversation and workspace checkpoint.
-7. Produce a signed-ready Windows installer with deterministic runtime diagnostics.
+7. Produce signed-ready desktop installers with deterministic runtime diagnostics.
 
 ## 3. Non-goals
 
