@@ -86,6 +86,13 @@ Use root/package `package.json` scripts as the command source of truth. The repo
 `1.3.14`. Run focused tests while iterating, workspace-wide checks for shared contracts, and
 `bun run dead-code` after adding/deleting/renaming source or changing exports/import shapes.
 
+There are two lockfiles. The workspace `bun.lock` covers development, and
+`scripts/cloud-runtime.bun.lock` pins the production cloud runtime graph, which CI verifies frozen.
+Changing a dependency that reaches that graph also needs `bun run update:cloud-runtime-lock`
+committed, or the container and production-build jobs fail while every source check passes. The
+`Cloud runtime lockfile` workflow does this for a Dependabot pull request on dispatch, because
+Dependabot maintains only the first lockfile.
+
 Two coverage gaps are real and must not be mistaken for passing verification. `@piarium/ui` runs
 under Vitest and is collected by `bun run test:pi`, but `packages/ui/vitest.config.ts` excludes a
 named list of suites that cannot pass yet; treat that list as the remaining gap, keep each entry's
