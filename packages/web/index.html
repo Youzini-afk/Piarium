@@ -469,6 +469,10 @@
         --splash-face-fill: rgba(255, 255, 255, 0.15);
         --splash-cell-fill: rgba(255, 255, 255, 0.35);
         --splash-logo-fill: var(--splash-stroke);
+        /* The lattice, which is drawn behind the mark and must stay much fainter than the mark's own
+           face cells or the floor competes with it. */
+        --splash-lattice-line: rgba(255, 255, 255, 0.22);
+        --splash-cell-pulse: rgba(255, 255, 255, 0.07);
       }
 
       html[data-splash-variant='light'] {
@@ -477,6 +481,8 @@
         --splash-face-fill: rgba(0, 0, 0, 0.15);
         --splash-cell-fill: rgba(0, 0, 0, 0.4);
         --splash-logo-fill: var(--splash-stroke);
+        --splash-lattice-line: rgba(0, 0, 0, 0.22);
+        --splash-cell-pulse: rgba(0, 0, 0, 0.07);
       }
 
       html[data-splash-variant='dark'] {
@@ -489,7 +495,8 @@
         :root {
           --splash-face-fill: color-mix(in srgb, var(--splash-stroke) 15%, transparent);
           --splash-cell-fill: color-mix(in srgb, var(--splash-stroke) 35%, transparent);
-          --splash-lattice-line: color-mix(in srgb, var(--splash-stroke) 12%, transparent);
+          --splash-lattice-line: color-mix(in srgb, var(--splash-stroke) 22%, transparent);
+          --splash-cell-pulse: color-mix(in srgb, var(--splash-stroke) 7%, transparent);
         }
       }
 
@@ -508,6 +515,18 @@ background: var(--splash-background, var(--color-background, #151313));
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
+/* The falloff lives on an untransformed wrapper, not on the lattice.
+   A mask applies in its own element's coordinate space, so masking the lattice directly meant a local
+   circle became a rhombus once the isometric matrix had run: the screen corners were cut first and the
+   floor visibly stopped short of them. Here the wrapper is unrotated, so the falloff is in screen
+   space and reaches every corner. */
+.pi-splash-ground-clip {
+position: absolute;
+inset: 0;
+overflow: hidden;
+-webkit-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+}
 /* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
    registering offset arrive inline, because both depend on the measured viewport. */
 .pi-splash-ground {
@@ -516,8 +535,6 @@ left: 50%;
 top: 54%;
 display: grid;
 transform-origin: 0 0;
--webkit-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
@@ -531,7 +548,7 @@ animation-delay: calc(1.2s + var(--pi-breathe-delay));
 }
 @keyframes pi-splash-breathe {
 0%, 100% { background: transparent; }
-50% { background: var(--splash-cell-fill, rgba(255, 255, 255, 0.35)); }
+50% { background: var(--splash-cell-pulse, rgba(255, 255, 255, 0.07)); }
 }
 /* Declared after the breathing rule so equal specificity lets the exit win without !important. */
 .pi-splash[data-leaving='true'] .pi-splash-cell {
@@ -555,21 +572,9 @@ top: 54%;
 translate: -50% -98.0%;
 display: block;
 }
-/* The pool of light at the footprint. Wide and shallow, to sit in the plane rather than face the
-   viewer, and centred on the contact vertex rather than on the box. */
-.pi-splash-mark::after {
-content: '';
-position: absolute;
-left: 50%;
-top: 98.0%;
-width: 170%;
-height: 38%;
-translate: -50% -50%;
-border-radius: 50%;
-background: radial-gradient(closest-side, var(--splash-contact, rgba(255, 255, 255, 0.1)) 0%, transparent 100%);
-pointer-events: none;
-z-index: -1;
-}
+/* No contact shadow, glow, or reflection. Earlier versions had all three, added to compensate for a
+   cube that did not sit anywhere; registered to the lattice it needs none of them, and each one read
+   as an unexplained smudge under the mark rather than as contact. */
 .pi-splash-status {
 position: absolute;
 left: 50%;
@@ -617,11 +622,17 @@ animation: none;
       <!-- Loading fallback while React initializes. Dismissed through packages/ui/src/lib/splash.ts,
            which owns this element's contract. -->
       <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
-        <div id="initial-loading-ground" class="pi-splash-ground" aria-hidden="true"></div>
+        <div class="pi-splash-ground-clip" aria-hidden="true">
+          <div id="initial-loading-ground" class="pi-splash-ground"></div>
+        </div>
         <span class="pi-splash-mark">
           <svg width="168" height="168" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
             <!-- Isometric cube: edge=48, centerY=50 -->
             <!-- Points: top(50,2), left(8.432,26), right(91.568,26), center(50,50), bottomLeft(8.432,74), bottomRight(91.568,74), bottom(50,98) -->
+
+            <!-- Occluder. The faces below are translucent washes, so without this the ground lattice
+                 shows straight through the cube and it stops reading as a solid object. -->
+            <path d="M50 2 L91.568 26 L91.568 74 L50 98 L8.432 74 L8.432 26 Z" fill="var(--splash-background)"/>
 
             <!-- Left face - base fill with stroke -->
             <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>

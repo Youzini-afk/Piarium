@@ -25,11 +25,14 @@ import {
  */
 
 /** Piarium's own splash palette, hydrated pre-paint from the persisted theme. */
+const SPLASH_BACKGROUND = 'var(--splash-background, var(--color-background, #151313))';
+
 const PIARIUM_SPLASH_COLORS = {
-  background: 'var(--splash-background, var(--color-background, #151313))',
+  background: SPLASH_BACKGROUND,
   line: 'var(--splash-lattice-line, rgba(255, 255, 255, 0.22))',
-  cell: 'var(--splash-cell-fill, rgba(255, 255, 255, 0.35))',
-  contact: 'var(--splash-contact, rgba(255, 255, 255, 0.1))',
+  // Kept faint. At the wash strength the faces use, a pulsing cell reads as a random bright tile
+  // rather than as the floor breathing.
+  cell: 'var(--splash-cell-pulse, rgba(255, 255, 255, 0.07))',
   status: 'var(--splash-stroke)',
 } as const;
 
@@ -97,24 +100,32 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       aria-label={label}
     >
       <style>{STYLES}</style>
-      <div className="pi-splash-ground" aria-hidden="true" style={groundInlineStyle(shape)}>
-        {cells.map((cell) => (
-          <span
-            key={cell.key}
-            className="pi-splash-cell"
-            data-breathe={cell.breatheDelayMs === null ? 'false' : 'true'}
-            style={{
-              '--pi-cell-delay': `${cell.delayMs}ms`,
-              ...(cell.breatheDelayMs === null
-                ? {}
-                : { '--pi-breathe-delay': `${cell.breatheDelayMs}ms` }),
-            } as React.CSSProperties}
-          />
-        ))}
+      <div className="pi-splash-ground-clip" aria-hidden="true">
+        <div className="pi-splash-ground" style={groundInlineStyle(shape)}>
+          {cells.map((cell) => (
+            <span
+              key={cell.key}
+              className="pi-splash-cell"
+              data-breathe={cell.breatheDelayMs === null ? 'false' : 'true'}
+              style={{
+                '--pi-cell-delay': `${cell.delayMs}ms`,
+                ...(cell.breatheDelayMs === null
+                  ? {}
+                  : { '--pi-breathe-delay': `${cell.breatheDelayMs}ms` }),
+              } as React.CSSProperties}
+            />
+          ))}
+        </div>
       </div>
 
       <span className="pi-splash-mark">
-        <PiariumLogo width={markSize} height={markSize} isAnimated={!reducedMotion} decorative />
+        <PiariumLogo
+          width={markSize}
+          height={markSize}
+          isAnimated={!reducedMotion}
+          decorative
+          occlusionFill={SPLASH_BACKGROUND}
+        />
       </span>
       <div className="pi-splash-status">{status ?? ''}</div>
     </div>

@@ -185,6 +185,23 @@ export const LOGO_TOP_FACE_PATH = quadPath(
 );
 
 /**
+ * The cube's outline: the hexagon its three visible faces fill together.
+ *
+ * The faces are washes over transparency, which is right when the mark sits on a flat surface and
+ * wrong when it stands on a drawn floor, because the floor shows straight through a solid object.
+ * Filling this shape first gives the cube something to occlude with while leaving the face shading
+ * untouched on top.
+ */
+export const LOGO_SILHOUETTE_PATH = quadPath(
+  LOGO_VERTICES.top,
+  LOGO_VERTICES.right,
+  LOGO_VERTICES.bottomRight,
+  LOGO_VERTICES.bottom,
+  LOGO_VERTICES.bottomLeft,
+  LOGO_VERTICES.left,
+);
+
+/**
  * Both faces are wound from the shared front vertex outward, which makes them mirror images of each
  * other. The left face used to be wound from its outer edge inward, and the logo compensated by
  * reading its opacity row backwards; winding them the same way removes that compensation and makes
@@ -210,6 +227,11 @@ export interface PiariumMarkColors {
   readonly faceFill: string;
   /** Lattice cell colour, modulated per cell by the opacity tables. */
   readonly cellFill: string;
+  /**
+   * Fills the outline first so the cube hides what is behind it. Omit where the mark sits on a plain
+   * surface and the translucent faces are the intended look.
+   */
+  readonly occlusionFill?: string;
 }
 
 /**
@@ -237,6 +259,9 @@ export const piariumMarkSvgMarkup = (size: number, colors: PiariumMarkColors): s
   return [
     `<svg width="${size}" height="${size}" viewBox="${LOGO_VIEWBOX}" fill="none"`,
     ' xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">',
+    colors.occlusionFill
+      ? `<path d="${LOGO_SILHOUETTE_PATH}" fill="${colors.occlusionFill}"/>`
+      : '',
     face(LOGO_LEFT_FACE_PATH),
     cells(LOGO_LEFT_FACE_CELLS, leftFaceCellOpacity),
     face(LOGO_RIGHT_FACE_PATH),

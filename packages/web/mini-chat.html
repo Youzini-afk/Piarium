@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
@@ -62,13 +62,13 @@
         --splash-background: var(--splash-background-dark);
         --splash-stroke: var(--splash-stroke-dark);
         --splash-lattice-line: rgba(255, 255, 255, 0.22);
-        --splash-cell-fill: rgba(255, 255, 255, 0.35);
+        --splash-cell-pulse: rgba(255, 255, 255, 0.07);
       }
       html[data-splash-variant='light'] {
         --splash-background: var(--splash-background-light);
         --splash-stroke: var(--splash-stroke-light);
         --splash-lattice-line: rgba(0, 0, 0, 0.22);
-        --splash-cell-fill: rgba(0, 0, 0, 0.35);
+        --splash-cell-pulse: rgba(0, 0, 0, 0.07);
       }
       html[data-splash-variant='dark'] {
         --splash-background: var(--splash-background-dark);
@@ -77,7 +77,7 @@
       @supports (color: color-mix(in srgb, white 50%, transparent)) {
         :root {
           --splash-lattice-line: color-mix(in srgb, var(--splash-stroke) 22%, transparent);
-          --splash-cell-fill: color-mix(in srgb, var(--splash-stroke) 35%, transparent);
+          --splash-cell-pulse: color-mix(in srgb, var(--splash-stroke) 7%, transparent);
         }
       }
       /* The pre-paint cover paints the themed background before the plane exists. */
@@ -92,6 +92,18 @@ background: var(--splash-background, var(--color-background, #151313));
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
+/* The falloff lives on an untransformed wrapper, not on the lattice.
+   A mask applies in its own element's coordinate space, so masking the lattice directly meant a local
+   circle became a rhombus once the isometric matrix had run: the screen corners were cut first and the
+   floor visibly stopped short of them. Here the wrapper is unrotated, so the falloff is in screen
+   space and reaches every corner. */
+.pi-splash-ground-clip {
+position: absolute;
+inset: 0;
+overflow: hidden;
+-webkit-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+}
 /* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
    registering offset arrive inline, because both depend on the measured viewport. */
 .pi-splash-ground {
@@ -100,8 +112,6 @@ left: 50%;
 top: 54%;
 display: grid;
 transform-origin: 0 0;
--webkit-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
@@ -115,7 +125,7 @@ animation-delay: calc(1.2s + var(--pi-breathe-delay));
 }
 @keyframes pi-splash-breathe {
 0%, 100% { background: transparent; }
-50% { background: var(--splash-cell-fill, rgba(255, 255, 255, 0.35)); }
+50% { background: var(--splash-cell-pulse, rgba(255, 255, 255, 0.07)); }
 }
 /* Declared after the breathing rule so equal specificity lets the exit win without !important. */
 .pi-splash[data-leaving='true'] .pi-splash-cell {
@@ -150,7 +160,9 @@ animation: none;
            ElectronMiniChatApp through packages/ui/src/lib/splash.ts). No cube here on
            purpose — the content renders the single Piarium cube itself. -->
       <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
-        <div id="initial-loading-ground" class="pi-splash-ground" aria-hidden="true"></div>
+        <div class="pi-splash-ground-clip" aria-hidden="true">
+          <div id="initial-loading-ground" class="pi-splash-ground"></div>
+        </div>
       </div>
     </div>
 

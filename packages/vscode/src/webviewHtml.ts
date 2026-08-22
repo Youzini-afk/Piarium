@@ -50,9 +50,7 @@ const SPLASH_CSS = splashPlaneCss(
   {
     background: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
     line: 'var(--vscode-widget-border, var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.24)))',
-    cell: 'var(--vscode-editorIndentGuide-activeBackground, rgba(128,128,128,0.4))',
-    // A light pool, so it reads on a dark editor theme; a dark one would vanish into the background.
-    contact: 'var(--vscode-editorIndentGuide-activeBackground, rgba(128,128,128,0.28))',
+    cell: 'var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.14))',
     status: 'var(--vscode-foreground)',
   },
   { withMark: true },
@@ -163,11 +161,13 @@ ${SPLASH_CSS}
 </head>
 <body>
   <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
-    <div class="pi-splash-ground" aria-hidden="true" style="grid-template-columns:${GROUND_STYLE.gridTemplateColumns};grid-template-rows:${GROUND_STYLE.gridTemplateRows};transform:${GROUND_STYLE.transform}">${groundCells}</div>
+    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-ground" style="grid-template-columns:${GROUND_STYLE.gridTemplateColumns};grid-template-rows:${GROUND_STYLE.gridTemplateRows};transform:${GROUND_STYLE.transform}">${groundCells}</div></div>
     <span class="pi-splash-mark">${piariumMarkSvgMarkup(MARK_SIZE, {
         stroke: 'var(--vscode-foreground)',
         faceFill: 'var(--vscode-editorWidget-background, transparent)',
         cellFill: 'var(--vscode-foreground)',
+        // Without this the ground shows straight through the cube's translucent faces.
+        occlusionFill: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
       })}</span>
       <div class="piarium-name">PIARIUM</div>
       <div id="loading-status" role="status" aria-live="polite"></div>

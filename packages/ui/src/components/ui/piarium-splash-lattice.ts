@@ -171,13 +171,6 @@ export interface SplashPlaneColors {
   readonly line: string;
   /** Fill a breathing cell reaches at the top of its pulse. */
   readonly cell: string;
-  /**
-   * The pool of light where the mark meets the ground.
-   *
-   * Light, not dark. An earlier attempt used a black radial gradient, which is invisible against a
-   * near-black background, so the mark had no contact cue at all.
-   */
-  readonly contact: string;
   /** Status line colour. Omitted by hosts with no status line. */
   readonly status?: string;
 }
@@ -211,21 +204,9 @@ top: ${GROUND_ORIGIN_Y_PCT}%;
 translate: -50% -${vertexY}%;
 display: block;
 }
-/* The pool of light at the footprint. Wide and shallow, to sit in the plane rather than face the
-   viewer, and centred on the contact vertex rather than on the box. */
-.pi-splash-mark::after {
-content: '';
-position: absolute;
-left: 50%;
-top: ${vertexY}%;
-width: 170%;
-height: 38%;
-translate: -50% -50%;
-border-radius: 50%;
-background: radial-gradient(closest-side, ${colors.contact} 0%, transparent 100%);
-pointer-events: none;
-z-index: -1;
-}
+/* No contact shadow, glow, or reflection. Earlier versions had all three, added to compensate for a
+   cube that did not sit anywhere; registered to the lattice it needs none of them, and each one read
+   as an unexplained smudge under the mark rather than as contact. */
 .pi-splash-status {
 position: absolute;
 left: 50%;
@@ -274,6 +255,18 @@ background: ${colors.background};
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
+/* The falloff lives on an untransformed wrapper, not on the lattice.
+   A mask applies in its own element's coordinate space, so masking the lattice directly meant a local
+   circle became a rhombus once the isometric matrix had run: the screen corners were cut first and the
+   floor visibly stopped short of them. Here the wrapper is unrotated, so the falloff is in screen
+   space and reaches every corner. */
+.pi-splash-ground-clip {
+position: absolute;
+inset: 0;
+overflow: hidden;
+-webkit-mask-image: radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+mask-image: radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+}
 /* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
    registering offset arrive inline, because both depend on the measured viewport. */
 .pi-splash-ground {
@@ -282,8 +275,6 @@ left: 50%;
 top: ${GROUND_ORIGIN_Y_PCT}%;
 display: grid;
 transform-origin: 0 0;
--webkit-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {

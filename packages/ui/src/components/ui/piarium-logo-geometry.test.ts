@@ -9,6 +9,7 @@ import {
   LOGO_RIGHT_FACE_CELLS,
   LOGO_RIGHT_FACE_PATH,
   LOGO_TOP_FACE_PATH,
+  LOGO_SILHOUETTE_PATH,
   LOGO_VERTICES,
   generateFaceGrid,
   piariumMarkSvgMarkup,
@@ -129,8 +130,7 @@ describe('every splash host shares the plane', () => {
   const PIARIUM_COLORS = {
     background: 'var(--splash-background, var(--color-background, #151313))',
     line: 'var(--splash-lattice-line, rgba(255, 255, 255, 0.22))',
-    cell: 'var(--splash-cell-fill, rgba(255, 255, 255, 0.35))',
-    contact: 'var(--splash-contact, rgba(255, 255, 255, 0.1))',
+    cell: 'var(--splash-cell-pulse, rgba(255, 255, 255, 0.07))',
   } as const;
 
   /** Between these, each host embeds the generator's output verbatim. */
@@ -216,5 +216,46 @@ describe('every splash host shares the plane', () => {
     for (const cell of [...LOGO_LEFT_FACE_CELLS, ...LOGO_RIGHT_FACE_CELLS]) {
       expect(markup).toContain(cell.path);
     }
+  });
+});
+
+/**
+ * The cube's faces are translucent washes, which is right on a plain surface and wrong on a drawn one.
+ * On the splash floor the lattice showed straight through the cube, so it stopped reading as a solid
+ * object standing on the ground.
+ */
+describe('the mark can occlude what is behind it', () => {
+  test('the silhouette is the hexagon the three visible faces fill together', () => {
+    // Every vertex of the outline, and no interior vertex: `center` is where the three faces meet and
+    // must not appear, or the outline would be notched.
+    for (const vertex of ['top', 'right', 'bottomRight', 'bottom', 'bottomLeft', 'left'] as const) {
+      const point = LOGO_VERTICES[vertex];
+      expect(LOGO_SILHOUETTE_PATH).toContain(`${point.x} ${point.y}`);
+    }
+    expect(LOGO_SILHOUETTE_PATH.match(/L/g)).toHaveLength(5);
+  });
+
+  test('the generated mark draws the occluder first, or the faces would cover it', () => {
+    const markup = piariumMarkSvgMarkup(96, {
+      stroke: 'var(--test-stroke)',
+      faceFill: 'var(--test-face)',
+      cellFill: 'var(--test-cell)',
+      occlusionFill: 'var(--test-occlude)',
+    });
+    expect(markup.indexOf(LOGO_SILHOUETTE_PATH)).toBeLessThan(markup.indexOf(LOGO_LEFT_FACE_PATH));
+  });
+
+  test('the occluder is opt-in, so a mark on a plain surface keeps its translucent faces', () => {
+    const markup = piariumMarkSvgMarkup(96, {
+      stroke: 'var(--test-stroke)',
+      faceFill: 'var(--test-face)',
+      cellFill: 'var(--test-cell)',
+    });
+    expect(markup).not.toContain(LOGO_SILHOUETTE_PATH);
+  });
+
+  test('the pre-paint splash occludes with its own background', () => {
+    const html = readInlineSplash();
+    expect(html).toContain(`d="${LOGO_SILHOUETTE_PATH}" fill="var(--splash-background)"`);
   });
 });
