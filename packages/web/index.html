@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
@@ -504,7 +504,9 @@
          Everything here must be inline: it has to cover the viewport before the bundle exists, and a
          frame later is a frame of unpainted background. It is a verbatim copy of splashPlaneCss() in
          packages/ui/src/components/ui/piarium-splash-lattice.ts, which the geometry test asserts
-         character for character, so edit that function rather than this block. */
+         character for character, so edit that function rather than this block. The floor's grid and
+         camera transform are in here rather than applied by script because nothing about them depends on
+         the window: the floor is fixed and larger than any window it has to cover. */
       /* SPLASH-CSS-BEGIN */
 .pi-splash {
 position: fixed;
@@ -515,33 +517,46 @@ background: var(--splash-background, var(--color-background, #151313));
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
-/* The falloff lives on an untransformed wrapper, not on the lattice.
-   A mask applies in its own element's coordinate space, so masking the lattice directly meant a local
-   circle became a rhombus once the isometric matrix had run: the screen corners were cut first and the
-   floor visibly stopped short of them. Here the wrapper is unrotated, so the falloff is in screen
-   space and reaches every corner. */
+/* Two fades, on two untransformed wrappers, because they answer two different questions and a mask
+   applies in its own element's coordinate space. Masking the floor itself meant a local circle came out
+   a sheared ellipse once the camera had run, and the screen's corners were cut first: the floor visibly
+   stopped short of them. Nesting instead multiplies the two alphas without needing mask-composite. */
 .pi-splash-ground-clip {
 position: absolute;
 inset: 0;
 overflow: hidden;
--webkit-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+-webkit-mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
 }
-/* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
-   registering offset arrive inline, because both depend on the measured viewport. */
+/* The horizon. Receding floor points crowd toward a line 780px above the
+   origin and never reach it, so a floor drawn to any finite depth always ends somewhere, and on a tall
+   window that end lands mid-screen where the peripheral fade cannot reach it. Anchoring the ramp to the
+   origin's own percentage keeps it in place at every window size. */
+.pi-splash-horizon {
+position: absolute;
+inset: 0;
+overflow: hidden;
+-webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 410px), rgba(0,0,0,1) calc(56% - 278px));
+mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 410px), rgba(0,0,0,1) calc(56% - 278px));
+}
+/* Flat transform style on purpose: the cells are rasterised once and mapped by a single projective
+   transform, rather than each becoming a participant in a 3D rendering context. */
 .pi-splash-ground {
 position: absolute;
 left: 50%;
-top: 54%;
+top: 56%;
 display: grid;
 transform-origin: 0 0;
+grid-template-columns: repeat(24, 96px);
+grid-template-rows: repeat(24, 96px);
+transform: perspective(1600px) rotateX(64deg) rotateZ(45deg) translate(-1392px, -1392px);
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
 box-shadow: inset -1px -1px 0 var(--splash-lattice-line, rgba(255, 255, 255, 0.22));
 }
-/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears
-   when there is genuinely something to wait for. */
+/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
+   there is genuinely something to wait for. */
 .pi-splash-cell[data-breathe='true'] {
 animation: pi-splash-breathe 2.8s ease-in-out infinite;
 animation-delay: calc(1.2s + var(--pi-breathe-delay));
@@ -555,30 +570,44 @@ animation-delay: calc(1.2s + var(--pi-breathe-delay));
 animation: pi-splash-cell-out 460ms cubic-bezier(0.32, 0, 0.24, 1) both;
 animation-delay: var(--pi-cell-delay);
 }
-/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering
-   tiles rather than simply dimming. */
+/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering tiles
+   rather than simply dimming. */
 @keyframes pi-splash-cell-out {
 to { opacity: 0; transform: scale(0.62); }
 }
 
-/* The mark stands on the lattice, so its lowest vertex has to land on the lattice origin. That vertex
-   is at 98.0% of the mark's own box height, not at its centre or its bottom edge, so the box is
-   pulled up by exactly that much. Matching the cell edge to the base edge then makes the cube's
-   footprint one cell of the floor, and the lines leaving its base corners are the floor's own lines. */
+/* The mark is placed by the cube's base centre, not by its box. Under perspective the projected cube is
+   asymmetric — the near corner grows, the far corner shrinks — so the base centre is nowhere near the
+   box's middle, and anchoring on the box or on its bottom edge is what left the cube hovering in three
+   earlier attempts. The translate is measured from the projection, and it is a constant only because the
+   cube's edge is. */
 .pi-splash-mark {
 position: absolute;
 left: 50%;
-top: 54%;
-translate: -50% -98.0%;
+top: 56%;
+translate: -50% -77.99%;
+display: block;
+line-height: 0;
+}
+/* The translate is a share of this box, so the box has to be exactly the drawing. An svg is inline by
+   default, which puts it on a baseline with descender space under it, and the cube would then stand that
+   many pixels above the floor for no visible reason. */
+.pi-splash-mark svg {
 display: block;
 }
-/* No contact shadow, glow, or reflection. Earlier versions had all three, added to compensate for a
-   cube that did not sit anywhere; registered to the lattice it needs none of them, and each one read
-   as an unexplained smudge under the mark rather than as contact. */
+/* The glyph on the open top, breathing. The rest of the cube holds still: the mark is the one thing the
+   eye is meant to settle on, and animating the faces as well made it restless. */
+.pi-splash-glyph {
+animation: pi-splash-glyph-pulse 1.8s ease-in-out infinite;
+}
+@keyframes pi-splash-glyph-pulse {
+0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+50% { filter: drop-shadow(0 0 4px var(--splash-stroke)); }
+}
 .pi-splash-status {
 position: absolute;
 left: 50%;
-top: calc(54% + 44px);
+top: calc(56% + 52px);
 translate: -50% 0;
 min-height: 1rem;
 max-width: 32ch;
@@ -607,6 +636,7 @@ to { opacity: 0; }
 .pi-splash[data-leaving='true'] .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-mark,
 .pi-splash[data-leaving='true'] .pi-splash-status,
+.pi-splash-glyph,
 .pi-splash-status {
 animation: none;
 }
@@ -614,7 +644,7 @@ animation: none;
 .pi-splash { transition: opacity 260ms ease; }
 .pi-splash[data-leaving='true'] { opacity: 0; }
 }
-/* SPLASH-CSS-END */
+      /* SPLASH-CSS-END */
     </style>
   </head>
   <body class="h-full bg-background text-foreground">
@@ -623,144 +653,48 @@ animation: none;
            which owns this element's contract. -->
       <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
         <div class="pi-splash-ground-clip" aria-hidden="true">
-          <div id="initial-loading-ground" class="pi-splash-ground"></div>
+          <div class="pi-splash-horizon">
+            <div id="initial-loading-ground" class="pi-splash-ground"></div>
+          </div>
         </div>
+        <!-- The cube, projected through the same camera that transforms the floor. A verbatim copy of
+             perspectiveMark(CUBE_EDGE_PX, PIARIUM_MARK_COLORS).svg from
+             packages/ui/src/components/ui/piarium-mark-perspective.ts, which the geometry test asserts,
+             so change that module rather than this block. The published isometric mark cannot be used
+             here: its base edges are parallel and the floor's converge, so the two could never meet. -->
         <span class="pi-splash-mark">
-          <svg width="168" height="168" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-            <!-- Isometric cube: edge=48, centerY=50 -->
-            <!-- Points: top(50,2), left(8.432,26), right(91.568,26), center(50,50), bottomLeft(8.432,74), bottomRight(91.568,74), bottom(50,98) -->
-
-            <!-- Occluder. The faces below are translucent washes, so without this the ground lattice
-                 shows straight through the cube and it stops reading as a solid object. -->
-            <path d="M50 2 L91.568 26 L91.568 74 L50 98 L8.432 74 L8.432 26 Z" fill="var(--splash-background)"/>
-
-            <!-- Left face - base fill with stroke -->
-            <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
-
-            <!-- Left face grid cells (4x4) with varying opacity -->
-            <path d="M50 50 L39.608 44 L39.608 56 L50 62 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-            <path d="M39.608 44 L29.216 38 L29.216 50 L39.608 56 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-            <path d="M29.216 38 L18.824 32 L18.824 44 L29.216 50 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-            <path d="M18.824 32 L8.432 26 L8.432 38 L18.824 44 Z" fill="var(--splash-cell-fill)" opacity="0.55"/>
-            <path d="M50 62 L39.608 56 L39.608 68 L50 74 Z" fill="var(--splash-cell-fill)" opacity="0.35"/>
-            <path d="M39.608 56 L29.216 50 L29.216 62 L39.608 68 Z" fill="var(--splash-cell-fill)" opacity="0.1"/>
-            <path d="M29.216 50 L18.824 44 L18.824 56 L29.216 62 Z" fill="var(--splash-cell-fill)" opacity="0.5"/>
-            <path d="M18.824 44 L8.432 38 L8.432 50 L18.824 56 Z" fill="var(--splash-cell-fill)" opacity="0.25"/>
-            <path d="M50 74 L39.608 68 L39.608 80 L50 86 Z" fill="var(--splash-cell-fill)" opacity="0.4"/>
-            <path d="M39.608 68 L29.216 62 L29.216 74 L39.608 80 Z" fill="var(--splash-cell-fill)" opacity="0.3"/>
-            <path d="M29.216 62 L18.824 56 L18.824 68 L29.216 74 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-            <path d="M18.824 56 L8.432 50 L8.432 62 L18.824 68 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-            <path d="M50 86 L39.608 80 L39.608 92 L50 98 Z" fill="var(--splash-cell-fill)" opacity="0.55"/>
-            <path d="M39.608 80 L29.216 74 L29.216 86 L39.608 92 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-            <path d="M29.216 74 L18.824 68 L18.824 80 L29.216 86 Z" fill="var(--splash-cell-fill)" opacity="0.35"/>
-            <path d="M18.824 68 L8.432 62 L8.432 74 L18.824 80 Z" fill="var(--splash-cell-fill)" opacity="0.1"/>
-
-            <!-- Right face - base fill with stroke -->
-            <path d="M50 50 L91.568 26 L91.568 74 L50 98 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
-
-            <!-- Right face grid cells (4x4) with varying opacity -->
-            <path d="M50 50 L60.392 44 L60.392 56 L50 62 Z" fill="var(--splash-cell-fill)" opacity="0.3"/>
-            <path d="M60.392 44 L70.784 38 L70.784 50 L60.392 56 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-            <path d="M70.784 38 L81.176 32 L81.176 44 L70.784 50 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-            <path d="M81.176 32 L91.568 26 L91.568 38 L81.176 44 Z" fill="var(--splash-cell-fill)" opacity="0.25"/>
-            <path d="M50 62 L60.392 56 L60.392 68 L50 74 Z" fill="var(--splash-cell-fill)" opacity="0.5"/>
-            <path d="M60.392 56 L70.784 50 L70.784 62 L60.392 68 Z" fill="var(--splash-cell-fill)" opacity="0.35"/>
-            <path d="M70.784 50 L81.176 44 L81.176 56 L70.784 62 Z" fill="var(--splash-cell-fill)" opacity="0.1"/>
-            <path d="M81.176 44 L91.568 38 L91.568 50 L81.176 56 Z" fill="var(--splash-cell-fill)" opacity="0.4"/>
-            <path d="M50 74 L60.392 68 L60.392 80 L50 86 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-            <path d="M60.392 68 L70.784 62 L70.784 74 L60.392 80 Z" fill="var(--splash-cell-fill)" opacity="0.55"/>
-            <path d="M70.784 62 L81.176 56 L81.176 68 L70.784 74 Z" fill="var(--splash-cell-fill)" opacity="0.3"/>
-            <path d="M81.176 56 L91.568 50 L91.568 62 L81.176 68 Z" fill="var(--splash-cell-fill)" opacity="0.15"/>
-            <path d="M50 86 L60.392 80 L60.392 92 L50 98 Z" fill="var(--splash-cell-fill)" opacity="0.45"/>
-            <path d="M60.392 80 L70.784 74 L70.784 86 L60.392 92 Z" fill="var(--splash-cell-fill)" opacity="0.25"/>
-            <path d="M70.784 74 L81.176 68 L81.176 80 L70.784 86 Z" fill="var(--splash-cell-fill)" opacity="0.4"/>
-            <path d="M81.176 68 L91.568 62 L91.568 74 L81.176 80 Z" fill="var(--splash-cell-fill)" opacity="0.2"/>
-
-            <!-- Top face - open (no fill), only stroke -->
-            <path d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/>
-
-            <!-- Piarium π mark on top face -->
-            <g transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
-              <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="var(--splash-logo-fill)"/>
-            </g>
-          </svg>
+          <!-- SPLASH-MARK-BEGIN -->
+<svg width="143.43" height="149.62" viewBox="-71.72 -116.69 143.43 149.62" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M0 -114.69 L69.72 -88.62 L0 -60.42 L-69.72 -88.62 Z" fill="var(--splash-background, var(--color-background, #151313))"/><path d="M0 -60.42 L-69.72 -88.62 L-67.88 0 L0 30.94 Z" fill="var(--splash-background, var(--color-background, #151313))"/><path d="M0 -60.42 L69.72 -88.62 L67.88 0 L0 30.94 Z" fill="var(--splash-background, var(--color-background, #151313))"/><path d="M0 -60.42 L-69.72 -88.62 L-67.88 0 L0 30.94 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/><path d="M0 -60.42 L-17.96 -67.68 L-17.83 -44.55 L0 -37.1 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M-17.96 -67.68 L-35.55 -74.8 L-35.31 -51.85 L-17.83 -44.55 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M-35.55 -74.8 L-52.8 -81.78 L-52.45 -59 L-35.31 -51.85 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M-52.8 -81.78 L-69.72 -88.62 L-69.25 -66.02 L-52.45 -59 Z" fill="var(--splash-cell-fill)" opacity="0.55"/><path d="M0 -37.1 L-17.83 -44.55 L-17.71 -21.73 L0 -14.11 Z" fill="var(--splash-cell-fill)" opacity="0.35"/><path d="M-17.83 -44.55 L-35.31 -51.85 L-35.07 -29.2 L-17.71 -21.73 Z" fill="var(--splash-cell-fill)" opacity="0.1"/><path d="M-35.31 -51.85 L-52.45 -59 L-52.09 -36.53 L-35.07 -29.2 Z" fill="var(--splash-cell-fill)" opacity="0.5"/><path d="M-52.45 -59 L-69.25 -66.02 L-68.79 -43.72 L-52.09 -36.53 Z" fill="var(--splash-cell-fill)" opacity="0.25"/><path d="M0 -14.11 L-17.71 -21.73 L-17.59 0.77 L0 8.57 Z" fill="var(--splash-cell-fill)" opacity="0.4"/><path d="M-17.71 -21.73 L-35.07 -29.2 L-34.83 -6.87 L-17.59 0.77 Z" fill="var(--splash-cell-fill)" opacity="0.3"/><path d="M-35.07 -29.2 L-52.09 -36.53 L-51.75 -14.36 L-34.83 -6.87 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M-52.09 -36.53 L-68.79 -43.72 L-68.33 -21.71 L-51.75 -14.36 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M0 8.57 L-17.59 0.77 L-17.47 22.98 L0 30.94 Z" fill="var(--splash-cell-fill)" opacity="0.55"/><path d="M-17.59 0.77 L-34.83 -6.87 L-34.6 15.17 L-17.47 22.98 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M-34.83 -6.87 L-51.75 -14.36 L-51.4 7.51 L-34.6 15.17 Z" fill="var(--splash-cell-fill)" opacity="0.35"/><path d="M-51.75 -14.36 L-68.33 -21.71 L-67.88 0 L-51.4 7.51 Z" fill="var(--splash-cell-fill)" opacity="0.1"/><path d="M0 -60.42 L69.72 -88.62 L67.88 0 L0 30.94 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/><path d="M0 -60.42 L17.96 -67.68 L17.83 -44.55 L0 -37.1 Z" fill="var(--splash-cell-fill)" opacity="0.3"/><path d="M17.96 -67.68 L35.55 -74.8 L35.31 -51.85 L17.83 -44.55 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M35.55 -74.8 L52.8 -81.78 L52.45 -59 L35.31 -51.85 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M52.8 -81.78 L69.72 -88.62 L69.25 -66.02 L52.45 -59 Z" fill="var(--splash-cell-fill)" opacity="0.25"/><path d="M0 -37.1 L17.83 -44.55 L17.71 -21.73 L0 -14.11 Z" fill="var(--splash-cell-fill)" opacity="0.5"/><path d="M17.83 -44.55 L35.31 -51.85 L35.07 -29.2 L17.71 -21.73 Z" fill="var(--splash-cell-fill)" opacity="0.35"/><path d="M35.31 -51.85 L52.45 -59 L52.09 -36.53 L35.07 -29.2 Z" fill="var(--splash-cell-fill)" opacity="0.1"/><path d="M52.45 -59 L69.25 -66.02 L68.79 -43.72 L52.09 -36.53 Z" fill="var(--splash-cell-fill)" opacity="0.4"/><path d="M0 -14.11 L17.71 -21.73 L17.59 0.77 L0 8.57 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M17.71 -21.73 L35.07 -29.2 L34.83 -6.87 L17.59 0.77 Z" fill="var(--splash-cell-fill)" opacity="0.55"/><path d="M35.07 -29.2 L52.09 -36.53 L51.75 -14.36 L34.83 -6.87 Z" fill="var(--splash-cell-fill)" opacity="0.3"/><path d="M52.09 -36.53 L68.79 -43.72 L68.33 -21.71 L51.75 -14.36 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M0 8.57 L17.59 0.77 L17.47 22.98 L0 30.94 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M17.59 0.77 L34.83 -6.87 L34.6 15.17 L17.47 22.98 Z" fill="var(--splash-cell-fill)" opacity="0.25"/><path d="M34.83 -6.87 L51.75 -14.36 L51.4 7.51 L34.6 15.17 Z" fill="var(--splash-cell-fill)" opacity="0.4"/><path d="M51.75 -14.36 L68.33 -21.71 L67.88 0 L51.4 7.51 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M0 -114.69 L69.72 -88.62 L0 -60.42 L-69.72 -88.62 Z" fill="none" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/><path class="pi-splash-glyph" d="M-3.2 -102.31 L36.01 -87.34 L29.57 -84.78 L24.02 -86.92 L-2.22 -76.56 L-8.83 -79.18 L17.41 -89.46 L2.16 -95.32 L-24.08 -85.21 L-30.54 -87.77 L-4.3 -97.8 L-9.64 -99.86 Z" fill="var(--splash-stroke)"/></svg>
+          <!-- SPLASH-MARK-END -->
         </span>
         <div id="initial-loading-status" class="pi-splash-status"></div>
       </div>
     </div>
 
     <script>
-      // Builds the ground lattice. Kept out of the markup because both the cell count and the
-      // registering offset depend on the measured viewport. Mirrors resolveGroundShape,
-      // buildSplashCells and groundInlineStyle in
-      // packages/ui/src/components/ui/piarium-splash-lattice.ts, and the numbers here are the mark's
-      // own footprint: cell 0.48 of the mark box because that is the cube's base edge, and the
-      // isometric matrix because those are the axes the base edges run along. Change them together or
-      // the lines stop coming out of the cube's base.
-      (function () {
-        var ground = document.getElementById('initial-loading-ground');
-        if (!ground) return;
-
-        var COS30 = 0.866;
-
-        function build() {
-          var mark = innerWidth >= 768 ? 168 : 124;
-          var cell = mark * 0.48;
-          var originY = innerHeight * 0.54;
-          var reachY = Math.max(originY, innerHeight - originY);
-          var axis = Math.ceil(Math.max(innerWidth / 2 / (COS30 * cell), (2 * reachY) / cell));
-          axis = Math.max(8, Math.min(24, axis));
-          if (axis % 2 !== 0) axis += 1;
-          var offset = (axis / 2) * cell;
-
-          ground.style.gridTemplateColumns = 'repeat(' + axis + ',' + cell + 'px)';
-          ground.style.gridTemplateRows = 'repeat(' + axis + ',' + cell + 'px)';
-          ground.style.transform = 'matrix(0.866, 0.5, -0.866, 0.5, 0, 0) translate('
-            + -offset + 'px,' + -offset + 'px)';
-
-          // Radiate from the cell the mark stands on, in lattice space, so the wavefront travels along
-          // the cube's own base axes rather than as a screen-space circle.
-          var middle = (axis - 1) / 2;
-          var maxRadius = Math.hypot(middle, middle) || 1;
-          var buffer = '';
-          for (var row = 0; row < axis; row++) {
-            for (var col = 0; col < axis; col++) {
-              var fraction = Math.hypot(col - middle, row - middle) / maxRadius;
-              var style = '--pi-cell-delay:' + Math.round(fraction * 520) + 'ms';
-              var breathes = Math.random() < 0.1;
-              if (breathes) style += ';--pi-breathe-delay:' + Math.round(Math.random() * 2200) + 'ms';
-              buffer += '<span class="pi-splash-cell" data-breathe="' + (breathes ? 'true' : 'false')
-                + '" style="' + style + '"></span>';
-            }
-          }
-          ground.innerHTML = buffer;
-        }
-
-        build();
-
-        var resizeTimer = null;
-        function onResize() {
-          if (resizeTimer !== null) clearTimeout(resizeTimer);
-          // Rebuilding mid-exit would restart the staggered animation, so leave it alone once the
-          // splash is on its way out.
-          resizeTimer = setTimeout(function () {
-            resizeTimer = null;
-            var element = document.getElementById('initial-loading');
-            if (!element || element.dataset.leaving === 'true') return;
-            build();
-          }, 200);
-        }
-        addEventListener('resize', onResize);
-
-        // The splash removes itself, so the listener has to go with it.
-        var observer = new MutationObserver(function () {
-          if (document.getElementById('initial-loading')) return;
-          removeEventListener('resize', onResize);
-          if (resizeTimer !== null) clearTimeout(resizeTimer);
-          observer.disconnect();
-        });
-        observer.observe(document.getElementById('root'), { childList: true, subtree: true });
-      })();
+      // Fills the floor. Emitted by splashGroundScript() in
+      // packages/ui/src/components/ui/piarium-splash-lattice.ts and asserted by the geometry test, so
+      // change that function rather than this block. Generated rather than hand-written because the
+      // per-cell delays are what tie the floor's exit to the cube it radiates from, and a second
+      // implementation of that in a string is exactly how the two drift apart.
+      //
+      // The floor's extent is fixed and larger than any window, so there is nothing to measure and
+      // nothing to rebuild on resize: a wider window simply reveals more of the same grid.
+      /* SPLASH-JS-BEGIN */
+(function(){
+var ground=document.getElementById('initial-loading-ground');
+if(!ground)return;
+var delays=[520,502,484,468,452,437,423,411,400,390,382,376,371,369,368,369,371,376,382,390,400,411,423,437,502,483,465,447,431,415,401,388,376,366,357,350,345,342,341,342,345,350,357,366,376,388,401,415,484,465,446,428,410,394,379,365,352,341,332,325,320,316,315,316,320,325,332,341,352,365,379,394,468,447,428,409,390,373,357,342,329,317,307,299,294,290,289,290,294,299,307,317,329,342,357,373,452,431,410,390,371,353,336,321,306,294,283,274,268,264,263,264,268,274,283,294,306,321,336,353,437,415,394,373,353,334,316,299,284,270,259,249,242,238,236,238,242,249,259,270,284,299,316,334,423,401,379,357,336,316,297,279,263,248,235,224,217,212,210,212,217,224,235,248,263,279,297,316,411,388,365,342,321,299,279,260,242,226,212,200,191,186,184,186,191,200,212,226,242,260,279,299,400,376,352,329,306,284,263,242,223,205,189,176,166,160,158,160,166,176,189,205,223,242,263,284,390,366,341,317,294,270,248,226,205,186,168,153,141,134,131,134,141,153,168,186,205,226,248,270,382,357,332,307,283,259,235,212,189,168,149,131,117,108,105,108,117,131,149,168,189,212,235,259,376,350,325,299,274,249,224,200,176,153,131,111,95,83,79,83,95,111,131,153,176,200,224,249,371,345,320,294,268,242,217,191,166,141,117,95,74,59,53,59,74,95,117,141,166,191,217,242,369,342,316,290,264,238,212,186,160,134,108,83,59,37,26,37,59,83,108,134,160,186,212,238,368,341,315,289,263,236,210,184,158,131,105,79,53,26,0,26,53,79,105,131,158,184,210,236,369,342,316,290,264,238,212,186,160,134,108,83,59,37,26,37,59,83,108,134,160,186,212,238,371,345,320,294,268,242,217,191,166,141,117,95,74,59,53,59,74,95,117,141,166,191,217,242,376,350,325,299,274,249,224,200,176,153,131,111,95,83,79,83,95,111,131,153,176,200,224,249,382,357,332,307,283,259,235,212,189,168,149,131,117,108,105,108,117,131,149,168,189,212,235,259,390,366,341,317,294,270,248,226,205,186,168,153,141,134,131,134,141,153,168,186,205,226,248,270,400,376,352,329,306,284,263,242,223,205,189,176,166,160,158,160,166,176,189,205,223,242,263,284,411,388,365,342,321,299,279,260,242,226,212,200,191,186,184,186,191,200,212,226,242,260,279,299,423,401,379,357,336,316,297,279,263,248,235,224,217,212,210,212,217,224,235,248,263,279,297,316,437,415,394,373,353,334,316,299,284,270,259,249,242,238,236,238,242,249,259,270,284,299,316,334];
+var breathes=[-1,-1,-1,-1,-1,2082,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,993,-1,-1,-1,-1,-1,-1,-1,982,-1,-1,-1,-1,-1,725,-1,-1,-1,-1,-1,-1,-1,1060,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1705,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1828,-1,-1,-1,-1,-1,-1,1764,-1,70,-1,55,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1699,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1626,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1035,-1,-1,-1,-1,1771,-1,-1,-1,1271,-1,-1,-1,-1,-1,-1,2180,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1671,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1912,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1587,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1056,-1,-1,-1,-1,-1,-1,-1,1266,-1,-1,-1,2150,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1309,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1999,-1,1916,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1375,-1,-1,-1,-1,-1,-1,-1,-1,583,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,717,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,708,-1,-1,-1,-1,-1,2165,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1743,2184,-1,-1,229,-1,-1,248,-1,-1,-1,-1,-1,-1,2115,173,-1,-1,155,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,95,-1,-1,1869,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1105,-1,-1,-1,1033,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1525,-1,637,-1,-1,-1,-1,-1,-1,57,-1,-1,-1,-1,-1,-1,-1,777,-1,154,-1,-1,1924,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1306,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,789,-1,-1,-1,-1,2094,-1,-1,-1,-1,-1,-1];
+var buffer='';
+for(var i=0;i<delays.length;i++){
+var style='--pi-cell-delay:'+delays[i]+'ms';
+if(breathes[i]>=0)style+=';--pi-breathe-delay:'+breathes[i]+'ms';
+buffer+='<span class="pi-splash-cell" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
+}
+ground.innerHTML=buffer;
+})();
+      /* SPLASH-JS-END */
     </script>
 
     <!-- Nerd Fonts are terminal-only. Expose an idempotent first-use loader so

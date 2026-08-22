@@ -1,14 +1,14 @@
 ﻿/**
  * The Piarium mark's isometric geometry, in one place.
  *
- * The mark is drawn in four surfaces: a pre-paint copy inlined in `packages/web/index.html`, the
- * same copy in `packages/web/mini-chat.html`, the VS Code webview splash, and this React logo. The
- * inline copies cannot import anything, because they have to paint before the bundle exists, so the
- * duplication is structural rather than laziness. Keeping the numbers here gives the duplication a
- * source of truth that `piarium-logo-geometry.test.ts` can hold the inline copy against.
+ * This is the published mark, and it is a parallel projection because that is the right thing for an
+ * icon: no vanishing point, no size gradient, identical at any scale. `PiariumLogo` renders it, and the
+ * app icons and favicons are cut from the same numbers.
  *
- * The same lattice is what the splash animation tiles across the viewport, so the cube reads as a
- * region of that lattice rather than a separate object placed on top of it.
+ * It is not what the splash draws. A cube in parallel projection has parallel base edges, and the
+ * splash floor's lines converge, so the two cannot meet — `piarium-mark-perspective.ts` projects the
+ * same cube through the splash camera instead. What that module does reuse from here is the lattice
+ * subdivision and the per-cell opacity tables, so the two drawings of the cube are shaded alike.
  */
 
 /** Cube edge length in the 100x100 viewBox. */
@@ -19,7 +19,7 @@ const LOGO_SIN30 = 0.5;
 const LOGO_CENTER_X = 50;
 const LOGO_CENTER_Y = 50;
 export const LOGO_VIEWBOX = '0 0 100 100';
-const LOGO_GRID_SIZE = 4;
+export const LOGO_GRID_SIZE = 4;
 
 export interface LogoPoint {
   readonly x: number;
@@ -70,41 +70,14 @@ export const LOGO_ISO_MATRIX =
 export const LOGO_MARK_PATH = 'M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z';
 export const LOGO_MARK_SCALE = 0.75;
 
-/**
- * The cube's footprint, as fractions of its own box. This is what lets a ground plane register with
- * the mark instead of merely passing behind it.
- *
- * The base is a rhombus: front vertex `bottom`, side vertices `bottomLeft` and `bottomRight`, and the
- * hidden back vertex coinciding with `center`. Its two edge directions are ±30 degrees from
- * horizontal, which is the isometric projection's defining property and the reason a ground plane
- * cannot be perspectival if its lines are to stay parallel to those edges.
- */
-export const LOGO_FOOTPRINT = {
-  /** Where the lowest vertex sits in the box. Anchoring by the box centre or bottom edge floats it. */
-  vertex: { x: LOGO_VERTICES.bottom.x / 100, y: LOGO_VERTICES.bottom.y / 100 },
-  /** Base edge length as a fraction of the box, so a ground cell can be made to match it exactly. */
-  edge: LOGO_EDGE / 100,
-} as const;
-
-/**
- * The projection a ground plane needs to share the cube's base axes.
- *
- * Maps a unit square to the same rhombus the cube stands on, so a plain CSS grid becomes a lattice
- * whose lines run parallel to the base edges. Registering that lattice with the cube then only
- * requires matching the cell size to `LOGO_FOOTPRINT.edge` and putting a lattice vertex on
- * `LOGO_FOOTPRINT.vertex`.
- */
-export const LOGO_GROUND_TRANSFORM =
-  `matrix(${LOGO_COS30}, ${LOGO_SIN30}, ${-LOGO_COS30}, ${LOGO_SIN30}, 0, 0)`;
-
-const LEFT_FACE_CELL_OPACITIES = [
+export const LEFT_FACE_CELL_OPACITIES = [
   0.2, 0.45, 0.15, 0.55,
   0.35, 0.1, 0.5, 0.25,
   0.4, 0.3, 0.45, 0.15,
   0.55, 0.2, 0.35, 0.1,
 ] as const;
 
-const RIGHT_FACE_CELL_OPACITIES = [
+export const RIGHT_FACE_CELL_OPACITIES = [
   0.3, 0.15, 0.45, 0.25,
   0.5, 0.35, 0.1, 0.4,
   0.2, 0.55, 0.3, 0.15,
@@ -185,23 +158,6 @@ export const LOGO_TOP_FACE_PATH = quadPath(
 );
 
 /**
- * The cube's outline: the hexagon its three visible faces fill together.
- *
- * The faces are washes over transparency, which is right when the mark sits on a flat surface and
- * wrong when it stands on a drawn floor, because the floor shows straight through a solid object.
- * Filling this shape first gives the cube something to occlude with while leaving the face shading
- * untouched on top.
- */
-export const LOGO_SILHOUETTE_PATH = quadPath(
-  LOGO_VERTICES.top,
-  LOGO_VERTICES.right,
-  LOGO_VERTICES.bottomRight,
-  LOGO_VERTICES.bottom,
-  LOGO_VERTICES.bottomLeft,
-  LOGO_VERTICES.left,
-);
-
-/**
  * Both faces are wound from the shared front vertex outward, which makes them mirror images of each
  * other. The left face used to be wound from its outer edge inward, and the logo compensated by
  * reading its opacity row backwards; winding them the same way removes that compensation and makes
@@ -219,56 +175,3 @@ export const leftFaceCellOpacity = (cell: LogoFaceCell): number =>
 
 export const rightFaceCellOpacity = (cell: LogoFaceCell): number =>
   RIGHT_FACE_CELL_OPACITIES[cell.row * LOGO_GRID_SIZE + cell.col] ?? 0.35;
-
-export interface PiariumMarkColors {
-  /** Outline and mark colour. */
-  readonly stroke: string;
-  /** Face wash under the lattice cells. */
-  readonly faceFill: string;
-  /** Lattice cell colour, modulated per cell by the opacity tables. */
-  readonly cellFill: string;
-  /**
-   * Fills the outline first so the cube hides what is behind it. Omit where the mark sits on a plain
-   * surface and the translucent faces are the intended look.
-   */
-  readonly occlusionFill?: string;
-}
-
-/**
- * The mark as an SVG string.
- *
- * For hosts that build their document as text rather than render React: the VS Code webview shell is
- * generated TypeScript, so it can share this instead of becoming another hand-maintained copy. The
- * colours are injected because a webview has to follow the editor's theme, not Piarium's.
- *
- * `packages/web/index.html` and `packages/web/mini-chat.html` still cannot use this — they have to
- * paint before any module is evaluated — which is why the geometry tests hold their literal copies
- * against these same constants.
- */
-export const piariumMarkSvgMarkup = (size: number, colors: PiariumMarkColors): string => {
-  const cells = (
-    faceCells: readonly LogoFaceCell[],
-    opacity: (cell: LogoFaceCell) => number,
-  ): string => faceCells
-    .map((cell) => `<path d="${cell.path}" fill="${colors.cellFill}" opacity="${opacity(cell)}"/>`)
-    .join('');
-
-  const face = (d: string): string =>
-    `<path d="${d}" fill="${colors.faceFill}" stroke="${colors.stroke}" stroke-width="2" stroke-linejoin="round"/>`;
-
-  return [
-    `<svg width="${size}" height="${size}" viewBox="${LOGO_VIEWBOX}" fill="none"`,
-    ' xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">',
-    colors.occlusionFill
-      ? `<path d="${LOGO_SILHOUETTE_PATH}" fill="${colors.occlusionFill}"/>`
-      : '',
-    face(LOGO_LEFT_FACE_PATH),
-    cells(LOGO_LEFT_FACE_CELLS, leftFaceCellOpacity),
-    face(LOGO_RIGHT_FACE_PATH),
-    cells(LOGO_RIGHT_FACE_CELLS, rightFaceCellOpacity),
-    `<path d="${LOGO_TOP_FACE_PATH}" fill="none" stroke="${colors.stroke}" stroke-width="2" stroke-linejoin="round"/>`,
-    `<g transform="${LOGO_ISO_MATRIX} scale(${LOGO_MARK_SCALE})">`,
-    `<path d="${LOGO_MARK_PATH}" fill="${colors.stroke}"/>`,
-    '</g></svg>',
-  ].join('');
-};

@@ -1,10 +1,9 @@
 import * as os from 'node:os';
 import * as vscode from 'vscode';
-import { piariumMarkSvgMarkup } from '@piarium/ui/src/components/ui/piarium-logo-geometry';
+import { perspectiveMark } from '@piarium/ui/src/components/ui/piarium-mark-perspective';
 import {
-  groundInlineStyle,
-  resolveGroundShape,
-  resolveMarkSize,
+  buildSplashCells,
+  CUBE_EDGE_PX,
   splashPlaneCss,
 } from '@piarium/ui/src/components/ui/piarium-splash-lattice';
 import { getThemeKindName } from './theme';
@@ -12,35 +11,32 @@ import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
 /**
- * The ground is emitted as markup rather than built by a script, because this document is generated
- * anyway and a webview's CSP is one less thing to reason about without another inline script.
+ * The cube, projected through the same camera the floor is transformed by, in the editor's colours.
  *
- * A fixed extent is the trade: the panel can be a narrow sidebar or a full editor tab, and this shell
- * has no way to measure it. Sizing for a mid-size panel overflows a wide tab and is cropped in a
- * sidebar, which is the harmless direction to be wrong in because the mask fades the outer region
- * either way. The cell size still comes from the mark, so the lattice registers with the cube here too.
+ * Built once at module load. The geometry depends only on the cube's edge, which is a constant, and these
+ * colours are CSS variables the editor resolves itself, so nothing here has to be rebuilt when the theme
+ * changes.
  */
-const PANEL_WIDTH = 1100;
-const PANEL_HEIGHT = 900;
-const MARK_SIZE = resolveMarkSize(PANEL_WIDTH);
-const GROUND_SHAPE = resolveGroundShape(PANEL_WIDTH, PANEL_HEIGHT, MARK_SIZE);
-const GROUND_STYLE = groundInlineStyle(GROUND_SHAPE);
+const MARK = perspectiveMark(CUBE_EDGE_PX, {
+  stroke: 'var(--vscode-foreground)',
+  faceFill: 'var(--vscode-editorWidget-background, transparent)',
+  cellFill: 'var(--vscode-foreground)',
+  // Without this the floor shows straight through the cube's translucent faces.
+  occlusionFill: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
+});
 
-/** Exit delay per cell, radiating from the cell the mark stands on. Mirrors `buildSplashCells`. */
-const renderGroundCells = (): string => {
-  const middle = (GROUND_SHAPE.axis - 1) / 2;
-  const maxRadius = Math.hypot(middle, middle) || 1;
-  const cells: string[] = [];
-
-  for (let row = 0; row < GROUND_SHAPE.axis; row += 1) {
-    for (let col = 0; col < GROUND_SHAPE.axis; col += 1) {
-      const delay = Math.round((Math.hypot(col - middle, row - middle) / maxRadius) * 520);
-      cells.push(`<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:${delay}ms"></span>`);
-    }
-  }
-
-  return cells.join('');
-};
+/**
+ * The floor, emitted as markup rather than built by a script, because this document is generated anyway
+ * and a webview's CSP is one less thing to reason about without another inline script.
+ *
+ * The floor's extent is fixed and larger than any panel, which is what makes emitting it here possible:
+ * this shell cannot measure a panel that may be a narrow sidebar or a full editor tab, and it does not
+ * have to. No breathing, though — the splash is up for a moment and the idle pulse starts after a second
+ * and a bit, so here it would only ever be dead weight in the document.
+ */
+const GROUND_CELLS = buildSplashCells('boot', 'forward', false)
+  .map((cell) => `<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:${cell.delayMs}ms"></span>`)
+  .join('');
 
 /**
  * Splash rules, taken from the shared generator with the editor's own colours. A webview that ignores
@@ -51,7 +47,7 @@ const SPLASH_CSS = splashPlaneCss(
     background: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
     line: 'var(--vscode-widget-border, var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.24)))',
     cell: 'var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.14))',
-    status: 'var(--vscode-foreground)',
+    stroke: 'var(--vscode-foreground)',
   },
   { withMark: true },
 );
@@ -109,7 +105,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const documentLanguage = vscode.env.language.replace(/[^A-Za-z0-9-]/g, '') || 'en';
   const runtimeConnectionFailed = htmlSafeJson(vscode.l10n.t('Piarium: Pi runtime connection failed'));
   const waitingForDevelopmentServer = htmlSafeJson(vscode.l10n.t('Piarium: Waiting for the webview development server'));
-  const groundCells = renderGroundCells();
   const bootstrapConfig = htmlSafeJson({
     workspaceFolder,
     workspaceFolders,
@@ -134,44 +129,31 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       color: var(--vscode-foreground);
       font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
     }
-    /* Splash. Same receding plane as the web shell, generated from the shared module so this host
+    /* Splash. Same floor and same cube as the web shell, generated from the shared module so this host
        cannot drift, but coloured from the editor theme: a webview that ignores its host's theme looks
        broken. */
 ${SPLASH_CSS}
-    .piarium-name {
-      font-size: 12px;
-      letter-spacing: 0.08em;
-      opacity: 0.72;
-      animation: pi-splash-name-in 480ms 620ms ease both;
-    }
-    @keyframes pi-splash-name-in { from { opacity: 0; } to { opacity: 0.72; } }
-
+    /* Errors only. The product name uses the shared status slot, so it is placed and timed once. */
     #loading-status {
+      position: absolute;
+      left: 50%;
+      top: calc(56% + 84px);
+      translate: -50% 0;
       max-width: 320px;
       color: var(--vscode-errorForeground, #f48771);
       font-size: 12px;
       text-align: center;
       white-space: pre-wrap;
     }
-    @media (prefers-reduced-motion: reduce) {
-      .piarium-name { animation: none; opacity: 0.72; }
-    }
   </style>
   <title>Piarium</title>
 </head>
 <body>
   <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
-    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-ground" style="grid-template-columns:${GROUND_STYLE.gridTemplateColumns};grid-template-rows:${GROUND_STYLE.gridTemplateRows};transform:${GROUND_STYLE.transform}">${groundCells}</div></div>
-    <span class="pi-splash-mark">${piariumMarkSvgMarkup(MARK_SIZE, {
-        stroke: 'var(--vscode-foreground)',
-        faceFill: 'var(--vscode-editorWidget-background, transparent)',
-        cellFill: 'var(--vscode-foreground)',
-        // Without this the ground shows straight through the cube's translucent faces.
-        occlusionFill: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
-      })}</span>
-      <div class="piarium-name">PIARIUM</div>
-      <div id="loading-status" role="status" aria-live="polite"></div>
-    </div>
+    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-ground">${GROUND_CELLS}</div></div></div>
+    <span class="pi-splash-mark">${MARK.svg}</span>
+    <div class="pi-splash-status">PIARIUM</div>
+    <div id="loading-status" role="status" aria-live="polite"></div>
   </div>
   <div id="root"></div>
   <script>

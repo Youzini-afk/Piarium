@@ -35,6 +35,21 @@ node artifacts/cloud-runtime/packages/web/bin/cli.js serve --foreground
 The canonical cloud builder compiles the Pi host/broker and Web UI, creates a production lockfile,
 and preserves the workspace layout required by `resolveBundledPiHostEntry()`.
 
+## Generated blocks in the HTML entry points
+
+`index.html` and `mini-chat.html` paint the splash before any module is evaluated, so they cannot
+import the modules that define it. They embed generated output instead, between `SPLASH-CSS`,
+`SPLASH-MARK`, and `SPLASH-JS` sentinels. After changing anything in
+`packages/ui/src/components/ui/piarium-splash-*.ts` or `piarium-mark-perspective.ts`:
+
+```bash
+bun run splash:emit
+```
+
+`piarium-splash-lattice.test.ts` asserts each embedded block still equals its generator's output
+character for character, so forgetting the regeneration fails the tests rather than shipping a floor
+that no longer meets the cube standing on it.
+
 ## Cloud and remote deployment
 
 Use the Piarium container images, Docker Compose, or the atomic SSH deployment helper. Image names,

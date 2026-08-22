@@ -1,122 +1,273 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { LOGO_FOOTPRINT, LOGO_VERTICES } from './piarium-logo-geometry';
+import { markBox, perspectiveMark } from './piarium-mark-perspective';
 import {
-  GROUND_ORIGIN_Y_PCT,
+  CAMERA_FLOOR_TRANSFORM,
+  HORIZON_RISE_PX,
+  cameraDepth,
+  floorReach,
+  projectPoint,
+} from './piarium-splash-camera';
+import {
+  CUBE_EDGE_PX,
+  GROUND_EDGE_RISE_PX,
+  GROUND_FADE_RISE_PX,
+  GROUND_REACH,
+  GROUND_SHAPE,
+  PIARIUM_MARK_COLORS,
+  PIARIUM_SPLASH_COLORS,
   buildSplashCells,
-  groundInlineStyle,
-  resolveGroundShape,
-  resolveMarkSize,
+  splashGroundScript,
+  splashPlaneCss,
 } from './piarium-splash-lattice';
+import { INITIAL_SPLASH_IDS } from '@/lib/splash';
 
 /**
- * The point of these is the registration between the mark and the ground.
+ * What these tests are for.
  *
- * Two earlier versions of this splash looked wrong for a reason no test would have caught, because
- * nothing asserted a relationship between the two: the lattice was sized from the viewport and centred
- * on the viewport, so the mark stood on a grid that had nothing to do with it. The lines have to be the
- * mark's own base edges continued outward, and that is a checkable numeric property.
+ * Three earlier versions of this splash looked wrong for a reason no test would have caught, because
+ * nothing asserted a relationship between the cube and the floor it was supposed to stand on. Each time
+ * the floor was drawn with one set of numbers and the cube with another, and each time it read as a cube
+ * hovering in front of a pattern. So these assert relationships, not appearance: that the projection
+ * really converges, that the cube's base is one floor cell, that the point placed on the floor's origin is
+ * the cube's base centre, and that the four hosts that paint this splash still carry the same bytes.
  */
 
-const COS30 = 0.866;
-const SIN30 = 0.5;
+const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..', '..');
+const readRepoFile = (...segments: string[]): string =>
+  readFileSync(path.join(repoRoot, ...segments), 'utf8');
 
-const VIEWPORTS: ReadonlyArray<readonly [number, number]> = [
-  [1920, 1080],
-  [1440, 900],
-  [1024, 512],
-  [768, 1024],
-  [420, 700],
-];
+const readWebShell = (): string => readRepoFile('packages', 'web', 'index.html');
+const readMiniChat = (): string => readRepoFile('packages', 'web', 'mini-chat.html');
+const readWebview = (): string => readRepoFile('packages', 'vscode', 'src', 'webviewHtml.ts');
 
-describe('the ground registers with the mark', () => {
-  test.each(VIEWPORTS)('%ix%i: a cell is exactly the cube base edge', (width, height) => {
-    const markSize = resolveMarkSize(width);
-    const shape = resolveGroundShape(width, height, markSize);
-    expect(shape.cellPx).toBeCloseTo(markSize * LOGO_FOOTPRINT.edge, 6);
+/** Content a host embeds verbatim between a pair of sentinels. */
+const between = (body: string, open: string, close: string): string => {
+  const start = body.indexOf(open);
+  const end = body.indexOf(close, start);
+  expect(start, `${open} missing`).toBeGreaterThan(-1);
+  expect(end, `${close} missing`).toBeGreaterThan(start);
+  return body.slice(start + open.length, end).trim();
+};
+
+const CSS_SENTINELS = ['/* SPLASH-CSS-BEGIN */', '/* SPLASH-CSS-END */'] as const;
+const JS_SENTINELS = ['/* SPLASH-JS-BEGIN */', '/* SPLASH-JS-END */'] as const;
+const MARK_SENTINELS = ['<!-- SPLASH-MARK-BEGIN -->', '<!-- SPLASH-MARK-END -->'] as const;
+
+describe('the camera is a perspective camera', () => {
+  test('equal steps away from the viewer project to shrinking steps on screen', () => {
+    // The property isometric could never have. Without it there is no vanishing point, no size gradient,
+    // and nothing to tell the eye whether the plane recedes or tilts up toward it.
+    const step = (n: number): number => {
+      const near = projectPoint({ x: -n * CUBE_EDGE_PX, y: -n * CUBE_EDGE_PX, z: 0 });
+      const far = projectPoint({ x: -(n + 1) * CUBE_EDGE_PX, y: -(n + 1) * CUBE_EDGE_PX, z: 0 });
+      return near.y - far.y;
+    };
+
+    const steps = [0, 1, 2, 4, 8, 14].map(step);
+    for (const [index, value] of steps.entries()) {
+      expect(value).toBeGreaterThan(0);
+      if (index > 0) expect(value).toBeLessThan(steps[index - 1] as number);
+    }
+    // Not a token amount of convergence: the far rows are a fifth the depth of the near ones.
+    expect(steps.at(-1) as number).toBeLessThan((steps[0] as number) / 4);
   });
 
-  test.each(VIEWPORTS)('%ix%i: the base edges are lattice edges', (width, height) => {
-    const markSize = resolveMarkSize(width);
-    const shape = resolveGroundShape(width, height, markSize);
+  test('the floor origin projects to the origin, so the two coordinate systems share a point', () => {
+    expect(projectPoint({ x: 0, y: 0, z: 0 })).toEqual({ x: 0, y: 0 });
+  });
 
-    // Both base edges leaving the cube's lowest vertex, in rendered pixels.
-    const baseEdges = [LOGO_VERTICES.bottomLeft, LOGO_VERTICES.bottomRight].map((vertex) => [
-      ((vertex.x - LOGO_VERTICES.bottom.x) / 100) * markSize,
-      ((vertex.y - LOGO_VERTICES.bottom.y) / 100) * markSize,
-    ]);
+  test('receding points approach the horizon and never pass it', () => {
+    for (const distance of [1_000, 100_000, 10_000_000]) {
+      const rise = -projectPoint({ x: -distance, y: -distance, z: 0 }).y;
+      expect(rise).toBeLessThan(HORIZON_RISE_PX);
+    }
+    expect(-projectPoint({ x: -10_000_000, y: -10_000_000, z: 0 }).y)
+      .toBeCloseTo(HORIZON_RISE_PX, 0);
+  });
 
-    // A lattice vertex has four neighbours: the matrix sends (1,0) and (0,1) to (cos30, sin30) and
-    // (-cos30, sin30), and each of those runs both ways.
-    const latticeEdges = [
-      [COS30, SIN30],
-      [-COS30, SIN30],
-      [-COS30, -SIN30],
-      [COS30, -SIN30],
-    ].map(([x, y]) => [x * shape.cellPx, y * shape.cellPx]);
+  test('height above the floor reads as up the screen and toward the viewer', () => {
+    const standing = projectPoint({ x: 0, y: 0, z: CUBE_EDGE_PX });
+    expect(standing.y).toBeLessThan(0);
+    expect(cameraDepth({ x: 0, y: 0, z: CUBE_EDGE_PX })).toBeGreaterThan(0);
+  });
 
-    for (const [dx, dy] of baseEdges) {
-      const matched = latticeEdges.some(
-        ([lx, ly]) => Math.abs(dx - lx) < 0.05 && Math.abs(dy - ly) < 0.05,
-      );
-      expect(matched, `base edge (${dx.toFixed(2)}, ${dy.toFixed(2)}) is not a lattice edge`).toBe(true);
+  test('the floor transform the CSS applies is the one this arithmetic describes', () => {
+    // The floor is transformed by CSS and the cube is projected here, so the two have to be the same
+    // camera stated twice. Any drift between them is the exact failure of the three earlier attempts.
+    expect(CAMERA_FLOOR_TRANSFORM).toMatch(/^perspective\(\d+px\) rotateX\(\d+deg\) rotateZ\(\d+deg\)$/);
+  });
+
+  test('reach is measured from the corners, which is exact for a projective map', () => {
+    // A projective map takes lines to lines, so the image of a rectangle is a quadrilateral and its
+    // extremes are its vertices. Sampling the boundary densely must therefore find nothing further out.
+    const far = 900;
+    const near = 400;
+    const reach = floorReach(far, near);
+
+    for (let i = 0; i <= 40; i += 1) {
+      const t = -far + ((far + near) * i) / 40;
+      for (const point of [
+        { x: t, y: -far },
+        { x: t, y: near },
+        { x: -far, y: t },
+        { x: near, y: t },
+      ]) {
+        const projected = projectPoint({ ...point, z: 0 });
+        expect(-projected.y).toBeLessThanOrEqual(reach.farRise + 1e-6);
+        expect(projected.y).toBeLessThanOrEqual(reach.nearDrop + 1e-6);
+        expect(Math.abs(projected.x)).toBeLessThanOrEqual(reach.halfWidth + 1e-6);
+      }
     }
   });
+});
 
-  test.each(VIEWPORTS)('%ix%i: the lattice reaches past every viewport edge', (width, height) => {
-    const shape = resolveGroundShape(width, height);
-    const originY = height * (GROUND_ORIGIN_Y_PCT / 100);
-
-    // The matrix maps an w-by-w square to a rhombus 2*cos30*w wide and w tall, measured from the
-    // middle vertex the offset places on the mark's footprint.
-    const span = shape.axis * shape.cellPx;
-    expect(COS30 * span).toBeGreaterThanOrEqual(Math.max(width / 2, width - width / 2));
-    expect(span / 2).toBeGreaterThanOrEqual(Math.max(originY, height - originY));
+describe('the cube stands on the floor', () => {
+  const mark = perspectiveMark(CUBE_EDGE_PX, {
+    stroke: 'S', faceFill: 'F', cellFill: 'C', occlusionFill: 'O',
   });
 
-  test('the axis count is even, so a vertex and not a cell centre sits on the footprint', () => {
-    for (const [width, height] of VIEWPORTS) {
-      expect(resolveGroundShape(width, height).axis % 2).toBe(0);
-    }
+  test('a floor cell is exactly the cube base', () => {
+    // Not "about the same size". The cube's footprint has to be one cell of the floor, because that is
+    // what makes the lines leaving its base corners the floor's own lines rather than a near miss.
+    expect(GROUND_SHAPE.cellPx).toBe(CUBE_EDGE_PX);
   });
 
-  test('the registering offset is half the lattice, in pre-transform units', () => {
-    const shape = resolveGroundShape(1920, 1080);
-    expect(shape.offsetPx).toBeCloseTo((shape.axis / 2) * shape.cellPx, 6);
-    expect(groundInlineStyle(shape).transform).toContain(`translate(${-shape.offsetPx}px`);
+  test('the origin is a cell centre, not a cell corner', () => {
+    // The cube's base is centred on the origin, so a corner there would leave it straddling four cells.
+    const offsetInCells = GROUND_SHAPE.offsetPx / GROUND_SHAPE.cellPx;
+    expect(offsetInCells % 1).toBe(0.5);
+    expect(Math.floor(offsetInCells)).toBe(GROUND_SHAPE.originCell);
+  });
+
+  test('the projected base is asymmetric, which is what proves it is not still isometric', () => {
+    const half = CUBE_EDGE_PX / 2;
+    const nearCorner = projectPoint({ x: half, y: half, z: 0 });
+    const farCorner = projectPoint({ x: -half, y: -half, z: 0 });
+
+    // The near corner reaches further from the origin than the far corner. Under a parallel projection
+    // these two distances are equal, and that equality is what made the old floor read as tilting up.
+    expect(nearCorner.y).toBeGreaterThan(-farCorner.y);
+    // Sideways it stays symmetric, because the spin is 45 degrees.
+    expect(projectPoint({ x: half, y: -half, z: 0 }).x)
+      .toBeCloseTo(-projectPoint({ x: -half, y: half, z: 0 }).x, 6);
+  });
+
+  test('the box is measured from the projection, and the base centre sits well off its middle', () => {
+    expect(mark.originFraction.x).toBeCloseTo(0.5, 3);
+    // Most of the cube is above its own feet, so anchoring on the box middle or on its bottom edge,
+    // which is what two earlier attempts did, leaves it hovering or buried.
+    expect(mark.originFraction.y).toBeGreaterThan(0.7);
+    expect(mark.originFraction.y).toBeLessThan(0.9);
+    expect(mark.originTranslate).toBe(
+      `${-Math.round(mark.originFraction.x * 10000) / 100}% ${-Math.round(mark.originFraction.y * 10000) / 100}%`,
+    );
+  });
+
+  test('the stylesheet places the mark by that same measurement', () => {
+    // The cube is drawn by one module and positioned by another. If the placement were restated by hand
+    // the two would drift, so the stylesheet reads it from the projection.
+    expect(splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true }))
+      .toContain(`translate: ${markBox(CUBE_EDGE_PX).originTranslate};`);
+  });
+
+  test('only the three faces the camera can see are drawn, and the occluder is first', () => {
+    // Two walls, their lattices, the open top's outline, the glyph, and three occluding fills.
+    const paths = mark.markup.match(/<path /g) ?? [];
+    expect(paths).toHaveLength(3 + 2 + 32 + 1 + 1);
+
+    // The occluding fills come first or the translucent faces would be painted under them and the floor
+    // would show straight through the cube, which is what it did before.
+    const firstFace = mark.markup.indexOf('fill="F"');
+    expect(mark.markup.indexOf('fill="O"')).toBeLessThan(firstFace);
+    expect(mark.markup.lastIndexOf('fill="O"')).toBeLessThan(firstFace);
+  });
+
+  test('the hidden faces are absent, not merely covered', () => {
+    // A face behind the cube painted after the occluder shows the back of the cube through its front.
+    const wallFills = mark.markup.match(/fill="F"/g) ?? [];
+    expect(wallFills).toHaveLength(2);
+  });
+
+  test('the glyph carries the class the stylesheet animates', () => {
+    expect(mark.markup).toContain('class="pi-splash-glyph"');
+    expect(splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true })).toContain('.pi-splash-glyph {');
+  });
+});
+
+describe('the floor covers the window it has to cover', () => {
+  // A share of height above the origin, and the rest below, at each window size.
+  const VIEWPORTS: ReadonlyArray<readonly [number, number]> = [
+    [390, 700],
+    [1280, 800],
+    [1440, 900],
+    [1920, 1080],
+  ];
+
+  test.each(VIEWPORTS)('%ix%i: the floor reaches past the sides and the bottom', (width, height) => {
+    const originY = height * 0.56;
+    expect(GROUND_REACH.halfWidth).toBeGreaterThanOrEqual(width / 2);
+    expect(GROUND_REACH.nearDrop).toBeGreaterThanOrEqual(height - originY);
+  });
+
+  test('the top is a horizon rather than an edge, and it is faded before it arrives', () => {
+    // Reaching the top of a tall window is not merely expensive, it is impossible: receding points crowd
+    // toward the horizon. So the floor is faded out before its far edge and the edge never shows.
+    expect(GROUND_EDGE_RISE_PX).toBeLessThan(HORIZON_RISE_PX);
+    expect(GROUND_FADE_RISE_PX).toBeLessThan(GROUND_EDGE_RISE_PX);
+
+    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
+    expect(css).toContain(`rgba(0,0,0,0) calc(56% - ${Math.round(GROUND_EDGE_RISE_PX)}px)`);
+    expect(css).toContain(`rgba(0,0,0,1) calc(56% - ${Math.round(GROUND_FADE_RISE_PX)}px)`);
+  });
+
+  test('the near corner stays in front of the camera', () => {
+    // Past the camera plane the projection divides by zero and the image turns inside out. This is the
+    // ceiling on how far the floor may extend toward the viewer, and it is easy to cross by accident.
+    const ahead = (GROUND_SHAPE.axis - GROUND_SHAPE.originCell - 0.5) * GROUND_SHAPE.cellPx;
+    expect(cameraDepth({ x: ahead, y: ahead, z: 0 })).toBeLessThan(1600);
+    expect(GROUND_REACH.nearDrop).toBeGreaterThan(0);
+  });
+
+  test('the element count stays within what the isometric version already cost', () => {
+    // Every cell animates during the exit, and the splash runs when the machine is busiest.
+    expect(GROUND_SHAPE.axis ** 2).toBeLessThanOrEqual(576);
   });
 });
 
 describe('exit choreography', () => {
-  const shape = resolveGroundShape(1440, 900);
-
-  test('boot starts at the mark and ends at the far corner', () => {
-    const cells = buildSplashCells(shape, 'boot', 'forward', false);
-    const middle = Math.floor(shape.axis / 2);
-    const atMark = cells.find((cell) => cell.key === `${middle}-${middle}`);
+  test('boot starts at the cell the cube stands on and ends at the far corner', () => {
+    const cells = buildSplashCells('boot', 'forward', false);
+    const { originCell, axis } = GROUND_SHAPE;
+    const atCube = cells.find((cell) => cell.key === `${originCell}-${originCell}`);
     const delays = cells.map((cell) => cell.delayMs);
 
-    // The cell on the footprint leaves in the first wave; nothing leaves before it.
-    expect(atMark?.delayMs).toBe(Math.min(...delays));
-    expect(Math.max(...delays)).toBeGreaterThan(0);
+    expect(atCube?.delayMs).toBe(0);
+    expect(Math.min(...delays)).toBe(0);
+    // The furthest cell is the one diagonally behind the cube, not a corner of a grid it sits in the
+    // middle of, because it does not sit in the middle of it.
+    const furthest = cells.find((cell) => cell.key === '0-0');
+    expect(furthest?.delayMs).toBe(Math.max(...delays));
+    expect(cells.find((cell) => cell.key === `${axis - 1}-${axis - 1}`)?.delayMs)
+      .toBeLessThan(furthest?.delayMs as number);
   });
 
   test('switch reverses with the direction', () => {
-    const forward = buildSplashCells(shape, 'switch', 'forward', false);
-    const backward = buildSplashCells(shape, 'switch', 'backward', false);
+    const forward = buildSplashCells('switch', 'forward', false);
+    const backward = buildSplashCells('switch', 'backward', false);
 
-    const firstColumn = (cells: typeof forward) =>
-      cells.filter((cell) => cell.key.endsWith('-0')).map((cell) => cell.delayMs);
-    const lastColumn = (cells: typeof forward) =>
-      cells.filter((cell) => cell.key.endsWith(`-${shape.axis - 1}`)).map((cell) => cell.delayMs);
+    const column = (cells: typeof forward, index: number): number[] =>
+      cells.filter((cell) => cell.key.endsWith(`-${index}`)).map((cell) => cell.delayMs);
+    const last = GROUND_SHAPE.axis - 1;
 
-    // Forward leaves the first column earliest; backward leaves the last column earliest.
-    expect(Math.min(...firstColumn(forward))).toBeLessThan(Math.min(...lastColumn(forward)));
-    expect(Math.min(...lastColumn(backward))).toBeLessThan(Math.min(...firstColumn(backward)));
+    expect(Math.min(...column(forward, 0))).toBeLessThan(Math.min(...column(forward, last)));
+    expect(Math.min(...column(backward, last))).toBeLessThan(Math.min(...column(backward, 0)));
   });
 
   test('every delay stays within the budget the exit duration is built from', () => {
     for (const mode of ['boot', 'switch'] as const) {
-      for (const cell of buildSplashCells(shape, mode, 'forward', false)) {
+      for (const cell of buildSplashCells(mode, 'forward', false)) {
         expect(cell.delayMs).toBeGreaterThanOrEqual(0);
         expect(cell.delayMs).toBeLessThanOrEqual(520);
       }
@@ -124,14 +275,146 @@ describe('exit choreography', () => {
   });
 
   test('breathing is opt-in and sparse', () => {
-    const none = buildSplashCells(shape, 'boot', 'forward', false);
+    const none = buildSplashCells('boot', 'forward', false);
     expect(none.every((cell) => cell.breatheDelayMs === null)).toBe(true);
 
     // A deterministic source, so the share is asserted rather than sampled.
-    const always = buildSplashCells(shape, 'boot', 'forward', true, () => 0);
+    const always = buildSplashCells('boot', 'forward', true, () => 0);
     expect(always.every((cell) => cell.breatheDelayMs === 0)).toBe(true);
 
-    const never = buildSplashCells(shape, 'boot', 'forward', true, () => 0.99);
+    const never = buildSplashCells('boot', 'forward', true, () => 0.99);
     expect(never.every((cell) => cell.breatheDelayMs === null)).toBe(true);
+  });
+});
+
+/**
+ * Four surfaces paint this splash: the web shell, the mini-chat window, the VS Code webview, and the React
+ * component. They differ in what they show and where their colours come from, and those differences are
+ * deliberate. What must not differ is the camera and the exit contract, because a floor on a different
+ * camera stops meeting the cube, and a different exit attribute means the shared dismissal silently does
+ * nothing.
+ */
+describe('every splash host carries the same generated bytes', () => {
+  test('the web shell embeds the generated rules character for character', () => {
+    // Not a similarity check. Perspective rules are fiddly enough that an approximate copy is worse than
+    // none: it would look almost right and diverge silently.
+    expect(between(readWebShell(), ...CSS_SENTINELS))
+      .toBe(splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true }).trim());
+  });
+
+  test('the web shell embeds the projected cube character for character', () => {
+    expect(between(readWebShell(), ...MARK_SENTINELS))
+      .toBe(perspectiveMark(CUBE_EDGE_PX, PIARIUM_MARK_COLORS).svg);
+  });
+
+  test('the mini-chat window embeds the no-cube variant character for character', () => {
+    expect(between(readMiniChat(), ...CSS_SENTINELS))
+      .toBe(splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: false }).trim());
+  });
+
+  test('both pre-paint hosts embed the same generated floor script', () => {
+    const script = splashGroundScript(INITIAL_SPLASH_IDS.ground);
+    expect(between(readWebShell(), ...JS_SENTINELS)).toBe(script);
+    expect(between(readMiniChat(), ...JS_SENTINELS)).toBe(script);
+  });
+
+  test('the generated floor script carries one entry per cell', () => {
+    // The delays are baked rather than recomputed in the emitted string, because the delay pattern is what
+    // ties the floor's exit to the cube it radiates from and a second implementation of it would drift.
+    const script = splashGroundScript(INITIAL_SPLASH_IDS.ground);
+    const delays = /var delays=\[([^\]]+)\]/.exec(script)?.[1]?.split(',') ?? [];
+    const breathes = /var breathes=\[([^\]]+)\]/.exec(script)?.[1]?.split(',') ?? [];
+    expect(delays).toHaveLength(GROUND_SHAPE.axis ** 2);
+    expect(breathes).toHaveLength(GROUND_SHAPE.axis ** 2);
+    expect(script).toContain(`getElementById('${INITIAL_SPLASH_IDS.ground}')`);
+  });
+
+  test('the generated floor script is stable across calls', () => {
+    // It picks breathing cells at random, which would otherwise churn the embedded copies on every
+    // regeneration and fail the verbatim assertions for no reason.
+    expect(splashGroundScript('x')).toBe(splashGroundScript('x'));
+  });
+
+  test('the VS Code webview generates its rules and its cube instead of embedding them', () => {
+    // It builds its document as text at runtime, so it can call the generators. A copy here would mean
+    // the duplication grew rather than shrank.
+    const source = readWebview();
+    expect(source).toContain('splashPlaneCss(');
+    expect(source).toContain('perspectiveMark(');
+    expect(source).not.toContain(CSS_SENTINELS[0]);
+    expect(source).not.toContain('<svg');
+  });
+
+  test('the pre-paint hosts apply the camera through CSS, with no projection of their own', () => {
+    // The whole reason the floor is a flat grid under one transform: a host that had to project it would
+    // need the arithmetic inline, and that arithmetic is what has to agree with the cube.
+    for (const body of [readWebShell(), readMiniChat()]) {
+      expect(body).toContain(CAMERA_FLOOR_TRANSFORM);
+      expect(body).not.toContain('Math.cos');
+      expect(body).not.toContain('matrix(0.866');
+    }
+  });
+
+  const hosts: ReadonlyArray<{ name: string; read: () => string }> = [
+    { name: 'web shell', read: readWebShell },
+    { name: 'mini-chat window', read: readMiniChat },
+    { name: 'VS Code webview', read: readWebview },
+  ];
+
+  for (const host of hosts) {
+    test(`${host.name} tells the cover to leave through the shared attribute`, () => {
+      expect(host.read()).toContain(INITIAL_SPLASH_IDS.leavingAttribute);
+    });
+
+    test(`${host.name} nests the floor inside both fades`, () => {
+      // Screen-space vignette outside, horizon fade inside, floor innermost. Masking the floor itself is
+      // what cut the screen's corners first in an earlier attempt.
+      const body = host.read();
+      const clip = body.indexOf('pi-splash-ground-clip');
+      const horizon = body.indexOf('pi-splash-horizon');
+      const ground = body.indexOf('class="pi-splash-ground"');
+      expect(clip).toBeGreaterThan(-1);
+      expect(horizon).toBeGreaterThan(clip);
+      expect(ground).toBeGreaterThan(horizon);
+    });
+  }
+
+  test('the web shell keeps the ids the app reaches for', () => {
+    // `lib/splash.ts` can only address this markup through the DOM, so a rename here would stop every
+    // status message appearing instead of failing anywhere a reader would notice.
+    const html = readWebShell();
+    expect(html).toContain(`id="${INITIAL_SPLASH_IDS.root}"`);
+    expect(html).toContain(`id="${INITIAL_SPLASH_IDS.status}"`);
+    expect(html).toContain(`id="${INITIAL_SPLASH_IDS.ground}"`);
+  });
+
+  test('the status line is a sibling of the cube, not the element the cube lives in', () => {
+    // The regression this guards: two call sites used to assign textContent on the container, which
+    // deleted the cube's SVG and left a bare sentence on a coloured field.
+    const html = readWebShell();
+    expect(html.indexOf(`id="${INITIAL_SPLASH_IDS.status}"`))
+      .toBeGreaterThan(html.indexOf(MARK_SENTINELS[1]));
+  });
+
+  test('the mini-chat window deliberately carries no cube', () => {
+    // Its content renders the single Piarium cube in its empty state, so a cube here would show a second
+    // one for a moment before handing off.
+    const html = readMiniChat();
+    expect(html).not.toContain('pi-splash-mark');
+    expect(html).not.toContain(MARK_SENTINELS[0]);
+  });
+
+  test('reduced motion keeps the cover visible', () => {
+    // It must weaken the animation, not remove the cover: hiding it would put the unpainted first frame
+    // back, which is the problem the splash exists to solve.
+    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
+    expect(css).toContain('prefers-reduced-motion');
+    expect(css).not.toMatch(/prefers-reduced-motion[\s\S]*display:\s*none/);
+    expect(css).toContain('.pi-splash-glyph,');
+  });
+
+  test('the cover is opaque, since a transparent one hides nothing', () => {
+    expect(splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: false }))
+      .toContain(`background: ${PIARIUM_SPLASH_COLORS.background};`);
   });
 });

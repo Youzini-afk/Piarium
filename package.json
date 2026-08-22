@@ -84,6 +84,7 @@
     "mobile:ios": "bun run --cwd packages/mobile ios",
     "mobile:android": "bun run --cwd packages/mobile android",
     "mobile:prebuild": "bun run --cwd packages/mobile prebuild",
+    "splash:emit": "bun run scripts/splash/emit-splash.ts",
     "docs:validate": "node scripts/docs/validate-docs.mjs",
     "test:docs": "node --test scripts/docs/engineering-docs.test.mjs",
     "dead-code": "bunx knip@5.80.0 --no-exit-code --include files,exports,nsExports,types,nsTypes,enumMembers,duplicates",

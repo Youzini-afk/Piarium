@@ -1,40 +1,113 @@
-﻿import { LOGO_FOOTPRINT, LOGO_GROUND_TRANSFORM } from './piarium-logo-geometry';
+import { markBox } from './piarium-mark-perspective';
+import {
+  CAMERA_FLOOR_TRANSFORM,
+  floorReach,
+  HORIZON_RISE_PX,
+} from './piarium-splash-camera';
 
 /**
- * The splash ground: a lattice registered to the mark's own footprint.
+ * The splash floor: a grid put into the camera's floor plane, with the cube standing on one of its cells.
  *
- * Two earlier attempts failed for the same underlying reason, and the fix is geometric rather than
- * a matter of tuning.
+ * The floor and the mark agree because neither owns any geometry of its own. The floor receives the
+ * camera as a CSS transform, the mark is projected through the same camera into SVG, and a cell is
+ * exactly the cube's edge with the cube's base centred on one cell, so the cube's footprint *is* a floor
+ * cell and the lines leaving its base corners are the floor's own lines. Three earlier attempts each
+ * failed at that seam; there is no seam left to fail at.
  *
- * The first drew an isometric lattice, which was the right projection, but sized its cells from the
- * viewport and centred them on the viewport. So the lines had no relationship to the cube: the cube
- * was pasted onto an unrelated grid, and the pair read as a logo on wallpaper.
- *
- * The second replaced the projection with perspective, chasing a sense of depth. That made it worse
- * in the way that matters here. The cube is drawn isometrically, so its base edges are parallel lines
- * at ±30 degrees; a perspectival ground converges, and converging lines cannot stay parallel to those
- * edges. The lines then provably cannot emerge from the cube's base, whatever the tilt.
- *
- * So: isometric again, but registered. The cell edge equals the cube's base edge, and a lattice vertex
- * is placed on the cube's lowest vertex. The cube's base is then exactly one cell of the floor, and the
- * lines run outward from its four base corners because they are the same lines.
+ * The floor keeps the default flat `transform-style`, so its cells are rasterised once and mapped by a
+ * single projective transform. That is what makes perspective cost the same as the isometric version it
+ * replaces, rather than promoting several hundred cells into a 3D rendering context during startup, when
+ * the machine is already at its busiest.
  */
 
 export type PiariumSplashMode = 'boot' | 'switch';
 export type PiariumSplashDirection = 'forward' | 'backward';
 
-/** Rendered mark size. The cell edge is derived from this, so the two can never disagree. */
-const MARK_SIZE_DESKTOP = 168;
-const MARK_SIZE_COMPACT = 124;
+/**
+ * Cube edge in pixels, and therefore the floor's cell size, which is what registers the two.
+ *
+ * One value for every viewport, not a breakpoint pair. A floor cell is a size in the scene, so on a
+ * narrow viewport the right answer is fewer cells on screen rather than smaller ones — and a fixed edge
+ * is what lets the two hosts that cannot run the projection embed an exact cube instead of a resized
+ * approximation of one, since a perspective drawing does not survive being scaled.
+ */
+export const CUBE_EDGE_PX = 96;
 
-export const resolveMarkSize = (viewportWidth: number): number =>
-  (viewportWidth >= 768 ? MARK_SIZE_DESKTOP : MARK_SIZE_COMPACT);
+/**
+ * Cells behind the cube and in front of it, along each floor axis.
+ *
+ * Wildly asymmetric on purpose. Receding cells compress toward the horizon, so covering the screen above
+ * the origin takes many of them; approaching cells magnify, so a few cover everything below. Stretching
+ * the floor equally in both directions would push its near corner through the camera and invert it.
+ *
+ * `BEHIND` stops well short of the horizon, because the rows there are already about a tenth as tall on
+ * screen as the first one and hundreds more would buy nothing. The floor is faded out before that edge
+ * instead — see `GROUND_FADE_RISE_PX`.
+ *
+ * `AHEAD` has a hard ceiling near thirteen: past that the near corner passes the camera plane, the
+ * projection divides by zero and the image turns inside out. Nine leaves room and still puts the near
+ * corner well below any window's bottom edge.
+ *
+ * Together these cover roughly 2700 by 4600 CSS pixels of window at 576 cells, which is the same element
+ * count the isometric version reached at its largest.
+ */
+const GROUND_CELLS_BEHIND = 14;
+const GROUND_CELLS_AHEAD = 9;
 
-/** Where the mark stands, as a share of viewport height. Slightly low, to leave headroom above. */
-export const GROUND_ORIGIN_Y_PCT = 54;
+/** Cells per axis: the ones behind, the cube's own, and the ones in front. */
+const GROUND_AXIS = GROUND_CELLS_BEHIND + 1 + GROUND_CELLS_AHEAD;
+/** Floor-space extent from the origin, in each of the two directions. */
+const GROUND_BEHIND_PX = (GROUND_CELLS_BEHIND + 0.5) * CUBE_EDGE_PX;
+const GROUND_AHEAD_PX = (GROUND_CELLS_AHEAD + 0.5) * CUBE_EDGE_PX;
 
-const MIN_AXIS_CELLS = 8;
-const MAX_AXIS_CELLS = 24;
+/** Where the cube stands, as a share of viewport height. Low enough to leave the far floor room. */
+const GROUND_ORIGIN_Y_PCT = 56;
+
+export interface GroundShape {
+  /** Cells per axis. */
+  readonly axis: number;
+  /** Cell edge in pixels, equal to the cube's edge. */
+  readonly cellPx: number;
+  /** Zero-based row and column of the cell the cube stands on. */
+  readonly originCell: number;
+  /**
+   * Pre-transform offset that puts the cube's base centre on the floor's origin.
+   *
+   * Half a cell past a whole number of cells, because the cube's base is centred on the origin, so the
+   * origin has to be a cell's centre and not a corner. Anchoring on a corner instead is what made the
+   * cube straddle four cells in an earlier attempt.
+   */
+  readonly offsetPx: number;
+}
+
+/**
+ * The floor, fixed rather than measured.
+ *
+ * Nothing here depends on the viewport. The floor is deliberately larger than any window it has to
+ * cover, so resizing reveals a different part of the same grid instead of rebuilding it, and the two
+ * hosts that paint before any module is evaluated can embed the same numbers as the two that import
+ * them. `piarium-splash-lattice.test.ts` checks the coverage claim against the camera.
+ */
+export const GROUND_SHAPE: GroundShape = {
+  axis: GROUND_AXIS,
+  cellPx: CUBE_EDGE_PX,
+  originCell: GROUND_CELLS_BEHIND,
+  offsetPx: GROUND_BEHIND_PX,
+};
+
+/** How far the floor's extremes land from the origin on screen, under the shared camera. */
+export const GROUND_REACH = floorReach(GROUND_BEHIND_PX, GROUND_AHEAD_PX);
+
+/**
+ * Where the floor stops being drawn and where it starts fading into the background, both as screen pixels
+ * above the origin.
+ *
+ * The far edge is a real edge, and on a tall window it lands mid-screen, so it has to be faded rather
+ * than merely masked at the periphery. Fading over the outer half of the floor's depth puts the ramp
+ * exactly where the rows are compressing hardest, which is what a horizon looks like anyway.
+ */
+export const GROUND_EDGE_RISE_PX = GROUND_REACH.farRise;
+export const GROUND_FADE_RISE_PX = floorReach(GROUND_BEHIND_PX / 2, GROUND_AHEAD_PX).farRise;
 
 const CELL_EXIT_MS = 460;
 const MARK_EXIT_MS = 460;
@@ -50,49 +123,7 @@ export const SPLASH_REDUCED_EXIT_DURATION_MS = 260;
 const BREATHE_SHARE = 0.1;
 const BREATHE_SPREAD_MS = 2200;
 
-export interface GroundShape {
-  /** Cells per axis. Square, because the lattice has to reach equally far along both base axes. */
-  readonly axis: number;
-  /** Cell edge in pixels, equal to the cube's rendered base edge. */
-  readonly cellPx: number;
-  /** Pre-transform offset that puts a lattice vertex on the cube's lowest vertex. */
-  readonly offsetPx: number;
-}
-
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
-
-/**
- * Size the lattice and work out the offset that registers it with the mark.
- *
- * The isometric matrix maps a `w` by `w` square to a rhombus `2 * cos30 * w` wide and `w` tall. Placing
- * the lattice's middle vertex on the mark's base vertex therefore reaches `cos30 * w` horizontally and
- * `w / 2` vertically from that point, and the vertical reach is the binding constraint because the
- * origin sits below the viewport's middle. Solving for the axis count from the taller of the two
- * distances to an edge is what stops the lattice ending in view, which is how the first attempt failed.
- */
-export const resolveGroundShape = (
-  viewportWidth: number,
-  viewportHeight: number,
-  markSize: number = resolveMarkSize(viewportWidth),
-): GroundShape => {
-  const cellPx = markSize * LOGO_FOOTPRINT.edge;
-  const originY = viewportHeight * (GROUND_ORIGIN_Y_PCT / 100);
-  const reachX = Math.max(viewportWidth / 2, viewportWidth / 2);
-  const reachY = Math.max(originY, viewportHeight - originY);
-
-  // Half-extents of the projected rhombus are cos30 * axis * cell and axis * cell / 2.
-  const axisForWidth = reachX / (0.866 * cellPx);
-  const axisForHeight = (2 * reachY) / cellPx;
-  const axis = clamp(
-    Math.ceil(Math.max(axisForWidth, axisForHeight)),
-    MIN_AXIS_CELLS,
-    MAX_AXIS_CELLS,
-  );
-
-  // An even axis count puts a vertex, not a cell centre, at the middle of the lattice.
-  const evenAxis = axis % 2 === 0 ? axis : axis + 1;
-  return { axis: evenAxis, cellPx, offsetPx: (evenAxis / 2) * cellPx };
-};
 
 export interface SplashCell {
   readonly key: string;
@@ -103,33 +134,37 @@ export interface SplashCell {
 /**
  * Per-cell exit delay.
  *
- * `boot` radiates from the cell the mark stands on, so the floor comes apart outward from its feet.
- * Measured in lattice space, which because the lattice is sheared means the wavefront travels along the
- * cube's own base axes rather than as a screen-space circle.
+ * `boot` radiates from the cell the cube stands on, so the floor comes apart outward from its feet.
+ * Measured in floor space, so under perspective the wavefront races away toward the horizon rather than
+ * expanding as a flat circle on screen.
  *
- * `switch` sweeps along one base axis and flips with the direction, so switching back is visibly the
+ * `switch` sweeps along one floor axis and flips with the direction, so switching back is visibly the
  * reverse of switching forward. A slight cross-axis skew keeps the sweep from landing as one hard edge.
  */
 export const buildSplashCells = (
-  shape: GroundShape,
   mode: PiariumSplashMode,
   direction: PiariumSplashDirection,
   breathe: boolean,
   random: () => number = Math.random,
 ): SplashCell[] => {
+  const { axis, originCell } = GROUND_SHAPE;
   const cells: SplashCell[] = [];
-  const middle = (shape.axis - 1) / 2;
-  const maxRadius = Math.hypot(middle, middle) || 1;
+  // The cube does not stand in the middle of the grid, so the furthest cell from it is whichever corner
+  // is furthest — which is the one diagonally behind it.
+  const maxRadius = Math.hypot(
+    Math.max(originCell, axis - 1 - originCell),
+    Math.max(originCell, axis - 1 - originCell),
+  ) || 1;
   const skew = 0.22;
 
-  for (let row = 0; row < shape.axis; row += 1) {
-    for (let col = 0; col < shape.axis; col += 1) {
+  for (let row = 0; row < axis; row += 1) {
+    for (let col = 0; col < axis; col += 1) {
       let fraction: number;
       if (mode === 'boot') {
-        fraction = Math.hypot(col - middle, row - middle) / maxRadius;
+        fraction = Math.hypot(col - originCell, row - originCell) / maxRadius;
       } else {
-        const along = direction === 'forward' ? col : shape.axis - 1 - col;
-        fraction = (along + row * skew) / (shape.axis * (1 + skew));
+        const along = direction === 'forward' ? col : axis - 1 - col;
+        fraction = (along + row * skew) / (axis * (1 + skew));
       }
       cells.push({
         key: `${row}-${col}`,
@@ -145,21 +180,17 @@ export const buildSplashCells = (
 };
 
 /**
- * Inline geometry for the ground element.
+ * Geometry for the floor element.
  *
- * `transform-origin: 0 0` keeps the element's own origin pinned wherever it is positioned, and the
- * pre-matrix translate slides the lattice so its middle vertex is the point that lands there. Both have
- * to be inline because they depend on the measured viewport, which the shared stylesheet cannot know.
+ * `transform-origin: 0 0` pins the element's own origin wherever the stylesheet positions it, and the
+ * translate, applied before the camera, slides the grid so the cube's cell centre is the point that
+ * lands there.
  */
-export const groundInlineStyle = (shape: GroundShape): {
-  gridTemplateColumns: string;
-  gridTemplateRows: string;
-  transform: string;
-} => ({
-  gridTemplateColumns: `repeat(${shape.axis}, ${shape.cellPx}px)`,
-  gridTemplateRows: `repeat(${shape.axis}, ${shape.cellPx}px)`,
-  transform: `${LOGO_GROUND_TRANSFORM} translate(${-shape.offsetPx}px, ${-shape.offsetPx}px)`,
-});
+const GROUND_STYLE = {
+  gridTemplateColumns: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
+  gridTemplateRows: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
+  transform: `${CAMERA_FLOOR_TRANSFORM} translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
+} as const;
 
 export interface SplashPlaneColors {
   /**
@@ -167,21 +198,53 @@ export interface SplashPlaneColors {
    * be transparent, and each host's background comes from a different source.
    */
   readonly background: string;
-  /** Lattice line colour. Strong enough to read: an early attempt used 12% and vanished. */
+  /** Floor line colour. Strong enough to read: an early attempt used 12% and vanished. */
   readonly line: string;
   /** Fill a breathing cell reaches at the top of its pulse. */
   readonly cell: string;
-  /** Status line colour. Omitted by hosts with no status line. */
-  readonly status?: string;
+  /**
+   * Ink for the mark and the status line. Omitted by hosts that draw no mark, which is also the only
+   * case where it goes unused.
+   */
+  readonly stroke?: string;
 }
+
+/**
+ * Piarium's own splash palette.
+ *
+ * Every colour is a `--splash-*` custom property that `packages/web/index.html` sets before paint from
+ * the persisted theme. Reading the live theme instead would let the mark follow a theme change that the
+ * floor and the background could not, and a cover that is half one palette and half another looks broken
+ * in a way that a cover uniformly in one palette does not.
+ *
+ * Shared rather than restated per host so the two that embed generated output can be compared against
+ * it exactly.
+ */
+export const PIARIUM_SPLASH_COLORS: SplashPlaneColors = {
+  background: 'var(--splash-background, var(--color-background, #151313))',
+  line: 'var(--splash-lattice-line, rgba(255, 255, 255, 0.22))',
+  // Kept faint. At the wash strength the faces use, a pulsing cell reads as a random bright tile rather
+  // than as the floor breathing.
+  cell: 'var(--splash-cell-pulse, rgba(255, 255, 255, 0.07))',
+  stroke: 'var(--splash-stroke)',
+};
+
+/** The same palette, as the projected mark needs it. */
+export const PIARIUM_MARK_COLORS = {
+  stroke: 'var(--splash-stroke)',
+  faceFill: 'var(--splash-face-fill)',
+  cellFill: 'var(--splash-cell-fill)',
+  // The faces are translucent washes, so the floor would otherwise show straight through the cube.
+  occlusionFill: PIARIUM_SPLASH_COLORS.background,
+} as const;
 
 /**
  * The splash's visual rules, as one string.
  *
  * Four surfaces paint a splash and only two of them can import anything, so the rules would otherwise
  * exist in four hand-maintained copies. The React component and the VS Code webview call this;
- * `index.html` and `mini-chat.html` embed its output verbatim, and `piarium-logo-geometry.test.ts`
- * asserts those copies still equal it exactly.
+ * `index.html` and `mini-chat.html` embed its output verbatim, and the geometry tests assert those copies
+ * still equal it exactly.
  *
  * Emitted without leading indentation so an embedded copy can match character for character.
  */
@@ -189,28 +252,42 @@ export const splashPlaneCss = (
   colors: SplashPlaneColors,
   options: { withMark: boolean },
 ): string => {
-  const vertexY = (LOGO_FOOTPRINT.vertex.y * 100).toFixed(1);
+  const ink = colors.stroke ?? colors.line;
 
   const markRules = options.withMark
     ? `
-/* The mark stands on the lattice, so its lowest vertex has to land on the lattice origin. That vertex
-   is at ${vertexY}% of the mark's own box height, not at its centre or its bottom edge, so the box is
-   pulled up by exactly that much. Matching the cell edge to the base edge then makes the cube's
-   footprint one cell of the floor, and the lines leaving its base corners are the floor's own lines. */
+/* The mark is placed by the cube's base centre, not by its box. Under perspective the projected cube is
+   asymmetric — the near corner grows, the far corner shrinks — so the base centre is nowhere near the
+   box's middle, and anchoring on the box or on its bottom edge is what left the cube hovering in three
+   earlier attempts. The translate is measured from the projection, and it is a constant only because the
+   cube's edge is. */
 .pi-splash-mark {
 position: absolute;
 left: 50%;
 top: ${GROUND_ORIGIN_Y_PCT}%;
-translate: -50% -${vertexY}%;
+translate: ${markBox(CUBE_EDGE_PX).originTranslate};
+display: block;
+line-height: 0;
+}
+/* The translate is a share of this box, so the box has to be exactly the drawing. An svg is inline by
+   default, which puts it on a baseline with descender space under it, and the cube would then stand that
+   many pixels above the floor for no visible reason. */
+.pi-splash-mark svg {
 display: block;
 }
-/* No contact shadow, glow, or reflection. Earlier versions had all three, added to compensate for a
-   cube that did not sit anywhere; registered to the lattice it needs none of them, and each one read
-   as an unexplained smudge under the mark rather than as contact. */
+/* The glyph on the open top, breathing. The rest of the cube holds still: the mark is the one thing the
+   eye is meant to settle on, and animating the faces as well made it restless. */
+.pi-splash-glyph {
+animation: pi-splash-glyph-pulse 1.8s ease-in-out infinite;
+}
+@keyframes pi-splash-glyph-pulse {
+0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+50% { filter: drop-shadow(0 0 4px ${ink}); }
+}
 .pi-splash-status {
 position: absolute;
 left: 50%;
-top: calc(${GROUND_ORIGIN_Y_PCT}% + 44px);
+top: calc(${GROUND_ORIGIN_Y_PCT}% + 52px);
 translate: -50% 0;
 min-height: 1rem;
 max-width: 32ch;
@@ -219,7 +296,7 @@ font-weight: 600;
 letter-spacing: 0.11em;
 text-transform: uppercase;
 text-align: center;
-color: ${colors.status ?? colors.line};
+color: ${ink};
 opacity: 0;
 animation: pi-splash-status-in 480ms 700ms ease both;
 }
@@ -237,6 +314,7 @@ to { opacity: 0; }
     ? `,
 .pi-splash[data-leaving='true'] .pi-splash-mark,
 .pi-splash[data-leaving='true'] .pi-splash-status,
+.pi-splash-glyph,
 .pi-splash-status`
     : '';
 
@@ -255,11 +333,10 @@ background: ${colors.background};
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
-/* The falloff lives on an untransformed wrapper, not on the lattice.
-   A mask applies in its own element's coordinate space, so masking the lattice directly meant a local
-   circle became a rhombus once the isometric matrix had run: the screen corners were cut first and the
-   floor visibly stopped short of them. Here the wrapper is unrotated, so the falloff is in screen
-   space and reaches every corner. */
+/* Two fades, on two untransformed wrappers, because they answer two different questions and a mask
+   applies in its own element's coordinate space. Masking the floor itself meant a local circle came out
+   a sheared ellipse once the camera had run, and the screen's corners were cut first: the floor visibly
+   stopped short of them. Nesting instead multiplies the two alphas without needing mask-composite. */
 .pi-splash-ground-clip {
 position: absolute;
 inset: 0;
@@ -267,21 +344,35 @@ overflow: hidden;
 -webkit-mask-image: radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
 mask-image: radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
 }
-/* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
-   registering offset arrive inline, because both depend on the measured viewport. */
+/* The horizon. Receding floor points crowd toward a line ${Math.round(HORIZON_RISE_PX)}px above the
+   origin and never reach it, so a floor drawn to any finite depth always ends somewhere, and on a tall
+   window that end lands mid-screen where the peripheral fade cannot reach it. Anchoring the ramp to the
+   origin's own percentage keeps it in place at every window size. */
+.pi-splash-horizon {
+position: absolute;
+inset: 0;
+overflow: hidden;
+-webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_EDGE_RISE_PX)}px), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_FADE_RISE_PX)}px));
+mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_EDGE_RISE_PX)}px), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_FADE_RISE_PX)}px));
+}
+/* Flat transform style on purpose: the cells are rasterised once and mapped by a single projective
+   transform, rather than each becoming a participant in a 3D rendering context. */
 .pi-splash-ground {
 position: absolute;
 left: 50%;
 top: ${GROUND_ORIGIN_Y_PCT}%;
 display: grid;
 transform-origin: 0 0;
+grid-template-columns: ${GROUND_STYLE.gridTemplateColumns};
+grid-template-rows: ${GROUND_STYLE.gridTemplateRows};
+transform: ${GROUND_STYLE.transform};
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
 box-shadow: inset -1px -1px 0 ${colors.line};
 }
-/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears
-   when there is genuinely something to wait for. */
+/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
+   there is genuinely something to wait for. */
 .pi-splash-cell[data-breathe='true'] {
 animation: pi-splash-breathe 2.8s ease-in-out infinite;
 animation-delay: calc(1.2s + var(--pi-breathe-delay));
@@ -295,8 +386,8 @@ animation-delay: calc(1.2s + var(--pi-breathe-delay));
 animation: pi-splash-cell-out ${CELL_EXIT_MS}ms cubic-bezier(0.32, 0, 0.24, 1) both;
 animation-delay: var(--pi-cell-delay);
 }
-/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering
-   tiles rather than simply dimming. */
+/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering tiles
+   rather than simply dimming. */
 @keyframes pi-splash-cell-out {
 to { opacity: 0; transform: scale(0.62); }
 }
@@ -313,4 +404,51 @@ animation: none;
 .pi-splash[data-leaving='true'] { opacity: 0; }
 }
 `;
+};
+
+/**
+ * A deterministic stand-in for `Math.random`, so the emitted pre-paint script is stable.
+ *
+ * Regenerating the embedded copies has to produce the same bytes or every regeneration would show up as
+ * a diff and the verbatim-copy tests would fail for no reason. A plain multiplicative generator is
+ * enough: the only thing riding on it is which tenth of the cells breathe.
+ */
+const stableRandom = (): (() => number) => {
+  let state = 0x2f6e2b1;
+  return () => {
+    state = (state * 48271) % 0x7fffffff;
+    return state / 0x7fffffff;
+  };
+};
+
+/**
+ * The pre-paint script that fills the floor, for hosts that build their document as text.
+ *
+ * `index.html` and `mini-chat.html` embed this verbatim and the geometry tests assert the copies still
+ * match. The cell attributes are baked from `buildSplashCells` rather than recomputed in the emitted
+ * script: the delay pattern is the one thing that visibly ties the floor's exit to the cube it radiates
+ * from, and a second implementation of it in a string is exactly how that drifts.
+ *
+ * The cells are emitted by a script rather than as markup because five hundred spans of literal HTML in
+ * two files is a worse thing to maintain than one generated line, and the script is synchronous in
+ * `body`, so the floor is still there for the first paint.
+ */
+export const splashGroundScript = (elementId: string): string => {
+  const cells = buildSplashCells('boot', 'forward', true, stableRandom());
+  const delays = cells.map((cell) => cell.delayMs).join(',');
+  const breathes = cells.map((cell) => cell.breatheDelayMs ?? -1).join(',');
+
+  return `(function(){
+var ground=document.getElementById('${elementId}');
+if(!ground)return;
+var delays=[${delays}];
+var breathes=[${breathes}];
+var buffer='';
+for(var i=0;i<delays.length;i++){
+var style='--pi-cell-delay:'+delays[i]+'ms';
+if(breathes[i]>=0)style+=';--pi-breathe-delay:'+breathes[i]+'ms';
+buffer+='<span class="pi-splash-cell" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
+}
+ground.innerHTML=buffer;
+})();`;
 };

@@ -9,7 +9,6 @@ import {
   LOGO_MARK_SCALE,
   LOGO_RIGHT_FACE_CELLS,
   LOGO_RIGHT_FACE_PATH,
-  LOGO_SILHOUETTE_PATH,
   LOGO_TOP_FACE_PATH,
   LOGO_VIEWBOX,
   leftFaceCellOpacity,
@@ -26,14 +25,6 @@ interface PiariumLogoProps {
    * surrounding element already names the mark, as the splash does.
    */
   decorative?: boolean;
-  /**
-   * Fills the cube's outline before its faces are drawn, so it hides whatever is behind it.
-   *
-   * The faces are translucent washes, which reads correctly on a plain surface and breaks when the
-   * mark stands on something drawn: the splash floor showed straight through the cube. Callers pass
-   * the colour the cube should occlude with, normally the surface it sits on.
-   */
-  occlusionFill?: string;
 }
 
 export const PiariumLogo: React.FC<PiariumLogoProps> = ({
@@ -42,7 +33,6 @@ export const PiariumLogo: React.FC<PiariumLogoProps> = ({
   height = 70,
   isAnimated = false,
   decorative = false,
-  occlusionFill,
 }) => {
   const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
@@ -121,8 +111,6 @@ export const PiariumLogo: React.FC<PiariumLogoProps> = ({
       {isAnimated ? (
         <style>{`@keyframes piarium-logo-glow{0%,100%{filter:drop-shadow(0 0 0 transparent)}50%{filter:drop-shadow(0 0 4px var(--piarium-glow-color))}}.piarium-logo-glow{animation:piarium-logo-glow 1.8s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.piarium-logo-glow{animation:none}}`}</style>
       ) : null}
-      {/* Occluder, drawn first so the faces keep their translucent shading on top of it. */}
-      {occlusionFill ? <path d={LOGO_SILHOUETTE_PATH} fill={occlusionFill} /> : null}
 
       {/* Left face - base fill */}
       <path

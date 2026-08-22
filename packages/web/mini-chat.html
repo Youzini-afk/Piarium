@@ -47,9 +47,9 @@
     </script>
 
     <style>
-      /* Lattice-free plane, no cube. The mini-chat content renders its own (single) Piarium cube in
-         its empty state, so a cube here would briefly show a second, differently-sized one before
-         handing off. The plane carries the same identity without that collision.
+      /* The floor, with no cube on it. The mini-chat content renders its own single Piarium cube in its
+         empty state, so a cube here would briefly show a second one before handing off. The floor alone
+         carries the same identity without that collision.
 
          The rules below are a verbatim copy of splashPlaneCss() in
          packages/ui/src/components/ui/piarium-splash-lattice.ts, which the geometry test asserts
@@ -92,33 +92,46 @@ background: var(--splash-background, var(--color-background, #151313));
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
-/* The falloff lives on an untransformed wrapper, not on the lattice.
-   A mask applies in its own element's coordinate space, so masking the lattice directly meant a local
-   circle became a rhombus once the isometric matrix had run: the screen corners were cut first and the
-   floor visibly stopped short of them. Here the wrapper is unrotated, so the falloff is in screen
-   space and reaches every corner. */
+/* Two fades, on two untransformed wrappers, because they answer two different questions and a mask
+   applies in its own element's coordinate space. Masking the floor itself meant a local circle came out
+   a sheared ellipse once the camera had run, and the screen's corners were cut first: the floor visibly
+   stopped short of them. Nesting instead multiplies the two alphas without needing mask-composite. */
 .pi-splash-ground-clip {
 position: absolute;
 inset: 0;
 overflow: hidden;
--webkit-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
-mask-image: radial-gradient(circle at 50% 54%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+-webkit-mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
+mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.85) 45%, rgba(0,0,0,0.5) 75%, rgba(0,0,0,0.28) 100%);
 }
-/* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
-   registering offset arrive inline, because both depend on the measured viewport. */
+/* The horizon. Receding floor points crowd toward a line 780px above the
+   origin and never reach it, so a floor drawn to any finite depth always ends somewhere, and on a tall
+   window that end lands mid-screen where the peripheral fade cannot reach it. Anchoring the ramp to the
+   origin's own percentage keeps it in place at every window size. */
+.pi-splash-horizon {
+position: absolute;
+inset: 0;
+overflow: hidden;
+-webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 410px), rgba(0,0,0,1) calc(56% - 278px));
+mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 410px), rgba(0,0,0,1) calc(56% - 278px));
+}
+/* Flat transform style on purpose: the cells are rasterised once and mapped by a single projective
+   transform, rather than each becoming a participant in a 3D rendering context. */
 .pi-splash-ground {
 position: absolute;
 left: 50%;
-top: 54%;
+top: 56%;
 display: grid;
 transform-origin: 0 0;
+grid-template-columns: repeat(24, 96px);
+grid-template-rows: repeat(24, 96px);
+transform: perspective(1600px) rotateX(64deg) rotateZ(45deg) translate(-1392px, -1392px);
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
 box-shadow: inset -1px -1px 0 var(--splash-lattice-line, rgba(255, 255, 255, 0.22));
 }
-/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears
-   when there is genuinely something to wait for. */
+/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
+   there is genuinely something to wait for. */
 .pi-splash-cell[data-breathe='true'] {
 animation: pi-splash-breathe 2.8s ease-in-out infinite;
 animation-delay: calc(1.2s + var(--pi-breathe-delay));
@@ -132,8 +145,8 @@ animation-delay: calc(1.2s + var(--pi-breathe-delay));
 animation: pi-splash-cell-out 460ms cubic-bezier(0.32, 0, 0.24, 1) both;
 animation-delay: var(--pi-cell-delay);
 }
-/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering
-   tiles rather than simply dimming. */
+/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering tiles
+   rather than simply dimming. */
 @keyframes pi-splash-cell-out {
 to { opacity: 0; transform: scale(0.62); }
 }
@@ -149,68 +162,55 @@ animation: none;
 .pi-splash { transition: opacity 260ms ease; }
 .pi-splash[data-leaving='true'] { opacity: 0; }
 }
-/* SPLASH-CSS-END */
+      /* SPLASH-CSS-END */
     </style>
 
     <script type="module" src="/src/mini-chat-main.tsx"></script>
   </head>
   <body class="h-full bg-background text-foreground">
     <div id="root" class="h-full">
-      <!-- Plane backdrop until the mini-chat React app is ready (dismissed in
-           ElectronMiniChatApp through packages/ui/src/lib/splash.ts). No cube here on
-           purpose — the content renders the single Piarium cube itself. -->
+      <!-- The floor, until the mini-chat React app is ready (dismissed in ElectronMiniChatApp through
+           packages/ui/src/lib/splash.ts). No cube here on purpose: the content renders the single
+           Piarium cube itself. -->
       <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
         <div class="pi-splash-ground-clip" aria-hidden="true">
-          <div id="initial-loading-ground" class="pi-splash-ground"></div>
+          <div class="pi-splash-horizon">
+            <div id="initial-loading-ground" class="pi-splash-ground"></div>
+          </div>
         </div>
       </div>
     </div>
 
     <script>
-      // Builds the ground lattice, and holds the safety net that keeps a failed handoff from leaving the
-      // window covered. Mirrors resolveGroundShape/groundInlineStyle in
-      // packages/ui/src/components/ui/piarium-splash-lattice.ts. There is no mark here, so nothing to
-      // register against, but the cell size and axes are still the cube's so the two windows match.
-      (function () {
-        var COS30 = 0.866;
-        var ground = document.getElementById('initial-loading-ground');
+      // Fills the floor. Emitted by splashGroundScript() in
+      // packages/ui/src/components/ui/piarium-splash-lattice.ts and asserted by the geometry test, so
+      // change that function rather than this block. There is no cube in this window, but the floor is
+      // the same floor, so the two windows read as the same place.
+      /* SPLASH-JS-BEGIN */
+(function(){
+var ground=document.getElementById('initial-loading-ground');
+if(!ground)return;
+var delays=[520,502,484,468,452,437,423,411,400,390,382,376,371,369,368,369,371,376,382,390,400,411,423,437,502,483,465,447,431,415,401,388,376,366,357,350,345,342,341,342,345,350,357,366,376,388,401,415,484,465,446,428,410,394,379,365,352,341,332,325,320,316,315,316,320,325,332,341,352,365,379,394,468,447,428,409,390,373,357,342,329,317,307,299,294,290,289,290,294,299,307,317,329,342,357,373,452,431,410,390,371,353,336,321,306,294,283,274,268,264,263,264,268,274,283,294,306,321,336,353,437,415,394,373,353,334,316,299,284,270,259,249,242,238,236,238,242,249,259,270,284,299,316,334,423,401,379,357,336,316,297,279,263,248,235,224,217,212,210,212,217,224,235,248,263,279,297,316,411,388,365,342,321,299,279,260,242,226,212,200,191,186,184,186,191,200,212,226,242,260,279,299,400,376,352,329,306,284,263,242,223,205,189,176,166,160,158,160,166,176,189,205,223,242,263,284,390,366,341,317,294,270,248,226,205,186,168,153,141,134,131,134,141,153,168,186,205,226,248,270,382,357,332,307,283,259,235,212,189,168,149,131,117,108,105,108,117,131,149,168,189,212,235,259,376,350,325,299,274,249,224,200,176,153,131,111,95,83,79,83,95,111,131,153,176,200,224,249,371,345,320,294,268,242,217,191,166,141,117,95,74,59,53,59,74,95,117,141,166,191,217,242,369,342,316,290,264,238,212,186,160,134,108,83,59,37,26,37,59,83,108,134,160,186,212,238,368,341,315,289,263,236,210,184,158,131,105,79,53,26,0,26,53,79,105,131,158,184,210,236,369,342,316,290,264,238,212,186,160,134,108,83,59,37,26,37,59,83,108,134,160,186,212,238,371,345,320,294,268,242,217,191,166,141,117,95,74,59,53,59,74,95,117,141,166,191,217,242,376,350,325,299,274,249,224,200,176,153,131,111,95,83,79,83,95,111,131,153,176,200,224,249,382,357,332,307,283,259,235,212,189,168,149,131,117,108,105,108,117,131,149,168,189,212,235,259,390,366,341,317,294,270,248,226,205,186,168,153,141,134,131,134,141,153,168,186,205,226,248,270,400,376,352,329,306,284,263,242,223,205,189,176,166,160,158,160,166,176,189,205,223,242,263,284,411,388,365,342,321,299,279,260,242,226,212,200,191,186,184,186,191,200,212,226,242,260,279,299,423,401,379,357,336,316,297,279,263,248,235,224,217,212,210,212,217,224,235,248,263,279,297,316,437,415,394,373,353,334,316,299,284,270,259,249,242,238,236,238,242,249,259,270,284,299,316,334];
+var breathes=[-1,-1,-1,-1,-1,2082,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,993,-1,-1,-1,-1,-1,-1,-1,982,-1,-1,-1,-1,-1,725,-1,-1,-1,-1,-1,-1,-1,1060,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1705,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1828,-1,-1,-1,-1,-1,-1,1764,-1,70,-1,55,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1699,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1626,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1035,-1,-1,-1,-1,1771,-1,-1,-1,1271,-1,-1,-1,-1,-1,-1,2180,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1671,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1912,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1587,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1056,-1,-1,-1,-1,-1,-1,-1,1266,-1,-1,-1,2150,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1309,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1999,-1,1916,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1375,-1,-1,-1,-1,-1,-1,-1,-1,583,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,717,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,708,-1,-1,-1,-1,-1,2165,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1743,2184,-1,-1,229,-1,-1,248,-1,-1,-1,-1,-1,-1,2115,173,-1,-1,155,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,95,-1,-1,1869,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1105,-1,-1,-1,1033,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1525,-1,637,-1,-1,-1,-1,-1,-1,57,-1,-1,-1,-1,-1,-1,-1,777,-1,154,-1,-1,1924,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1306,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,789,-1,-1,-1,-1,2094,-1,-1,-1,-1,-1,-1];
+var buffer='';
+for(var i=0;i<delays.length;i++){
+var style='--pi-cell-delay:'+delays[i]+'ms';
+if(breathes[i]>=0)style+=';--pi-breathe-delay:'+breathes[i]+'ms';
+buffer+='<span class="pi-splash-cell" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
+}
+ground.innerHTML=buffer;
+})();
+      /* SPLASH-JS-END */
+    </script>
 
-        if (ground) {
-          var mark = innerWidth >= 768 ? 168 : 124;
-          var cell = mark * 0.48;
-          var originY = innerHeight * 0.54;
-          var reachY = Math.max(originY, innerHeight - originY);
-          var axis = Math.ceil(Math.max(innerWidth / 2 / (COS30 * cell), (2 * reachY) / cell));
-          axis = Math.max(8, Math.min(24, axis));
-          if (axis % 2 !== 0) axis += 1;
-          var offset = (axis / 2) * cell;
-
-          ground.style.gridTemplateColumns = 'repeat(' + axis + ',' + cell + 'px)';
-          ground.style.gridTemplateRows = 'repeat(' + axis + ',' + cell + 'px)';
-          ground.style.transform = 'matrix(0.866, 0.5, -0.866, 0.5, 0, 0) translate('
-            + -offset + 'px,' + -offset + 'px)';
-
-          var middle = (axis - 1) / 2;
-          var maxRadius = Math.hypot(middle, middle) || 1;
-          var buffer = '';
-          for (var row = 0; row < axis; row++) {
-            for (var col = 0; col < axis; col++) {
-              var fraction = Math.hypot(col - middle, row - middle) / maxRadius;
-              buffer += '<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:'
-                + Math.round(fraction * 520) + 'ms"></span>';
-            }
-          }
-          ground.innerHTML = buffer;
-        }
-
-        // Safety net: never let the splash hang if the app fails to dismiss it.
-        setTimeout(function () {
-          var loading = document.getElementById('initial-loading');
-          if (!loading || loading.dataset.leaving === 'true') return;
-          loading.dataset.leaving = 'true';
-          setTimeout(function () { loading.remove(); }, 980);
-        }, 8000);
-      })();
+    <script>
+      // Safety net: never let the splash hang if the app fails to dismiss it.
+      setTimeout(function () {
+        var loading = document.getElementById('initial-loading');
+        if (!loading || loading.dataset.leaving === 'true') return;
+        loading.dataset.leaving = 'true';
+        setTimeout(function () { loading.remove(); }, 980);
+      }, 8000);
     </script>
   </body>
 </html>

@@ -12,6 +12,8 @@ import { SPLASH_EXIT_DURATION_MS } from '@/components/ui/piarium-splash-lattice'
 
 const SPLASH_ID = 'initial-loading';
 const STATUS_ID = 'initial-loading-status';
+/** The floor container the generated pre-paint script fills. Nothing in the app reads it after that. */
+const GROUND_ID = 'initial-loading-ground';
 
 /**
  * The splash is told to leave through the same attribute the React splash uses, so one stylesheet
@@ -72,5 +74,6 @@ export const dismissInitialSplash = (): void => {
 export const INITIAL_SPLASH_IDS = {
   root: SPLASH_ID,
   status: STATUS_ID,
+  ground: GROUND_ID,
   leavingAttribute: LEAVING_ATTRIBUTE,
 } as const;
