@@ -55,7 +55,10 @@ export const createDocumentAuthorityHarness = async (overrides = {}) => {
     },
     resource: (resourceId) => ({ workspaceId: identity.workspaceId, resourceId }),
     async cleanup() {
-      await fs.promises.rm(root, { recursive: true, force: true });
+      // Windows keeps a directory handle open until every child process that touched it has fully
+      // exited, so removal races with process teardown and fails with EBUSY. `force` only ignores
+      // a missing path, so ask for the retry backoff that covers a busy one.
+      await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     },
   };
 };
