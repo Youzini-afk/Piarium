@@ -2,7 +2,7 @@
 
 Status: Pi-native engine and composable workbench delivered; Windows release is the open boundary
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the

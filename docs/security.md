@@ -2,7 +2,7 @@
 
 Status: Pi-native host, desktop, recovery, and extension boundaries in place; release verification active
 
-Last updated: 2026-08-18
+Last updated: 2026-08-22
 
 ## Protected assets
 

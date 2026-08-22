@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
@@ -10,6 +10,21 @@ import { fileURLToPath } from "node:url";
 import { PIARIUM_PROTOCOL_VERSION } from "@piarium/protocol";
 
 const HOST_ENTRY = fileURLToPath(new URL("../dist/host-bootstrap.js", import.meta.url));
+
+// The host reports the version of the Pi SDK it actually resolved, which is the one this package
+// pins. Read it from the manifest rather than repeating the literal, so upgrading the runtime does
+// not mean hunting for copies of the number in tests.
+const PINNED_PI_VERSION = (() => {
+  const manifest = JSON.parse(readFileSync(
+    fileURLToPath(new URL("../package.json", import.meta.url)),
+    "utf8",
+  ));
+  const version = manifest.devDependencies?.["@earendil-works/pi-coding-agent"];
+  if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) {
+    throw new Error("pi-host must pin an exact Pi version");
+  }
+  return version;
+})();
 
 function withTimeout(promise, timeoutMs, message) {
   let timer;
@@ -45,13 +60,13 @@ async function materializeIncompletePiFixture(root) {
     JSON.stringify({
       name: "@earendil-works/pi-coding-agent",
       type: "module",
-      version: "0.84.1",
+      version: PINNED_PI_VERSION,
       exports: { ".": "./index.js" },
     }),
   );
   await writeFile(
     join(packageRoot, "index.js"),
-    `export const VERSION = "0.84.1";
+    `export const VERSION = "${PINNED_PI_VERSION}";
 export function getAgentDir() { return process.env.PI_CODING_AGENT_DIR ?? ""; }
 await import("@earendil-works/pi-ai");
 `,
@@ -207,7 +222,7 @@ test("external Pi package root starts the host and creates a session", async () 
         assert.equal(handshake.ok, true);
         assert.equal(handshake.result.runtime.source, "custom");
         assert.equal(handshake.result.runtime.packageRoot, packageRoot);
-        assert.equal(handshake.result.runtime.piVersion, "0.84.1");
+        assert.equal(handshake.result.runtime.piVersion, PINNED_PI_VERSION);
         assert.notEqual(handshake.result.runtime.source, "bundled");
 
         child.stdin.write(
