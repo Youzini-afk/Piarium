@@ -36,7 +36,7 @@ Completed and pushed community phases:
 
 | Phase | Commit | Result |
 | --- | --- | --- |
-| Compatibility baseline | `ea18cd9` | Current Pi 0.84.1 package-entry smoke evidence |
+| Compatibility baseline | `ea18cd9` | Package-entry smoke evidence on the then-bundled Pi 0.84.1 |
 | Native config synchronization | `8411985` | Revisioned drafts, external-change watches, dirty preservation |
 | pi-lens | `e55d998` | Native global/ancestor-project authorities and command observation |
 | permission-system | `d0fc118` | Scoped native JSONC policy adapter |
@@ -447,8 +447,9 @@ feat: integrate background tasks with Fleet
 
 Piarium now treats that declaration as upstream metadata rather than an adapter/recommendation
 blocker because the package entry point and exact `rtk` command registration were verified on the
-bundled Pi `0.84.1`. The adaptation consumes `npm:pi-rtk-optimizer` directly. It does not suppress
-the recorded peer evidence, pin an old Pi SDK, maintain a fork, or add a v0.80 compatibility branch.
+Pi bundled at the time (`0.84.1`). The adaptation consumes `npm:pi-rtk-optimizer` directly. It does
+not suppress the recorded peer evidence, pin an old Pi SDK, maintain a fork, or add a v0.80
+compatibility branch.
 
 The native adapter provides:
 
