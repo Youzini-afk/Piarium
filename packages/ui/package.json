@@ -9,6 +9,7 @@
     "dev": "tsc --noEmit --watch",
     "build": "tsc --noEmit",
     "type-check": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js"
   },
   "dependencies": {
@@ -117,6 +118,7 @@
     "tw-animate-css": "^1.3.8",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "vitest": "^4.1.4"
   }
 }

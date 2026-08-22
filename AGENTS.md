@@ -86,11 +86,13 @@ Use root/package `package.json` scripts as the command source of truth. The repo
 `1.3.14`. Run focused tests while iterating, workspace-wide checks for shared contracts, and
 `bun run dead-code` after adding/deleting/renaming source or changing exports/import shapes.
 
-Two coverage gaps are real and must not be mistaken for passing verification. `@piarium/ui` has no
-`test` script, so its test files are not collected by `bun run test:pi`; run them directly against a
-runner when changing that package. `packages/electron` `type-check` only runs `node --check` on its
-entry `.mjs` files and its `lint` is a no-op, so root `type-check`/`lint` prove nothing about the
-desktop shell; verify it with the Electron tests and a bundled or packaged smoke instead.
+Two coverage gaps are real and must not be mistaken for passing verification. `@piarium/ui` runs
+under Vitest and is collected by `bun run test:pi`, but `packages/ui/vitest.config.ts` excludes a
+named list of suites that cannot pass yet; treat that list as the remaining gap, keep each entry's
+recorded cause accurate, and shrink it rather than adding to it. `packages/electron` `type-check`
+only runs `node --check` on its entry `.mjs` files and its `lint` is a no-op, so root
+`type-check`/`lint` prove nothing about the desktop shell; verify it with the Electron tests and a
+bundled or packaged smoke instead.
 
 Each roadmap phase is independently tested, committed, and pushed after its acceptance checks pass.
 Preserve unrelated user changes and report exactly which runtime/build checks were and were not run.
