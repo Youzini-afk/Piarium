@@ -3,6 +3,25 @@
 All notable changes to Piarium are recorded here. The project is pre-1.0; the
 private runtime protocol and product surfaces still move together.
 
+## 0.5.0
+
+Piarium now includes an optional IDE Workbench alongside the original Agent Workspace.
+
+- Switch directly between Agent and IDE workbench profiles from the application header
+- Edit files in a multi-group CodeMirror workbench backed by revisioned document authority
+- Browse and search workspaces, use language services, and run, debug, or test projects without
+  leaving Piarium
+- Keep Agent conversations beside the editor with dedicated Sessions and Context views
+- Inspect MCP servers from a compact IDE toolbar panel, with full configuration still available
+  from Settings
+- Coordinate Agent file changes with dirty editor buffers instead of silently overwriting them
+- Extend workbench shells, views, editors, language services, tasks, debug adapters, and tests through
+  the Piarium extension platform
+- Use VS Code as a focused Piarium companion for chat, session switching, Settings, and sending files
+  or selections into the active Pi session
+- Faster cloud authentication startup and more reliable restoration of the selected workspace
+- Windows installers for x64 and ARM64
+
 ## 0.1.0
 
 First public source snapshot of the Pi-native workspace.
