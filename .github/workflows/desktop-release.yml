@@ -67,6 +67,12 @@ jobs:
         with:
           ref: ${{ inputs.release_ref }}
 
+      - name: Checkout current release automation
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .release-automation
+
       - name: Record packaged source
         id: source
         shell: bash
@@ -140,14 +146,14 @@ jobs:
           if [ "${{ matrix.architecture }}" = "arm64" ]; then
             manifest="packages/electron/dist/latest-linux-arm64.yml"
           fi
-          node packages/electron/scripts/verify-linux-appimage.mjs "$appimage"
+          node .release-automation/packages/electron/scripts/verify-linux-appimage.mjs "$appimage"
           node packages/electron/scripts/verify-update-manifest.mjs \
             "$manifest" "$appimage" "${{ steps.source.outputs.version }}"
           extract_root="$(mktemp -d)"
           trap 'rm -rf "$extract_root"' EXIT
           chmod +x "$appimage"
           (cd "$extract_root" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
-          xvfb-run --auto-servernum node packages/electron/scripts/smoke-desktop-unpacked.mjs \
+          xvfb-run --auto-servernum node .release-automation/packages/electron/scripts/smoke-desktop-unpacked.mjs \
             "$extract_root/squashfs-root/AppRun" --no-sandbox
 
       - name: Verify and smoke macOS application
@@ -163,13 +169,14 @@ jobs:
           file "$executable" | grep -q "$expected_arch"
           native_modules="$(find "$app/Contents/Resources/app.asar.unpacked" -type f -name '*.node')"
           test -n "$native_modules"
-          for required in better_sqlite3.node pty.node sherpa-onnx.node; do
+          printf '%s\n' "$native_modules" | grep -q "/better-sqlite3/prebuilds/darwin-${{ matrix.architecture }}.node$"
+          for required in pty.node sherpa-onnx.node; do
             printf '%s\n' "$native_modules" | grep -q "/$required$"
           done
           while IFS= read -r native_module; do
             file "$native_module" | grep -q "$expected_arch"
           done <<< "$native_modules"
-          node packages/electron/scripts/smoke-desktop-unpacked.mjs "$executable"
+          node .release-automation/packages/electron/scripts/smoke-desktop-unpacked.mjs "$executable"
 
       - name: Stage Windows release assets
         if: matrix.platform == 'windows'
@@ -225,6 +232,12 @@ jobs:
         with:
           ref: ${{ inputs.release_ref }}
 
+      - name: Checkout current release automation
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .release-automation
+
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -244,7 +257,7 @@ jobs:
             RUNNER_TEMP="$GITHUB_WORKSPACE/finalized" \
             GH_REPO="$GITHUB_REPOSITORY" \
             PIARIUM_VERSION="$version" \
-            node packages/electron/scripts/finalize-latest-yml.mjs
+            node .release-automation/packages/electron/scripts/finalize-latest-yml.mjs
 
           find artifacts -type f -name 'Piarium-*' -exec cp {} release-assets/ \;
           find artifacts -type f \( -name 'latest-linux.yml' -o -name 'latest-linux-arm64.yml' \) \

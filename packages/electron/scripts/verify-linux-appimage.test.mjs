@@ -20,7 +20,11 @@ const createPayload = () => {
     '[Desktop Entry]', 'Name=Piarium', 'Exec=AppRun --no-sandbox %U', 'Icon=piarium', 'StartupWMClass=piarium', '',
   ].join('\n'));
   writeElf(path.join(root, 'piarium'), 'x64');
-  for (const name of ['better_sqlite3.node', 'pty.node', 'sherpa-onnx.node']) {
+  writeElf(
+    path.join(root, 'resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/linux-x64.node'),
+    'x64',
+  );
+  for (const name of ['pty.node', 'sherpa-onnx.node']) {
     writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules', name), 'x64');
   }
   return root;
