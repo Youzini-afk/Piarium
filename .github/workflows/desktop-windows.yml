@@ -95,7 +95,7 @@ jobs:
           Copy-Item -LiteralPath 'packages/electron/dist/latest.yml' -Destination (Join-Path $assets $manifest)
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: piarium-windows-${{ matrix.architecture }}-${{ steps.source.outputs.sha }}
           if-no-files-found: error

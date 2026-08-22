@@ -60,7 +60,7 @@ jobs:
         run: bun run release:npm:package "$GITHUB_REF_NAME" "$RUNNER_TEMP/piarium-npm-release"
 
       - name: Preserve exact publish artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: piarium-npm-${{ github.sha }}
           if-no-files-found: error
