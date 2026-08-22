@@ -94,6 +94,9 @@ jobs:
           if [ -n "$unexpected" ]; then
             echo "::error::Unexpected changes outside the cloud runtime lockfile:"
             echo "$unexpected"
+            echo "--- diff ---"
+            git diff --stat -- . ':!scripts/cloud-runtime.bun.lock'
+            git diff -- . ':!scripts/cloud-runtime.bun.lock' | head -80
             exit 1
           fi
 
