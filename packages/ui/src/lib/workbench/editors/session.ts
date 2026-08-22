@@ -1,6 +1,7 @@
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { restoreEditorWorkbenchSnapshot } from './snapshot';
 import {
+  activeEditorTab,
   closeEditorGroup,
   closeEditorTab,
   closeEditorTabsByResourcePrefix,
@@ -152,16 +153,22 @@ export const openWorkbenchEditor = (
   workspaceId: string,
   resourceId: string,
   providerId?: string,
-  options?: { preview?: boolean; newView?: boolean; groupId?: string },
+  options?: { preview?: boolean; newView?: boolean; groupId?: string; viewState?: EditorViewState },
 ): EditorWorkbenchState => {
   const next = openEditor(ensureEditorWorkbench(workspaceId), {
     resourceId,
     providerId: providerId ?? resolveEditorProviderId(resourceId),
+    // An explicit provider is authoritative; a resolved default stays open to re-resolution.
+    ...(providerId ? { providerPinned: true } : {}),
     ...(options?.preview === true ? { preview: true } : {}),
     ...(options?.newView === true ? { newView: true } : {}),
     ...(options?.groupId ? { groupId: options.groupId } : {}),
   }, createId);
-  return replaceEditorWorkbench(next);
+  const opened = replaceEditorWorkbench(next);
+  if (!options?.viewState) return opened;
+  const tab = activeEditorTab(opened);
+  if (!tab) return opened;
+  return replaceEditorWorkbench(updateEditorViewState(opened, tab.viewId, options.viewState));
 };
 
 export const closeWorkbenchEditor = (workspaceId: string, tabId: string): EditorWorkbenchState => (

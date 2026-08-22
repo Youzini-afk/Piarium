@@ -70,6 +70,60 @@ describe('editor groups', () => {
     state = closeEditorTab(state, firstTab);
     expect(listEditorGroups(state.tree)[0]?.tabs.map((tab) => tab.resourceId)).toEqual(['b.ts']);
   });
+
+  test('a pinned provider opens a distinct tab beside the ordinary view of the same resource', () => {
+    seq = 0;
+    let state = createEmptyEditorWorkbench('ws-1', ids);
+    state = openEditor(state, { resourceId: 'a.ts', providerId: 'text' }, ids);
+    state = openEditor(state, {
+      resourceId: 'a.ts',
+      providerId: BUILTIN_EDITOR_PROVIDER_IDS.gitDiff,
+      providerPinned: true,
+    }, ids);
+
+    const tabs = listEditorGroups(state.tree)[0]?.tabs ?? [];
+    expect(tabs.map((tab) => tab.providerId)).toEqual(['text', BUILTIN_EDITOR_PROVIDER_IDS.gitDiff]);
+    expect(tabs.map((tab) => tab.providerPinned)).toEqual([undefined, true]);
+  });
+
+  test('repeat opens reuse their own tab and never steal the other kind', () => {
+    seq = 0;
+    let state = createEmptyEditorWorkbench('ws-1', ids);
+    state = openEditor(state, { resourceId: 'a.ts', providerId: 'text' }, ids);
+    state = openEditor(state, {
+      resourceId: 'a.ts',
+      providerId: BUILTIN_EDITOR_PROVIDER_IDS.gitDiff,
+      providerPinned: true,
+    }, ids);
+
+    // A second diff request focuses the existing diff tab rather than adding another.
+    state = openEditor(state, {
+      resourceId: 'a.ts',
+      providerId: BUILTIN_EDITOR_PROVIDER_IDS.gitDiff,
+      providerPinned: true,
+    }, ids);
+    // Opening the file normally focuses the text tab, not the diff tab.
+    state = openEditor(state, { resourceId: 'a.ts', providerId: 'text' }, ids);
+
+    const group = listEditorGroups(state.tree)[0];
+    expect(group?.tabs).toHaveLength(2);
+    const active = group?.tabs.find((tab) => tab.tabId === group.activeTabId);
+    expect(active?.providerId).toBe('text');
+  });
+
+  test('a pinned tab survives a snapshot round trip', () => {
+    seq = 0;
+    const state = openEditor(createEmptyEditorWorkbench('ws-1', ids), {
+      resourceId: 'a.ts',
+      providerId: BUILTIN_EDITOR_PROVIDER_IDS.gitDiff,
+      providerPinned: true,
+    }, ids);
+    const restored = restoreEditorWorkbenchSnapshot(serializeEditorWorkbenchSnapshot(state), 'ws-1');
+    if (restored.status !== 'ready') throw new Error('expected a ready snapshot');
+    const tab = listEditorGroups(restored.state.tree)[0]?.tabs[0];
+    expect(tab?.providerId).toBe(BUILTIN_EDITOR_PROVIDER_IDS.gitDiff);
+    expect(tab?.providerPinned).toBe(true);
+  });
 });
 
 describe('editor snapshot restore', () => {
@@ -112,6 +166,18 @@ describe('editor providers', () => {
       status: 'selected',
       providerId: BUILTIN_EDITOR_PROVIDER_IDS.text,
     });
+  });
+
+  test('the Git diff provider is never selected by resolution', () => {
+    resetEditorProvidersForTests();
+    for (const resourceId of ['a.ts', 'notes.md', 'patch.diff', 'change.patch', 'noextension']) {
+      const selection = selectEditorProvider(resourceId);
+      const selected = selection.status === 'selected' ? selection.providerId : '';
+      expect(selected).not.toBe(BUILTIN_EDITOR_PROVIDER_IDS.gitDiff);
+      expect(selection.status === 'ambiguous' ? selection.providerIds : []).not.toContain(
+        BUILTIN_EDITOR_PROVIDER_IDS.gitDiff,
+      );
+    }
   });
 });
 

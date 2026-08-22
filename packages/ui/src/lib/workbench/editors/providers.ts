@@ -70,6 +70,14 @@ export const BUILTIN_EDITOR_PROVIDERS: EditorProviderContribution[] = [
     priority: 20,
   },
   {
+    // Declares no languages and no fallback, so `matches` never returns true and resolution never
+    // selects it. Reachable only through an explicit, pinned provider request.
+    id: BUILTIN_EDITOR_PROVIDER_IDS.gitDiff,
+    extensionId: 'piarium.builtin.editors',
+    enabled: true,
+    priority: 0,
+  },
+  {
     id: BUILTIN_EDITOR_PROVIDER_IDS.text,
     extensionId: 'piarium.builtin.editors',
     enabled: true,

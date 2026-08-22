@@ -1,4 +1,6 @@
 export type EditorViewState = {
+  /** Which Git revision the diff viewer compares against, for diff-provider tabs. */
+  diffScope?: 'working' | 'staged';
   cursorLine?: number;
   cursorColumn?: number;
   scrollTop?: number;
@@ -18,6 +20,12 @@ export type EditorTab = {
   preview: boolean;
   pinned: boolean;
   providerId: string;
+  /**
+   * The caller chose this provider explicitly, so provider resolution must not replace it.
+   * Without this the host re-resolves on every render and an explicitly requested provider,
+   * such as the Git diff viewer, is silently overridden by the resource's default.
+   */
+  providerPinned?: boolean;
   viewState: EditorViewState;
 };
 
@@ -71,6 +79,11 @@ export const BUILTIN_EDITOR_PROVIDER_IDS = {
   image: 'piarium.builtin.image',
   pdf: 'piarium.builtin.pdf',
   diff: 'piarium.builtin.diff',
+  /**
+   * Git working-tree/staged diff for a tracked file. Declares no languages and is never a
+   * fallback, so resolution never selects it; callers request it explicitly with a pinned tab.
+   */
+  gitDiff: 'piarium.builtin.git-diff',
 } as const;
 
 export type BuiltinEditorProviderId = typeof BUILTIN_EDITOR_PROVIDER_IDS[keyof typeof BUILTIN_EDITOR_PROVIDER_IDS];

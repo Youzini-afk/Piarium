@@ -83,6 +83,7 @@ export const openEditor = (
   input: {
     resourceId: string;
     providerId: string;
+    providerPinned?: boolean;
     preview?: boolean;
     pinned?: boolean;
     groupId?: string;
@@ -94,9 +95,18 @@ export const openEditor = (
   const group = findEditorGroup(state.tree, groupId) ?? listEditorGroups(state.tree)[0];
   if (!group) return state;
 
-  const existing = input.newView
-    ? undefined
-    : group.tabs.find((tab) => tab.resourceId === input.resourceId);
+  // A pinned-provider tab is a distinct view of the resource, so one file can be open as text and
+  // as a Git diff at the same time. Pinned opens only reuse the same pinned provider, and ordinary
+  // opens never steal a pinned tab.
+  const reusesExisting = (tab: EditorTab): boolean => {
+    if (tab.resourceId !== input.resourceId) return false;
+    if (input.providerPinned === true) {
+      return tab.providerPinned === true && tab.providerId === input.providerId;
+    }
+    return tab.providerPinned !== true;
+  };
+
+  const existing = input.newView ? undefined : group.tabs.find(reusesExisting);
   if (existing) {
     return {
       ...state,
@@ -115,6 +125,7 @@ export const openEditor = (
     preview: input.preview === true && input.pinned !== true,
     pinned: input.pinned === true,
     providerId: input.providerId,
+    ...(input.providerPinned === true ? { providerPinned: true } : {}),
     viewState: {},
   };
 

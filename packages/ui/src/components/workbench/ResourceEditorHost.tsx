@@ -40,6 +40,9 @@ import {
 } from '@/lib/extensions/workbench-registry';
 import type { DocumentRecord } from '@/lib/documents/types';
 import { listEditorProviders } from '@/lib/workbench/editors/providers';
+import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+
+const GitDiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((module) => ({ default: module.DiffView })));
 
 type ResourceEditorHostProps = {
   excludedProviderIds?: readonly string[];
@@ -143,9 +146,15 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   ), [surfaceContributions]);
   React.useSyncExternalStore(subscribeEditorProviders, getEditorProvidersRevision, () => 0);
   const selection = selectEditorProvider(tab.resourceId, [...listEditorProviders(), ...surfaceProviders]);
-  const activeProviderId = selection.status === 'selected'
-    ? selection.providerId
-    : (isEditorProviderEnabled(tab.providerId) ? tab.providerId : BUILTIN_EDITOR_PROVIDER_IDS.text);
+  // A pinned provider was chosen explicitly for this tab, so resolution must not replace it. It
+  // still yields to the provider being disabled, which is an authoritative unavailable state.
+  const pinnedProviderId = tab.providerPinned === true && isEditorProviderEnabled(tab.providerId)
+    ? tab.providerId
+    : undefined;
+  const activeProviderId = pinnedProviderId
+    ?? (selection.status === 'selected'
+      ? selection.providerId
+      : (isEditorProviderEnabled(tab.providerId) ? tab.providerId : BUILTIN_EDITOR_PROVIDER_IDS.text));
   const surfaceContribution = surfaceContributionById.get(activeProviderId);
   const needsText = TEXT_PROVIDERS.has(activeProviderId) && isEditorProviderEnabled(activeProviderId);
   const needsDocument = needsText || Boolean(surfaceContribution);
@@ -279,6 +288,10 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const setMode = (previewMode: 'preview' | 'edit' | 'tree' | 'text'): void => {
     if (onViewStateChange) onViewStateChange({ previewMode });
     else setEditorPreviewMode(workspaceId, tab.viewId, previewMode);
+  };
+  const setDiffScope = (diffScope: 'working' | 'staged'): void => {
+    if (onViewStateChange) onViewStateChange({ diffScope });
+    else patchEditorViewState(workspaceId, tab.viewId, { diffScope });
   };
   const modeToggle = (() => {
     if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.json) {
@@ -455,6 +468,25 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
             onChange={(xml) => getDocumentRegistry().applyTransaction(identity, xml, { origin: 'drawio' })}
           />
         </div>
+      </HostFrame>
+    );
+  }
+
+  if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff) {
+    return (
+      <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
+        <React.Suspense fallback={null}>
+          <GitDiffView
+            flushContent
+            hideStackedFileSidebar
+            showOpenInEditorAction
+            diffScope={tab.viewState.diffScope ?? 'working'}
+            onDiffScopeChange={setDiffScope}
+            // Git keys its file list by repository-relative path, which is the resource ID when the
+            // workspace root is the repository root. The absolute path would match nothing.
+            targetFilePath={tab.resourceId}
+          />
+        </React.Suspense>
       </HostFrame>
     );
   }

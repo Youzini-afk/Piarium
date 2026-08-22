@@ -11,7 +11,8 @@ this kernel; they do not own document buffers, disk revisions, or layout schema.
 - `session.ts` — Map by workspaceId. `peekEditorWorkbench` never creates. Persist failure/malformed
   keeps last-good and does not write empty over the failed snapshot. Runtime switch resets the map.
 - `providers.ts` — enabled provider selection, user association, text fallback, and disable without
-  background work
+  background work. A provider that declares no languages, filenames, or fallback is never selected
+  by resolution and is reachable only through an explicit request.
 - `commands.ts` / `context-keys.ts` / `menus.ts` — owner-scoped commands, per-key context subscribe,
   `when` menu projection
 - `panels.ts` — terminal/problems/output container; empty is distinct from failure
@@ -19,6 +20,17 @@ this kernel; they do not own document buffers, disk revisions, or layout schema.
 
 High-frequency cursor/scroll state stays on the tab `viewState` in memory. Snapshots are explicit,
 not per keystroke. Document dirty buffers remain in the Document Registry.
+
+Passing an explicit `providerId` to `openWorkbenchEditor` pins it: the tab records `providerPinned`
+and the host stops re-resolving that tab, so the caller's choice is not replaced by the resource's
+default on the next render. A pinned tab is a distinct view of the resource, so one file can be open
+as text and as a Git diff at the same time; pinned opens only reuse the same pinned provider and
+ordinary opens never focus a pinned tab. A pinned provider still yields to being disabled, which is
+an authoritative unavailable state rather than a silent substitution.
+
+`piarium.builtin.git-diff` renders the working-tree or staged diff for a tracked file and is the
+IDE's target for Git diff requests. It declares no languages and no fallback, so resolution never
+selects it. Its `viewState.diffScope` carries `working` or `staged` and persists with the tab.
 
 The Agent Files surface and the official IDE Workbench both mount this kernel. `FilesView` is now
 only a composition of `SidebarFilesTree` and `EditorWorkbenchArea`; it owns no second document or
