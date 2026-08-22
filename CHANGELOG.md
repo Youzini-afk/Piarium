@@ -3,6 +3,21 @@
 All notable changes to Piarium are recorded here. The project is pre-1.0; the
 private runtime protocol and product surfaces still move together.
 
+## 0.6.0
+
+Piarium's IDE Workbench release is now available as native desktop packages across Windows, macOS,
+and Linux.
+
+- Switch directly between the Agent Workspace and IDE Workbench from the application header
+- Work with the multi-group editor, files, search, source control, run/debug/test, sessions, context,
+  and MCP surfaces in one composable workspace
+- Download native x64 and ARM64 packages for Windows and Linux, plus Intel and Apple Silicon packages
+  for macOS
+- Validate every release on its matching native runner, including application startup, renderer
+  readiness, health checks, and a real terminal create/close cycle
+- Keep separate Windows and Linux architecture channels while merging both macOS architectures into
+  the standard macOS updater feed
+
 ## 0.5.0
 
 Piarium now includes an optional IDE Workbench alongside the original Agent Workspace.

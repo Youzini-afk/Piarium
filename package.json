@@ -1,6 +1,6 @@
 {
   "name": "piarium-monorepo",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Pi-native desktop, web, mobile, and editor workspace for coding agents.",
   "private": true,
   "type": "module",

@@ -115,8 +115,8 @@ manifest, capability, lifecycle, storage, publishing, and testing contracts.
 
 ## Download Desktop
 
-The Windows x64 and ARM64 desktop installers are published through
-[GitHub Releases](https://github.com/Youzini-afk/Piarium/releases).
+Windows x64/ARM64, Linux x64/ARM64, and macOS Intel/Apple Silicon desktop packages are published
+through [GitHub Releases](https://github.com/Youzini-afk/Piarium/releases).
 
 ## Get started from source
 
@@ -131,10 +131,10 @@ Desktop no longer uses a permanently bundled Pi SDK. It discovers a user-level P
 first, then the Pi Runtime flow can select, install, or upgrade Pi without downgrading it. Piarium
 becomes ready only after a real Host handshake and does not need to restart after activation.
 Electron contains the Node runtime needed to run the application, while Pi remains an independently
-managed user-level tool. The ordinary Windows x64 and ARM64 installers have passed no-Pi startup, Runtime Manager,
-health, and terminal-lifecycle smoke checks; optional offline installers and other desktop platforms
-remain at the release-verification boundary. Containers and the VS Code extension keep a pinned,
-self-contained Pi runtime for reproducible unattended and editor-host execution.
+managed user-level tool. Native x64/ARM64 desktop packages for Windows, Linux, and macOS are validated
+on matching runners for application startup, Runtime Manager, health, and terminal lifecycle; optional
+offline installers remain future work. Containers and the VS Code extension keep a pinned, self-contained
+Pi runtime for reproducible unattended and editor-host execution.
 
 ### Run the Web development surface
 
