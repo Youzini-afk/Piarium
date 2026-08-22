@@ -131,7 +131,23 @@ describe('Piarium cloud runtime layout', () => {
   it('reinstalls Pi SDK packages into the staged cloud pi-host production graph', () => {
     const hostManifest = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
     expect(hostManifest.dependencies?.['@earendil-works/pi-coding-agent']).toBeUndefined();
-    expect(hostManifest.devDependencies?.['@earendil-works/pi-coding-agent']).toBe('0.84.1');
+    // The Pi SDK stays a devDependency so the cloud builder reinstalls it into the staged
+    // production graph. Assert the pin is exact rather than a literal version, so upgrading the
+    // runtime does not require editing this test.
+    for (const name of [
+      '@earendil-works/pi-agent-core',
+      '@earendil-works/pi-ai',
+      '@earendil-works/pi-coding-agent',
+    ]) {
+      expect(hostManifest.devDependencies?.[name]).toMatch(/^\d+\.\d+\.\d+$/);
+    }
+    // Pi publishes these in lockstep, so a partial bump is a mistake worth failing on.
+    const piVersions = new Set([
+      hostManifest.devDependencies?.['@earendil-works/pi-agent-core'],
+      hostManifest.devDependencies?.['@earendil-works/pi-ai'],
+      hostManifest.devDependencies?.['@earendil-works/pi-coding-agent'],
+    ]);
+    expect(piVersions.size).toBe(1);
     const builderSource = fs.readFileSync(
       path.join(repoRoot, 'scripts', 'build-cloud-runtime.mjs'),
       'utf8',

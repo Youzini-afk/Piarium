@@ -35,3 +35,9 @@ updates:
         patterns:
           - vitest
           - '@vitest/*'
+      # Pi publishes its packages in lockstep and Piarium pins them to one exact version, so a
+      # single-package bump is a half upgrade that cannot pass. Upgrading also means refreshing the
+      # cloud runtime lockfile and the isolated VS Code runtime lockfile, so keep it one review.
+      pi-runtime:
+        patterns:
+          - '@earendil-works/*'

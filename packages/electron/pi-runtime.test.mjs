@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,18 @@ const source = (relativePath) => fs.readFile(
   fileURLToPath(new URL(relativePath, import.meta.url)),
   'utf8',
 );
+
+// The bundled Pi version is declared once, in the host package. Read it here instead of repeating
+// the literal, so upgrading the runtime does not mean hunting for copies of the number in tests.
+const pinnedPiVersion = () => {
+  const manifest = JSON.parse(readFileSync(
+    fileURLToPath(new URL('../pi-host/package.json', import.meta.url)),
+    'utf8',
+  ));
+  const version = manifest.devDependencies?.['@earendil-works/pi-coding-agent'];
+  assert.match(version ?? '', /^\d+\.\d+\.\d+$/, 'pi-host must pin an exact Pi version');
+  return version;
+};
 
 test('resolves the unpacked Pi host entry in packaged apps', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-electron-host-entry-'));
@@ -74,7 +87,7 @@ test('desktop broker handshakes with the compiled Pi host', async () => {
   try {
     const handshake = await broker.warmup();
     assert.equal(handshake.protocolVersion, PIARIUM_PROTOCOL_VERSION);
-    assert.equal(handshake.runtime.piVersion, '0.84.1');
+    assert.equal(handshake.runtime.piVersion, pinnedPiVersion());
   } finally {
     await broker.dispose();
     assert.ok(events.some((event) => event.kind === 'worker.exit' && event.expected));

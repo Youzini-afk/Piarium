@@ -76,10 +76,12 @@ deleting the security boundary that module currently enforces.
 
 ## Upstream dependency baseline
 
-Pi `0.84.1` publishes `brace-expansion` `5.0.9` and `undici` `8.9.0` in its npm shrinkwrap, so
+Pi `0.84.2` publishes `brace-expansion` `5.0.9` and `undici` `8.9.0` in its npm shrinkwrap, so
 Piarium no longer mutates Pi's installed dependency tree after installation. The root, cloud, and
 isolated VS Code lockfiles keep those resolved versions reproducible, and the VS Code packaged
-runtime smoke still rejects `brace-expansion <5.0.9` or `undici <8.9.0`.
+runtime smoke still rejects `brace-expansion <5.0.9` or `undici <8.9.0`. Confirm both resolutions
+when the bundled Pi moves; the floor is the requirement, and the exact Pi release is only where it
+currently comes from.
 
 The root `allowScripts` policy pins approval to esbuild `0.28.1`, whose postinstall validates its
 platform binary. The no-op Google GenAI preinstall and protobufjs postinstall are explicitly denied;
