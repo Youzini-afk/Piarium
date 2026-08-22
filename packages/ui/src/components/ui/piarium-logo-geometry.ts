@@ -70,6 +70,33 @@ export const LOGO_ISO_MATRIX =
 export const LOGO_MARK_PATH = 'M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z';
 export const LOGO_MARK_SCALE = 0.75;
 
+/**
+ * The cube's footprint, as fractions of its own box. This is what lets a ground plane register with
+ * the mark instead of merely passing behind it.
+ *
+ * The base is a rhombus: front vertex `bottom`, side vertices `bottomLeft` and `bottomRight`, and the
+ * hidden back vertex coinciding with `center`. Its two edge directions are ±30 degrees from
+ * horizontal, which is the isometric projection's defining property and the reason a ground plane
+ * cannot be perspectival if its lines are to stay parallel to those edges.
+ */
+export const LOGO_FOOTPRINT = {
+  /** Where the lowest vertex sits in the box. Anchoring by the box centre or bottom edge floats it. */
+  vertex: { x: LOGO_VERTICES.bottom.x / 100, y: LOGO_VERTICES.bottom.y / 100 },
+  /** Base edge length as a fraction of the box, so a ground cell can be made to match it exactly. */
+  edge: LOGO_EDGE / 100,
+} as const;
+
+/**
+ * The projection a ground plane needs to share the cube's base axes.
+ *
+ * Maps a unit square to the same rhombus the cube stands on, so a plain CSS grid becomes a lattice
+ * whose lines run parallel to the base edges. Registering that lattice with the cube then only
+ * requires matching the cell size to `LOGO_FOOTPRINT.edge` and putting a lattice vertex on
+ * `LOGO_FOOTPRINT.vertex`.
+ */
+export const LOGO_GROUND_TRANSFORM =
+  `matrix(${LOGO_COS30}, ${LOGO_SIN30}, ${-LOGO_COS30}, ${LOGO_SIN30}, 0, 0)`;
+
 const LEFT_FACE_CELL_OPACITIES = [
   0.2, 0.45, 0.15, 0.55,
   0.35, 0.1, 0.5, 0.25,

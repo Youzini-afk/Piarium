@@ -89,21 +89,19 @@ inset: 0;
 z-index: 9998;
 overflow: hidden;
 background: var(--splash-background, var(--color-background, #151313));
-perspective: 1100px;
-perspective-origin: 50% 44%;
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
-.pi-splash-plane {
+/* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
+   registering offset arrive inline, because both depend on the measured viewport. */
+.pi-splash-ground {
 position: absolute;
 left: 50%;
-top: 58%;
+top: 54%;
 display: grid;
-transform-origin: center;
-transform: translate(-50%, -50%) rotateX(68deg);
-transform-style: preserve-3d;
--webkit-mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
-mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
+transform-origin: 0 0;
+-webkit-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
+mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
@@ -152,35 +150,45 @@ animation: none;
            ElectronMiniChatApp through packages/ui/src/lib/splash.ts). No cube here on
            purpose — the content renders the single Piarium cube itself. -->
       <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
-        <div id="initial-loading-plane" class="pi-splash-plane" aria-hidden="true"></div>
+        <div id="initial-loading-ground" class="pi-splash-ground" aria-hidden="true"></div>
       </div>
     </div>
 
     <script>
-      // Builds the ground plane, and holds the safety net that keeps a failed handoff from leaving the
-      // window covered. Mirrors resolvePlaneShape/buildSplashCells in piarium-splash-lattice.ts.
+      // Builds the ground lattice, and holds the safety net that keeps a failed handoff from leaving the
+      // window covered. Mirrors resolveGroundShape/groundInlineStyle in
+      // packages/ui/src/components/ui/piarium-splash-lattice.ts. There is no mark here, so nothing to
+      // register against, but the cell size and axes are still the cube's so the two windows match.
       (function () {
-        var plane = document.getElementById('initial-loading-plane');
+        var COS30 = 0.866;
+        var ground = document.getElementById('initial-loading-ground');
 
-        if (plane) {
-          var cell = innerWidth >= 768 ? 170 : 110;
-          var cols = Math.max(6, Math.min(22, Math.ceil((innerWidth * 2) / cell)));
-          var rows = Math.max(6, Math.min(22, Math.ceil((innerHeight * 2) / cell)));
-          plane.style.gridTemplateColumns = 'repeat(' + cols + ',' + cell + 'px)';
-          plane.style.gridTemplateRows = 'repeat(' + rows + ',' + cell + 'px)';
+        if (ground) {
+          var mark = innerWidth >= 768 ? 168 : 124;
+          var cell = mark * 0.48;
+          var originY = innerHeight * 0.54;
+          var reachY = Math.max(originY, innerHeight - originY);
+          var axis = Math.ceil(Math.max(innerWidth / 2 / (COS30 * cell), (2 * reachY) / cell));
+          axis = Math.max(8, Math.min(24, axis));
+          if (axis % 2 !== 0) axis += 1;
+          var offset = (axis / 2) * cell;
 
-          var midCol = (cols - 1) / 2;
-          var midRow = (rows - 1) / 2;
-          var maxRadius = Math.hypot(midCol, midRow) || 1;
+          ground.style.gridTemplateColumns = 'repeat(' + axis + ',' + cell + 'px)';
+          ground.style.gridTemplateRows = 'repeat(' + axis + ',' + cell + 'px)';
+          ground.style.transform = 'matrix(0.866, 0.5, -0.866, 0.5, 0, 0) translate('
+            + -offset + 'px,' + -offset + 'px)';
+
+          var middle = (axis - 1) / 2;
+          var maxRadius = Math.hypot(middle, middle) || 1;
           var buffer = '';
-          for (var row = 0; row < rows; row++) {
-            for (var col = 0; col < cols; col++) {
-              var fraction = Math.hypot(col - midCol, row - midRow) / maxRadius;
+          for (var row = 0; row < axis; row++) {
+            for (var col = 0; col < axis; col++) {
+              var fraction = Math.hypot(col - middle, row - middle) / maxRadius;
               buffer += '<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:'
                 + Math.round(fraction * 520) + 'ms"></span>';
             }
           }
-          plane.innerHTML = buffer;
+          ground.innerHTML = buffer;
         }
 
         // Safety net: never let the splash hang if the app fails to dismiss it.

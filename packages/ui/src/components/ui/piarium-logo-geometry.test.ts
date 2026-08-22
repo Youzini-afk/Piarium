@@ -130,6 +130,7 @@ describe('every splash host shares the plane', () => {
     background: 'var(--splash-background, var(--color-background, #151313))',
     line: 'var(--splash-lattice-line, rgba(255, 255, 255, 0.22))',
     cell: 'var(--splash-cell-fill, rgba(255, 255, 255, 0.35))',
+    contact: 'var(--splash-contact, rgba(255, 255, 255, 0.1))',
   } as const;
 
   /** Between these, each host embeds the generator's output verbatim. */

@@ -2,7 +2,9 @@ import * as os from 'node:os';
 import * as vscode from 'vscode';
 import { piariumMarkSvgMarkup } from '@piarium/ui/src/components/ui/piarium-logo-geometry';
 import {
-  resolvePlaneShape,
+  groundInlineStyle,
+  resolveGroundShape,
+  resolveMarkSize,
   splashPlaneCss,
 } from '@piarium/ui/src/components/ui/piarium-splash-lattice';
 import { getThemeKindName } from './theme';
@@ -10,26 +12,29 @@ import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
 /**
- * The plane is emitted as markup rather than built by a script, because this document is generated
+ * The ground is emitted as markup rather than built by a script, because this document is generated
  * anyway and a webview's CSP is one less thing to reason about without another inline script.
  *
  * A fixed extent is the trade: the panel can be a narrow sidebar or a full editor tab, and this shell
  * has no way to measure it. Sizing for a mid-size panel overflows a wide tab and is cropped in a
  * sidebar, which is the harmless direction to be wrong in because the mask fades the outer region
- * either way.
+ * either way. The cell size still comes from the mark, so the lattice registers with the cube here too.
  */
-const PLANE_SHAPE = resolvePlaneShape(1100, 900);
+const PANEL_WIDTH = 1100;
+const PANEL_HEIGHT = 900;
+const MARK_SIZE = resolveMarkSize(PANEL_WIDTH);
+const GROUND_SHAPE = resolveGroundShape(PANEL_WIDTH, PANEL_HEIGHT, MARK_SIZE);
+const GROUND_STYLE = groundInlineStyle(GROUND_SHAPE);
 
-/** Exit delay per cell, radiating from where the mark stands. Mirrors `buildSplashCells`. */
-const renderPlaneCells = (): string => {
-  const midCol = (PLANE_SHAPE.cols - 1) / 2;
-  const midRow = (PLANE_SHAPE.rows - 1) / 2;
-  const maxRadius = Math.hypot(midCol, midRow) || 1;
+/** Exit delay per cell, radiating from the cell the mark stands on. Mirrors `buildSplashCells`. */
+const renderGroundCells = (): string => {
+  const middle = (GROUND_SHAPE.axis - 1) / 2;
+  const maxRadius = Math.hypot(middle, middle) || 1;
   const cells: string[] = [];
 
-  for (let row = 0; row < PLANE_SHAPE.rows; row += 1) {
-    for (let col = 0; col < PLANE_SHAPE.cols; col += 1) {
-      const delay = Math.round((Math.hypot(col - midCol, row - midRow) / maxRadius) * 520);
+  for (let row = 0; row < GROUND_SHAPE.axis; row += 1) {
+    for (let col = 0; col < GROUND_SHAPE.axis; col += 1) {
+      const delay = Math.round((Math.hypot(col - middle, row - middle) / maxRadius) * 520);
       cells.push(`<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:${delay}ms"></span>`);
     }
   }
@@ -46,6 +51,8 @@ const SPLASH_CSS = splashPlaneCss(
     background: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
     line: 'var(--vscode-widget-border, var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.24)))',
     cell: 'var(--vscode-editorIndentGuide-activeBackground, rgba(128,128,128,0.4))',
+    // A light pool, so it reads on a dark editor theme; a dark one would vanish into the background.
+    contact: 'var(--vscode-editorIndentGuide-activeBackground, rgba(128,128,128,0.28))',
     status: 'var(--vscode-foreground)',
   },
   { withMark: true },
@@ -104,7 +111,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const documentLanguage = vscode.env.language.replace(/[^A-Za-z0-9-]/g, '') || 'en';
   const runtimeConnectionFailed = htmlSafeJson(vscode.l10n.t('Piarium: Pi runtime connection failed'));
   const waitingForDevelopmentServer = htmlSafeJson(vscode.l10n.t('Piarium: Waiting for the webview development server'));
-  const planeCells = renderPlaneCells();
+  const groundCells = renderGroundCells();
   const bootstrapConfig = htmlSafeJson({
     workspaceFolder,
     workspaceFolders,
@@ -156,9 +163,8 @@ ${SPLASH_CSS}
 </head>
 <body>
   <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
-    <div class="pi-splash-plane" aria-hidden="true">${planeCells}</div>
-    <div class="pi-splash-center">
-      <span class="pi-splash-mark">${piariumMarkSvgMarkup(112, {
+    <div class="pi-splash-ground" aria-hidden="true" style="grid-template-columns:${GROUND_STYLE.gridTemplateColumns};grid-template-rows:${GROUND_STYLE.gridTemplateRows};transform:${GROUND_STYLE.transform}">${groundCells}</div>
+    <span class="pi-splash-mark">${piariumMarkSvgMarkup(MARK_SIZE, {
         stroke: 'var(--vscode-foreground)',
         faceFill: 'var(--vscode-editorWidget-background, transparent)',
         cellFill: 'var(--vscode-foreground)',

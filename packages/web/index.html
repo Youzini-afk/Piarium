@@ -505,21 +505,19 @@ inset: 0;
 z-index: 9998;
 overflow: hidden;
 background: var(--splash-background, var(--color-background, #151313));
-perspective: 1100px;
-perspective-origin: 50% 44%;
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
 
-.pi-splash-plane {
+/* Positioned at the mark's footprint, with its own origin pinned there. The grid template and the
+   registering offset arrive inline, because both depend on the measured viewport. */
+.pi-splash-ground {
 position: absolute;
 left: 50%;
-top: 58%;
+top: 54%;
 display: grid;
-transform-origin: center;
-transform: translate(-50%, -50%) rotateX(68deg);
-transform-style: preserve-3d;
--webkit-mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
-mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
+transform-origin: 0 0;
+-webkit-mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
+mask-image: radial-gradient(120% 96% at 50% 50%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.9) 30%, rgba(0,0,0,0.4) 62%, rgba(0,0,0,0) 88%);
 }
 /* Two edges per cell, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
@@ -546,60 +544,64 @@ animation-delay: var(--pi-cell-delay);
 to { opacity: 0; transform: scale(0.62); }
 }
 
-.pi-splash-center {
+/* The mark stands on the lattice, so its lowest vertex has to land on the lattice origin. That vertex
+   is at 98.0% of the mark's own box height, not at its centre or its bottom edge, so the box is
+   pulled up by exactly that much. Matching the cell edge to the base edge then makes the cube's
+   footprint one cell of the floor, and the lines leaving its base corners are the floor's own lines. */
+.pi-splash-mark {
 position: absolute;
 left: 50%;
-top: 50%;
-translate: -50% -50%;
-display: flex;
-flex-direction: column;
-align-items: center;
-gap: 18px;
-padding: 0 24px;
-text-align: center;
-}
-.pi-splash-mark {
-position: relative;
+top: 54%;
+translate: -50% -98.0%;
 display: block;
 }
-/* Seats the mark on the plane. Wider than tall, because the plane is foreshortened. */
+/* The pool of light at the footprint. Wide and shallow, to sit in the plane rather than face the
+   viewer, and centred on the contact vertex rather than on the box. */
 .pi-splash-mark::after {
 content: '';
 position: absolute;
 left: 50%;
-bottom: 2%;
-width: 96%;
-height: 26%;
-translate: -50% 0;
+top: 98.0%;
+width: 170%;
+height: 38%;
+translate: -50% -50%;
 border-radius: 50%;
-background: radial-gradient(50% 50% at 50% 50%, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.28) 45%, rgba(0,0,0,0) 100%);
+background: radial-gradient(closest-side, var(--splash-contact, rgba(255, 255, 255, 0.1)) 0%, transparent 100%);
 pointer-events: none;
-}
-.pi-splash[data-leaving='true'] .pi-splash-center {
-animation: pi-splash-mark-out 460ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
-}
-@keyframes pi-splash-mark-out {
-to { opacity: 0; transform: translateY(-10px) scale(1.05); }
+z-index: -1;
 }
 .pi-splash-status {
+position: absolute;
+left: 50%;
+top: calc(54% + 44px);
+translate: -50% 0;
 min-height: 1rem;
 max-width: 32ch;
 font-size: 11px;
 font-weight: 600;
 letter-spacing: 0.11em;
 text-transform: uppercase;
+text-align: center;
 color: var(--splash-stroke);
 opacity: 0;
 animation: pi-splash-status-in 480ms 700ms ease both;
 }
 @keyframes pi-splash-status-in { to { opacity: 0.5; } }
+.pi-splash[data-leaving='true'] .pi-splash-mark,
+.pi-splash[data-leaving='true'] .pi-splash-status {
+animation: pi-splash-mark-out 460ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
+}
+@keyframes pi-splash-mark-out {
+to { opacity: 0; }
+}
 
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
 .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-cell,
-.pi-splash[data-leaving='true'] .pi-splash-center,
+.pi-splash[data-leaving='true'] .pi-splash-mark,
+.pi-splash[data-leaving='true'] .pi-splash-status,
 .pi-splash-status {
 animation: none;
 }
@@ -615,10 +617,9 @@ animation: none;
       <!-- Loading fallback while React initializes. Dismissed through packages/ui/src/lib/splash.ts,
            which owns this element's contract. -->
       <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
-        <div id="initial-loading-plane" class="pi-splash-plane" aria-hidden="true"></div>
-        <div class="pi-splash-center">
-          <span class="pi-splash-mark">
-          <svg width="148" height="148" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+        <div id="initial-loading-ground" class="pi-splash-ground" aria-hidden="true"></div>
+        <span class="pi-splash-mark">
+          <svg width="168" height="168" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
             <!-- Isometric cube: edge=48, centerY=50 -->
             <!-- Points: top(50,2), left(8.432,26), right(91.568,26), center(50,50), bottomLeft(8.432,74), bottomRight(91.568,74), bottom(50,98) -->
 
@@ -672,40 +673,48 @@ animation: none;
               <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="var(--splash-logo-fill)"/>
             </g>
           </svg>
-          </span>
-          <div id="initial-loading-status" class="pi-splash-status"></div>
-        </div>
+        </span>
+        <div id="initial-loading-status" class="pi-splash-status"></div>
       </div>
     </div>
 
     <script>
-      // Builds the ground plane. Kept out of the markup because the cell count depends on the
-      // viewport: a fixed count either ends in plain view on a wide screen or emits hundreds of
-      // elements on a small one. Mirrors resolvePlaneShape/buildSplashCells in
-      // packages/ui/src/components/ui/piarium-splash-lattice.ts.
+      // Builds the ground lattice. Kept out of the markup because both the cell count and the
+      // registering offset depend on the measured viewport. Mirrors resolveGroundShape,
+      // buildSplashCells and groundInlineStyle in
+      // packages/ui/src/components/ui/piarium-splash-lattice.ts, and the numbers here are the mark's
+      // own footprint: cell 0.48 of the mark box because that is the cube's base edge, and the
+      // isometric matrix because those are the axes the base edges run along. Change them together or
+      // the lines stop coming out of the cube's base.
       (function () {
-        var plane = document.getElementById('initial-loading-plane');
-        if (!plane) return;
+        var ground = document.getElementById('initial-loading-ground');
+        if (!ground) return;
+
+        var COS30 = 0.866;
 
         function build() {
-          var cell = innerWidth >= 768 ? 170 : 110;
-          // Over-provision and let the mask hide the boundary. Perspective coverage has no tidy
-          // closed form, and being too small is the visible failure.
-          var cols = Math.max(6, Math.min(22, Math.ceil((innerWidth * 2) / cell)));
-          var rows = Math.max(6, Math.min(22, Math.ceil((innerHeight * 2) / cell)));
+          var mark = innerWidth >= 768 ? 168 : 124;
+          var cell = mark * 0.48;
+          var originY = innerHeight * 0.54;
+          var reachY = Math.max(originY, innerHeight - originY);
+          var axis = Math.ceil(Math.max(innerWidth / 2 / (COS30 * cell), (2 * reachY) / cell));
+          axis = Math.max(8, Math.min(24, axis));
+          if (axis % 2 !== 0) axis += 1;
+          var offset = (axis / 2) * cell;
 
-          plane.style.gridTemplateColumns = 'repeat(' + cols + ',' + cell + 'px)';
-          plane.style.gridTemplateRows = 'repeat(' + rows + ',' + cell + 'px)';
+          ground.style.gridTemplateColumns = 'repeat(' + axis + ',' + cell + 'px)';
+          ground.style.gridTemplateRows = 'repeat(' + axis + ',' + cell + 'px)';
+          ground.style.transform = 'matrix(0.866, 0.5, -0.866, 0.5, 0, 0) translate('
+            + -offset + 'px,' + -offset + 'px)';
 
-          // Radiate from where the mark stands, in plane space. Under perspective that makes the
-          // wavefront race away toward the horizon rather than expand as a flat circle.
-          var midCol = (cols - 1) / 2;
-          var midRow = (rows - 1) / 2;
-          var maxRadius = Math.hypot(midCol, midRow) || 1;
+          // Radiate from the cell the mark stands on, in lattice space, so the wavefront travels along
+          // the cube's own base axes rather than as a screen-space circle.
+          var middle = (axis - 1) / 2;
+          var maxRadius = Math.hypot(middle, middle) || 1;
           var buffer = '';
-          for (var row = 0; row < rows; row++) {
-            for (var col = 0; col < cols; col++) {
-              var fraction = Math.hypot(col - midCol, row - midRow) / maxRadius;
+          for (var row = 0; row < axis; row++) {
+            for (var col = 0; col < axis; col++) {
+              var fraction = Math.hypot(col - middle, row - middle) / maxRadius;
               var style = '--pi-cell-delay:' + Math.round(fraction * 520) + 'ms';
               var breathes = Math.random() < 0.1;
               if (breathes) style += ';--pi-breathe-delay:' + Math.round(Math.random() * 2200) + 'ms';
@@ -713,7 +722,7 @@ animation: none;
                 + '" style="' + style + '"></span>';
             }
           }
-          plane.innerHTML = buffer;
+          ground.innerHTML = buffer;
         }
 
         build();

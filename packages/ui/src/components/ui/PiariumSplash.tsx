@@ -3,23 +3,24 @@ import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import {
   buildSplashCells,
-  resolvePlaneShape,
+  groundInlineStyle,
+  resolveGroundShape,
+  resolveMarkSize,
   splashPlaneCss,
   type PiariumSplashDirection,
   type PiariumSplashMode,
 } from './piarium-splash-lattice';
 
 /**
- * The Piarium splash: a receding ground plane with the mark standing on it.
+ * The Piarium splash: the mark standing on a lattice that is its own footprint extended outward.
  *
- * The plane is perspectival rather than isometric. Isometric was the first attempt, on the theory
- * that the mark's own lattice tiled across the viewport would make the mark read as part of it, but
- * an axonometric projection has no vanishing point and no density gradient, so it reads as wallpaper.
- * Here the plane converges, its cells foreshorten, a radial mask removes its boundary so it appears
- * to continue past where it is drawn, and a contact shadow seats the mark on it.
+ * The lattice shares the cube's base axes, its cell edge equals the cube's base edge, and one of its
+ * vertices sits on the cube's lowest vertex. So the cube's footprint is one cell of the floor and the
+ * lines leaving its base corners are the floor's own lines, which is what makes it stand in the space
+ * rather than sit in front of it.
  *
- * Two behaviours share the component. `boot` covers startup and comes apart outward from the mark.
- * `switch` covers a Workbench Profile change and sweeps across the plane, reversing with the
+ * Two behaviours share the component. `boot` covers startup and comes apart outward from the mark's
+ * feet. `switch` covers a Workbench Profile change and sweeps along one base axis, reversing with the
  * direction the user moved, so a profile change reads as a re-layout rather than as a restart.
  */
 
@@ -28,6 +29,7 @@ const PIARIUM_SPLASH_COLORS = {
   background: 'var(--splash-background, var(--color-background, #151313))',
   line: 'var(--splash-lattice-line, rgba(255, 255, 255, 0.22))',
   cell: 'var(--splash-cell-fill, rgba(255, 255, 255, 0.35))',
+  contact: 'var(--splash-contact, rgba(255, 255, 255, 0.1))',
   status: 'var(--splash-stroke)',
 } as const;
 
@@ -72,16 +74,18 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
 }) => {
   const reducedMotion = usePrefersReducedMotion();
   const { width, height } = useViewport();
-  const shape = React.useMemo(() => resolvePlaneShape(width, height), [width, height]);
+  const markSize = resolveMarkSize(width);
+  const shape = React.useMemo(
+    () => resolveGroundShape(width, height, markSize),
+    [width, height, markSize],
+  );
 
-  // Breathing cells are chosen once per plane shape. Re-picking them on every render would make the
+  // Breathing cells are chosen once per ground shape. Re-picking them on every render would make the
   // idle state shimmer randomly instead of pulsing steadily.
   const cells = React.useMemo(
     () => buildSplashCells(shape, mode, direction, mode === 'boot' && !reducedMotion),
     [shape, mode, direction, reducedMotion],
   );
-
-  const markSize = width >= 768 ? 148 : 112;
 
   return (
     <div
@@ -93,14 +97,7 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       aria-label={label}
     >
       <style>{STYLES}</style>
-      <div
-        className="pi-splash-plane"
-        aria-hidden="true"
-        style={{
-          gridTemplateColumns: `repeat(${shape.cols}, ${shape.cellPx}px)`,
-          gridTemplateRows: `repeat(${shape.rows}, ${shape.cellPx}px)`,
-        }}
-      >
+      <div className="pi-splash-ground" aria-hidden="true" style={groundInlineStyle(shape)}>
         {cells.map((cell) => (
           <span
             key={cell.key}
@@ -116,12 +113,10 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
         ))}
       </div>
 
-      <div className="pi-splash-center">
-        <span className="pi-splash-mark">
-          <PiariumLogo width={markSize} height={markSize} isAnimated={!reducedMotion} decorative />
-        </span>
-        <div className="pi-splash-status">{status ?? ''}</div>
-      </div>
+      <span className="pi-splash-mark">
+        <PiariumLogo width={markSize} height={markSize} isAnimated={!reducedMotion} decorative />
+      </span>
+      <div className="pi-splash-status">{status ?? ''}</div>
     </div>
   );
 };
