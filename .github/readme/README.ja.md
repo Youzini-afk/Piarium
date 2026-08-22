@@ -1,17 +1,17 @@
-[简体中文](README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [Français](README.fr.md) | 日本語
+[简体中文](../../README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [Français](README.fr.md) | 日本語
 
 # Piarium
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="packages/web/public/logo-dark-512x512.svg" />
-    <img src="packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
+    <source media="(prefers-color-scheme: dark)" srcset="../../packages/web/public/logo-dark-512x512.svg" />
+    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
   </picture>
 </p>
 
 [![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
 **コーディングエージェントのための Pi ネイティブで再構成可能なワークスペース。ローカル作業を中心に
 据えつつ、デスクトップ、Web、エディタ、モバイルのいずれからも使えます。**
@@ -86,7 +86,7 @@ Piarium はこれらの拡張を fork せず、そのプライベートな状態
 | `pi-rtk-optimizer` | ネイティブな厳格 JSON による RTK 書き換え、出力、読み取り、切り詰め設定とコマンドの利用可否 |
 
 各アダプターが読み書きするコマンド、イベント、ネイティブ設定と、どのファイルがプラグイン所有のままかは
-[拡張統合の契約](docs/extension-compatibility.md)にまとめてあります。Piarium はプラグインのバージョンを
+[拡張統合の契約](../../docs/extension-compatibility.md)にまとめてあります。Piarium はプラグインのバージョンを
 Pi のリリースごとに認証することはしません。
 
 ## Piarium 拡張を作る
@@ -112,7 +112,7 @@ npx piarium-extension test
 ```
 
 マニフェスト、ケイパビリティ、ライフサイクル、ストレージ、公開、テストの完全な契約は
-[Piarium 拡張の開発ガイド](docs/piarium-extension-authoring.md)を参照してください。
+[Piarium 拡張の開発ガイド](../../docs/piarium-extension-authoring.md)を参照してください。
 
 ## デスクトップ版のダウンロード
 
@@ -172,7 +172,7 @@ bun run electron:smoke:win
 
 NSIS インストーラー、更新メタデータ、blockmap は `packages/electron/dist` に出力されます。コード署名の
 資格情報がない場合、インストーラーは意図的に未署名になります。署名とプラットフォームの詳細は
-[デスクトップパッケージングガイド](packages/electron/README.md#packaging)を参照してください。
+[デスクトップパッケージングガイド](../../packages/electron/README.md#packaging)を参照してください。
 
 ## クラウドイメージを動かす
 
@@ -190,7 +190,7 @@ curl --fail http://127.0.0.1:3000/health
 
 `http://127.0.0.1:3000` を開き、生成されたパスワードを使います。インターネットに面したデプロイの前には
 TLS リバースプロキシか承認済みトンネルを置いてください。必要な転送ルールは
-[リバースプロキシの設定](docs/REVERSE_PROXY.md)にあります。本番では、可変タグに頼らず `PIARIUM_IMAGE` を
+[リバースプロキシの設定](../../docs/REVERSE_PROXY.md)にあります。本番では、可変タグに頼らず `PIARIUM_IMAGE` を
 検証済みの不変ダイジェストに設定してください。
 
 エージェントがコンテナ内で Python、Java、Go、Rust をコンパイルする必要がある場合は、toolbelt オーバーレイを
@@ -201,7 +201,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
 イメージは `linux/amd64` と `linux/arm64` 向けに、provenance と SBOM の attestation 付きで公開されます。
-永続パス、環境、コンテナ、SSH ロールバックの完全な契約は[クラウドデプロイ](docs/cloud-deployment.md)に
+永続パス、環境、コンテナ、SSH ロールバックの完全な契約は[クラウドデプロイ](../../docs/cloud-deployment.md)に
 記載しています。
 
 ## アーキテクチャ
@@ -232,8 +232,8 @@ flowchart LR
 サードパーティの Pi パッケージは、ユーザーの OS 権限で動く実行可能コードです。Piarium は観測された
 ケイパビリティを表示し、プロジェクトローカルな実行可能リソースにゲートを設けますが、信頼された拡張を
 完全なサンドボックスに変えるとは主張しません。リモートインスタンスを公開したり、見慣れないコードを
-インストールしたりする前に、[セキュリティポリシー](.github/SECURITY.en.md)と
-[セキュリティモデル](docs/security.md)を読んでください。
+インストールしたりする前に、[セキュリティポリシー](../../.github/SECURITY.en.md)と
+[セキュリティモデル](../../docs/security.md)を読んでください。
 
 ## リポジトリ構成
 
@@ -279,21 +279,21 @@ Ubuntu の本番ビルドです。型チェック、lint、ワークスペース
 Docker ワークフローがコンテナ契約を検証し、対になるスリムと toolbelt のベース/アプリケーションイメージを
 ビルドし、不変ダイジェストで両方をスモークし、両候補が通ってからタグを昇格させます。
 
-貢献する前に [CONTRIBUTING.en.md](.github/CONTRIBUTING.en.md) と、リポジトリ固有のルールである
-[AGENTS.md](AGENTS.md) を読んでください。
+貢献する前に [CONTRIBUTING.en.md](../../.github/CONTRIBUTING.en.md) と、リポジトリ固有のルールである
+[AGENTS.md](../../AGENTS.md) を読んでください。
 
 ## 設計と運用のドキュメント
 
-- [アーキテクチャ](docs/architecture.md)
-- [ロードマップ](docs/roadmap.md)
-- [構成可能なワークベンチと IDE の契約](docs/composable-workbench-execution-plan.md)（簡体中国語）
-- [Piarium 拡張プラットフォーム](docs/piarium-extension-platform.md)
-- [VS Code コンパニオンへの移行](docs/vscode-companion.md)
-- [OpenChamber から Pi への移行契約](docs/openchamber-pi-migration.md)
-- [プラグイン GUI と所有権の設計](docs/plugin-gui-design.md)
-- [復元モデル](docs/recovery.md)
-- [クラウドデプロイ](docs/cloud-deployment.md)
-- [セキュリティモデル](docs/security.md)
+- [アーキテクチャ](../../docs/architecture.md)
+- [ロードマップ](../../docs/roadmap.md)
+- [構成可能なワークベンチと IDE の契約](../../docs/composable-workbench-execution-plan.md)（簡体中国語）
+- [Piarium 拡張プラットフォーム](../../docs/piarium-extension-platform.md)
+- [VS Code コンパニオンへの移行](../../docs/vscode-companion.md)
+- [OpenChamber から Pi への移行契約](../../docs/openchamber-pi-migration.md)
+- [プラグイン GUI と所有権の設計](../../docs/plugin-gui-design.md)
+- [復元モデル](../../docs/recovery.md)
+- [クラウドデプロイ](../../docs/cloud-deployment.md)
+- [セキュリティモデル](../../docs/security.md)
 
 ## 系譜とライセンス
 
@@ -302,11 +302,11 @@ Piarium はメンテナーの OpenChamber fork を直接 Pi ネイティブに�
 なった OpenCode のプロセス、クライアント、スキーマ、互換パスは削除されます。
 
 結合著作物としての Piarium は
-[GNU Affero General Public License v3.0](LICENSE)（`AGPL-3.0-only`）で配布されます。ネットワーク越しに
+[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）で配布されます。ネットワーク越しに
 利用者へ提供される改変版は、ライセンスの要求どおり、対応するソースを利用者が入手できるようにしなければ
 なりません。
 
 取り込んだ寛容なライセンスの成果物は元の表示のまま残ります。それらの表示を保持していることは、Piarium
-全体が MIT License で利用できることを意味しません。[サードパーティ表示](THIRD_PARTY_NOTICES.md)を
+全体が MIT License で利用できることを意味しません。[サードパーティ表示](../../THIRD_PARTY_NOTICES.md)を
 参照してください。Pi とサードパーティの Pi パッケージは独立したプロジェクトで、それぞれ自身のライセンスで
 配布されています。

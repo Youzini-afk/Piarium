@@ -64,11 +64,15 @@ async function git(args) {
 /**
  * Engineering docs are the repo-level contracts, not the user-facing docs site.
  *
- * `README*.md` covers every root README translation, so a new language is validated the day it is
- * added rather than the day someone notices its links rotted.
+ * The README translations live in `.github/readme/` rather than the repository root, which GitHub
+ * would otherwise list five near-identical files in. They are covered here so a new language is
+ * validated the day it is added rather than the day someone notices its links rotted, and because
+ * their links are all two levels relative and therefore the easiest kind to get wrong.
  */
 async function engineeringDocPaths() {
-  const tracked = await git(["ls-files", "--", "AGENTS.md", "README*.md", "docs"])
+  const tracked = await git([
+    "ls-files", "--", "AGENTS.md", "README.md", ".github/readme", "docs",
+  ])
   if (tracked === null) return null
   return tracked
     .split("\n")

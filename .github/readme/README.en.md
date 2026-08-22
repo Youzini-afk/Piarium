@@ -1,17 +1,17 @@
-[简体中文](README.md) | [繁體中文](README.zh-TW.md) | English | [Français](README.fr.md) | [日本語](README.ja.md)
+[简体中文](../../README.md) | [繁體中文](README.zh-TW.md) | English | [Français](README.fr.md) | [日本語](README.ja.md)
 
 # Piarium
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="packages/web/public/logo-dark-512x512.svg" />
-    <img src="packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
+    <source media="(prefers-color-scheme: dark)" srcset="../../packages/web/public/logo-dark-512x512.svg" />
+    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
   </picture>
 </p>
 
 [![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
 **A Pi-native, recomposable workspace for coding agents: built for local work and usable across
 desktop, web, editors, and mobile clients.**
@@ -85,7 +85,7 @@ advance independently.
 | `pi-background-tasks` | Fleet visibility, launch, bounded logs, and stop controls through the public EventBus contract |
 | `pi-rtk-optimizer` | Native strict-JSON RTK rewrite, output, read, and truncation configuration plus command availability |
 
-See [maintained extension integration](docs/extension-compatibility.md) for the commands, events, and
+See [maintained extension integration](../../docs/extension-compatibility.md) for the commands, events, and
 native configuration each adapter consumes, and which files stay plugin-owned. Piarium does not
 certify plugin versions against Pi releases.
 
@@ -111,7 +111,7 @@ npx piarium-extension build
 npx piarium-extension test
 ```
 
-See the [Piarium extension authoring guide](docs/piarium-extension-authoring.md) for the complete
+See the [Piarium extension authoring guide](../../docs/piarium-extension-authoring.md) for the complete
 manifest, capability, lifecycle, storage, publishing, and testing contracts.
 
 ## Download Desktop
@@ -172,7 +172,7 @@ bun run electron:smoke:win
 
 The NSIS installer, update metadata, and blockmap are written to `packages/electron/dist`. Without
 code-signing credentials the installer is intentionally unsigned. See the
-[desktop packaging guide](packages/electron/README.md#packaging) for signing and platform details.
+[desktop packaging guide](../../packages/electron/README.md#packaging) for signing and platform details.
 
 ## Run the cloud image
 
@@ -189,7 +189,7 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 Open `http://127.0.0.1:3000` and use the generated password. Put a TLS reverse proxy or an approved
-tunnel in front of any Internet-facing deployment; see [reverse proxy setup](docs/REVERSE_PROXY.md)
+tunnel in front of any Internet-facing deployment; see [reverse proxy setup](../../docs/REVERSE_PROXY.md)
 for the required forwarding rules. For production, set `PIARIUM_IMAGE` to a tested immutable digest
 instead of relying on a floating tag.
 
@@ -202,7 +202,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 Images are published for `linux/amd64` and `linux/arm64` with provenance and SBOM attestations. The
 complete persistent-path, environment, container, and SSH rollback contract is documented in
-[Cloud deployment](docs/cloud-deployment.md).
+[Cloud deployment](../../docs/cloud-deployment.md).
 
 ## Architecture
 
@@ -231,8 +231,8 @@ Electron preload boundary.
 
 Third-party Pi packages are executable code with the user's operating-system permissions. Piarium
 shows observed capabilities and gates project-local executable resources, but it does not claim to
-turn trusted extensions into a complete sandbox. Read the [security policy](.github/SECURITY.en.md) and
-[security model](docs/security.md) before exposing a remote instance or installing unfamiliar code.
+turn trusted extensions into a complete sandbox. Read the [security policy](../../.github/SECURITY.en.md) and
+[security model](../../docs/security.md) before exposing a remote instance or installing unfamiliar code.
 
 ## Repository layout
 
@@ -279,21 +279,21 @@ inputs make the Docker workflow verify the container contract, build the coupled
 base/application images, smoke both applications by immutable digest, and promote tags only after
 both candidates pass.
 
-Before contributing, read [CONTRIBUTING.en.md](.github/CONTRIBUTING.en.md) and the repository-specific rules in
-[AGENTS.md](AGENTS.md).
+Before contributing, read [CONTRIBUTING.en.md](../../.github/CONTRIBUTING.en.md) and the repository-specific rules in
+[AGENTS.md](../../AGENTS.md).
 
 ## Design and operations documentation
 
-- [Architecture](docs/architecture.md)
-- [Roadmap](docs/roadmap.md)
-- [Composable workbench and IDE contract](docs/composable-workbench-execution-plan.md) (Chinese)
-- [Piarium extension platform](docs/piarium-extension-platform.md)
-- [VS Code companion migration](docs/vscode-companion.md)
-- [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)
-- [Plugin GUI and ownership design](docs/plugin-gui-design.md)
-- [Recovery model](docs/recovery.md)
-- [Cloud deployment](docs/cloud-deployment.md)
-- [Security model](docs/security.md)
+- [Architecture](../../docs/architecture.md)
+- [Roadmap](../../docs/roadmap.md)
+- [Composable workbench and IDE contract](../../docs/composable-workbench-execution-plan.md) (Chinese)
+- [Piarium extension platform](../../docs/piarium-extension-platform.md)
+- [VS Code companion migration](../../docs/vscode-companion.md)
+- [OpenChamber-to-Pi migration contract](../../docs/openchamber-pi-migration.md)
+- [Plugin GUI and ownership design](../../docs/plugin-gui-design.md)
+- [Recovery model](../../docs/recovery.md)
+- [Cloud deployment](../../docs/cloud-deployment.md)
+- [Security model](../../docs/security.md)
 
 ## Lineage and license
 
@@ -302,10 +302,10 @@ product and UI lineage, not a runtime dependency: obsolete OpenCode processes, c
 and compatibility paths are removed as their Pi-native replacements become authoritative.
 
 Piarium as a combined work is distributed under the
-[GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Modified versions offered to
+[GNU Affero General Public License v3.0](../../LICENSE) (`AGPL-3.0-only`). Modified versions offered to
 users over a network must make their corresponding source available as required by the license.
 
 Imported permissively licensed material remains under its original notices; retaining those notices
 does not make Piarium as a whole available under the MIT License. See
-[Third-party notices](THIRD_PARTY_NOTICES.md). Pi and third-party Pi packages are independent
+[Third-party notices](../../THIRD_PARTY_NOTICES.md). Pi and third-party Pi packages are independent
 projects distributed under their own licenses.

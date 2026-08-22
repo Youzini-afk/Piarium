@@ -1,17 +1,17 @@
-[简体中文](README.md) | 繁體中文 | [English](README.en.md) | [Français](README.fr.md) | [日本語](README.ja.md)
+[简体中文](../../README.md) | 繁體中文 | [English](README.en.md) | [Français](README.fr.md) | [日本語](README.ja.md)
 
 # Piarium
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="packages/web/public/logo-dark-512x512.svg" />
-    <img src="packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
+    <source media="(prefers-color-scheme: dark)" srcset="../../packages/web/public/logo-dark-512x512.svg" />
+    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Piarium" width="128" />
   </picture>
 </p>
 
 [![CI](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/ci.yml)
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
 **一套 Pi 原生、可重組的程式設計代理工作空間：以本機與桌面體驗為中心，同時涵蓋 Web、編輯器與行動端。**
 
@@ -77,7 +77,7 @@ Piarium 不會 fork 這些擴充，也不會複製它們的私有狀態。整合
 | `pi-rtk-optimizer` | 原生嚴格 JSON 中的 RTK 改寫、輸出、讀取和截斷設定，以及命令可用狀態 |
 
 每個擴充的整合面——Piarium 讀取或呼叫哪些命令、事件和原生設定，以及哪些檔案仍歸外掛所有——記錄在
-[擴充整合約定](docs/extension-compatibility.md)。Piarium 不逐版本認證外掛與 Pi 的搭配。
+[擴充整合約定](../../docs/extension-compatibility.md)。Piarium 不逐版本認證外掛與 Pi 的搭配。
 
 ## 開發 Piarium 擴充
 
@@ -101,7 +101,7 @@ npx piarium-extension test
 ```
 
 完整的清單格式、能力、生命週期、儲存、發布和測試說明見
-[Piarium 擴充開發指南](docs/piarium-extension-authoring.md)。
+[Piarium 擴充開發指南](../../docs/piarium-extension-authoring.md)。
 
 ## 下載桌面版
 
@@ -158,7 +158,7 @@ bun run electron:smoke:win
 
 NSIS 安裝套件、更新中介資料和 blockmap 會輸出到 `packages/electron/dist`。沒有設定程式碼簽署憑證時，
 組建會刻意產生未簽署的安裝套件。簽署方式和其他平台說明見
-[桌面封裝指南](packages/electron/README.md#packaging)。
+[桌面封裝指南](../../packages/electron/README.md#packaging)。
 
 ## 執行雲端映像
 
@@ -174,7 +174,7 @@ curl --fail http://127.0.0.1:3000/health
 ```
 
 開啟 `http://127.0.0.1:3000`，使用剛產生的密碼登入。任何面向公開網路的部署都應置於 TLS 反向代理
-或經過審核的通道之後，具體轉送要求見[反向代理設定](docs/REVERSE_PROXY.md)。生產環境請將
+或經過審核的通道之後，具體轉送要求見[反向代理設定](../../docs/REVERSE_PROXY.md)。生產環境請將
 `PIARIUM_IMAGE` 固定為已驗證的不可變摘要，不要依賴浮動標籤。
 
 若代理程式要在容器裡編譯 Python、Java、Go 或 Rust，疊加工具鏈覆疊層：
@@ -184,7 +184,7 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
 
 映像同時發布 `linux/amd64` 和 `linux/arm64` 版本，並帶有 provenance 與 SBOM 證明。持續保存路徑、
-環境變數、容器及 SSH 回滾的完整約定見[雲端部署](docs/cloud-deployment.md)。
+環境變數、容器及 SSH 回滾的完整約定見[雲端部署](../../docs/cloud-deployment.md)。
 
 ## 架構
 
@@ -211,7 +211,7 @@ Pi 工作程序異常也不會讓轉譯程序一同崩潰。跨程序傳輸的�
 
 第三方 Pi 套件是擁有當前使用者作業系統權限的可執行程式碼。Piarium 會呈現觀察到的能力，並對專案內
 可執行資源設置授權門檻，但不會把受信任的擴充宣傳成完整的沙箱。在公開遠端實例或安裝陌生程式碼之前，
-請閱讀[安全政策](.github/SECURITY.md)和[安全模型](docs/security.md)。
+請閱讀[安全政策](../../.github/SECURITY.md)和[安全模型](../../docs/security.md)。
 
 ## 儲存庫結構
 
@@ -255,20 +255,20 @@ CI 固定為三條職責不同的門檻：Ubuntu 原始碼品質、Windows 執�
 發生變化時，Docker 工作流程只驗證容器約定，並組建配套的精簡與工具鏈基礎映像及應用映像；兩個
 候選應用都通過不可變摘要煙霧測試後，才會提升可安裝的標籤。
 
-參與貢獻前，請閱讀[貢獻指南](.github/CONTRIBUTING.md)和儲存庫專用規則 [AGENTS.md](AGENTS.md)。
+參與貢獻前，請閱讀[貢獻指南](../../.github/CONTRIBUTING.md)和儲存庫專用規則 [AGENTS.md](../../AGENTS.md)。
 
 ## 設計與維運文件
 
-- [架構](docs/architecture.md)
-- [藍圖](docs/roadmap.md)
-- [可組合工作台與 IDE 約定](docs/composable-workbench-execution-plan.md)（簡體中文）
-- [Piarium 擴充平台](docs/piarium-extension-platform.md)
-- [VS Code 伴隨遷移](docs/vscode-companion.md)
-- [從 OpenChamber 遷移到 Pi 的約定](docs/openchamber-pi-migration.md)
-- [外掛 GUI 與狀態歸屬設計](docs/plugin-gui-design.md)
-- [還原模型](docs/recovery.md)
-- [雲端部署](docs/cloud-deployment.md)
-- [安全模型](docs/security.md)
+- [架構](../../docs/architecture.md)
+- [藍圖](../../docs/roadmap.md)
+- [可組合工作台與 IDE 約定](../../docs/composable-workbench-execution-plan.md)（簡體中文）
+- [Piarium 擴充平台](../../docs/piarium-extension-platform.md)
+- [VS Code 伴隨遷移](../../docs/vscode-companion.md)
+- [從 OpenChamber 遷移到 Pi 的約定](../../docs/openchamber-pi-migration.md)
+- [外掛 GUI 與狀態歸屬設計](../../docs/plugin-gui-design.md)
+- [還原模型](../../docs/recovery.md)
+- [雲端部署](../../docs/cloud-deployment.md)
+- [安全模型](../../docs/security.md)
 
 ## 專案沿革與授權
 
@@ -276,9 +276,9 @@ Piarium 是維護者 OpenChamber fork 的直接 Pi 原生重構。該 fork 是�
 依賴：隨著 Pi 原生實作成為權威，過時的 OpenCode 程序、用戶端、Schema 和相容路徑會被移除。
 
 Piarium 作為組合後的完整作品，依照
-[GNU Affero General Public License v3.0](LICENSE)（`AGPL-3.0-only`）發布。透過網路向使用者提供
+[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）發布。透過網路向使用者提供
 修改版時，必須按照授權條款要求向這些使用者提供對應的原始碼。
 
 匯入的寬鬆授權程式碼仍保留其原始聲明；保留這些聲明不代表 Piarium 整體仍可依 MIT License 使用。
-詳情見[第三方聲明](THIRD_PARTY_NOTICES.md)。Pi 和第三方 Pi 套件是獨立專案，並分別遵循它們自己的
+詳情見[第三方聲明](../../THIRD_PARTY_NOTICES.md)。Pi 和第三方 Pi 套件是獨立專案，並分別遵循它們自己的
 授權條款。

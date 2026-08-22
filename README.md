@@ -1,4 +1,4 @@
-简体中文 | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [Français](README.fr.md) | [日本語](README.ja.md)
+简体中文 | [繁體中文](.github/readme/README.zh-TW.md) | [English](.github/readme/README.en.md) | [Français](.github/readme/README.fr.md) | [日本語](.github/readme/README.ja.md)
 
 # Piarium
 
