@@ -175,3 +175,60 @@ export const leftFaceCellOpacity = (cell: LogoFaceCell): number =>
 
 export const rightFaceCellOpacity = (cell: LogoFaceCell): number =>
   RIGHT_FACE_CELL_OPACITIES[cell.row * LOGO_GRID_SIZE + cell.col] ?? 0.35;
+
+export interface PiariumMarkColors {
+  /** Outline and mark colour. */
+  readonly stroke: string;
+  /** Face wash under the lattice cells. */
+  readonly faceFill: string;
+  /** Lattice cell colour, modulated per cell by the opacity tables. */
+  readonly cellFill: string;
+}
+
+/**
+ * The mark as an SVG string.
+ *
+ * For hosts that build their document as text rather than render React: the VS Code webview shell is
+ * generated TypeScript, so it can share this instead of becoming another hand-maintained copy. The
+ * colours are injected because a webview has to follow the editor's theme, not Piarium's.
+ *
+ * `packages/web/index.html` and `packages/web/mini-chat.html` still cannot use this — they have to
+ * paint before any module is evaluated — which is why the geometry tests hold their literal copies
+ * against these same constants.
+ */
+export const piariumMarkSvgMarkup = (size: number, colors: PiariumMarkColors): string => {
+  const cells = (
+    faceCells: readonly LogoFaceCell[],
+    opacity: (cell: LogoFaceCell) => number,
+  ): string => faceCells
+    .map((cell) => `<path d="${cell.path}" fill="${colors.cellFill}" opacity="${opacity(cell)}"/>`)
+    .join('');
+
+  const face = (d: string): string =>
+    `<path d="${d}" fill="${colors.faceFill}" stroke="${colors.stroke}" stroke-width="2" stroke-linejoin="round"/>`;
+
+  return [
+    `<svg width="${size}" height="${size}" viewBox="${LOGO_VIEWBOX}" fill="none"`,
+    ' xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">',
+    face(LOGO_LEFT_FACE_PATH),
+    cells(LOGO_LEFT_FACE_CELLS, leftFaceCellOpacity),
+    face(LOGO_RIGHT_FACE_PATH),
+    cells(LOGO_RIGHT_FACE_CELLS, rightFaceCellOpacity),
+    `<path d="${LOGO_TOP_FACE_PATH}" fill="none" stroke="${colors.stroke}" stroke-width="2" stroke-linejoin="round"/>`,
+    `<g transform="${LOGO_ISO_MATRIX} scale(${LOGO_MARK_SCALE})">`,
+    `<path d="${LOGO_MARK_PATH}" fill="${colors.stroke}"/>`,
+    '</g></svg>',
+  ].join('');
+};
+
+/**
+ * The projection every splash lattice shares.
+ *
+ * Declared here so the three hosts cannot drift apart: the lattice has to use the mark's own
+ * projection or the cube stops lining up with the background it sits in.
+ */
+export const SPLASH_LATTICE_TRANSFORM =
+  `matrix(${LOGO_COS30}, ${LOGO_SIN30}, ${-LOGO_COS30}, ${LOGO_SIN30}, 0, 0)`;
+
+/** Class every host toggles to run its splash exit. */
+export const SPLASH_EXIT_CLASS = 'pi-splash-out';

@@ -9,6 +9,7 @@ import {
   type VSCodeThemePayload,
 } from '@piarium/ui/lib/theme/vscode/adapter';
 import { configurePiRuntimeSurface } from '@piarium/ui/lib/pi-runtime/client';
+import { dismissInitialSplash } from '@piarium/ui/lib/splash';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 
@@ -51,12 +52,9 @@ configurePiRuntimeSurface({
   runtimeKey: 'vscode:local',
 });
 
-const fadeOutLoadingScreen = () => {
-  const element = document.getElementById('initial-loading');
-  if (!element) return;
-  element.classList.add('fade-out');
-  window.setTimeout(() => element.remove(), 300);
-};
+// The splash markup comes from `webviewHtml.ts`, and its exit timing belongs to the same contract, so
+// the shared helper owns both rather than this file re-deriving the class name and the duration.
+const fadeOutLoadingScreen = () => dismissInitialSplash();
 
 const waitForUiMount = (timeoutMs = 8_000): Promise<boolean> => {
   const root = document.getElementById('root');

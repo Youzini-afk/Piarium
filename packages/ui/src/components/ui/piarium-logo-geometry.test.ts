@@ -10,7 +10,10 @@ import {
   LOGO_RIGHT_FACE_PATH,
   LOGO_TOP_FACE_PATH,
   LOGO_VERTICES,
+  SPLASH_EXIT_CLASS,
+  SPLASH_LATTICE_TRANSFORM,
   generateFaceGrid,
+  piariumMarkSvgMarkup,
 } from './piarium-logo-geometry';
 import { INITIAL_SPLASH_IDS } from '@/lib/splash';
 
@@ -22,8 +25,13 @@ import { INITIAL_SPLASH_IDS } from '@/lib/splash';
  */
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..', '..');
-const readInlineSplash = (): string =>
-  readFileSync(path.join(repoRoot, 'packages', 'web', 'index.html'), 'utf8');
+const readRepoFile = (...segments: string[]): string =>
+  readFileSync(path.join(repoRoot, ...segments), 'utf8');
+
+const readInlineSplash = (): string => readRepoFile('packages', 'web', 'index.html');
+const readMiniChatSplash = (): string => readRepoFile('packages', 'web', 'mini-chat.html');
+const readWebviewSplash = (): string =>
+  readRepoFile('packages', 'vscode', 'src', 'webviewHtml.ts');
 
 describe('logo geometry', () => {
   test('the cube closes: opposite vertices are symmetric about the centre', () => {
@@ -114,5 +122,80 @@ describe('the pre-paint splash keeps the ids the app reaches for', () => {
     const markIndex = html.indexOf(LOGO_MARK_PATH);
     expect(markIndex).toBeGreaterThan(-1);
     expect(statusIndex).toBeGreaterThan(markIndex);
+  });
+});
+
+/**
+ * Four surfaces paint a splash: the web shell, the mini-chat window, the VS Code webview, and the
+ * React component. They differ in what they show and where their colours come from, and those
+ * differences are deliberate. What must not differ is the projection and the exit contract, because
+ * a lattice on a different projection stops lining up with the mark, and a different exit class means
+ * the shared dismissal silently does nothing.
+ */
+describe('every splash host shares the projection and the exit contract', () => {
+  /** Hosts that must paint before any module is evaluated, so they carry the values literally. */
+  const literalHosts: ReadonlyArray<{ name: string; read: () => string }> = [
+    { name: 'web shell', read: readInlineSplash },
+    { name: 'mini-chat window', read: readMiniChatSplash },
+  ];
+
+  const allHosts = [...literalHosts, { name: 'VS Code webview', read: readWebviewSplash }];
+
+  for (const host of literalHosts) {
+    test(`${host.name} spells out the mark's own projection`, () => {
+      expect(host.read()).toContain(SPLASH_LATTICE_TRANSFORM);
+    });
+
+    test(`${host.name} spells out the shared exit class`, () => {
+      expect(host.read()).toContain(SPLASH_EXIT_CLASS);
+    });
+  }
+
+  test('the VS Code webview takes both from the shared module rather than spelling them out', () => {
+    // It is generated at runtime, so hardcoding either value would be a regression: the point of
+    // importing them is that this host cannot drift.
+    const source = readWebviewSplash();
+    expect(source).toContain('SPLASH_LATTICE_TRANSFORM');
+    expect(source).toContain('SPLASH_EXIT_CLASS');
+    expect(source).not.toContain(SPLASH_LATTICE_TRANSFORM);
+  });
+
+  for (const host of allHosts) {
+    test(`${host.name} keeps the cover visible under reduced motion`, () => {
+      // Reduced motion must weaken the animation, not remove the cover: hiding it would put the
+      // unpainted first frame back, which is the problem the splash exists to solve.
+      const body = host.read();
+      expect(body).toContain('prefers-reduced-motion');
+      expect(body).not.toMatch(/prefers-reduced-motion[^}]*display:\s*none/);
+    });
+  }
+
+  test('the mini-chat window deliberately carries no cube', () => {
+    // Its content renders the single Piarium cube in its empty state, so a cube here would show a
+    // second differently-sized one for a moment before handing off.
+    expect(readMiniChatSplash()).not.toContain(LOGO_MARK_PATH);
+  });
+
+  test('the VS Code webview generates its cube instead of duplicating it', () => {
+    // It is the one host built as text at runtime, so it can share the geometry module. A literal
+    // copy of the mark's path here would mean the duplication grew instead of shrinking.
+    const source = readWebviewSplash();
+    expect(source).toContain('piariumMarkSvgMarkup');
+    expect(source).not.toContain(LOGO_MARK_PATH);
+  });
+
+  test('the generated webview mark carries the same geometry as the logo', () => {
+    const markup = piariumMarkSvgMarkup(96, {
+      stroke: 'var(--test-stroke)',
+      faceFill: 'var(--test-face)',
+      cellFill: 'var(--test-cell)',
+    });
+    expect(markup).toContain(LOGO_LEFT_FACE_PATH);
+    expect(markup).toContain(LOGO_RIGHT_FACE_PATH);
+    expect(markup).toContain(LOGO_TOP_FACE_PATH);
+    expect(markup).toContain(LOGO_MARK_PATH);
+    for (const cell of [...LOGO_LEFT_FACE_CELLS, ...LOGO_RIGHT_FACE_CELLS]) {
+      expect(markup).toContain(cell.path);
+    }
   });
 });

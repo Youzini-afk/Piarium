@@ -3,6 +3,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
+import { dismissInitialSplash } from '@/lib/splash';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
@@ -208,11 +209,7 @@ const ElectronMiniChatContent: React.FC<{ config: MiniChatConfig }> = ({ config 
   React.useEffect(() => {
     if (!ready || splashDismissedRef.current) return;
     splashDismissedRef.current = true;
-    const element = document.getElementById('initial-loading');
-    if (!element) return;
-    element.classList.add('fade-out');
-    const timer = window.setTimeout(() => element.remove(), 300);
-    return () => window.clearTimeout(timer);
+    dismissInitialSplash();
   }, [ready]);
 
   return (
