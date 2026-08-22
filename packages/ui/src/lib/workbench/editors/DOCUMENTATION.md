@@ -32,6 +32,10 @@ an authoritative unavailable state rather than a silent substitution.
 IDE's target for Git diff requests. It declares no languages and no fallback, so resolution never
 selects it. Its `viewState.diffScope` carries `working` or `staged` and persists with the tab.
 
+The IDE Workbench's secondary sidebar hosts the Agent session only. Notes and todos stay with the
+Agent profile, and Git diffs open here in the editor area, so the retired `context` secondary view
+migrates to `session` while extension-contributed secondary views are preserved.
+
 The Agent Files surface and the official IDE Workbench both mount this kernel. `FilesView` is now
 only a composition of `SidebarFilesTree` and `EditorWorkbenchArea`; it owns no second document or
 tab model. `useFilesExplorerStore` persists expanded directories and performs a one-time migration

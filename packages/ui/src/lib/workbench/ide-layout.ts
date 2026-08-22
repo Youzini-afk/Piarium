@@ -12,7 +12,14 @@ const IDE_WORKBENCH_LAYOUT_VERSION = 1 as const;
 const WRITE_COALESCE_MS = 250;
 
 export type IdeWorkbenchActivityId = 'explorer' | 'search' | 'git' | 'run' | 'extensions';
-export type IdeWorkbenchSecondaryId = 'session' | 'context';
+
+/**
+ * The secondary sidebar hosts the Agent session only. Notes and todos stay with the Agent profile,
+ * and Git diffs open in the editor area, so no second built-in view is needed here. Extension
+ * contributions are still preserved in the stack's view IDs, so this stays internal rather than
+ * becoming a published vocabulary of one.
+ */
+type IdeWorkbenchSecondaryId = 'session';
 
 export type PiariumIdeLayoutNode =
   | {
@@ -59,7 +66,6 @@ export interface IdeWorkbenchLayoutProjection {
   bottomPanelVisible: boolean;
   mainWeights: [number, number, number];
   primaryVisible: boolean;
-  secondaryView: IdeWorkbenchSecondaryId;
   secondaryVisible: boolean;
   statusVisible: boolean;
 }
@@ -74,8 +80,8 @@ export const IDE_LAYOUT_NODE_IDS = {
 } as const;
 
 const ACTIVITY_VIEW_IDS: IdeWorkbenchActivityId[] = ['explorer', 'search', 'git', 'run', 'extensions'];
-const SECONDARY_VIEW_IDS: IdeWorkbenchSecondaryId[] = ['session', 'context'];
-const RETIRED_SECONDARY_VIEW_IDS = new Set(['agent', 'fleet', 'recovery']);
+const SECONDARY_VIEW_IDS: IdeWorkbenchSecondaryId[] = ['session'];
+const RETIRED_SECONDARY_VIEW_IDS = new Set(['agent', 'context', 'fleet', 'recovery']);
 const BOTTOM_VIEW_IDS = ['terminal', 'problems', 'output', 'tasks'];
 
 export const DEFAULT_IDE_WORKBENCH_LAYOUT: PiariumIdeLayoutDocument = {
@@ -191,9 +197,12 @@ export const parseIdeWorkbenchLayout = (value: unknown): PiariumIdeLayoutDocumen
       !SECONDARY_VIEW_IDS.includes(viewId as IdeWorkbenchSecondaryId)
       && !RETIRED_SECONDARY_VIEW_IDS.has(viewId)
     ));
+    // A retired or unknown active view falls back to the session; a surviving extension view keeps
+    // its selection so a package update does not silently reset the user's choice.
+    const active = secondary.activeViewId;
     nodes[IDE_LAYOUT_NODE_IDS.secondary] = {
       ...secondary,
-      activeViewId: secondary.activeViewId === 'context' ? 'context' : 'session',
+      activeViewId: active !== undefined && preserved.includes(active) ? active : 'session',
       viewIds: [...SECONDARY_VIEW_IDS, ...preserved],
     };
   }
@@ -263,9 +272,6 @@ export const projectIdeWorkbenchLayout = (document: PiariumIdeLayoutDocument): I
     bottomPanelVisible: bottom.visible,
     mainWeights: [weights[0] ?? 0, weights[1] ?? 1, weights[2] ?? 0],
     primaryVisible: primary.visible,
-    secondaryView: SECONDARY_VIEW_IDS.includes(secondary.activeViewId as IdeWorkbenchSecondaryId)
-      ? secondary.activeViewId as IdeWorkbenchSecondaryId
-      : 'session',
     secondaryVisible: secondary.visible,
     statusVisible: document.statusVisible,
   };

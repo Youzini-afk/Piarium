@@ -9,6 +9,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
@@ -16,9 +17,9 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 import { McpQuickPopover } from '@/components/sections/mcp/McpQuickPopover';
 import { SidebarFilesTree } from '@/components/layout/SidebarFilesTree';
-import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
 import { ChatView } from '@/components/views/ChatView';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
+import { PiSessionSidebar } from '@/components/pi-session/PiSessionSidebar';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { ArchiveView } from '@/components/views/ArchiveView';
@@ -54,7 +55,6 @@ import {
   updateIdeLayoutNode,
   type IdeWorkbenchActivityId,
   type IdeWorkbenchLayoutProjection,
-  type IdeWorkbenchSecondaryId,
 } from '@/lib/workbench/ide-layout';
 import { useIdeWorkbenchLayout } from '@/lib/workbench/useIdeWorkbenchLayout';
 import { showWorkbenchPanel } from '@/lib/workbench/editors/panels';
@@ -63,9 +63,10 @@ import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { FileSearchResult, WorkspaceContentSearchHit } from '@/lib/api/types';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
+import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
 import { IdeRunPanel } from '@/components/workbench/IdeRunPanel';
 import { EditorWorkbenchArea } from '@/components/workbench/EditorWorkbenchArea';
-import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
+import { resourceIdFromWorkspacePath, workspacePathFromResourceId } from '@/lib/documents/path';
 
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then((module) => ({ default: module.SettingsWindow })));
@@ -138,11 +139,6 @@ const ACTIVITIES: ReadonlyArray<{ id: IdeWorkbenchActivityId; icon: IconName; la
   { id: 'git', icon: 'git-branch', labelKey: 'workbench.ide.activity.git', ariaKey: 'workbench.ide.activity.gitAria' },
   { id: 'run', icon: 'play', labelKey: 'workbench.ide.activity.run', ariaKey: 'workbench.ide.activity.runAria' },
   { id: 'extensions', icon: 'plug', labelKey: 'workbench.ide.activity.extensions', ariaKey: 'workbench.ide.activity.extensionsAria' },
-];
-
-const SECONDARY_VIEWS: ReadonlyArray<{ id: IdeWorkbenchSecondaryId; labelKey: I18nKey }> = [
-  { id: 'session', labelKey: 'workbench.ide.secondary.session' },
-  { id: 'context', labelKey: 'workbench.ide.secondary.context' },
 ];
 
 const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory }) => {
@@ -359,12 +355,12 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setCommandPaletteOpen = useUIStore((state) => state.setCommandPaletteOpen);
-  const openContextDiff = useUIStore((state) => state.openContextDiff);
   const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
   const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
   const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
   const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(isSettingsDialogOpen);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
+  const [sessionPickerOpen, setSessionPickerOpen] = React.useState(false);
   const layoutState = useIdeWorkbenchLayout(workspaceId);
   const layoutDocument = layoutState?.document ?? DEFAULT_IDE_WORKBENCH_LAYOUT;
   const layout = React.useMemo(() => projectIdeWorkbenchLayout(layoutDocument), [layoutDocument]);
@@ -380,7 +376,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
 
   const patchLayout = React.useCallback((patch: Partial<Pick<
     IdeWorkbenchLayoutProjection,
-    'activity' | 'primaryVisible' | 'secondaryView' | 'secondaryVisible'
+    'activity' | 'primaryVisible' | 'secondaryVisible'
   >>) => {
     if (!workspaceId) return;
     patchIdeWorkbenchLayout(workspaceId, (document) => {
@@ -394,16 +390,28 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         });
       }
       const secondary = next.nodes[IDE_LAYOUT_NODE_IDS.secondary];
-      if (secondary?.kind === 'stack' && (patch.secondaryView !== undefined || patch.secondaryVisible !== undefined)) {
-        next = updateIdeLayoutNode(next, {
-          ...secondary,
-          ...(patch.secondaryView !== undefined ? { activeViewId: patch.secondaryView } : {}),
-          ...(patch.secondaryVisible !== undefined ? { visible: patch.secondaryVisible } : {}),
-        });
+      if (secondary?.kind === 'stack' && patch.secondaryVisible !== undefined) {
+        next = updateIdeLayoutNode(next, { ...secondary, visible: patch.secondaryVisible });
       }
       return next;
     });
   }, [workspaceId]);
+
+  // Git diffs belong in the editor area. The Agent profile routes them through its tabbed context
+  // panel, which the IDE shell does not mount, so the IDE opens a pinned diff provider tab instead.
+  const openGitDiffInEditor = React.useCallback((gitPath: string, staged: boolean) => {
+    if (!workspaceId || !directory) return;
+    // Git reports repository-relative paths. Resolve against the workspace root and re-derive the
+    // resource ID so a path that escapes the root is rejected rather than opened.
+    const resourceId = resourceIdFromWorkspacePath(
+      directory,
+      workspacePathFromResourceId(directory, gitPath),
+    );
+    if (!resourceId) return;
+    openWorkbenchEditor(workspaceId, resourceId, BUILTIN_EDITOR_PROVIDER_IDS.gitDiff, {
+      viewState: { diffScope: staged ? 'staged' : 'working' },
+    });
+  }, [directory, workspaceId]);
 
   const startResize = React.useCallback((side: 'primary' | 'secondary') => (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -463,6 +471,16 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           open={directoryDialogOpen}
           onOpenChange={setDirectoryDialogOpen}
         />
+        <Dialog open={sessionPickerOpen} onOpenChange={setSessionPickerOpen}>
+          <DialogContent className="h-[min(36rem,80vh)] max-w-md gap-0 overflow-hidden p-0">
+            <DialogTitle className="sr-only">{t('workbench.ide.sessions')}</DialogTitle>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ErrorBoundary>
+                <PiSessionSidebar onRequestClose={() => setSessionPickerOpen(false)} />
+              </ErrorBoundary>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <header
           className="app-region-drag flex h-12 shrink-0 items-center gap-2 border-b border-border px-2"
@@ -513,6 +531,22 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{t('workbench.ide.commandPalette')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t('workbench.ide.sessionsAria')}
+                  aria-haspopup="dialog"
+                  aria-expanded={sessionPickerOpen}
+                  onClick={() => setSessionPickerOpen(true)}
+                >
+                  <Icon name="list-unordered" className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('workbench.ide.sessions')}</TooltipContent>
             </Tooltip>
             <McpQuickPopover />
             <Tooltip>
@@ -610,11 +644,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   <React.Suspense fallback={null}>
                     <GitView
                       isActive
-                      onViewDiff={(path, staged) => {
-                        if (!directory) return;
-                        openContextDiff(directory, path, staged);
-                        patchLayout({ secondaryView: 'context', secondaryVisible: true });
-                      }}
+                      onViewDiff={openGitDiffInEditor}
                     />
                   </React.Suspense>
                 ) : null}
@@ -666,34 +696,13 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                 className="flex min-h-0 min-w-0 flex-col border-l border-border bg-sidebar"
                 style={{ flex: `${layout.mainWeights[2]} 1 0%` }}
               >
-                <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/60 px-1 py-1">
-                  {SECONDARY_VIEWS.map((item) => (
-                    <Button
-                      key={item.id}
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      aria-pressed={layout.secondaryView === item.id}
-                      className={cn(layout.secondaryView === item.id && 'bg-[var(--interactive-selection)]')}
-                      onClick={() => patchLayout({ secondaryView: item.id })}
-                    >
-                      {t(item.labelKey)}
-                    </Button>
-                  ))}
-                </div>
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                   <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews} />
-                  <div className={cn('h-full min-h-0', layout.secondaryView !== 'session' && 'hidden')}>
+                  <div className="h-full min-h-0">
                     <ErrorBoundary>
-                      <ChatView active={layout.secondaryView === 'session'} showWorkStatus />
+                      <ChatView active showWorkStatus />
                     </ErrorBoundary>
                   </div>
-                  {layout.secondaryView === 'context' ? (
-                    <WorkbenchReplacement
-                      target={WORKBENCH_REPLACEMENT_TARGETS.workspaceExplorer}
-                      fallback={<ProjectContextPanel />}
-                    />
-                  ) : null}
                 </div>
               </aside>
             </>

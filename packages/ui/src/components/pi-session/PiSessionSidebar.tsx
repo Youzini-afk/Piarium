@@ -60,6 +60,11 @@ import {
 interface PiSessionSidebarProps {
   isVisible?: boolean;
   mobileVariant?: boolean;
+  /**
+   * Called after an action that should dismiss a transient host, such as the IDE session picker
+   * dialog. The mobile switcher keeps its own dismissal, so hosts that stay mounted omit this.
+   */
+  onRequestClose?: () => void;
 }
 
 interface SessionGroup {
@@ -352,6 +357,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
 export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   isVisible = true,
   mobileVariant = false,
+  onRequestClose,
 }) => {
   const { t } = useI18n();
   const summaries = usePiSessionStore((state) => state.summaries);
@@ -433,25 +439,28 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
       await openSession({ sessionId: session.id });
       setActiveMainTab('chat');
       if (mobileVariant) setSessionSwitcherOpen(false);
+      onRequestClose?.();
     } catch (error) {
       console.error('Failed to open Pi session:', error);
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [mobileVariant, openSession, selectProjectForPath, setActiveMainTab, setDirectory, setSessionSwitcherOpen]);
+  }, [mobileVariant, onRequestClose, openSession, selectProjectForPath, setActiveMainTab, setDirectory, setSessionSwitcherOpen]);
 
   const handleCreate = React.useCallback(async () => {
     try {
       await startPiSessionDraftFromNavigation({ projectId: activeProjectId });
       if (mobileVariant) setSessionSwitcherOpen(false);
+      onRequestClose?.();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [activeProjectId, mobileVariant, setSessionSwitcherOpen]);
+  }, [activeProjectId, mobileVariant, onRequestClose, setSessionSwitcherOpen]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
     setSettingsDialogOpen(true);
-  }, [mobileVariant, setSessionSwitcherOpen, setSettingsDialogOpen]);
+  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
   const handleOpenMiniChat = React.useCallback((session: SessionSummary) => {
     void invokeDesktop('desktop_open_session_mini_chat_window', {

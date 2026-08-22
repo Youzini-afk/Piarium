@@ -15,7 +15,6 @@ describe('IDE workbench layout document', () => {
     const projection = projectIdeWorkbenchLayout(parsed);
     expect(projection.activity).toBe('explorer');
     expect(projection.primaryVisible).toBe(true);
-    expect(projection.secondaryView).toBe('session');
     expect(projection.secondaryVisible).toBe(true);
   });
 
@@ -32,9 +31,31 @@ describe('IDE workbench layout document', () => {
     expect(migrated?.kind === 'stack' ? migrated.activeViewId : undefined).toBe('session');
     expect(migrated?.kind === 'stack' ? migrated.viewIds : []).toEqual([
       'session',
-      'context',
       'example.extension-view',
     ]);
+  });
+
+  test('the retired context view no longer survives as a secondary view', () => {
+    const legacy = structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT);
+    const secondary = legacy.nodes[IDE_LAYOUT_NODE_IDS.secondary];
+    if (!secondary || secondary.kind !== 'stack') throw new Error('expected secondary stack');
+    secondary.activeViewId = 'context';
+    secondary.viewIds = ['session', 'context'];
+
+    const migrated = parseIdeWorkbenchLayout(legacy).nodes[IDE_LAYOUT_NODE_IDS.secondary];
+    expect(migrated?.kind === 'stack' ? migrated.activeViewId : undefined).toBe('session');
+    expect(migrated?.kind === 'stack' ? migrated.viewIds : []).toEqual(['session']);
+  });
+
+  test('a surviving extension view keeps its active selection', () => {
+    const legacy = structuredClone(DEFAULT_IDE_WORKBENCH_LAYOUT);
+    const secondary = legacy.nodes[IDE_LAYOUT_NODE_IDS.secondary];
+    if (!secondary || secondary.kind !== 'stack') throw new Error('expected secondary stack');
+    secondary.activeViewId = 'example.extension-view';
+    secondary.viewIds = ['session', 'example.extension-view'];
+
+    const migrated = parseIdeWorkbenchLayout(legacy).nodes[IDE_LAYOUT_NODE_IDS.secondary];
+    expect(migrated?.kind === 'stack' ? migrated.activeViewId : undefined).toBe('example.extension-view');
   });
 
   test('missing references and cycles are malformed rather than rewritten to defaults', () => {
