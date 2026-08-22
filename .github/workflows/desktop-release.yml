@@ -73,7 +73,8 @@ jobs:
         run: |
           set -euo pipefail
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p \"require('./packages/electron/package.json').version\")" >> "$GITHUB_OUTPUT"
+          version="$(node -p 'require("./packages/electron/package.json").version')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Require matching release tag and package version
         shell: bash
@@ -237,7 +238,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p "require('./packages/electron/package.json').version")"
+          version="$(node -p 'require("./packages/electron/package.json").version')"
           mkdir -p finalized release-assets
           LATEST_YML_DIR="$GITHUB_WORKSPACE/artifacts" \
             RUNNER_TEMP="$GITHUB_WORKSPACE/finalized" \
