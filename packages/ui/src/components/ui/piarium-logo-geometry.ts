@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The Piarium mark's isometric geometry, in one place.
  *
  * The mark is drawn in four surfaces: a pre-paint copy inlined in `packages/web/index.html`, the
@@ -14,8 +14,8 @@
 /** Cube edge length in the 100x100 viewBox. */
 const LOGO_EDGE = 48;
 /** Exported because the splash lattice reuses the same projection. */
-export const LOGO_COS30 = 0.866;
-export const LOGO_SIN30 = 0.5;
+const LOGO_COS30 = 0.866;
+const LOGO_SIN30 = 0.5;
 const LOGO_CENTER_X = 50;
 const LOGO_CENTER_Y = 50;
 export const LOGO_VIEWBOX = '0 0 100 100';
@@ -220,15 +220,3 @@ export const piariumMarkSvgMarkup = (size: number, colors: PiariumMarkColors): s
     '</g></svg>',
   ].join('');
 };
-
-/**
- * The projection every splash lattice shares.
- *
- * Declared here so the three hosts cannot drift apart: the lattice has to use the mark's own
- * projection or the cube stops lining up with the background it sits in.
- */
-export const SPLASH_LATTICE_TRANSFORM =
-  `matrix(${LOGO_COS30}, ${LOGO_SIN30}, ${-LOGO_COS30}, ${LOGO_SIN30}, 0, 0)`;
-
-/** Class every host toggles to run its splash exit. */
-export const SPLASH_EXIT_CLASS = 'pi-splash-out';

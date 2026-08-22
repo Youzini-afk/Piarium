@@ -47,11 +47,13 @@
     </script>
 
     <style>
-      /* The isometric lattice, but no cube. The mini-chat content renders its own (single) Piarium
-         cube in its empty state, so a cube here would briefly show a second, differently-sized one
-         before handing off. The lattice carries the same identity without that collision, and it
-         dissolves on the same schedule as the web shell's splash. Geometry is asserted against the
-         React logo by packages/ui/src/components/ui/piarium-logo-geometry.test.ts. */
+      /* Lattice-free plane, no cube. The mini-chat content renders its own (single) Piarium cube in
+         its empty state, so a cube here would briefly show a second, differently-sized one before
+         handing off. The plane carries the same identity without that collision.
+
+         The rules below are a verbatim copy of splashPlaneCss() in
+         packages/ui/src/components/ui/piarium-splash-lattice.ts, which the geometry test asserts
+         character for character, so edit that function rather than this block. */
       :root {
         --splash-background-dark: #151313;
         --splash-stroke-dark: #CECDC3;
@@ -59,105 +61,134 @@
         --splash-stroke-light: #100F0F;
         --splash-background: var(--splash-background-dark);
         --splash-stroke: var(--splash-stroke-dark);
-        --splash-lattice-line: rgba(255, 255, 255, 0.12);
+        --splash-lattice-line: rgba(255, 255, 255, 0.22);
+        --splash-cell-fill: rgba(255, 255, 255, 0.35);
       }
       html[data-splash-variant='light'] {
         --splash-background: var(--splash-background-light);
         --splash-stroke: var(--splash-stroke-light);
-        --splash-lattice-line: rgba(0, 0, 0, 0.12);
+        --splash-lattice-line: rgba(0, 0, 0, 0.22);
+        --splash-cell-fill: rgba(0, 0, 0, 0.35);
       }
       html[data-splash-variant='dark'] {
         --splash-background: var(--splash-background-dark);
         --splash-stroke: var(--splash-stroke-dark);
       }
       @supports (color: color-mix(in srgb, white 50%, transparent)) {
-        :root { --splash-lattice-line: color-mix(in srgb, var(--splash-stroke) 12%, transparent); }
+        :root {
+          --splash-lattice-line: color-mix(in srgb, var(--splash-stroke) 22%, transparent);
+          --splash-cell-fill: color-mix(in srgb, var(--splash-stroke) 35%, transparent);
+        }
       }
+      /* The pre-paint cover paints the themed background before the plane exists. */
+      #initial-loading { background-color: var(--splash-background); }
+      /* SPLASH-CSS-BEGIN */
+.pi-splash {
+position: fixed;
+inset: 0;
+z-index: 9998;
+overflow: hidden;
+background: var(--splash-background, var(--color-background, #151313));
+perspective: 1100px;
+perspective-origin: 50% 44%;
+}
+.pi-splash[data-leaving='true'] { pointer-events: none; }
 
-      #initial-loading {
-        position: absolute;
-        inset: 0;
-        z-index: 9999;
-        overflow: hidden;
-        background-color: var(--splash-background);
-      }
-      #initial-loading.pi-splash-out { pointer-events: none; }
+.pi-splash-plane {
+position: absolute;
+left: 50%;
+top: 58%;
+display: grid;
+transform-origin: center;
+transform: translate(-50%, -50%) rotateX(68deg);
+transform-style: preserve-3d;
+-webkit-mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
+mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
+}
+/* Two edges per cell, so neighbours do not stack into a 2px rule. */
+.pi-splash-cell {
+box-shadow: inset -1px -1px 0 var(--splash-lattice-line, rgba(255, 255, 255, 0.22));
+}
+/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears
+   when there is genuinely something to wait for. */
+.pi-splash-cell[data-breathe='true'] {
+animation: pi-splash-breathe 2.8s ease-in-out infinite;
+animation-delay: calc(1.2s + var(--pi-breathe-delay));
+}
+@keyframes pi-splash-breathe {
+0%, 100% { background: transparent; }
+50% { background: var(--splash-cell-fill, rgba(255, 255, 255, 0.35)); }
+}
+/* Declared after the breathing rule so equal specificity lets the exit win without !important. */
+.pi-splash[data-leaving='true'] .pi-splash-cell {
+animation: pi-splash-cell-out 460ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cell-delay);
+}
+/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering
+   tiles rather than simply dimming. */
+@keyframes pi-splash-cell-out {
+to { opacity: 0; transform: scale(0.62); }
+}
 
-      #initial-loading-lattice {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        display: grid;
-        transform-origin: center;
-        transform: translate(-50%, -50%) matrix(0.866, 0.5, -0.866, 0.5, 0, 0);
-      }
-      /* Two edges per cell, so neighbours do not stack into a 2px rule. */
-      #initial-loading-lattice > i {
-        box-shadow: inset -1px -1px 0 var(--splash-lattice-line);
-      }
-      #initial-loading.pi-splash-out #initial-loading-lattice > i {
-        animation: pi-splash-cell-out 400ms cubic-bezier(0.4, 0, 0.3, 1) both;
-        animation-delay: var(--d);
-      }
-      @keyframes pi-splash-cell-out {
-        to { opacity: 0; transform: scale(0.82); }
-      }
 
-      /* Reduced motion drops the per-cell dissolve for one fade of the whole cover. It must still
-         show the cover: hiding it would put the unpainted first frame back. */
-      @media (prefers-reduced-motion: reduce) {
-        #initial-loading.pi-splash-out #initial-loading-lattice > i { animation: none; }
-        #initial-loading { transition: opacity 260ms ease; }
-        #initial-loading.pi-splash-out { opacity: 0; }
-      }
+/* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
+   cover: hiding it would put the unpainted first frame back. */
+@media (prefers-reduced-motion: reduce) {
+.pi-splash-cell,
+.pi-splash[data-leaving='true'] .pi-splash-cell {
+animation: none;
+}
+.pi-splash { transition: opacity 260ms ease; }
+.pi-splash[data-leaving='true'] { opacity: 0; }
+}
+/* SPLASH-CSS-END */
     </style>
 
     <script type="module" src="/src/mini-chat-main.tsx"></script>
   </head>
   <body class="h-full bg-background text-foreground">
     <div id="root" class="h-full">
-      <!-- Lattice backdrop until the mini-chat React app is ready (dismissed in
+      <!-- Plane backdrop until the mini-chat React app is ready (dismissed in
            ElectronMiniChatApp through packages/ui/src/lib/splash.ts). No cube here on
            purpose — the content renders the single Piarium cube itself. -->
-      <div id="initial-loading">
-        <div id="initial-loading-lattice" aria-hidden="true"></div>
+      <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
+        <div id="initial-loading-plane" class="pi-splash-plane" aria-hidden="true"></div>
       </div>
     </div>
 
     <script>
-      // Builds the lattice, and holds the safety net that keeps a failed handoff from leaving the
-      // window covered. Mirrors resolveLatticeShape in PiariumSplash.tsx; the mini-chat window is
-      // small, so this lands near the minimum axis count, which is the intended texture there.
+      // Builds the ground plane, and holds the safety net that keeps a failed handoff from leaving the
+      // window covered. Mirrors resolvePlaneShape/buildSplashCells in piarium-splash-lattice.ts.
       (function () {
-        var COS30 = 0.866;
-        var SIN30 = 0.5;
-        var lattice = document.getElementById('initial-loading-lattice');
+        var plane = document.getElementById('initial-loading-plane');
 
-        if (lattice) {
-          var cell = innerWidth >= 768 ? 86 : 62;
-          var required = Math.max(innerWidth / COS30, innerHeight / SIN30);
-          var axis = Math.max(4, Math.min(16, Math.round(((required / 2) * 1.5) / cell)));
-          lattice.style.gridTemplateColumns = 'repeat(' + axis + ',' + cell + 'px)';
-          lattice.style.gridTemplateRows = 'repeat(' + axis + ',' + cell + 'px)';
+        if (plane) {
+          var cell = innerWidth >= 768 ? 170 : 110;
+          var cols = Math.max(6, Math.min(22, Math.ceil((innerWidth * 2) / cell)));
+          var rows = Math.max(6, Math.min(22, Math.ceil((innerHeight * 2) / cell)));
+          plane.style.gridTemplateColumns = 'repeat(' + cols + ',' + cell + 'px)';
+          plane.style.gridTemplateRows = 'repeat(' + rows + ',' + cell + 'px)';
 
-          var mid = (axis - 1) / 2;
-          var maxRadius = Math.hypot(mid, mid) || 1;
+          var midCol = (cols - 1) / 2;
+          var midRow = (rows - 1) / 2;
+          var maxRadius = Math.hypot(midCol, midRow) || 1;
           var buffer = '';
-          for (var row = 0; row < axis; row++) {
-            for (var col = 0; col < axis; col++) {
-              var delay = Math.round((Math.hypot(col - mid, row - mid) / maxRadius) * 460);
-              buffer += '<i style="--d:' + delay + 'ms"></i>';
+          for (var row = 0; row < rows; row++) {
+            for (var col = 0; col < cols; col++) {
+              var fraction = Math.hypot(col - midCol, row - midRow) / maxRadius;
+              buffer += '<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:'
+                + Math.round(fraction * 520) + 'ms"></span>';
             }
           }
-          lattice.innerHTML = buffer;
+          plane.innerHTML = buffer;
         }
 
         // Safety net: never let the splash hang if the app fails to dismiss it.
         setTimeout(function () {
           var loading = document.getElementById('initial-loading');
-          if (!loading || loading.classList.contains('pi-splash-out')) return;
-          loading.classList.add('pi-splash-out');
-          setTimeout(function () { loading.remove(); }, 900);
+          if (!loading || loading.dataset.leaving === 'true') return;
+          loading.dataset.leaving = 'true';
+          setTimeout(function () { loading.remove(); }, 980);
         }, 8000);
       })();
     </script>

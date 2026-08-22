@@ -1,40 +1,55 @@
 import * as os from 'node:os';
 import * as vscode from 'vscode';
+import { piariumMarkSvgMarkup } from '@piarium/ui/src/components/ui/piarium-logo-geometry';
 import {
-  SPLASH_EXIT_CLASS,
-  SPLASH_LATTICE_TRANSFORM,
-  piariumMarkSvgMarkup,
-} from '@piarium/ui/src/components/ui/piarium-logo-geometry';
+  resolvePlaneShape,
+  splashPlaneCss,
+} from '@piarium/ui/src/components/ui/piarium-splash-lattice';
 import { getThemeKindName } from './theme';
 import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
 /**
- * The lattice is emitted as markup rather than built by a script, because this document is generated
+ * The plane is emitted as markup rather than built by a script, because this document is generated
  * anyway and a webview's CSP is one less thing to reason about without another inline script.
  *
- * A fixed extent is the trade for that: the panel can be a narrow sidebar or a full editor tab, and
- * this shell has no way to measure it. The size is chosen to overflow a wide tab and be cropped in a
- * sidebar, which is the harmless direction to be wrong in.
+ * A fixed extent is the trade: the panel can be a narrow sidebar or a full editor tab, and this shell
+ * has no way to measure it. Sizing for a mid-size panel overflows a wide tab and is cropped in a
+ * sidebar, which is the harmless direction to be wrong in because the mask fades the outer region
+ * either way.
  */
-const LATTICE_AXIS = 16;
-const LATTICE_CELL_PX = 76;
+const PLANE_SHAPE = resolvePlaneShape(1100, 900);
 
-/** Exit delay per cell, radiating from the mark at the centre. Mirrors `buildSplashCells`. */
-const renderLatticeCells = (): string => {
-  const mid = (LATTICE_AXIS - 1) / 2;
-  const maxRadius = Math.hypot(mid, mid) || 1;
+/** Exit delay per cell, radiating from where the mark stands. Mirrors `buildSplashCells`. */
+const renderPlaneCells = (): string => {
+  const midCol = (PLANE_SHAPE.cols - 1) / 2;
+  const midRow = (PLANE_SHAPE.rows - 1) / 2;
+  const maxRadius = Math.hypot(midCol, midRow) || 1;
   const cells: string[] = [];
 
-  for (let row = 0; row < LATTICE_AXIS; row += 1) {
-    for (let col = 0; col < LATTICE_AXIS; col += 1) {
-      const delay = Math.round((Math.hypot(col - mid, row - mid) / maxRadius) * 460);
-      cells.push(`<i style="--d:${delay}ms"></i>`);
+  for (let row = 0; row < PLANE_SHAPE.rows; row += 1) {
+    for (let col = 0; col < PLANE_SHAPE.cols; col += 1) {
+      const delay = Math.round((Math.hypot(col - midCol, row - midRow) / maxRadius) * 520);
+      cells.push(`<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:${delay}ms"></span>`);
     }
   }
 
   return cells.join('');
 };
+
+/**
+ * Splash rules, taken from the shared generator with the editor's own colours. A webview that ignores
+ * its host's theme looks broken, which is the one thing this host must not share with the others.
+ */
+const SPLASH_CSS = splashPlaneCss(
+  {
+    background: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
+    line: 'var(--vscode-widget-border, var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.24)))',
+    cell: 'var(--vscode-editorIndentGuide-activeBackground, rgba(128,128,128,0.4))',
+    status: 'var(--vscode-foreground)',
+  },
+  { withMark: true },
+);
 
 export interface WebviewHtmlOptions {
   devServerUrl?: string | null;
@@ -89,7 +104,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const documentLanguage = vscode.env.language.replace(/[^A-Za-z0-9-]/g, '') || 'en';
   const runtimeConnectionFailed = htmlSafeJson(vscode.l10n.t('Piarium: Pi runtime connection failed'));
   const waitingForDevelopmentServer = htmlSafeJson(vscode.l10n.t('Piarium: Waiting for the webview development server'));
-  const latticeCells = renderLatticeCells();
+  const planeCells = renderPlaneCells();
   const bootstrapConfig = htmlSafeJson({
     workspaceFolder,
     workspaceFolders,
@@ -114,60 +129,10 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       color: var(--vscode-foreground);
       font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
     }
-    /* Splash. Shares the isometric lattice with the web shell, but takes its colours from the editor
-       theme rather than Piarium's: a webview that ignores the host theme looks broken. The mark and
-       the lattice projection come from @piarium/ui's geometry module, so this is generated rather
-       than a hand-maintained copy. */
-    #initial-loading {
-      position: fixed;
-      inset: 0;
-      z-index: 9999;
-      overflow: hidden;
-      background: var(--vscode-editor-background, var(--vscode-sideBar-background));
-    }
-    #initial-loading.${SPLASH_EXIT_CLASS} { pointer-events: none; }
-
-    #initial-loading-lattice {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      display: grid;
-      grid-template-columns: repeat(${LATTICE_AXIS}, ${LATTICE_CELL_PX}px);
-      grid-template-rows: repeat(${LATTICE_AXIS}, ${LATTICE_CELL_PX}px);
-      transform-origin: center;
-      transform: translate(-50%, -50%) ${SPLASH_LATTICE_TRANSFORM};
-    }
-    /* Two edges per cell, so neighbours do not stack into a 2px rule. */
-    #initial-loading-lattice > i {
-      box-shadow: inset -1px -1px 0 var(--vscode-widget-border, var(--vscode-contrastBorder, transparent));
-    }
-    #initial-loading.${SPLASH_EXIT_CLASS} #initial-loading-lattice > i {
-      animation: pi-splash-cell-out 400ms cubic-bezier(0.4, 0, 0.3, 1) both;
-      animation-delay: var(--d);
-    }
-    @keyframes pi-splash-cell-out {
-      to { opacity: 0; transform: scale(0.82); }
-    }
-
-    #initial-loading-center {
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      translate: -50% -50%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 14px;
-      padding: 0 20px;
-      text-align: center;
-    }
-    #initial-loading.${SPLASH_EXIT_CLASS} #initial-loading-center {
-      animation: pi-splash-mark-out 420ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
-    }
-    @keyframes pi-splash-mark-out {
-      to { opacity: 0; transform: scale(1.06); }
-    }
-
+    /* Splash. Same receding plane as the web shell, generated from the shared module so this host
+       cannot drift, but coloured from the editor theme: a webview that ignores its host's theme looks
+       broken. */
+${SPLASH_CSS}
     .piarium-name {
       font-size: 12px;
       letter-spacing: 0.08em;
@@ -183,31 +148,21 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       text-align: center;
       white-space: pre-wrap;
     }
-
-    /* Reduced motion drops the staged lattice and mark animation for one fade of the whole cover.
-       It must still show the cover: hiding it would put the unpainted panel back. */
     @media (prefers-reduced-motion: reduce) {
-      #initial-loading.${SPLASH_EXIT_CLASS} #initial-loading-lattice > i,
-      #initial-loading.${SPLASH_EXIT_CLASS} #initial-loading-center,
-      .piarium-name {
-        animation: none;
-      }
-      .piarium-name { opacity: 0.72; }
-      #initial-loading { transition: opacity 260ms ease; }
-      #initial-loading.${SPLASH_EXIT_CLASS} { opacity: 0; }
+      .piarium-name { animation: none; opacity: 0.72; }
     }
   </style>
   <title>Piarium</title>
 </head>
 <body>
-  <div id="initial-loading">
-    <div id="initial-loading-lattice" aria-hidden="true">${latticeCells}</div>
-    <div id="initial-loading-center">
-      ${piariumMarkSvgMarkup(96, {
+  <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
+    <div class="pi-splash-plane" aria-hidden="true">${planeCells}</div>
+    <div class="pi-splash-center">
+      <span class="pi-splash-mark">${piariumMarkSvgMarkup(112, {
         stroke: 'var(--vscode-foreground)',
         faceFill: 'var(--vscode-editorWidget-background, transparent)',
         cellFill: 'var(--vscode-foreground)',
-      })}
+      })}</span>
       <div class="piarium-name">PIARIUM</div>
       <div id="loading-status" role="status" aria-live="polite"></div>
     </div>

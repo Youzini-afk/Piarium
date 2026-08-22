@@ -10,11 +10,10 @@ import {
   LOGO_RIGHT_FACE_PATH,
   LOGO_TOP_FACE_PATH,
   LOGO_VERTICES,
-  SPLASH_EXIT_CLASS,
-  SPLASH_LATTICE_TRANSFORM,
   generateFaceGrid,
   piariumMarkSvgMarkup,
 } from './piarium-logo-geometry';
+import { splashPlaneCss } from './piarium-splash-lattice';
 import { INITIAL_SPLASH_IDS } from '@/lib/splash';
 
 /**
@@ -96,22 +95,16 @@ describe('the pre-paint splash mirrors the logo', () => {
     expect(missing).toEqual([]);
   });
 
-  test('shares the lattice projection with the splash component', () => {
-    // Both the inline lattice and PiariumSplash tile the mark's own lattice. If one is re-derived
-    // with different constants the cube stops lining up with the background it sits in.
-    const html = readInlineSplash();
-    expect(html).toContain('matrix(0.866, 0.5, -0.866, 0.5, 0, 0)');
-  });
 });
 
 describe('the pre-paint splash keeps the ids the app reaches for', () => {
   // `lib/splash.ts` can only address this markup through the DOM, so a rename here would stop every
   // status message appearing instead of failing anywhere a reader would notice.
-  test('exposes the root, the status line, and the exit class', () => {
+  test('exposes the root, the status line, and the leaving attribute', () => {
     const html = readInlineSplash();
     expect(html).toContain(`id="${INITIAL_SPLASH_IDS.root}"`);
     expect(html).toContain(`id="${INITIAL_SPLASH_IDS.status}"`);
-    expect(html).toContain(INITIAL_SPLASH_IDS.exitClass);
+    expect(html).toContain(INITIAL_SPLASH_IDS.leavingAttribute);
   });
 
   test('the status line is a sibling of the mark, not the container the mark lives in', () => {
@@ -132,43 +125,68 @@ describe('the pre-paint splash keeps the ids the app reaches for', () => {
  * a lattice on a different projection stops lining up with the mark, and a different exit class means
  * the shared dismissal silently does nothing.
  */
-describe('every splash host shares the projection and the exit contract', () => {
-  /** Hosts that must paint before any module is evaluated, so they carry the values literally. */
-  const literalHosts: ReadonlyArray<{ name: string; read: () => string }> = [
-    { name: 'web shell', read: readInlineSplash },
-    { name: 'mini-chat window', read: readMiniChatSplash },
-  ];
+describe('every splash host shares the plane', () => {
+  const PIARIUM_COLORS = {
+    background: 'var(--splash-background, var(--color-background, #151313))',
+    line: 'var(--splash-lattice-line, rgba(255, 255, 255, 0.22))',
+    cell: 'var(--splash-cell-fill, rgba(255, 255, 255, 0.35))',
+  } as const;
 
-  const allHosts = [...literalHosts, { name: 'VS Code webview', read: readWebviewSplash }];
+  /** Between these, each host embeds the generator's output verbatim. */
+  const between = (body: string): string => {
+    const open = body.indexOf('/* SPLASH-CSS-BEGIN */');
+    const close = body.indexOf('/* SPLASH-CSS-END */');
+    expect(open).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(open);
+    return body.slice(open + '/* SPLASH-CSS-BEGIN */'.length, close);
+  };
 
-  for (const host of literalHosts) {
-    test(`${host.name} spells out the mark's own projection`, () => {
-      expect(host.read()).toContain(SPLASH_LATTICE_TRANSFORM);
-    });
-
-    test(`${host.name} spells out the shared exit class`, () => {
-      expect(host.read()).toContain(SPLASH_EXIT_CLASS);
-    });
-  }
-
-  test('the VS Code webview takes both from the shared module rather than spelling them out', () => {
-    // It is generated at runtime, so hardcoding either value would be a regression: the point of
-    // importing them is that this host cannot drift.
-    const source = readWebviewSplash();
-    expect(source).toContain('SPLASH_LATTICE_TRANSFORM');
-    expect(source).toContain('SPLASH_EXIT_CLASS');
-    expect(source).not.toContain(SPLASH_LATTICE_TRANSFORM);
+  test('the web shell embeds the generated rules character for character', () => {
+    // Not a similarity check. The perspective rules are fiddly enough that an approximate copy is
+    // worse than none: it would look almost right and diverge silently.
+    expect(between(readInlineSplash()))
+      .toBe(splashPlaneCss({ ...PIARIUM_COLORS, status: 'var(--splash-stroke)' }, { withMark: true }));
   });
 
+  test('the mini-chat window embeds the no-mark variant character for character', () => {
+    expect(between(readMiniChatSplash()))
+      .toBe(splashPlaneCss(PIARIUM_COLORS, { withMark: false }));
+  });
+
+  test('the VS Code webview generates its rules instead of embedding them', () => {
+    // It builds its document as text at runtime, so it can call the generator. A copy here would mean
+    // the duplication grew rather than shrank.
+    const source = readWebviewSplash();
+    expect(source).toContain('splashPlaneCss(');
+    expect(source).not.toContain('/* SPLASH-CSS-BEGIN */');
+    expect(source).not.toContain('.pi-splash-plane {');
+  });
+
+  const allHosts: ReadonlyArray<{ name: string; read: () => string }> = [
+    { name: 'web shell', read: readInlineSplash },
+    { name: 'mini-chat window', read: readMiniChatSplash },
+    { name: 'VS Code webview', read: readWebviewSplash },
+  ];
+
   for (const host of allHosts) {
-    test(`${host.name} keeps the cover visible under reduced motion`, () => {
-      // Reduced motion must weaken the animation, not remove the cover: hiding it would put the
-      // unpainted first frame back, which is the problem the splash exists to solve.
-      const body = host.read();
-      expect(body).toContain('prefers-reduced-motion');
-      expect(body).not.toMatch(/prefers-reduced-motion[^}]*display:\s*none/);
+    test(`${host.name} tells the cover to leave through the shared attribute`, () => {
+      expect(host.read()).toContain(INITIAL_SPLASH_IDS.leavingAttribute);
     });
   }
+
+  test('the generated rules keep the cover visible under reduced motion', () => {
+    // Reduced motion must weaken the animation, not remove the cover: hiding it would put the
+    // unpainted first frame back, which is the problem the splash exists to solve.
+    const css = splashPlaneCss({ ...PIARIUM_COLORS, status: 'var(--splash-stroke)' }, { withMark: true });
+    expect(css).toContain('prefers-reduced-motion');
+    expect(css).not.toMatch(/prefers-reduced-motion[\s\S]*display:\s*none/);
+    expect(css).toContain('opacity: 0;');
+  });
+
+  test('the plane is opaque, since a transparent cover hides nothing', () => {
+    const css = splashPlaneCss(PIARIUM_COLORS, { withMark: false });
+    expect(css).toContain(`background: ${PIARIUM_COLORS.background};`);
+  });
 
   test('the mini-chat window deliberately carries no cube', () => {
     // Its content renders the single Piarium cube in its empty state, so a cube here would show a

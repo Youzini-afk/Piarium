@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
@@ -495,107 +495,130 @@
 
       /* Pre-paint splash.
          Everything here must be inline: it has to cover the viewport before the bundle exists, and a
-         frame later is a frame of unpainted background. The mark's two visible faces are a 4x4
-         lattice of parallelograms, so the splash tiles that same lattice across the viewport and the
-         cube reads as the filled region of it. One transform carries the isometric projection, which
-         is the same matrix the mark uses for its top face; the cells stay in phase with the mark
-         without any per-cell trigonometry. Geometry is asserted against the React logo by
-         packages/ui/src/components/ui/piarium-logo-geometry.test.ts. */
-      #initial-loading {
-        position: fixed;
-        inset: 0;
-        z-index: 9999;
-        overflow: hidden;
-        background-color: var(--splash-background);
-        font-family: system-ui, -apple-system, sans-serif;
-      }
-      #initial-loading.pi-splash-out { pointer-events: none; }
+         frame later is a frame of unpainted background. It is a verbatim copy of splashPlaneCss() in
+         packages/ui/src/components/ui/piarium-splash-lattice.ts, which the geometry test asserts
+         character for character, so edit that function rather than this block. */
+      /* SPLASH-CSS-BEGIN */
+.pi-splash {
+position: fixed;
+inset: 0;
+z-index: 9998;
+overflow: hidden;
+background: var(--splash-background, var(--color-background, #151313));
+perspective: 1100px;
+perspective-origin: 50% 44%;
+}
+.pi-splash[data-leaving='true'] { pointer-events: none; }
 
-      #initial-loading-lattice {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        display: grid;
-        transform-origin: center;
-        transform: translate(-50%, -50%) matrix(0.866, 0.5, -0.866, 0.5, 0, 0);
-      }
-      /* Two edges per cell, so neighbours do not stack into a 2px rule. */
-      #initial-loading-lattice > i {
-        box-shadow: inset -1px -1px 0 var(--splash-lattice-line, var(--splash-face-fill));
-      }
-      /* Idle breathing starts late on purpose: a fast start never reaches it, so it only appears when
-         there is genuinely something to wait for. */
-      #initial-loading-lattice > i.b {
-        animation: pi-splash-breathe 2.6s ease-in-out infinite;
-        animation-delay: calc(1.2s + var(--bd));
-      }
-      @keyframes pi-splash-breathe {
-        0%, 100% { background: transparent; }
-        50% { background: var(--splash-cell-fill); }
-      }
-      /* Declared after the breathing rule so equal specificity lets the exit win. */
-      #initial-loading.pi-splash-out #initial-loading-lattice > i {
-        animation: pi-splash-cell-out 400ms cubic-bezier(0.4, 0, 0.3, 1) both;
-        animation-delay: var(--d);
-      }
-      @keyframes pi-splash-cell-out {
-        to { opacity: 0; transform: scale(0.82); }
-      }
+.pi-splash-plane {
+position: absolute;
+left: 50%;
+top: 58%;
+display: grid;
+transform-origin: center;
+transform: translate(-50%, -50%) rotateX(68deg);
+transform-style: preserve-3d;
+-webkit-mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
+mask-image: radial-gradient(115% 78% at 50% 44%, rgba(0,0,0,1) 0%, rgba(0,0,0,0.92) 26%, rgba(0,0,0,0.45) 58%, rgba(0,0,0,0) 84%);
+}
+/* Two edges per cell, so neighbours do not stack into a 2px rule. */
+.pi-splash-cell {
+box-shadow: inset -1px -1px 0 var(--splash-lattice-line, rgba(255, 255, 255, 0.22));
+}
+/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears
+   when there is genuinely something to wait for. */
+.pi-splash-cell[data-breathe='true'] {
+animation: pi-splash-breathe 2.8s ease-in-out infinite;
+animation-delay: calc(1.2s + var(--pi-breathe-delay));
+}
+@keyframes pi-splash-breathe {
+0%, 100% { background: transparent; }
+50% { background: var(--splash-cell-fill, rgba(255, 255, 255, 0.35)); }
+}
+/* Declared after the breathing rule so equal specificity lets the exit win without !important. */
+.pi-splash[data-leaving='true'] .pi-splash-cell {
+animation: pi-splash-cell-out 460ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cell-delay);
+}
+/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering
+   tiles rather than simply dimming. */
+@keyframes pi-splash-cell-out {
+to { opacity: 0; transform: scale(0.62); }
+}
 
-      #initial-loading-center {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        translate: -50% -50%;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 20px;
-        padding: 0 24px;
-        text-align: center;
-      }
-      #initial-loading.pi-splash-out #initial-loading-center {
-        animation: pi-splash-mark-out 420ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
-      }
-      @keyframes pi-splash-mark-out {
-        to { opacity: 0; transform: scale(1.06); }
-      }
+.pi-splash-center {
+position: absolute;
+left: 50%;
+top: 50%;
+translate: -50% -50%;
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 18px;
+padding: 0 24px;
+text-align: center;
+}
+.pi-splash-mark {
+position: relative;
+display: block;
+}
+/* Seats the mark on the plane. Wider than tall, because the plane is foreshortened. */
+.pi-splash-mark::after {
+content: '';
+position: absolute;
+left: 50%;
+bottom: 2%;
+width: 96%;
+height: 26%;
+translate: -50% 0;
+border-radius: 50%;
+background: radial-gradient(50% 50% at 50% 50%, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.28) 45%, rgba(0,0,0,0) 100%);
+pointer-events: none;
+}
+.pi-splash[data-leaving='true'] .pi-splash-center {
+animation: pi-splash-mark-out 460ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
+}
+@keyframes pi-splash-mark-out {
+to { opacity: 0; transform: translateY(-10px) scale(1.05); }
+}
+.pi-splash-status {
+min-height: 1rem;
+max-width: 32ch;
+font-size: 11px;
+font-weight: 600;
+letter-spacing: 0.11em;
+text-transform: uppercase;
+color: var(--splash-stroke);
+opacity: 0;
+animation: pi-splash-status-in 480ms 700ms ease both;
+}
+@keyframes pi-splash-status-in { to { opacity: 0.5; } }
 
-      #initial-loading-status {
-        min-height: 1rem;
-        max-width: 32ch;
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.11em;
-        text-transform: uppercase;
-        color: var(--splash-stroke);
-        opacity: 0;
-        animation: pi-splash-status-in 480ms 700ms ease both;
-      }
-      @keyframes pi-splash-status-in { to { opacity: 0.55; } }
-
-      /* Reduced motion drops the staged lattice and mark animation for one fade of the whole cover.
-         It must still show the cover: hiding it would put the unpainted first frame back. */
-      @media (prefers-reduced-motion: reduce) {
-        #initial-loading-lattice > i,
-        #initial-loading.pi-splash-out #initial-loading-lattice > i,
-        #initial-loading.pi-splash-out #initial-loading-center {
-          animation: none;
-        }
-        #initial-loading-status { animation: none; opacity: 0.55; }
-        #initial-loading { transition: opacity 260ms ease; }
-        #initial-loading.pi-splash-out { opacity: 0; }
-      }
+/* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
+   cover: hiding it would put the unpainted first frame back. */
+@media (prefers-reduced-motion: reduce) {
+.pi-splash-cell,
+.pi-splash[data-leaving='true'] .pi-splash-cell,
+.pi-splash[data-leaving='true'] .pi-splash-center,
+.pi-splash-status {
+animation: none;
+}
+.pi-splash-status { opacity: 0.5; }
+.pi-splash { transition: opacity 260ms ease; }
+.pi-splash[data-leaving='true'] { opacity: 0; }
+}
+/* SPLASH-CSS-END */
     </style>
   </head>
   <body class="h-full bg-background text-foreground">
     <div id="root" class="h-full">
       <!-- Loading fallback while React initializes. Dismissed through packages/ui/src/lib/splash.ts,
            which owns this element's contract. -->
-      <div id="initial-loading" role="status" aria-label="Loading Piarium">
-        <div id="initial-loading-lattice" aria-hidden="true"></div>
-        <div id="initial-loading-center">
-          <svg width="132" height="132" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <div id="initial-loading" class="pi-splash" data-leaving="false" role="status" aria-label="Loading Piarium">
+        <div id="initial-loading-plane" class="pi-splash-plane" aria-hidden="true"></div>
+        <div class="pi-splash-center">
+          <span class="pi-splash-mark">
+          <svg width="148" height="148" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
             <!-- Isometric cube: edge=48, centerY=50 -->
             <!-- Points: top(50,2), left(8.432,26), right(91.568,26), center(50,50), bottomLeft(8.432,74), bottomRight(91.568,74), bottom(50,98) -->
 
@@ -649,50 +672,48 @@
               <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="var(--splash-logo-fill)"/>
             </g>
           </svg>
-          <div id="initial-loading-status"></div>
+          </span>
+          <div id="initial-loading-status" class="pi-splash-status"></div>
         </div>
       </div>
     </div>
 
     <script>
-      // Builds the splash lattice. Kept out of the markup because the cell count depends on the
-      // viewport, and a fixed count either leaves gaps on a wide screen or emits hundreds of
-      // elements on one. Mirrors resolveLatticeShape/buildSplashCells in PiariumSplash.tsx.
+      // Builds the ground plane. Kept out of the markup because the cell count depends on the
+      // viewport: a fixed count either ends in plain view on a wide screen or emits hundreds of
+      // elements on a small one. Mirrors resolvePlaneShape/buildSplashCells in
+      // packages/ui/src/components/ui/piarium-splash-lattice.ts.
       (function () {
-        var lattice = document.getElementById('initial-loading-lattice');
-        if (!lattice) return;
-
-        var COS30 = 0.866;
-        var SIN30 = 0.5;
+        var plane = document.getElementById('initial-loading-plane');
+        if (!plane) return;
 
         function build() {
-          var cell = innerWidth >= 768 ? 86 : 62;
-          // The isometric matrix sends a w-by-h rectangle to a rhombus cos30*(w+h) wide and
-          // sin30*(w+h) tall. The extra factor keeps the viewport's corners inside the rhombus
-          // rather than only its edges.
-          var required = Math.max(innerWidth / COS30, innerHeight / SIN30);
-          var side = (required / 2) * 1.5;
-          var axis = Math.max(4, Math.min(16, Math.round(side / cell)));
+          var cell = innerWidth >= 768 ? 170 : 110;
+          // Over-provision and let the mask hide the boundary. Perspective coverage has no tidy
+          // closed form, and being too small is the visible failure.
+          var cols = Math.max(6, Math.min(22, Math.ceil((innerWidth * 2) / cell)));
+          var rows = Math.max(6, Math.min(22, Math.ceil((innerHeight * 2) / cell)));
 
-          lattice.style.gridTemplateColumns = 'repeat(' + axis + ',' + cell + 'px)';
-          lattice.style.gridTemplateRows = 'repeat(' + axis + ',' + cell + 'px)';
+          plane.style.gridTemplateColumns = 'repeat(' + cols + ',' + cell + 'px)';
+          plane.style.gridTemplateRows = 'repeat(' + rows + ',' + cell + 'px)';
 
-          // Radiate from the centre, where the mark is, so the lattice falls away from it. Measured
-          // in lattice space: because the lattice is sheared, the wavefront follows the cube's own
-          // axes on screen rather than a screen-space circle.
-          var mid = (axis - 1) / 2;
-          var maxRadius = Math.hypot(mid, mid) || 1;
+          // Radiate from where the mark stands, in plane space. Under perspective that makes the
+          // wavefront race away toward the horizon rather than expand as a flat circle.
+          var midCol = (cols - 1) / 2;
+          var midRow = (rows - 1) / 2;
+          var maxRadius = Math.hypot(midCol, midRow) || 1;
           var buffer = '';
-          for (var row = 0; row < axis; row++) {
-            for (var col = 0; col < axis; col++) {
-              var fraction = Math.hypot(col - mid, row - mid) / maxRadius;
-              var style = '--d:' + Math.round(fraction * 460) + 'ms';
-              var breathes = Math.random() < 0.12;
-              if (breathes) style += ';--bd:' + Math.round(Math.random() * 2000) + 'ms';
-              buffer += '<i class="' + (breathes ? 'b' : '') + '" style="' + style + '"></i>';
+          for (var row = 0; row < rows; row++) {
+            for (var col = 0; col < cols; col++) {
+              var fraction = Math.hypot(col - midCol, row - midRow) / maxRadius;
+              var style = '--pi-cell-delay:' + Math.round(fraction * 520) + 'ms';
+              var breathes = Math.random() < 0.1;
+              if (breathes) style += ';--pi-breathe-delay:' + Math.round(Math.random() * 2200) + 'ms';
+              buffer += '<span class="pi-splash-cell" data-breathe="' + (breathes ? 'true' : 'false')
+                + '" style="' + style + '"></span>';
             }
           }
-          lattice.innerHTML = buffer;
+          plane.innerHTML = buffer;
         }
 
         build();
@@ -705,7 +726,7 @@
           resizeTimer = setTimeout(function () {
             resizeTimer = null;
             var element = document.getElementById('initial-loading');
-            if (!element || element.classList.contains('pi-splash-out')) return;
+            if (!element || element.dataset.leaving === 'true') return;
             build();
           }, 200);
         }
