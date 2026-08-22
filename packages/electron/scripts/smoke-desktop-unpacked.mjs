@@ -148,9 +148,11 @@ const waitForRenderer = async (userDataDir) => {
     let lastState;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => ({
+        apiBaseUrl: typeof window.__PIARIUM_API_BASE_URL__ === 'string' ? window.__PIARIUM_API_BASE_URL__ : '',
         bodyText: document.body?.innerText?.slice(0, 4000) ?? '',
         diagnostics: window.__piariumStartupDiagnostics ?? null,
         href: window.location.href,
+        localOrigin: typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string' ? window.__PIARIUM_LOCAL_ORIGIN__ : '',
         mainWorkspace: document.querySelector('[data-pi-composer-shell="true"]') !== null,
         ready: window.__piariumAppReady === true,
         runtimeSetup: document.querySelector('[data-pi-runtime-setup="true"]') !== null,
@@ -198,7 +200,13 @@ const waitForExit = (child, milliseconds) => new Promise((resolve) => {
 
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-desktop-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
-const logPath = path.join(userDataDir, 'logs', 'main.log');
+const logPaths = [
+  path.join(userDataDir, 'logs', 'main.log'),
+  ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Piarium', 'main.log')] : []),
+  ...(process.platform === 'linux' ? [
+    path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Piarium', 'logs', 'main.log'),
+  ] : []),
+];
 const child = spawn(appPath, [
   `--user-data-dir=${userDataDir}`,
   '--remote-debugging-port=0',
@@ -215,23 +223,32 @@ child.once('error', (error) => {
   spawnError = error;
 });
 
-const readLog = async () => fsp.readFile(logPath, 'utf8').catch(() => '');
+const readLog = async () => {
+  for (const logPath of logPaths) {
+    const content = await fsp.readFile(logPath, 'utf8').catch(() => '');
+    if (content) return content;
+  }
+  return '';
+};
 
 try {
-  let port;
-  for (let attempt = 0; attempt < 90 && port === undefined; attempt += 1) {
-    await delay(500);
-    if (spawnError) throw spawnError;
-    const log = await readLog();
-    const match = log.match(/server listening on 127\.0\.0\.1:(\d+)/);
-    if (match) port = Number(match[1]);
-    if (child.exitCode !== null && port === undefined) {
-      throw new Error(`Packaged Piarium exited before startup completed (code ${child.exitCode}).`);
-    }
+  if (spawnError) throw spawnError;
+  const renderer = await waitForRenderer(userDataDir);
+  if (child.exitCode !== null) {
+    throw new Error(`Packaged Piarium exited before startup completed (code ${child.exitCode}).`);
   }
-  if (port === undefined) throw new Error('Packaged Piarium did not start its local server.');
-
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const runtimeValue = renderer.state?.localOrigin || renderer.state?.apiBaseUrl;
+  let runtimeUrl;
+  try {
+    runtimeUrl = new URL(runtimeValue);
+  } catch {
+    throw new Error(`Packaged renderer did not expose its local runtime origin: ${String(runtimeValue || '(missing)')}`);
+  }
+  if (!['http:', 'https:'].includes(runtimeUrl.protocol)
+    || !['127.0.0.1', '::1', '[::1]', 'localhost'].includes(runtimeUrl.hostname)) {
+    throw new Error(`Packaged renderer exposed a non-local runtime origin: ${runtimeUrl.origin}`);
+  }
+  const baseUrl = runtimeUrl.origin;
   const healthResponse = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(10_000) });
   const health = await healthResponse.json();
   if (!healthResponse.ok || health?.status !== 'ok') {
@@ -260,7 +277,6 @@ try {
     throw new Error(`Packaged terminal close returned HTTP ${closeResponse.status}: ${JSON.stringify(closed)}`);
   }
 
-  const renderer = await waitForRenderer(userDataDir);
   console.log(JSON.stringify({
     appPath,
     architecture: process.arch,
