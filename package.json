@@ -215,7 +215,7 @@
     "concurrently": "^10.0.4",
     "cors": "^2.8.6",
     "cross-env": "^10.1.0",
-    "eslint": "^9.39.5",
+    "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.10.0",
