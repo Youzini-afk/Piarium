@@ -5,6 +5,11 @@ const CLIENT_TOKEN_QUERY_PARAM = 'piarium_client_token';
 const URL_AUTH_TOKEN_QUERY_PARAM = 'piarium_url_token';
 const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
 const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
+const PREVIEW_FRAME_POLICY_RESPONSE_HEADERS = [
+  'x-frame-options',
+  'content-security-policy',
+  'content-security-policy-report-only',
+];
 export const PREVIEW_TARGET_ERROR_HEADER = 'x-piarium-preview-target-error';
 
 const LOOPBACK_HOSTS = new Set([
@@ -51,6 +56,18 @@ export const applyPreviewPassthroughResponseHeaders = (proxyRes, res) => {
   for (const headerName of PREVIEW_PASSTHROUGH_RESPONSE_HEADERS) {
     const value = readHeader(proxyRes?.headers, headerName);
     if (value !== undefined) {
+      res.setHeader(headerName, value);
+    }
+  }
+};
+
+const synchronizePreviewFramePolicyResponseHeaders = (headers, res) => {
+  if (!res || res.headersSent || typeof res.setHeader !== 'function') return;
+  for (const headerName of PREVIEW_FRAME_POLICY_RESPONSE_HEADERS) {
+    const value = readHeader(headers, headerName);
+    if (value === undefined || value === null || value === '') {
+      res.removeHeader?.(headerName);
+    } else {
       res.setHeader(headerName, value);
     }
   }
@@ -1463,6 +1480,10 @@ export const createPreviewProxyRuntime = ({
           // if it normally sets X-Frame-Options or a CSP frame-ancestors rule.
           // The proxy is same-origin so embedding is otherwise safe.
           stripFrameBustingHeaders(proxyRes.headers, bridgeNonce);
+          // responseInterceptor runs after the middleware has copied upstream
+          // headers to ServerResponse. Mirror the rewritten policy there too;
+          // mutating proxyRes.headers alone leaves stale X-Frame-Options/CSP.
+          synchronizePreviewFramePolicyResponseHeaders(proxyRes.headers, res);
 
           const resolved = resolveTargetFromRequest(req);
           if (!resolved.ok) {

@@ -1,3 +1,8 @@
+import crypto from 'node:crypto';
+import { createServer } from 'node:http';
+
+import express from 'express';
+import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -35,6 +40,28 @@ const createResponse = () => {
     },
   };
 };
+
+const listen = (server) => new Promise((resolve, reject) => {
+  const onError = (error) => {
+    server.off('listening', onListening);
+    reject(error);
+  };
+  const onListening = () => {
+    server.off('error', onError);
+    resolve(server.address().port);
+  };
+  server.once('error', onError);
+  server.once('listening', onListening);
+  server.listen(0, '127.0.0.1');
+});
+
+const close = (server) => new Promise((resolve, reject) => {
+  server.closeAllConnections?.();
+  server.close((error) => {
+    if (error) reject(error);
+    else resolve();
+  });
+});
 
 const createAttachedPreviewRuntime = () => {
   let proxyOptions;
@@ -151,6 +178,78 @@ describe('preview target failure signaling', () => {
       continued = true;
     });
     expect(continued).toBe(true);
+  });
+});
+
+describe('preview proxy middleware integration', () => {
+  it('rewrites a real upstream response without forwarding Piarium credentials', async () => {
+    const upstreamRequest = {};
+    const upstreamServer = createServer((req, res) => {
+      upstreamRequest.url = req.url;
+      upstreamRequest.headers = req.headers;
+      res.setHeader('content-type', 'text/html; charset=utf-8');
+      res.setHeader('x-frame-options', 'DENY');
+      res.setHeader(PREVIEW_TARGET_ERROR_HEADER, 'expired');
+      res.end('<html><head></head><body><img src="/logo.png"></body></html>');
+    });
+    const app = express();
+    const proxyServer = createServer(app);
+    const runtime = createPreviewProxyRuntime({
+      crypto,
+      URL,
+      createProxyMiddleware,
+      responseInterceptor,
+    });
+    runtime.attach(app, {
+      server: proxyServer,
+      express,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {},
+    });
+
+    let upstreamPort;
+    let proxyPort;
+    try {
+      upstreamPort = await listen(upstreamServer);
+      proxyPort = await listen(proxyServer);
+      const proxyOrigin = `http://127.0.0.1:${proxyPort}`;
+      const registration = await fetch(`${proxyOrigin}/api/preview/targets`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: `http://127.0.0.1:${upstreamPort}/` }),
+      });
+      expect(registration.status).toBe(200);
+      const { proxyBasePath, previewToken } = await registration.json();
+
+      const response = await fetch(
+        `${proxyOrigin}${proxyBasePath}/docs?x=1&piarium_preview_token=${previewToken}`,
+        {
+          headers: {
+            authorization: 'Bearer piarium-secret',
+            cookie: 'piarium-secret=1',
+            'x-inertia': 'true',
+            'x-piarium-ui-session': 'piarium-secret',
+          },
+        },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get(PREVIEW_TARGET_ERROR_HEADER)).toBeNull();
+      expect(response.headers.get('x-frame-options')).toBeNull();
+      expect(body).toContain(`src="${proxyBasePath}/logo.png?piarium_preview_token=${previewToken}"`);
+      expect(body).toContain('id="piarium-preview-bridge"');
+      expect(upstreamRequest.url).toBe('/docs?x=1');
+      expect(upstreamRequest.headers.authorization).toBeUndefined();
+      expect(upstreamRequest.headers.cookie).toBeUndefined();
+      expect(upstreamRequest.headers['x-piarium-ui-session']).toBeUndefined();
+      expect(upstreamRequest.headers['x-inertia']).toBe('true');
+      expect(upstreamRequest.headers['accept-encoding']).toBe('identity');
+    } finally {
+      if (proxyPort !== undefined) await close(proxyServer);
+      if (upstreamPort !== undefined) await close(upstreamServer);
+    }
   });
 });
 
