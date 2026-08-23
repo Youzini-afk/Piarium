@@ -10,8 +10,8 @@ import { usePiariumExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
   getWorkbenchProfileTransitionSnapshot,
+  markWorkbenchProfileTransitionCoverReady,
   subscribeWorkbenchProfileTransition,
-  type WorkbenchProfileTransitionState,
 } from '@/lib/workbench/profile-transition';
 
 /**
@@ -26,13 +26,32 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
   const { t } = useI18n();
   const catalog = usePiariumExtensionCatalog();
   const reducedMotion = usePrefersReducedMotion();
-  const [transition, setTransition] = React.useState<WorkbenchProfileTransitionState>(
+  const transition = React.useSyncExternalStore(
+    subscribeWorkbenchProfileTransition,
+    getWorkbenchProfileTransitionSnapshot,
     getWorkbenchProfileTransitionSnapshot,
   );
   // Kept mounted through the exit so the sweep can finish after the store has gone idle.
   const [exiting, setExiting] = React.useState(false);
 
-  React.useEffect(() => subscribeWorkbenchProfileTransition(setTransition), []);
+  React.useEffect(() => {
+    if (!transition.isSwitching) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      markWorkbenchProfileTransitionCoverReady();
+      return;
+    }
+
+    // A layout committed during an input event can still be replaced before the browser paints it. Two
+    // frames guarantee the cover has reached the screen once before the shell mutation is allowed to run.
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(markWorkbenchProfileTransitionCoverReady);
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame !== 0) cancelAnimationFrame(secondFrame);
+    };
+  }, [transition.isSwitching, transition.toProfileId]);
 
   React.useEffect(() => {
     if (transition.isSwitching) {

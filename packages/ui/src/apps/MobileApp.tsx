@@ -17,6 +17,7 @@ import { SettingsView } from '@/components/views/SettingsView';
 import { TerminalView } from '@/components/views/TerminalView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
@@ -3058,6 +3059,7 @@ export function MobileApp({ apis }: MobileAppProps) {
             <MobileAppUpdateToast />
             <WorkbenchProfileBridge />
             <WorkbenchShellHost />
+            <WorkbenchTransitionOverlay />
             <Toaster position="top-center" offset="calc(var(--oc-safe-area-top, 0px) + 16px)" />
           </div>
         </TooltipProvider>

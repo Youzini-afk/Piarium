@@ -5,9 +5,11 @@ import {
   beginWorkbenchProfileTransition,
   finishWorkbenchProfileTransition,
   getWorkbenchProfileTransitionSnapshot,
+  markWorkbenchProfileTransitionCoverReady,
   resetWorkbenchProfileTransitionForTests,
   resolveTransitionDirection,
   subscribeWorkbenchProfileTransition,
+  waitForWorkbenchProfileTransitionCover,
 } from './profile-transition';
 
 describe('workbench profile transition state', () => {
@@ -37,48 +39,71 @@ describe('workbench profile transition state', () => {
     expect(seen).toEqual([true]);
   });
 
-  test('holds the cover for the minimum even when the switch settles immediately', () => {
+  test('waits for a painted cover before the switch may start', async () => {
     beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
-    finishWorkbenchProfileTransition();
+    let resolved: boolean | undefined;
+    const wait = waitForWorkbenchProfileTransitionCover().then((covered) => {
+      resolved = covered;
+      return covered;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBeUndefined();
+    markWorkbenchProfileTransitionCoverReady();
+    await expect(wait).resolves.toBe(true);
+  });
+
+  test('holds the cover for the minimum visible time after it is painted', async () => {
+    beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    vi.advanceTimersByTime(200);
+    markWorkbenchProfileTransitionCoverReady();
+    const finished = finishWorkbenchProfileTransition();
 
     expect(getWorkbenchProfileTransitionSnapshot().isSwitching).toBe(true);
     vi.advanceTimersByTime(MIN_TRANSITION_VISIBLE_MS - 1);
     expect(getWorkbenchProfileTransitionSnapshot().isSwitching).toBe(true);
     vi.advanceTimersByTime(1);
     expect(getWorkbenchProfileTransitionSnapshot().isSwitching).toBe(false);
+    await finished;
   });
 
-  test('settles at once when the switch already outlasted the minimum', () => {
+  test('settles at once when the painted cover already outlasted the minimum', async () => {
     beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    markWorkbenchProfileTransitionCoverReady();
     vi.advanceTimersByTime(MIN_TRANSITION_VISIBLE_MS + 50);
-    finishWorkbenchProfileTransition();
+    await finishWorkbenchProfileTransition();
     expect(getWorkbenchProfileTransitionSnapshot().isSwitching).toBe(false);
   });
 
-  test('a second finish does not restart or extend the hold', () => {
+  test('a second finish does not restart or extend the hold', async () => {
     beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
-    finishWorkbenchProfileTransition();
+    markWorkbenchProfileTransitionCoverReady();
+    const first = finishWorkbenchProfileTransition();
     vi.advanceTimersByTime(MIN_TRANSITION_VISIBLE_MS - 20);
-    finishWorkbenchProfileTransition();
+    const second = finishWorkbenchProfileTransition();
     vi.advanceTimersByTime(20);
     expect(getWorkbenchProfileTransitionSnapshot().isSwitching).toBe(false);
+    await Promise.all([first, second]);
   });
 
-  test('finishing without a transition is a no-op', () => {
-    finishWorkbenchProfileTransition();
+  test('finishing without a transition is a no-op', async () => {
+    await finishWorkbenchProfileTransition();
     expect(getWorkbenchProfileTransitionSnapshot().isSwitching).toBe(false);
   });
 
-  test('a switch that never settles is released by the backstop', () => {
+  test('a switch that never paints is released by the backstop', async () => {
     beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    const cover = waitForWorkbenchProfileTransitionCover();
     vi.advanceTimersByTime(MAX_TRANSITION_VISIBLE_MS);
     expect(getWorkbenchProfileTransitionSnapshot().isSwitching).toBe(false);
+    await expect(cover).resolves.toBe(false);
   });
 
-  test('a new transition cancels the previous hold', () => {
+  test('a new transition cancels the previous hold', async () => {
     beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
-    finishWorkbenchProfileTransition();
+    const first = finishWorkbenchProfileTransition();
     beginWorkbenchProfileTransition({ toProfileId: 'default' });
+    await first;
 
     vi.advanceTimersByTime(MIN_TRANSITION_VISIBLE_MS * 2);
     // The pending hide belonged to the first transition and must not close the second.

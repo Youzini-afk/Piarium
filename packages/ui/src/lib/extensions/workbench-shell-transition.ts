@@ -24,6 +24,7 @@ import {
   beginWorkbenchProfileTransition,
   finishWorkbenchProfileTransition,
   resolveTransitionDirection,
+  waitForWorkbenchProfileTransitionCover,
 } from '@/lib/workbench/profile-transition';
 import { startWorkbenchMountSession } from './workbench-mount';
 import {
@@ -460,6 +461,10 @@ export const selectActiveWorkbenchProfile = async (
     toProfileId: profileId,
   });
 
+  // Do not let the shell replacement consume the same frame as the overlay state update. The overlay
+  // acknowledges after a painted frame, making the transition deterministic on both fast and busy hosts.
+  await waitForWorkbenchProfileTransitionCover();
+
   try {
     await runSelectActiveWorkbenchProfile(
       createLiveWorkbenchShellTransitionDependencies(),
@@ -468,7 +473,7 @@ export const selectActiveWorkbenchProfile = async (
       options,
     );
   } finally {
-    finishWorkbenchProfileTransition();
+    await finishWorkbenchProfileTransition();
   }
 };
 

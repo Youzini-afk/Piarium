@@ -42,10 +42,14 @@ const IDLE: WorkbenchProfileTransitionState = {
 };
 
 type Listener = (state: WorkbenchProfileTransitionState) => void;
+type CoverWaiter = (covered: boolean) => void;
 
 const listeners = new Set<Listener>();
+const coverWaiters = new Set<CoverWaiter>();
+const idleWaiters = new Set<() => void>();
 let state: WorkbenchProfileTransitionState = IDLE;
 let startedAt = 0;
+let coverReady = false;
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
 let maxTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -65,10 +69,24 @@ const publish = (next: WorkbenchProfileTransitionState): void => {
   listeners.forEach((listener) => listener(state));
 };
 
+const resolveCoverWaiters = (covered: boolean): void => {
+  for (const resolve of coverWaiters) resolve(covered);
+  coverWaiters.clear();
+};
+
+const resolveIdleWaiters = (): void => {
+  for (const resolve of idleWaiters) resolve();
+  idleWaiters.clear();
+};
+
 const settle = (): void => {
   clearTimers();
   if (!state.isSwitching) return;
+  resolveCoverWaiters(false);
+  coverReady = false;
+  startedAt = 0;
   publish(IDLE);
+  resolveIdleWaiters();
 };
 
 /**
@@ -93,6 +111,10 @@ export const beginWorkbenchProfileTransition = (input: {
   direction?: WorkbenchProfileTransitionDirection;
 }): void => {
   clearTimers();
+  // A new transaction supersedes a cover wait left by a caller that never completed.
+  resolveCoverWaiters(false);
+  resolveIdleWaiters();
+  coverReady = false;
   startedAt = Date.now();
   publish({
     isSwitching: true,
@@ -104,24 +126,55 @@ export const beginWorkbenchProfileTransition = (input: {
 };
 
 /**
+ * Called by the application-level overlay after the browser has painted it once.
+ *
+ * Starting the shell mutation before this acknowledgement lets a fast profile switch consume the same
+ * frame as the transition state update, so the overlay exists in React state but never reaches the screen.
+ */
+export const markWorkbenchProfileTransitionCoverReady = (): void => {
+  if (!state.isSwitching || coverReady) return;
+  coverReady = true;
+  // The minimum is visible time, not time spent waiting for React and the browser to paint the cover.
+  startedAt = Date.now();
+  resolveCoverWaiters(true);
+};
+
+/** Wait until the overlay confirms a painted frame, or the transition backstop releases it. */
+export const waitForWorkbenchProfileTransitionCover = (): Promise<boolean> => {
+  if (!state.isSwitching || coverReady) return Promise.resolve(coverReady);
+  return new Promise((resolve) => {
+    coverWaiters.add(resolve);
+  });
+};
+
+const waitForWorkbenchProfileTransitionIdle = (): Promise<void> => {
+  if (!state.isSwitching) return Promise.resolve();
+  return new Promise((resolve) => {
+    idleWaiters.add(resolve);
+  });
+};
+
+/**
  * Ends the transition, holding the cover until the minimum has elapsed.
  *
  * Safe to call when no transition is running, and safe to call twice: a switch can fail after the
  * shell was already proven ready, and both paths funnel through here.
  */
-export const finishWorkbenchProfileTransition = (): void => {
+export const finishWorkbenchProfileTransition = (): Promise<void> => {
   if (!state.isSwitching) {
     clearTimers();
-    return;
+    return Promise.resolve();
   }
-  if (hideTimer !== null) return;
+  if (hideTimer !== null) return waitForWorkbenchProfileTransitionIdle();
 
   const remaining = MIN_TRANSITION_VISIBLE_MS - (Date.now() - startedAt);
   if (remaining <= 0) {
     settle();
-    return;
+    return Promise.resolve();
   }
+  const idle = waitForWorkbenchProfileTransitionIdle();
   hideTimer = setTimeout(settle, remaining);
+  return idle;
 };
 
 export const subscribeWorkbenchProfileTransition = (listener: Listener): (() => void) => {
@@ -137,7 +190,10 @@ export const getWorkbenchProfileTransitionSnapshot = (): WorkbenchProfileTransit
 /** Test seam: drop all state and timers so one case cannot leak into the next. */
 export const resetWorkbenchProfileTransitionForTests = (): void => {
   clearTimers();
+  resolveCoverWaiters(false);
+  resolveIdleWaiters();
   state = IDLE;
   startedAt = 0;
+  coverReady = false;
   listeners.clear();
 };
