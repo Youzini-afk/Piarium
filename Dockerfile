@@ -9,7 +9,6 @@ ARG PIARIUM_SOURCE_REVISION
 # workspace manifest required by the frozen monorepo lockfile.
 COPY package.json bun.lock ./
 COPY bun-patches ./bun-patches
-COPY patches ./patches
 COPY scripts/fix-deprecation.js ./scripts/fix-deprecation.js
 COPY packages/electron/package.json ./packages/electron/package.json
 COPY packages/extension-builtins/package.json ./packages/extension-builtins/package.json
@@ -31,8 +30,7 @@ COPY packages/vscode/package.json ./packages/vscode/package.json
 COPY packages/vscode/runtime/package.json ./packages/vscode/runtime/package.json
 COPY packages/web/package.json ./packages/web/package.json
 RUN bun install --frozen-lockfile --ignore-scripts \
-  && node ./scripts/fix-deprecation.js \
-  && node ./node_modules/patch-package/index.js
+  && node ./scripts/fix-deprecation.js
 
 COPY . .
 RUN PIARIUM_SOURCE_REVISION="${PIARIUM_SOURCE_REVISION}" \
