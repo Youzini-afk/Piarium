@@ -6,6 +6,7 @@ import {
   CUBE_EDGE_PX,
   PIARIUM_MARK_COLORS,
   PIARIUM_SPLASH_COLORS,
+  splashExitScale,
   splashPlaneCss,
   type PiariumSplashDirection,
   type PiariumSplashMode,
@@ -60,6 +61,11 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
   className,
 }) => {
   const reducedMotion = usePrefersReducedMotion();
+  // Re-evaluate on the render that flips `leaving`: a slow startup may have been resized since mount, and
+  // the flattened floor must contain the viewport that actually exists at handoff time.
+  const exitScale = typeof window === 'undefined'
+    ? splashExitScale(1920, 1080)
+    : splashExitScale(window.innerWidth, window.innerHeight);
 
   // Which cells breathe is drawn once per mount. Re-picking on every render would make the idle state
   // shimmer randomly instead of pulsing steadily. The sweep has no random part, so it is a constant.
@@ -75,6 +81,7 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       className={['pi-splash', className].filter(Boolean).join(' ')}
       data-leaving={leaving ? 'true' : 'false'}
       data-mode={mode}
+      style={{ '--pi-floor-exit-scale': exitScale } as React.CSSProperties}
       role="status"
       aria-live="polite"
       aria-label={label}

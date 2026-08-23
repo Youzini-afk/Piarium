@@ -1,9 +1,11 @@
 import { markBox } from './piarium-mark-perspective';
 import {
+  CAMERA_FLAT_FLOOR_TRANSFORM,
   CAMERA_FLOOR_TRANSFORM,
   floorInscribedRadius,
   floorReach,
   HORIZON_RISE_PX,
+  projectFlatFloorPoint,
   projectPoint,
 } from './piarium-splash-camera';
 
@@ -56,11 +58,23 @@ export const CUBE_EDGE_PX = 96;
 const GROUND_CELLS_BEHIND = 14;
 const GROUND_CELLS_AHEAD = 9;
 
+/**
+ * The visible line plane extends farther toward the horizon without adding DOM cells.
+ *
+ * The 24×24 real cells remain the opaque cover and the things that scatter. A single repeating-gradient
+ * continuation behind them carries the same registered grid farther away, so tall windows do not end in a
+ * blank strip above a finite floor. It extends only away from the camera: adding near rows would approach
+ * the perspective plane and magnify them into huge foreground slabs.
+ */
+const VISUAL_GROUND_CELLS_BEHIND = 28;
+
 /** Cells per axis: the ones behind, the cube's own, and the ones in front. */
 const GROUND_AXIS = GROUND_CELLS_BEHIND + 1 + GROUND_CELLS_AHEAD;
 /** Floor-space extent from the origin, in each of the two directions. */
 const GROUND_BEHIND_PX = (GROUND_CELLS_BEHIND + 0.5) * CUBE_EDGE_PX;
 const GROUND_AHEAD_PX = (GROUND_CELLS_AHEAD + 0.5) * CUBE_EDGE_PX;
+const VISUAL_GROUND_BEHIND_PX = (VISUAL_GROUND_CELLS_BEHIND + 0.5) * CUBE_EDGE_PX;
+const VISUAL_GROUND_EXTRA_PX = VISUAL_GROUND_BEHIND_PX - GROUND_BEHIND_PX;
 
 /** Where the cube stands, as a share of viewport height. Low enough to leave the far floor room. */
 const GROUND_ORIGIN_Y_PCT = 56;
@@ -99,6 +113,7 @@ export const GROUND_SHAPE: GroundShape = {
 
 /** How far the floor's extremes land from the origin on screen, under the shared camera. */
 export const GROUND_REACH = floorReach(GROUND_BEHIND_PX, GROUND_AHEAD_PX);
+const VISUAL_GROUND_REACH = floorReach(VISUAL_GROUND_BEHIND_PX, GROUND_AHEAD_PX);
 
 /**
  * Where the floor stops being drawn and where it starts fading into the background, both as screen pixels
@@ -114,6 +129,15 @@ export const GROUND_FADE_RISE_PX = floorReach(
   GROUND_BEHIND_PX - GROUND_FADE_ROWS * CUBE_EDGE_PX,
   GROUND_AHEAD_PX,
 ).farRise;
+const VISUAL_GROUND_EDGE_RISE_PX = VISUAL_GROUND_REACH.farRise;
+const VISUAL_GROUND_FADE_RISE_PX = floorReach(
+  VISUAL_GROUND_BEHIND_PX - GROUND_FADE_ROWS * CUBE_EDGE_PX,
+  GROUND_AHEAD_PX,
+).farRise;
+const VISUAL_GROUND_RADIUS_PX = Math.floor(floorInscribedRadius(
+  VISUAL_GROUND_BEHIND_PX,
+  GROUND_AHEAD_PX,
+));
 
 /**
  * How far from the cube's feet the exit reveals the app one cell at a time.
@@ -134,8 +158,10 @@ export const GROUND_REVEAL_RADIUS_PX = Math.floor(Math.min(
 
 const CELL_EXIT_MS = 520;
 const MARK_EXIT_MS = 520;
-/** The cube makes contact before the first floor tile starts moving. */
-const BOOT_PRESS_LEAD_MS = 240;
+/** The cube makes contact, then the camera is almost overhead before the first floor tile starts moving. */
+const BOOT_TILE_RELEASE_MS = 620;
+const FLOOR_FLATTEN_DELAY_MS = 260;
+const FLOOR_FLATTEN_MS = 420;
 /**
  * Screen-space travel produced by lowering a rigid cube by about a fifth of its height in the shared
  * camera. The SVG is already projected geometry, so translating that drawing is the inexpensive visual
@@ -150,7 +176,7 @@ const MARK_PRESS_DISTANCE_PX = Math.round(projectPoint({
 const MAX_CELL_DELAY_MS = 520;
 
 /** How long a caller must keep the splash mounted after asking it to leave. */
-export const SPLASH_EXIT_DURATION_MS = BOOT_PRESS_LEAD_MS
+export const SPLASH_EXIT_DURATION_MS = BOOT_TILE_RELEASE_MS
   + MAX_CELL_DELAY_MS
   + Math.max(CELL_EXIT_MS, MARK_EXIT_MS);
 /** The reduced-motion path replaces every staged animation with one fade of the whole cover. */
@@ -173,6 +199,73 @@ const BREATHE_SHARE = 0.1;
 const BREATHE_SPREAD_MS = 2200;
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+interface FlatFloorEdge {
+  readonly normalX: number;
+  readonly normalY: number;
+  /** Dot product of the outward normal and either endpoint. Positive because the origin is inside. */
+  readonly support: number;
+}
+
+const FLAT_GROUND_OUTLINE = [
+  projectFlatFloorPoint({ x: -GROUND_BEHIND_PX, y: -GROUND_BEHIND_PX }),
+  projectFlatFloorPoint({ x: GROUND_AHEAD_PX, y: -GROUND_BEHIND_PX }),
+  projectFlatFloorPoint({ x: GROUND_AHEAD_PX, y: GROUND_AHEAD_PX }),
+  projectFlatFloorPoint({ x: -GROUND_BEHIND_PX, y: GROUND_AHEAD_PX }),
+] as const;
+
+/** Half-plane description of the flattened floor, used to fit the viewport without guessing breakpoints. */
+const FLAT_GROUND_EDGES: readonly FlatFloorEdge[] = FLAT_GROUND_OUTLINE.map((point, index) => {
+  const next = FLAT_GROUND_OUTLINE[(index + 1) % FLAT_GROUND_OUTLINE.length] as typeof point;
+  const edgeX = next.x - point.x;
+  const edgeY = next.y - point.y;
+  // The outline is clockwise, so its right-hand normal points outward.
+  const normalX = edgeY;
+  const normalY = -edgeX;
+  return {
+    normalX,
+    normalY,
+    support: normalX * point.x + normalY * point.y,
+  };
+});
+
+/** Four percent prevents antialiasing and rounded viewport pixels from exposing a one-pixel corner seam. */
+const FLAT_GROUND_OVERSCAN = 1.04;
+
+/**
+ * Scale that makes the flattened real-cell outline contain every viewport corner.
+ *
+ * A fixed scale either fails on wide windows or makes mobile tiles enormous. Each edge defines a half
+ * plane `normal·point <= scale×support`; solving those inequalities for the four screen corners gives the
+ * exact fit for any aspect ratio, then the small overscan above keeps the antialiased outline off-screen.
+ */
+export const splashExitScale = (viewportWidth: number, viewportHeight: number): number => {
+  const width = Math.max(0, viewportWidth);
+  const height = Math.max(0, viewportHeight);
+  const originY = height * GROUND_ORIGIN_Y_PCT / 100;
+  const corners = [
+    { x: -width / 2, y: -originY },
+    { x: width / 2, y: -originY },
+    { x: width / 2, y: height - originY },
+    { x: -width / 2, y: height - originY },
+  ];
+  let required = 1;
+  for (const edge of FLAT_GROUND_EDGES) {
+    for (const corner of corners) {
+      required = Math.max(
+        required,
+        (edge.normalX * corner.x + edge.normalY * corner.y) / edge.support,
+      );
+    }
+  }
+  return Math.ceil(required * FLAT_GROUND_OVERSCAN * 1000) / 1000;
+};
+
+/** Same fit, emitted for the two hosts that paint before a module can be imported. */
+const splashExitScaleExpression = (): string => {
+  const edges = JSON.stringify(FLAT_GROUND_EDGES);
+  return `(function(w,h){var e=${edges};var oy=h*${GROUND_ORIGIN_Y_PCT / 100};var p=[[-w/2,-oy],[w/2,-oy],[w/2,h-oy],[-w/2,h-oy]];var s=1;for(var i=0;i<e.length;i++){for(var j=0;j<p.length;j++){s=Math.max(s,(e[i].normalX*p[j][0]+e[i].normalY*p[j][1])/e[i].support)}}return Math.ceil(s*${FLAT_GROUND_OVERSCAN}*1000)/1000})(innerWidth,innerHeight)`;
+};
 
 export interface SplashCell {
   readonly key: string;
@@ -262,7 +355,8 @@ export const buildSplashCells = (
 const GROUND_STYLE = {
   gridTemplateColumns: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
   gridTemplateRows: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
-  transform: `${CAMERA_FLOOR_TRANSFORM} translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
+  transform: `${CAMERA_FLOOR_TRANSFORM} scale(1) translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
+  flattenedTransform: `${CAMERA_FLAT_FLOOR_TRANSFORM} scale(var(--pi-floor-exit-scale, ${splashExitScale(1920, 1080)})) translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
 } as const;
 
 export interface SplashPlaneColors {
@@ -442,12 +536,14 @@ to { opacity: 0; transform: translateY(5px); }
 .pi-splash-status { opacity: 0.5; }`
     : '';
 
-  // Percentages of the cover's own alpha would have to be re-derived per window; absolute radii keep the
-  // plateau exactly as wide as the region the reveal is allowed to open, which is a fixed number of pixels.
+  // The visible line plane extends past the real cells, so its idle mask uses that larger registered
+  // outline. During exit the radius grows past the viewport while the camera turns overhead, removing the
+  // atmospheric edge without a discrete mask swap.
+  const floorMask = `var(--pi-splash-floor-mask, ${VISUAL_GROUND_RADIUS_PX}px)`;
   const falloff = [
-    `rgba(0,0,0,1) ${GROUND_REVEAL_RADIUS_PX}px`,
-    `rgba(0,0,0,0.55) ${GROUND_REVEAL_RADIUS_PX * 3}px`,
-    `rgba(0,0,0,0.3) ${GROUND_REVEAL_RADIUS_PX * 5}px`,
+    `rgba(0,0,0,1) ${floorMask}`,
+    `rgba(0,0,0,0.55) calc(${floorMask} + ${VISUAL_GROUND_RADIUS_PX * 2}px)`,
+    `rgba(0,0,0,0.3) calc(${floorMask} + ${VISUAL_GROUND_RADIUS_PX * 4}px)`,
   ].join(', ');
   const vignette = `radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, ${falloff})`;
   const hole = `radial-gradient(circle at 50% ${GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,0) var(--pi-splash-open, 0px), rgba(0,0,0,1) calc(var(--pi-splash-open, 0px) + ${REVEAL_EDGE_PX}px))`;
@@ -474,6 +570,25 @@ syntax: '<length>';
 inherits: false;
 initial-value: 0px;
 }
+@property --pi-splash-floor-mask {
+syntax: '<length>';
+inherits: true;
+initial-value: ${VISUAL_GROUND_RADIUS_PX}px;
+}
+@property --pi-splash-horizon-lift {
+syntax: '<length>';
+inherits: true;
+initial-value: 0px;
+}
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] {
+animation: pi-splash-floor-unmask ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+}
+@keyframes pi-splash-floor-unmask {
+to {
+--pi-splash-floor-mask: 160vmax;
+--pi-splash-horizon-lift: 160vmax;
+}
+}
 /* The floor is a quadrilateral in projection and a window is a rectangle, so the cells cannot cover the
    screen's corners. The backdrop covers everything they miss, and the hole opens from the cube's feet so
    that where the cells *are* the cover, they are the only cover. */
@@ -490,8 +605,8 @@ mask-image: ${hole};
    backdrop just fades and the sweep reads as a wipe over it. */
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
 animation:
-pi-splash-open ${REVEAL_MS}ms ${BOOT_PRESS_LEAD_MS}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
-pi-splash-backdrop-out ${BACKDROP_FADE_MS}ms ${BOOT_PRESS_LEAD_MS + REVEAL_MS}ms ease both;
+pi-splash-open ${REVEAL_MS}ms ${BOOT_TILE_RELEASE_MS}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out ${BACKDROP_FADE_MS}ms ${BOOT_TILE_RELEASE_MS + REVEAL_MS}ms ease both;
 }
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {
 animation: pi-splash-backdrop-out ${REVEAL_MS + BACKDROP_FADE_MS}ms ease both;
@@ -522,8 +637,8 @@ mask-image: ${vignette};
 position: absolute;
 inset: 0;
 overflow: hidden;
--webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_EDGE_RISE_PX)}px), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_FADE_RISE_PX)}px));
-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_EDGE_RISE_PX)}px), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(GROUND_FADE_RISE_PX)}px));
+-webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_EDGE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_FADE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)));
+mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_EDGE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_FADE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)));
 }
 /* Flat transform style on purpose: the cells are rasterised once and mapped by a single projective
    transform, rather than each becoming a participant in a 3D rendering context. */
@@ -537,6 +652,35 @@ grid-template-columns: ${GROUND_STYLE.gridTemplateColumns};
 grid-template-rows: ${GROUND_STYLE.gridTemplateRows};
 transform: ${GROUND_STYLE.transform};
 }
+/* A line-only continuation of the same registered grid reaches the horizon without hundreds more cells.
+   The real cells paint over it and remain the opaque cover; this layer only prevents a tall viewport from
+   ending in an unrelated blank band above a visibly finite floor. */
+.pi-splash-ground::before {
+content: '';
+position: absolute;
+left: -${VISUAL_GROUND_EXTRA_PX}px;
+top: -${VISUAL_GROUND_EXTRA_PX}px;
+right: 0;
+bottom: 0;
+pointer-events: none;
+background-image:
+linear-gradient(to right, transparent 0 calc(100% - 1px), ${colors.line} calc(100% - 1px) 100%),
+linear-gradient(to bottom, transparent 0 calc(100% - 1px), ${colors.line} calc(100% - 1px) 100%);
+background-size: ${CUBE_EDGE_PX}px ${CUBE_EDGE_PX}px;
+}
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground {
+animation: pi-splash-floor-flatten ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+}
+@keyframes pi-splash-floor-flatten {
+to { transform: ${GROUND_STYLE.flattenedTransform}; }
+}
+.pi-splash[data-leaving='true'] .pi-splash-ground::before {
+animation: pi-splash-continuation-out ${CELL_EXIT_MS}ms ease both;
+}
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::before {
+animation-delay: ${BOOT_TILE_RELEASE_MS}ms;
+}
+@keyframes pi-splash-continuation-out { to { opacity: 0; } }
 /* Opaque, because these cells are the cover. Two edges each, so neighbours do not stack into a 2px rule. */
 .pi-splash-cell {
 background: ${colors.background};
@@ -560,7 +704,7 @@ animation: pi-splash-cell-out ${CELL_EXIT_MS}ms cubic-bezier(0.32, 0, 0.24, 1) b
 animation-delay: var(--pi-cell-delay);
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cell {
-animation-delay: calc(var(--pi-cell-delay) + ${BOOT_PRESS_LEAD_MS}ms);
+animation-delay: calc(var(--pi-cell-delay) + ${BOOT_TILE_RELEASE_MS}ms);
 }
 /* Each cell moves in the floor's own coordinate system before the parent camera projects it. On screen
    the squares therefore stay registered as perspective diamonds while the wave pushes them away from the
@@ -579,6 +723,9 @@ ${markRules}
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
+.pi-splash:not([data-mode='switch'])[data-leaving='true'],
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground,
+.pi-splash[data-leaving='true'] .pi-splash-ground::before,
 .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-backdrop,
@@ -628,6 +775,8 @@ export const splashGroundScript = (elementId: string): string => {
   return `(function(){
 var ground=document.getElementById('${elementId}');
 if(!ground)return;
+var splash=ground.closest('.pi-splash');
+if(splash)splash.style.setProperty('--pi-floor-exit-scale',${splashExitScaleExpression()});
 var delays=[${delays}];
 var breathes=[${breathes}];
 var scatterXs=[${scatterXs}];

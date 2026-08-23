@@ -91,6 +91,18 @@ export const projectPoint = (point: Point3): Point2 => {
 };
 
 /**
+ * Project a floor point after the camera has moved directly above it.
+ *
+ * With the tilt at zero every floor point has zero camera depth, so perspective contributes no division;
+ * only the shared 45-degree spin remains. The splash exit uses this endpoint to turn the receding floor
+ * into the screen-aligned diamond mosaic that hands off to the flat application UI.
+ */
+export const projectFlatFloorPoint = (point: Pick<Point3, 'x' | 'y'>): Point2 => ({
+  x: point.x * cosSpin - point.y * sinSpin,
+  y: point.x * sinSpin + point.y * cosSpin,
+});
+
+/**
  * How far above the origin the horizon sits on screen, in pixels.
  *
  * Floor points receding from the viewer crowd toward this line and never cross it, so it is a hard
@@ -166,3 +178,7 @@ export const floorInscribedRadius = (far: number, near: number): number => {
 /** The CSS transform that puts a flat element into the floor plane under this same camera. */
 export const CAMERA_FLOOR_TRANSFORM =
   `perspective(${CAMERA_DISTANCE_PX}px) rotateX(${CAMERA_TILT_DEG}deg) rotateZ(${CAMERA_SPIN_DEG}deg)`;
+
+/** Same camera after it has moved overhead, with an identical transform list for smooth interpolation. */
+export const CAMERA_FLAT_FLOOR_TRANSFORM =
+  `perspective(${CAMERA_DISTANCE_PX}px) rotateX(0deg) rotateZ(${CAMERA_SPIN_DEG}deg)`;

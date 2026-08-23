@@ -3,11 +3,13 @@ import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { markBox, perspectiveMark } from './piarium-mark-perspective';
 import {
+  CAMERA_FLAT_FLOOR_TRANSFORM,
   CAMERA_FLOOR_TRANSFORM,
   HORIZON_RISE_PX,
   cameraDepth,
   floorInscribedRadius,
   floorReach,
+  projectFlatFloorPoint,
   projectPoint,
 } from './piarium-splash-camera';
 import {
@@ -21,6 +23,7 @@ import {
   PIARIUM_SPLASH_COLORS,
   SPLASH_EXIT_DURATION_MS,
   buildSplashCells,
+  splashExitScale,
   splashGroundScript,
   splashPlaneCss,
 } from './piarium-splash-lattice';
@@ -101,6 +104,15 @@ describe('the camera is a perspective camera', () => {
     // The floor is transformed by CSS and the cube is projected here, so the two have to be the same
     // camera stated twice. Any drift between them is the exact failure of the three earlier attempts.
     expect(CAMERA_FLOOR_TRANSFORM).toMatch(/^perspective\(\d+px\) rotateX\(\d+deg\) rotateZ\(\d+deg\)$/);
+  });
+
+  test('the exit camera ends directly overhead without changing the shared floor spin', () => {
+    expect(CAMERA_FLAT_FLOOR_TRANSFORM)
+      .toMatch(/^perspective\(\d+px\) rotateX\(0deg\) rotateZ\(\d+deg\)$/);
+    const xStep = projectFlatFloorPoint({ x: CUBE_EDGE_PX, y: 0 });
+    const yStep = projectFlatFloorPoint({ x: 0, y: CUBE_EDGE_PX });
+    expect(Math.hypot(xStep.x, xStep.y)).toBeCloseTo(CUBE_EDGE_PX, 8);
+    expect(Math.hypot(yStep.x, yStep.y)).toBeCloseTo(CUBE_EDGE_PX, 8);
   });
 
   test('reach is measured from the corners, which is exact for a projective map', () => {
@@ -222,8 +234,8 @@ describe('the floor covers the window it has to cover', () => {
     expect(GROUND_FADE_RISE_PX).toBeLessThan(GROUND_EDGE_RISE_PX);
 
     const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
-    expect(css).toContain(`rgba(0,0,0,0) calc(56% - ${Math.round(GROUND_EDGE_RISE_PX)}px)`);
-    expect(css).toContain(`rgba(0,0,0,1) calc(56% - ${Math.round(GROUND_FADE_RISE_PX)}px)`);
+    expect(css).toContain('var(--pi-splash-horizon-lift, 0px)');
+    expect(css).toContain('.pi-splash-ground::before {');
   });
 
   test('the near corner stays in front of the camera', () => {
@@ -245,6 +257,39 @@ describe('the floor covers the window it has to cover', () => {
   test('the element count stays within what the isometric version already cost', () => {
     // Every cell animates during the exit, and the splash runs when the machine is busiest.
     expect(GROUND_SHAPE.axis ** 2).toBeLessThanOrEqual(576);
+  });
+
+  test.each([
+    [390, 700],
+    [1280, 800],
+    [2048, 1024],
+    [2550, 1275],
+    [3840, 2160],
+  ] as const)('the flattened floor contains every %ix%i viewport corner', (width, height) => {
+    const far = GROUND_SHAPE.offsetPx;
+    const near = (GROUND_SHAPE.axis - GROUND_SHAPE.originCell - 0.5) * GROUND_SHAPE.cellPx;
+    const scale = splashExitScale(width, height);
+    const outline = [
+      projectFlatFloorPoint({ x: -far, y: -far }),
+      projectFlatFloorPoint({ x: near, y: -far }),
+      projectFlatFloorPoint({ x: near, y: near }),
+      projectFlatFloorPoint({ x: -far, y: near }),
+    ].map((point) => ({ x: point.x * scale, y: point.y * scale }));
+    const originY = height * 0.56;
+    const corners = [
+      { x: -width / 2, y: -originY },
+      { x: width / 2, y: -originY },
+      { x: width / 2, y: height - originY },
+      { x: -width / 2, y: height - originY },
+    ];
+    for (const corner of corners) {
+      const crosses = outline.map((point, index) => {
+        const next = outline[(index + 1) % outline.length] as typeof point;
+        return (next.x - point.x) * (corner.y - point.y)
+          - (next.y - point.y) * (corner.x - point.x);
+      });
+      expect(crosses.every((cross) => cross >= -1e-6)).toBe(true);
+    }
   });
 });
 
@@ -299,9 +344,11 @@ describe('the floor is the cover', () => {
 
   test('the peripheral falloff is flat across the whole reveal', () => {
     // It is a mask over the cells, so any softness inside the hole would let the app through cells that
-    // have not gone yet. Its plateau is the reveal radius, which is why the stops are absolute lengths
-    // rather than the shares of the window they used to be.
-    expect(css).toContain(`rgba(0,0,0,1) ${GROUND_REVEAL_RADIUS_PX}px`);
+    // have not gone yet. On exit the registered radius expands until the now-flat floor is unmasked across
+    // the whole viewport rather than switching masks on one frame.
+    expect(css).toContain('@property --pi-splash-floor-mask');
+    expect(css).toContain('rgba(0,0,0,1) var(--pi-splash-floor-mask');
+    expect(css).toContain('--pi-splash-floor-mask: 160vmax;');
   });
 
   test('the backdrop finishes fading before the last cells do', () => {
@@ -373,6 +420,9 @@ describe('exit choreography', () => {
     expect(press).toMatch(/translateY\(\d+px\)/);
     expect(press).not.toContain('scaleX');
     expect(press).not.toContain('scaleY');
+    expect(css).toContain('@keyframes pi-splash-floor-flatten');
+    expect(css).toContain(CAMERA_FLAT_FLOOR_TRANSFORM);
+    expect(css).toContain('scale(var(--pi-floor-exit-scale');
     expect(css).toMatch(/animation-delay: calc\(var\(--pi-cell-delay\) \+ \d+ms\)/);
     expect(css).toContain(
       'transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px)) scale(0.56);',
@@ -453,6 +503,7 @@ describe('every splash host carries the same generated bytes', () => {
     expect(scatterXs).toHaveLength(GROUND_SHAPE.axis ** 2);
     expect(scatterYs).toHaveLength(GROUND_SHAPE.axis ** 2);
     expect(script).toContain(`getElementById('${INITIAL_SPLASH_IDS.ground}')`);
+    expect(script).toContain("style.setProperty('--pi-floor-exit-scale'");
   });
 
   test('the generated floor script is stable across calls', () => {
@@ -497,10 +548,11 @@ describe('every splash host carries the same generated bytes', () => {
       // then the floor. Masking the floor itself is what cut the screen's corners first in an earlier
       // attempt, and a backdrop painted after the cells would cover the holes they leave.
       const body = host.read();
-      const backdrop = body.indexOf('pi-splash-backdrop');
-      const clip = body.indexOf('pi-splash-ground-clip');
-      const horizon = body.indexOf('pi-splash-horizon');
-      const ground = body.indexOf('class="pi-splash-ground"');
+      const root = body.indexOf(`<div id="${INITIAL_SPLASH_IDS.root}"`);
+      const backdrop = body.indexOf('class="pi-splash-backdrop"', root);
+      const clip = body.indexOf('class="pi-splash-ground-clip"', root);
+      const horizon = body.indexOf('class="pi-splash-horizon"', root);
+      const ground = body.indexOf('class="pi-splash-ground"', root);
       expect(backdrop).toBeGreaterThan(-1);
       expect(clip).toBeGreaterThan(backdrop);
       expect(horizon).toBeGreaterThan(clip);
@@ -543,6 +595,12 @@ describe('every splash host carries the same generated bytes', () => {
     const html = readMiniChat();
     expect(html).not.toContain('pi-splash-mark');
     expect(html).not.toContain(MARK_SENTINELS[0]);
+  });
+
+  test('the mini-chat safety dismissal keeps the cover through the full staged exit', () => {
+    expect(readMiniChat()).toContain(
+      `setTimeout(function () { loading.remove(); }, ${SPLASH_EXIT_DURATION_MS});`,
+    );
   });
 
   test('reduced motion keeps the cover visible', () => {
