@@ -1,6 +1,6 @@
 # Browser performance capture
 
-Start OpenChamber locally, then run:
+Start Piarium locally, then run:
 
 ```bash
 bun run profile:browser
@@ -8,7 +8,7 @@ bun run profile:browser
 
 The command opens an isolated Chrome profile. On the first run, complete any
 login or setup in that window, prepare the sessions and screen you want to
-measure, then return to the terminal and press Enter. Use OpenChamber normally
+measure, then return to the terminal and press Enter. Use Piarium normally
 for the next 60 seconds.
 
 Google Chrome is selected first on macOS, with Chrome Canary and Chromium as
@@ -17,13 +17,9 @@ with `--chrome /path/to/executable`.
 
 The generated `artifacts/browser-profile-*/` directory contains:
 
-- `summary.json`: long-task, memory, network, sync-operation, and UI streaming/render metrics. `failedRequests` includes transport failures and HTTP 4xx/5xx responses, while `httpErrorResponses` isolates HTTP errors;
+- `summary.json`: long-task, memory, network, and UI streaming/render metrics. `failedRequests` includes transport failures and HTTP 4xx/5xx responses, while `httpErrorResponses` isolates HTTP errors;
 - `trace.json`: import into Chrome DevTools Performance with **Load profile**;
 - `network.har`: import into Chrome DevTools Network with **Import HAR**.
-
-`summary.json.longTaskAttribution` correlates long tasks with global-session
-lifecycle publications, session navigation, and targeted sidebar/message-list
-renders. One task may appear under multiple marks when phases overlap.
 
 Chrome trace finalization is allowed up to two minutes for large captures. If
 Chrome still does not emit its completion event, the command preserves the
@@ -41,19 +37,14 @@ sensitive URL parameters. The trace applies the same key and URL-parameter
 redaction, but profiling artifacts can still reveal project paths and endpoint
 names. Do not publish them without review.
 
-`summary.json.sessionLoadPerformance.events` contains the bounded session-loading
-operation timeline without runtime keys, directories, session IDs, message
-content, or credentials. It includes recording-relative timing, caller, outcome,
-retry count, and downloaded record count where available.
-
-The capture bypasses the PWA service worker and reloads without the browser cache before recording, so repeated optimization runs execute the current local build instead of a previously cached bundle. By default, network recording begins after that preparation reload. Pass `--reload` to perform another cache-bypassing reload after recording starts and include startup requests in the HAR and session-load timeline.
+The capture bypasses the PWA service worker and reloads without the browser cache before recording, so repeated optimization runs execute the current local build instead of a previously cached bundle. By default, network recording begins after that preparation reload. Pass `--reload` to perform another cache-bypassing reload after recording starts and include startup requests in the HAR and trace.
 
 Useful options:
 
 ```bash
 bun run profile:browser -- --duration 120
 bun run profile:browser -- --url http://localhost:4173
-bun run profile:browser -- --output /tmp/openchamber-profile
+bun run profile:browser -- --output /tmp/piarium-profile
 bun run profile:browser -- --reload --no-prompt --duration 60
 ```
 

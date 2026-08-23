@@ -1,6 +1,10 @@
 import React from 'react';
 import morphdom from 'morphdom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
+// Keep KaTeX and its fonts in the same lazy boundary as the full Markdown
+// renderer. Importing the stylesheet from TypeScript lets Vite resolve its
+// font assets without making them part of every Piarium entry point.
+import 'katex/dist/katex.min.css';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';

@@ -9,12 +9,10 @@ import { join, resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
 import process from "node:process"
 
-import { projectSessionLoadPerformance } from "./profile-browser-session-load.mjs"
-
 const HELP = `Usage: bun run profile:browser -- [options]
 
 Options:
-  --url <url>             OpenChamber URL (default: http://localhost:3000)
+  --url <url>             Piarium URL (default: http://localhost:3000)
   --duration <seconds>    Recording duration after Enter (default: 60)
   --output <directory>    Artifact directory (default: artifacts/browser-profile-<time>)
   --chrome <path>         Chrome/Chromium executable
@@ -25,7 +23,7 @@ Options:
   --help                  Show this help
 
 The command records a Chrome performance trace, a redacted HAR, browser metrics,
-and OpenChamber's numeric sync counters. It never records response bodies.`
+and Piarium's numeric streaming/render counters. It never records response bodies.`
 
 const parseArgs = (argv) => {
   const options = {
@@ -33,7 +31,7 @@ const parseArgs = (argv) => {
     duration: 60,
     output: null,
     chrome: null,
-    profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
+    profileDir: join(homedir(), ".config", "piarium", "browser-profile-google-chrome"),
     headless: false,
     prompt: true,
     reload: false,
@@ -201,7 +199,7 @@ class CdpClient {
   }
 }
 
-const SENSITIVE_HEADER = /authorization|cookie|token|secret|password|api[-_]?key|x-openchamber/i
+const SENSITIVE_HEADER = /authorization|cookie|token|secret|password|api[-_]?key|x-(?:piarium|openchamber)/i
 const SENSITIVE_QUERY = /token|secret|password|auth|key|code|credential/i
 
 const redactHeaders = (headers = {}) => Object.entries(headers).map(([name, value]) => ({
@@ -253,8 +251,8 @@ const writeTraceFile = (path, traceEvents) => new Promise((resolveWrite, rejectW
 const createHar = (records, pageUrl, startedAt) => ({
   log: {
     version: "1.2",
-    creator: { name: "OpenChamber browser profiler", version: "1" },
-    pages: [{ startedDateTime: startedAt, id: "page_1", title: "OpenChamber profile", pageTimings: {} }],
+    creator: { name: "Piarium browser profiler", version: "1" },
+    pages: [{ startedDateTime: startedAt, id: "page_1", title: "Piarium profile", pageTimings: {} }],
     entries: [...records.values()].map((record) => {
       const start = record.wallTime ? new Date(record.wallTime * 1000).toISOString() : startedAt
       const duration = record.finishedAt && record.startedAt
@@ -298,34 +296,6 @@ const createHar = (records, pageUrl, startedAt) => ({
 })
 
 const metricMap = (metrics = []) => Object.fromEntries(metrics.map(({ name, value }) => [name, value]))
-
-const LONG_TASK_ATTRIBUTION_MARKS = [
-  "openchamber.global_sessions.event_update_flush",
-  "openchamber.navigation.session_select",
-  "openchamber.navigation.session_state_set",
-  "openchamber.react.session_sidebar_render",
-  "openchamber.react.message_list_render",
-]
-
-const buildLongTaskAttribution = (traceEvents, longTasks) => {
-  const marks = traceEvents.filter((event) => LONG_TASK_ATTRIBUTION_MARKS.includes(event.name))
-  return Object.fromEntries(LONG_TASK_ATTRIBUTION_MARKS.map((markName) => {
-    const matchingMarks = marks.filter((event) => event.name === markName)
-    const matchingTasks = longTasks.filter((task) => matchingMarks.some((mark) => (
-      mark.pid === task.pid
-      && mark.tid === task.tid
-      && Number(mark.ts) >= Number(task.ts)
-      && Number(mark.ts) <= Number(task.ts) + Number(task.dur)
-    )))
-    const durations = matchingTasks.map((task) => Number(task.dur) / 1000)
-    return [markName, {
-      marks: matchingMarks.length,
-      longTasks: matchingTasks.length,
-      totalLongTaskMs: Number(durations.reduce((total, duration) => total + duration, 0).toFixed(3)),
-      longestTaskMs: Number(durations.reduce((max, duration) => Math.max(max, duration), 0).toFixed(3)),
-    }]
-  }))
-}
 
 const evaluateValue = async (client, expression) => {
   const result = await client.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })
@@ -376,11 +346,7 @@ const main = async () => {
     const loaded = client.once("Page.loadEventFired", 30_000)
     await client.send("Page.navigate", { url: options.url })
     await loaded
-    await evaluateValue(client, `
-      localStorage.setItem("openchamber_sync_perf", "1")
-      localStorage.setItem("openchamber_stream_perf", "1")
-      localStorage.setItem("openchamber_session_load_perf", "1")
-    `)
+    await evaluateValue(client, `localStorage.setItem("piarium_stream_perf", "1")`)
     const reloaded = client.once("Page.loadEventFired", 30_000)
     await client.send("Page.reload", { ignoreCache: true })
     await reloaded
@@ -395,10 +361,8 @@ const main = async () => {
       await wait(5_000)
     }
 
-    await evaluateValue(client, `window.__piariumSyncPerformance?.reset()`)
     await evaluateValue(client, `window.__piariumStreamPerformance?.setEnabled(true)`)
     await evaluateValue(client, `window.__piariumStreamPerformance?.reset()`)
-    await evaluateValue(client, `if (window.__piariumSessionLoadPerformance) window.__piariumSessionLoadPerformance.events.length = 0`)
     const records = new Map()
     const traceEvents = []
     const startedAt = new Date().toISOString()
@@ -446,7 +410,7 @@ const main = async () => {
       ].join(","),
     })
 
-    console.log(`Recording for ${options.duration} seconds. Use OpenChamber normally during this window.`)
+    console.log(`Recording for ${options.duration} seconds. Use Piarium normally during this window.`)
     const recordingStartedAt = Date.now()
     if (options.reload) {
       const recordedReload = client.once("Page.loadEventFired", 30_000)
@@ -456,12 +420,7 @@ const main = async () => {
     await wait(Math.max(0, options.duration * 1000 - (Date.now() - recordingStartedAt)))
     const afterMetrics = metricMap((await client.send("Performance.getMetrics")).metrics)
     const afterHeap = await client.send("Runtime.getHeapUsage")
-    const syncCounters = await evaluateValue(client, `window.__piariumSyncPerformance?.getSnapshot() ?? null`)
     const streamPerformance = await evaluateValue(client, `window.__piariumStreamPerformance?.getSnapshot() ?? null`)
-    const sessionLoadPerformance = await evaluateValue(
-      client,
-      `(${projectSessionLoadPerformance.toString()})(window.__piariumSessionLoadPerformance?.events ?? [], ${JSON.stringify(recordingStartedAt)})`,
-    )
     const traceCompleteEvent = client.once("Tracing.tracingComplete", 120_000)
     let traceComplete = true
     try {
@@ -477,7 +436,6 @@ const main = async () => {
     for (const unsubscribe of unsubscribers) unsubscribe()
 
     const longTasks = traceEvents.filter((event) => event.name === "RunTask" && Number(event.dur) >= 50_000)
-    const longTaskAttribution = buildLongTaskAttribution(traceEvents, longTasks)
     const failedRequests = [...records.values()].filter((record) => (
       record.failed || Number(record.response?.status) >= 400
     )).length
@@ -492,14 +450,11 @@ const main = async () => {
       transferredBytes: [...records.values()].reduce((total, record) => total + (record.encodedDataLength ?? 0), 0),
       longTasksOver50ms: longTasks.length,
       longestTaskMs: longTasks.reduce((max, event) => Math.max(max, Number(event.dur) / 1000), 0),
-      longTaskAttribution,
       performanceMetricsBefore: beforeMetrics,
       performanceMetricsAfter: afterMetrics,
       heapBefore: beforeHeap,
       heapAfter: afterHeap,
-      syncCounters,
       streamPerformance,
-      sessionLoadPerformance,
       includesRecordedReload: options.reload,
       traceComplete,
       traceFileComplete: false,

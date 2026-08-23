@@ -240,13 +240,6 @@ export const streamPerfObserve = (metric: string, value: number): void => {
     updatePerfCounter(metric, value);
 };
 
-export const streamPerfMark = (metric: string): void => {
-    if (!streamPerfEnabled || typeof performance === 'undefined' || typeof performance.mark !== 'function') {
-        return;
-    }
-    performance.mark(`piarium.${metric}`);
-};
-
 export const streamPerfMeasure = <T>(metric: string, fn: () => T): T => {
     if (!streamPerfEnabled) {
         return fn();

@@ -166,7 +166,13 @@ export default defineConfig({
             packageName === '@shikijs/langs' ||
             packageName === '@shikijs/themes' ||
             packageName === '@codemirror/legacy-modes' ||
-            packageName === '@pierre/diffs'
+            packageName === '@pierre/diffs' ||
+            // These are facade packages whose imports Rollup resolves into
+            // sibling packages. Naming a manual chunk for the empty facade
+            // emits useless zero-byte files and warnings.
+            packageName === 'reselect' ||
+            packageName === 'detect-node-es' ||
+            packageName === 'motion'
           ) {
             return undefined;
           }
