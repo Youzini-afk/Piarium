@@ -44,7 +44,7 @@
     "lint:mobile": "bun run --cwd packages/mobile lint",
     "clean": "bun run --filter '*' clean",
     "changelog-card": "node scripts/changelog-card/generate.mjs",
-    "postinstall": "node ./scripts/fix-deprecation.js && patch-package && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
+    "postinstall": "node ./scripts/fix-deprecation.js && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
     "test:pi": "bun run --sequential --filter '@piarium/*' test",
     "test:pi:dist": "bun run --sequential --filter '@piarium/*' test:dist",
     "check:pi": "bun run build:type-dependencies && bun run --filter '@piarium/*' type-check && bun run test:pi",
@@ -162,7 +162,6 @@
     "globals": "^17.10.0",
     "node-addon-api": "7.1.1",
     "nodemon": "^3.1.14",
-    "patch-package": "^8.0.1",
     "sharp": "^0.35.3",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.1",
@@ -174,6 +173,7 @@
     "vitest": "^4.1.11"
   },
   "patchedDependencies": {
-    "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch"
+    "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
+    "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch"
   }
 }

@@ -1,7 +1,7 @@
-diff --git a/node_modules/ghostty-web/dist/ghostty-web.js b/node_modules/ghostty-web/dist/ghostty-web.js
+diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
 index 0000000000000000000000000000000000000000..1111111111111111111111111111111111111111 100644
---- a/node_modules/ghostty-web/dist/ghostty-web.js
-+++ b/node_modules/ghostty-web/dist/ghostty-web.js
+--- a/dist/ghostty-web.js
++++ b/dist/ghostty-web.js
 @@ -1299,1 +1299,1 @@
 -      C === 0 || C < 32 ? B.push(" ") : B.push(String.fromCodePoint(C));
 +      C === 0 || C < 32 || C > 1114111 || C >= 55296 && C <= 57343 ? B.push(" ") : B.push(String.fromCodePoint(C));
