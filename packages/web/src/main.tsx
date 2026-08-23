@@ -120,9 +120,12 @@ const start = async (): Promise<void> => {
     return;
   }
 
-  // Hold the render until a desktop relay-host restore has picked its transport.
-  await getDesktopRelayRestoreReady();
-  await import('@piarium/ui/main');
+  // Parse and compile the UI while the desktop relay transport is being
+  // restored. Rendering still waits for the selected transport, so the auth
+  // gate never probes a transient endpoint, but network/JS work no longer runs
+  // serially behind a direct-address probe or relay handshake.
+  const applicationModule = import('@piarium/ui/main');
+  await Promise.all([getDesktopRelayRestoreReady(), applicationModule]);
 };
 
 void start();

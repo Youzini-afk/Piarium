@@ -1,6 +1,5 @@
 import React from 'react';
 import { RiLockLine, RiLockUnlockLine, RiLoader4Line } from '@remixicon/react';
-import { browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
@@ -18,14 +17,17 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
-  authenticateWithPasskey,
-  cancelPasskeyCeremony,
+  browserSupportsPasskeys,
   defaultPasskeyStatus,
   fetchPasskeyStatus,
-  isPasskeyCeremonyAbort,
   type PasskeyStatus,
+} from '@/lib/passkeys-api';
+import {
+  authenticateWithPasskey,
+  cancelPasskeyCeremony,
+  isPasskeyCeremonyAbort,
   registerCurrentDevicePasskey,
-} from '@/lib/passkeys';
+} from '@/lib/passkey-ceremony-loader';
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
 // Transient-failure auto-retry for the initial session check. Over the relay the
@@ -391,7 +393,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
     void (async () => {
       try {
-        if (!window.isSecureContext || !browserSupportsWebAuthn()) {
+        if (!window.isSecureContext || !browserSupportsPasskeys()) {
           if (!cancelled) {
             setSupportsPasskeys(false);
           }

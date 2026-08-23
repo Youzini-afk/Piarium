@@ -49,9 +49,6 @@ import { PiComposer } from './PiComposer';
 import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
-import { PiModelSelectorDialog } from './PiModelSelectorDialog';
-import { PiTimeline } from './PiTimeline';
-import { PiWorkStatusPanel } from './PiWorkStatusPanel';
 import { piSessionTitle } from './sessionPresentation';
 import { renderPiComposerSubmission } from './piComposerSubmission';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
@@ -59,6 +56,21 @@ import {
   WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
+
+const LazyPiModelSelectorDialog = React.lazy(async () => {
+  const module = await import('./PiModelSelectorDialog');
+  return { default: module.PiModelSelectorDialog };
+});
+
+const LazyPiTimeline = React.lazy(async () => {
+  const module = await import('./PiTimeline');
+  return { default: module.PiTimeline };
+});
+
+const LazyPiWorkStatusPanel = React.lazy(async () => {
+  const module = await import('./PiWorkStatusPanel');
+  return { default: module.PiWorkStatusPanel };
+});
 
 interface PiChatViewProps {
   active?: boolean;
@@ -125,6 +137,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     recoveryPreference,
     currentRecord?.recoveryStatus,
   );
+  const isModelSelectorOpen = useUIStore((state) => state.isModelSelectorOpen);
   const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
@@ -522,19 +535,25 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           <WorkbenchReplacement
             target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
             fallback={(
-              <PiTimeline
-                cwd={snapshot.cwd}
-                entries={entries}
-                hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
-                liveAssistant={currentRecord.liveAssistant}
-                onRecover={handleRecover}
-                onTogglePinned={handleTogglePinned}
-                pinBusyEntryId={pinBusyEntryId}
-                pinnedEntryIds={pinnedEntryIds}
-                recoveryBusyEntryId={recoveryBusyEntryId}
-                sessionId={currentSessionId}
-                toolExecutions={currentRecord.toolExecutions}
-              />
+              <React.Suspense fallback={(
+                <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
+                  <Icon name="loader-4" className="size-4 animate-spin" />
+                </div>
+              )}>
+                <LazyPiTimeline
+                  cwd={snapshot.cwd}
+                  entries={entries}
+                  hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
+                  liveAssistant={currentRecord.liveAssistant}
+                  onRecover={handleRecover}
+                  onTogglePinned={handleTogglePinned}
+                  pinBusyEntryId={pinBusyEntryId}
+                  pinnedEntryIds={pinnedEntryIds}
+                  recoveryBusyEntryId={recoveryBusyEntryId}
+                  sessionId={currentSessionId}
+                  toolExecutions={currentRecord.toolExecutions}
+                />
+              </React.Suspense>
             )}
           />
         )}
@@ -576,10 +595,18 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         )}
           <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />
         </div>
-        {showWorkStatus ? <PiWorkStatusPanel sessionId={currentSessionId} /> : null}
+        {showWorkStatus ? (
+          <React.Suspense fallback={null}>
+            <LazyPiWorkStatusPanel sessionId={currentSessionId} />
+          </React.Suspense>
+        ) : null}
       </div>
 
-      <PiModelSelectorDialog />
+      {isModelSelectorOpen ? (
+        <React.Suspense fallback={null}>
+          <LazyPiModelSelectorDialog />
+        </React.Suspense>
+      ) : null}
       <Dialog open={recoveryEntry !== null} onOpenChange={(open) => { if (!open) setRecoveryEntry(null); }}>
         <DialogContent showCloseButton={false} className="max-w-md gap-5">
           <DialogHeader>
