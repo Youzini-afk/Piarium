@@ -147,7 +147,7 @@
         "@capacitor/app": "^8.0.0",
         "@capacitor/core": "^8.4.1",
         "@capacitor/keyboard": "^8.0.0",
-        "@capacitor/push-notifications": "^8.1.1",
+        "@capacitor/push-notifications": "^8.1.2",
         "@capacitor/status-bar": "^8.0.0",
       },
       "devDependencies": {
@@ -210,7 +210,7 @@
         "@capacitor/app": "^8.0.0",
         "@capacitor/core": "^8.4.1",
         "@capacitor/keyboard": "^8.0.0",
-        "@capacitor/push-notifications": "^8.1.1",
+        "@capacitor/push-notifications": "^8.1.2",
         "@capacitor/status-bar": "^8.0.0",
         "@codemirror/autocomplete": "^6.20.0",
         "@codemirror/commands": "^6.10.1",
@@ -711,7 +711,7 @@
 
     "@capacitor/keyboard": ["@capacitor/keyboard@8.0.5", "", { "peerDependencies": { "@capacitor/core": ">=8.0.0" } }, "sha512-oFXygC4eKYA5l2MdpTR06L2M/4x6e2SLD5yS1T9+UBDKTkzyvhWKEhbYLUaTIBPpLKqlfGudJw1X73S1H9eUzQ=="],
 
-    "@capacitor/push-notifications": ["@capacitor/push-notifications@8.1.1", "", { "peerDependencies": { "@capacitor/core": ">=8.0.0" } }, "sha512-WqzjPKIbYbARMN+GC0XMAJcxJpUUzqgzS/Ny8RODLrro38pQhm3GXYwX2Mwd+LZlLY39rGImkCkrKyQSNfuikA=="],
+    "@capacitor/push-notifications": ["@capacitor/push-notifications@8.1.2", "", { "peerDependencies": { "@capacitor/core": ">=8.0.0" } }, "sha512-TQl4XxqJfNF+KbSYBFMXYYT5WXUaleVKXlByhh/8+KySMVNjp+l5OqAUoGe/sY1IAnGXEuUeCjA/WLZEVvGwrA=="],
 
     "@capacitor/status-bar": ["@capacitor/status-bar@8.0.2", "", { "peerDependencies": { "@capacitor/core": ">=8.0.0" } }, "sha512-WXs8YB8B9eEaPZz+bcdY6t2nForF1FLoj/JU0Dl9RRgQnddnS98FEEyDooQhaY7wivr000j4+SC1FyeJkrFO7A=="],
 
