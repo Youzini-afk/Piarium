@@ -1,3 +1,5 @@
+import { createSettingsFileStore } from '@piarium/settings-store';
+
 const STORE_VERSION = 2;
 const TOKEN_PREFIX = 'piarium_client_';
 const TOKEN_BYTES = 32;
@@ -141,39 +143,39 @@ const constantTimeEqual = (left, right, crypto) => {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storePath }) => {
+export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storePath, clientStore: providedClientStore }) => {
   const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
   const nowIso = () => new Date().toISOString();
   const generateId = () => crypto.randomBytes(12).toString('hex');
   const generateToken = () => `${TOKEN_PREFIX}${crypto.randomBytes(TOKEN_BYTES).toString('base64url')}`;
   const auditPath = path.join(path.dirname(storePath), 'external-access-audit.jsonl');
-  let storeMutationQueue = Promise.resolve();
+  const emptyStore = () => ({ version: STORE_VERSION, clients: [] });
+  const clientStore = providedClientStore ?? createSettingsFileStore({
+    filePath: storePath,
+    defaultValue: emptyStore(),
+  });
 
-  const withStoreMutation = async (fn) => {
-    const previous = storeMutationQueue;
-    let release;
-    storeMutationQueue = new Promise((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    try {
-      return await fn();
-    } finally {
-      release();
+  const normalizeStore = (payload) => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.version !== STORE_VERSION) {
+      throw new Error(`Unsupported remote clients version: ${String(payload?.version)}`);
     }
-  };
-
-  const normalizeStore = (payload) => ({
-    version: STORE_VERSION,
-    clients: Array.isArray(payload?.clients)
-      ? payload.clients
-        .filter((client) => client && typeof client === 'object')
-        .map((client) => {
+    if (!Array.isArray(payload.clients)) {
+      throw new Error('Remote clients file has invalid clients');
+    }
+    const clients = payload.clients.map((client) => {
+          if (!client || typeof client !== 'object' || Array.isArray(client)) {
+            throw new Error('Remote clients file contains an invalid client');
+          }
+          const id = normalizeOptionalString(client.id);
+          const tokenHash = normalizeOptionalString(client.tokenHash);
+          if (!id || !tokenHash) {
+            throw new Error('Remote clients file contains an incomplete client');
+          }
           const profile = normalizeProfile(client.profile);
           return {
-            id: typeof client.id === 'string' ? client.id : generateId(),
+            id,
             label: normalizeLabel(client.label),
-            tokenHash: typeof client.tokenHash === 'string' ? client.tokenHash : '',
+            tokenHash,
             createdAt: typeof client.createdAt === 'string' ? client.createdAt : nowIso(),
             lastUsedAt: typeof client.lastUsedAt === 'string' ? client.lastUsedAt : null,
             revokedAt: typeof client.revokedAt === 'string' ? client.revokedAt : null,
@@ -187,28 +189,21 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
             lastTransport: client.lastTransport === 'relay' || client.lastTransport === 'direct' ? client.lastTransport : null,
             ...normalizeMetadata(client),
           };
-        })
-        .filter((client) => client.tokenHash.length > 0)
-      : [],
+        });
+    return { version: STORE_VERSION, clients };
+  };
+
+  const readStore = async () => normalizeStore(await clientStore.read());
+
+  const mutateStore = (mutator) => clientStore.transact(async (persisted) => {
+    const store = normalizeStore(persisted);
+    const transaction = await mutator(store);
+    return {
+      document: store,
+      result: transaction.result,
+      write: transaction.write !== false,
+    };
   });
-
-  const readStore = async () => {
-    try {
-      const raw = await fsPromises.readFile(storePath, 'utf8');
-      return normalizeStore(safeJsonParse(raw));
-    } catch (error) {
-      if (error?.code === 'ENOENT') return normalizeStore(null);
-      throw error;
-    }
-  };
-
-  const writeStore = async (store) => {
-    await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
-    if (typeof fsPromises.chmod === 'function') {
-      await fsPromises.chmod(storePath, 0o600).catch(() => {});
-    }
-  };
 
   const publicClient = (client) => ({
     id: client.id,
@@ -232,24 +227,20 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
   });
 
   const listClients = async () => {
-    return withStoreMutation(async () => {
-      const store = await readStore();
-      return store.clients.map(publicClient);
-    });
+    const store = await readStore();
+    return store.clients.map(publicClient);
   };
 
   // Relay demand includes both pairing-time intent and the authoritative fact
   // that a device has actually reached this host through the relay.
   const hasActiveRelayClients = async () => {
-    return withStoreMutation(async () => {
-      const store = await readStore();
-      const now = Date.now();
-      return store.clients.some((client) => {
-        if (client.usesRelay !== true && client.lastTransport !== 'relay') return false;
-        if (client.revokedAt) return false;
-        const expires = Date.parse(client.expiresAt || '');
-        return !Number.isFinite(expires) || expires > now;
-      });
+    const store = await readStore();
+    const now = Date.now();
+    return store.clients.some((client) => {
+      if (client.usesRelay !== true && client.lastTransport !== 'relay') return false;
+      if (client.revokedAt) return false;
+      const expires = Date.parse(client.expiresAt || '');
+      return !Number.isFinite(expires) || expires > now;
     });
   };
 
@@ -269,8 +260,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     capabilities,
     allowedDirectories,
   } = {}) => {
-    return withStoreMutation(async () => {
-      const store = await readStore();
+    return mutateStore(async (store) => {
       const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
       const normalizedProfile = normalizeProfile(profile);
       const token = generateToken();
@@ -307,8 +297,7 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
         }
       }
       store.clients.push(client);
-      await writeStore(store);
-      return { client: publicClient(client), token };
+      return { result: { client: publicClient(client), token } };
     });
   };
 
@@ -316,26 +305,21 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     if (typeof id !== 'string' || id.trim().length === 0) {
       return { revoked: false };
     }
-    return withStoreMutation(async () => {
-      const store = await readStore();
+    return mutateStore(async (store) => {
       const client = store.clients.find((entry) => entry.id === id);
-      if (!client) return { revoked: false };
-      if (!client.revokedAt) client.revokedAt = nowIso();
-      await writeStore(store);
-      return { revoked: true, client: publicClient(client) };
+      if (!client) return { result: { revoked: false }, write: false };
+      if (client.revokedAt) return { result: { revoked: true, client: publicClient(client) }, write: false };
+      client.revokedAt = nowIso();
+      return { result: { revoked: true, client: publicClient(client) } };
     });
   };
 
   const purgeRevokedClients = async () => {
-    return withStoreMutation(async () => {
-      const store = await readStore();
+    return mutateStore(async (store) => {
       const before = store.clients.length;
       store.clients = store.clients.filter((entry) => !entry.revokedAt);
       const purged = before - store.clients.length;
-      if (purged > 0) {
-        await writeStore(store);
-      }
-      return { purged };
+      return { result: { purged }, write: purged > 0 };
     });
   };
 
@@ -347,12 +331,11 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
     // forwarded request with x-piarium-relay-connection; anything else is a
     // direct (local/LAN/tunnel-URL) request. This also drives relay demand.
     const transport = req?.headers?.['x-piarium-relay-connection'] ? 'relay' : 'direct';
-    return withStoreMutation(async () => {
+    return mutateStore(async (store) => {
       const tokenHash = hashToken(token);
-      const store = await readStore();
       const client = store.clients.find((entry) => !entry.revokedAt && constantTimeEqual(entry.tokenHash, tokenHash, crypto));
-      if (!client) return null;
-      if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return null;
+      if (!client) return { result: null, write: false };
+      if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) return { result: null, write: false };
       const now = Date.now();
       const lastUsedAt = Date.parse(client.lastUsedAt || '');
       // A relayed request proves this client depends on the relay even if it was
@@ -362,12 +345,18 @@ export const createRemoteClientAuthRuntime = ({ fsPromises, path, crypto, storeP
       if (healUsesRelay) client.usesRelay = true;
       // Write on the throttle interval — or immediately when the transport
       // changed, so a LAN⇄relay switch is visible right away, not a minute late.
-      if (healUsesRelay || !Number.isFinite(lastUsedAt) || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS || client.lastTransport !== transport) {
+      const shouldWrite = healUsesRelay
+        || !Number.isFinite(lastUsedAt)
+        || now - lastUsedAt >= LAST_USED_WRITE_INTERVAL_MS
+        || client.lastTransport !== transport;
+      if (shouldWrite) {
         client.lastUsedAt = new Date(now).toISOString();
         client.lastTransport = transport;
-        await writeStore(store);
       }
-      return { ok: true, clientId: client.id, sessionToken: client.id, client: publicClient(client) };
+      return {
+        result: { ok: true, clientId: client.id, sessionToken: client.id, client: publicClient(client) },
+        write: shouldWrite,
+      };
     });
   };
 

@@ -79,6 +79,22 @@ describe('settings file store', () => {
     assert.deepEqual(await store.read(), { recovered: true });
   });
 
+  it('returns a transaction result without rewriting a read-only document', async () => {
+    const { filePath, store } = await createStore();
+    await store.replace({ value: 1 });
+    const before = await fsPromises.stat(filePath);
+
+    const result = await store.transact((current) => ({
+      result: current.value,
+      write: false,
+    }));
+
+    const after = await fsPromises.stat(filePath);
+    assert.equal(result, 1);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+    assert.deepEqual(await store.read(), { value: 1 });
+  });
+
   it('writes private directory and file modes', { skip: process.platform === 'win32' }, async () => {
     const { filePath, store } = await createStore();
     await store.replace({ value: true });

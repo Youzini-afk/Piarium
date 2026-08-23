@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,8 +6,15 @@ import crypto from 'node:crypto';
 
 import { createClientPairingRuntime } from './pairing.js';
 
+const roots = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+});
+
 const makeRuntime = async (options = {}) => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-pairing-test-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-pairing-test-'));
+  roots.push(dir);
   const createdClients = [];
   const remoteClientAuthRuntime = options.remoteClientAuthRuntime || {
     createClient: vi.fn(async (input) => {
@@ -23,15 +30,16 @@ const makeRuntime = async (options = {}) => {
       return { client, token: `token-${createdClients.length}` };
     }),
   };
-  const runtime = createClientPairingRuntime({
+  const storePath = path.join(dir, 'pairing.json');
+  const createRuntime = () => createClientPairingRuntime({
     fsPromises: fs,
     path,
     crypto,
-    storePath: path.join(dir, 'pairing.json'),
+    storePath,
     remoteClientAuthRuntime,
     ttlMs: options.ttlMs ?? 10 * 60 * 1000,
   });
-  return { dir, runtime, remoteClientAuthRuntime, createdClients };
+  return { dir, runtime: createRuntime(), createRuntime, remoteClientAuthRuntime, createdClients, storePath };
 };
 
 describe('client auth pairing runtime', () => {
@@ -138,5 +146,36 @@ describe('client auth pairing runtime', () => {
     const ids = store.sessions.map((session) => session.id);
     expect(ids).not.toContain(expired.pairing.id);
     expect(ids).toHaveLength(1);
+  });
+
+  it('allows exactly one redemption across independent runtime instances', async () => {
+    const { runtime, createRuntime, remoteClientAuthRuntime } = await makeRuntime();
+    const created = await runtime.createPairingSession();
+
+    const attempts = await Promise.allSettled([
+      runtime.redeemPairingSession({
+        pairingId: created.pairing.id,
+        secret: created.pairing.secret,
+        clientKind: 'mobile',
+      }),
+      createRuntime().redeemPairingSession({
+        pairingId: created.pairing.id,
+        secret: created.pairing.secret,
+        clientKind: 'mobile',
+      }),
+    ]);
+
+    expect(attempts.filter((attempt) => attempt.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === 'rejected')).toHaveLength(1);
+    expect(remoteClientAuthRuntime.createClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves malformed pairing state instead of replacing it', async () => {
+    const { runtime, storePath } = await makeRuntime();
+    const malformed = '{"version":1,"sessions":';
+    await fs.writeFile(storePath, malformed, 'utf8');
+
+    await expect(runtime.createPairingSession()).rejects.toBeInstanceOf(SyntaxError);
+    expect(await fs.readFile(storePath, 'utf8')).toBe(malformed);
   });
 });

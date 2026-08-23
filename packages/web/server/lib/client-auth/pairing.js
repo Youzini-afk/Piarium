@@ -1,3 +1,5 @@
+import { createSettingsFileStore } from '@piarium/settings-store';
+
 const STORE_VERSION = 1;
 const PAIRING_ID_PREFIX = 'pair_';
 const SECRET_BYTES = 32;
@@ -44,14 +46,6 @@ const normalizeAllowedClientKinds = (value) => {
   return kinds.length > 0 ? Array.from(new Set(kinds)) : ['mobile', 'desktop'];
 };
 
-const safeJsonParse = (raw) => {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-};
-
 const constantTimeEqual = (left, right, crypto) => {
   if (typeof left !== 'string' || typeof right !== 'string') return false;
   const leftBuffer = Buffer.from(left, 'hex');
@@ -88,15 +82,14 @@ const redeemError = () => {
 };
 
 export const createClientPairingRuntime = ({
-  fsPromises,
-  path,
   crypto,
   storePath,
   remoteClientAuthRuntime,
+  pairingStore: providedPairingStore,
   ttlMs = DEFAULT_TTL_MS,
 } = {}) => {
-  if (!fsPromises || !path || !crypto || !storePath || !remoteClientAuthRuntime) {
-    throw new Error('createClientPairingRuntime requires fsPromises, path, crypto, storePath, and remoteClientAuthRuntime');
+  if (!crypto || !storePath || !remoteClientAuthRuntime) {
+    throw new Error('createClientPairingRuntime requires crypto, storePath, and remoteClientAuthRuntime');
   }
 
   const nowIso = () => new Date().toISOString();
@@ -104,30 +97,31 @@ export const createClientPairingRuntime = ({
   const generateId = () => `${PAIRING_ID_PREFIX}${crypto.randomBytes(12).toString('hex')}`;
   const generateSecret = () => crypto.randomBytes(SECRET_BYTES).toString('base64url');
   const generateFingerprint = () => crypto.randomBytes(FINGERPRINT_BYTES).toString('hex').toUpperCase().replace(/^(.{4})(.{4})$/, '$1-$2');
-  let storeMutationQueue = Promise.resolve();
+  const emptyStore = () => ({ version: STORE_VERSION, sessions: [] });
+  const pairingStore = providedPairingStore ?? createSettingsFileStore({
+    filePath: storePath,
+    defaultValue: emptyStore(),
+  });
 
-  const withStoreMutation = async (fn) => {
-    const previous = storeMutationQueue;
-    let release;
-    storeMutationQueue = new Promise((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    try {
-      return await fn();
-    } finally {
-      release();
+  const normalizeStore = (payload) => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.version !== STORE_VERSION) {
+      throw new Error(`Unsupported pairing store version: ${String(payload?.version)}`);
     }
-  };
-
-  const normalizeStore = (payload) => ({
-    version: STORE_VERSION,
-    sessions: Array.isArray(payload?.sessions)
-      ? payload.sessions
-        .filter((session) => session && typeof session === 'object')
-        .map((session) => ({
-          id: typeof session.id === 'string' ? session.id : generateId(),
-          secretHash: typeof session.secretHash === 'string' ? session.secretHash : '',
+    if (!Array.isArray(payload.sessions)) {
+      throw new Error('Pairing store has invalid sessions');
+    }
+    const sessions = payload.sessions.map((session) => {
+          if (!session || typeof session !== 'object' || Array.isArray(session)) {
+            throw new Error('Pairing store contains an invalid session');
+          }
+          const id = normalizeOptionalString(session.id);
+          const secretHash = normalizeOptionalString(session.secretHash);
+          if (!id || !secretHash) {
+            throw new Error('Pairing store contains an incomplete session');
+          }
+          return {
+          id,
+          secretHash,
           createdAt: typeof session.createdAt === 'string' ? session.createdAt : nowIso(),
           expiresAt: normalizeTimestamp(session.expiresAt) || new Date(Date.now() + ttlMs).toISOString(),
           usedAt: normalizeTimestamp(session.usedAt),
@@ -138,28 +132,22 @@ export const createClientPairingRuntime = ({
           allowedClientKinds: normalizeAllowedClientKinds(session.allowedClientKinds),
           createdByClientId: normalizeOptionalString(session.createdByClientId),
           usesRelay: session.usesRelay === true,
-        }))
-        .filter((session) => session.secretHash.length > 0)
-      : [],
+        };
+      });
+    return { version: STORE_VERSION, sessions };
+  };
+
+  const readStore = async () => normalizeStore(await pairingStore.read());
+
+  const mutateStore = (mutator) => pairingStore.transact(async (persisted) => {
+    const store = normalizeStore(persisted);
+    const transaction = await mutator(store);
+    return {
+      document: store,
+      result: transaction.result,
+      write: transaction.write !== false,
+    };
   });
-
-  const readStore = async () => {
-    try {
-      const raw = await fsPromises.readFile(storePath, 'utf8');
-      return normalizeStore(safeJsonParse(raw));
-    } catch (error) {
-      if (error?.code === 'ENOENT') return normalizeStore(null);
-      throw error;
-    }
-  };
-
-  const writeStore = async (store) => {
-    await fsPromises.mkdir(path.dirname(storePath), { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(storePath, JSON.stringify(normalizeStore(store), null, 2), { mode: 0o600 });
-    if (typeof fsPromises.chmod === 'function') {
-      await fsPromises.chmod(storePath, 0o600).catch(() => {});
-    }
-  };
 
   const sweepExpiredSessionsFromStore = (store) => {
     const now = Date.now();
@@ -177,8 +165,7 @@ export const createClientPairingRuntime = ({
   };
 
   const createPairingSession = async ({ label, allowedClientKinds, createdByClientId, usesRelay } = {}) => {
-    return withStoreMutation(async () => {
-      const store = await readStore();
+    return mutateStore(async (store) => {
       sweepExpiredSessionsFromStore(store);
       const secret = generateSecret();
       const session = {
@@ -196,43 +183,41 @@ export const createClientPairingRuntime = ({
         usesRelay: usesRelay === true,
       };
       store.sessions.push(session);
-      await writeStore(store);
-      return { pairing: { ...publicSession(session), secret } };
+      return { result: { pairing: { ...publicSession(session), secret } } };
     });
   };
 
   // Sessions that can still be redeemed (link created, device not yet connected).
-  const listPendingSessions = async () => withStoreMutation(async () => {
+  const listPendingSessions = async () => {
     const store = await readStore();
     return store.sessions.filter(isPendingSession).map(publicSession);
-  });
+  };
 
   // Relay-transport demand from pairing: any still-redeemable relay session.
-  const hasActiveRelaySession = async () => withStoreMutation(async () => {
+  const hasActiveRelaySession = async () => {
     const store = await readStore();
     return store.sessions.some((session) => session.usesRelay === true && isPendingSession(session));
-  });
+  };
 
   const getPairingSession = async (id) => {
     const normalizedId = normalizeOptionalString(id);
     if (!normalizedId) return null;
-    return withStoreMutation(async () => {
-      const store = await readStore();
-      const session = store.sessions.find((entry) => entry.id === normalizedId);
-      return session ? publicSession(session) : null;
-    });
+    const store = await readStore();
+    const session = store.sessions.find((entry) => entry.id === normalizedId);
+    return session ? publicSession(session) : null;
   };
 
   const cancelPairingSession = async (id) => {
     const normalizedId = normalizeOptionalString(id);
     if (!normalizedId) return { cancelled: false };
-    return withStoreMutation(async () => {
-      const store = await readStore();
+    return mutateStore(async (store) => {
       const session = store.sessions.find((entry) => entry.id === normalizedId);
-      if (!session) return { cancelled: false };
-      if (!session.cancelledAt) session.cancelledAt = nowIso();
-      await writeStore(store);
-      return { cancelled: true, pairing: publicSession(session) };
+      if (!session) return { result: { cancelled: false }, write: false };
+      if (session.cancelledAt) {
+        return { result: { cancelled: true, pairing: publicSession(session) }, write: false };
+      }
+      session.cancelledAt = nowIso();
+      return { result: { cancelled: true, pairing: publicSession(session) } };
     });
   };
 
@@ -252,8 +237,7 @@ export const createClientPairingRuntime = ({
     const normalizedKind = normalizeClientKind(clientKind) || 'mobile';
     if (!normalizedId || !normalizedSecret) throw redeemError();
 
-    return withStoreMutation(async () => {
-      const store = await readStore();
+    return mutateStore(async (store) => {
       const session = store.sessions.find((entry) => entry.id === normalizedId);
       if (!session) throw redeemError();
       if (session.cancelledAt || session.usedAt) throw redeemError();
@@ -282,18 +266,15 @@ export const createClientPairingRuntime = ({
       });
       session.usedAt = nowIso();
       session.clientId = result.client?.id || null;
-      await writeStore(store);
-      return { pairing: publicSession(session), client: result.client, token: result.token };
+      return { result: { pairing: publicSession(session), client: result.client, token: result.token } };
     });
   };
 
-  const sweepExpiredSessions = async () => withStoreMutation(async () => {
-    const store = await readStore();
+  const sweepExpiredSessions = async () => mutateStore(async (store) => {
     const before = store.sessions.length;
     sweepExpiredSessionsFromStore(store);
     const purged = before - store.sessions.length;
-    if (purged > 0) await writeStore(store);
-    return { purged };
+    return { result: { purged }, write: purged > 0 };
   });
 
   return {

@@ -9,11 +9,22 @@ export interface SettingsFileStore {
   read(): Promise<PiariumSettingsDocument>;
   readSync(): PiariumSettingsDocument;
   replace(settings: PiariumSettingsDocument): Promise<PiariumSettingsDocument>;
+  transact<Result>(
+    mutator: (
+      current: PiariumSettingsDocument,
+    ) => SettingsFileTransaction<Result> | Promise<SettingsFileTransaction<Result>>,
+  ): Promise<Result>;
   update(
     mutator: (
       current: PiariumSettingsDocument,
     ) => PiariumSettingsDocument | void | Promise<PiariumSettingsDocument | void>,
   ): Promise<PiariumSettingsDocument>;
+}
+
+export interface SettingsFileTransaction<Result> {
+  document?: PiariumSettingsDocument;
+  result: Result;
+  write?: boolean;
 }
 
 export interface SettingsFileStoreOptions {

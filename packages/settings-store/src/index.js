@@ -201,12 +201,21 @@ export const createSettingsFileStore = ({
     return settings;
   });
 
-  const update = (mutator) => withMutationLock(async () => {
+  const transact = (mutator) => withMutationLock(async () => {
     const current = await read();
-    const next = assertObject((await mutator(structuredClone(current))) ?? current);
-    await writeUnlocked(next);
-    return next;
+    const transaction = await mutator(structuredClone(current));
+    if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
+      throw new Error('Settings transaction must return an object');
+    }
+    const next = assertObject(transaction.document ?? current);
+    if (transaction.write !== false) await writeUnlocked(next);
+    return transaction.result;
   });
 
-  return { filePath: resolvedPath, read, readSync, replace, update };
+  const update = (mutator) => transact(async (current) => {
+    const next = assertObject((await mutator(current)) ?? current);
+    return { document: next, result: next };
+  });
+
+  return { filePath: resolvedPath, read, readSync, replace, transact, update };
 };

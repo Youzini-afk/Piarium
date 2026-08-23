@@ -6,14 +6,15 @@ import crypto from 'node:crypto';
 import { createRemoteClientAuthRuntime } from './remote-clients.js';
 
 const createRuntime = async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-remote-clients-test-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-remote-clients-test-'));
+  const storePath = path.join(dir, 'remote-clients.json');
   const runtime = createRemoteClientAuthRuntime({
     fsPromises: fs,
     path,
     crypto,
-    storePath: path.join(dir, 'remote-clients.json'),
+    storePath,
   });
-  return { dir, runtime };
+  return { dir, runtime, storePath };
 };
 
 describe('remote client auth runtime', () => {
@@ -151,6 +152,34 @@ describe('remote client auth runtime', () => {
       const clients = await runtime.listClients();
       expect(clients).toHaveLength(1);
       expect(typeof clients[0].revokedAt).toBe('string');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes independent runtime writers without dropping either client', async () => {
+    const { dir, runtime, storePath } = await createRuntime();
+    try {
+      const second = createRemoteClientAuthRuntime({ fsPromises: fs, path, crypto, storePath });
+      await Promise.all([
+        runtime.createClient({ label: 'Laptop A' }),
+        second.createClient({ label: 'Laptop B' }),
+      ]);
+
+      expect((await runtime.listClients()).map((client) => client.label).sort())
+        .toEqual(['Laptop A', 'Laptop B']);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves malformed token state instead of replacing it', async () => {
+    const { dir, runtime, storePath } = await createRuntime();
+    try {
+      const malformed = '{"version":2,"clients":';
+      await fs.writeFile(storePath, malformed, 'utf8');
+      await expect(runtime.createClient({ label: 'Laptop' })).rejects.toBeInstanceOf(SyntaxError);
+      expect(await fs.readFile(storePath, 'utf8')).toBe(malformed);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
