@@ -12,7 +12,7 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { getWorktreeSetupCommands, type PiariumProjectRef } from '@/lib/piariumProjectConfig';
+import { getWorktreeSetupCommands, type PiariumProjectRef } from '@/lib/project-config';
 import type {
   CreateMultiRunParams,
   MultiRunAgentSelection,

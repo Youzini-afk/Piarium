@@ -23,7 +23,7 @@ let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
 const bootstrapWatcherOptions: Array<{ onFailed?: () => void; onReady?: () => void }> = [];
 
-mock.module('@/lib/openchamberConfig', () => ({
+mock.module('@/lib/project-config', () => ({
   substituteCommandVariables: (command: string) => command,
 }));
 

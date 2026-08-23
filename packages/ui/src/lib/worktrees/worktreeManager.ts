@@ -1,4 +1,4 @@
-import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { substituteCommandVariables } from '@/lib/project-config';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   deleteRemoteBranch,

@@ -96,4 +96,22 @@ describe('workspace text helpers', () => {
       expect(error).toBeInstanceOf(DocumentsError);
     }
   });
+
+  test('does not overwrite a concurrent external edit after a revision conflict', async () => {
+    const { api, files } = createDocuments();
+    const key = `${resource('notes.txt').workspaceId}\0notes.txt`;
+    files.set(key, { content: 'original', revision: 'd1_external-1' });
+    const write = api.write;
+    let injected = false;
+    api.write = async (request) => {
+      if (!injected) {
+        injected = true;
+        files.set(key, { content: 'external edit', revision: 'd1_external-2' });
+      }
+      return write(request);
+    };
+
+    expect(await writeWorkspaceTextFile(api, '/repo', '/repo/notes.txt', 'local edit')).toBe(false);
+    expect(files.get(key)?.content).toBe('external edit');
+  });
 });

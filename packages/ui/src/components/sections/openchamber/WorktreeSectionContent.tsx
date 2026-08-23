@@ -24,7 +24,7 @@ import {
   getWorktreeSetupWaitEnabled,
   saveWorktreeSetupCommands,
   saveWorktreeSetupWaitEnabled,
-} from '@/lib/openchamberConfig';
+} from '@/lib/project-config';
 import { listProjectWorktrees, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
 import { collectPiWorktreeSessions } from '@/lib/pi-runtime/worktreeSessions';
 import type { WorktreeMetadata } from '@/types/worktree';

@@ -38,7 +38,7 @@ import type { DocumentIdentity } from '@/lib/documents/types';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
+import { parseProjectPlanMarkdown } from '@/lib/project-config';
 import { createPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';

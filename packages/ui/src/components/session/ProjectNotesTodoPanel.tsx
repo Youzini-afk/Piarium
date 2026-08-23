@@ -28,10 +28,10 @@ import {
   readProjectPlanFile,
   PIARIUM_PROJECT_TODO_TEXT_MAX_LENGTH,
   saveProjectNotesAndTodos,
-  type OpenChamberProjectPlanFileLink,
-  type OpenChamberProjectTodoItem,
-  type ProjectRef,
-} from '@/lib/openchamberConfig';
+  type PiariumProjectPlanFileLink,
+  type PiariumProjectTodoItem,
+  type PiariumProjectRef as ProjectRef,
+} from '@/lib/project-config';
 import { requestFileAccess } from '@/lib/desktop';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -86,15 +86,16 @@ type PendingSendTarget = {
   todoText: string;
 };
 
-type ProjectPlanListItem = OpenChamberProjectPlanFileLink & {
+type ProjectPlanListItem = PiariumProjectPlanFileLink & {
   title: string;
 };
 
 const toPlanListItem = async (
-  plan: OpenChamberProjectPlanFileLink,
+  project: ProjectRef,
+  plan: PiariumProjectPlanFileLink,
   fallbackTitle: string,
 ): Promise<ProjectPlanListItem> => {
-  const file = await readProjectPlanFile(plan.path);
+  const file = await readProjectPlanFile(project, plan.path);
   return {
     ...plan,
     title: file?.title || plan.path.split('/').pop() || fallbackTitle,
@@ -108,12 +109,12 @@ const createTodoId = (): string => {
   return `todo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 };
 
-const sortTodosWithCompletedLast = (items: OpenChamberProjectTodoItem[]): OpenChamberProjectTodoItem[] => [
+const sortTodosWithCompletedLast = (items: PiariumProjectTodoItem[]): PiariumProjectTodoItem[] => [
   ...items.filter((todo) => !todo.completed),
   ...items.filter((todo) => todo.completed),
 ];
 
-const insertTodoBeforeCompleted = (items: OpenChamberProjectTodoItem[], item: OpenChamberProjectTodoItem): OpenChamberProjectTodoItem[] => {
+const insertTodoBeforeCompleted = (items: PiariumProjectTodoItem[], item: PiariumProjectTodoItem): PiariumProjectTodoItem[] => {
   const firstCompletedIndex = items.findIndex((todo) => todo.completed);
   if (firstCompletedIndex === -1) {
     return [...items, item];
@@ -166,7 +167,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const { t } = useI18n();
   const [isLoading, setIsLoading] = React.useState(false);
   const [notes, setNotes] = React.useState('');
-  const [todos, setTodos] = React.useState<OpenChamberProjectTodoItem[]>([]);
+  const [todos, setTodos] = React.useState<PiariumProjectTodoItem[]>([]);
   const [newTodoText, setNewTodoText] = React.useState('');
   const [sendingTodoId, setSendingTodoId] = React.useState<string | null>(null);
   const [expandedTodoIds, setExpandedTodoIds] = React.useState<Set<string>>(() => new Set());
@@ -194,7 +195,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const padding = useUIStore((state) => state.padding);
 
   const persistProjectData = React.useCallback(
-    async (nextNotes: string, nextTodos: OpenChamberProjectTodoItem[]) => {
+    async (nextNotes: string, nextTodos: PiariumProjectTodoItem[]) => {
       if (!projectRef) {
         return false;
       }
@@ -241,7 +242,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       try {
         const data = await getProjectContextData(projectRef);
         const nextPlans = await Promise.all(
-          data.plans.map((plan) => toPlanListItem(plan, t('rightSidebar.contextNotesTodo.plan.defaultTitle')))
+          data.plans.map((plan) => toPlanListItem(projectRef, plan, t('rightSidebar.contextNotesTodo.plan.defaultTitle')))
         );
         if (cancelled) {
           return;

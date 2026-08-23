@@ -285,6 +285,7 @@ accepted. UI disables unavailable actions instead of guessing from runtime versi
 | Models/auth | Pi ModelRuntime/AuthStorage + layered native `models.json` | Never mirror secrets into renderer storage; preserve source provenance |
 | Pi settings/packages | Pi SettingsManager/PackageManager | Scope-aware JSON settings, extension-owned config documents, and native package updates with source/provenance shown |
 | App metadata | Atomic Piarium JSON | Archive state now; recovery preference, pin, tags, and view preferences are application-owned additions |
+| Project workspace preferences | `~/.config/piarium/projects/<path-id>.json` | One Piarium-owned, path-derived authority for worktree setup, notes, todos, plans, draft starters, and project actions; writes preserve unknown fields, reject malformed JSON, and fail on external revision conflicts instead of overwriting them |
 | Workspace checkpoints | `pi-workspace-history` | Access through tree hooks, commands, and recovery bridge v1; never mirror private snapshot state |
 | Prompt repair | `pi-wtf` | Invoke the plugin's registered command capabilities and preserve its configuration |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |

@@ -44,7 +44,7 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { validateWorktreeCreate, createWorktree, listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { getWorktreeSetupCommands, getWorktreeSetupWaitEnabled } from '@/lib/project-config';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { renderMagicPrompt } from '@/lib/magicPrompts';

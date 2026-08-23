@@ -55,26 +55,5 @@ export const writeWorkspaceTextFile = async (
     operationId: crypto.randomUUID(),
   });
   if (written.status === 'written') return true;
-  const latest = await documents.read(resource);
-  if (latest.status === 'missing') {
-    const created = await documents.write({
-      resource,
-      content,
-      encoding,
-      bom,
-      expectedRevision: null,
-      operationId: crypto.randomUUID(),
-    });
-    return created.status === 'written';
-  }
-  if (latest.status !== 'ready') return false;
-  const retried = await documents.write({
-    resource,
-    content,
-    encoding,
-    bom,
-    expectedRevision: latest.revision,
-    operationId: crypto.randomUUID(),
-  });
-  return retried.status === 'written';
+  return false;
 };

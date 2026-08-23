@@ -5,7 +5,7 @@ import {
   getWorktreeSetupCommands,
   getWorktreeSetupWaitEnabled,
   type PiariumProjectRef,
-} from '@/lib/piariumProjectConfig';
+} from '@/lib/project-config';
 import {
   checkPiariumGitRepository,
   createPiariumWorktree,

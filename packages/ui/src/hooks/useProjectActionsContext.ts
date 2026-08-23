@@ -1,7 +1,7 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import type { ProjectRef } from '@/lib/openchamberConfig';
+import type { PiariumProjectRef as ProjectRef } from '@/lib/project-config';
 
 export interface ProjectActionsContext {
   projectRef: ProjectRef;

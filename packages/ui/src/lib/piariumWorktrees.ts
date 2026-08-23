@@ -10,7 +10,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import {
   substituteProjectCommandVariables,
   type PiariumProjectRef,
-} from './piariumProjectConfig';
+} from './project-config';
 
 export interface PiariumWorktreeCreateOptions {
   branchName?: string;
