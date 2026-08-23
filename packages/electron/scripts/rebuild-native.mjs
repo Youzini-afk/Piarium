@@ -145,7 +145,7 @@ const verifyWindowsNodePtyPrebuild = () => {
   }
 
   const verificationScript = `
-const pty = require('node-pty');
+const pty = require(${JSON.stringify(nodePtyDir)});
 const child = pty.spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'exit 0'], {
   cols: 80,
   rows: 24,
