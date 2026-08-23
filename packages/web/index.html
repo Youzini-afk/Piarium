@@ -778,6 +778,13 @@ animation: pi-splash-status-in 480ms 700ms ease both;
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-mark {
 animation: pi-splash-mark-press 960ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cube-face {
+animation: pi-splash-cube-bury 960ms linear both;
+}
+.pi-splash[data-leaving='true'] .pi-splash-cube-glyph {
+animation: none;
+filter: none;
+}
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-mark {
 animation: pi-splash-mark-out 960ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
 }
@@ -785,12 +792,16 @@ animation: pi-splash-mark-out 960ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
 animation: pi-splash-status-out 180ms ease both;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::after {
-animation: pi-splash-contact-press 400ms 557ms cubic-bezier(0.3, 0, 0.2, 1) both;
+animation: pi-splash-contact-press 303ms 557ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-mark-press {
 0%, 58% { transform: translateZ(48px); }
 92% { transform: translateZ(-48px); }
 100% { transform: translateZ(-54px); }
+}
+@keyframes pi-splash-cube-bury {
+0%, 72% { opacity: 1; }
+86%, 100% { opacity: 0; }
 }
 @keyframes pi-splash-contact-press {
 0% { opacity: 0.35; transform: scale(1); }
@@ -815,6 +826,7 @@ to { opacity: 0; transform: translateY(5px); }
 .pi-splash[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash[data-leaving='true'] .pi-splash-mark,
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cube-face,
 .pi-splash[data-leaving='true'] .pi-splash-status,
 .pi-splash:not([data-mode='switch']) .pi-splash-ground::after,
 .pi-splash-cube-glyph,

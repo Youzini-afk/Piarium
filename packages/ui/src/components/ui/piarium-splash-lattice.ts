@@ -161,7 +161,12 @@ const FLOOR_FLATTEN_MS = 520;
 /** The camera finishes its move first; only then does the cube travel through the floor. */
 const CUBE_PRESS_START_PCT = 58;
 const CUBE_CONTACT_PCT = 92;
+/** The real cube faces are gone before its floor cell opens, so the buried mark cannot shine through. */
+const CUBE_FACE_FADE_START_PCT = 72;
+const CUBE_FACE_FADE_END_PCT = 86;
 const CUBE_PRESS_DELAY_MS = Math.round(MARK_EXIT_MS * CUBE_PRESS_START_PCT / 100);
+/** The contact light ends exactly as the centre tile is released. */
+const CONTACT_PRESS_MS = BOOT_TILE_RELEASE_MS - CUBE_PRESS_DELAY_MS;
 /** Widest per-cell delay either mode schedules. */
 const MAX_CELL_DELAY_MS = 520;
 
@@ -510,6 +515,13 @@ animation: pi-splash-status-in 480ms 700ms ease both;
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-mark {
 animation: pi-splash-mark-press ${MARK_EXIT_MS}ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cube-face {
+animation: pi-splash-cube-bury ${MARK_EXIT_MS}ms linear both;
+}
+.pi-splash[data-leaving='true'] .pi-splash-cube-glyph {
+animation: none;
+filter: none;
+}
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-mark {
 animation: pi-splash-mark-out ${MARK_EXIT_MS}ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
 }
@@ -517,12 +529,16 @@ animation: pi-splash-mark-out ${MARK_EXIT_MS}ms 60ms cubic-bezier(0.4, 0, 0.3, 1
 animation: pi-splash-status-out 180ms ease both;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::after {
-animation: pi-splash-contact-press 400ms ${CUBE_PRESS_DELAY_MS}ms cubic-bezier(0.3, 0, 0.2, 1) both;
+animation: pi-splash-contact-press ${CONTACT_PRESS_MS}ms ${CUBE_PRESS_DELAY_MS}ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-mark-press {
 0%, ${CUBE_PRESS_START_PCT}% { transform: translateZ(${CUBE_EDGE_PX / 2}px); }
 ${CUBE_CONTACT_PCT}% { transform: translateZ(${-CUBE_EDGE_PX / 2}px); }
 100% { transform: translateZ(${-CUBE_EDGE_PX / 2 - 6}px); }
+}
+@keyframes pi-splash-cube-bury {
+0%, ${CUBE_FACE_FADE_START_PCT}% { opacity: 1; }
+${CUBE_FACE_FADE_END_PCT}%, 100% { opacity: 0; }
 }
 @keyframes pi-splash-contact-press {
 0% { opacity: 0.35; transform: scale(1); }
@@ -540,6 +556,7 @@ to { opacity: 0; transform: translateY(5px); }
   const reducedMarkRules = options.withMark
     ? `,
 .pi-splash[data-leaving='true'] .pi-splash-mark,
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cube-face,
 .pi-splash[data-leaving='true'] .pi-splash-status,
 .pi-splash:not([data-mode='switch']) .pi-splash-ground::after,
 .pi-splash-cube-glyph,

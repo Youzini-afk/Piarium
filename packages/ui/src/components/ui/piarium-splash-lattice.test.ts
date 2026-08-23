@@ -398,7 +398,7 @@ describe('exit choreography', () => {
     expect(css).toContain('@keyframes pi-splash-mark-press');
     const press = css.slice(
       css.indexOf('@keyframes pi-splash-mark-press'),
-      css.indexOf('@keyframes pi-splash-contact-press'),
+      css.indexOf('@keyframes pi-splash-cube-bury'),
     );
     expect(press).toContain(`translateZ(${CUBE_EDGE_PX / 2}px)`);
     expect(press).toContain(`translateZ(${-CUBE_EDGE_PX / 2}px)`);
@@ -414,6 +414,27 @@ describe('exit choreography', () => {
     expect(css).toContain(
       'transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px)) scale(0.56);',
     );
+  });
+
+  test('the buried cube is gone before the centre floor cell opens', () => {
+    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
+    const [, faceDurationMs] = /pi-splash-cube-bury (\d+)ms/.exec(css)
+      ?.map(Number) as [number, number];
+    const bury = css.slice(
+      css.indexOf('@keyframes pi-splash-cube-bury'),
+      css.indexOf('@keyframes pi-splash-contact-press'),
+    );
+    const [, hiddenPct] = /(\d+)%, 100% \{ opacity: 0; \}/.exec(bury)
+      ?.map(Number) as [number, number];
+    const [, tileReleaseMs] = /animation-delay: calc\(var\(--pi-cell-delay\) \+ (\d+)ms\)/
+      .exec(css)?.map(Number) as [number, number];
+
+    expect(faceDurationMs * hiddenPct / 100).toBeLessThan(tileReleaseMs);
+    expect(css).toContain(".pi-splash[data-leaving='true'] .pi-splash-cube-glyph {\nanimation: none;");
+
+    const [, contactDurationMs, contactDelayMs] = /pi-splash-contact-press (\d+)ms (\d+)ms/
+      .exec(css)?.map(Number) as [number, number, number];
+    expect(contactDelayMs + contactDurationMs).toBe(tileReleaseMs);
   });
 
   test('the waiting pulse is drawn on the cube footprint in floor space', () => {
