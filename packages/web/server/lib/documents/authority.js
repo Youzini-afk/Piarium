@@ -196,16 +196,7 @@ export const createDocumentAuthority = (options) => {
     const tmp = `${absolutePath}.piarium-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       await fsPromises.writeFile(tmp, bytes);
-      try {
-        await fsPromises.rename(tmp, absolutePath);
-      } catch (error) {
-        if (process.platform === 'win32' && (error?.code === 'EPERM' || error?.code === 'EEXIST')) {
-          await fsPromises.unlink(absolutePath);
-          await fsPromises.rename(tmp, absolutePath);
-        } else {
-          throw error;
-        }
-      }
+      await fsPromises.rename(tmp, absolutePath);
     } catch (error) {
       await fsPromises.unlink(tmp).catch(() => undefined);
       throw error;

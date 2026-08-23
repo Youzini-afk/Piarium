@@ -2,7 +2,7 @@
 
 Status: Pi-native host, desktop, recovery, and extension boundaries in place; release verification active
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## Protected assets
 
@@ -68,6 +68,24 @@ extension process.
 - Installer upgrade/uninstall data-retention test.
 
 Security-sensitive behavior changes require an architecture note and focused regression test.
+
+### Desktop renderer credential boundary
+
+Electron keeps saved host tokens, custom request headers, local filesystem identity, and relay host
+identity in the main process. A preload obtains the current window's bootstrap over synchronous IPC
+at document start; the main process returns those sensitive fields only when the requesting frame is
+the packaged `piarium-ui://app` renderer, the exact local application origin, or the exact development
+UI origin. They are never passed through Chromium `additionalArguments`, where operating-system
+process inspection and crash diagnostics could expose them.
+
+Remote pages rendered inside a desktop window retain presentation and window-management commands,
+but cannot enumerate saved hosts, probe arbitrary addresses through the main process, or discover the
+desktop LAN address. Navigation hands only `http:` and `https:` URLs to the operating system; custom,
+file, and script protocols are denied.
+
+Document replacement writes a temporary sibling and renames it over the destination. If replacement
+is unavailable on the current filesystem, the write fails and preserves the previous document; it
+does not delete the destination to force the rename.
 
 The OpenChamber fork migration must preserve its stronger workspace containment, remote-client
 capabilities and allowed-directory policy, external-access audit, renderer origin gates, and

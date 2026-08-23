@@ -22,6 +22,12 @@ import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { updateWindowInitScript } from './window-init-script.mjs';
 import {
+  createPreloadBootstrapPayload,
+  isTrustedLocalRendererUrl,
+  normalizeExternalHttpUrl,
+  REMOTE_SAFE_DESKTOP_COMMANDS,
+} from './renderer-security-policy.mjs';
+import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
   fetchLinuxAppIcons,
@@ -2395,13 +2401,10 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
   const desktopApiBaseUrl = rendererRuntimeConfig.apiBaseUrl;
   const desktopClientToken = rendererRuntimeConfig.clientToken;
   const desktopRequestHeaders = rendererRuntimeConfig.requestHeaders || {};
-  const desktopHome = os.homedir() || '';
-  const desktopMacosMajor = String(macosMajorVersion());
   const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
-  const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const titleBarOverlayEnabled = false;
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
@@ -2429,18 +2432,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     titleBarOverlay: titleBarOverlayEnabled,
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
-      additionalArguments: [
-        `--piarium-local-origin=${desktopLocalOrigin}`,
-        `--piarium-api-base-url=${desktopApiBaseUrl}`,
-        `--piarium-client-token=${desktopClientToken}`,
-        `--piarium-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
-        `--piarium-home=${desktopHome}`,
-        `--piarium-macos-major=${desktopMacosMajor}`,
-        `--piarium-mac-vibrancy=${useVibrancy ? '1' : '0'}`,
-        `--piarium-tray-enabled=${trayEnabled ? '1' : '0'}`,
-        `--piarium-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
-        `--piarium-relay-host-id=${rendererRuntimeConfig.relayHostId || ''}`,
-      ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
       contextIsolation: true,
@@ -2455,7 +2446,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
 
   const browserWindow = new BrowserWindow(options);
   browserWindow.__piariumLabel = label || nextWindowLabel();
-  browserWindow.__piariumRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
+  browserWindow.__piariumRuntimeConfig = rendererRuntimeConfig;
   browserWindow.__piariumInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
   browserWindow.__piariumTitleBarOverlayEnabled = titleBarOverlayEnabled;
 
@@ -2607,14 +2598,16 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {} }
     if (isAllowedNavigationUrl(url)) {
       return { action: 'allow' };
     }
-    void shell.openExternal(url).catch(() => {});
+    const externalUrl = normalizeExternalHttpUrl(url);
+    if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
     return { action: 'deny' };
   });
 
   browserWindow.webContents.on('will-navigate', (event, url) => {
     if (isAllowedNavigationUrl(url)) return;
     event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+    const externalUrl = normalizeExternalHttpUrl(url);
+    if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
   });
 
   browserWindow.webContents.setZoomFactor(1);
@@ -2787,6 +2780,7 @@ const getWindowRuntimeConfig = (browserWindow) => {
     apiBaseUrl: state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '',
     clientToken: state.clientToken || '',
     requestHeaders: state.requestHeaders || {},
+    relayHostId: '',
   };
   if (!browserWindow || browserWindow.isDestroyed()) return fallback;
   const config = browserWindow.__piariumRuntimeConfig;
@@ -2794,6 +2788,7 @@ const getWindowRuntimeConfig = (browserWindow) => {
     apiBaseUrl: typeof config?.apiBaseUrl === 'string' ? config.apiBaseUrl : fallback.apiBaseUrl,
     clientToken: typeof config?.clientToken === 'string' ? config.clientToken : fallback.clientToken,
     requestHeaders: sanitizeRuntimeRequestHeaders(config?.requestHeaders || fallback.requestHeaders),
+    relayHostId: typeof config?.relayHostId === 'string' ? config.relayHostId : fallback.relayHostId,
   };
 };
 
@@ -2819,12 +2814,9 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopApiBaseUrl = effectiveRuntimeConfig.apiBaseUrl || '';
   const desktopClientToken = effectiveRuntimeConfig.clientToken || '';
   const desktopRequestHeaders = effectiveRuntimeConfig.requestHeaders || {};
-  const desktopHome = os.homedir() || '';
-  const desktopMacosMajor = String(macosMajorVersion());
   const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
   const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
-  const trayEnabled = process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false;
   const browserWindow = new BrowserWindow({
     title: 'Piarium Mini Chat',
     width: MINI_CHAT_WINDOW_WIDTH,
@@ -2843,15 +2835,6 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
-      additionalArguments: [
-        `--piarium-local-origin=${desktopLocalOrigin}`,
-        `--piarium-api-base-url=${desktopApiBaseUrl}`,
-        `--piarium-client-token=${desktopClientToken}`,
-        `--piarium-runtime-headers=${JSON.stringify(desktopRequestHeaders)}`,
-        `--piarium-home=${desktopHome}`,
-        `--piarium-macos-major=${desktopMacosMajor}`,
-        `--piarium-tray-enabled=${trayEnabled ? '1' : '0'}`,
-      ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
       contextIsolation: true,
@@ -2901,18 +2884,19 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   });
 
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url).catch(() => {});
+    const externalUrl = normalizeExternalHttpUrl(url);
+    if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
     return { action: 'deny' };
   });
   browserWindow.webContents.on('will-navigate', (event, url) => {
-    try {
-      const target = new URL(url);
-      const local = new URL(shouldUsePackagedUi() ? packagedUiOrigin() : (state.localOrigin || state.sidecarUrl || ''));
-      if (target.origin === local.origin) return;
-    } catch {
-    }
+    if (isTrustedLocalRendererUrl(url, {
+      uiProtocol: UI_PROTOCOL,
+      developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}` : '',
+      localOrigins: [state.localOrigin, state.sidecarUrl],
+    })) return;
     event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+    const externalUrl = normalizeExternalHttpUrl(url);
+    if (externalUrl) void shell.openExternal(externalUrl).catch(() => {});
   });
   browserWindow.webContents.on('dom-ready', () => {
     const initScript = browserWindow.__piariumInitScript;
@@ -4909,62 +4893,45 @@ app.on('web-contents-created', (_event, contents) => {
 // remote page could read arbitrary local files, open arbitrary apps, etc.
 //
 // Strategy: commands fall into two buckets by capability, not by origin.
-// Window/host-switcher operations (probe a URL, open a new window, set
-// title, read the hosts list) are safe for any renderer. Filesystem,
-// shell.openPath, installed-app scans, app relaunch, and file dialogs
-// are gated to local senders — even the user's own remote UI shouldn't
-// need them, and a compromised remote can't use them either.
-const isLocalSender = (webContents) => {
-  try {
-    const raw = typeof webContents?.getURL === 'function' ? webContents.getURL() : '';
-    if (!raw) return false;
-    const url = new URL(raw);
-    if (url.protocol === `${UI_PROTOCOL}:` && url.hostname === 'app') return true;
-    // Electron dev renders from Vite while the local API is served on a
-    // separate port. This exact loopback HMR origin is trusted only in dev.
-    if (isDev && url.origin === `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}`) return true;
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    if (state.localOrigin) {
-      try {
-        const allowed = new URL(state.localOrigin);
-        if (allowed.origin === url.origin) return true;
-      } catch {
-      }
-    }
-    if (state.sidecarUrl) {
-      try {
-        const allowed = new URL(state.sidecarUrl);
-        if (allowed.origin === url.origin) return true;
-      } catch {
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
+// Presentation-only window operations remain available to a remote renderer.
+// Saved-host enumeration, network probing, LAN discovery, filesystem access,
+// shell operations, installed-app scans, relaunch, and file dialogs stay local:
+// several of those return credentials or let the main process reach resources
+// that the remote page itself cannot access.
+const ipcSenderUrl = (event) => {
+  const frameUrl = typeof event?.senderFrame?.url === 'string' ? event.senderFrame.url : '';
+  if (frameUrl) return frameUrl;
+  return typeof event?.sender?.getURL === 'function' ? event.sender.getURL() : '';
 };
 
-const COMMANDS_SAFE_FOR_REMOTE = new Set([
-  'desktop_hosts_get',
-  'desktop_host_probe',
-  'desktop_new_window',
-  'desktop_new_window_at_url',
-  'desktop_new_window_for_host',
-  'desktop_set_window_title',
-  'desktop_set_window_theme',
-  'desktop_is_window_fullscreen',
-  'desktop_start_window_drag',
-  'desktop_minimize_current_window',
-  'desktop_toggle_current_window_maximized',
-  'desktop_close_current_window',
-  'desktop_get_current_window_state',
-  'desktop_get_app_version',
-  'desktop_get_lan_address',
-  'desktop_capture_page_rect',
-]);
+const isLocalSender = (event) => isTrustedLocalRendererUrl(ipcSenderUrl(event), {
+  uiProtocol: UI_PROTOCOL,
+  developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}` : '',
+  localOrigins: [state.localOrigin, state.sidecarUrl],
+});
+
+ipcMain.on('piarium:bootstrap', (event) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender);
+  const runtimeConfig = getWindowRuntimeConfig(browserWindow);
+  event.returnValue = createPreloadBootstrapPayload({
+    senderUrl: ipcSenderUrl(event),
+    uiProtocol: UI_PROTOCOL,
+    developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.PIARIUM_HMR_UI_PORT || '5173'}` : '',
+    localOrigins: [state.localOrigin, state.sidecarUrl],
+    localOrigin: state.localOrigin || state.sidecarUrl || '',
+    apiBaseUrl: runtimeConfig.apiBaseUrl,
+    clientToken: runtimeConfig.clientToken,
+    requestHeaders: sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders),
+    relayHostId: runtimeConfig.relayHostId,
+    homeDirectory: os.homedir() || '',
+    macosMajor: macosMajorVersion(),
+    macVibrancy: process.platform !== 'darwin' || readSettingsRoot().desktopVibrancy !== false,
+    trayEnabled: process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false,
+  });
+});
 
 ipcMain.handle('piarium:invoke', async (event, command, args) => {
-  if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
+  if (!isLocalSender(event) && !REMOTE_SAFE_DESKTOP_COMMANDS.has(command)) {
     log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
   }
@@ -4974,7 +4941,7 @@ ipcMain.handle('piarium:invoke', async (event, command, args) => {
 
 ipcMain.handle('piarium:dialog:open', async (event, options) => {
   // Native file dialogs expose absolute local paths; never grant to remote.
-  if (!isLocalSender(event.sender)) {
+  if (!isLocalSender(event)) {
     log.warn(`[ipc] rejected dialog:open from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
   }
@@ -5022,7 +4989,7 @@ ipcMain.handle('piarium:dialog:open', async (event, options) => {
 });
 
 ipcMain.handle('piarium:file:grant-existing', async (event, filePath) => {
-  if (!isLocalSender(event.sender)) {
+  if (!isLocalSender(event)) {
     log.warn(`[ipc] rejected file:grant-existing from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
   }

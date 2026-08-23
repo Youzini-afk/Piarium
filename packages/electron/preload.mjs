@@ -2,27 +2,25 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 const eventListeners = new Map();
 
-const readArgValue = (name) => {
-  const prefix = `${name}=`;
-  const entry = process.argv.find((value) => typeof value === 'string' && value.startsWith(prefix));
-  if (!entry) {
-    return '';
+const bootstrap = (() => {
+  try {
+    const value = ipcRenderer.sendSync('piarium:bootstrap');
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
   }
-  return entry.slice(prefix.length);
-};
-
-const localOrigin = readArgValue('--piarium-local-origin');
-const apiBaseUrl = readArgValue('--piarium-api-base-url');
-const clientToken = readArgValue('--piarium-client-token');
-const runtimeHeadersRaw = readArgValue('--piarium-runtime-headers');
-const homeDirectory = readArgValue('--piarium-home');
-const macosMajorRaw = readArgValue('--piarium-macos-major');
-const macosMajor = Number.parseInt(macosMajorRaw, 10);
+})();
+const localOrigin = typeof bootstrap.localOrigin === 'string' ? bootstrap.localOrigin : '';
+const apiBaseUrl = typeof bootstrap.apiBaseUrl === 'string' ? bootstrap.apiBaseUrl : '';
+const clientToken = typeof bootstrap.clientToken === 'string' ? bootstrap.clientToken : '';
+const runtimeHeaders = bootstrap.requestHeaders && typeof bootstrap.requestHeaders === 'object'
+  ? bootstrap.requestHeaders
+  : null;
+const homeDirectory = typeof bootstrap.homeDirectory === 'string' ? bootstrap.homeDirectory : '';
+const macosMajor = Number.parseInt(String(bootstrap.macosMajor ?? ''), 10);
 const macVibrancySupported = process.platform === 'darwin';
-// Effective state for this window (main process resolves the saved preference
-// and passes it in). Defaults on when supported unless explicitly '0'.
-const hasMacVibrancy = macVibrancySupported && readArgValue('--piarium-mac-vibrancy') !== '0';
-const trayEnabled = process.platform !== 'darwin' || readArgValue('--piarium-tray-enabled') !== '0';
+const hasMacVibrancy = macVibrancySupported && bootstrap.macVibrancy !== false;
+const trayEnabled = process.platform !== 'darwin' || bootstrap.trayEnabled !== false;
 
 // Preload re-executes on every cross-origin navigation (we run with
 // sandbox:false, per-document). Two separate concerns to balance:
@@ -33,18 +31,9 @@ const trayEnabled = process.platform !== 'darwin' || readArgValue('--piarium-tra
 //  - __PIARIUM_DESKTOP__ is the IPC channel to the main process. It is
 //    exposed broadly, but privileged commands are gated in main.mjs.
 //    Local-only globals below stay limited to packaged UI / exact localOrigin.
-// Everything driven by localOrigin (home dir, macOS hints) also stays
-// local-only since it leaks info about the Electron host machine.
-const currentOrigin = (() => {
-  try {
-    return typeof location !== 'undefined' ? location.origin : '';
-  } catch {
-    return '';
-  }
-})();
-const isLocalPage = currentOrigin !== 'null'
-  && (currentOrigin === 'piarium-ui://app'
-  || (localOrigin && currentOrigin === localOrigin));
+// Host filesystem identity and runtime credentials stay local-only. Basic
+// window presentation hints remain available to every rendered page.
+const isLocalPage = bootstrap.localPage === true;
 
 // Remote pages need __PIARIUM_LOCAL_ORIGIN__ so the HostSwitcher knows
 // the URL of the Local entry (isDesktopLocalOriginActive() falls back to
@@ -66,19 +55,13 @@ if (clientToken && isLocalPage) {
 // Which saved host this window should connect to over the relay-capable path
 // (direct probe first, E2EE tunnel fallback). Local pages only — the id is
 // only useful together with the desktop IPC channel anyway.
-const relayHostId = readArgValue('--piarium-relay-host-id');
+const relayHostId = typeof bootstrap.relayHostId === 'string' ? bootstrap.relayHostId : '';
 if (relayHostId && isLocalPage) {
   contextBridge.exposeInMainWorld('__PIARIUM_RELAY_HOST_ID__', relayHostId);
 }
 
-if (runtimeHeadersRaw && isLocalPage) {
-  try {
-    const runtimeHeaders = JSON.parse(runtimeHeadersRaw);
-    if (runtimeHeaders && typeof runtimeHeaders === 'object') {
-      contextBridge.exposeInMainWorld('__PIARIUM_RUNTIME_HEADERS__', runtimeHeaders);
-    }
-  } catch {
-  }
+if (runtimeHeaders && isLocalPage) {
+  contextBridge.exposeInMainWorld('__PIARIUM_RUNTIME_HEADERS__', runtimeHeaders);
 }
 
 // Home directory leaks the OS username — keep local-only. Remote pages

@@ -188,6 +188,38 @@ export const defineDocumentAuthorityContract = ({ describe, it, expect, beforeEa
       expect(['first-write', 'second-write']).toContain(final.content);
     });
 
+    it('preserves the previous document when atomic replacement fails', async () => {
+      await harness.cleanup();
+      const fsPromises = {
+        ...fs.promises,
+        rename: async (source, destination) => {
+          if (String(source).includes('.piarium-tmp-') && String(destination).endsWith('protected.txt')) {
+            const error = new Error('EPERM: replacement denied');
+            error.code = 'EPERM';
+            throw error;
+          }
+          return fs.promises.rename(source, destination);
+        },
+      };
+      harness = await createDocumentAuthorityHarness({ authority: { fsPromises } });
+      const filePath = path.join(harness.workspaceRoot, 'protected.txt');
+      await fs.promises.writeFile(filePath, 'original');
+      const current = await harness.authority.read(harness.resource('protected.txt'));
+      expect(current.status).toBe('ready');
+
+      await expect(harness.authority.write({
+        resource: harness.resource('protected.txt'),
+        content: 'replacement',
+        encoding: 'utf-8',
+        bom: false,
+        expectedRevision: current.revision,
+        operationId: operationId(),
+      })).rejects.toMatchObject({ code: 'failed' });
+
+      expect(await fs.promises.readFile(filePath, 'utf8')).toBe('original');
+      expect((await fs.promises.readdir(harness.workspaceRoot)).some((entry) => entry.includes('.piarium-tmp-'))).toBe(false);
+    });
+
     it('watches created, changed, moved, deleted, and reset events without file bodies', async () => {
       const events = [];
       const subscription = harness.authority.watch(harness.identity.workspaceId, (event) => {
