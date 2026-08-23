@@ -214,18 +214,25 @@ const FLAT_GROUND_OUTLINE = [
   projectFlatFloorPoint({ x: -GROUND_BEHIND_PX, y: GROUND_AHEAD_PX }),
 ] as const;
 
+/**
+ * Trigonometric results differ in their last machine bits between Windows and glibc. These coefficients
+ * are embedded into pre-paint HTML and compared byte-for-byte, so normalize far below a CSS pixel before
+ * serializing them instead of weakening the host-equality contract.
+ */
+const stableGeometry = (value: number): number => Math.round(value * 1e6) / 1e6;
+
 /** Half-plane description of the flattened floor, used to fit the viewport without guessing breakpoints. */
 const FLAT_GROUND_EDGES: readonly FlatFloorEdge[] = FLAT_GROUND_OUTLINE.map((point, index) => {
   const next = FLAT_GROUND_OUTLINE[(index + 1) % FLAT_GROUND_OUTLINE.length] as typeof point;
   const edgeX = next.x - point.x;
   const edgeY = next.y - point.y;
   // The outline is clockwise, so its right-hand normal points outward.
-  const normalX = edgeY;
-  const normalY = -edgeX;
+  const normalX = stableGeometry(edgeY);
+  const normalY = stableGeometry(-edgeX);
   return {
     normalX,
     normalY,
-    support: normalX * point.x + normalY * point.y,
+    support: stableGeometry(normalX * point.x + normalY * point.y),
   };
 });
 
