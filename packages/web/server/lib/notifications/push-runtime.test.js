@@ -2,7 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createPushRuntime } from './push-runtime.js';
 
-const createRuntime = () => createPushRuntime({
+const createMemoryStore = () => {
+  let document = { version: 1, subscriptionsBySession: {} };
+  return {
+    read: vi.fn(async () => structuredClone(document)),
+    update: vi.fn(async (mutator) => {
+      document = await mutator(structuredClone(document));
+      return structuredClone(document);
+    }),
+  };
+};
+
+const createRuntime = (overrides = {}) => createPushRuntime({
   fsPromises: {
     mkdir: vi.fn(async () => {}),
     readFile: vi.fn(async () => JSON.stringify({ version: 1, subscriptionsBySession: {} })),
@@ -15,8 +26,10 @@ const createRuntime = () => createPushRuntime({
     setVapidDetails: vi.fn(),
   },
   PUSH_SUBSCRIPTIONS_FILE_PATH: '/tmp/push-subscriptions.json',
+  pushSubscriptionsStore: createMemoryStore(),
   readSettingsFromDisk: vi.fn(async () => ({})),
   updateSettingsOnDisk: vi.fn(async (mutator) => mutator({})),
+  ...overrides,
 });
 
 describe('push runtime visibility tracking', () => {
@@ -81,5 +94,21 @@ describe('push runtime visibility tracking', () => {
     runtime.updateUiVisibility('phone', true, 'android');
     runtime.updateUiVisibility('phone', true); // heartbeat without platform
     expect(runtime.isAnyInteractiveClientVisible()).toBe(false);
+  });
+});
+
+describe('push runtime persistence', () => {
+  it('does not overwrite a store whose schema is not the current contract', async () => {
+    const pushSubscriptionsStore = {
+      read: vi.fn(),
+      update: vi.fn(async (mutator) => mutator({ version: 2, subscriptionsBySession: {} })),
+    };
+    const runtime = createRuntime({ pushSubscriptionsStore });
+
+    await expect(runtime.addOrUpdatePushSubscription('session', {
+      endpoint: 'https://push.example/subscription',
+      p256dh: 'public-key',
+      auth: 'auth-secret',
+    })).rejects.toThrow('Unsupported push subscriptions version: 2');
   });
 });

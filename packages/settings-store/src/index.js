@@ -41,11 +41,13 @@ const enqueueMutation = (key, operation) => {
 
 export const createSettingsFileStore = ({
   filePath,
+  defaultValue = {},
   fsModule = fs,
   fsPromises = fsPromisesDefault,
   pathModule = pathDefault,
   processLike = process,
 }) => {
+  const readDefault = () => structuredClone(assertObject(defaultValue));
   const resolvedPath = pathModule.resolve(filePath);
   const lockPath = `${resolvedPath}.lock`;
   const previousPath = `${resolvedPath}.previous`;
@@ -59,7 +61,7 @@ export const createSettingsFileStore = ({
         try {
           return parseSettings(await fsPromises.readFile(previousPath, 'utf8'));
         } catch (previousError) {
-          if (errorCode(previousError) === 'ENOENT') return {};
+          if (errorCode(previousError) === 'ENOENT') return readDefault();
           throw previousError;
         }
       }
@@ -75,7 +77,7 @@ export const createSettingsFileStore = ({
         try {
           return parseSettings(fsModule.readFileSync(previousPath, 'utf8'));
         } catch (previousError) {
-          if (errorCode(previousError) === 'ENOENT') return {};
+          if (errorCode(previousError) === 'ENOENT') return readDefault();
           throw previousError;
         }
       }

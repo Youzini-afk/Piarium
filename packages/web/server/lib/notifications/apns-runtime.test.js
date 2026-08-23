@@ -27,6 +27,17 @@ const createMemoryFs = () => {
   };
 };
 
+const createMemoryStore = () => {
+  let document = { version: 1, tokensBySession: {} };
+  return {
+    read: vi.fn(async () => structuredClone(document)),
+    update: vi.fn(async (mutator) => {
+      document = await mutator(structuredClone(document));
+      return structuredClone(document);
+    }),
+  };
+};
+
 const makeDeps = (overrides = {}) => {
   // Stateful settings so the auto-generated relay signing keypair persists + reads back.
   let settings = {};
@@ -36,6 +47,7 @@ const makeDeps = (overrides = {}) => {
     crypto,
     http2: { connect: vi.fn(() => { throw new Error('http2 must not be used in relay mode'); }) },
     APNS_TOKENS_FILE_PATH: '/tmp/apns-tokens.json',
+    tokensStore: createMemoryStore(),
     readSettingsFromDisk: vi.fn(async () => settings),
     updateSettingsOnDisk: vi.fn(async (mutator) => {
       settings = await mutator(settings);
@@ -76,6 +88,17 @@ afterEach(() => {
 });
 
 describe('apns runtime relay mode (explicit)', () => {
+  it('does not overwrite a token store whose schema is not the current contract', async () => {
+    const tokensStore = {
+      read: vi.fn(),
+      update: vi.fn(async (mutator) => mutator({ version: 2, tokensBySession: {} })),
+    };
+    const runtime = createApnsRuntime(makeDeps({ tokensStore }));
+
+    await expect(runtime.addOrUpdateApnsToken('s1', 'tokenA'))
+      .rejects.toThrow('Unsupported APNs tokens version: 2');
+  });
+
   it('registers tokens (signed) and posts signed generic text, dropping dead tokens', async () => {
     const fetchMock = vi.fn(async (url) =>
       isRegister([url])

@@ -18,6 +18,7 @@ export interface SettingsFileStore {
 
 export interface SettingsFileStoreOptions {
   filePath: string;
+  defaultValue?: PiariumSettingsDocument;
   fsModule?: Pick<typeof fs, 'readFileSync'>;
   fsPromises?: Pick<
     typeof fsPromises,

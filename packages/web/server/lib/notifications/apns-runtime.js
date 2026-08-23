@@ -13,8 +13,10 @@ import {
   getOrCreateRelaySigningKeypair,
   signRelayMessage as signRelayMessageShared,
 } from '../relay/signing-key.js';
+import { createSettingsFileStore } from '@piarium/settings-store';
 
 const APNS_TOKENS_VERSION = 1;
+const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const APNS_HOST_PRODUCTION = 'https://api.push.apple.com';
 const APNS_HOST_SANDBOX = 'https://api.sandbox.push.apple.com';
 // APNs rejects auth tokens older than 1h; refresh well inside that window.
@@ -35,7 +37,6 @@ const normalizePem = (value) => (typeof value === 'string' ? value.replace(/\\n/
 export const createApnsRuntime = (deps) => {
   const {
     fsPromises,
-    path,
     crypto,
     http2,
     APNS_TOKENS_FILE_PATH,
@@ -43,7 +44,11 @@ export const createApnsRuntime = (deps) => {
     updateSettingsOnDisk,
   } = deps;
 
-  let persistLock = Promise.resolve();
+  const emptyStore = () => ({ version: APNS_TOKENS_VERSION, tokensBySession: {} });
+  const tokensStore = deps.tokensStore ?? createSettingsFileStore({
+    filePath: APNS_TOKENS_FILE_PATH,
+    defaultValue: emptyStore(),
+  });
   let cachedJwt = null; // { token, issuedAtMs, keyId }
   let cachedRelayKey = null; // { privateKey, publicJwk }
   let warnedUnconfigured = false;
@@ -96,40 +101,35 @@ export const createApnsRuntime = (deps) => {
   // Token persistence (same shape + write-lock pattern as push-runtime.js)
   // ---------------------------------------------------------------------------
 
-  const emptyStore = () => ({ version: APNS_TOKENS_VERSION, tokensBySession: {} });
-
   const readTokensFromDisk = async () => {
     try {
-      const raw = await fsPromises.readFile(APNS_TOKENS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object' || parsed.version !== APNS_TOKENS_VERSION) {
-        return emptyStore();
+      const parsed = await tokensStore.read();
+      if (!isRecord(parsed) || parsed.version !== APNS_TOKENS_VERSION) {
+        throw new Error(`Unsupported APNs tokens version: ${String(parsed?.version)}`);
       }
-      const tokensBySession =
-        parsed.tokensBySession && typeof parsed.tokensBySession === 'object' ? parsed.tokensBySession : {};
-      return { version: APNS_TOKENS_VERSION, tokensBySession };
+      if (!isRecord(parsed.tokensBySession)) {
+        throw new Error('APNs tokens file has invalid tokensBySession');
+      }
+      return { version: APNS_TOKENS_VERSION, tokensBySession: parsed.tokensBySession };
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return emptyStore();
-      }
       console.warn('Failed to read APNs tokens file:', error);
-      return emptyStore();
+      throw error;
     }
   };
 
-  const writeTokensToDisk = async (data) => {
-    await fsPromises.mkdir(path.dirname(APNS_TOKENS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(APNS_TOKENS_FILE_PATH, JSON.stringify(data, null, 2), 'utf8');
-  };
-
   const persistTokenUpdate = async (mutate) => {
-    persistLock = persistLock.then(async () => {
-      const current = await readTokensFromDisk();
-      const next = mutate({ version: APNS_TOKENS_VERSION, tokensBySession: current.tokensBySession || {} });
-      await writeTokensToDisk(next);
-      return next;
+    return tokensStore.update((stored) => {
+      if (stored.version !== APNS_TOKENS_VERSION) {
+        throw new Error(`Unsupported APNs tokens version: ${String(stored.version)}`);
+      }
+      if (!isRecord(stored.tokensBySession)) {
+        throw new Error('APNs tokens file has invalid tokensBySession');
+      }
+      return mutate({
+        version: APNS_TOKENS_VERSION,
+        tokensBySession: stored.tokensBySession,
+      });
     });
-    return persistLock;
   };
 
   const normalizeTokens = (record) => {

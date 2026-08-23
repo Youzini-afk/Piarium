@@ -1,5 +1,8 @@
+import { createSettingsFileStore } from '@piarium/settings-store';
+
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 const UI_VISIBILITY_TTL_MS = 30_000;
+const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const isLoopbackHttpOrigin = (value) => {
   if (typeof value !== 'string') {
@@ -13,15 +16,20 @@ const isLoopbackHttpOrigin = (value) => {
 
 export const createPushRuntime = (deps) => {
   const {
-    fsPromises,
-    path,
     webPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDisk,
     updateSettingsOnDisk,
   } = deps;
 
-  let persistPushSubscriptionsLock = Promise.resolve();
+  const emptyPushSubscriptions = () => ({
+    version: PUSH_SUBSCRIPTIONS_VERSION,
+    subscriptionsBySession: {},
+  });
+  const pushSubscriptionsStore = deps.pushSubscriptionsStore ?? createSettingsFileStore({
+    filePath: PUSH_SUBSCRIPTIONS_FILE_PATH,
+    defaultValue: emptyPushSubscriptions(),
+  });
   let pushInitialized = false;
 
   const uiVisibilityByToken = new Map();
@@ -35,48 +43,39 @@ export const createPushRuntime = (deps) => {
 
   const readPushSubscriptionsFromDisk = async () => {
     try {
-      const raw = await fsPromises.readFile(PUSH_SUBSCRIPTIONS_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') {
-        return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
+      const parsed = await pushSubscriptionsStore.read();
+      if (!isRecord(parsed)) {
+        throw new Error('Push subscriptions file is malformed');
       }
       if (typeof parsed.version !== 'number' || parsed.version !== PUSH_SUBSCRIPTIONS_VERSION) {
-        return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
+        throw new Error(`Unsupported push subscriptions version: ${String(parsed.version)}`);
       }
 
-      const subscriptionsBySession =
-        parsed.subscriptionsBySession && typeof parsed.subscriptionsBySession === 'object'
-          ? parsed.subscriptionsBySession
-          : {};
+      if (!isRecord(parsed.subscriptionsBySession)) {
+        throw new Error('Push subscriptions file has invalid subscriptionsBySession');
+      }
 
-      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession };
+      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: parsed.subscriptionsBySession };
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
-      }
       console.warn('Failed to read push subscriptions file:', error);
-      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
+      throw error;
     }
   };
 
-  const writePushSubscriptionsToDisk = async (data) => {
-    await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(PUSH_SUBSCRIPTIONS_FILE_PATH, JSON.stringify(data, null, 2), 'utf8');
-  };
-
   const persistPushSubscriptionUpdate = async (mutate) => {
-    persistPushSubscriptionsLock = persistPushSubscriptionsLock.then(async () => {
-      await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
-      const current = await readPushSubscriptionsFromDisk();
+    return pushSubscriptionsStore.update((stored) => {
+      if (stored.version !== PUSH_SUBSCRIPTIONS_VERSION) {
+        throw new Error(`Unsupported push subscriptions version: ${String(stored.version)}`);
+      }
+      if (!isRecord(stored.subscriptionsBySession)) {
+        throw new Error('Push subscriptions file has invalid subscriptionsBySession');
+      }
       const next = mutate({
         version: PUSH_SUBSCRIPTIONS_VERSION,
-        subscriptionsBySession: current.subscriptionsBySession || {},
+        subscriptionsBySession: stored.subscriptionsBySession,
       });
-      await writePushSubscriptionsToDisk(next);
       return next;
     });
-
-    return persistPushSubscriptionsLock;
   };
 
   const getOrCreateVapidKeys = async () => {

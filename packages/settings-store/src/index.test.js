@@ -30,6 +30,21 @@ describe('settings file store', () => {
     assert.throws(() => store.readSync(), SyntaxError);
   });
 
+  it('returns a cloned caller default only when no complete document exists', async () => {
+    const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'piarium-settings-store-default-'));
+    roots.push(root);
+    const filePath = path.join(root, 'state.json');
+    const defaultValue = { version: 1, entries: {} };
+    const store = createSettingsFileStore({ filePath, defaultValue });
+
+    const first = await store.read();
+    first.entries.changed = true;
+    assert.deepEqual(await store.read(), defaultValue);
+
+    await fsPromises.writeFile(filePath, '{}', 'utf8');
+    assert.deepEqual(await store.read(), {});
+  });
+
   it('serializes updates from independent store instances without losing fields', async () => {
     const { filePath, store } = await createStore();
     const second = createSettingsFileStore({ filePath });
