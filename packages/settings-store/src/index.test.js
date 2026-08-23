@@ -69,6 +69,16 @@ describe('settings file store', () => {
     assert.deepEqual(store.readSync(), { preserved: true });
   });
 
+  it('recovers the mutation queue after a rejected update', async () => {
+    const { store } = await createStore();
+    await assert.rejects(store.update(() => {
+      throw new Error('rejected mutation');
+    }), /rejected mutation/);
+
+    await store.update((current) => ({ ...current, recovered: true }));
+    assert.deepEqual(await store.read(), { recovered: true });
+  });
+
   it('writes private directory and file modes', { skip: process.platform === 'win32' }, async () => {
     const { filePath, store } = await createStore();
     await store.replace({ value: true });

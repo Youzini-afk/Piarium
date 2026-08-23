@@ -32,7 +32,7 @@ const processIsAlive = (processLike, pid) => {
 const enqueueMutation = (key, operation) => {
   const previous = mutationQueues.get(key) ?? Promise.resolve();
   const current = previous.catch(() => undefined).then(operation);
-  const settled = current.finally(() => {
+  const settled = current.catch(() => undefined).finally(() => {
     if (mutationQueues.get(key) === settled) mutationQueues.delete(key);
   });
   mutationQueues.set(key, settled);

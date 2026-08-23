@@ -1,3 +1,5 @@
+import { createSettingsFileStore } from '@piarium/settings-store';
+
 const MOBILE_DEVICES_VERSION = 1;
 const DEVICE_TOKEN_PREFIX = 'ocm_';
 
@@ -47,13 +49,15 @@ const publicDevice = (device) => ({
 
 export const createMobileDeviceStore = (deps) => {
   const {
-    fsPromises,
-    path,
     crypto,
     mobileDevicesFilePath,
   } = deps;
 
-  let persistLock = Promise.resolve();
+  const emptyStore = () => ({ version: MOBILE_DEVICES_VERSION, devices: [] });
+  const deviceStore = deps.deviceStore ?? createSettingsFileStore({
+    filePath: mobileDevicesFilePath,
+    defaultValue: emptyStore(),
+  });
 
   const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
   const createDeviceToken = () => `${DEVICE_TOKEN_PREFIX}${crypto.randomBytes(32).toString('base64url')}`;
@@ -61,40 +65,38 @@ export const createMobileDeviceStore = (deps) => {
 
   const readStore = async () => {
     try {
-      const raw = await fsPromises.readFile(mobileDevicesFilePath, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = await deviceStore.read();
       if (!parsed || typeof parsed !== 'object' || parsed.version !== MOBILE_DEVICES_VERSION) {
-        return { version: MOBILE_DEVICES_VERSION, devices: [] };
+        throw new Error(`Unsupported mobile devices version: ${String(parsed?.version)}`);
       }
-      const devices = Array.isArray(parsed.devices)
-        ? parsed.devices.map(sanitizeDevice).filter(Boolean)
-        : [];
+      if (!Array.isArray(parsed.devices)) {
+        throw new Error('Mobile devices file has invalid devices');
+      }
+      const devices = parsed.devices.map(sanitizeDevice);
+      if (devices.some((device) => device === null)) {
+        throw new Error('Mobile devices file contains an invalid device');
+      }
       return { version: MOBILE_DEVICES_VERSION, devices };
     } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') {
-        return { version: MOBILE_DEVICES_VERSION, devices: [] };
-      }
       console.warn('[Mobile] Failed to read devices file:', error?.message || error);
-      return { version: MOBILE_DEVICES_VERSION, devices: [] };
+      throw error;
     }
   };
 
-  const writeStore = async (store) => {
-    await fsPromises.mkdir(path.dirname(mobileDevicesFilePath), { recursive: true });
-    await fsPromises.writeFile(mobileDevicesFilePath, JSON.stringify(store, null, 2), 'utf8');
-  };
-
   const updateStore = async (mutate) => {
-    persistLock = persistLock.then(async () => {
-      const current = await readStore();
-      const next = await mutate({
+    return deviceStore.update(async (stored) => {
+      if (stored.version !== MOBILE_DEVICES_VERSION || !Array.isArray(stored.devices)) {
+        throw new Error(`Unsupported mobile devices version: ${String(stored.version)}`);
+      }
+      const devices = stored.devices.map(sanitizeDevice);
+      if (devices.some((device) => device === null)) {
+        throw new Error('Mobile devices file contains an invalid device');
+      }
+      return mutate({
         version: MOBILE_DEVICES_VERSION,
-        devices: current.devices,
+        devices,
       });
-      await writeStore(next);
-      return next;
     });
-    return persistLock;
   };
 
   const listDevices = async () => {
