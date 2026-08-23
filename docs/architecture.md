@@ -2,7 +2,7 @@
 
 Status: Pi-native engine and composable workbench delivered; release hardening continues
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## 1. Context
 
@@ -152,6 +152,13 @@ the typed auth-prompt response and is neither embedded in the discovery request 
 Concurrent provider-config writes use an atomic owner lock without a product-imposed wait cutoff.
 Dead owners are reclaimed by process identity; deployments may opt into a wait budget with
 `PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS`, while `0` keeps the budget disabled.
+
+Application settings have one file authority, `@piarium/settings-store`, shared by the Web host,
+Electron, the VS Code companion, and the CLI. Reads distinguish a missing file from malformed or
+unreadable state. Every mutation re-reads under an owner lock and replaces the document through a
+complete temporary file; interrupted Windows replacement retains a complete `.previous` document.
+No surface may independently perform a whole-file read-modify-write or treat invalid JSON as an empty
+first run. This also serializes first-use identity material such as Relay, APNs, and VAPID keys.
 
 ### 4.3 Session workers
 

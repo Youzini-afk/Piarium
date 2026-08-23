@@ -45,6 +45,34 @@ const createResponse = () => {
 };
 
 describe('ui auth client credential seam', () => {
+  it('does not let spoofed forwarded addresses bypass password rate limiting', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    try {
+      for (let index = 0; index < 10; index += 1) {
+        const response = createResponse();
+        await auth.handleSessionCreate({
+          body: { password: 'wrong' },
+          connection: { remoteAddress: '203.0.113.10' },
+          headers: { 'x-forwarded-for': `198.51.100.${index}` },
+          socket: { remoteAddress: '203.0.113.10' },
+        }, response);
+        expect(response.statusCode).toBe(401);
+      }
+
+      const blocked = createResponse();
+      await auth.handleSessionCreate({
+        body: { password: 'wrong' },
+        connection: { remoteAddress: '203.0.113.10' },
+        headers: { 'x-forwarded-for': '192.0.2.200' },
+        socket: { remoteAddress: '203.0.113.10' },
+      }, blocked);
+      expect(blocked.statusCode).toBe(429);
+    } finally {
+      auth.dispose();
+    }
+  });
+
   it('accepts bearer client credentials when UI password auth is enabled', async () => {
     const createUiAuth = await loadCreateUiAuth();
     const auth = createUiAuth({

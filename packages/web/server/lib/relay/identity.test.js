@@ -9,8 +9,9 @@ const makeSettingsStore = (initial = {}) => {
   let settings = { ...initial };
   return {
     readSettingsFromDisk: async () => ({ ...settings }),
-    writeSettingsToDisk: async (next) => {
-      settings = { ...next };
+    updateSettingsOnDisk: async (mutator) => {
+      settings = { ...(await mutator({ ...settings })) };
+      return { ...settings };
     },
     peek: () => settings,
   };

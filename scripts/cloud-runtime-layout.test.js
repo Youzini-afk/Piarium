@@ -56,6 +56,7 @@ const createFixture = () => {
         '@piarium/protocol': '0.1.0',
       },
     },
+    'settings-store': { name: '@piarium/settings-store', dependencies: {} },
     web: {
       name: '@piarium/web',
       dependencies: {
@@ -63,6 +64,7 @@ const createFixture = () => {
         '@piarium/extension-host': 'workspace:*',
         '@piarium/protocol': 'workspace:*',
         '@piarium/runtime-broker': 'workspace:*',
+        '@piarium/settings-store': 'workspace:*',
       },
     },
   };
@@ -75,6 +77,7 @@ const createFixture = () => {
       fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
       fs.mkdirSync(path.join(packageRoot, 'server'), { recursive: true });
     }
+    if (directory === 'settings-store') fs.mkdirSync(path.join(packageRoot, 'src'), { recursive: true });
   }
   return root;
 };
@@ -95,6 +98,7 @@ describe('Piarium cloud runtime layout', () => {
     expect(lockText).toContain('"packages/extension-contract"');
     expect(lockText).toContain('"packages/extension-host"');
     expect(lockText).toContain('"packages/runtime-broker"');
+    expect(lockText).toContain('"packages/settings-store"');
     expect(lockText).toContain('"packages/pi-host"');
     expect(lockText).toContain('"packages/protocol"');
     expect(lockText).toContain('"packages/web"');
@@ -168,6 +172,7 @@ describe('Piarium cloud runtime layout', () => {
       'protocol',
       'pi-host',
       'runtime-broker',
+      'settings-store',
       'web',
     ]);
     for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {

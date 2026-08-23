@@ -23,16 +23,11 @@ let rateLimitCleanupTimer = null;
 const rateLimitLocks = new Map();
 
 const getClientIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    const ip = forwarded.split(',')[0].trim();
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-
-  const ip = req.ip || req.connection?.remoteAddress;
+  // Password login is unauthenticated, so forwarded headers are attacker input
+  // unless every deployment configures an exact proxy trust chain. Bucket by
+  // the actual peer instead; a reverse proxy intentionally becomes one shared
+  // protection boundary rather than an unlimited source of spoofed identities.
+  const ip = req.socket?.remoteAddress || req.connection?.remoteAddress;
   if (ip) {
     if (ip.startsWith('::ffff:')) {
       return ip.substring(7);

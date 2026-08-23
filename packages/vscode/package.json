@@ -243,6 +243,7 @@
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",
     "@piarium/runtime-client": "workspace:*",
+    "@piarium/settings-store": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   }

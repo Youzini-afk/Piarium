@@ -42,6 +42,7 @@ import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-
 import { mintOutsideFileGrant } from '@piarium/web/server/lib/fs/routes.js';
 import { resolvePiariumDataDir } from '@piarium/web/server/lib/platform/data-paths.js';
 import { clearAppImageArgv0FromProcessEnv } from '@piarium/web/server/lib/platform/inherited-env.js';
+import { createSettingsFileStore } from '@piarium/settings-store';
 
 const execFileAsync = promisify(execFile);
 
@@ -673,6 +674,7 @@ const refreshQuitRiskFlags = async () => {
 };
 
 const settingsFilePath = () => path.join(resolvePiariumDataDir(process), 'settings.json');
+const settingsStore = createSettingsFileStore({ filePath: settingsFilePath() });
 
 const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
@@ -680,56 +682,8 @@ const sshManager = new ElectronSshManager({
   emit: (event, detail) => emitToAllWindows(event, detail),
 });
 
-const readJsonFile = (filePath) => {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return {};
-    // Parse errors can happen if a concurrent writer just truncated the file
-    // and hasn't finished writing yet. Log loudly so we notice, then return
-    // {} as before. Writes are atomic (tmp + rename) so this race is rare.
-    log.warn?.('[electron] failed to read JSON file', filePath, error);
-    return {};
-  }
-};
-
-const writeJsonFile = async (filePath, data) => {
-  const directory = path.dirname(filePath);
-  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') await fsp.chmod(directory, 0o700);
-  // Atomic: write to a temp file then rename. Readers never see a partial
-  // JSON file that could parse-error and get coerced to {}.
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-  if (process.platform !== 'win32') await fsp.chmod(tmp, 0o600);
-  await fsp.rename(tmp, filePath);
-  if (process.platform !== 'win32') await fsp.chmod(filePath, 0o600);
-};
-
-const readSettingsRoot = () => {
-  const root = readJsonFile(settingsFilePath());
-  return root && typeof root === 'object' && !Array.isArray(root) ? root : {};
-};
-
-// Serializes read-modify-write of the settings file within this process.
-// Multiple call sites (spawnLocalServer, writeDesktopHostsConfig, theme
-// preference saves, ssh manager imports, etc.) would otherwise have their
-// RMW pairs interleave across awaits, letting one writer's stale copy
-// overwrite another writer's just-persisted changes.
-let settingsMutationChain = Promise.resolve();
-const mutateSettingsRoot = (mutator) => {
-  const next = settingsMutationChain.then(async () => {
-    const current = readSettingsRoot();
-    const result = await mutator(current);
-    const nextRoot = result ?? current;
-    await writeJsonFile(settingsFilePath(), nextRoot);
-  });
-  // Keep the chain alive even if one mutator throws.
-  settingsMutationChain = next.catch(() => {});
-  return next;
-};
-
-const writeSettingsRoot = async (root) => writeJsonFile(settingsFilePath(), root);
+const readSettingsRoot = () => settingsStore.readSync();
+const mutateSettingsRoot = (mutator) => settingsStore.update(mutator);
 
 // Stable per-install identifier for this desktop, persisted in settings. Used as
 // the client dedupe key on remote hosts so re-authenticating (e.g. after a login

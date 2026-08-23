@@ -179,16 +179,9 @@ const isLocalHost = (host, req) => {
 };
 
 const getClientIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    const ip = forwarded.split(',')[0].trim();
-    if (ip.startsWith('::ffff:')) {
-      return ip.substring(7);
-    }
-    return ip;
-  }
-
-  const ip = req.ip || req.connection?.remoteAddress;
+  // Bootstrap-token exchange happens before authentication. Never let an
+  // untrusted X-Forwarded-For value choose its rate-limit bucket.
+  const ip = req.socket?.remoteAddress || req.connection?.remoteAddress;
   if (ip) {
     if (ip.startsWith('::ffff:')) {
       return ip.substring(7);

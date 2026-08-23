@@ -49,7 +49,7 @@ const envRelayUrlOverride = () => {
  * @param {{
  *   crypto: typeof import('node:crypto'),
  *   readSettingsFromDisk: () => Promise<object>,
- *   writeSettingsToDisk: (settings: object) => Promise<void>,
+ *   updateSettingsOnDisk: (mutator: (settings: object) => object) => Promise<object>,
  *   getLocalPort: () => number,
  *   logger?: Pick<Console, 'warn'>,
  * }} deps
@@ -57,7 +57,7 @@ const envRelayUrlOverride = () => {
 export const createRelayService = ({
   crypto,
   readSettingsFromDisk,
-  writeSettingsToDisk,
+  updateSettingsOnDisk,
   getLocalPort,
   // Returns true when any paired device or pending pairing session uses the
   // relay transport. The relay lifecycle is driven purely by this demand.
@@ -69,7 +69,7 @@ export const createRelayService = ({
   hostLock = null,
   logger = console,
 }) => {
-  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDisk, writeSettingsToDisk });
+  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDisk, updateSettingsOnDisk });
 
   let hostClient = null;
   let status = { state: 'disabled', lastError: null, connectedClients: 0 };
@@ -92,11 +92,10 @@ export const createRelayService = ({
   };
 
   const writeConfig = async (config) => {
-    const settings = await readSettingsFromDisk();
-    await writeSettingsToDisk({
+    await updateSettingsOnDisk((settings) => ({
       ...settings,
       privateRelay: { enabled: config.enabled === true, relayUrl: normalizeRelayUrl(config.relayUrl) },
-    });
+    }));
   };
 
   const stopHostClient = () => {

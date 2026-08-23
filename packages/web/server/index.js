@@ -281,7 +281,7 @@ const settingsRuntime = createSettingsRuntime({
   upsertManagedRemoteTunnelToken,
 });
 readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
-const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
+const updateSettingsOnDisk = (...args) => settingsRuntime.updateSettingsOnDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
 
 const themeRuntime = createThemeRuntime({
@@ -304,7 +304,7 @@ const pushRuntime = createPushRuntime({
   webPush,
   PUSH_SUBSCRIPTIONS_FILE_PATH,
   readSettingsFromDisk,
-  writeSettingsToDisk,
+  updateSettingsOnDisk,
 });
 const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
 const addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
@@ -332,7 +332,7 @@ const apnsRuntime = createApnsRuntime({
   http2,
   APNS_TOKENS_FILE_PATH,
   readSettingsFromDisk,
-  writeSettingsToDisk,
+  updateSettingsOnDisk,
 });
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
 const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
@@ -699,7 +699,7 @@ async function main(options = {}) {
     ensurePushInitialized,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
-    writeSettingsToDisk,
+    updateSettingsOnDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
     addOrUpdateApnsToken,
@@ -961,7 +961,7 @@ async function main(options = {}) {
     crypto,
     os,
     readSettingsFromDisk,
-    writeSettingsToDisk,
+    updateSettingsOnDisk,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     hostLock: createRelayHostLock({

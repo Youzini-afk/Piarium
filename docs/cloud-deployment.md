@@ -7,6 +7,7 @@ closure:
 - `@piarium/protocol`;
 - `@piarium/pi-host`;
 - `@piarium/runtime-broker`;
+- `@piarium/settings-store`;
 - `@piarium/web`.
 
 These packages remain one workspace because the broker resolves the bundled host through package

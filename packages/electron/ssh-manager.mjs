@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createSettingsFileStore } from '@piarium/settings-store';
 
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
@@ -62,25 +63,6 @@ const expandSshIncludeToken = (token, baseDir) => {
   } catch {
     return [];
   }
-};
-
-const readJsonRoot = (settingsFilePath) => {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-};
-
-const writeJsonRoot = async (settingsFilePath, root) => {
-  await fsp.mkdir(path.dirname(settingsFilePath), { recursive: true });
-  // Atomic write: concurrent readers (main.mjs, web server) would otherwise
-  // see partial JSON and readJsonRoot()'s catch would silently coerce to {},
-  // causing the next read-modify-write to wipe the entire settings file.
-  const tmp = `${settingsFilePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(root, null, 2));
-  await fsp.rename(tmp, settingsFilePath);
 };
 
 const defaultTrue = () => true;
@@ -382,6 +364,7 @@ const isLivenessHttpStatus = (status) => (status >= 200 && status <= 299) || isA
 export class ElectronSshManager {
   constructor(options) {
     this.settingsFilePath = options.settingsFilePath;
+    this.settingsStore = options.settingsStore ?? createSettingsFileStore({ filePath: this.settingsFilePath });
     this.appVersion = options.appVersion;
     this.emit = options.emit;
     this.platform = options.platform || process.platform;
@@ -697,47 +680,45 @@ export class ElectronSshManager {
   }
 
   readInstances() {
-    const root = readJsonRoot(this.settingsFilePath);
+    const root = this.settingsStore.readSync();
     return { instances: Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [] };
   }
 
   async setInstances(config) {
-    const root = readJsonRoot(this.settingsFilePath);
-    const previousSshIds = new Set(
-      (Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [])
-        .map((entry) => String(entry?.id || '').trim())
-        .filter((id) => id && id !== LOCAL_HOST_ID)
-    );
     const instances = Array.isArray(config?.instances) ? config.instances.map((instance) => this.sanitizeInstance(instance)) : [];
-    root.desktopSshInstances = instances;
+    await this.settingsStore.update((root) => {
+      const previousSshIds = new Set(
+        (Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [])
+          .map((entry) => String(entry?.id || '').trim())
+          .filter((id) => id && id !== LOCAL_HOST_ID)
+      );
+      root.desktopSshInstances = instances;
 
-    const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts.filter(Boolean) : [];
-    const nextIds = new Set(instances.map((instance) => instance.id));
+      const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts.filter(Boolean) : [];
+      const nextIds = new Set(instances.map((instance) => instance.id));
+      const filteredHosts = hosts.filter((entry) => {
+        const id = String(entry?.id || '').trim();
+        return id && id !== LOCAL_HOST_ID && !(previousSshIds.has(id) && !nextIds.has(id));
+      });
 
-    const filteredHosts = hosts.filter((entry) => {
-      const id = String(entry?.id || '').trim();
-      return id && id !== LOCAL_HOST_ID && !(previousSshIds.has(id) && !nextIds.has(id));
-    });
-
-    for (const instance of instances) {
-      const label = instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
-      const existing = filteredHosts.find((entry) => entry?.id === instance.id);
-      if (existing) {
-        existing.label = label;
-        if (!existing.url || !String(existing.url).trim()) {
-          existing.url = 'http://127.0.0.1/';
+      for (const instance of instances) {
+        const label = instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
+        const existing = filteredHosts.find((entry) => entry?.id === instance.id);
+        if (existing) {
+          existing.label = label;
+          if (!existing.url || !String(existing.url).trim()) {
+            existing.url = 'http://127.0.0.1/';
+          }
+        } else {
+          filteredHosts.push({ id: instance.id, label, url: 'http://127.0.0.1/' });
         }
-      } else {
-        filteredHosts.push({ id: instance.id, label, url: 'http://127.0.0.1/' });
       }
-    }
-
-    root.desktopHosts = filteredHosts;
-    if (typeof root.desktopDefaultHostId === 'string' && previousSshIds.has(root.desktopDefaultHostId) && !nextIds.has(root.desktopDefaultHostId)) {
-      root.desktopDefaultHostId = LOCAL_HOST_ID;
-    }
-
-    await writeJsonRoot(this.settingsFilePath, root);
+      root.desktopHosts = filteredHosts;
+      if (typeof root.desktopDefaultHostId === 'string' && previousSshIds.has(root.desktopDefaultHostId) && !nextIds.has(root.desktopDefaultHostId)) {
+        root.desktopDefaultHostId = LOCAL_HOST_ID;
+      }
+      return root;
+    });
   }
 
   sanitizeStoredSecret(secret) {
@@ -826,20 +807,21 @@ export class ElectronSshManager {
   }
 
   async updateHostRuntime(instanceId, label, localUrl, clientToken = '') {
-    const root = readJsonRoot(this.settingsFilePath);
-    const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
-    const existing = hosts.find((entry) => entry?.id === instanceId);
     const token = typeof clientToken === 'string' ? clientToken.trim() : '';
-    if (existing) {
-      existing.label = label;
-      existing.url = localUrl;
-      existing.apiUrl = localUrl;
-      if (token) existing.clientToken = token;
-    } else {
-      hosts.push({ id: instanceId, label, url: localUrl, apiUrl: localUrl, ...(token ? { clientToken: token } : {}) });
-    }
-    root.desktopHosts = hosts;
-    await writeJsonRoot(this.settingsFilePath, root);
+    await this.settingsStore.update((root) => {
+      const hosts = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
+      const existing = hosts.find((entry) => entry?.id === instanceId);
+      if (existing) {
+        existing.label = label;
+        existing.url = localUrl;
+        existing.apiUrl = localUrl;
+        if (token) existing.clientToken = token;
+      } else {
+        hosts.push({ id: instanceId, label, url: localUrl, apiUrl: localUrl, ...(token ? { clientToken: token } : {}) });
+      }
+      root.desktopHosts = hosts;
+      return root;
+    });
   }
 
   async issueClientToken(localUrl, piariumPassword) {
@@ -901,15 +883,16 @@ export class ElectronSshManager {
   }
 
   async persistLocalPort(instanceId, localPort) {
-    const root = readJsonRoot(this.settingsFilePath);
-    const instances = Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [];
-    for (const instance of instances) {
-      if (instance?.id !== instanceId) continue;
-      instance.localForward = instance.localForward && typeof instance.localForward === 'object' ? instance.localForward : {};
-      instance.localForward.preferredLocalPort = localPort;
-    }
-    root.desktopSshInstances = instances;
-    await writeJsonRoot(this.settingsFilePath, root);
+    await this.settingsStore.update((root) => {
+      const instances = Array.isArray(root.desktopSshInstances) ? root.desktopSshInstances : [];
+      for (const instance of instances) {
+        if (instance?.id !== instanceId) continue;
+        instance.localForward = instance.localForward && typeof instance.localForward === 'object' ? instance.localForward : {};
+        instance.localForward.preferredLocalPort = localPort;
+      }
+      root.desktopSshInstances = instances;
+      return root;
+    });
   }
 
   async resolveSshConfig(parsed) {

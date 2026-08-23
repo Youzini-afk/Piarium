@@ -16,7 +16,7 @@ const createRuntime = () => createPushRuntime({
   },
   PUSH_SUBSCRIPTIONS_FILE_PATH: '/tmp/push-subscriptions.json',
   readSettingsFromDisk: vi.fn(async () => ({})),
-  writeSettingsToDisk: vi.fn(async () => {}),
+  updateSettingsOnDisk: vi.fn(async (mutator) => mutator({})),
 });
 
 describe('push runtime visibility tracking', () => {

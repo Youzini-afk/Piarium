@@ -31,7 +31,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
     readSettingsFromDisk,
-    writeSettingsToDisk,
+    updateSettingsOnDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
     addOrUpdateApnsToken,
@@ -85,10 +85,11 @@ export const registerNotificationRoutes = (app, dependencies) => {
       try {
         const settings = await readSettingsFromDisk();
         if (typeof settings?.publicOrigin !== 'string' || settings.publicOrigin.trim().length === 0) {
-          await writeSettingsToDisk({
-            ...settings,
-            publicOrigin: origin,
-          });
+          await updateSettingsOnDisk((current) => (
+            typeof current?.publicOrigin === 'string' && current.publicOrigin.trim().length > 0
+              ? current
+              : { ...current, publicOrigin: origin }
+          ));
           setPushInitialized(false);
         }
       } catch {

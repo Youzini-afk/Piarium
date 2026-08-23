@@ -9,11 +9,11 @@
  * @param {{
  *   crypto: typeof import('node:crypto'),
  *   readSettingsFromDisk: () => Promise<object>,
- *   writeSettingsToDisk: (settings: object) => Promise<void>,
+ *   updateSettingsOnDisk: (mutator: (settings: object) => object) => Promise<object>,
  * }} deps
  * @returns {Promise<{ privateKey: import('node:crypto').KeyObject, publicJwk: JsonWebKey }>}
  */
-export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromDisk, writeSettingsToDisk }) => {
+export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromDisk, updateSettingsOnDisk }) => {
   const toKeypair = (stored) => ({
     privateKey: crypto.createPrivateKey({ key: stored.privateJwk, format: 'jwk' }),
     publicJwk: stored.publicJwk,
@@ -29,8 +29,12 @@ export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromD
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const privateJwk = privateKey.export({ format: 'jwk' });
   const publicJwk = publicKey.export({ format: 'jwk' });
-  await writeSettingsToDisk({ ...settings, relaySigningKey: { privateJwk, publicJwk } });
-  return { privateKey, publicJwk };
+  const updated = await updateSettingsOnDisk((current) => (
+    current?.relaySigningKey?.privateJwk && current?.relaySigningKey?.publicJwk
+      ? current
+      : { ...current, relaySigningKey: { privateJwk, publicJwk } }
+  ));
+  return toKeypair(updated.relaySigningKey);
 };
 
 // Fixed key order so the hash is stable regardless of stored JSON field order.

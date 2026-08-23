@@ -216,7 +216,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         }
       }
       if (ghCliActive && !ghCliUser) {
-        setGhCliActive(false);
+        await setGhCliActive(false);
       }
 
       const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && (ghCliActive || !usingOwnToken);
@@ -273,7 +273,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
       const { setGhCliDisabled, isGhCliDisabled } = await getGitHubLibraries();
       const { clearGhCliTokenCache } = await import('./gh-cli-credential.js');
       const disabled = Boolean(req.body?.disabled);
-      setGhCliDisabled(disabled);
+      await setGhCliDisabled(disabled);
       clearGhCliTokenCache();
       return res.json({ disabled: isGhCliDisabled() });
     } catch (error) {
@@ -386,7 +386,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
 
         const { createOctokit } = await import('./octokit.js');
         const user = await getGitHubUserSummary(createOctokit(ghToken));
-        setGhCliActive(true);
+        await setGhCliActive(true);
         const accounts = getGitHubAuthAccounts()
           .map((account) => ({ ...account, current: false }))
           .concat({ id: GH_CLI_ACCOUNT_ID, user, current: true, source: 'gh-cli' });
@@ -403,7 +403,7 @@ export function registerGitHubRoutes(app, dependencies = {}) {
         });
       }
 
-      const activated = activateGitHubAuth(accountId);
+      const activated = await activateGitHubAuth(accountId);
       if (!activated) {
         return res.status(404).json({ error: 'GitHub account not found' });
       }

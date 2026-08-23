@@ -25,6 +25,7 @@ COPY packages/pi-host/package.json ./packages/pi-host/package.json
 COPY packages/protocol/package.json ./packages/protocol/package.json
 COPY packages/runtime-broker/package.json ./packages/runtime-broker/package.json
 COPY packages/runtime-client/package.json ./packages/runtime-client/package.json
+COPY packages/settings-store/package.json ./packages/settings-store/package.json
 COPY packages/ui/package.json ./packages/ui/package.json
 COPY packages/vscode/package.json ./packages/vscode/package.json
 COPY packages/vscode/runtime/package.json ./packages/vscode/runtime/package.json

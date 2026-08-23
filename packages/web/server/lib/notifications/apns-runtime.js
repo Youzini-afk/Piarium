@@ -40,7 +40,7 @@ export const createApnsRuntime = (deps) => {
     http2,
     APNS_TOKENS_FILE_PATH,
     readSettingsFromDisk,
-    writeSettingsToDisk,
+    updateSettingsOnDisk,
   } = deps;
 
   let persistLock = Promise.resolve();
@@ -59,7 +59,7 @@ export const createApnsRuntime = (deps) => {
   // relay identity — same keypair, same storage, same serverId derivation).
   const getOrCreateRelayKeypair = async () => {
     if (cachedRelayKey) return cachedRelayKey;
-    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDisk, writeSettingsToDisk });
+    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDisk, updateSettingsOnDisk });
     return cachedRelayKey;
   };
 

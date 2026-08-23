@@ -18,6 +18,7 @@ import { createClientPairingRuntime } from '../../server/lib/client-auth/pairing
 import { createRelayIdentityRuntime } from '../../server/lib/relay/identity.js';
 import { DEFAULT_RELAY_URL } from '../../server/lib/relay/service.js';
 import { bytesToBase64Url } from '../../server/lib/relay/e2ee.js';
+import { createSettingsFileStore } from '@piarium/settings-store';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -58,25 +59,11 @@ function resolveRelayUrl(settings) {
 // are preserved. Enough for the CLI without wiring the full settings runtime.
 function createSettingsAccessors() {
   const settingsPath = path.join(getDataDir(), SETTINGS_FILE_NAME);
-  const readSettingsFromDisk = async () => {
-    let raw;
-    try {
-      raw = await fs.promises.readFile(settingsPath, 'utf8');
-    } catch (error) {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') return {};
-      throw error;
-    }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Settings file is malformed (non-object payload)');
-    }
-    return parsed;
+  const store = createSettingsFileStore({ filePath: settingsPath });
+  return {
+    readSettingsFromDisk: store.read,
+    updateSettingsOnDisk: store.update,
   };
-  const writeSettingsToDisk = async (settings) => {
-    await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
-    await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
-  };
-  return { readSettingsFromDisk, writeSettingsToDisk };
 }
 
 // Resolves the instance's relay identity (serverId + encryption public key,

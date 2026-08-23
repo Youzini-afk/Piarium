@@ -19,7 +19,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), '..');
 const canonicalLockPath = path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock');
 
-export const CLOUD_RUNTIME_SCHEMA_VERSION = 1;
+export const CLOUD_RUNTIME_SCHEMA_VERSION = 2;
 export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'extension-contract',
   'extension-builtins',
@@ -27,6 +27,7 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'protocol',
   'pi-host',
   'runtime-broker',
+  'settings-store',
   'web',
 ]);
 
@@ -87,6 +88,10 @@ const packageFiles = Object.freeze({
   },
   'runtime-broker': {
     required: ['package.json', 'dist'],
+    optional: [],
+  },
+  'settings-store': {
+    required: ['package.json', 'src'],
     optional: [],
   },
   web: {
@@ -289,6 +294,8 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
     if (!existsSync(brokerLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/runtime-broker.');
     const extensionHostLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'extension-host');
     if (!existsSync(extensionHostLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/extension-host.');
+    const settingsStoreLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'settings-store');
+    if (!existsSync(settingsStoreLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/settings-store.');
   }
 
   verifyCloudRuntimeIdentity(outputDir);

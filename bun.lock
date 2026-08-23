@@ -43,6 +43,7 @@
         "@piarium/pi-host": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-broker": "workspace:*",
+        "@piarium/settings-store": "workspace:*",
         "@piarium/web": "workspace:*",
         "better-sqlite3": "^13.0.3",
         "electron-context-menu": "^4.1.2",
@@ -196,6 +197,10 @@
         "@piarium/protocol": "0.1.0",
       },
     },
+    "packages/settings-store": {
+      "name": "@piarium/settings-store",
+      "version": "0.7.0",
+    },
     "packages/ui": {
       "name": "@piarium/ui",
       "version": "0.7.0",
@@ -299,6 +304,7 @@
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-broker": "workspace:*",
         "@piarium/runtime-client": "workspace:*",
+        "@piarium/settings-store": "workspace:*",
         "@piarium/ui": "workspace:*",
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
@@ -327,6 +333,7 @@
         "@piarium/extension-host": "workspace:*",
         "@piarium/protocol": "workspace:*",
         "@piarium/runtime-broker": "workspace:*",
+        "@piarium/settings-store": "workspace:*",
         "@simplewebauthn/server": "13.3.2",
         "adm-zip": "^0.6.0",
         "better-sqlite3": "^13.0.3",
@@ -1154,6 +1161,8 @@
     "@piarium/runtime-broker": ["@piarium/runtime-broker@workspace:packages/runtime-broker"],
 
     "@piarium/runtime-client": ["@piarium/runtime-client@workspace:packages/runtime-client"],
+
+    "@piarium/settings-store": ["@piarium/settings-store@workspace:packages/settings-store"],
 
     "@piarium/ui": ["@piarium/ui@workspace:packages/ui"],
 

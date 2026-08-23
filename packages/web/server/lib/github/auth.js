@@ -1,12 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { resolvePiariumDataDir } from '../platform/data-paths.js';
+import { createSettingsFileStore } from '@piarium/settings-store';
 
 const PIARIUM_DATA_DIR = resolvePiariumDataDir(process);
 
 const STORAGE_DIR = PIARIUM_DATA_DIR;
 const STORAGE_FILE = path.join(STORAGE_DIR, 'github-auth.json');
 const SETTINGS_FILE = path.join(PIARIUM_DATA_DIR, 'settings.json');
+const settingsStore = createSettingsFileStore({ filePath: SETTINGS_FILE });
 
 const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
 const DEFAULT_GITHUB_SCOPES = 'repo read:org workflow read:user user:email';
@@ -158,34 +160,6 @@ function writeAuthList(list) {
   writeJsonFile(list);
 }
 
-function readSettingsFile() {
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {};
-    }
-  } catch {
-    // ignore
-  }
-  return {};
-}
-
-function writeSettingsFile(settings) {
-  ensureStorageDir();
-  const tmpFile = `${SETTINGS_FILE}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpFile, JSON.stringify(settings, null, 2), 'utf8');
-  try {
-    fs.chmodSync(tmpFile, 0o600);
-  } catch {
-    // best-effort
-  }
-  fs.renameSync(tmpFile, SETTINGS_FILE);
-  try {
-    fs.chmodSync(SETTINGS_FILE, 0o600);
-  } catch {
-    // best-effort
-  }
-}
-
 export function getGitHubAuth() {
   const list = readAuthList();
   if (!list.length) {
@@ -255,7 +229,7 @@ export function setGitHubAuth({ accessToken, scope, tokenType, user, accountId }
   return nextEntry;
 }
 
-export function activateGitHubAuth(accountId) {
+export async function activateGitHubAuth(accountId) {
   if (typeof accountId !== 'string' || !accountId.trim()) {
     return false;
   }
@@ -264,7 +238,7 @@ export function activateGitHubAuth(accountId) {
   if (index === -1) {
     return false;
   }
-  setGhCliActive(false);
+  await setGhCliActive(false);
   list.forEach((entry, idx) => {
     entry.current = idx === index;
   });
@@ -302,13 +276,10 @@ export function getGitHubClientId() {
   if (clientId) return clientId;
 
   try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-      const stored = typeof parsed?.githubClientId === 'string' ? parsed.githubClientId.trim() : '';
-      if (stored) return stored;
-    }
-  } catch {
-    // ignore
+    const stored = settingsStore.readSync().githubClientId;
+    if (typeof stored === 'string' && stored.trim()) return stored.trim();
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
   }
 
   return DEFAULT_GITHUB_CLIENT_ID;
@@ -320,13 +291,10 @@ export function getGitHubScopes() {
   if (fromEnv) return fromEnv;
 
   try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-      const stored = typeof parsed?.githubScopes === 'string' ? parsed.githubScopes.trim() : '';
-      if (stored) return stored;
-    }
-  } catch {
-    // ignore
+    const stored = settingsStore.readSync().githubScopes;
+    if (typeof stored === 'string' && stored.trim()) return stored.trim();
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
   }
 
   return DEFAULT_GITHUB_SCOPES;
@@ -335,25 +303,25 @@ export function getGitHubScopes() {
 export const GITHUB_AUTH_FILE = STORAGE_FILE;
 
 export function isGhCliDisabled() {
-  return Boolean(readSettingsFile()?.ghCliDisabled);
+  return Boolean(settingsStore.readSync().ghCliDisabled);
 }
 
-export function setGhCliDisabled(disabled) {
-  const settings = readSettingsFile();
-  settings.ghCliDisabled = Boolean(disabled);
-  if (settings.ghCliDisabled) {
-    settings.ghCliActive = false;
-  }
-  writeSettingsFile(settings);
+export async function setGhCliDisabled(disabled) {
+  await settingsStore.update((settings) => {
+    settings.ghCliDisabled = Boolean(disabled);
+    if (settings.ghCliDisabled) settings.ghCliActive = false;
+    return settings;
+  });
 }
 
 export function isGhCliActive() {
-  const settings = readSettingsFile();
+  const settings = settingsStore.readSync();
   return !settings?.ghCliDisabled && Boolean(settings?.ghCliActive);
 }
 
-export function setGhCliActive(active) {
-  const settings = readSettingsFile();
-  settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
-  writeSettingsFile(settings);
+export async function setGhCliActive(active) {
+  await settingsStore.update((settings) => {
+    settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
+    return settings;
+  });
 }

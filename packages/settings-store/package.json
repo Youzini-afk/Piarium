@@ -1,0 +1,21 @@
+{
+  "name": "@piarium/settings-store",
+  "version": "0.7.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node --check ./src/index.js",
+    "type-check": "node --check ./src/index.js",
+    "lint": "node --check ./src/index.js",
+    "test": "node --test ./src/index.test.js"
+  }
+}

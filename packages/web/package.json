@@ -32,6 +32,7 @@
     "@piarium/extension-host": "workspace:*",
     "@piarium/protocol": "workspace:*",
     "@piarium/runtime-broker": "workspace:*",
+    "@piarium/settings-store": "workspace:*",
     "@simplewebauthn/server": "13.3.2",
     "adm-zip": "^0.6.0",
     "better-sqlite3": "^13.0.3",

@@ -18,7 +18,7 @@ export const createPushRuntime = (deps) => {
     webPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDisk,
-    writeSettingsToDisk,
+    updateSettingsOnDisk,
   } = deps;
 
   let persistPushSubscriptionsLock = Promise.resolve();
@@ -87,16 +87,20 @@ export const createPushRuntime = (deps) => {
     }
 
     const generated = webPush.generateVAPIDKeys();
-    const next = {
-      ...settings,
-      vapidKeys: {
-        publicKey: generated.publicKey,
-        privateKey: generated.privateKey,
-      },
-    };
-
-    await writeSettingsToDisk(next);
-    return { publicKey: generated.publicKey, privateKey: generated.privateKey };
+    const updated = await updateSettingsOnDisk((current) => {
+      const currentKeys = current?.vapidKeys;
+      if (currentKeys && typeof currentKeys.publicKey === 'string' && typeof currentKeys.privateKey === 'string') {
+        return current;
+      }
+      return {
+        ...current,
+        vapidKeys: {
+          publicKey: generated.publicKey,
+          privateKey: generated.privateKey,
+        },
+      };
+    });
+    return updated.vapidKeys;
   };
 
   const normalizePushSubscriptions = (record) => {

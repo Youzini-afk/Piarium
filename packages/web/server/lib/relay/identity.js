@@ -19,11 +19,11 @@ const isJwkPair = (value) => Boolean(value && typeof value === 'object' && value
  * @param {{
  *   crypto: typeof import('node:crypto'),
  *   readSettingsFromDisk: () => Promise<object>,
- *   writeSettingsToDisk: (settings: object) => Promise<void>,
+ *   updateSettingsOnDisk: (mutator: (settings: object) => object) => Promise<object>,
  * }} deps
  */
 export const createRelayIdentityRuntime = (deps) => {
-  const { crypto, readSettingsFromDisk, writeSettingsToDisk } = deps;
+  const { crypto, readSettingsFromDisk, updateSettingsOnDisk } = deps;
 
   let cachedIdentity = null;
 
@@ -39,8 +39,12 @@ export const createRelayIdentityRuntime = (deps) => {
     const keyPair = await generateEcdhKeyPair();
     const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', keyPair.privateKey);
     const publicJwk = await exportPublicKeyJwk(keyPair.publicKey);
-    await writeSettingsToDisk({ ...settings, relayEncryptionKey: { privateJwk, publicJwk } });
-    return { privateJwk, publicJwk };
+    const updated = await updateSettingsOnDisk((current) => (
+      isJwkPair(current?.relayEncryptionKey)
+        ? current
+        : { ...current, relayEncryptionKey: { privateJwk, publicJwk } }
+    ));
+    return updated.relayEncryptionKey;
   };
 
   /**
@@ -53,7 +57,7 @@ export const createRelayIdentityRuntime = (deps) => {
    */
   const getRelayIdentity = async () => {
     if (cachedIdentity) return cachedIdentity;
-    const signing = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDisk, writeSettingsToDisk });
+    const signing = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDisk, updateSettingsOnDisk });
     const serverId = deriveServerId({ crypto }, signing.publicJwk);
     const encryption = await getOrCreateEncryptionKeypair();
     const hostEncPrivateKey = await importEcdhPrivateKey(encryption.privateJwk);
