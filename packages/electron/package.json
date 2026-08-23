@@ -16,7 +16,8 @@
     "better-sqlite3": "^13.0.3",
     "electron-context-menu": "^4.1.2",
     "electron-log": "^5.4.3",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "node-pty": "1.2.0-beta.12"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
