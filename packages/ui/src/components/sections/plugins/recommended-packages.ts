@@ -26,7 +26,7 @@ export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
   },
   {
     name: 'pi-openai-codex-compat',
-    source: 'npm:pi-openai-codex-compat@alpha',
+    source: 'npm:pi-openai-codex-compat',
     descriptionKey: 'settings.piarium.plugins.package.openaiCodexCompat',
   },
   {

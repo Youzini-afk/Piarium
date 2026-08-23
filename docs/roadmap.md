@@ -304,7 +304,7 @@ the integration surface each adapter consumes is recorded in
   reconnect/auth/logout/enable/disable command orchestration, and the plugin-owned read-only
   `configCatalog/v1` effective server projection. MCP settings appear only for an installed adapter;
   the split page lists each effective server once on the left and edits an explicit revisioned native
-  source on the right. Piarium never merges the six sources in the renderer, and the catalog excludes
+  source on the right. Piarium never merges adapter sources in the renderer, and the catalog excludes
   arguments, environment, headers, tokens, OAuth, and URL credential material. Desktop header and
   mobile controls consume the same public status/command path; the old OpenCode MCP stores, draft
   editor, and OAuth callback route are removed. Each native source keeps a structured,

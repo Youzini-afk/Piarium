@@ -114,6 +114,7 @@ const FeatureQuickSettings: React.FC<{ fields: AftFields }> = ({ fields }) => {
       <PluginOptionalBooleanField {...fields} path={['semantic_search']} label={t('settings.piarium.pluginSettings.aft.field.semanticSearch')} unsetLabel={notSet} />
       <PluginOptionalBooleanField {...fields} path={['callgraph_store']} label={t('settings.piarium.pluginSettings.aft.field.callgraphStore')} unsetLabel={notSet} />
       <PluginOptionalBooleanField {...fields} path={['inspect', 'enabled']} label={t('settings.piarium.pluginSettings.aft.field.inspectEnabled')} unsetLabel={notSet} />
+      <PluginOptionalNumberField {...fields} path={['inspect', 'diagnostics_timeout_ms']} label={t('settings.piarium.pluginSettings.aft.field.inspectDiagnosticsTimeout')} min={10_000} max={600_000} step={1_000} unit="ms" unsetLabel={notSet} />
       <PluginOptionalSelectField
         {...fields}
         path={['bash']}
@@ -196,6 +197,7 @@ const UserSafetyQuickSettings: React.FC<{ fields: AftFields }> = ({ fields }) =>
       <PluginOptionalNumberField {...fields} path={['backup', 'max_depth']} label={t('settings.piarium.pluginSettings.aft.field.backupDepth')} min={1} step={1} unsetLabel={notSet} />
       <PluginOptionalNumberField {...fields} path={['backup', 'max_file_size']} label={t('settings.piarium.pluginSettings.aft.field.backupSize')} min={1} step={1} unit="B" unsetLabel={notSet} />
       <PluginOptionalBooleanField {...fields} path={['sandbox', 'enabled']} label={t('settings.piarium.pluginSettings.aft.field.sandboxEnabled')} unsetLabel={notSet} />
+      <PluginOptionalBooleanField {...fields} path={['gh_shim', 'enabled']} label={t('settings.piarium.pluginSettings.aft.field.ghShimEnabled')} unsetLabel={notSet} />
     </SettingsControlGroup>
   );
 };

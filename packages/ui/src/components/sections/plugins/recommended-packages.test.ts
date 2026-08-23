@@ -9,6 +9,7 @@ describe('recommended Pi packages', () => {
     expect(sourceByName['pi-background-tasks']).toBe('npm:pi-background-tasks');
     expect(RECOMMENDED_PACKAGES.find((entry) => entry.name === 'pi-background-tasks')?.workbench).toBe('fleet');
     expect(sourceByName['pi-observational-memory']).toBe('npm:pi-observational-memory');
+    expect(sourceByName['pi-openai-codex-compat']).toBe('npm:pi-openai-codex-compat');
     expect(sourceByName['context-mode']).toBe('npm:context-mode');
     expect(sourceByName['@cortexkit/aft-pi']).toBe('npm:@cortexkit/aft-pi');
     expect(sourceByName['pi-lens']).toBe('npm:pi-lens');

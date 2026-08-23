@@ -66,10 +66,10 @@ describe('Magic Context config model', () => {
       field: 'memory.enabled',
     });
     expect(magicContextDraftIssue({
-      experimental: { mural: { model: '  ' } },
+      mural: { model: '  ' },
     }, 'project')).toEqual({
       code: 'invalid-value',
-      field: 'experimental.mural.model',
+      field: 'mural.model',
     });
     expect(magicContextDraftIssue({
       system_prompt_injection: { skip_signatures: [42] },

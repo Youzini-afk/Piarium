@@ -71,19 +71,30 @@ const WEB_ACCESS_PATHS = ['web-search.json'] as const;
 const PROVIDER_EDITORS = [
   { id: 'openai', label: 'OpenAI / Codex' },
   { id: 'brave', label: 'Brave' },
-  { id: 'exa', label: 'Exa' },
   { id: 'parallel', label: 'Parallel' },
+  { id: 'parallel-mcp', label: 'Parallel MCP' },
   { id: 'tinyfish', label: 'TinyFish' },
   { id: 'search1api', label: 'Search1API' },
   { id: 'searchinfinity', label: 'Searchinfinity' },
   { id: 'querit', label: 'Querit' },
   { id: 'tavily', label: 'Tavily' },
-  { id: 'serpdive', label: 'SERPdive' },
-  { id: 'anysearch', label: 'AnySearch' },
+  { id: 'firecrawl', label: 'Firecrawl' },
+  { id: 'jina', label: 'Jina' },
+  { id: 'searxng', label: 'SearXNG' },
+  { id: 'duckduckgo', label: 'DuckDuckGo' },
   { id: 'perplexity', label: 'Perplexity' },
   { id: 'gemini', label: 'Gemini API / Web' },
-  { id: 'searxng', label: 'SearXNG' },
-  { id: 'firecrawl', label: 'Firecrawl' },
+  { id: 'exa', label: 'Exa' },
+  { id: 'serpdive', label: 'SERPdive' },
+  { id: 'kagi', label: 'Kagi' },
+  { id: 'ollama', label: 'Ollama Cloud' },
+  { id: 'anysearch', label: 'AnySearch' },
+  { id: 'xai', label: 'xAI' },
+  { id: 'brightdata', label: 'Bright Data' },
+  { id: 'serpbase', label: 'SerpBase' },
+  { id: 'serper', label: 'Serper' },
+  { id: 'valyu', label: 'Valyu' },
+  { id: 'bocha', label: 'Bocha' },
 ] as const;
 
 const CREDENTIAL_KEYS: Partial<Record<ProviderEditor, readonly string[]>> = {
@@ -91,16 +102,32 @@ const CREDENTIAL_KEYS: Partial<Record<ProviderEditor, readonly string[]>> = {
   brave: ['braveApiKey'],
   exa: ['exaApiKey'],
   parallel: ['parallelApiKey'],
+  'parallel-mcp': ['parallelApiKey'],
   tinyfish: ['tinyfishApiKey'],
   search1api: ['search1apiApiKey'],
   searchinfinity: ['searchinfinityApiKey'],
   querit: ['queritApiKey'],
   tavily: ['tavilyApiKey'],
+  jina: ['jinaApiKey'],
   serpdive: ['serpdiveApiKey'],
+  kagi: ['kagiApiKey'],
+  ollama: ['ollamaApiKey'],
   anysearch: ['anysearchApiKey'],
+  xai: ['xaiApiKey'],
+  brightdata: ['brightdataApiKey'],
+  serpbase: ['serpbaseApiKey'],
+  serper: ['serperApiKey'],
+  valyu: ['valyuApiKey'],
+  bocha: ['bochaApiKey'],
   perplexity: ['perplexityApiKey'],
   gemini: ['geminiApiKey', 'cloudflareApiKey'],
   firecrawl: ['firecrawlApiKey'],
+};
+
+const PROVIDER_ENDPOINTS: Partial<Record<ProviderEditor, { key: string; placeholder: string }>> = {
+  brave: { key: 'braveBaseUrl', placeholder: 'https://api.search.brave.com/res/v1' },
+  exa: { key: 'exaBaseUrl', placeholder: 'https://api.exa.ai' },
+  tavily: { key: 'tavilyBaseUrl', placeholder: 'https://api.tavily.com' },
 };
 
 const providerOptions = WEB_ACCESS_RESOLVED_PROVIDERS.map((value) => ({
@@ -290,6 +317,23 @@ const SearchPanel: React.FC<PanelProps> = ({ fields }) => {
           info={t('settings.piarium.pluginSettings.webAccess.search.summaryModelDescription')}
           placeholder="provider/model"
         />
+        <PluginNumberField
+          {...fields}
+          path={['summaryGenerationDeadlineMs']}
+          label={t('settings.piarium.pluginSettings.webAccess.search.summaryDeadline')}
+          defaultValue={30_000}
+          min={1}
+          max={600_000}
+          unit="ms"
+        />
+        <PluginNumberField
+          {...fields}
+          path={['maxInlineContentChars']}
+          label={t('settings.piarium.pluginSettings.webAccess.search.inlineContentLimit')}
+          defaultValue={30_000}
+          min={1}
+          max={200_000}
+        />
       </SettingsControlGroup>
     </div>
   );
@@ -319,6 +363,7 @@ const ProvidersPanel: React.FC<PanelProps> = ({ fields }) => {
   const [provider, setProvider] = React.useState<ProviderEditor>('openai');
   const providerLabel = PROVIDER_EDITORS.find((option) => option.id === provider)?.label ?? provider;
   const credentials = CREDENTIAL_KEYS[provider] ?? [];
+  const providerEndpoint = PROVIDER_ENDPOINTS[provider];
   const endpointInfo = t('settings.piarium.pluginSettings.webAccess.providers.endpointDescription');
   const modelInfo = t('settings.piarium.pluginSettings.webAccess.providers.modelDescription');
 
@@ -373,7 +418,24 @@ const ProvidersPanel: React.FC<PanelProps> = ({ fields }) => {
               info={modelInfo}
               placeholder="model-id"
             />
+            <PluginStringListField
+              {...fields}
+              path={['openaiSearchProviders']}
+              label={t('settings.piarium.pluginSettings.webAccess.providers.providerPriority')}
+              placeholder={'openai-codex\nopenai'}
+              emptyArrayOnClear
+            />
           </>
+        ) : null}
+        {providerEndpoint ? (
+          <PluginStringField
+            {...fields}
+            path={[providerEndpoint.key]}
+            label={t('settings.piarium.pluginSettings.webAccess.providers.endpoint')}
+            info={endpointInfo}
+            inputType="url"
+            placeholder={providerEndpoint.placeholder}
+          />
         ) : null}
         {provider === 'gemini' ? (
           <>
@@ -406,6 +468,23 @@ const ProvidersPanel: React.FC<PanelProps> = ({ fields }) => {
               { value: 'mako', label: t('settings.piarium.pluginSettings.webAccess.providers.serpdive.mako') },
               { value: 'moby', label: t('settings.piarium.pluginSettings.webAccess.providers.serpdive.moby') },
             ]}
+          />
+        ) : null}
+        {provider === 'xai' ? (
+          <PluginStringField
+            {...fields}
+            path={['xaiSearchModel']}
+            label={t('settings.piarium.pluginSettings.webAccess.providers.model')}
+            info={modelInfo}
+            placeholder="grok-4-1-fast"
+          />
+        ) : null}
+        {provider === 'brightdata' ? (
+          <PluginStringField
+            {...fields}
+            path={['brightdataSerpZone']}
+            label={t('settings.piarium.pluginSettings.webAccess.providers.zone')}
+            placeholder="pi_serp"
           />
         ) : null}
         {provider === 'searxng' ? (
@@ -589,7 +668,52 @@ const ContentPanel: React.FC<PanelProps> = ({ fields }) => {
           info={t('settings.piarium.pluginSettings.webAccess.content.videoDescription')}
           defaultValue
         />
-        <PluginRuntimeNote>{t('settings.piarium.pluginSettings.webAccess.content.pdfNote')}</PluginRuntimeNote>
+        <PluginBooleanField
+          {...fields}
+          path={['image', 'enabled']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.image')}
+          defaultValue
+        />
+        <PluginBooleanField
+          {...fields}
+          path={['pdf', 'enabled']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.pdf')}
+          defaultValue
+        />
+        <PluginSelectField
+          {...fields}
+          path={['pdf', 'provider']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.pdfProvider')}
+          defaultValue="auto"
+          options={[
+            { value: 'auto', label: t('settings.piarium.pluginSettings.webAccess.search.routingMode.auto') },
+            { value: 'gemini', label: 'Gemini' },
+            { value: 'datalab', label: 'Datalab' },
+            { value: 'unpdf', label: 'unpdf' },
+          ]}
+        />
+        <PluginNumberField
+          {...fields}
+          path={['pdf', 'maxSizeMB']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.pdfMaxSize')}
+          defaultValue={20}
+          min={Number.MIN_VALUE}
+          max={50}
+          unit="MB"
+        />
+        <PluginNumberField
+          {...fields}
+          path={['pdf', 'maxPages']}
+          label={t('settings.piarium.pluginSettings.webAccess.content.pdfMaxPages')}
+          defaultValue={100}
+          min={1}
+          step={1}
+        />
+        <CredentialField
+          fields={fields}
+          configKey="datalabApiKey"
+          providerLabel="Datalab"
+        />
       </SettingsControlGroup>
     </div>
   );

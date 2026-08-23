@@ -58,6 +58,7 @@ const KNOWN_TOP_LEVEL_FIELDS = new Set([
   'callgraph_store',
   'callgraph_chunk_size',
   'inspect',
+  'gh_shim',
   'backup',
   'worktree',
   'sandbox',
@@ -156,6 +157,7 @@ const validateInspect = (value: unknown, issues: AftDraftIssue[]): void => {
   if ('enabled' in value) validateBoolean(value.enabled, 'inspect.enabled', issues);
   if ('tier2_idle_minutes' in value) validateNumber(value.tier2_idle_minutes, 'inspect.tier2_idle_minutes', issues, { min: 0 });
   if ('tier2_soft_deadline_ms' in value) validateNumber(value.tier2_soft_deadline_ms, 'inspect.tier2_soft_deadline_ms', issues, { integer: true, min: 1 });
+  if ('diagnostics_timeout_ms' in value) validateNumber(value.diagnostics_timeout_ms, 'inspect.diagnostics_timeout_ms', issues, { integer: true, min: 10_000, max: 600_000 });
   if ('max_drill_down_items' in value) validateNumber(value.max_drill_down_items, 'inspect.max_drill_down_items', issues, { integer: true, min: 1, max: 100 });
   if ('categories' in value) {
     if (!isObject(value.categories)) issue(issues, 'invalid-value', 'inspect.categories');
@@ -347,6 +349,10 @@ const validateKnownFields = (draft: JsonObject, issues: AftDraftIssue[]): void =
   if ('checker' in draft) validateStringRecord(draft.checker, 'checker', issues, CHECKERS);
   if ('disabled_tools' in draft && !stringArray(draft.disabled_tools)) issue(issues, 'invalid-value', 'disabled_tools');
   if ('inspect' in draft) validateInspect(draft.inspect, issues);
+  if ('gh_shim' in draft) {
+    if (!isObject(draft.gh_shim)) issue(issues, 'invalid-value', 'gh_shim');
+    else if ('enabled' in draft.gh_shim) validateBoolean(draft.gh_shim.enabled, 'gh_shim.enabled', issues);
+  }
   if ('backup' in draft) validateBackup(draft.backup, issues);
   if ('worktree' in draft) {
     if (!isObject(draft.worktree)) issue(issues, 'invalid-value', 'worktree');
@@ -375,6 +381,7 @@ const diagnoseIgnoredProjectFields = (draft: JsonObject, issues: AftDraftIssue[]
     'backup',
     'subc',
     'formatter_timeout_secs',
+    'gh_shim',
   ]) {
     if (field in draft) issue(issues, 'ignored-project', field, false);
   }

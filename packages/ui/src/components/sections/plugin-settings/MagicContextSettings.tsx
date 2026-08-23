@@ -160,6 +160,17 @@ const ContextPanel: React.FC<PanelProps> = ({ fields, scope }) => {
       </SettingsControlGroup>
 
       <SettingsControlGroup
+        title={t('settings.piarium.pluginSettings.magic.pi.title')}
+        info={t('settings.piarium.pluginSettings.magic.pi.description')}
+        contentClassName="space-y-4"
+      >
+        <PluginBooleanField {...fields} path={['todowrite', 'enabled']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.todoEnabled')} defaultValue />
+        <PluginBooleanField {...fields} path={['todowrite', 'overlay']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.todoOverlay')} defaultValue />
+        <PluginBooleanField {...fields} path={['mural', 'enabled']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.muralEnabled')} defaultValue={false} />
+        <PluginStringField {...fields} path={['mural', 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.muralModel')} placeholder="provider/model" />
+      </SettingsControlGroup>
+
+      <SettingsControlGroup
         title={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.safetyCompression')}
         info={t('settings.piarium.pluginSettings.magic.pipeline.compressionDescription')}
         contentClassName="space-y-4"

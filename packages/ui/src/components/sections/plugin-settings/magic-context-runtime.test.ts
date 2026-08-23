@@ -9,6 +9,7 @@ describe('Magic Context runtime actions', () => {
   test('builds native command invocations and preserves provider confirmation', () => {
     expect(buildMagicContextRuntimeCommand('status')).toEqual({ command: 'ctx-status' });
     expect(buildMagicContextRuntimeCommand('flush')).toEqual({ command: 'ctx-flush' });
+    expect(buildMagicContextRuntimeCommand('todos')).toEqual({ command: 'todos' });
     expect(buildMagicContextRuntimeCommand('embedding-status')).toEqual({ command: 'ctx-embed' });
     expect(buildMagicContextRuntimeCommand('embedding-start')).toEqual({ command: 'ctx-embed start' });
     expect(buildMagicContextRuntimeCommand('embedding-pause')).toEqual({ command: 'ctx-embed pause' });

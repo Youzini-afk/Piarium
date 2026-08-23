@@ -172,17 +172,17 @@ value.
 | Adapter | Quick tasks | Native authority shown in the quick view | Advanced-only by default | Local warnings that remain visible |
 | --- | --- | --- | --- | --- |
 | pi-subagents | Agents and definition actions; per-scope model/provider/thinking/output overrides; delegation; review; limits | Provider actions/Agent Markdown, user/project `settings.json#subagents`, and global runtime `config.json` are three distinct save owners | per-agent model-scope maps, external runners, worktree/storage paths, Intercom, notification batching, detailed LSP/retry tuning, complex prompts and future runtime fields | definition versus override precedence, project trust, hard budgets and destructive provider actions |
-| Magic Context | Context; memory; internal models; maintenance schedules and session operations | Independent user/project JSONC drafts with ignored project keys reported | per-model maps, prompts/permissions, sampling fine-tuning, SQLite/Synapse details and experimental fields | fail-closed behavior, lossy compression, project-ignored keys, model-cost maintenance actions |
-| pi-web-access | Search; providers and credential sources; Browser/Curator; content; safety | Agent-root `web-search.json`; command presence is only loaded-state evidence | custom tool names, provider-specific fine tuning and future fields | executable credential sources, browser-cookie access, remote bind, fresh scraping and SSRF exceptions |
-| pi-mcp-adapter | Runtime servers and actions; selected-source server overrides; behavior and interaction policy | One visibly selected source from the documented six-layer precedence; the dedicated MCP page remains canonical | bearer/OAuth details, complex output guards, tracing/filter details and future fields | URL credential reset, sampling auto-approval, socket trust and source-local versus effective state |
+| Magic Context | Context; memory; TodoWrite/Mural; internal models; maintenance schedules and session operations | Independent user/project JSONC drafts with ignored project keys reported | per-model maps, prompts/permissions, sampling fine-tuning, SQLite/Synapse details and future fields | fail-closed behavior, lossy compression, project-ignored keys, model-cost maintenance actions |
+| pi-web-access | Search; all 0.24 providers and credential sources; Browser/Curator; summary/content/PDF limits; safety | Agent-root `web-search.json`; command presence is only loaded-state evidence | authenticated-fetch profiles, custom tool names, provider-specific fine tuning and future fields | executable credential sources, browser-cookie access, remote bind, fresh scraping and SSRF exceptions |
+| pi-mcp-adapter | Runtime servers and actions; selected-source server overrides; behavior and interaction policy | One visibly selected source from the adapter-owned effective catalog; normal mode currently reports six precedence layers and exclusive mode one Pi source | bearer/OAuth details, complex output guards, tracing/filter details and future fields | URL credential reset, sampling auto-approval, socket trust and source-local versus effective state |
 | pi-workspace-history | Protection and retention | Independent user/project `settings.json#workspaceHistory` drafts | scan budgets, Git timeout and future storage-engine tuning | lowering retention deletes old history; changing the storage directory does not migrate old history; home-directory capture |
 | pi-wtf | Command words and the three generated command behaviors | Global `wtf.json`; previews are distinguished from commands currently loaded in a session | future plugin-owned fields | `!` rewrites session history and never restores file or external side effects |
-| pi-openai-codex-compat | Codex request, reasoning, remote-compaction and tool options | Independent global `openai-codex-compat.json` and trusted project `.pi/openai-codex-compat.json` drafts | unknown future plugin fields | absent keys stay unset; environment overrides remain plugin-owned |
+| pi-openai-codex-compat | Codex request, reasoning, remote-compaction, apply-patch diagnostics and tool options | Independent global `openai-codex-compat.json` and trusted project `.pi/openai-codex-compat.json` drafts | unknown future plugin fields | absent keys stay unset; environment overrides remain plugin-owned |
 | pi-observational-memory | Observation, reflection, compaction, pool and worker settings | Independent user/project `settings.json#observational-memory` drafts | unknown future plugin fields | invalid thresholds and incomplete worker models block save without rewriting the draft |
 | pi-lens | Diagnostics; formatting and fixes; context delivery; project scale, rules, and security scans; native runtime actions | Resolved user authority (`PI_LENS_CONFIG_PATH` or `~/.pi-lens/config.json`) plus the nearest ordered project `.pi-lens.json` / `pi-lens.json` authority | future namespaces, detailed rule policies, LSP server maps and tool-specific tuning | project-ignored global keys stay visible, absent values remain unset, and native command availability is observed per session |
-| @cortexkit/aft-pi | Editing mode; tool surface; search, semantic, call-graph, inspection, LSP, backup, and sandbox controls | Host-resolved CortexKit user `aft.jsonc` authority plus project `.cortexkit/aft.jsonc`; both are revisioned JSONC drafts | formatter/checker maps, server definitions, shell feature objects, transport, credentials, path lists, and future fields | invalid known fields block structured save; unknown fields and project-stripped fields stay visible and are preserved; runtime observation is command-only |
+| @cortexkit/aft-pi | Editing mode; tool surface; search, semantic, call-graph, inspection deadlines, LSP, backup, sandbox, and GitHub routing-shim controls | Host-resolved CortexKit user `aft.jsonc` authority plus project `.cortexkit/aft.jsonc`; both are revisioned JSONC drafts | formatter/checker maps, server definitions, shell feature objects, transport, credentials, path lists, and future fields | invalid known fields block structured save; unknown fields and project-stripped fields stay visible and are preserved; runtime observation is command-only |
 | pi-hermes-memory | Memory policy and limits; review; flush; capacity; correction/failure recall; session search and model overrides | Host-resolved global `hermes-memory-user` authority (`hermes-memory-config.json` under the active Pi agent directory) | `memoryDir`, custom policy text, child extension paths, four correction arrays, and future fields | unknown fields are preserved and non-blocking; modern overflow strategy takes precedence without deleting the legacy field; runtime observation is command-only |
-| @gotgenes/pi-permission-system | Task-oriented allow/ask/deny policy; runtime/interface flags; prompt and review-log display budgets | Independent global `extensions/pi-permission-system/config.json` under the active Pi agent root and trusted project `.pi/extensions/pi-permission-system/config.json` | pattern maps, third-party permission surfaces, shell aliases, infrastructure read paths, authorizer chains, and deprecated preview caps | pattern maps remain intact until replaced deliberately, trailing commas and unknown 26.3 top-level keys block save, `yoloMode` keeps a source-qualified warning, and runtime availability comes only from the native command catalog |
+| @gotgenes/pi-permission-system | Task-oriented allow/ask/deny policy; runtime/interface flags; prompt and review-log display budgets | Independent global `extensions/pi-permission-system/config.json` under the active Pi agent root and trusted project `.pi/extensions/pi-permission-system/config.json` | pattern maps, third-party permission surfaces, shell aliases, infrastructure read paths, authorizer chains, and deprecated preview caps | pattern maps remain intact until replaced deliberately, trailing commas and unknown 27.0.0 top-level keys block save, `yoloMode` keeps a source-qualified warning, and runtime availability comes only from the native command catalog |
 | pi-rtk-optimizer | Rewrite/suggest behavior; missing-binary guard; notifications; output, read/source, and truncation controls | Strict JSON at global `<agentDir>/extensions/pi-rtk-optimizer/config.json` | removed rewrite categories, unknown future fields, and complex legacy shapes | missing fields remain absent; unknown and legacy fields are preserved; numeric controls use only native 40–4000 and 1000–200000 ranges; runtime presence is the exact `rtk` command, not binary availability |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
@@ -294,7 +294,7 @@ Target sections:
 1. Overview and health: active scope, context state, diagnostics, and available session operations.
 2. Session operations: status, flush, augmentation, wrap-up, session upgrade, dream, and embeddings.
 3. Core and compression: TTL, thresholds, tags, history budget, commit trigger, system injection,
-   transforms, sub-context behavior, and lossy/experimental controls.
+   TodoWrite projection, Mural rendering, transforms, sub-context behavior, and lossy controls.
 4. Memory and embeddings: memory, automatic search, Git indexing, embedding, and SQLite settings.
 5. Agents and schedules: historian, dreamer, sidekick, model/thinking/timeout, fallbacks, schedules,
    and promotion thresholds.
@@ -309,11 +309,13 @@ and Maintenance. It keeps independent unsaved
 user/project drafts, hides fields the real project loader strips, reports ignored fields already
 present in a project document, validates the plugin's numeric five-field cron and embedding
 requirements, and preserves polymorphic per-model maps for Advanced JSONC editing instead of
-flattening them into scalar controls.
+flattening them into scalar controls. TodoWrite and the top-level `mural` block use their current
+native paths rather than the removed experimental namespace.
 
 Implemented session-operations slice: when a live session advertises the current command set, the
 adapter opens the plugin-owned status dialog, flushes pending context, queries embedding status,
-starts or pauses embedding, submits Sidekick augmentation, and invokes wrap-up, full or ranged
+starts or pauses embedding, shows the plugin-owned todo dialog, submits Sidekick augmentation, and
+invokes wrap-up, full or ranged
 recompression, session upgrade, or a selected Dreamer task. Augmentation is labelled as a real new
 user turn rather than a preview. Wrap-up, upgrade, and Dreamer receive focused explanations of
 model cost/state effects. Full and ranged recompression deliberately keep Magic Context's native
@@ -339,7 +341,8 @@ Acceptance:
 
 Authority:
 
-- the adapter's six documented config sources and merge order;
+- the adapter-owned effective source catalog and merge order (normally six native sources, or the
+  single Pi source while exclusive mode is active);
 - `pi-mcp-adapter/status/v1` for effective runtime state;
 - its registered panel, reconnect, authentication, logout, enable, and disable commands;
 - the adapter's OS keyring/OAuth implementation for credentials.
@@ -350,7 +353,7 @@ catalog: one row per deduplicated effective server, with runtime state joined by
 right pane shows the selected server, its runtime actions, and the highest-precedence native source
 that directly defines it. New-server and adapter-settings actions choose an explicit native source;
 source-local edits still use the revisioned `config.text` contract and preserve the raw JSON/JSONC
-draft. Piarium never folds the six files in the renderer.
+draft. Piarium never folds source documents in the renderer.
 
 The public catalog contains only server identity, disabled state, transport kind and sanitized
 command/URL/socket display data, plus direct native-source membership. It does not expose arguments,
@@ -406,9 +409,11 @@ Implemented configuration slice: the first-class adapter now models automatic, n
 all-provider, and typed ordered-fallback routing without presenting `provider` and
 `searchProvider` as independent choices. Its quick view is organized as Search, Providers &
 credentials, Browser & Curator, Content, and Safety. Stable high-frequency controls include masked
-credential sources, provider endpoints/models, Curator bind modes, Chromium-cookie opt-in,
-GitHub/video feature switches, domain policy, and SSRF exceptions. Tool-name aliases, shortcuts,
-size/time budgets, and provider-specific tuning remain in the same draft's Advanced editor while
+credential sources, provider endpoints/models, OpenAI credential-provider priority, Curator bind
+modes, Chromium-cookie opt-in, summary and inline-content limits, GitHub/video/image/PDF switches,
+PDF provider/size/page limits, domain policy, and SSRF exceptions. Tool-name aliases, shortcuts,
+less common budgets, authenticated-fetch profiles, and provider-specific tuning remain in the same
+draft's Advanced editor while
 unknown native keys are preserved. Piarium propagates its selected Pi agent directory through
 `PI_CODING_AGENT_DIR`, so the file edited by the GUI is the file loaded by extensions even when a
 custom agent directory is used.
@@ -514,9 +519,10 @@ currently effective.
 The project view follows AFT's native one-way and user-only merge rules instead of presenting the
 user form as if every field took effect. It reports but does not remove user-only top-level fields,
 `aft_safety` disablement, semantic backend/credential/query settings, executable-origin LSP settings,
-sandbox disablement, and project write allowances. Project quick controls expose only fields the
-loader actually honors. Additional project read denials and complex native values remain available
-in Advanced.
+sandbox disablement, the GitHub CLI shim, and project write allowances. User quick controls include
+the bounded inspect diagnostics timeout and GitHub CLI shim added in AFT 0.52.1. Project quick
+controls expose only fields the loader actually honors. Additional project read denials and complex
+native values remain available in Advanced.
 
 Runtime observation is deliberately command-only. Piarium marks AFT observed only when
 `command.list` contains `aft-status`. It does not execute `/aft-status`: that command renders through
@@ -552,7 +558,7 @@ survive structured edits, while a second strict parse rejects trailing commas be
 loader does not accept them. Quick controls show user tasks rather than configuration keys. A scalar
 permission can be left unset or set to allow, ask, or deny; an existing pattern map is shown as a
 disabled custom-rule sentinel and remains unchanged in the shared draft until the user chooses a
-scalar replacement or edits it in Advanced. The current 26.3 schema is strict: an unknown top-level
+scalar replacement or edits it in Advanced. The current 27.0.0 schema is strict: an unknown top-level
 key would invalidate the entire scope, so Piarium preserves it visibly in the draft but diagnoses and
 blocks saving until it is removed or the adapter is updated for a plugin version that owns it. Known
 booleans, positive integers, permission maps, shell aliases, string arrays, and the optional schema
@@ -576,7 +582,7 @@ Acceptance:
 
 - both scopes preserve comments, pattern maps, revisions, dirty drafts,
   external-change conflicts, and project trust behavior;
-- missing fields stay absent, while invalid known values, unknown 26.3 top-level keys, and trailing
+- missing fields stay absent, while invalid known values, unknown 27.0.0 top-level keys, and trailing
   commas block save with localized diagnostics;
 - `yoloMode` explains that ask decisions are approved automatically if the selected source becomes
   effective, while explicit deny decisions still apply;

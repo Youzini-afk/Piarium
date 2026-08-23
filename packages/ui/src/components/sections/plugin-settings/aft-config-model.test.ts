@@ -22,6 +22,8 @@ describe('AFT config model', () => {
       enabled: 'yes',
       formatter_timeout_secs: 0,
       formatter: { '.ts': 'unknown' },
+      gh_shim: { enabled: 'yes' },
+      inspect: { diagnostics_timeout_ms: 9_999 },
       lsp: { grace_days: 0 },
       semantic: { timeout_ms: -1 },
     }, 'global');
@@ -34,6 +36,8 @@ describe('AFT config model', () => {
     expect(has('invalid-value', 'formatter..ts')).toBe(true);
     expect(has('invalid-number', 'lsp.grace_days')).toBe(true);
     expect(has('invalid-number', 'semantic.timeout_ms')).toBe(true);
+    expect(has('invalid-boolean', 'gh_shim.enabled')).toBe(true);
+    expect(has('invalid-number', 'inspect.diagnostics_timeout_ms')).toBe(true);
   });
 
   test('diagnoses the complete project strip surface without blocking', () => {
@@ -44,6 +48,7 @@ describe('AFT config model', () => {
       backup: { enabled: true },
       subc: { client_reaper: true },
       formatter_timeout_secs: 30,
+      gh_shim: { enabled: false },
       disabled_tools: ['other', 'aft_safety'],
       semantic: {
         backend: 'fastembed',
@@ -80,6 +85,7 @@ describe('AFT config model', () => {
       'bridge',
       'disabled_tools.aft_safety',
       'formatter_timeout_secs',
+      'gh_shim',
       'lsp.auto_install',
       'lsp.disabled',
       'lsp.grace_days',

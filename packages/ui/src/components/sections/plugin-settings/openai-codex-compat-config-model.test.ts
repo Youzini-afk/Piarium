@@ -23,6 +23,6 @@ describe('OpenAI Codex compatibility config model', () => {
       code: 'invalid-number',
       field: 'autoCompactAtPercent',
     });
-    expect(openAICodexCompatDraftIssue({ autoCompactAtPercent: 80 })).toBeNull();
+    expect(openAICodexCompatDraftIssue({ applyPatchDebug: true, autoCompactAtPercent: 80 })).toBeNull();
   });
 });

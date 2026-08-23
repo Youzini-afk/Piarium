@@ -14,6 +14,7 @@ const BOOLEAN_FIELDS = [
   'fastMode',
   'responsesLite',
   'applyPatch',
+  'applyPatchDebug',
   'imageGeneration',
   'webRun',
 ] as const;

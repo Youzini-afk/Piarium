@@ -51,7 +51,7 @@ Each row is the public contract Piarium consumes. Piarium owns none of these fil
 | `pi-workspace-history` | `session_before_tree` hook plus registered undo/redo/checkpoint commands | Plugin-owned history store |
 | `pi-subagents` | Public `subagents:rpc:v1` with advertised `fleetStatus: { version: 1 }`; provider-owned agent management tool | Scoped Pi `settings.json`, Agent Markdown, and global runtime JSON |
 | `pi-background-tasks` | Public EventBus v1 `request`/`response`/`terminal` for Fleet run, bounded logs, kill | Plugin-owned task store |
-| `pi-mcp-adapter` | Public `status/v1` snapshots and read-only `configCatalog/v1`; adapter commands | Six adapter-owned JSON/JSONC sources |
+| `pi-mcp-adapter` | Public `status/v1` snapshots and read-only `configCatalog/v1`; adapter commands | Adapter-reported JSON/JSONC sources (six in normal mode, one in exclusive mode) |
 | `pi-web-access` | Registered command catalog for Curator, account diagnostics, stored results | Agent-level `web-search.json` |
 | `@cortexkit/pi-magic-context` | Registered `ctx-*` commands; native Pi status component; public custom entries | CortexKit user/project JSONC |
 | `pi-openai-codex-compat` | Registered settings command | Global and project `openai-codex-compat.json` |

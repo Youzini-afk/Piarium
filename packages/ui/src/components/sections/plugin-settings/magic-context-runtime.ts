@@ -8,6 +8,7 @@ import type { MagicContextDreamerTask } from './magic-context-config-model';
 export type MagicContextRuntimeActionId =
   | 'status'
   | 'flush'
+  | 'todos'
   | 'embedding-status'
   | 'embedding-start'
   | 'embedding-pause'
@@ -43,6 +44,8 @@ export const buildMagicContextRuntimeCommand = (
       return { command: 'ctx-status' };
     case 'flush':
       return { command: 'ctx-flush' };
+    case 'todos':
+      return { command: 'todos' };
     case 'embedding-status':
       return { command: 'ctx-embed' };
     case 'embedding-start':

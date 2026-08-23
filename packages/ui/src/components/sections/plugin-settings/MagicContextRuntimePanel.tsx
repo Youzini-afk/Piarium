@@ -219,6 +219,16 @@ export const MagicContextRuntimePanel: React.FC<MagicContextRuntimePanelProps> =
             {runningCommand === 'ctx-flush' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
             {t('settings.piarium.pluginSettings.magic.runtime.action.flush')}
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={actionsDisabled || !commandAvailable('todos')}
+            onClick={() => void runAction('todos')}
+          >
+            {runningCommand === 'todos' ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
+            {t('settings.piarium.pluginSettings.magic.runtime.action.todos')}
+          </Button>
         </div>
         <div className="space-y-2 border-t border-border/60 pt-4">
           <div className="space-y-1">

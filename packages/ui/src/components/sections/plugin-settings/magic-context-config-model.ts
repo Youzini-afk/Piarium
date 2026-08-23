@@ -151,7 +151,7 @@ const EXPOSED_BOOLEAN_PATHS: readonly (readonly string[])[] = [
   ['todowrite', 'enabled'],
   ['todowrite', 'overlay'],
   ['keep_subagents'],
-  ['experimental', 'mural', 'enabled'],
+  ['mural', 'enabled'],
   ['commit_cluster_trigger', 'enabled'],
   ['system_prompt_injection', 'enabled'],
   ['smart_drops'],
@@ -361,9 +361,9 @@ export function magicContextDraftIssue(
     }
   }
 
-  const muralModel = readJsonPath(draft, ['experimental', 'mural', 'model']);
-  if (hasJsonPath(draft, ['experimental', 'mural', 'model']) && !nonEmptyString(muralModel)) {
-    return { code: 'invalid-value', field: 'experimental.mural.model' };
+  const muralModel = readJsonPath(draft, ['mural', 'model']);
+  if (hasJsonPath(draft, ['mural', 'model']) && !nonEmptyString(muralModel)) {
+    return { code: 'invalid-value', field: 'mural.model' };
   }
 
   const skipSignatures = readJsonPath(draft, ['system_prompt_injection', 'skip_signatures']);

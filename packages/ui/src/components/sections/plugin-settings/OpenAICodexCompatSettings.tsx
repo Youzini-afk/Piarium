@@ -73,6 +73,7 @@ export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps>
   const fieldLabel = React.useCallback((field: string): string => {
     const labels: Record<string, string> = {
       applyPatch: t('settings.piarium.pluginSettings.codexCompat.field.applyPatch'),
+      applyPatchDebug: t('settings.piarium.pluginSettings.codexCompat.field.applyPatchDebug'),
       autoCompactAtPercent: t('settings.piarium.pluginSettings.codexCompat.field.autoCompactAtPercent'),
       fastMode: t('settings.piarium.pluginSettings.codexCompat.field.fastMode'),
       imageDetail: t('settings.piarium.pluginSettings.codexCompat.field.imageDetail'),
@@ -163,6 +164,7 @@ export const OpenAICodexCompatSettings: React.FC<OpenAICodexCompatSettingsProps>
         contentClassName="space-y-4"
       >
         <PluginOptionalBooleanField {...fieldProps} path={['applyPatch']} label="apply_patch" />
+        <PluginOptionalBooleanField {...fieldProps} path={['applyPatchDebug']} label={t('settings.piarium.pluginSettings.codexCompat.field.applyPatchDebug')} />
         <PluginOptionalSelectField {...fieldProps} path={['toolBackground']} label={t('settings.piarium.pluginSettings.codexCompat.field.toolBackground')} options={[
           { value: 'subtle', label: t('settings.piarium.pluginSettings.codexCompat.value.subtle') },
           { value: 'status', label: t('settings.piarium.pluginSettings.codexCompat.value.status') },

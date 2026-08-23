@@ -9,17 +9,29 @@ export const WEB_ACCESS_RESOLVED_PROVIDERS = [
   'openai',
   'brave',
   'parallel',
+  'parallel-mcp',
   'tinyfish',
   'search1api',
   'searchinfinity',
   'querit',
   'tavily',
-  'serpdive',
-  'anysearch',
+  'firecrawl',
+  'jina',
   'searxng',
-  'exa',
+  'duckduckgo',
   'perplexity',
   'gemini',
+  'exa',
+  'serpdive',
+  'kagi',
+  'ollama',
+  'anysearch',
+  'xai',
+  'brightdata',
+  'serpbase',
+  'serper',
+  'valyu',
+  'bocha',
 ] as const;
 
 export const WEB_ACCESS_SEARCH_PROVIDERS = [
@@ -28,7 +40,7 @@ export const WEB_ACCESS_SEARCH_PROVIDERS = [
   ...WEB_ACCESS_RESOLVED_PROVIDERS,
 ] as const;
 
-export const WEB_ACCESS_FALLBACK_KINDS = ['transient', 'quota', 'network'] as const;
+export const WEB_ACCESS_FALLBACK_KINDS = ['transient', 'quota', 'network', 'invalid-response'] as const;
 
 export const WEB_ACCESS_CREDENTIAL_KEYS = [
   'openaiApiKey',
@@ -39,12 +51,22 @@ export const WEB_ACCESS_CREDENTIAL_KEYS = [
   'searchinfinityApiKey',
   'queritApiKey',
   'tavilyApiKey',
+  'jinaApiKey',
   'serpdiveApiKey',
+  'kagiApiKey',
+  'bochaApiKey',
+  'ollamaApiKey',
+  'valyuApiKey',
+  'serpbaseApiKey',
+  'serperApiKey',
   'anysearchApiKey',
+  'xaiApiKey',
+  'brightdataApiKey',
   'firecrawlApiKey',
   'exaApiKey',
   'perplexityApiKey',
   'geminiApiKey',
+  'datalabApiKey',
   'cloudflareApiKey',
 ] as const;
 
@@ -74,6 +96,8 @@ const COMMON_BOOLEAN_PATHS: readonly (readonly string[])[] = [
   ['githubClone', 'enabled'],
   ['youtube', 'enabled'],
   ['video', 'enabled'],
+  ['image', 'enabled'],
+  ['pdf', 'enabled'],
   ['firecrawlFreshScrape'],
   ['ssrf', 'trustEnvProxy'],
 ];
@@ -152,6 +176,20 @@ function validHttpUrl(value: JsonValue | undefined, forbidCredentials: boolean):
     const url = new URL(value.trim());
     return (url.protocol === 'http:' || url.protocol === 'https:')
       && (!forbidCredentials || (!url.username && !url.password));
+  } catch {
+    return false;
+  }
+}
+
+function validHttpsApiBaseUrl(value: JsonValue | undefined): boolean {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:'
+      && !url.username
+      && !url.password
+      && !url.search
+      && !url.hash;
   } catch {
     return false;
   }
@@ -273,6 +311,8 @@ export function webAccessDraftIssue(draft: JsonObject): WebAccessDraftIssue | nu
     ['geminiBaseUrl'],
     ['chromeProfile'],
     ['serpdiveModel'],
+    ['xaiSearchModel'],
+    ['brightdataSerpZone'],
     ['githubClone', 'clonePath'],
     ['youtube', 'preferredModel'],
     ['video', 'preferredModel'],
@@ -286,15 +326,25 @@ export function webAccessDraftIssue(draft: JsonObject): WebAccessDraftIssue | nu
 
   for (const [path, min, max] of [
     [['curatorTimeoutSeconds'], 1, 600],
+    [['summaryGenerationDeadlineMs'], 1, 600_000],
+    [['maxInlineContentChars'], 1, 200_000],
     [['githubClone', 'maxRepoSizeMB'], Number.MIN_VALUE, Number.POSITIVE_INFINITY],
     [['githubClone', 'cloneTimeoutSeconds'], Number.MIN_VALUE, Number.POSITIVE_INFINITY],
     [['video', 'maxSizeMB'], Number.MIN_VALUE, Number.POSITIVE_INFINITY],
     [['pdf', 'maxSizeMB'], Number.MIN_VALUE, 50],
+    [['pdf', 'maxPages'], 1, Number.POSITIVE_INFINITY],
   ] as const) {
     const value = readJsonPath(draft, path);
     if (value !== undefined && (
       typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max
     )) return { code: 'invalid-value', field: path.join('.') };
+  }
+
+  for (const path of [['summaryGenerationDeadlineMs'], ['maxInlineContentChars']] as const) {
+    const value = readJsonPath(draft, path);
+    if (value !== undefined && !Number.isInteger(value)) {
+      return { code: 'invalid-value', field: path.join('.') };
+    }
   }
 
   for (const [path, forbidCredentials] of [
@@ -307,9 +357,35 @@ export function webAccessDraftIssue(draft: JsonObject): WebAccessDraftIssue | nu
     }
   }
 
+  for (const path of [['braveBaseUrl'], ['exaBaseUrl'], ['tavilyBaseUrl']] as const) {
+    if (hasJsonPath(draft, path) && !validHttpsApiBaseUrl(readJsonPath(draft, path))) {
+      return { code: 'invalid-value', field: path.join('.') };
+    }
+  }
+
+  const openaiSearchProviders = readJsonPath(draft, ['openaiSearchProviders']);
+  if (openaiSearchProviders !== undefined && (
+    !Array.isArray(openaiSearchProviders)
+    || openaiSearchProviders.some((entry) => typeof entry !== 'string' || !entry.trim())
+  )) return { code: 'invalid-value', field: 'openaiSearchProviders' };
+
   const openaiSearchModel = readJsonPath(draft, ['openaiSearchModel']);
   if (hasJsonPath(draft, ['openaiSearchModel']) && !normalizedString(openaiSearchModel)) {
     return { code: 'invalid-value', field: 'openaiSearchModel' };
+  }
+  if (hasJsonPath(draft, ['xaiSearchModel']) && !normalizedString(readJsonPath(draft, ['xaiSearchModel']))) {
+    return { code: 'invalid-value', field: 'xaiSearchModel' };
+  }
+
+  const brightdataSerpZone = readJsonPath(draft, ['brightdataSerpZone']);
+  if (brightdataSerpZone !== undefined && (
+    typeof brightdataSerpZone !== 'string'
+    || !/^[A-Za-z0-9_-]+$/.test(brightdataSerpZone.trim())
+  )) return { code: 'invalid-value', field: 'brightdataSerpZone' };
+
+  const pdfProvider = readJsonPath(draft, ['pdf', 'provider']);
+  if (pdfProvider !== undefined && !['auto', 'gemini', 'datalab', 'unpdf'].includes(String(pdfProvider))) {
+    return { code: 'invalid-value', field: 'pdf.provider' };
   }
 
   const firecrawlVersion = readJsonPath(draft, ['firecrawlApiVersion']);
