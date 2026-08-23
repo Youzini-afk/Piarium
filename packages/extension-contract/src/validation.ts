@@ -51,7 +51,14 @@ import {
   type PiariumExtensionStorageSnapshot,
   type PiariumExtensionSurfaceEntrypoint,
 } from "./types.js";
-import { parsePiariumWorkbenchProfileSnapshot } from "./workbench.js";
+import {
+  PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
+  parsePiariumWorkbenchProfileSnapshot,
+} from "./workbench.js";
+import {
+  parsePiariumTransitionSceneContributionData,
+  PiariumTransitionSceneContractError,
+} from "./motion.js";
 import {
   parsePiariumExtensionServiceRoutingContext,
   parsePiariumExtensionServiceRoutingSnapshot,
@@ -88,6 +95,7 @@ const CONTRIBUTION_KINDS = new Set<PiariumExtensionContributionKind>([
   "shell",
   "sidebar",
   "status-item",
+  "transition-scene",
   "tool-renderer",
   "view",
 ]);
@@ -367,6 +375,17 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
         issues.push(`${itemPath}.data.priority must be finite`);
       }
     }
+    if (kind === "transition-scene") {
+      try {
+        parsePiariumTransitionSceneContributionData(data);
+      } catch (error) {
+        if (error instanceof PiariumTransitionSceneContractError) {
+          issues.push(...error.issues.map((issue) => `${itemPath}.${issue}`));
+        } else {
+          throw error;
+        }
+      }
+    }
     const contractVersion = positiveRevision(raw.contractVersion, `${itemPath}.contractVersion`, issues);
     const rawSupports = uniqueStrings(raw.supports, `${itemPath}.supports`, issues);
     const supports: PiariumApplicationSurface[] = [];
@@ -406,6 +425,9 @@ function parseContributions(value: unknown, path: string, issues: string[]): Pia
           ...(typeof priority === "number" && Number.isFinite(priority) ? { priority } : {}),
         };
       }
+    }
+    if (kind === "transition-scene" && replacement?.target !== PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition) {
+      issues.push(`${itemPath}.replacement.target must be ${PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.transition}`);
     }
     result.push({
       id,

@@ -1,8 +1,10 @@
-import { createElement, type ComponentType } from "react";
+import { createElement, type ComponentType, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
   PiariumManagedSurfaceContext,
   PiariumSurfaceMountImplementation,
+  PiariumTransitionSceneMountProps,
+  PiariumTransitionSceneFrameV1,
 } from "@piarium/extension-sdk";
 
 export interface PiariumReactContribution<TProps extends object = Record<string, unknown>>
@@ -17,6 +19,7 @@ export interface PiariumReactReplacementProps {
 }
 
 export type PiariumReactReplacementContribution = PiariumReactContribution<PiariumReactReplacementProps>;
+export type PiariumReactTransitionSceneContribution = PiariumReactContribution<PiariumTransitionSceneMountProps>;
 
 export const defineReactReplacement = (
   Component: ComponentType<PiariumReactReplacementProps>,
@@ -50,6 +53,17 @@ export const defineReactContribution = <TProps extends object>(
 export const defineReactShell = defineReactReplacement;
 export const defineReactView = defineReactContribution;
 export const defineReactEditor = defineReactContribution;
+export const defineReactTransitionScene = (
+  Component: ComponentType<PiariumTransitionSceneMountProps>,
+): PiariumReactTransitionSceneContribution => defineReactContribution(Component);
+
+export const usePiariumTransitionScene = (
+  transition: PiariumTransitionSceneMountProps["transition"],
+): PiariumTransitionSceneFrameV1 => useSyncExternalStore(
+  transition.subscribe,
+  transition.getSnapshot,
+  transition.getSnapshot,
+);
 
 export const ownReactRoot = (context: PiariumManagedSurfaceContext, root: Root): Root => {
   context.onDispose(() => root.unmount());

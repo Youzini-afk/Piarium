@@ -165,7 +165,7 @@
             "enum": [
               "command", "composer-action", "editor", "keybinding", "menu-item", "message-renderer",
               "page", "panel", "session-decoration", "settings-page", "shell", "sidebar",
-              "status-item", "tool-renderer", "view"
+              "status-item", "tool-renderer", "transition-scene", "view"
             ]
           },
           "supports": {
@@ -194,7 +194,26 @@
               "priority": { "type": "number" }
             }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "kind": { "const": "transition-scene" } },
+              "required": ["kind"]
+            },
+            "then": {
+              "required": ["replacement"],
+              "properties": {
+                "data": { "$ref": "#/$defs/transitionSceneData" },
+                "replacement": {
+                  "type": "object",
+                  "required": ["target"],
+                  "properties": { "target": { "const": "workbench.transition" } }
+                }
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -213,6 +232,43 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "transitionDurationSet": {
+      "type": "object",
+      "required": ["quick", "reduced", "standard"],
+      "properties": {
+        "quick": { "type": "integer", "minimum": 0 },
+        "reduced": { "type": "integer", "minimum": 0 },
+        "standard": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "transitionSceneData": {
+      "type": "object",
+      "required": ["contract", "durations", "scenes"],
+      "properties": {
+        "contract": { "const": "piarium-transition-scene/v1" },
+        "fallback": { "type": "boolean" },
+        "scenes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["workbench-profile"] }
+        },
+        "durations": {
+          "type": "object",
+          "required": ["workbench-profile"],
+          "properties": {
+            "workbench-profile": {
+              "type": "object",
+              "required": ["covering", "revealing"],
+              "properties": {
+                "covering": { "$ref": "#/$defs/transitionDurationSet" },
+                "revealing": { "$ref": "#/$defs/transitionDurationSet" }
+              }
+            }
+          }
+        }
+      }
     },
     "id": {
       "type": "string",

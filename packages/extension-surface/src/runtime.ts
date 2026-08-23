@@ -596,6 +596,21 @@ export class SurfaceExtensionRuntime {
       throw new SurfaceRegistryConflictError("Surface contribution IDs must be unique", [...new Set(duplicateContributions)]);
     }
     orderContributions(allContributions);
+    const fallbackReplacements = new Map<string, SurfaceContribution[]>();
+    for (const contribution of allContributions) {
+      const target = contribution.descriptor.replacement?.target;
+      if (!target || contribution.descriptor.data.fallback !== true) continue;
+      const group = fallbackReplacements.get(target) ?? [];
+      group.push(contribution);
+      fallbackReplacements.set(target, group);
+    }
+    for (const [target, fallbacks] of fallbackReplacements) {
+      if (fallbacks.length <= 1) continue;
+      throw new SurfaceRegistryConflictError(
+        `Surface replacement ${target} has more than one fallback`,
+        fallbacks.map((fallback) => fallback.descriptor.id),
+      );
+    }
 
     const allServices = [...candidateOwners.values()].flatMap((owner) => owner.services);
     const serviceGroups = new Map<string, SurfaceService[]>();

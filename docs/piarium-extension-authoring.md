@@ -74,6 +74,76 @@ future optional Motion-service boundary are specified in
 [Piarium Motion and replaceable transition scenes](piarium-motion-platform.md). A complete Shell owns
 its internal elements and animation; Piarium only coordinates cross-owner handoff.
 
+### Transition Scene
+
+A `transition-scene` contribution replaces `workbench.transition` without requiring either Shell to
+render a particular element. Its serialized descriptor declares the scenes and their real phase
+durations. Zero means immediate completion; Piarium does not impose a guessed maximum duration.
+
+```json
+{
+  "contractVersion": 1,
+  "data": {
+    "contract": "piarium-transition-scene/v1",
+    "scenes": ["workbench-profile"],
+    "durations": {
+      "workbench-profile": {
+        "covering": { "quick": 900, "standard": 1800, "reduced": 0 },
+        "revealing": { "quick": 900, "standard": 1800, "reduced": 0 }
+      }
+    }
+  },
+  "entrypoint": "dev.example.motion.main",
+  "id": "dev.example.motion.transition",
+  "kind": "transition-scene",
+  "replacement": { "target": "workbench.transition" },
+  "supports": ["desktop", "web"]
+}
+```
+
+Managed extensions mount once for the complete transaction and subscribe to a stable controller:
+
+```ts
+import { defineSurfaceExtension, defineTransitionSceneMount } from "@piarium/extension-sdk"
+
+export default defineSurfaceExtension((context) => {
+  context.contribute({
+    contractVersion: 1,
+    data: {
+      contract: "piarium-transition-scene/v1",
+      scenes: ["workbench-profile"],
+      durations: {
+        "workbench-profile": {
+          covering: { quick: 900, standard: 1800, reduced: 0 },
+          revealing: { quick: 900, standard: 1800, reduced: 0 },
+        },
+      },
+    },
+    id: "dev.example.motion.transition",
+    kind: "transition-scene",
+    replacement: { target: "workbench.transition" },
+    supports: ["desktop", "web"],
+  }, defineTransitionSceneMount((container, mount) => {
+    const render = () => {
+      const frame = mount.props.transition.getSnapshot()
+      container.dataset.phase = frame.phase
+      container.dataset.direction = frame.direction
+    }
+    const unsubscribe = mount.props.transition.subscribe(render)
+    render()
+    return () => {
+      unsubscribe()
+      container.replaceChildren()
+    }
+  }))
+})
+```
+
+The scene may call `transition.complete(transitionId, phase)` when its current covering or revealing
+animation finishes. If it does not, Piarium advances at the duration declared in the selected
+artifact. The controller rejects a completion from an older transition or phase. Profile persistence,
+candidate Shell ownership, failure rollback, and the final handoff remain Core responsibilities.
+
 Language, debug, and test helpers accept either a static descriptor or a function receiving the
 brokered Host context. Use `context.assets.path("runtime/server.mjs")` for an executable shipped in the
 extension package. Piarium resolves the path inside the immutable selected artifact; it is not relative

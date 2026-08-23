@@ -18,6 +18,11 @@ Piarium aborts and disposes that mounted instance when its props or owner change
 disabled, or the host unmounts it. DOM, Canvas, Web Components, and framework-owned roots can all use
 the same contract without importing Piarium's React or private UI.
 
+`defineTransitionSceneMount` specializes that boundary for `transition-scene` contributions. It
+receives one stable external-store controller for the full cover/covered/reveal transaction; the
+scene owns its pixels while Piarium retains Profile commit and failure recovery. No official Shell
+element names are part of this contract.
+
 `@piarium/extension-sdk/testing` exports managed Surface, isolated Surface, and Host conformance
 harnesses with real owner cleanup semantics. See the complete
 [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

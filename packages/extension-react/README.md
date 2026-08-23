@@ -9,4 +9,6 @@ passed across React singleton boundaries.
 
 Using React is optional; managed and isolated extensions may use any framework or direct DOM/Canvas.
 `defineReactShell`, `defineReactView`, and `defineReactEditor` are typed aliases of the same adapter.
+`defineReactTransitionScene` and `usePiariumTransitionScene` adapt the stable transition controller
+without sharing Piarium's own React root or prescribing a Shell DOM structure.
 See the complete [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

@@ -158,6 +158,26 @@ test("replacement selection and ordering update without a document refresh", asy
   assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["alpha", "last"]);
 });
 
+test("a second replacement fallback is rejected before it becomes visible", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  await runtime.activate({ owner: owner("dev.example.alpha", 1, 1) }, (context) => {
+    context.contribute({
+      ...page("dev.example.alpha.shell"),
+      data: { fallback: true },
+      replacement: { target: "workbench.shell" },
+    }, "alpha");
+  });
+  await assert.rejects(runtime.activate({ owner: owner("dev.example.beta", 1, 1) }, (context) => {
+    context.contribute({
+      ...page("dev.example.beta.shell"),
+      data: { fallback: true },
+      replacement: { target: "workbench.shell" },
+    }, "beta");
+  }), /more than one fallback/);
+  assert.deepEqual(runtime.getSnapshot().visibleContributions.map((item) => item.implementation), ["alpha"]);
+  assert.equal(runtime.getSnapshot().actual.find((item) => item.extensionId === "dev.example.beta")?.status, "failed");
+});
+
 test("deactivation withdraws contributions before asynchronous cleanup completes", async () => {
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   let release!: () => void;

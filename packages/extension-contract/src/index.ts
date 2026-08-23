@@ -4,3 +4,4 @@ export * from "./workbench.js";
 export * from "./services.js";
 export * from "./service-routing.js";
 export * from "./discovery.js";
+export * from "./motion.js";

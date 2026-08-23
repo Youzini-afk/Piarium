@@ -11,6 +11,8 @@ import type {
   PiariumExtensionStaticContribution,
   PiariumExtensionStorageOpenRequest,
   PiariumExtensionStorageSnapshot,
+  PiariumTransitionSceneAnimatedPhase,
+  PiariumTransitionSceneFrameV1,
 } from "@piarium/extension-contract";
 
 export interface PiariumSurfaceAsset {
@@ -74,6 +76,26 @@ export interface PiariumEditorMountProps {
   providerId: string;
   resource: { resourceId: string; workspaceId: string };
   viewId: string;
+}
+
+/**
+ * Stable per-transition external store. Piarium owns the handoff transaction; a scene owns only its
+ * rendering and may complete the current animated phase before its declared duration elapses.
+ */
+export interface PiariumTransitionSceneControllerV1 {
+  complete(transitionId: number, phase: PiariumTransitionSceneAnimatedPhase): void;
+  getSnapshot(): PiariumTransitionSceneFrameV1;
+  subscribe(listener: () => void): () => void;
+}
+
+export interface PiariumTransitionSceneMountProps {
+  transition: PiariumTransitionSceneControllerV1;
+}
+
+export interface PiariumIsolatedTransitionSceneFrameMessage {
+  contributionId: string;
+  frame: PiariumTransitionSceneFrameV1;
+  type: "motion.transition.frame";
 }
 
 export interface PiariumIsolatedEditorMountMessage {
@@ -267,6 +289,9 @@ export const PIARIUM_WORKSPACE_DEBUG_CAPABILITY = "workspace.debug";
 export const PIARIUM_WORKSPACE_TEST_CAPABILITY = "workspace.test";
 
 export {
+  PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION,
+  PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
+  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
   PIARIUM_WORKBENCH_CONTEXT_KEYS,
   PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
   PIARIUM_WORKBENCH_IDE_PROFILE_ID,
@@ -274,8 +299,25 @@ export {
   PIARIUM_WORKBENCH_SLOTS,
 } from "@piarium/extension-contract";
 
+export type {
+  PiariumTransitionSceneAnimatedPhase,
+  PiariumTransitionSceneContributionDataV1,
+  PiariumTransitionSceneDirection,
+  PiariumTransitionSceneDurationSet,
+  PiariumTransitionSceneFrameV1,
+  PiariumTransitionSceneId,
+  PiariumTransitionScenePhase,
+  PiariumTransitionScenePhaseDurations,
+  PiariumTransitionSceneTempo,
+} from "@piarium/extension-contract";
+
 export const defineShellMount = defineSurfaceMount;
 export const defineViewMount = defineSurfaceMount;
+export const defineTransitionSceneMount = (
+  implementation:
+    | PiariumSurfaceMount<PiariumTransitionSceneMountProps>
+    | PiariumSurfaceMountImplementation<PiariumTransitionSceneMountProps>,
+): PiariumSurfaceMountImplementation<PiariumTransitionSceneMountProps> => defineSurfaceMount(implementation);
 export const defineEditorMount = (
   implementation:
     | PiariumSurfaceMount<PiariumEditorMountProps>

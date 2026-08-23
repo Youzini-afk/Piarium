@@ -245,7 +245,7 @@ test("rejects unknown contribution kinds instead of coercing them", () => {
   ));
 });
 
-test("accepts view and editor contribution kinds", () => {
+test("accepts view, editor, and transition scene contribution kinds", () => {
   const source = manifest();
   source.contributions = [
     { ...source.contributions[0]!, id: "dev.example.memory-workbench.panel-view", kind: "view" },
@@ -255,9 +255,66 @@ test("accepts view and editor contribution kinds", () => {
       kind: "editor",
       data: Object.assign({ route: "memory" }, { languageIds: ["markdown"], priority: 40 }),
     },
+    Object.assign({
+      ...source.contributions[0]!,
+      id: "dev.example.memory-workbench.transition",
+      kind: "transition-scene",
+      data: Object.assign({ route: "memory" }, {
+        contract: "piarium-transition-scene/v1",
+        durations: {
+          "workbench-profile": {
+            covering: { quick: 800, reduced: 0, standard: 1_600 },
+            revealing: { quick: 800, reduced: 0, standard: 1_600 },
+          },
+        },
+        scenes: ["workbench-profile"],
+      }),
+    }, { replacement: { target: "workbench.transition" } }),
   ];
   const parsed = parsePiariumExtensionManifest(source);
-  assert.deepEqual(parsed.contributions?.map((item) => item.kind), ["view", "editor"]);
+  assert.deepEqual(parsed.contributions?.map((item) => item.kind), ["view", "editor", "transition-scene"]);
+});
+
+test("rejects transition scenes without a complete timing contract", () => {
+  const source = manifest();
+  source.contributions = [Object.assign({
+    ...source.contributions[0]!,
+    id: "dev.example.memory-workbench.transition",
+    kind: "transition-scene",
+    data: Object.assign({ route: "memory" }, {
+      contract: "piarium-transition-scene/v1",
+      durations: { "workbench-profile": { covering: { quick: 1 } } },
+      scenes: ["workbench-profile"],
+    }),
+  }, { replacement: { target: "workbench.transition" } })];
+  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
+    error instanceof PiariumExtensionContractError
+    && error.issues.some((issue) => issue.includes("data.durations.workbench-profile.covering.reduced"))
+    && error.issues.some((issue) => issue.includes("data.durations.workbench-profile.revealing"))
+  ));
+});
+
+test("requires transition scenes to use the public workbench transition target", () => {
+  const source = manifest();
+  source.contributions = [Object.assign({
+    ...source.contributions[0]!,
+    id: "dev.example.memory-workbench.transition",
+    kind: "transition-scene",
+    data: Object.assign({ route: "memory" }, {
+      contract: "piarium-transition-scene/v1",
+      durations: {
+        "workbench-profile": {
+          covering: { quick: 1, reduced: 0, standard: 1 },
+          revealing: { quick: 1, reduced: 0, standard: 1 },
+        },
+      },
+      scenes: ["workbench-profile"],
+    }),
+  }, { replacement: { target: "dev.example.private-transition" } })];
+  assert.throws(() => parsePiariumExtensionManifest(source), (error: unknown) => (
+    error instanceof PiariumExtensionContractError
+    && error.issues.some((issue) => issue.includes("replacement.target must be workbench.transition"))
+  ));
 });
 
 test("rejects editor contributions without a resource selector", () => {

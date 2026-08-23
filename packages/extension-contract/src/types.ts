@@ -62,6 +62,7 @@ export type PiariumExtensionContributionKind =
   | "shell"
   | "sidebar"
   | "status-item"
+  | "transition-scene"
   | "tool-renderer"
   | "view";
 

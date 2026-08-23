@@ -34,6 +34,7 @@ export const PIARIUM_WORKBENCH_REPLACEMENT_TARGETS = {
   secondarySidebar: "workbench.secondary-sidebar",
   panel: "workbench.panel",
   status: "workbench.status",
+  transition: "workbench.transition",
 } as const;
 
 export const PIARIUM_WORKBENCH_SLOTS = {
