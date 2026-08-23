@@ -131,13 +131,17 @@ export const GROUND_REVEAL_RADIUS_PX = Math.floor(Math.min(
   GROUND_FADE_RISE_PX,
 ));
 
-const CELL_EXIT_MS = 460;
-const MARK_EXIT_MS = 460;
+const CELL_EXIT_MS = 520;
+const MARK_EXIT_MS = 520;
+/** The cube makes contact before the first floor tile starts moving. */
+const BOOT_PRESS_LEAD_MS = 240;
 /** Widest per-cell delay either mode schedules. */
 const MAX_CELL_DELAY_MS = 520;
 
 /** How long a caller must keep the splash mounted after asking it to leave. */
-export const SPLASH_EXIT_DURATION_MS = MAX_CELL_DELAY_MS + Math.max(CELL_EXIT_MS, MARK_EXIT_MS);
+export const SPLASH_EXIT_DURATION_MS = BOOT_PRESS_LEAD_MS
+  + MAX_CELL_DELAY_MS
+  + Math.max(CELL_EXIT_MS, MARK_EXIT_MS);
 /** The reduced-motion path replaces every staged animation with one fade of the whole cover. */
 export const SPLASH_REDUCED_EXIT_DURATION_MS = 260;
 
@@ -148,8 +152,8 @@ export const SPLASH_REDUCED_EXIT_DURATION_MS = 260;
  * hole reaches it; the backdrop then fades once the hole has stopped growing, and finishes before the
  * outermost cells do, so those are seen coming apart against the app rather than against flat colour.
  */
-const REVEAL_MS = 440;
-const BACKDROP_FADE_MS = 300;
+const REVEAL_MS = 480;
+const BACKDROP_FADE_MS = 260;
 /** Soft edge on the hole. Wide enough not to read as a circle, narrow enough not to leak past the cells. */
 const REVEAL_EDGE_PX = 64;
 
@@ -163,6 +167,9 @@ export interface SplashCell {
   readonly key: string;
   readonly delayMs: number;
   readonly breatheDelayMs: number | null;
+  /** Floor-space displacement during exit. The camera projects it with the tile, so it stays on-plane. */
+  readonly scatterXPx: number;
+  readonly scatterYPx: number;
 }
 
 /**
@@ -200,12 +207,33 @@ export const buildSplashCells = (
         const along = direction === 'forward' ? col : axis - 1 - col;
         fraction = (along + row * skew) / (axis * (1 + skew));
       }
+      const dx = col - originCell;
+      const dy = row - originCell;
+      const radius = Math.hypot(dx, dy);
+      let scatterXPx: number;
+      let scatterYPx: number;
+      if (mode === 'boot') {
+        // Nearby tiles move just enough to expose the app; tiles further out travel farther so the floor
+        // opens like a field of diamonds rather than collapsing into a small circular dimple. The motion
+        // is authored in floor space and projected once by the parent camera.
+        const magnitude = radius === 0
+          ? 0
+          : CUBE_EDGE_PX * (0.18 + 0.36 * clamp(radius / 6, 0, 1));
+        scatterXPx = radius === 0 ? 0 : Math.round((dx / radius) * magnitude);
+        scatterYPx = radius === 0 ? 0 : Math.round((dy / radius) * magnitude);
+      } else {
+        // A profile change keeps its directional sweep instead of borrowing the startup's radial burst.
+        scatterXPx = Math.round(CUBE_EDGE_PX * 0.28) * (direction === 'forward' ? 1 : -1);
+        scatterYPx = 0;
+      }
       cells.push({
         key: `${row}-${col}`,
         delayMs: Math.round(clamp(fraction, 0, 1) * MAX_CELL_DELAY_MS),
         breatheDelayMs: breathe && random() < BREATHE_SHARE
           ? Math.round(random() * BREATHE_SPREAD_MS)
           : null,
+        scatterXPx,
+        scatterYPx,
       });
     }
   }
@@ -289,6 +317,7 @@ export const splashPlaneCss = (
   options: { withMark: boolean },
 ): string => {
   const ink = colors.stroke ?? colors.line;
+  const projectedMark = options.withMark ? markBox(CUBE_EDGE_PX) : null;
 
   const markRules = options.withMark
     ? `
@@ -301,7 +330,8 @@ export const splashPlaneCss = (
 position: absolute;
 left: 50%;
 top: ${GROUND_ORIGIN_Y_PCT}%;
-translate: ${markBox(CUBE_EDGE_PX).originTranslate};
+translate: ${projectedMark?.originTranslate};
+transform-origin: ${(projectedMark?.originFraction.x ?? 0) * 100}% ${(projectedMark?.originFraction.y ?? 0) * 100}%;
 display: block;
 line-height: 0;
 }
@@ -320,6 +350,27 @@ animation: pi-splash-glyph-pulse 1.8s ease-in-out infinite;
 0%, 100% { filter: drop-shadow(0 0 0 transparent); }
 50% { filter: drop-shadow(0 0 4px ${ink}); }
 }
+/* The one animated floor element during the wait state is the cube's own footprint. It is positioned in
+   floor coordinates and receives the same camera as every cell, so the glyph pulse has a physical answer
+   on the plane rather than a separate screen-space glow. */
+.pi-splash:not([data-mode='switch']) .pi-splash-ground::after {
+content: '';
+position: absolute;
+left: ${GROUND_SHAPE.offsetPx - CUBE_EDGE_PX / 2}px;
+top: ${GROUND_SHAPE.offsetPx - CUBE_EDGE_PX / 2}px;
+box-sizing: border-box;
+width: ${CUBE_EDGE_PX}px;
+height: ${CUBE_EDGE_PX}px;
+pointer-events: none;
+background: ${colors.background};
+box-shadow: inset 0 0 0 1px ${ink};
+opacity: 0.32;
+animation: pi-splash-contact-pulse 1.8s ease-in-out infinite;
+}
+@keyframes pi-splash-contact-pulse {
+0%, 100% { opacity: 0.22; background: ${colors.background}; }
+50% { opacity: 0.72; background: ${colors.cell}; }
+}
 .pi-splash-status {
 position: absolute;
 left: 50%;
@@ -337,12 +388,33 @@ opacity: 0;
 animation: pi-splash-status-in 480ms 700ms ease both;
 }
 @keyframes pi-splash-status-in { to { opacity: 0.5; } }
-.pi-splash[data-leaving='true'] .pi-splash-mark,
-.pi-splash[data-leaving='true'] .pi-splash-status {
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-mark {
+animation: pi-splash-mark-press ${MARK_EXIT_MS}ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+.pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-mark {
 animation: pi-splash-mark-out ${MARK_EXIT_MS}ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
+}
+.pi-splash[data-leaving='true'] .pi-splash-status {
+animation: pi-splash-status-out 180ms ease both;
+}
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::after {
+animation: pi-splash-contact-press 360ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+@keyframes pi-splash-mark-press {
+0% { opacity: 1; transform: scaleX(1) scaleY(1); }
+72% { opacity: 1; transform: scaleX(0.94) scaleY(0.18); }
+100% { opacity: 0; transform: scaleX(0.9) scaleY(0.06); }
+}
+@keyframes pi-splash-contact-press {
+0% { opacity: 0.35; transform: scale(1); }
+55% { opacity: 0.9; transform: scale(0.72); }
+100% { opacity: 0; transform: scale(0.24); }
 }
 @keyframes pi-splash-mark-out {
 to { opacity: 0; }
+}
+@keyframes pi-splash-status-out {
+to { opacity: 0; transform: translateY(5px); }
 }`
     : '';
 
@@ -350,6 +422,7 @@ to { opacity: 0; }
     ? `,
 .pi-splash[data-leaving='true'] .pi-splash-mark,
 .pi-splash[data-leaving='true'] .pi-splash-status,
+.pi-splash:not([data-mode='switch']) .pi-splash-ground::after,
 .pi-splash-glyph,
 .pi-splash-status`
     : '';
@@ -407,8 +480,8 @@ mask-image: ${hole};
    backdrop just fades and the sweep reads as a wipe over it. */
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
 animation:
-pi-splash-open ${REVEAL_MS}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
-pi-splash-backdrop-out ${BACKDROP_FADE_MS}ms ${REVEAL_MS}ms ease both;
+pi-splash-open ${REVEAL_MS}ms ${BOOT_PRESS_LEAD_MS}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out ${BACKDROP_FADE_MS}ms ${BOOT_PRESS_LEAD_MS + REVEAL_MS}ms ease both;
 }
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {
 animation: pi-splash-backdrop-out ${REVEAL_MS + BACKDROP_FADE_MS}ms ease both;
@@ -458,6 +531,7 @@ transform: ${GROUND_STYLE.transform};
 .pi-splash-cell {
 background: ${colors.background};
 box-shadow: inset -1px -1px 0 ${colors.line};
+transform-origin: center;
 }
 /* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
    there is genuinely something to wait for. Both ends are opaque colours: a translucent pulse would have
@@ -475,10 +549,20 @@ animation-delay: calc(1.2s + var(--pi-breathe-delay));
 animation: pi-splash-cell-out ${CELL_EXIT_MS}ms cubic-bezier(0.32, 0, 0.24, 1) both;
 animation-delay: var(--pi-cell-delay);
 }
-/* Each cell shrinks toward its own centre while it fades, so the floor comes apart into scattering tiles
-   rather than simply dimming. */
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cell {
+animation-delay: calc(var(--pi-cell-delay) + ${BOOT_PRESS_LEAD_MS}ms);
+}
+/* Each cell moves in the floor's own coordinate system before the parent camera projects it. On screen
+   the squares therefore stay registered as perspective diamonds while the wave pushes them away from the
+   cube's footprint. Opacity holds for the first half so the separation is visible before they dissolve. */
 @keyframes pi-splash-cell-out {
-to { opacity: 0; transform: scale(0.62); }
+0% { background: ${colors.background}; }
+32%, 55% { opacity: 1; background: ${colors.cell}; }
+to {
+opacity: 0;
+background: ${colors.cell};
+transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px)) scale(0.56);
+}
 }
 ${markRules}
 
@@ -528,15 +612,19 @@ export const splashGroundScript = (elementId: string): string => {
   const cells = buildSplashCells('boot', 'forward', true, stableRandom());
   const delays = cells.map((cell) => cell.delayMs).join(',');
   const breathes = cells.map((cell) => cell.breatheDelayMs ?? -1).join(',');
+  const scatterXs = cells.map((cell) => cell.scatterXPx).join(',');
+  const scatterYs = cells.map((cell) => cell.scatterYPx).join(',');
 
   return `(function(){
 var ground=document.getElementById('${elementId}');
 if(!ground)return;
 var delays=[${delays}];
 var breathes=[${breathes}];
+var scatterXs=[${scatterXs}];
+var scatterYs=[${scatterYs}];
 var buffer='';
 for(var i=0;i<delays.length;i++){
-var style='--pi-cell-delay:'+delays[i]+'ms';
+var style='--pi-cell-delay:'+delays[i]+'ms;--pi-cell-scatter-x:'+scatterXs[i]+'px;--pi-cell-scatter-y:'+scatterYs[i]+'px';
 if(breathes[i]>=0)style+=';--pi-breathe-delay:'+breathes[i]+'ms';
 buffer+='<span class="pi-splash-cell" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
 }

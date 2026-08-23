@@ -93,6 +93,8 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
                 data-breathe={cell.breatheDelayMs === null ? 'false' : 'true'}
                 style={{
                   '--pi-cell-delay': `${cell.delayMs}ms`,
+                  '--pi-cell-scatter-x': `${cell.scatterXPx}px`,
+                  '--pi-cell-scatter-y': `${cell.scatterYPx}px`,
                   ...(cell.breatheDelayMs === null
                     ? {}
                     : { '--pi-breathe-delay': `${cell.breatheDelayMs}ms` }),

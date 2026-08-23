@@ -20,10 +20,12 @@
  */
 
 /**
- * Tilt about the horizontal axis. Shallow enough that the far cells compress into a horizon, steep
- * enough that the near cells read as floor rather than as wall.
+ * Tilt about the horizontal axis. This is deliberately more top-down than the first perspective
+ * version: at 64 degrees the near cells loomed while the horizon sat so high that the camera read as
+ * looking up the floor. Fifty-eight keeps a real vanishing point while showing enough of the plane for
+ * the cube's footprint and the outward tile motion to read as one surface.
  */
-const CAMERA_TILT_DEG = 64;
+const CAMERA_TILT_DEG = 58;
 
 /**
  * Rotation within the plane. 45 degrees puts a cube corner toward the viewer, which is the three
@@ -34,10 +36,12 @@ const CAMERA_SPIN_DEG = 45;
 /**
  * Distance from the eye to the projection plane, in pixels.
  *
- * Smaller converges harder. It also bounds how far the floor may extend: a point whose depth
- * approaches this distance projects to infinity, and past it the image inverts.
+ * Smaller converges harder. The original 1600px distance made the nearest rows more than five times the
+ * height of the far reach; 1800px keeps the depth cue without letting the foreground dominate the mark.
+ * It also bounds how far the floor may extend: a point whose depth approaches this distance projects to
+ * infinity, and past it the image inverts.
  */
-const CAMERA_DISTANCE_PX = 1600;
+const CAMERA_DISTANCE_PX = 1800;
 
 const RAD = Math.PI / 180;
 const cosTilt = Math.cos(CAMERA_TILT_DEG * RAD);
