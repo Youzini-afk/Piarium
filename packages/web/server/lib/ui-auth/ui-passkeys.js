@@ -111,7 +111,7 @@ const parseStoredPasskey = (record) => {
 
 export const createUiPasskeys = ({
   passwordBinding,
-  readSettingsFromDiskMigrated,
+  readSettingsFromDisk,
   storeFile = PASSKEY_STORE_FILE,
   rpName = DEFAULT_RP_NAME,
   challengeTtlMs = DEFAULT_CHALLENGE_TTL_MS,
@@ -196,7 +196,7 @@ export const createUiPasskeys = ({
     }
 
     try {
-      const settings = await readSettingsFromDiskMigrated?.();
+      const settings = await readSettingsFromDisk?.();
       if (typeof settings?.publicOrigin === 'string' && settings.publicOrigin.trim().length > 0) {
         origins.add(new URL(settings.publicOrigin.trim()).origin);
       }

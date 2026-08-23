@@ -181,7 +181,7 @@ describe('core-routes', () => {
         handlePasskeyRevoke: vi.fn(),
         handleResetAuth: vi.fn(),
       },
-      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      readSettingsFromDisk: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
     });
 
@@ -225,7 +225,7 @@ describe('core-routes', () => {
         handlePasskeyRevoke: vi.fn(),
         handleResetAuth: vi.fn(),
       },
-      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      readSettingsFromDisk: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
     });
 
@@ -298,7 +298,7 @@ describe('core-routes', () => {
           token: 'piarium_client_token',
         })),
       },
-      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      readSettingsFromDisk: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
       ...overrides,
     };
@@ -506,7 +506,7 @@ describe('core-routes', () => {
         handlePasskeyRevoke: vi.fn(),
         handleResetAuth: vi.fn(),
       },
-      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      readSettingsFromDisk: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
     });
 
@@ -564,7 +564,7 @@ describe('core-routes', () => {
       remoteClientAuthRuntime: {
         recordAuditEvent: vi.fn(async () => ({ recorded: true })),
       },
-      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      readSettingsFromDisk: vi.fn(async () => ({})),
       normalizeTunnelSessionTtlMs: vi.fn(),
     });
 
@@ -641,7 +641,7 @@ describe('client auth routes', () => {
           return { purged: before - clients.length };
         },
       },
-      readSettingsFromDiskMigrated: async () => ({}),
+      readSettingsFromDisk: async () => ({}),
       normalizeTunnelSessionTtlMs: () => 1000,
       testHooks: { clients, requireAuth, requireSessionAuth, resolveAuthContext },
     };

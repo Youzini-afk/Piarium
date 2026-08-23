@@ -68,7 +68,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       resolveProjectDirectory,
       readCustomThemesFromDisk,
       formatSettingsResponse,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       persistSettings,
       sanitizeProjects,
       buildAugmentedPath,
@@ -114,7 +114,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
 
     app.get('/api/config/settings', async (_req, res) => {
       try {
-        const settings = await readSettingsFromDiskMigrated();
+        const settings = await readSettingsFromDisk();
         res.json(formatSettingsResponse(settings));
       } catch (error) {
         console.error('Failed to read Piarium settings:', error);
@@ -153,14 +153,14 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       crypto,
       piariumDataDir,
       sanitizeProjects,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       persistSettings,
       createFsSearchRuntime,
       spawn,
       resolveGitBinaryForSpawn,
     });
     registerScheduledTaskRoutes(app, {
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       sanitizeProjects,
       projectConfigRuntime,
       scheduledTasksRuntime,
@@ -178,7 +178,7 @@ export const createPlatformRoutesRuntime = ({ clientReloadDelayMs }) => {
       pathModule: path,
       osModule: os,
       env: process.env,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       persistSettings,
       sanitizeProjects,
     });

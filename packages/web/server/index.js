@@ -257,12 +257,12 @@ const sanitizeSettingsUpdate = (...args) => settingsHelpers.sanitizeSettingsUpda
 const mergePersistedSettings = (...args) => settingsHelpers.mergePersistedSettings(...args);
 const formatSettingsResponse = (...args) => settingsHelpers.formatSettingsResponse(...args);
 
-let readSettingsFromDiskMigrated = async () => ({});
+let readSettingsFromDisk = async () => ({});
 const projectDirectoryRuntime = createProjectDirectoryRuntime({
   fsPromises,
   path,
   normalizeDirectoryPath,
-  getReadSettingsFromDiskMigrated: () => readSettingsFromDiskMigrated,
+  getReadSettingsFromDisk: () => readSettingsFromDisk,
   sanitizeProjects,
 });
 const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
@@ -271,25 +271,18 @@ const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProj
 const settingsRuntime = createSettingsRuntime({
   fsPromises,
   path,
-  crypto,
   SETTINGS_FILE_PATH,
   sanitizeProjects,
   sanitizeSettingsUpdate,
   mergePersistedSettings,
   normalizeSettingsPaths,
-  normalizeStringArray,
   formatSettingsResponse,
-  resolveDirectoryCandidate,
-  normalizeManagedRemoteTunnelHostname,
-  normalizeManagedRemoteTunnelPresets,
-  normalizeManagedRemoteTunnelPresetTokens,
   syncManagedRemoteTunnelConfigWithPresets,
   upsertManagedRemoteTunnelToken,
 });
-readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
+readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
-const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 
 const themeRuntime = createThemeRuntime({
   fsPromises,
@@ -300,7 +293,7 @@ const themeRuntime = createThemeRuntime({
 });
 const readCustomThemesFromDisk = (...args) => themeRuntime.readCustomThemesFromDisk(...args);
 
-const requestSecurityRuntime = createRequestSecurityRuntime({ readSettingsFromDiskMigrated });
+const requestSecurityRuntime = createRequestSecurityRuntime({ readSettingsFromDisk });
 const getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
 const rejectWebSocketUpgrade = (...args) => requestSecurityRuntime.rejectWebSocketUpgrade(...args);
 const isRequestOriginAllowed = (...args) => requestSecurityRuntime.isRequestOriginAllowed(...args);
@@ -310,7 +303,7 @@ const pushRuntime = createPushRuntime({
   path,
   webPush,
   PUSH_SUBSCRIPTIONS_FILE_PATH,
-  readSettingsFromDiskMigrated,
+  readSettingsFromDisk,
   writeSettingsToDisk,
 });
 const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
@@ -338,9 +331,8 @@ const apnsRuntime = createApnsRuntime({
   crypto,
   http2,
   APNS_TOKENS_FILE_PATH,
-  readSettingsFromDiskMigrated,
+  readSettingsFromDisk,
   writeSettingsToDisk,
-  readSettingsStrict: readSettingsFromDiskStrict,
 });
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
 const removeApnsToken = (...args) => apnsRuntime.removeApnsToken(...args);
@@ -374,7 +366,7 @@ const projectConfigRuntime = createProjectConfigRuntime({
 });
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
-  listProjects: async () => sanitizeProjects((await readSettingsFromDiskMigrated())?.projects || []),
+  listProjects: async () => sanitizeProjects((await readSettingsFromDisk())?.projects || []),
   emitTaskRunEvent: (event) => {
     for (const client of uiPiariumEventClients) {
       try {
@@ -396,7 +388,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   logger: console,
 });
 const scheduledTaskService = createScheduledTaskService({
-  readSettingsFromDiskMigrated,
+  readSettingsFromDisk,
   sanitizeProjects,
   projectConfigRuntime,
   scheduledTasksRuntime,
@@ -439,7 +431,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
   URL,
   tunnelProviderRegistry,
   tunnelAuthController,
-  readSettingsFromDiskMigrated,
+  readSettingsFromDisk,
   readManagedRemoteTunnelConfigFromDisk,
   normalizeTunnelProvider,
   normalizeTunnelMode,
@@ -701,7 +693,7 @@ async function main(options = {}) {
     getServerPort: activePort,
     getTunnelUrl: () => tunnelService.getPublicUrl(),
     getServerLabel: () => os.hostname()?.trim() || 'Piarium',
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
     ensurePushInitialized,
@@ -805,7 +797,7 @@ async function main(options = {}) {
   const workspaceRootGuard = createDocumentRootGuard({
     fsPromises,
     pathModule: path,
-    readSettings: readSettingsFromDiskMigrated,
+    readSettings: readSettingsFromDisk,
     getWorkspaceRoot: () => workspaceConfig.root,
   });
   const documentsAuthority = createDocumentAuthority({
@@ -891,7 +883,7 @@ async function main(options = {}) {
   const sessionNames = new Map();
   const sessionSnapshots = new Map();
   const sendPiSessionNotification = async ({ body, kind, sessionId, tag, title }) => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => ({}));
+    const settings = await readSettingsFromDisk().catch(() => ({}));
     if (settings.notifyOnCompletion === false) return;
     const payload = { body, kind, sessionId, tag, title };
     const desktopDelivered = getIsWindowFocused() && settings.notificationMode !== 'always'
@@ -911,7 +903,7 @@ async function main(options = {}) {
   const piSessionAutomation = createPiSessionAutomationRuntime({
     broker: piRuntimeBroker,
     getSmallModelService: () => import('./lib/small-model/index.js'),
-    readSettings: readSettingsFromDiskMigrated,
+    readSettings: readSettingsFromDisk,
     onGoalSettled: async ({ goal, sessionId }) => {
       const complete = goal.status === 'complete';
       const statusLabel = goal.status === 'budgetLimited' ? 'budget reached' : goal.status;
@@ -968,9 +960,8 @@ async function main(options = {}) {
   const relayService = createRelayService({
     crypto,
     os,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     writeSettingsToDisk,
-    readSettingsStrict: readSettingsFromDiskStrict,
     remoteClientAuthRuntime,
     getLocalPort: () => tunnelRuntimeContext.getActivePort(),
     hostLock: createRelayHostLock({
@@ -1017,7 +1008,7 @@ async function main(options = {}) {
     resolveProjectDirectory,
     readCustomThemesFromDisk,
     formatSettingsResponse,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     persistSettings,
     sanitizeProjects,
     buildAugmentedPath: platformEnvironmentRuntime.buildAugmentedPath,
@@ -1056,7 +1047,7 @@ async function main(options = {}) {
     __dirname,
     express,
     listRecentSessions: () => getReadyPiRuntimeBroker()?.listSessions?.() ?? [],
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     normalizePwaAppName,
     normalizePwaOrientation,
   });
@@ -1079,7 +1070,7 @@ async function main(options = {}) {
     process,
     crypto,
     normalizeTunnelBootstrapTtlMs,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     tunnelAuthController,
     startTunnelWithNormalizedRequest,
     gracefulShutdown,

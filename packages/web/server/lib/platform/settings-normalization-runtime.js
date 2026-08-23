@@ -1,3 +1,5 @@
+import { createProjectIdFromPath } from '../projects/project-id.js';
+
 export const createSettingsNormalizationRuntime = (dependencies) => {
   const {
     os,
@@ -143,10 +145,10 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       if (!entry || typeof entry !== 'object') continue;
 
       const candidate = entry;
-      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
       const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
+      const id = createProjectIdFromPath(normalizedPath);
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
       const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'

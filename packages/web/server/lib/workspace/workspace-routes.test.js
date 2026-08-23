@@ -59,7 +59,7 @@ async function createApp(env = {}) {
     fsPromises: fs.promises,
     pathModule: path,
     osModule: os,
-    readSettingsFromDiskMigrated: vi.fn(async () => ({ projects: [] })),
+    readSettingsFromDisk: vi.fn(async () => ({ projects: [] })),
     persistSettings: vi.fn(async (changes) => ({ ...changes })),
     sanitizeProjects: (value) => Array.isArray(value) ? value : [],
   });

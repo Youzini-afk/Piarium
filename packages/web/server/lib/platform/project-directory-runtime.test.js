@@ -12,8 +12,8 @@ const createTestRuntime = (overrides = {}) => {
       resolve: (p) => p,
     },
     normalizeDirectoryPath: (value) => value,
-    readSettingsFromDiskMigrated: async () => ({}),
-    getReadSettingsFromDiskMigrated: () => async () => ({}),
+    readSettingsFromDisk: async () => ({}),
+    getReadSettingsFromDisk: () => async () => ({}),
     sanitizeProjects: (input) => input,
   };
 
@@ -226,7 +226,7 @@ describe('project directory runtime', () => {
           stat: async () => ({ isDirectory: () => true }),
           realpath: async () => '/real/workspace/project',
         },
-        getReadSettingsFromDiskMigrated: () => async () => ({
+        getReadSettingsFromDisk: () => async () => ({
           lastDirectory: '/home/user/workspace/project',
         }),
       });
@@ -247,7 +247,7 @@ describe('project directory runtime', () => {
           stat: async () => ({ isDirectory: () => true }),
           realpath: async () => '/real/workspace/project',
         },
-        getReadSettingsFromDiskMigrated: () => async () => ({
+        getReadSettingsFromDisk: () => async () => ({
           projects: [{ id: 'proj-1', path: '/home/user/workspace/project' }],
           activeProjectId: 'proj-1',
         }),

@@ -81,7 +81,7 @@ describe('project icon routes', () => {
       crypto,
       piariumDataDir: '/tmp/piarium-test',
       sanitizeProjects: (projects) => projects,
-      readSettingsFromDiskMigrated: async () => ({
+      readSettingsFromDisk: async () => ({
         projects: [{
           id: 'proj-1',
           path: '/repo',

@@ -8,35 +8,20 @@
 /**
  * @param {{
  *   crypto: typeof import('node:crypto'),
- *   readSettingsFromDiskMigrated: () => Promise<object>,
+ *   readSettingsFromDisk: () => Promise<object>,
  *   writeSettingsToDisk: (settings: object) => Promise<void>,
- *   readSettingsStrict?: () => Promise<object>,
  * }} deps
  * @returns {Promise<{ privateKey: import('node:crypto').KeyObject, publicJwk: JsonWebKey }>}
  */
-export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict }) => {
+export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromDisk, writeSettingsToDisk }) => {
   const toKeypair = (stored) => ({
     privateKey: crypto.createPrivateKey({ key: stored.privateJwk, format: 'jwk' }),
     publicJwk: stored.publicJwk,
   });
-  const settings = await readSettingsFromDiskMigrated();
+  const settings = await readSettingsFromDisk();
   const existing = settings?.relaySigningKey;
   if (existing && existing.privateJwk && existing.publicJwk) {
     return toKeypair(existing);
-  }
-  // Regeneration gate: the lenient settings reader maps read failures to `{}`,
-  // indistinguishable from "first run". Minting a new keypair changes serverId,
-  // which orphans every paired device and push binding AND the write below would
-  // clobber the settings file with the empty spread. Re-verify with the strict
-  // reader (throws on corrupt/unreadable) before generating; if it finds the
-  // key the lenient read lost, use it and generate nothing.
-  let verifiedSettings = settings;
-  if (readSettingsStrict) {
-    verifiedSettings = await readSettingsStrict();
-    const verified = verifiedSettings?.relaySigningKey;
-    if (verified && verified.privateJwk && verified.publicJwk) {
-      return toKeypair(verified);
-    }
   }
   // Loud on purpose: a new signing key means a new serverId — every previously
   // paired device and push binding is orphaned. Expected exactly once, on first run.
@@ -44,7 +29,7 @@ export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromD
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const privateJwk = privateKey.export({ format: 'jwk' });
   const publicJwk = publicKey.export({ format: 'jwk' });
-  await writeSettingsToDisk({ ...settings, ...(verifiedSettings || {}), relaySigningKey: { privateJwk, publicJwk } });
+  await writeSettingsToDisk({ ...settings, relaySigningKey: { privateJwk, publicJwk } });
   return { privateKey, publicJwk };
 };
 

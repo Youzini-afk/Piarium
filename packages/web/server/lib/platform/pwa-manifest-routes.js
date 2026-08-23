@@ -17,7 +17,7 @@ const finiteTimestamp = (...values) => {
 export const registerPwaManifestRoute = (app, dependencies) => {
   const {
     listRecentSessions = async () => [],
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     normalizePwaAppName,
     normalizePwaOrientation,
   } = dependencies;
@@ -69,7 +69,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     let storedName = '';
     let storedOrientation = 'system';
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       storedName = normalizePwaAppName(settings?.pwaAppName, '');
       storedOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
     } catch {

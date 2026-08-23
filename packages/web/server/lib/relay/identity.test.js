@@ -8,7 +8,7 @@ import { canonicalPublicJwkString } from './signing-key.js';
 const makeSettingsStore = (initial = {}) => {
   let settings = { ...initial };
   return {
-    readSettingsFromDiskMigrated: async () => ({ ...settings }),
+    readSettingsFromDisk: async () => ({ ...settings }),
     writeSettingsToDisk: async (next) => {
       settings = { ...next };
     },

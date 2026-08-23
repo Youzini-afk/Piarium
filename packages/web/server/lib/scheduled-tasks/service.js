@@ -25,14 +25,14 @@ const asNonEmptyString = (value) => {
 
 export const createScheduledTaskService = (dependencies) => {
   const {
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     sanitizeProjects,
     projectConfigRuntime,
     scheduledTasksRuntime,
   } = dependencies;
 
   const listProjects = async () => {
-    const settings = await readSettingsFromDiskMigrated();
+    const settings = await readSettingsFromDisk();
     return sanitizeProjects(settings?.projects || []);
   };
 

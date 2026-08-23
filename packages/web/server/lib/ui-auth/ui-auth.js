@@ -426,7 +426,7 @@ export const createUiAuth = ({
   password,
   cookieName = SESSION_COOKIE_NAME,
   sessionTtlMs = SESSION_TTL_MS,
-  readSettingsFromDiskMigrated,
+  readSettingsFromDisk,
   clientAuthController = null,
   requireClientAuth = false,
 } = {}) => {
@@ -655,7 +655,7 @@ export const createUiAuth = ({
   const resolveSessionTtlMs = (trustDevice) => (trustDevice ? TRUSTED_DEVICE_SESSION_TTL_MS : sessionTtlMs);
   let passkeyController = createUiPasskeys({
     passwordBinding,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
   });
 
   const rebuildPasskeyController = () => {
@@ -663,7 +663,7 @@ export const createUiAuth = ({
     passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
     passkeyController = createUiPasskeys({
       passwordBinding,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
     });
   };
 

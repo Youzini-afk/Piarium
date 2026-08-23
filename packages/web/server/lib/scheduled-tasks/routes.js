@@ -11,7 +11,7 @@ const parseTaskID = (req) => asNonEmptyString(req?.params?.taskId);
 
 export const registerScheduledTaskRoutes = (app, dependencies) => {
   const {
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     sanitizeProjects,
     projectConfigRuntime,
     scheduledTasksRuntime,

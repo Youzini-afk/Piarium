@@ -30,7 +30,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     ensurePushInitialized,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     writeSettingsToDisk,
     addOrUpdatePushSubscription,
     removePushSubscription,
@@ -83,7 +83,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     const origin = typeof req.body?.origin === 'string' ? req.body.origin.trim() : '';
     if (origin.startsWith('http://') || origin.startsWith('https://')) {
       try {
-        const settings = await readSettingsFromDiskMigrated();
+        const settings = await readSettingsFromDisk();
         if (typeof settings?.publicOrigin !== 'string' || settings.publicOrigin.trim().length === 0) {
           await writeSettingsToDisk({
             ...settings,

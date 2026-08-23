@@ -17,7 +17,7 @@ export const createPushRuntime = (deps) => {
     path,
     webPush,
     PUSH_SUBSCRIPTIONS_FILE_PATH,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     writeSettingsToDisk,
   } = deps;
 
@@ -80,7 +80,7 @@ export const createPushRuntime = (deps) => {
   };
 
   const getOrCreateVapidKeys = async () => {
-    const settings = await readSettingsFromDiskMigrated();
+    const settings = await readSettingsFromDisk();
     const existing = settings?.vapidKeys;
     if (existing && typeof existing.publicKey === 'string' && typeof existing.privateKey === 'string') {
       return { publicKey: existing.publicKey, privateKey: existing.privateKey };
@@ -320,7 +320,7 @@ export const createPushRuntime = (deps) => {
     }
 
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       const stored = settings?.publicOrigin;
       if (typeof stored === 'string' && stored.trim().length > 0) {
         const trimmed = stored.trim();

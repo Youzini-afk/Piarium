@@ -8,7 +8,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     __dirname,
     express,
     listRecentSessions,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     normalizePwaAppName,
     normalizePwaOrientation,
   } = dependencies;
@@ -38,7 +38,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
       registerPwaManifestRoute(app, {
         process,
         listRecentSessions,
-        readSettingsFromDiskMigrated,
+        readSettingsFromDisk,
         normalizePwaAppName,
         normalizePwaOrientation,
       });

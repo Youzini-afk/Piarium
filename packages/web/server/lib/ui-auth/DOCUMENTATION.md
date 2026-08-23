@@ -14,7 +14,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
 - `packages/web/server/lib/client-auth/pairing.js`: short-lived Pairing v2 sessions and one-time secret redemption into trusted-device client tokens.
 
 ## Public exports (ui-auth.js)
-- `createUiAuth({ password, cookieName, sessionTtlMs, readSettingsFromDiskMigrated })`: creates UI auth controller with methods:
+- `createUiAuth({ password, cookieName, sessionTtlMs, readSettingsFromDisk })`: creates UI auth controller with methods:
   - `enabled`
   - `requireAuth(req, res, next)`
   - `handleSessionStatus(req, res)`
@@ -32,7 +32,7 @@ Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. I
   - `dispose()`
 
 ## Public exports (ui-passkeys.js)
-- `createUiPasskeys({ passwordBinding, readSettingsFromDiskMigrated, storeFile, rpName, challengeTtlMs })`: creates passkey runtime with methods:
+- `createUiPasskeys({ passwordBinding, readSettingsFromDisk, storeFile, rpName, challengeTtlMs })`: creates passkey runtime with methods:
   - `enabled`
   - `getStatus(req)`
   - `listPasskeys(req)`

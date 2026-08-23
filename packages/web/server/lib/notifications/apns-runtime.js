@@ -39,10 +39,8 @@ export const createApnsRuntime = (deps) => {
     crypto,
     http2,
     APNS_TOKENS_FILE_PATH,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     writeSettingsToDisk,
-    // Strict settings reader gating identity regeneration (see signing-key.js).
-    readSettingsStrict,
   } = deps;
 
   let persistLock = Promise.resolve();
@@ -61,7 +59,7 @@ export const createApnsRuntime = (deps) => {
   // relay identity — same keypair, same storage, same serverId derivation).
   const getOrCreateRelayKeypair = async () => {
     if (cachedRelayKey) return cachedRelayKey;
-    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDisk, writeSettingsToDisk });
     return cachedRelayKey;
   };
 
@@ -243,7 +241,7 @@ export const createApnsRuntime = (deps) => {
 
     if (!keyId || !teamId || !p8) {
       try {
-        const settings = await readSettingsFromDiskMigrated();
+        const settings = await readSettingsFromDisk();
         const stored = settings?.apnsConfig;
         if (stored && typeof stored === 'object') {
           keyId = keyId || (typeof stored.keyId === 'string' ? stored.keyId.trim() : null);

@@ -48,7 +48,7 @@ const envRelayUrlOverride = () => {
 /**
  * @param {{
  *   crypto: typeof import('node:crypto'),
- *   readSettingsFromDiskMigrated: () => Promise<object>,
+ *   readSettingsFromDisk: () => Promise<object>,
  *   writeSettingsToDisk: (settings: object) => Promise<void>,
  *   getLocalPort: () => number,
  *   logger?: Pick<Console, 'warn'>,
@@ -56,11 +56,8 @@ const envRelayUrlOverride = () => {
  */
 export const createRelayService = ({
   crypto,
-  readSettingsFromDiskMigrated,
+  readSettingsFromDisk,
   writeSettingsToDisk,
-  // Strict settings reader (throws on corrupt/unreadable) gating identity
-  // regeneration — see identity.js/signing-key.js.
-  readSettingsStrict,
   getLocalPort,
   // Returns true when any paired device or pending pairing session uses the
   // relay transport. The relay lifecycle is driven purely by this demand.
@@ -72,7 +69,7 @@ export const createRelayService = ({
   hostLock = null,
   logger = console,
 }) => {
-  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDisk, writeSettingsToDisk });
 
   let hostClient = null;
   let status = { state: 'disabled', lastError: null, connectedClients: 0 };
@@ -82,7 +79,7 @@ export const createRelayService = ({
   const CLAIM_WATCH_INTERVAL_MS = 30_000;
 
   const readConfig = async () => {
-    const settings = await readSettingsFromDiskMigrated();
+    const settings = await readSettingsFromDisk();
     const stored = settings?.privateRelay;
     const override = envRelayUrlOverride();
     return {
@@ -95,7 +92,7 @@ export const createRelayService = ({
   };
 
   const writeConfig = async (config) => {
-    const settings = await readSettingsFromDiskMigrated();
+    const settings = await readSettingsFromDisk();
     await writeSettingsToDisk({
       ...settings,
       privateRelay: { enabled: config.enabled === true, relayUrl: normalizeRelayUrl(config.relayUrl) },

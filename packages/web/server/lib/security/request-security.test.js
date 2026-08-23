@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createRequestSecurityRuntime } from './request-security.js';
 
 const createRuntime = () => createRequestSecurityRuntime({
-  readSettingsFromDiskMigrated: async () => ({}),
+  readSettingsFromDisk: async () => ({}),
 });
 
 describe('request security runtime', () => {

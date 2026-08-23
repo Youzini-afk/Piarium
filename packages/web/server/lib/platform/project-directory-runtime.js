@@ -13,8 +13,8 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     fsPromises,
     path,
     normalizeDirectoryPath,
-    readSettingsFromDiskMigrated,
-    getReadSettingsFromDiskMigrated,
+    readSettingsFromDisk,
+    getReadSettingsFromDisk,
     sanitizeProjects,
   } = dependencies;
   const realpathCache = createRealpathCache({
@@ -78,9 +78,9 @@ export const createProjectDirectoryRuntime = (dependencies) => {
       return { directory: null, error: lastError };
     }
 
-    const readSettings = typeof getReadSettingsFromDiskMigrated === 'function'
-      ? getReadSettingsFromDiskMigrated()
-      : readSettingsFromDiskMigrated;
+    const readSettings = typeof getReadSettingsFromDisk === 'function'
+      ? getReadSettingsFromDisk()
+      : readSettingsFromDisk;
     const settings = await readSettings();
 
     // `lastDirectory` reflects the directory the UI is currently browsing —

@@ -36,7 +36,7 @@ const makeDeps = (overrides = {}) => {
     crypto,
     http2: { connect: vi.fn(() => { throw new Error('http2 must not be used in relay mode'); }) },
     APNS_TOKENS_FILE_PATH: '/tmp/apns-tokens.json',
-    readSettingsFromDiskMigrated: vi.fn(async () => settings),
+    readSettingsFromDisk: vi.fn(async () => settings),
     writeSettingsToDisk: vi.fn(async (next) => { settings = next; }),
     ...overrides,
   };
@@ -201,7 +201,7 @@ describe('apns runtime direct fallback (relay disabled)', () => {
   it('leaves direct APNs environment unset without an explicit override (per-token routing)', async () => {
     const { environment: _environment, ...configWithoutEnvironment } = APNS_CONFIG;
     const runtime = createApnsRuntime(
-      makeDeps({ readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: configWithoutEnvironment })) }),
+      makeDeps({ readSettingsFromDisk: vi.fn(async () => ({ apnsConfig: configWithoutEnvironment })) }),
     );
 
     await expect(runtime.resolveApnsConfig()).resolves.toMatchObject({ environment: null });
@@ -237,7 +237,7 @@ describe('apns runtime direct fallback (relay disabled)', () => {
       },
     };
     const runtime = createApnsRuntime(
-      makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: configWithoutEnvironment })) }),
+      makeDeps({ http2, readSettingsFromDisk: vi.fn(async () => ({ apnsConfig: configWithoutEnvironment })) }),
     );
     await runtime.addOrUpdateApnsToken('s1', 'tokenXcode', undefined, 'ios', 'sandbox');
     await runtime.addOrUpdateApnsToken('s2', 'tokenStore', undefined, 'ios', 'production');
@@ -273,7 +273,7 @@ describe('apns runtime direct fallback (relay disabled)', () => {
       }),
     };
     const runtime = createApnsRuntime(
-      makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
+      makeDeps({ http2, readSettingsFromDisk: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
     );
     await runtime.addOrUpdateApnsToken('s', 'tokenDirect');
     await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'ready-x' });

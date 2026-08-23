@@ -32,7 +32,7 @@ describe('PWA manifest route', () => {
       },
     }, {
       listRecentSessions,
-      readSettingsFromDiskMigrated: async () => ({}),
+      readSettingsFromDisk: async () => ({}),
       normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
       normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
     });

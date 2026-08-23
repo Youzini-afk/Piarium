@@ -5,7 +5,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     tunnelService,
     tunnelProviderRegistry,
     tunnelAuthController,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     readManagedRemoteTunnelConfigFromDisk,
     normalizeTunnelProvider,
     normalizeTunnelMode,
@@ -60,7 +60,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     if (activeProvider) {
       return normalizeTunnelProvider(activeProvider);
     }
-    const settings = await readSettingsFromDiskMigrated();
+    const settings = await readSettingsFromDisk();
     return normalizeTunnelProvider(settings?.tunnelProvider);
   };
 
@@ -244,7 +244,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
           ? params.mode.trim().toLowerCase()
           : null;
 
-        const settings = await readSettingsFromDiskMigrated();
+        const settings = await readSettingsFromDisk();
         const selectedPresetId = typeof params.managedRemoteTunnelPresetId === 'string'
           ? params.managedRemoteTunnelPresetId.trim()
           : '';
@@ -328,7 +328,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
     app.get('/api/piarium/tunnel/status', async (_req, res) => {
       try {
-        const settings = await readSettingsFromDiskMigrated();
+        const settings = await readSettingsFromDisk();
         const normalizedMode = normalizeTunnelMode(settings?.tunnelMode);
         const managedRemoteHostname = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
         const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
@@ -446,7 +446,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
 
     app.post('/api/piarium/tunnel/start', async (_req, res) => {
       try {
-        const settings = await readSettingsFromDiskMigrated();
+        const settings = await readSettingsFromDisk();
         if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
           const rawProvider = _req.body.provider.trim().toLowerCase();
           if (!tunnelProviderRegistry.get(rawProvider)) {

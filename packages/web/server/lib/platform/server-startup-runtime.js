@@ -4,7 +4,7 @@ export const createServerStartupRuntime = (dependencies) => {
     crypto,
     server,
     normalizeTunnelBootstrapTtlMs,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     tunnelAuthController,
     startTunnelWithNormalizedRequest,
     gracefulShutdown,
@@ -77,7 +77,7 @@ export const createServerStartupRuntime = (dependencies) => {
                 publicUrl,
                 mode,
               });
-              const settings = await readSettingsFromDiskMigrated();
+              const settings = await readSettingsFromDisk();
               const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
                 ? null
                 : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);

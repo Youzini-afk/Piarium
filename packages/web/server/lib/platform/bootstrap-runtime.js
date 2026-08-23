@@ -32,7 +32,7 @@ export const createServerBootstrapRuntime = (dependencies) => {
       getServerPort = () => null,
       getTunnelUrl = () => null,
       getServerLabel,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       normalizeTunnelSessionTtlMs,
       sayTTSCapability,
       ensurePushInitialized,
@@ -64,7 +64,7 @@ export const createServerBootstrapRuntime = (dependencies) => {
 
     const uiAuthController = createUiAuth({
       password: uiPassword,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       clientAuthController: remoteClientAuthRuntime,
     });
     if (uiAuthController.enabled) {
@@ -100,7 +100,7 @@ export const createServerBootstrapRuntime = (dependencies) => {
       getDirectCandidateUrls,
       getServerId,
       getServerLabel,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       normalizeTunnelSessionTtlMs,
     });
 
@@ -111,7 +111,7 @@ export const createServerBootstrapRuntime = (dependencies) => {
       ensurePushInitialized,
       getOrCreateVapidKeys,
       getUiSessionTokenFromRequest,
-      readSettingsFromDiskMigrated,
+      readSettingsFromDisk,
       writeSettingsToDisk,
       addOrUpdatePushSubscription,
       removePushSubscription,

@@ -58,18 +58,25 @@ function resolveRelayUrl(settings) {
 // are preserved. Enough for the CLI without wiring the full settings runtime.
 function createSettingsAccessors() {
   const settingsPath = path.join(getDataDir(), SETTINGS_FILE_NAME);
-  const readSettingsFromDiskMigrated = async () => {
+  const readSettingsFromDisk = async () => {
+    let raw;
     try {
-      return JSON.parse(await fs.promises.readFile(settingsPath, 'utf8'));
-    } catch {
-      return {};
+      raw = await fs.promises.readFile(settingsPath, 'utf8');
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') return {};
+      throw error;
     }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Settings file is malformed (non-object payload)');
+    }
+    return parsed;
   };
   const writeSettingsToDisk = async (settings) => {
     await fs.promises.mkdir(path.dirname(settingsPath), { recursive: true });
     await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
   };
-  return { readSettingsFromDiskMigrated, writeSettingsToDisk };
+  return { readSettingsFromDisk, writeSettingsToDisk };
 }
 
 // Resolves the instance's relay identity (serverId + encryption public key,
@@ -80,7 +87,7 @@ function createSettingsAccessors() {
 // is actually on (a relay candidate only connects when the host is relaying).
 async function buildRelayPairingCandidate() {
   const accessors = createSettingsAccessors();
-  const settings = await accessors.readSettingsFromDiskMigrated();
+  const settings = await accessors.readSettingsFromDisk();
   const relayUrl = resolveRelayUrl(settings);
   const identityRuntime = createRelayIdentityRuntime({ crypto, ...accessors });
   const identity = await identityRuntime.getRelayIdentity();

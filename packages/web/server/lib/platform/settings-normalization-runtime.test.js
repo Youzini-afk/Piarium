@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { createProjectIdFromPath } from '../projects/project-id.js';
 import { createSettingsNormalizationRuntime } from './settings-normalization-runtime.js';
 
 const createTestRuntime = (overrides = {}) => {
@@ -90,6 +91,7 @@ describe('settings normalization runtime - symlink resolution', () => {
 
       const result = runtime.sanitizeProjects(projects);
       expect(result[0].path).toBe('/workplace/user/MyProject');
+      expect(result[0].id).toBe(createProjectIdFromPath('/workplace/user/MyProject'));
     });
 
     it('falls back to path.resolve when realpathSync throws', () => {
@@ -119,7 +121,7 @@ describe('settings normalization runtime - symlink resolution', () => {
 
       const result = runtime.sanitizeProjects(projects);
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('proj1');
+      expect(result[0].id).toBe(createProjectIdFromPath('/real/project'));
     });
   });
 

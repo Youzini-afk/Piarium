@@ -5,7 +5,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     crypto,
     piariumDataDir,
     sanitizeProjects,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     persistSettings,
     createFsSearchRuntime,
     spawn,
@@ -183,7 +183,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     }
 
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       const { project } = findProjectById(settings, projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -255,7 +255,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     }
 
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       const { projects, project } = findProjectById(settings, projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -293,7 +293,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     }
 
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       const { projects, project } = findProjectById(settings, projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -323,7 +323,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     }
 
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       const { projects, project } = findProjectById(settings, projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });

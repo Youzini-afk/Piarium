@@ -103,7 +103,7 @@ const readTree = async (relativePath, depth, context) => {
 
 const openWorkspaceProject = async (relativePathValue, dependencies, context) => {
   const {
-    readSettingsFromDiskMigrated = async () => ({}),
+    readSettingsFromDisk = async () => ({}),
     persistSettings = async (changes) => changes,
     sanitizeProjects = (value) => Array.isArray(value) ? value : [],
   } = dependencies;
@@ -120,7 +120,7 @@ const openWorkspaceProject = async (relativePathValue, dependencies, context) =>
     throw error;
   }
 
-  const settings = await readSettingsFromDiskMigrated();
+  const settings = await readSettingsFromDisk();
   const projects = sanitizeProjects(settings?.projects || []);
   const projectId = createProjectIdFromPath(resolved.absolutePath);
   const now = Date.now();

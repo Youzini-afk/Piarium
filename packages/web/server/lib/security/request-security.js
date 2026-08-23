@@ -1,5 +1,5 @@
 export const createRequestSecurityRuntime = (deps) => {
-  const { readSettingsFromDiskMigrated } = deps;
+  const { readSettingsFromDisk } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never
   // matches the server host: the desktop shell, the iOS Capacitor WebView
   // (capacitor://localhost), and the Android Capacitor WebView, which uses
@@ -91,7 +91,7 @@ export const createRequestSecurityRuntime = (deps) => {
     }
 
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       if (typeof settings?.publicOrigin === 'string' && settings.publicOrigin.trim().length > 0) {
         origins.add(new URL(settings.publicOrigin.trim()).origin);
       }

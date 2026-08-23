@@ -417,7 +417,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     uiAuthController,
     remoteClientAuthRuntime,
     clientPairingRuntime,
-    readSettingsFromDiskMigrated,
+    readSettingsFromDisk,
     normalizeTunnelSessionTtlMs,
     // Returns the relay pairing candidate ({ type:'relay', relayUrl, serverId,
     // hostEncPubJwk, priority }) when the host relay is enabled, else null.
@@ -1040,7 +1040,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   app.get('/connect', async (req, res) => {
     try {
       const token = typeof req.query?.t === 'string' ? req.query.t : '';
-      const settings = await readSettingsFromDiskMigrated();
+      const settings = await readSettingsFromDisk();
       const tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
 
       const exchange = tunnelAuthController.exchangeBootstrapToken({
