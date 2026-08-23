@@ -686,7 +686,6 @@ export interface SettingsPayload {
   sessionRetentionAction?: 'archive' | 'delete';
   recoveryPreference?: 'conversation' | 'both' | 'ask';
   followUpBehavior?: 'steer' | 'queue';
-  queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
@@ -721,7 +720,6 @@ export interface SettingsPayload {
   mobileKeyboardMode?: 'native' | 'resize-content';
   draftStarters?: DraftStarterRef[];
   draftStartersVisible?: boolean;
-  draftStartersCraftGoalAdded?: boolean;
 
   [key: string]: unknown;
 }

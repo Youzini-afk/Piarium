@@ -23,7 +23,7 @@ const packageNameFromModuleId = (id: string): string | null => {
 };
 
 const themeJsonHmrPlugin = () => ({
-  name: 'openchamber-theme-json-hmr',
+  name: 'piarium-theme-json-hmr',
   handleHotUpdate({ file, server }: { file: string; server: { ws: { send: (payload: unknown) => void } } }) {
     if (!file.startsWith(`${themeDirectory}${path.sep}`) || path.extname(file) !== '.json') {
       return;

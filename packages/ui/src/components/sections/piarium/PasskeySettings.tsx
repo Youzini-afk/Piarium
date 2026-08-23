@@ -51,7 +51,7 @@ export const PasskeySettings: React.FC = () => {
       const nextPasskeys = await fetchStoredPasskeys();
       setPasskeys(nextPasskeys);
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.loadFailed');
+      const message = error instanceof Error ? error.message : t('settings.piarium.passkeys.toast.loadFailed');
       setErrorMessage(message);
     } finally {
       setIsLoading(false);
@@ -99,7 +99,7 @@ export const PasskeySettings: React.FC = () => {
 
   const handleRegisterPasskey = React.useCallback(async () => {
     if (!status.enabled) {
-      const message = t('settings.openchamber.passkeys.toast.enableUiPasswordFirst');
+      const message = t('settings.piarium.passkeys.toast.enableUiPasswordFirst');
       setErrorMessage(message);
       toast.message(message);
       return;
@@ -124,14 +124,14 @@ export const PasskeySettings: React.FC = () => {
       await registerCurrentDevicePasskey();
       setStatus(await fetchPasskeyStatus());
       await loadPasskeys();
-      toast.success(t('settings.openchamber.passkeys.toast.added'));
+      toast.success(t('settings.piarium.passkeys.toast.added'));
     } catch (error) {
       if (isPasskeyCeremonyAbort(error)) {
-        toast.message(t('settings.openchamber.passkeys.toast.setupCanceled'));
+        toast.message(t('settings.piarium.passkeys.toast.setupCanceled'));
         return;
       }
 
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.addFailed');
+      const message = error instanceof Error ? error.message : t('settings.piarium.passkeys.toast.addFailed');
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -147,9 +147,9 @@ export const PasskeySettings: React.FC = () => {
       await revokeStoredPasskey(id);
       setStatus(await fetchPasskeyStatus());
       await loadPasskeys();
-      toast.success(t('settings.openchamber.passkeys.toast.removed'));
+      toast.success(t('settings.piarium.passkeys.toast.removed'));
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.removeFailed');
+      const message = error instanceof Error ? error.message : t('settings.piarium.passkeys.toast.removeFailed');
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -165,7 +165,7 @@ export const PasskeySettings: React.FC = () => {
       await resetAllAuth();
       window.location.reload();
     } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.openchamber.passkeys.toast.clearAuthFailed');
+      const message = error instanceof Error ? error.message : t('settings.piarium.passkeys.toast.clearAuthFailed');
       setErrorMessage(message);
       toast.error(message);
       setIsResetting(false);
@@ -173,9 +173,9 @@ export const PasskeySettings: React.FC = () => {
   }, [t]);
 
   return (
-    <SettingsSection title={t('settings.openchamber.passkeys.title')}>
+    <SettingsSection title={t('settings.piarium.passkeys.title')}>
       <div className="space-y-2">
-        <SettingsFieldRow label={t('settings.openchamber.passkeys.field.currentDevice')}>
+        <SettingsFieldRow label={t('settings.piarium.passkeys.field.currentDevice')}>
           <Button
             type="button"
             variant={isRegistering ? 'secondary' : 'outline'}
@@ -184,7 +184,7 @@ export const PasskeySettings: React.FC = () => {
             disabled={isLoading || isResetting}
             className="!font-normal"
           >
-            {isRegistering ? t('settings.openchamber.passkeys.actions.cancelSetup') : t('settings.openchamber.passkeys.actions.add')}
+            {isRegistering ? t('settings.piarium.passkeys.actions.cancelSetup') : t('settings.piarium.passkeys.actions.add')}
           </Button>
           <Button
             type="button"
@@ -194,13 +194,13 @@ export const PasskeySettings: React.FC = () => {
             disabled={isLoading || isRegistering || isResetting}
             className="!font-normal text-muted-foreground hover:text-foreground"
           >
-            {isResetting ? t('settings.openchamber.passkeys.actions.signingOut') : t('settings.openchamber.passkeys.actions.signOutEverywhere')}
+            {isResetting ? t('settings.piarium.passkeys.actions.signingOut') : t('settings.piarium.passkeys.actions.signOutEverywhere')}
           </Button>
         </SettingsFieldRow>
 
         {!status.enabled && (
           <p className="typography-meta text-muted-foreground">
-            {t('settings.openchamber.passkeys.state.uiPasswordRequired')}
+            {t('settings.piarium.passkeys.state.uiPasswordRequired')}
           </p>
         )}
 
@@ -211,9 +211,9 @@ export const PasskeySettings: React.FC = () => {
         )}
 
         {isLoading ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.passkeys.state.loading')}</p>
+          <p className="typography-meta text-muted-foreground">{t('settings.piarium.passkeys.state.loading')}</p>
         ) : passkeys.length === 0 ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.passkeys.state.noneSaved')}</p>
+          <p className="typography-meta text-muted-foreground">{t('settings.piarium.passkeys.state.noneSaved')}</p>
         ) : (
           <div className="space-y-1 pt-1">
             {passkeys.map((passkey) => (
@@ -225,11 +225,11 @@ export const PasskeySettings: React.FC = () => {
               >
                 <span className="typography-meta text-muted-foreground truncate">
                   {passkey.lastUsedAt
-                    ? t('settings.openchamber.passkeys.item.lastUsed', {
-                        time: formatTimestamp(passkey.lastUsedAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
+                    ? t('settings.piarium.passkeys.item.lastUsed', {
+                        time: formatTimestamp(passkey.lastUsedAt, t('settings.piarium.passkeys.time.neverUsed'), timeFormatPreference),
                       })
-                    : t('settings.openchamber.passkeys.item.added', {
-                        time: formatTimestamp(passkey.createdAt, t('settings.openchamber.passkeys.time.neverUsed'), timeFormatPreference),
+                    : t('settings.piarium.passkeys.item.added', {
+                        time: formatTimestamp(passkey.createdAt, t('settings.piarium.passkeys.time.neverUsed'), timeFormatPreference),
                       })}
                 </span>
                 <Button
@@ -240,7 +240,7 @@ export const PasskeySettings: React.FC = () => {
                   disabled={revokingId === passkey.id}
                   className="!font-normal text-muted-foreground hover:text-foreground"
                 >
-                  {revokingId === passkey.id ? t('settings.openchamber.passkeys.actions.removing') : t('settings.common.actions.delete')}
+                  {revokingId === passkey.id ? t('settings.piarium.passkeys.actions.removing') : t('settings.common.actions.delete')}
                 </Button>
               </SettingsFieldRow>
             ))}

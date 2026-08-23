@@ -5,7 +5,7 @@ const CLIENT_TOKEN_QUERY_PARAM = 'piarium_client_token';
 const URL_AUTH_TOKEN_QUERY_PARAM = 'piarium_url_token';
 const PREVIEW_PASSTHROUGH_REQUEST_HEADERS = ['x-inertia', 'x-inertia-version'];
 const PREVIEW_PASSTHROUGH_RESPONSE_HEADERS = ['x-inertia', 'x-inertia-location'];
-export const PREVIEW_TARGET_ERROR_HEADER = 'x-openchamber-preview-target-error';
+export const PREVIEW_TARGET_ERROR_HEADER = 'x-piarium-preview-target-error';
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -15,7 +15,7 @@ const LOOPBACK_HOSTS = new Set([
   '0.0.0.0',
 ]);
 
-const PREVIEW_BRIDGE_SCRIPT_ID = 'openchamber-preview-bridge';
+const PREVIEW_BRIDGE_SCRIPT_ID = 'piarium-preview-bridge';
 
 const parsePreviewResourcePath = (url) => {
   try {
@@ -199,7 +199,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   if (window.__piariumPreviewBridgeInstalled) return;
   window.__piariumPreviewBridgeInstalled = true;
 
-  const SOURCE = 'openchamber-preview-bridge';
+  const SOURCE = 'piarium-preview-bridge';
   const VERSION = 1;
   const MAX_TEXT = 500;
   const MAX_ARG = 1000;
@@ -327,7 +327,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     try {
       const root = document.documentElement;
       root.style.colorScheme = next;
-      root.dataset.openchamberPreviewColorScheme = next;
+      root.dataset.piariumPreviewColorScheme = next;
       if (shouldSyncDataTheme()) {
         root.dataset.theme = next;
       }
@@ -514,7 +514,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       }
     };
 
-    function OpenChamberPreviewWebSocket(url, protocols) {
+    function PiariumPreviewWebSocket(url, protocols) {
       const protocolList = Array.isArray(protocols) ? protocols : [protocols];
       const isViteSocket = protocolList.indexOf('vite-hmr') >= 0;
       const nextUrl = rewriteUrl(url, protocols);
@@ -536,10 +536,10 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       return socket;
     }
 
-    OpenChamberPreviewWebSocket.prototype = NativeWebSocket.prototype;
-    Object.setPrototypeOf(OpenChamberPreviewWebSocket, NativeWebSocket);
-    Object.defineProperty(OpenChamberPreviewWebSocket, 'name', { value: 'WebSocket' });
-    window.WebSocket = OpenChamberPreviewWebSocket;
+    PiariumPreviewWebSocket.prototype = NativeWebSocket.prototype;
+    Object.setPrototypeOf(PiariumPreviewWebSocket, NativeWebSocket);
+    Object.defineProperty(PiariumPreviewWebSocket, 'name', { value: 'WebSocket' });
+    window.WebSocket = PiariumPreviewWebSocket;
   };
 
   const installAppRequestProxyPatch = () => {
@@ -672,27 +672,27 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
 
     if (typeof window.EventSource === 'function') {
       const NativeEventSource = window.EventSource;
-      function OpenChamberPreviewEventSource(url, eventSourceInitDict) {
+      function PiariumPreviewEventSource(url, eventSourceInitDict) {
         return new NativeEventSource(proxiedUrl(String(url)), eventSourceInitDict);
       }
-      OpenChamberPreviewEventSource.prototype = NativeEventSource.prototype;
-      Object.setPrototypeOf(OpenChamberPreviewEventSource, NativeEventSource);
-      Object.defineProperty(OpenChamberPreviewEventSource, 'name', { value: 'EventSource' });
-      window.EventSource = OpenChamberPreviewEventSource;
+      PiariumPreviewEventSource.prototype = NativeEventSource.prototype;
+      Object.setPrototypeOf(PiariumPreviewEventSource, NativeEventSource);
+      Object.defineProperty(PiariumPreviewEventSource, 'name', { value: 'EventSource' });
+      window.EventSource = PiariumPreviewEventSource;
     }
 
     if (typeof window.WebSocket === 'function') {
       const NativeWebSocket = window.WebSocket;
-      function OpenChamberPreviewAppWebSocket(url, protocols) {
+      function PiariumPreviewAppWebSocket(url, protocols) {
         const nextUrl = proxiedWebSocketUrl(String(url));
         return arguments.length === 1
           ? new NativeWebSocket(nextUrl)
           : new NativeWebSocket(nextUrl, protocols);
       }
-      OpenChamberPreviewAppWebSocket.prototype = NativeWebSocket.prototype;
-      Object.setPrototypeOf(OpenChamberPreviewAppWebSocket, NativeWebSocket);
-      Object.defineProperty(OpenChamberPreviewAppWebSocket, 'name', { value: 'WebSocket' });
-      window.WebSocket = OpenChamberPreviewAppWebSocket;
+      PiariumPreviewAppWebSocket.prototype = NativeWebSocket.prototype;
+      Object.setPrototypeOf(PiariumPreviewAppWebSocket, NativeWebSocket);
+      Object.defineProperty(PiariumPreviewAppWebSocket, 'name', { value: 'WebSocket' });
+      window.WebSocket = PiariumPreviewAppWebSocket;
     }
   };
 
@@ -861,7 +861,7 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
     const data = event.data;
-    if (!data || data.source !== 'openchamber-preview-parent' || data.version !== VERSION) return;
+    if (!data || data.source !== 'piarium-preview-parent' || data.version !== VERSION) return;
     if (data.type === 'set-inspect-mode') {
       setInspectMode(data.enabled === true);
     }
@@ -1013,7 +1013,7 @@ export const normalizeProxyTargetUrl = (rawUrl, { allowExternal = false } = {}) 
     url.hostname = '127.0.0.1';
   }
 
-  // Only keep origin here; the proxy path is preserved on the OpenChamber side.
+  // Only keep origin here; the proxy path is preserved on the Piarium side.
   return { ok: true, origin: url.origin };
 };
 
@@ -1025,7 +1025,7 @@ const appendProxyAuthToProxyUrl = (value, { previewToken = '', urlAuthToken = ''
     || value.includes(URL_AUTH_TOKEN_QUERY_PARAM);
   if (!needsQueryRewrite) return value;
   try {
-    const parsed = new URL(value, 'http://openchamber-preview.local');
+    const parsed = new URL(value, 'http://piarium-preview.local');
     parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
     parsed.searchParams.delete(URL_AUTH_TOKEN_QUERY_PARAM);
     if (previewToken) parsed.searchParams.set(TOKEN_QUERY_PARAM, previewToken);
@@ -1445,10 +1445,10 @@ export const createPreviewProxyRuntime = ({
       on: {
         proxyReq: (proxyReq, req) => {
           applyPreviewPassthroughRequestHeaders(req, proxyReq);
-          // Keep local dev servers from receiving OpenChamber credentials.
+          // Keep local dev servers from receiving Piarium credentials.
           proxyReq.removeHeader('cookie');
           proxyReq.removeHeader('authorization');
-          proxyReq.removeHeader('x-openchamber-ui-session');
+          proxyReq.removeHeader('x-piarium-ui-session');
           proxyReq.setHeader('accept-encoding', 'identity');
         },
         proxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
@@ -1459,7 +1459,7 @@ export const createPreviewProxyRuntime = ({
           // Per-response nonce lets the injected bridge run under the dev
           // server's CSP without dropping its script restrictions wholesale.
           const bridgeNonce = crypto.randomBytes(16).toString('base64');
-          // Allow the dev server response to be framed inside OpenChamber even
+          // Allow the dev server response to be framed inside Piarium even
           // if it normally sets X-Frame-Options or a CSP frame-ancestors rule.
           // The proxy is same-origin so embedding is otherwise safe.
           stripFrameBustingHeaders(proxyRes.headers, bridgeNonce);

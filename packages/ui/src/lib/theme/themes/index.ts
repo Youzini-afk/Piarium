@@ -25,15 +25,7 @@ export const themes: Theme[] = [
 ];
 
 export function getThemeById(id: string): Theme | undefined {
-  // Back-compat for previous default IDs and a short-lived rename.
-  const resolvedId =
-    id === 'openchamber-light' ? 'piarium-light' :
-    id === 'openchamber-dark' ? 'piarium-dark' :
-    id === 'app-light' ? 'flexoki-light' :
-    id === 'app-dark' ? 'flexoki-dark' :
-    id;
-
-  return themes.find(theme => theme.metadata.id === resolvedId);
+  return themes.find(theme => theme.metadata.id === id);
 }
 
 export function getDefaultTheme(prefersDark: boolean): Theme {

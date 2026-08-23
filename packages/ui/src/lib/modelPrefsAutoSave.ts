@@ -1,6 +1,7 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 
 type ModelRef = { providerID: string; modelID: string };
 type ModelPrefsPayload = {
@@ -114,6 +115,9 @@ export const startModelPrefsAutoSave = () => {
   });
 
   const unsubscribe = useUIStore.subscribe((state, prevState) => {
+    if (isApplyingAuthoritativeSettings()) {
+      return;
+    }
     const next = {
       favoriteModels: state.favoriteModels,
       hiddenModels: state.hiddenModels,

@@ -347,7 +347,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (typeof document === 'undefined') {
       return;
     }
-    const hasMacVibrancy = document.documentElement.hasAttribute('data-oc-vibrancy')
+    const hasMacVibrancy = document.documentElement.hasAttribute('data-piarium-vibrancy')
       || window.__PIARIUM_ELECTRON__?.macVibrancy === true;
     const chromeColor = hasMacVibrancy ? 'transparent' : theme.colors.surface.background;
 

@@ -19,8 +19,8 @@ import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromp
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
-import type { OpenChamberSection } from '@/components/sections/openchamber/types';
-import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
+import type { PiariumSettingsSection } from '@/components/sections/piarium/types';
+import { PiariumSettingsPage } from '@/components/sections/piarium/PiariumSettingsPage';
 import { BuiltinAboutSettingsPage } from './BuiltinAboutSettingsPage';
 import type { SettingsPageImplementation, SettingsPageMeta, SettingsRuntimeContext } from './page-types';
 
@@ -31,8 +31,8 @@ interface BuiltinPageDefinition {
   meta: SettingsPageMeta;
 }
 
-const openChamberPage = (section: OpenChamberSection): SettingsPageImplementation => ({
-  renderContent: () => <OpenChamberPage section={section} />,
+const piariumPage = (section: PiariumSettingsSection): SettingsPageImplementation => ({
+  renderContent: () => <PiariumSettingsPage section={section} />,
 });
 
 const page = (
@@ -44,13 +44,13 @@ const notVSCode = (ctx: SettingsRuntimeContext) => !ctx.isVSCode;
 
 export const BUILTIN_SETTINGS_PAGES: readonly BuiltinPageDefinition[] = [
   page({ slug: 'home', title: 'Settings', titleKey: 'settings.view.home.title', group: 'general', kind: 'single', icon: null, order: -1, keywords: ['search', 'settings'] }, { renderContent: () => null }),
-  page({ slug: 'general', title: 'General', titleKey: 'settings.page.general.title', group: 'general', kind: 'single', icon: 'settings-3', order: 0, keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'password', 'passkey', 'security', 'privacy', 'telemetry', 'transport', 'network', 'lan'] }, openChamberPage('general')),
-  page({ slug: 'appearance', title: 'Appearance', titleKey: 'settings.page.appearance.title', group: 'general', kind: 'single', icon: 'palette', order: 1, keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'keyboard', 'viewport', 'mobile', 'terminal', 'pwa', 'install name', 'app shortcuts'] }, openChamberPage('visual')),
-  page({ slug: 'chat', title: 'Chat', titleKey: 'settings.page.chat.title', group: 'general', kind: 'single', icon: 'chat-ai-3', order: 2, keywords: ['tools', 'diff', 'reasoning', 'dotfiles', 'draft', 'queue', 'output', 'copy', 'image', 'split messages', 'message actions'] }, openChamberPage('chat')),
-  page({ slug: 'notifications', title: 'Notifications', titleKey: 'settings.page.notifications.title', group: 'general', kind: 'single', icon: 'notification-3', order: 3, keywords: ['alerts', 'native', 'summary', 'summarization'] }, openChamberPage('notifications')),
-  page({ slug: 'sessions', title: 'Sessions', titleKey: 'settings.page.sessions.title', group: 'general', kind: 'single', icon: 'chat-history', order: 4, keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'zen', 'recovery', 'rollback', 'undo', 'checkpoint', 'pi-workspace-history', 'pi-wtf'] }, openChamberPage('sessions')),
-  page({ slug: 'shortcuts', title: 'Shortcuts', titleKey: 'settings.page.shortcuts.title', group: 'general', kind: 'single', icon: 'command', order: 5, keywords: ['keyboard', 'hotkeys', 'shortcuts', 'bindings'] }, { ...openChamberPage('shortcuts'), isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile }),
-  page({ slug: 'voice', title: 'Voice', titleKey: 'settings.page.voice.title', group: 'general', kind: 'single', icon: 'mic', order: 6, keywords: ['tts', 'speech', 'voice'] }, { ...openChamberPage('voice'), isAvailable: notVSCode }),
+  page({ slug: 'general', title: 'General', titleKey: 'settings.page.general.title', group: 'general', kind: 'single', icon: 'settings-3', order: 0, keywords: ['general', 'startup', 'launch at login', 'autostart', 'tray', 'password', 'passkey', 'security', 'privacy', 'telemetry', 'transport', 'network', 'lan'] }, piariumPage('general')),
+  page({ slug: 'appearance', title: 'Appearance', titleKey: 'settings.page.appearance.title', group: 'general', kind: 'single', icon: 'palette', order: 1, keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'keyboard', 'viewport', 'mobile', 'terminal', 'pwa', 'install name', 'app shortcuts'] }, piariumPage('visual')),
+  page({ slug: 'chat', title: 'Chat', titleKey: 'settings.page.chat.title', group: 'general', kind: 'single', icon: 'chat-ai-3', order: 2, keywords: ['tools', 'diff', 'reasoning', 'dotfiles', 'draft', 'queue', 'output', 'copy', 'image', 'split messages', 'message actions'] }, piariumPage('chat')),
+  page({ slug: 'notifications', title: 'Notifications', titleKey: 'settings.page.notifications.title', group: 'general', kind: 'single', icon: 'notification-3', order: 3, keywords: ['alerts', 'native', 'summary', 'summarization'] }, piariumPage('notifications')),
+  page({ slug: 'sessions', title: 'Sessions', titleKey: 'settings.page.sessions.title', group: 'general', kind: 'single', icon: 'chat-history', order: 4, keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'zen', 'recovery', 'rollback', 'undo', 'checkpoint', 'pi-workspace-history', 'pi-wtf'] }, piariumPage('sessions')),
+  page({ slug: 'shortcuts', title: 'Shortcuts', titleKey: 'settings.page.shortcuts.title', group: 'general', kind: 'single', icon: 'command', order: 5, keywords: ['keyboard', 'hotkeys', 'shortcuts', 'bindings'] }, { ...piariumPage('shortcuts'), isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile }),
+  page({ slug: 'voice', title: 'Voice', titleKey: 'settings.page.voice.title', group: 'general', kind: 'single', icon: 'mic', order: 6, keywords: ['tts', 'speech', 'voice'] }, { ...piariumPage('voice'), isAvailable: notVSCode }),
   page({ slug: 'usage', title: 'Usage', titleKey: 'settings.page.usage.title', group: 'general', kind: 'split', icon: 'bar-chart-2', order: 7, keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'] }, { renderContent: () => <UsagePage />, renderSidebar: (options) => <UsageSidebar onItemSelect={options.onItemSelect} /> }),
   page({ slug: 'about', title: 'About', titleKey: 'settings.page.about.title', group: 'general', kind: 'single', icon: 'information', order: 8, keywords: ['about', 'version', 'updates', 'release', 'changelog'] }, {
     isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode,
@@ -58,7 +58,7 @@ export const BUILTIN_SETTINGS_PAGES: readonly BuiltinPageDefinition[] = [
   }),
   page({ slug: 'projects', title: 'Projects', titleKey: 'settings.page.projects.title', group: 'projects', kind: 'split', icon: 'folders', order: 20, keywords: ['project', 'projects', 'worktree', 'worktrees', 'repo', 'repository', 'directory'] }, { isAvailable: notVSCode, renderContent: () => <ProjectsPage />, renderSidebar: (options) => <ProjectsSidebar onItemSelect={options.onItemSelect} /> }),
   page({ slug: 'remote-instances', title: 'Remote Instances', titleKey: 'settings.page.remoteInstances.title', group: 'projects', kind: 'single', icon: 'computer', order: 21, keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'] }, { isAvailable: notVSCode, renderContent: () => <RemoteInstancesPage /> }),
-  page({ slug: 'tunnel', title: 'External Tunnel', titleKey: 'settings.page.tunnel.title', group: 'projects', kind: 'single', icon: 'home-office', order: 22, badgeKey: 'settings.view.badge.beta', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'] }, { ...openChamberPage('tunnel'), isAvailable: notVSCode }),
+  page({ slug: 'tunnel', title: 'External Tunnel', titleKey: 'settings.page.tunnel.title', group: 'projects', kind: 'single', icon: 'home-office', order: 22, badgeKey: 'settings.view.badge.beta', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'] }, { ...piariumPage('tunnel'), isAvailable: notVSCode }),
   page({ slug: 'git', title: 'Git', titleKey: 'settings.page.git.title', group: 'projects', kind: 'single', icon: 'git-branch', order: 23, keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'] }, { isAvailable: notVSCode, renderContent: () => <GitPage /> }),
   page({ slug: 'runtime', title: 'Runtime', titleKey: 'settings.page.runtime.title', group: 'pi', kind: 'single', icon: 'terminal-box', order: 39, keywords: ['pi', 'runtime', 'install', 'upgrade', 'node', 'path', 'package root'] }, { renderContent: () => <PiRuntimeSettingsPage /> }),
   page({ slug: 'providers', title: 'Providers', titleKey: 'settings.page.providers.title', group: 'pi', kind: 'split', icon: 'cloud', order: 40, keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'] }, { renderContent: () => <ProvidersPage />, renderSidebar: (options) => <ProvidersSidebar onItemSelect={options.onItemSelect} /> }),

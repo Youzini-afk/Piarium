@@ -15,8 +15,8 @@ describe('desktop window controls position', () => {
     expect(resolveDesktopWindowControlsSide('left')).toBe('left');
   });
 
-  test('maps legacy auto to right', () => {
-    expect(normalizeDesktopWindowControlsPosition('auto')).toBe('right');
+  test('accepts only current position values', () => {
+    expect(normalizeDesktopWindowControlsPosition('auto')).toBeUndefined();
     expect(normalizeDesktopWindowControlsPosition('left')).toBe('left');
     expect(normalizeDesktopWindowControlsPosition('right')).toBe('right');
     expect(normalizeDesktopWindowControlsPosition('invalid')).toEqual(undefined);

@@ -295,7 +295,7 @@ describe('updateDesktopSettings', () => {
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://load-b.example', runtimeKey: 'load-b' });
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { terminalShell: 'fish', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      settings: { terminalShell: 'fish' },
       source: 'web',
     }));
     await syncDesktopSettings();
@@ -303,14 +303,14 @@ describe('updateDesktopSettings', () => {
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://load-a.example', runtimeKey: 'load-a' });
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { terminalShell: 'bash', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      settings: { terminalShell: 'bash' },
       source: 'web',
     }));
     await syncDesktopSettings();
     expect(useUIStore.getState().terminalShell).toBe('bash');
 
     originalLoad.resolve({
-      settings: { terminalShell: 'zsh', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      settings: { terminalShell: 'zsh' },
       source: 'web',
     });
     await firstSync;
@@ -326,7 +326,6 @@ describe('updateDesktopSettings', () => {
         themeId: 'theme-a',
         directoryShowHidden: true,
         sttModel: 'model-a',
-        draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
       },
       source: 'web',
     }));
@@ -334,7 +333,7 @@ describe('updateDesktopSettings', () => {
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://mirror-b.example', runtimeKey: 'mirror-b' });
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      settings: {},
       source: 'web',
     }));
     await syncDesktopSettings();
@@ -362,7 +361,6 @@ describe('updateDesktopSettings', () => {
         recoveryPreference: 'both',
         draftStarters: [{ type: 'command', name: 'runtime-a' }],
         draftStartersVisible: false,
-        draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
       },
       source: 'web',
     }));
@@ -378,7 +376,7 @@ describe('updateDesktopSettings', () => {
 
     switchRuntimeEndpoint({ apiBaseUrl: 'https://preferences-b.example', runtimeKey: 'preferences-b' });
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      settings: {},
       source: 'web',
     }));
     await syncDesktopSettings();
@@ -414,7 +412,6 @@ describe('updateDesktopSettings', () => {
       recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
       recentAgents: ['build', 'plan'],
       recentEfforts: { 'anthropic/claude-haiku-4': ['high', 'default'] },
-      draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     } satisfies SettingsPayload;
     registerSettingsApi(async () => ({}), async () => ({ settings, source: 'web' }));
 
@@ -469,7 +466,6 @@ describe('updateDesktopSettings', () => {
 
       expect(saveCalls).toHaveLength(1);
       expect(saveCalls[0]).toEqual({
-        draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
         hiddenModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
         collapsedModelProviders: ['openai'],
@@ -506,7 +502,7 @@ describe('updateDesktopSettings', () => {
     invalidateSettingsCache();
     useUIStore.getState().setAutoSaveEnabled(true);
     registerSettingsApi(async () => ({}), async () => ({
-      settings: { autoSaveEnabled: false, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      settings: { autoSaveEnabled: false },
       source: 'web',
     }));
 
@@ -531,7 +527,7 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls.some((changes) => changes.autoSaveEnabled === false)).toBe(true);
   });
 
-  test('seeds omitted autoSaveEnabled from the hydrated client preference', async () => {
+  test('materializes the current autoSaveEnabled default without a migration write', async () => {
     getWindow();
     invalidateSettingsCache();
     useUIStore.getState().setAutoSaveEnabled(false);
@@ -540,27 +536,7 @@ describe('updateDesktopSettings', () => {
       saveCalls.push(changes);
       return { ...changes } as SettingsPayload;
     }, async () => ({
-      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
-      source: 'web',
-    }));
-
-    await syncDesktopSettings();
-    await delay(500);
-
-    expect(useUIStore.getState().autoSaveEnabled).toBe(false);
-    expect(saveCalls.some((changes) => changes.autoSaveEnabled === false)).toBe(true);
-  });
-
-  test('seeds default autoSaveEnabled when omitted and client still has the default', async () => {
-    getWindow();
-    invalidateSettingsCache();
-    useUIStore.getState().setAutoSaveEnabled(true);
-    const saveCalls: Array<Partial<SettingsPayload>> = [];
-    registerSettingsApi(async (changes) => {
-      saveCalls.push(changes);
-      return { ...changes } as SettingsPayload;
-    }, async () => ({
-      settings: { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      settings: {},
       source: 'web',
     }));
 
@@ -568,6 +544,6 @@ describe('updateDesktopSettings', () => {
     await delay(500);
 
     expect(useUIStore.getState().autoSaveEnabled).toBe(true);
-    expect(saveCalls.some((changes) => changes.autoSaveEnabled === true)).toBe(true);
+    expect(saveCalls).toEqual([]);
   });
 });

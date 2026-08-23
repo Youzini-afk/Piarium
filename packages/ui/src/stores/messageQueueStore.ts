@@ -5,6 +5,7 @@ import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
+import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 
 export type FollowUpBehavior = 'steer' | 'queue';
 
@@ -13,32 +14,6 @@ export const DEFAULT_FOLLOW_UP_BEHAVIOR: FollowUpBehavior = 'queue';
 export const isFollowUpBehavior = (value: unknown): value is FollowUpBehavior => (
     value === 'steer' || value === 'queue'
 );
-
-export const normalizeFollowUpBehavior = (
-    value: unknown,
-    legacyQueueModeEnabled?: boolean | null,
-): FollowUpBehavior => {
-    // "immediate" was removed: on a busy session it was wire-identical to
-    // "steer" (OpenCode only supports delivery "steer" | "queue", defaulting
-    // to "steer"), so collapse any persisted/legacy "immediate" onto "steer".
-    if (value === 'immediate') {
-        return 'steer';
-    }
-
-    if (isFollowUpBehavior(value)) {
-        return value;
-    }
-
-    if (legacyQueueModeEnabled === false) {
-        return 'steer';
-    }
-
-    if (legacyQueueModeEnabled === true) {
-        return 'queue';
-    }
-
-    return DEFAULT_FOLLOW_UP_BEHAVIOR;
-};
 
 export interface QueuedMessage {
     id: string;
@@ -80,7 +55,6 @@ export const parseMessageQueueKey = (key: string): MessageQueueTarget | null => 
 
 interface MessageQueueState {
     queuedMessages: Record<string, QueuedMessage[]>; // runtime + directory + session → queue
-    quarantinedLegacyMessages: Record<string, QueuedMessage[]>;
     followUpBehavior: FollowUpBehavior;
 }
 
@@ -97,32 +71,11 @@ interface MessageQueueActions {
 
 type MessageQueueStore = MessageQueueState & MessageQueueActions;
 
-type PersistedMessageQueueState = {
-    queuedMessages?: Record<string, QueuedMessage[]>;
-    quarantinedLegacyMessages?: Record<string, QueuedMessage[]>;
-    followUpBehavior?: FollowUpBehavior;
-    queueModeEnabled?: boolean;
-};
-
-export const migrateMessageQueueState = (persistedState: unknown, version: number): Partial<MessageQueueStore> => {
-    const state = (persistedState ?? {}) as PersistedMessageQueueState;
-    const legacyQueues = version < 2 ? (state.queuedMessages ?? {}) : {};
-    return {
-        queuedMessages: version < 2 ? {} : (state.queuedMessages ?? {}),
-        quarantinedLegacyMessages: {
-            ...(state.quarantinedLegacyMessages ?? {}),
-            ...legacyQueues,
-        },
-        followUpBehavior: normalizeFollowUpBehavior(state.followUpBehavior, state.queueModeEnabled ?? null),
-    };
-};
-
 export const useMessageQueueStore = create<MessageQueueStore>()(
     devtools(
         persist(
             (set, get) => ({
                 queuedMessages: {},
-                quarantinedLegacyMessages: {},
                 followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
 
                 addToQueue: (target, message) => {
@@ -238,7 +191,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
 
                 setFollowUpBehavior: (behavior) => {
                     set({ followUpBehavior: behavior });
-                    void updateDesktopSettings({ followUpBehavior: behavior });
+                    if (!isApplyingAuthoritativeSettings()) {
+                        void updateDesktopSettings({ followUpBehavior: behavior });
+                    }
                 },
 
                 getQueueForTarget: (target) => {
@@ -246,19 +201,16 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                 },
             }),
             {
-                name: 'message-queue-store',
-                version: 2,
+                name: 'piarium.messageQueue.v1',
                 storage: createDeferredSafeJSONStorage(),
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
-                    quarantinedLegacyMessages: state.quarantinedLegacyMessages,
                     followUpBehavior: state.followUpBehavior,
                 }),
-                migrate: migrateMessageQueueState,
             }
         ),
         {
-            name: 'message-queue-store',
+            name: 'piarium-message-queue',
         }
     )
 );

@@ -8,7 +8,7 @@ import {
   isEmbeddedSessionChat,
   requestEmbeddedSessionRuntimeBootstrap,
 } from '@piarium/ui/components/layout/contextPanelEmbeddedChat';
-import '@piarium/ui/index.css';
+import '@piarium/ui/styles/application';
 import '@piarium/ui/styles/fonts';
 
 import { detectHostedSurface } from './hostedSurface';

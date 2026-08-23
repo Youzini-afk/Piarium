@@ -44,11 +44,11 @@
   scroll-margin-bottom: calc(var(--oc-mobile-keyboard-height, 0px) + var(--oc-safe-area-bottom-visual, 0px) + 96px);
 }
 
-:root.runtime-mobile-app[data-oc-mobile-layout-kind="tablet"] {
+:root.runtime-mobile-app[data-piarium-mobile-layout-kind="tablet"] {
   --oc-header-height: 60px;
 }
 
-:root.runtime-mobile-app[data-oc-mobile-layout-tier="tablet-landscape"] {
+:root.runtime-mobile-app[data-piarium-mobile-layout-tier="tablet-landscape"] {
   --oc-header-height: 56px;
 }
 

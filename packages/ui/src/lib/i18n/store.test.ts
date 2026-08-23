@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { DEFAULT_LOCALE, type Locale } from './runtime';
+import { DEFAULT_LOCALE } from './runtime';
 import { resetI18nDictionaryCacheForTests, useI18nStore } from './store';
 
 const defaultDictionary = useI18nStore.getState().dictionary;
@@ -13,16 +13,6 @@ const resetStore = () => {
   });
 };
 
-const waitForLocaleLoadToSettle = async (locale: Locale) => {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (useI18nStore.getState().loadingLocale !== locale) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  throw new Error(`Timed out waiting for ${locale} dictionary load`);
-};
-
 describe('i18n store', () => {
   beforeEach(resetStore);
 
@@ -34,10 +24,11 @@ describe('i18n store', () => {
     });
 
     try {
-      useI18nStore.getState().setLocale('es');
+      const loaded = useI18nStore.getState().setLocale('es');
 
       expect(useI18nStore.getState().loadingLocale).toBe('es');
-      await waitForLocaleLoadToSettle('es');
+      await loaded;
+      expect(useI18nStore.getState().loadingLocale).toBeNull();
     } finally {
       resetStore();
     }
@@ -45,10 +36,10 @@ describe('i18n store', () => {
 
   test('loads the french dictionary', async () => {
     try {
-      useI18nStore.getState().setLocale('fr');
+      const loaded = useI18nStore.getState().setLocale('fr');
 
       expect(useI18nStore.getState().loadingLocale).toBe('fr');
-      await waitForLocaleLoadToSettle('fr');
+      await loaded;
       expect(useI18nStore.getState().dictionary['common.language.french']).toBe('Français');
       expect(useI18nStore.getState().dictionary['settings.piarium.pluginSettings.aft.section.core'])
         .toBe('Comportement principal de l’édition');

@@ -42,9 +42,9 @@ type SessionFoldersStore = SessionFoldersState & SessionFoldersActions;
 
 // --- Storage ---
 
-const FOLDERS_STORAGE_KEY = 'oc.sessions.folders';
-const COLLAPSED_STORAGE_KEY = 'oc.sessions.folderCollapse';
-const STORAGE_INDEX_KEY = 'oc.sessions.folders.v2.index';
+const FOLDERS_STORAGE_KEY = 'piarium.sessionFolders.v1';
+const COLLAPSED_STORAGE_KEY = 'piarium.sessionFolderCollapse.v1';
+const STORAGE_INDEX_KEY = 'piarium.sessionFolders.index.v1';
 const SESSION_FOLDERS_API_PATH = '/api/session-folders';
 const DISK_WRITE_DEBOUNCE_MS = 250;
 
@@ -64,20 +64,16 @@ let folderMutationRevision = 0;
 const lastDiskUpdatedAtByRuntime = new Map<string, number>();
 
 type FolderStorageIndex = {
-  version: 2;
-  legacyClaimed: boolean;
   runtimes: Array<{ runtimeKey: string; updatedAt: number }>;
 };
 
-const runtimeStorageKey = (base: string, runtimeKey: string) => `${base}.v2:${encodeURIComponent(runtimeKey)}`;
+const runtimeStorageKey = (base: string, runtimeKey: string) => `${base}:${encodeURIComponent(runtimeKey)}`;
 const readStorageIndex = (): FolderStorageIndex => {
   try {
     const parsed = JSON.parse(safeStorage.getItem(STORAGE_INDEX_KEY) ?? '') as Partial<FolderStorageIndex>;
-    return parsed.version === 2 && Array.isArray(parsed.runtimes)
-      ? { version: 2, legacyClaimed: Boolean(parsed.legacyClaimed), runtimes: parsed.runtimes }
-      : { version: 2, legacyClaimed: false, runtimes: [] };
+    return Array.isArray(parsed.runtimes) ? { runtimes: parsed.runtimes } : { runtimes: [] };
   } catch {
-    return { version: 2, legacyClaimed: false, runtimes: [] };
+    return { runtimes: [] };
   }
 };
 
@@ -87,23 +83,7 @@ const touchRuntimeStorage = (runtimeKey: string, updatedAt = Date.now(), targetS
     { runtimeKey, updatedAt },
     ...index.runtimes.filter((entry) => entry.runtimeKey !== runtimeKey),
   ];
-  targetStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify({ version: 2, legacyClaimed: index.legacyClaimed, runtimes }));
-};
-
-const claimLegacyStorage = (runtimeKey: string): void => {
-  const index = readStorageIndex();
-  if (index.legacyClaimed) return;
-  const legacyFolders = safeStorage.getItem(FOLDERS_STORAGE_KEY);
-  const legacyCollapsed = safeStorage.getItem(COLLAPSED_STORAGE_KEY);
-  if (legacyFolders) safeStorage.setItem(runtimeStorageKey(FOLDERS_STORAGE_KEY, runtimeKey), legacyFolders);
-  if (legacyCollapsed) safeStorage.setItem(runtimeStorageKey(COLLAPSED_STORAGE_KEY, runtimeKey), legacyCollapsed);
-  const next = { ...index, legacyClaimed: true };
-  safeStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify(next));
-  if (safeStorage.getItem(STORAGE_INDEX_KEY) === JSON.stringify(next)) {
-    safeStorage.removeItem(FOLDERS_STORAGE_KEY);
-    safeStorage.removeItem(COLLAPSED_STORAGE_KEY);
-  }
-  touchRuntimeStorage(runtimeKey, 0);
+  targetStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify({ runtimes }));
 };
 
 const isVSCodeWebview = (): boolean => {
@@ -157,7 +137,6 @@ const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds
 
 const readPersistedFolders = (runtimeKey = activeFolderRuntimeKey): SessionFoldersMap => {
   try {
-    claimLegacyStorage(runtimeKey);
     const raw = safeStorage.getItem(runtimeStorageKey(FOLDERS_STORAGE_KEY, runtimeKey));
     if (!raw) {
       return {};
@@ -197,7 +176,6 @@ const readPersistedFolders = (runtimeKey = activeFolderRuntimeKey): SessionFolde
 
 const readPersistedCollapsed = (runtimeKey = activeFolderRuntimeKey): Set<string> => {
   try {
-    claimLegacyStorage(runtimeKey);
     const raw = safeStorage.getItem(runtimeStorageKey(COLLAPSED_STORAGE_KEY, runtimeKey));
     if (!raw) {
       return new Set();
@@ -607,7 +585,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         return null;
       },
     }),
-    { name: 'session-folders-store' },
+    { name: 'piarium-session-folders' },
   ),
 );
 

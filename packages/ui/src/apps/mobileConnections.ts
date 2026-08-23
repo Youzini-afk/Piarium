@@ -26,9 +26,9 @@ import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
 
-const MOBILE_CONNECTIONS_STORAGE_KEY = 'openchamber.mobile.connections.v1';
-const MOBILE_SECURE_STORAGE_PREFIX = 'openchamber.mobile.';
-const MOBILE_DEVICE_ID_STORAGE_KEY = 'openchamber.mobile.deviceId';
+const MOBILE_CONNECTIONS_STORAGE_KEY = 'piarium.mobile.connections.v1';
+const MOBILE_SECURE_STORAGE_PREFIX = 'piarium.mobile.';
+const MOBILE_DEVICE_ID_STORAGE_KEY = 'piarium.mobile.deviceId';
 
 // Stable per-install identifier for this phone, persisted in localStorage. Used
 // as the client dedupe key so every way this device authenticates to a given

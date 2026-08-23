@@ -204,27 +204,6 @@ const PR_GENERATION_SCHEMA: Record<string, unknown> = {
   required: ['title', 'body'],
 };
 
-// Legacy transport: run the structured generation inside the active chat
-// session. Kept as the fallback for setups with no direct provider login
-// (vanilla installs on OpenCode's free models), where the small-model
-// endpoint has nothing to call but the session itself still works.
-async function generateCommitMessageViaSession(
-  directory: string,
-  visiblePrompt: string,
-  hiddenPrompt: string,
-): Promise<{ message: import('./api/types').GeneratedCommitMessage }> {
-  const generationSession = await resolveGenerationSessionContext(directory);
-  const structured = await runStructuredGenerationInActiveSession({
-    directory,
-    visiblePrompt,
-    hiddenPrompt,
-    generationSession,
-    schema: COMMIT_GENERATION_SCHEMA,
-    kind: 'commit',
-  });
-  return { message: parseCommitStructured(structured) };
-}
-
 export async function generateCommitMessage(
   directory: string,
   files: string[],
@@ -234,7 +213,7 @@ export async function generateCommitMessage(
   void options;
 
   console.info('[git-generation][browser] request', {
-    transport: 'small-model',
+    transport: 'pi-session',
     kind: 'commit',
     directory,
     selectedFiles: files.length,
@@ -258,40 +237,22 @@ export async function generateCommitMessage(
     });
     const result = { message: parseCommitStructured(structured) };
     console.info('[git-generation][browser] success', {
-      transport: 'small-model',
+      transport: 'pi-session',
       kind: 'commit',
       elapsedMs: Date.now() - startedAt,
       subjectLength: result.message.subject.length,
       highlightsCount: result.message.highlights.length,
     });
     return result;
-  } catch (primaryError) {
-    // Small model unavailable (404 / no authenticated provider) — fall back
-    // to the session transport so free-model-only setups keep a working button.
-    console.info('[git-generation][browser] small model unavailable, falling back to session transport', {
+  } catch (error) {
+    console.error('[git-generation][browser] failed', {
+      transport: 'pi-session',
       kind: 'commit',
-      primaryError: primaryError instanceof Error ? primaryError.message : String(primaryError),
+      elapsedMs: Date.now() - startedAt,
+      message: error instanceof Error ? error.message : String(error),
+      error,
     });
-    try {
-      const result = await generateCommitMessageViaSession(directory, visiblePrompt, hiddenPrompt);
-      console.info('[git-generation][browser] success', {
-        transport: 'session-fallback',
-        kind: 'commit',
-        elapsedMs: Date.now() - startedAt,
-        subjectLength: result.message.subject.length,
-        highlightsCount: result.message.highlights.length,
-      });
-      return result;
-    } catch (error) {
-      console.error('[git-generation][browser] failed', {
-        transport: 'small-model',
-        kind: 'commit',
-        elapsedMs: Date.now() - startedAt,
-        message: error instanceof Error ? error.message : String(error),
-        error,
-      });
-      throw error;
-    }
+    throw error;
   }
 }
 
@@ -339,7 +300,7 @@ export async function generatePullRequestDescription(
   const changedFiles = Array.from(filesSet).sort().slice(0, 300);
 
   console.info('[git-generation][browser] request', {
-    transport: 'small-model',
+    transport: 'pi-session',
     kind: 'pr',
     directory,
     base: payload.base,
@@ -380,49 +341,22 @@ export async function generatePullRequestDescription(
     });
     const result = parsePrStructured(structured);
     console.info('[git-generation][browser] success', {
-      transport: 'small-model',
+      transport: 'pi-session',
       kind: 'pr',
       elapsedMs: Date.now() - startedAt,
       titleLength: result.title.length,
       bodyLength: result.body.length,
     });
     return result;
-  } catch (primaryError) {
-    // Small model unavailable (404 / no authenticated provider) — fall back
-    // to the session transport so free-model-only setups keep working.
-    console.info('[git-generation][browser] small model unavailable, falling back to session transport', {
+  } catch (error) {
+    console.error('[git-generation][browser] failed', {
+      transport: 'pi-session',
       kind: 'pr',
-      primaryError: primaryError instanceof Error ? primaryError.message : String(primaryError),
+      elapsedMs: Date.now() - startedAt,
+      message: error instanceof Error ? error.message : String(error),
+      error,
     });
-    try {
-      const fallbackSession = await resolveGenerationSessionContext(directory);
-      const structured = await runStructuredGenerationInActiveSession({
-        directory,
-        visiblePrompt,
-        hiddenPrompt,
-        generationSession: fallbackSession,
-        schema: PR_GENERATION_SCHEMA,
-        kind: 'pr',
-      });
-      const result = parsePrStructured(structured);
-      console.info('[git-generation][browser] success', {
-        transport: 'session-fallback',
-        kind: 'pr',
-        elapsedMs: Date.now() - startedAt,
-        titleLength: result.title.length,
-        bodyLength: result.body.length,
-      });
-      return result;
-    } catch (error) {
-      console.error('[git-generation][browser] failed', {
-        transport: 'small-model',
-        kind: 'pr',
-        elapsedMs: Date.now() - startedAt,
-        message: error instanceof Error ? error.message : String(error),
-        error,
-      });
-      throw error;
-    }
+    throw error;
   }
 }
 

@@ -617,7 +617,7 @@ Keep the review concise and practical. Respond in the same language the user use
     title: 'Review Handoff Instructions',
     group: 'Session',
     description: 'Hidden instructions attached to the /handoff-review command. Produces a handoff for a separate review agent.',
-    template: `Produce a review handoff for another agent. Do not compact or mutate session history. Your output is an assistant message that OpenChamber will send to a separate reviewer agent.
+    template: `Produce a review handoff for another agent. Do not compact or mutate session history. Your output is an assistant message that Piarium will send to a separate reviewer agent.
 
 Include:
 - The user's original intent and any later clarifications that changed the intent
@@ -630,7 +630,7 @@ Include:
 Formatting:
 - Concise markdown with clear sections
 - No preamble like "Here is a handoff"
-- Do not mention OpenChamber metadata, linked sessions, session IDs, or routing
+- Do not mention Piarium metadata, linked sessions, session IDs, or routing
 - Respond in the same language the user used most in the conversation`,
   },
   {
@@ -716,7 +716,7 @@ Use the \`question\` tool only for clarifying decisions that have a small set of
 
 6. When everything is settled, produce the final implementation plan: a clear, ordered breakdown of the work, the files and areas affected, the decisions that were made (and why), known risks, and any remaining assumptions flagged explicitly. The plan must reflect the user's actual answers — never fill gaps with guesses.
 
-7. After presenting the plan, if the \`openchamber\` tool is available, offer to start a separate session yourself to implement it; do so only after the user explicitly confirms, and include the full plan in that session's prompt because the new session cannot see this conversation.
+7. After presenting the plan, stop and let the user decide whether to revise it or begin implementation in this or another session.
 
 Respond in the same language the user uses.`,
   },
@@ -785,7 +785,7 @@ Use the \`question\` tool only for clarifying decisions that have a small set of
 
 The proposed Goal should normally be one compact paragraph. Keep enough operational detail to make completion auditable, but remove conversational history, rationale, repetition, and implementation details that are not part of the completion contract.
 
-Do not activate, execute, or claim completion of the proposed Goal. End by inviting the user to revise it or use it in the Goal dialog. If the \`openchamber\` tool is available, also offer to start a new Goal session for it yourself; do so only after the user explicitly confirms.
+Do not activate, execute, or claim completion of the proposed Goal. End by inviting the user to revise it or use it in the Goal dialog.
 
 Respond in the same language the user uses.`,
   },
@@ -803,8 +803,8 @@ Respond in the same language the user uses.`,
     id: 'session.scheduleTask.instructions',
     title: 'Scheduled Task Instructions',
     group: 'Session',
-    description: 'Hidden instructions attached to the /schedule-task command. Guides the dialogue that defines a scheduled task and optionally creates it through the openchamber tool.',
-    template: `The user wants to set up a scheduled task: a saved prompt that OpenChamber runs automatically on a schedule (daily, weekly, one time, or cron) in a chosen project, with a chosen model and optional Goal Mode.
+    description: 'Hidden instructions attached to the /schedule-task command. Guides the dialogue that defines a scheduled task for Piarium.',
+    template: `The user wants to set up a scheduled task: a saved prompt that Piarium runs automatically on a schedule (daily, weekly, one time, or cron) in a chosen project, with a chosen model and optional Goal Mode.
 
 Run this as a guided dialogue, not a one-shot answer.
 
@@ -824,7 +824,7 @@ Use the \`question\` tool only for clarifying decisions that have a small set of
 
 5. Do not perform the task's work in this session. The deliverable is the scheduled task definition.
 
-6. When everything is settled, present the final task definition clearly. If the \`openchamber\` tool is available, offer to create the task yourself and, only after the user explicitly confirms, create it and report the result. If the tool is unavailable, present the definition so the user can add it in OpenChamber's scheduled tasks UI.
+6. When everything is settled, present the final task definition clearly so the user can review it and add it in Piarium's scheduled tasks UI.
 
 Respond in the same language the user uses.`,
   },
@@ -977,17 +977,6 @@ const MAGIC_PROMPT_DEFINITION_BY_ID = new Map<MagicPromptId, MagicPromptDefiniti
   MAGIC_PROMPT_DEFINITIONS.map((definition) => [definition.id, definition])
 );
 
-const LEGACY_PROMPT_KEY_MAP: Record<string, { visible: MagicPromptId; instructions: MagicPromptId }> = {
-  'git.commit.generate': {
-    visible: 'git.commit.generate.visible',
-    instructions: 'git.commit.generate.instructions',
-  },
-  'git.pr.generate': {
-    visible: 'git.pr.generate.visible',
-    instructions: 'git.pr.generate.instructions',
-  },
-};
-
 let cachedOverrides: Record<string, string> | null = null;
 let inFlightOverridesRequest: Promise<Record<string, string>> | null = null;
 
@@ -1012,24 +1001,6 @@ const normalizeOverridesPayload = (payload: unknown): Record<string, string> => 
       continue;
     }
     result[key] = value;
-  }
-
-  for (const [legacyKey, splitKeys] of Object.entries(LEGACY_PROMPT_KEY_MAP)) {
-    const legacyValue = result[legacyKey];
-    if (typeof legacyValue !== 'string') {
-      continue;
-    }
-
-    const firstNewlineIndex = legacyValue.indexOf('\n');
-    const visible = (firstNewlineIndex === -1 ? legacyValue : legacyValue.slice(0, firstNewlineIndex)).trim();
-    const instructions = (firstNewlineIndex === -1 ? '' : legacyValue.slice(firstNewlineIndex + 1)).trim();
-
-    if (!(splitKeys.visible in result) && visible.length > 0) {
-      result[splitKeys.visible] = visible;
-    }
-    if (!(splitKeys.instructions in result) && instructions.length > 0) {
-      result[splitKeys.instructions] = instructions;
-    }
   }
 
   return result;

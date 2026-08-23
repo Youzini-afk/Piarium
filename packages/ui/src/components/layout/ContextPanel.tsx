@@ -882,7 +882,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return;
     }
     postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'openchamber-preview-parent',
+      source: 'piarium-preview-parent',
       version: 1,
       type: 'set-inspect-mode',
       enabled: inspectMode,
@@ -895,7 +895,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
       return;
     }
     postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'openchamber-preview-parent',
+      source: 'piarium-preview-parent',
       version: 1,
       type: 'set-color-scheme',
       scheme: previewColorScheme,
@@ -946,7 +946,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
         return;
       }
       const data = event.data;
-      if (!data || data.source !== 'openchamber-preview-bridge' || data.version !== 1) {
+      if (!data || data.source !== 'piarium-preview-bridge' || data.version !== 1) {
         return;
       }
 
@@ -1687,7 +1687,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     const frameWindow = iframeRef.current?.contentWindow;
     if (!frameWindow) return;
     frameWindow.postMessage({
-      source: 'openchamber-preview-parent',
+      source: 'piarium-preview-parent',
       version: 1,
       type: 'set-inspect-mode',
       enabled,
@@ -1755,7 +1755,7 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
     const handler = (event: MessageEvent<PreviewBridgeMessage>) => {
       if (event.source !== iframeRef.current?.contentWindow) return;
       const data = event.data;
-      if (!data || data.source !== 'openchamber-preview-bridge' || data.version !== 1) return;
+      if (!data || data.source !== 'piarium-preview-bridge' || data.version !== 1) return;
 
       if (data.type === 'ready') {
         const frameUrl = typeof data.url === 'string' ? data.url : '';
@@ -2164,7 +2164,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
         <webview
           ref={webviewRef}
           src={initialWebviewSrcRef.current}
-          partition="persist:openchamber-browser"
+          partition="persist:piarium-browser"
           allowpopups
           style={{ width: '100%', height: '100%', border: 'none' }}
         />

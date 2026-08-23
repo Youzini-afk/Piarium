@@ -282,13 +282,11 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         },
       }),
       {
-        name: 'openchamber-inline-comment-drafts',
+        name: 'piarium.inlineCommentDrafts.v1',
         storage: createDeferredSafeJSONStorage(),
-        version: 2,
         partialize: (state) => ({ drafts: state.drafts, touchedAt: state.touchedAt }),
-        migrate: () => ({ drafts: {}, touchedAt: {} }),
       },
     ),
-    { name: 'inline-comment-draft-store' },
+    { name: 'piarium-inline-comment-drafts' },
   ),
 );

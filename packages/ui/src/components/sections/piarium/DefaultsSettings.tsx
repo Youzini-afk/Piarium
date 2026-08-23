@@ -290,17 +290,17 @@ export const DefaultsSettings: React.FC = () => {
   if (isLoading) return null;
 
   const defaultPlaceholder = scope === 'project'
-    ? t('settings.openchamber.defaults.option.inheritGlobal')
-    : t('settings.openchamber.defaults.option.piDefault');
+    ? t('settings.piarium.defaults.option.inheritGlobal')
+    : t('settings.piarium.defaults.option.piDefault');
   const summaryModel = effectiveProviderId && effectiveModelId
     ? `${effectiveProviderId}/${effectiveModelId}`
-    : t('settings.openchamber.defaults.option.piDefault');
+    : t('settings.piarium.defaults.option.piDefault');
 
   return (
-    <SettingsSection title={t('settings.openchamber.defaults.title')} divider={false}>
+    <SettingsSection title={t('settings.piarium.defaults.title')} divider={false}>
       <div className="space-y-0">
         <div className="mt-0 mb-1 typography-meta text-muted-foreground">
-          {t('settings.openchamber.defaults.summaryPrefix')}{' '}
+          {t('settings.piarium.defaults.summaryPrefix')}{' '}
           <span className="text-foreground">
             {summaryModel}
             {effectiveThinking ? ` (${effectiveThinking})` : ''}
@@ -310,7 +310,7 @@ export const DefaultsSettings: React.FC = () => {
         <div>
           <SettingsFieldRow
             settingsItem="sessions.default-scope"
-            label={t('settings.openchamber.defaults.field.scope')}
+            label={t('settings.piarium.defaults.field.scope')}
           >
             <Select value={scope} onValueChange={(value) => setScope(value as PiConfigScope)}>
               <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
@@ -327,7 +327,7 @@ export const DefaultsSettings: React.FC = () => {
 
           <SettingsFieldRow
             settingsItem="sessions.default-model"
-            label={t('settings.openchamber.defaults.field.defaultModel')}
+            label={t('settings.piarium.defaults.field.defaultModel')}
           >
             <ModelSelector
               providerId={scopedProviderId ?? ''}
@@ -340,7 +340,7 @@ export const DefaultsSettings: React.FC = () => {
 
           <SettingsFieldRow
             settingsItem="sessions.default-thinking"
-            label={t('settings.openchamber.defaults.field.defaultThinking')}
+            label={t('settings.piarium.defaults.field.defaultThinking')}
           >
             <Select
               value={isThinkingLevel(scopedThinking) ? scopedThinking : DEFAULT_VALUE}
@@ -348,7 +348,7 @@ export const DefaultsSettings: React.FC = () => {
               disabled={isSaving || snapshot === null}
             >
               <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
-                <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')} />
+                <SelectValue placeholder={t('settings.piarium.defaults.field.thinkingPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={DEFAULT_VALUE}>{defaultPlaceholder}</SelectItem>
@@ -373,18 +373,18 @@ export const DefaultsSettings: React.FC = () => {
             settingsItem="sessions.deletion-dialog"
             checked={showDeletionDialog}
             onChange={setShowDeletionDialog}
-            label={t('settings.openchamber.defaults.field.showDeletionDialog')}
-            ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')}
+            label={t('settings.piarium.defaults.field.showDeletionDialog')}
+            ariaLabel={t('settings.piarium.defaults.field.showDeletionDialogAria')}
           />
         </SettingsInset>
 
         <div className="space-y-3 pt-6">
           <div className="flex items-center gap-1.5">
             <SettingsGroupTitle>
-              {t('settings.openchamber.defaults.smallModel.title')}
+              {t('settings.piarium.defaults.smallModel.title')}
             </SettingsGroupTitle>
             <SettingsInfoHint>
-              {t('settings.openchamber.defaults.smallModel.description')}
+              {t('settings.piarium.defaults.smallModel.description')}
             </SettingsInfoHint>
           </div>
 
@@ -394,12 +394,12 @@ export const DefaultsSettings: React.FC = () => {
             onChange={(checked) => {
               void handleSmallModelUseDefaultChange(checked);
             }}
-            label={t('settings.openchamber.defaults.smallModel.useDefault')}
-            ariaLabel={t('settings.openchamber.defaults.smallModel.useDefaultAria')}
+            label={t('settings.piarium.defaults.smallModel.useDefault')}
+            ariaLabel={t('settings.piarium.defaults.smallModel.useDefaultAria')}
           />
 
           {!smallModelUseDefault ? (
-            <SettingsFieldRow label={t('settings.openchamber.defaults.smallModel.overrideModel')}>
+            <SettingsFieldRow label={t('settings.piarium.defaults.smallModel.overrideModel')}>
               <ModelSelector
                 providerId={parsedSmallModel.providerId}
                 modelId={parsedSmallModel.modelId}
@@ -413,22 +413,22 @@ export const DefaultsSettings: React.FC = () => {
           <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
             <div className="flex items-center gap-1.5">
               <SettingsGroupTitle>
-                {t('settings.openchamber.defaults.walkthroughModel.title')}
+                {t('settings.piarium.defaults.walkthroughModel.title')}
               </SettingsGroupTitle>
               <SettingsInfoHint>
-                {t('settings.openchamber.defaults.walkthroughModel.description')}
+                {t('settings.piarium.defaults.walkthroughModel.description')}
               </SettingsInfoHint>
             </div>
             <SettingsFieldRow
               settingsItem="sessions.walkthrough-model"
-              label={t('settings.openchamber.defaults.walkthroughModel.overrideModel')}
+              label={t('settings.piarium.defaults.walkthroughModel.overrideModel')}
             >
               <ModelSelector
                 providerId={parsedWalkthroughModel.providerId}
                 modelId={parsedWalkthroughModel.modelId}
                 onChange={handleWalkthroughModelChange}
                 allowedProviderIds={smallModelProviders}
-                placeholder={t('settings.openchamber.defaults.walkthroughModel.usesSmallModel')}
+                placeholder={t('settings.piarium.defaults.walkthroughModel.usesSmallModel')}
                 className={SETTINGS_CUSTOM_TRIGGER_CLASS}
               />
             </SettingsFieldRow>

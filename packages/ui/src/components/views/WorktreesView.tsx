@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
+import { WorktreeSectionContent } from '@/components/sections/piarium/WorktreeSectionContent';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 
 // Full-page worktree management surface for a single project, opened from the

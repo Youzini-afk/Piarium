@@ -84,7 +84,10 @@ describe('runtimeFetch transport contract', () => {
       const captured = calls[0].input;
       expect(captured.url).toBe('https://runtime.example/api/session/abc/prompt_async?directory=%2Frepo&workspace=main');
       expect(captured.method).toBe('POST');
-      expect(captured.signal).toBe(controller.signal);
+      expect(captured.signal.aborted).toBe(false);
+      controller.abort('test cancellation');
+      expect(captured.signal.aborted).toBe(true);
+      expect(captured.signal.reason).toBe('test cancellation');
       expect(captured.headers.get('content-type')).toBe('application/json');
       expect(captured.headers.get('x-sdk-header')).toBe('kept');
       expect(captured.headers.get('x-init-header')).toBe('merged');

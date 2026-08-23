@@ -80,40 +80,12 @@ export type EventStreamStatus =
   | 'offline'
   | 'error';
 
-const LEGACY_DEFAULT_NOTIFICATION_TEMPLATES = {
-  completion: { title: '{agent_name} is ready', message: '{last_message}' },
-  error: { title: 'Tool error', message: '{last_message}' },
-  question: { title: '{agent_name} needs input', message: '{last_message}' },
-  subtask: { title: 'Subtask complete', message: '{last_message}' },
-} as const;
-
 const EMPTY_NOTIFICATION_TEMPLATES = {
   completion: { title: '', message: '' },
   error: { title: '', message: '' },
   question: { title: '', message: '' },
   subtask: { title: '', message: '' },
 } as const;
-
-const isSameTemplateValue = (
-  a: { title: string; message: string } | undefined,
-  b: { title: string; message: string }
-) => {
-  if (!a) return false;
-  return a.title === b.title && a.message === b.message;
-};
-
-const isLegacyDefaultTemplates = (value: unknown): boolean => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const candidate = value as Record<string, { title: string; message: string } | undefined>;
-  return (
-    isSameTemplateValue(candidate.completion, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.completion)
-    && isSameTemplateValue(candidate.error, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.error)
-    && isSameTemplateValue(candidate.question, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.question)
-    && isSameTemplateValue(candidate.subtask, LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.subtask)
-  );
-};
 
 const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
 const CONTEXT_PANEL_MIN_WIDTH = 380;
@@ -482,81 +454,6 @@ const reorderContextPanelTabs = (
   };
 };
 
-const sanitizeContextPanelByDirectory = (
-  value: unknown,
-): Record<string, ContextPanelDirectoryState> => {
-  if (!value || typeof value !== 'object') {
-    return {};
-  }
-
-  const source = value as Record<string, unknown>;
-  const next: Record<string, ContextPanelDirectoryState> = {};
-
-  for (const [rawDirectory, rawState] of Object.entries(source)) {
-    const directory = normalizeDirectoryPath(rawDirectory);
-    if (!directory || !rawState || typeof rawState !== 'object') {
-      continue;
-    }
-
-    const candidate = rawState as {
-      isOpen?: unknown;
-      expanded?: unknown;
-      tabs?: unknown;
-      activeTabId?: unknown;
-      widthByMode?: unknown;
-      touchedAt?: unknown;
-      mode?: unknown;
-      targetPath?: unknown;
-      dedupeKey?: unknown;
-      label?: unknown;
-    };
-
-    let tabs = sanitizeContextPanelTabs(candidate.tabs);
-    let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
-
-    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat' || candidate.mode === 'preview' || candidate.mode === 'browser')) {
-      tabs = [createContextPanelTab({
-        mode: candidate.mode,
-        targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,
-        dedupeKey: typeof candidate.dedupeKey === 'string' ? candidate.dedupeKey : null,
-        label: typeof candidate.label === 'string' ? candidate.label : null,
-      })];
-      activeTabId = tabs[0]?.id ?? null;
-    }
-
-    const resolvedActiveTabId = resolveActiveContextPanelTabID(tabs, activeTabId);
-    const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, resolvedActiveTabId);
-
-    // Legacy single `width` values are intentionally dropped: widths are now
-    // per-surface, seeded from registry defaults until the user resizes.
-    const widthByMode: Partial<Record<ContextPanelMode, number>> = {};
-    if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
-      for (const [mode, value] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
-        if (
-          (mode === 'diff' || mode === 'file' || mode === 'context' || mode === 'recovery' || mode === 'plan' || mode === 'chat' || mode === 'preview' || mode === 'browser' || mode === 'git' || mode === 'pr' || mode === 'notes' || mode === 'terminal')
-          && typeof value === 'number'
-          && Number.isFinite(value)
-        ) {
-          widthByMode[mode] = clampContextPanelWidth(value);
-        }
-      }
-    }
-
-    next[directory] = {
-      isOpen: candidate.isOpen === true,
-      expanded: candidate.expanded === true,
-      tabs: clampedTabs,
-      activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
-      widthByMode,
-      touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
-        ? candidate.touchedAt
-        : Date.now(),
-    };
-  }
-
-  return next;
-};
-
 const clampContextPanelRoots = (
   byDirectory: Record<string, ContextPanelDirectoryState>,
   maxRoots: number
@@ -632,7 +529,7 @@ interface UIStore {
   showDeletionDialog: boolean;
   serverPermissionAutoAcceptEnabled: boolean;
   autoDeleteEnabled: boolean;
-  /** Global file-editor autosave. Default true for backward compatibility. */
+  /** Global file-editor autosave. */
   autoSaveEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
@@ -697,7 +594,6 @@ interface UIStore {
 
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
-  agentControlToolEnabled: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -717,7 +613,6 @@ interface UIStore {
   expandedEditorToolbar: boolean;
   showSplitAssistantMessageActions: boolean;
   allowPromptingSubagentSessions: boolean;
-  isMobileSessionStatusBarCollapsed: boolean;
   mobileSessionPanelOpen: boolean;
   mobileSessionFilterProjectId: string | null;
   isExpandedInput: boolean;
@@ -863,7 +758,6 @@ interface UIStore {
   setSummaryLength: (value: number) => void;
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
-  setAgentControlToolEnabled: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -883,7 +777,6 @@ interface UIStore {
   setExpandedEditorToolbar: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setAllowPromptingSubagentSessions: (value: boolean) => void;
-  setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   setMobileSessionPanelOpen: (value: boolean) => void;
   setMobileSessionFilterProjectId: (value: string | null) => void;
   viewPagerPage: 'left' | 'center' | 'right';
@@ -1016,7 +909,6 @@ export const useUIStore = create<UIStore>()(
 
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
-        agentControlToolEnabled: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -1037,7 +929,6 @@ export const useUIStore = create<UIStore>()(
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
         draftStartersVisible: true,
-        isMobileSessionStatusBarCollapsed: false,
         mobileSessionPanelOpen: false,
         mobileSessionFilterProjectId: null,
         isExpandedInput: false,
@@ -2223,9 +2114,6 @@ export const useUIStore = create<UIStore>()(
         setPersistChatDraft: (value) => {
           set({ persistChatDraft: value });
         },
-        setAgentControlToolEnabled: (value) => {
-          set({ agentControlToolEnabled: value });
-        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2285,9 +2173,6 @@ export const useUIStore = create<UIStore>()(
         setAllowPromptingSubagentSessions: (value) => {
           set({ allowPromptingSubagentSessions: value });
         },
-        setIsMobileSessionStatusBarCollapsed: (value) => {
-          set({ isMobileSessionStatusBarCollapsed: value });
-        },
         setMobileSessionPanelOpen: (value) => {
           set({ mobileSessionPanelOpen: value });
         },
@@ -2337,143 +2222,8 @@ export const useUIStore = create<UIStore>()(
         },
       }),
       {
-        name: 'ui-store',
+        name: 'piarium.ui.v1',
         storage: createDeferredSafeJSONStorage(),
-        version: 13,
-        migrate: (persistedState, version) => {
-          if (!persistedState || typeof persistedState !== 'object') {
-            return persistedState;
-          }
-          const state = persistedState as Record<string, unknown>;
-
-          // v12 -> v13: promote FilesView localStorage autosave toggle into the store.
-          if (version < 13) {
-            if (typeof state.autoSaveEnabled !== 'boolean') {
-              let legacyEnabled = true;
-              try {
-                if (typeof localStorage !== 'undefined') {
-                  const legacy = localStorage.getItem('piarium:files:auto-save-enabled');
-                  if (legacy !== null) {
-                    legacyEnabled = legacy !== 'false';
-                    localStorage.removeItem('piarium:files:auto-save-enabled');
-                  }
-                }
-              } catch {
-                legacyEnabled = true;
-              }
-              state.autoSaveEnabled = legacyEnabled;
-            }
-          }
-
-          // v11 -> v12: drop legacy window-controls "auto" (always meant right).
-          if (version < 12) {
-            if (state.desktopWindowControlsPosition === 'auto' || state.desktopWindowControlsPosition == null) {
-              state.desktopWindowControlsPosition = 'right';
-            }
-          }
-
-          // v10 -> v11: move the previous terminal font default forward.
-          if (version < 11 && state.terminalFontSize === 13) {
-            state.terminalFontSize = 14;
-          }
-
-          // v9 -> v10: remove obsolete single-file diff view mode setting
-          if (version < 10) {
-            delete state.diffViewMode;
-          }
-
-          // v8 -> v9: initialize notes/todo panel height fields
-          if (version < 9) {
-            if (typeof state.notesPanelHeight !== 'number' || !Number.isFinite(state.notesPanelHeight)) {
-              state.notesPanelHeight = 112;
-            }
-            if (typeof state.todoPanelHeight !== 'number' || !Number.isFinite(state.todoPanelHeight)) {
-              state.todoPanelHeight = 259;
-            }
-          }
-
-          // v0 -> v1: reset legacy notification templates
-          if (version < 1) {
-            if (isLegacyDefaultTemplates(state.notificationTemplates)) {
-              state.notificationTemplates = {
-                completion: { ...EMPTY_NOTIFICATION_TEMPLATES.completion },
-                error: { ...EMPTY_NOTIFICATION_TEMPLATES.error },
-                question: { ...EMPTY_NOTIFICATION_TEMPLATES.question },
-                subtask: { ...EMPTY_NOTIFICATION_TEMPLATES.subtask },
-              };
-            }
-          }
-
-          // v2 -> v3: collapse 3 memory-limit fields into single messageLimit.
-          // Pick the best user-customised value (prefer historical, fall back to active).
-          // Discard old defaults (90/120/180) — they become the new single default (200).
-          if (version < 3) {
-            const OLD_DEFAULTS = new Set([90, 120, 180, 220]);
-            const hist = state.memoryLimitHistorical as number | undefined;
-            const active = state.memoryLimitActiveSession as number | undefined;
-
-            // If user had a non-default custom value, keep it as the new messageLimit.
-            if (typeof hist === 'number' && !OLD_DEFAULTS.has(hist)) {
-              state.messageLimit = hist;
-            } else if (typeof active === 'number' && !OLD_DEFAULTS.has(active)) {
-              state.messageLimit = active;
-            }
-            // Otherwise leave undefined → Zustand uses the initial default (200).
-
-            delete state.memoryLimitHistorical;
-            delete state.memoryLimitViewport;
-            delete state.memoryLimitActiveSession;
-          }
-
-          // Right-sidebar state was removed with the sidebar itself; drop
-          // stale persisted fields.
-          delete state.isRightSidebarOpen;
-          delete state.rightSidebarWidth;
-          delete state.rightSidebarTab;
-
-          state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
-
-          if (version < 5) {
-            if (!state.shortcutOverrides || typeof state.shortcutOverrides !== 'object') {
-              state.shortcutOverrides = {};
-            } else {
-              const overrides = state.shortcutOverrides as Record<string, unknown>;
-              const cleaned: Record<string, string> = {};
-              for (const [key, value] of Object.entries(overrides)) {
-                if (typeof key === 'string' && typeof value === 'string') {
-                  cleaned[key] = value;
-                }
-              }
-              state.shortcutOverrides = cleaned;
-            }
-          }
-
-          if (version < 6) {
-            state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
-          }
-
-          if (version < 7) {
-            state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
-          }
-
-          if (version < 8) {
-            if (state.gitChangesViewMode !== 'flat' && state.gitChangesViewMode !== 'tree') {
-              state.gitChangesViewMode = 'flat';
-            }
-          }
-
-          state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
-
-          if (typeof state.autoSaveEnabled !== 'boolean') {
-            state.autoSaveEnabled = true;
-          }
-
-          state.contextRailOrder = Array.isArray(state.contextRailOrder)
-            ? (state.contextRailOrder as unknown[]).filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-            : [];
-
-          return state;
-        },
         partialize: (state) => ({
           theme: state.theme,
           isSidebarOpen: state.isSidebarOpen,
@@ -2546,7 +2296,6 @@ export const useUIStore = create<UIStore>()(
           summaryLength: state.summaryLength,
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
-          agentControlToolEnabled: state.agentControlToolEnabled,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
@@ -2567,7 +2316,6 @@ export const useUIStore = create<UIStore>()(
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           draftStartersVisible: state.draftStartersVisible,
-          isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           mobileSessionFilterProjectId: state.mobileSessionFilterProjectId,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
@@ -2575,7 +2323,7 @@ export const useUIStore = create<UIStore>()(
       }
     ),
     {
-      name: 'ui-store'
+      name: 'piarium-ui'
     }
   )
 );

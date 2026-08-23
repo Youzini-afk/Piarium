@@ -7,7 +7,7 @@ import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
 import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
-import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { AboutSettings } from '@/components/sections/piarium/AboutSettings';
 import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { Button } from '@/components/ui/button';
 import { PiariumLogo } from '@/components/ui/PiariumLogo';

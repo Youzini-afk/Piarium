@@ -76,7 +76,7 @@
           mode = 'resize-content';
         }
 
-        document.documentElement.setAttribute('data-oc-mobile-keyboard-mode', mode);
+        document.documentElement.setAttribute('data-piarium-mobile-keyboard-mode', mode);
         const viewportMeta = document.querySelector('meta[name="viewport"]');
         if (viewportMeta) {
           viewportMeta.setAttribute('content', getViewportContentForMobileKeyboardMode(mode));

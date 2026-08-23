@@ -29,8 +29,7 @@ export const useModelPickerSectionsStore = create<ModelPickerSectionsStore>()(
         }),
     }),
     {
-      name: 'model-picker-collapsed-sections',
-      version: 1,
+      name: 'piarium.modelPickerSections.v1',
     },
   ),
 );

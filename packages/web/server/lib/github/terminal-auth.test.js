@@ -13,7 +13,7 @@ import {
 const makeTempHome = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-gh-terminal-'));
 
 describe('terminal GitHub auth helpers', () => {
-  it('writes the active OpenChamber GitHub account to gh hosts.yml', () => {
+  it('writes the active Piarium GitHub account to gh hosts.yml', () => {
     const homeDir = makeTempHome();
     const authFilePath = path.join(homeDir, '.config', 'piarium', 'github-auth.json');
 

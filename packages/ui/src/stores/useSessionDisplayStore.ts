@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 
@@ -26,27 +27,6 @@ type SessionDisplayStore = {
   setProjectSortOrder: (order: ProjectSortOrder) => void;
 };
 
-export const migrateSessionDisplayState = (
-  persisted: unknown,
-  version: number,
-): Partial<SessionDisplayStore> => {
-  const state = (persisted ?? {}) as Partial<SessionDisplayStore> & {
-    displayMode?: string;
-  };
-  if (version < 2) {
-    state.projectSortOrder = 'manual';
-  }
-  if (version < 3 && state.projectSortOrder === 'recent') {
-    state.projectSortOrder = 'manual';
-  }
-  if (version < 4) {
-    // v4 removes the default/minimal display mode: the sidebar now has a
-    // single row layout. Drop the stale key from persisted state.
-    delete state.displayMode;
-  }
-  return state;
-};
-
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
@@ -67,12 +47,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setProjectSortOrder: (order) => set({ projectSortOrder: order }),
     }),
     {
-      name: 'session-display-mode',
-      version: 4,
-      // v1→v2 adds projectSortOrder using the canonical manual ordering.
-      // v2→v3 replaces the previously shipped recent default with manual.
-      // v3→v4 removes displayMode (single sidebar row layout).
-      migrate: migrateSessionDisplayState,
+      name: 'piarium.sessionDisplay.v1',
+      storage: createDeferredSafeJSONStorage(),
     },
   ),
 );

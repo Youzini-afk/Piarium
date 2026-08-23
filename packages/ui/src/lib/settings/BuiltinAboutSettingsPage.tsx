@@ -1,5 +1,5 @@
 import React from 'react';
-import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { AboutSettings } from '@/components/sections/piarium/AboutSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useI18n } from '@/lib/i18n';
 

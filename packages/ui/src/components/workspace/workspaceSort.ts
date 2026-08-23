@@ -2,7 +2,7 @@ import type { WorkspaceEntry } from '@/lib/api/types';
 
 export type WorkspaceSortMode = 'name-asc' | 'name-desc' | 'modified-desc' | 'modified-asc';
 
-export const WORKSPACE_SORT_STORAGE_KEY = 'openchamber.workspaceSidebar.sortMode';
+export const WORKSPACE_SORT_STORAGE_KEY = 'piarium.workspaceSidebar.sortMode';
 export const DEFAULT_WORKSPACE_SORT_MODE: WorkspaceSortMode = 'name-asc';
 
 export const WORKSPACE_SORT_MODES: WorkspaceSortMode[] = [

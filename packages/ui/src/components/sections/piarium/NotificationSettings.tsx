@@ -313,7 +313,7 @@ export const NotificationSettings: React.FC = () => {
       const success = await apis.notifications.notifyAgentCompletion({
         title: t('settings.notifications.page.testNotification.title'),
         body: t('settings.notifications.page.testNotification.body'),
-        tag: 'openchamber-test',
+        tag: 'piarium-test',
       });
 
       if (success) {

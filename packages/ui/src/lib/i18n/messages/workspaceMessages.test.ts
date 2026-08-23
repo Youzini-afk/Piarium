@@ -7,58 +7,6 @@ import { dict as enDict } from './en';
 import { dict as zhDict } from './zh-CN';
 
 const WORKSPACE_KEYS = [
-  'workspace.sidebar.title',
-  'workspace.sidebar.actions.chooseWorkspace',
-  'workspace.sidebar.actions.terminal',
-  'workspace.sidebar.actions.newFolder',
-  'workspace.sidebar.actions.upload',
-  'workspace.sidebar.actions.sort',
-  'workspace.sidebar.actions.refresh',
-  'workspace.sidebar.sort.nameAsc',
-  'workspace.sidebar.sort.nameDesc',
-  'workspace.sidebar.sort.modifiedDesc',
-  'workspace.sidebar.sort.modifiedAsc',
-  'workspace.sidebar.menu.openChat',
-  'workspace.sidebar.menu.openFiles',
-  'workspace.sidebar.menu.openFile',
-  'workspace.sidebar.menu.git',
-  'workspace.sidebar.menu.terminal',
-  'workspace.sidebar.menu.newFolder',
-  'workspace.sidebar.menu.newFile',
-  'workspace.sidebar.menu.upload',
-  'workspace.sidebar.menu.refreshGitStatus',
-  'workspace.sidebar.menu.addToSession',
-  'workspace.sidebar.menu.copyPath',
-  'workspace.sidebar.menu.download',
-  'workspace.sidebar.menu.rename',
-  'workspace.sidebar.menu.moveToTrash',
-  'workspace.sidebar.menu.permanentDelete',
-  'workspace.sidebar.trash.title',
-  'workspace.sidebar.trash.empty',
-  'workspace.sidebar.state.empty',
-  'workspace.sidebar.state.loading',
-  'workspace.sidebar.dialog.create.folderTitle',
-  'workspace.sidebar.dialog.create.fileTitle',
-  'workspace.sidebar.dialog.create.folderDescription',
-  'workspace.sidebar.dialog.create.fileDescription',
-  'workspace.sidebar.dialog.create.namePlaceholder',
-  'workspace.sidebar.dialog.create.invalidName',
-  'workspace.sidebar.dialog.create.failed',
-  'workspace.sidebar.dialog.create.cancel',
-  'workspace.sidebar.dialog.create.confirm',
-  'workspace.sidebar.dialog.rename.title',
-  'workspace.sidebar.dialog.rename.description',
-  'workspace.sidebar.dialog.rename.placeholder',
-  'workspace.sidebar.dialog.rename.invalidName',
-  'workspace.sidebar.dialog.rename.sameName',
-  'workspace.sidebar.dialog.rename.cancel',
-  'workspace.sidebar.dialog.rename.submit',
-  'workspace.sidebar.confirm.permanentDelete',
-  'workspace.sidebar.toast.addedToSession',
-  'workspace.sidebar.toast.workspaceSelected',
-  'workspace.sidebar.toast.workspaceSelectFailed',
-  'workspace.sidebar.toast.downloadFailed',
-  'workspace.sidebar.toast.permanentlyDeleted',
   'workspace.archive.menu.preview',
   'workspace.archive.menu.extractNewFolder',
   'workspace.archive.menu.extractHere',
@@ -143,11 +91,10 @@ const WORKSPACE_KEYS = [
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const SAME_IN_CHINESE = new Set<string>([
-  'workspace.sidebar.menu.git',
   'workspace.git.title',
 ]);
 
-describe('workspace sidebar messages', () => {
+describe('workspace overlay messages', () => {
   test('has Chinese translations for workspace controls', () => {
     for (const key of WORKSPACE_KEYS) {
       expect(enDict[key]).toBeTruthy();
@@ -156,49 +103,6 @@ describe('workspace sidebar messages', () => {
         expect(zhDict[key]).not.toBe(enDict[key]);
       }
     }
-  });
-
-  test('workspace rows expose a native context menu handler', () => {
-    const source = readFileSync(
-      resolve(testDir, '../../../components/workspace/WorkspaceSidebarSection.tsx'),
-      'utf8',
-    );
-
-    expect(source).toContain('onContextMenu');
-  });
-
-  test('workspace rename uses a localized dialog instead of a native prompt', () => {
-    const source = readFileSync(
-      resolve(testDir, '../../../components/workspace/WorkspaceSidebarSection.tsx'),
-      'utf8',
-    );
-
-    expect(source).toContain("t('workspace.sidebar.dialog.rename.title')");
-    expect(source).toContain("t('workspace.sidebar.dialog.rename.submit')");
-    expect(source).not.toContain("window.prompt(t('workspace.sidebar.prompt.renameTo')");
-  });
-
-  test('workspace create uses a localized dialog instead of a native prompt', () => {
-    const source = readFileSync(
-      resolve(testDir, '../../../components/workspace/WorkspaceSidebarSection.tsx'),
-      'utf8',
-    );
-
-    expect(source).toContain("t('workspace.sidebar.dialog.create.folderTitle')");
-    expect(source).toContain("t('workspace.sidebar.dialog.create.confirm')");
-    expect(source).not.toContain("window.prompt(t('workspace.sidebar.prompt.newFolderName')");
-    expect(source).not.toContain("window.prompt(t('workspace.sidebar.prompt.newFileName')");
-  });
-
-  test('workspace sidebar exposes the hidden trash directory', () => {
-    const source = readFileSync(
-      resolve(testDir, '../../../components/workspace/WorkspaceSidebarSection.tsx'),
-      'utf8',
-    );
-
-    expect(source).toContain('TRASH_PATH');
-    expect(source).toContain("t('workspace.sidebar.trash.title')");
-    expect(source).toContain("t('workspace.sidebar.menu.permanentDelete')");
   });
 
   test('workspace terminal and git overlays use localized messages', () => {

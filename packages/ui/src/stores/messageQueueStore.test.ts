@@ -2,13 +2,12 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import {
   createMessageQueueTarget,
   getMessageQueueKey,
-  migrateMessageQueueState,
   parseMessageQueueKey,
   useMessageQueueStore,
 } from "./messageQueueStore"
 
 beforeEach(() => {
-  useMessageQueueStore.setState({ queuedMessages: {}, quarantinedLegacyMessages: {} })
+  useMessageQueueStore.setState({ queuedMessages: {} })
 })
 
 describe("message queue runtime ownership", () => {
@@ -25,17 +24,6 @@ describe("message queue runtime ownership", () => {
   test("round trips a composite queue key", () => {
     const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
     expect(parseMessageQueueKey(getMessageQueueKey(target))).toEqual(target)
-  })
-
-  test("quarantines legacy session-only queues instead of activating them", () => {
-    const migrated = migrateMessageQueueState({
-      queuedMessages: {
-        "session-1": [{ id: "queued-1", content: "legacy", createdAt: 1 }],
-      },
-    }, 1)
-
-    expect(migrated.queuedMessages).toEqual({})
-    expect(migrated.quarantinedLegacyMessages?.["session-1"]?.[0]?.content).toBe("legacy")
   })
 
   test("preserves the complete queue until the user sends or clears it", () => {

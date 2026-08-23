@@ -16,7 +16,7 @@ import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
-import { RecoverySettings } from '@/components/sections/openchamber/RecoverySettings';
+import { RecoverySettings } from '@/components/sections/piarium/RecoverySettings';
 import { PluginSettingsPage, PluginSettingsSidebar } from '@/components/sections/plugin-settings';
 import { ContextModeSettings } from '@/components/sections/plugin-settings/ContextModeSettings';
 import { AftSettings } from '@/components/sections/plugin-settings/AftSettings';

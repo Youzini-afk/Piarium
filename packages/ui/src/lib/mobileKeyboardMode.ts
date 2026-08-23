@@ -65,7 +65,7 @@ export const applyMobileKeyboardMode = (value: unknown): MobileKeyboardMode => {
     return mode;
   }
 
-  document.documentElement.setAttribute('data-oc-mobile-keyboard-mode', mode);
+  document.documentElement.setAttribute('data-piarium-mobile-keyboard-mode', mode);
 
   const viewportMeta = document.querySelector(VIEWPORT_META_SELECTOR);
   if (viewportMeta instanceof HTMLMetaElement) {

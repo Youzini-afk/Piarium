@@ -76,49 +76,49 @@ interface Option<T extends string> {
 const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string; descriptionKey: string }> = [
     {
         value: 'system',
-        labelKey: 'settings.openchamber.visual.option.themeMode.system',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.system.description',
+        labelKey: 'settings.piarium.visual.option.themeMode.system',
+        descriptionKey: 'settings.piarium.visual.option.themeMode.system.description',
     },
     {
         value: 'light',
-        labelKey: 'settings.openchamber.visual.option.themeMode.light',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.light.description',
+        labelKey: 'settings.piarium.visual.option.themeMode.light',
+        descriptionKey: 'settings.piarium.visual.option.themeMode.light.description',
     },
     {
         value: 'dark',
-        labelKey: 'settings.openchamber.visual.option.themeMode.dark',
-        descriptionKey: 'settings.openchamber.visual.option.themeMode.dark.description',
+        labelKey: 'settings.piarium.visual.option.themeMode.dark',
+        descriptionKey: 'settings.piarium.visual.option.themeMode.dark.description',
     },
 ];
 
 const DIFF_LAYOUT_OPTIONS: Option<'dynamic' | 'inline' | 'side-by-side'>[] = [
     {
         id: 'dynamic',
-        labelKey: 'settings.openchamber.visual.option.diffLayout.dynamic.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffLayout.dynamic.description',
+        labelKey: 'settings.piarium.visual.option.diffLayout.dynamic.label',
+        descriptionKey: 'settings.piarium.visual.option.diffLayout.dynamic.description',
     },
     {
         id: 'inline',
-        labelKey: 'settings.openchamber.visual.option.diffLayout.inline.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffLayout.inline.description',
+        labelKey: 'settings.piarium.visual.option.diffLayout.inline.label',
+        descriptionKey: 'settings.piarium.visual.option.diffLayout.inline.description',
     },
     {
         id: 'side-by-side',
-        labelKey: 'settings.openchamber.visual.option.diffLayout.sideBySide.label',
-        descriptionKey: 'settings.openchamber.visual.option.diffLayout.sideBySide.description',
+        labelKey: 'settings.piarium.visual.option.diffLayout.sideBySide.label',
+        descriptionKey: 'settings.piarium.visual.option.diffLayout.sideBySide.description',
     },
 ];
 
 const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
     {
         id: 'svg',
-        labelKey: 'settings.openchamber.visual.option.mermaidRendering.svg.label',
-        descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.svg.description',
+        labelKey: 'settings.piarium.visual.option.mermaidRendering.svg.label',
+        descriptionKey: 'settings.piarium.visual.option.mermaidRendering.svg.description',
     },
     {
         id: 'ascii',
-        labelKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.label',
-        descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.description',
+        labelKey: 'settings.piarium.visual.option.mermaidRendering.ascii.label',
+        descriptionKey: 'settings.piarium.visual.option.mermaidRendering.ascii.description',
     },
 ];
 
@@ -126,42 +126,42 @@ const DEFAULT_PWA_INSTALL_NAME = 'Piarium - Pi Coding Workspace';
 const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
     {
         id: 'system',
-        labelKey: 'settings.openchamber.visual.option.pwaOrientation.system.label',
-        descriptionKey: 'settings.openchamber.visual.option.pwaOrientation.system.description',
+        labelKey: 'settings.piarium.visual.option.pwaOrientation.system.label',
+        descriptionKey: 'settings.piarium.visual.option.pwaOrientation.system.description',
     },
     {
         id: 'portrait',
-        labelKey: 'settings.openchamber.visual.option.pwaOrientation.portrait.label',
-        descriptionKey: 'settings.openchamber.visual.option.pwaOrientation.portrait.description',
+        labelKey: 'settings.piarium.visual.option.pwaOrientation.portrait.label',
+        descriptionKey: 'settings.piarium.visual.option.pwaOrientation.portrait.description',
     },
     {
         id: 'landscape',
-        labelKey: 'settings.openchamber.visual.option.pwaOrientation.landscape.label',
-        descriptionKey: 'settings.openchamber.visual.option.pwaOrientation.landscape.description',
+        labelKey: 'settings.piarium.visual.option.pwaOrientation.landscape.label',
+        descriptionKey: 'settings.piarium.visual.option.pwaOrientation.landscape.description',
     },
 ];
 
 const MOBILE_KEYBOARD_MODE_OPTIONS: Option<MobileKeyboardMode>[] = [
     {
         id: 'native',
-        labelKey: 'settings.openchamber.visual.option.mobileKeyboardMode.native.label',
-        descriptionKey: 'settings.openchamber.visual.option.mobileKeyboardMode.native.description',
+        labelKey: 'settings.piarium.visual.option.mobileKeyboardMode.native.label',
+        descriptionKey: 'settings.piarium.visual.option.mobileKeyboardMode.native.description',
     },
     {
         id: 'resize-content',
-        labelKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.label',
-        descriptionKey: 'settings.openchamber.visual.option.mobileKeyboardMode.resizeContent.description',
+        labelKey: 'settings.piarium.visual.option.mobileKeyboardMode.resizeContent.label',
+        descriptionKey: 'settings.piarium.visual.option.mobileKeyboardMode.resizeContent.description',
     },
 ];
 
 const MOBILE_LAYOUT_OPTIONS: Array<{ value: MobileLayoutPreference; labelKey: string }> = [
     {
         value: 'default',
-        labelKey: 'settings.openchamber.visual.option.mobileLayout.default',
+        labelKey: 'settings.piarium.visual.option.mobileLayout.default',
     },
     {
         value: 'new',
-        labelKey: 'settings.openchamber.visual.option.mobileLayout.new',
+        labelKey: 'settings.piarium.visual.option.mobileLayout.new',
     },
 ];
 
@@ -178,84 +178,84 @@ const normalizePwaOrientation = (value: unknown): 'system' | 'portrait' | 'lands
 const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
     {
         id: 'markdown',
-        labelKey: 'settings.openchamber.visual.option.userMessageRendering.markdown.label',
-        descriptionKey: 'settings.openchamber.visual.option.userMessageRendering.markdown.description',
+        labelKey: 'settings.piarium.visual.option.userMessageRendering.markdown.label',
+        descriptionKey: 'settings.piarium.visual.option.userMessageRendering.markdown.description',
     },
     {
         id: 'plain',
-        labelKey: 'settings.openchamber.visual.option.userMessageRendering.plain.label',
-        descriptionKey: 'settings.openchamber.visual.option.userMessageRendering.plain.description',
+        labelKey: 'settings.piarium.visual.option.userMessageRendering.plain.label',
+        descriptionKey: 'settings.piarium.visual.option.userMessageRendering.plain.description',
     },
 ];
 
 const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
     {
         id: 'sorted',
-        labelKey: 'settings.openchamber.visual.option.chatRenderMode.sorted.label',
-        descriptionKey: 'settings.openchamber.visual.option.chatRenderMode.sorted.description',
+        labelKey: 'settings.piarium.visual.option.chatRenderMode.sorted.label',
+        descriptionKey: 'settings.piarium.visual.option.chatRenderMode.sorted.description',
     },
     {
         id: 'live',
-        labelKey: 'settings.openchamber.visual.option.chatRenderMode.live.label',
-        descriptionKey: 'settings.openchamber.visual.option.chatRenderMode.live.description',
+        labelKey: 'settings.piarium.visual.option.chatRenderMode.live.label',
+        descriptionKey: 'settings.piarium.visual.option.chatRenderMode.live.description',
     },
 ];
 
 const ACTIVITY_RENDER_MODE_OPTIONS: Option<'collapsed' | 'summary'>[] = [
     {
         id: 'collapsed',
-        labelKey: 'settings.openchamber.visual.option.activityRenderMode.collapsed.label',
-        descriptionKey: 'settings.openchamber.visual.option.activityRenderMode.collapsed.description',
+        labelKey: 'settings.piarium.visual.option.activityRenderMode.collapsed.label',
+        descriptionKey: 'settings.piarium.visual.option.activityRenderMode.collapsed.description',
     },
     {
         id: 'summary',
-        labelKey: 'settings.openchamber.visual.option.activityRenderMode.summary.label',
-        descriptionKey: 'settings.openchamber.visual.option.activityRenderMode.summary.description',
+        labelKey: 'settings.piarium.visual.option.activityRenderMode.summary.label',
+        descriptionKey: 'settings.piarium.visual.option.activityRenderMode.summary.description',
     },
 ];
 
 const TIME_FORMAT_OPTIONS: Option<'auto' | '12h' | '24h'>[] = [
     {
         id: 'auto',
-        labelKey: 'settings.openchamber.visual.option.timeFormat.auto.label',
-        descriptionKey: 'settings.openchamber.visual.option.timeFormat.auto.description',
+        labelKey: 'settings.piarium.visual.option.timeFormat.auto.label',
+        descriptionKey: 'settings.piarium.visual.option.timeFormat.auto.description',
     },
     {
         id: '24h',
-        labelKey: 'settings.openchamber.visual.option.timeFormat.24h.label',
-        descriptionKey: 'settings.openchamber.visual.option.timeFormat.24h.description',
+        labelKey: 'settings.piarium.visual.option.timeFormat.24h.label',
+        descriptionKey: 'settings.piarium.visual.option.timeFormat.24h.description',
     },
     {
         id: '12h',
-        labelKey: 'settings.openchamber.visual.option.timeFormat.12h.label',
-        descriptionKey: 'settings.openchamber.visual.option.timeFormat.12h.description',
+        labelKey: 'settings.piarium.visual.option.timeFormat.12h.label',
+        descriptionKey: 'settings.piarium.visual.option.timeFormat.12h.description',
     },
 ];
 
 const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     {
         id: 'auto',
-        labelKey: 'settings.openchamber.visual.option.weekStart.auto.label',
-        descriptionKey: 'settings.openchamber.visual.option.weekStart.auto.description',
+        labelKey: 'settings.piarium.visual.option.weekStart.auto.label',
+        descriptionKey: 'settings.piarium.visual.option.weekStart.auto.description',
     },
     {
         id: 'monday',
-        labelKey: 'settings.openchamber.visual.option.weekStart.monday.label',
+        labelKey: 'settings.piarium.visual.option.weekStart.monday.label',
     },
     {
         id: 'sunday',
-        labelKey: 'settings.openchamber.visual.option.weekStart.sunday.label',
+        labelKey: 'settings.piarium.visual.option.weekStart.sunday.label',
     },
 ];
 
 const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
     {
         id: 'steer',
-        labelKey: 'settings.openchamber.visual.option.followUpBehavior.steer.label',
+        labelKey: 'settings.piarium.visual.option.followUpBehavior.steer.label',
     },
     {
         id: 'queue',
-        labelKey: 'settings.openchamber.visual.option.followUpBehavior.queue.label',
+        labelKey: 'settings.piarium.visual.option.followUpBehavior.queue.label',
     },
 ];
 
@@ -308,21 +308,21 @@ type VisibleSetting =
     | 'draftStartersVisible';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
-    { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
-    { id: 'right', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsRight' },
+    { id: 'left', labelKey: 'settings.piarium.desktopNetwork.option.windowControlsLeft' },
+    { id: 'right', labelKey: 'settings.piarium.desktopNetwork.option.windowControlsRight' },
 ];
 
 const WINDOW_CONTROLS_STYLE_OPTIONS: Array<{ id: DesktopWindowControlsStyle; labelKey: string }> = [
-    { id: 'classic', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsClassic' },
-    { id: 'traffic-lights', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsTrafficLights' },
+    { id: 'classic', labelKey: 'settings.piarium.desktopNetwork.option.windowControlsClassic' },
+    { id: 'traffic-lights', labelKey: 'settings.piarium.desktopNetwork.option.windowControlsTrafficLights' },
 ];
 
-interface OpenChamberVisualSettingsProps {
+interface PiariumVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
     visibleSettings?: VisibleSetting[];
 }
 
-export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps> = ({ visibleSettings }) => {
+export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ visibleSettings }) => {
     const { locale, locales, setLocale, label, t } = useI18n();
     const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
     const { isMobile } = useDeviceInfo();
@@ -749,11 +749,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
     const selectedTimeFormatLabel = React.useMemo(() => {
         const option = TIME_FORMAT_OPTIONS.find((item) => item.id === timeFormatPreference);
-        return tUnsafe(option?.labelKey ?? 'settings.openchamber.visual.option.timeFormat.auto.label');
+        return tUnsafe(option?.labelKey ?? 'settings.piarium.visual.option.timeFormat.auto.label');
     }, [timeFormatPreference, tUnsafe]);
     const selectedWeekStartLabel = React.useMemo(() => {
         const option = WEEK_START_OPTIONS.find((item) => item.id === weekStartPreference);
-        return tUnsafe(option?.labelKey ?? 'settings.openchamber.visual.option.weekStart.auto.label');
+        return tUnsafe(option?.labelKey ?? 'settings.piarium.visual.option.weekStart.auto.label');
     }, [weekStartPreference, tUnsafe]);
     const selectedPwaOrientationLabel = React.useMemo(() => {
         const option = PWA_ORIENTATION_OPTIONS.find((item) => item.id === pwaOrientation);
@@ -883,10 +883,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasAppearanceSettings && (
                     <div className="space-y-0">
                         {hasThemeSettings && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.colorModeAndTheme')} divider={false}>
+                            <SettingsSection title={t('settings.piarium.visual.section.colorModeAndTheme')} divider={false}>
                                 <SettingsTwoColumn>
                                     <div className={SETTINGS_FIELDS_STACK_CLASS}>
-                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.colorMode')}>
+                                        <SettingsRadioGroup aria-label={t('settings.piarium.visual.section.colorMode')}>
                                             {THEME_MODE_OPTIONS.map((option) => (
                                                 <SettingsRadioOption
                                                     key={option.value}
@@ -900,7 +900,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                         {showMobileLayoutSetting && (
                                             <SettingsInset>
-                                                <SettingsStackedField label={t('settings.openchamber.visual.section.mobileLayout')}>
+                                                <SettingsStackedField label={t('settings.piarium.visual.section.mobileLayout')}>
                                                     <SettingsChipGroup
                                                         value={mobileLayoutPreference}
                                                         options={MOBILE_LAYOUT_OPTIONS.map((option) => ({
@@ -908,7 +908,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                             label: tUnsafe(option.labelKey),
                                                         }))}
                                                         onChange={handleMobileLayoutPreferenceChange}
-                                                        aria-label={t('settings.openchamber.visual.section.mobileLayout')}
+                                                        aria-label={t('settings.piarium.visual.section.mobileLayout')}
                                                     />
                                                 </SettingsStackedField>
                                             </SettingsInset>
@@ -917,12 +917,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     <div className={SETTINGS_FIELDS_STACK_CLASS}>
                                         <SettingsStackedField
-                                            label={t('settings.openchamber.visual.field.lightTheme')}
+                                            label={t('settings.piarium.visual.field.lightTheme')}
                                             settingsItem="appearance.light-theme"
                                         >
                                             <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectLightThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
+                                                <SelectTrigger aria-label={t('settings.piarium.visual.field.selectLightThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                    <SelectValue placeholder={t('settings.piarium.visual.field.selectThemePlaceholder')}>
                                                         {selectedLightTheme
                                                             ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
                                                             : undefined}
@@ -938,12 +938,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </Select>
                                         </SettingsStackedField>
                                         <SettingsStackedField
-                                            label={t('settings.openchamber.visual.field.darkTheme')}
+                                            label={t('settings.piarium.visual.field.darkTheme')}
                                             settingsItem="appearance.dark-theme"
                                         >
                                             <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectDarkThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                    <SelectValue placeholder={t('settings.openchamber.visual.field.selectThemePlaceholder')}>
+                                                <SelectTrigger aria-label={t('settings.piarium.visual.field.selectDarkThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                    <SelectValue placeholder={t('settings.piarium.visual.field.selectThemePlaceholder')}>
                                                         {selectedDarkTheme
                                                             ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
                                                             : undefined}
@@ -980,10 +980,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 className="typography-settings-link inline-flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
                                             >
                                                 <Icon name="restart" className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
-                                                {themesReloading ? t('settings.openchamber.visual.actions.reloadingThemes') : t('settings.openchamber.visual.actions.reloadThemes')}
+                                                {themesReloading ? t('settings.piarium.visual.actions.reloadingThemes') : t('settings.piarium.visual.actions.reloadThemes')}
                                             </button>
                                             <SettingsInfoHint>
-                                                {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
+                                                {t('settings.piarium.visual.field.themeImportInfoTooltip')}
                                             </SettingsInfoHint>
                                         </div>
                                     </div>
@@ -995,9 +995,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             checked={vibrancyChecked}
                                             onChange={setVibrancyChecked}
                                             disabled={vibrancyRestarting}
-                                            label={t('settings.openchamber.visual.field.macVibrancy')}
-                                            info={t('settings.openchamber.visual.field.macVibrancyHint')}
-                                            ariaLabel={t('settings.openchamber.visual.field.macVibrancy')}
+                                            label={t('settings.piarium.visual.field.macVibrancy')}
+                                            info={t('settings.piarium.visual.field.macVibrancyHint')}
+                                            ariaLabel={t('settings.piarium.visual.field.macVibrancy')}
                                         />
                                         {vibrancyChecked !== macVibrancyEnabled && (
                                             <div className="pl-6">
@@ -1012,8 +1012,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     }}
                                                 >
                                                     {vibrancyRestarting
-                                                        ? t('settings.openchamber.visual.actions.restarting')
-                                                        : t('settings.openchamber.visual.actions.saveAndRestart')}
+                                                        ? t('settings.piarium.visual.actions.restarting')
+                                                        : t('settings.piarium.visual.actions.saveAndRestart')}
                                                 </Button>
                                             </div>
                                         )}
@@ -1025,9 +1025,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <SettingsCheckboxRow
                                             checked={dockBadgeEnabled}
                                             onChange={setDockBadgeEnabled}
-                                            label={t('settings.openchamber.visual.field.dockBadge')}
-                                            info={t('settings.openchamber.visual.field.dockBadgeHint')}
-                                            ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
+                                            label={t('settings.piarium.visual.field.dockBadge')}
+                                            info={t('settings.piarium.visual.field.dockBadgeHint')}
+                                            ariaLabel={t('settings.piarium.visual.field.dockBadge')}
                                         />
                                     </SettingsInset>
                                 )}
@@ -1036,13 +1036,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                         {showWindowControlsPositionSetting && (
                             <SettingsSection
-                                title={t('settings.openchamber.desktopNetwork.field.windowControls')}
-                                info={t('settings.openchamber.desktopNetwork.field.windowControlsPositionDescription')}
+                                title={t('settings.piarium.desktopNetwork.field.windowControls')}
+                                info={t('settings.piarium.desktopNetwork.field.windowControlsPositionDescription')}
                                 divider={hasThemeSettings}
                             >
                                 <SettingsTwoColumn>
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.desktopNetwork.field.windowControlsPosition')}
+                                        label={t('settings.piarium.desktopNetwork.field.windowControlsPosition')}
                                         settingsItem="sessions.desktop-window-controls-position"
                                     >
                                         <SettingsChipGroup
@@ -1052,11 +1052,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 label: tUnsafe(option.labelKey),
                                             }))}
                                             onChange={handleWindowControlsPositionChange}
-                                            aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionAria')}
+                                            aria-label={t('settings.piarium.desktopNetwork.field.windowControlsPositionAria')}
                                         />
                                     </SettingsStackedField>
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.desktopNetwork.field.windowControlsStyle')}
+                                        label={t('settings.piarium.desktopNetwork.field.windowControlsStyle')}
                                         settingsItem="sessions.desktop-window-controls-style"
                                     >
                                         <SettingsChipGroup
@@ -1066,7 +1066,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 label: tUnsafe(option.labelKey),
                                             }))}
                                             onChange={handleWindowControlsStyleChange}
-                                            aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsStyleAria')}
+                                            aria-label={t('settings.piarium.desktopNetwork.field.windowControlsStyleAria')}
                                         />
                                     </SettingsStackedField>
                                 </SettingsTwoColumn>
@@ -1074,7 +1074,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                         )}
 
                         {hasLocalizationSettings && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.localization')}>
+                            <SettingsSection title={t('settings.piarium.visual.section.localization')}>
                                 <SettingsTwoColumn>
                                     <SettingsStackedField
                                         label={t('settings.appearance.language.label')}
@@ -1099,11 +1099,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <div className={SETTINGS_FIELDS_STACK_CLASS}>
                                             {shouldShow('timeFormat') && (
                                                 <SettingsStackedField
-                                                    label={t('settings.openchamber.visual.field.timeFormat')}
+                                                    label={t('settings.piarium.visual.field.timeFormat')}
                                                     settingsItem="appearance.time-format"
                                                 >
                                                     <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.piarium.visual.field.selectTimeFormatAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedTimeFormatLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1117,11 +1117,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                             {shouldShow('weekStart') && (
                                                 <SettingsStackedField
-                                                    label={t('settings.openchamber.visual.field.weekStartsOn')}
+                                                    label={t('settings.piarium.visual.field.weekStartsOn')}
                                                     settingsItem="appearance.week-start"
                                                 >
                                                     <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.piarium.visual.field.selectWeekStartAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedWeekStartLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1139,12 +1139,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                         )}
 
                         {(showPwaInstallNameSetting || showPwaOrientationSetting || showMobileKeyboardModeSetting) && (
-                            <SettingsSection title={t('settings.openchamber.visual.section.appInstall')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
+                            <SettingsSection title={t('settings.piarium.visual.section.appInstall')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
 
                             {showPwaInstallNameSetting && (
                                 <SettingsFieldRow
-                                    label={t('settings.openchamber.visual.field.installAppName')}
-                                    info={t('settings.openchamber.visual.field.installAppNameHint')}
+                                    label={t('settings.piarium.visual.field.installAppName')}
+                                    info={t('settings.piarium.visual.field.installAppNameHint')}
                                     settingsItem="appearance.pwa-install-name"
                                     alignEnd={false}
                                     controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
@@ -1165,7 +1165,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         }}
                                         className="min-w-0 flex-1"
                                         maxLength={64}
-                                        aria-label={t('settings.openchamber.visual.field.pwaInstallAppNameAria')}
+                                        aria-label={t('settings.piarium.visual.field.pwaInstallAppNameAria')}
                                     />
                                     <Button size="sm"
                                         type="button"
@@ -1175,7 +1175,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void applyPwaInstallName('');
                                         }}
                                         className={SETTINGS_ICON_BUTTON_CLASS}
-                                        aria-label={t('settings.openchamber.visual.actions.resetInstallAppNameAria')}
+                                        aria-label={t('settings.piarium.visual.actions.resetInstallAppNameAria')}
                                         title={t('settings.common.actions.reset')}
                                     >
                                         <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1185,8 +1185,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                             {showPwaOrientationSetting && (
                                 <SettingsFieldRow
-                                    label={t('settings.openchamber.visual.field.installOrientation')}
-                                    description={t('settings.openchamber.visual.field.installOrientationHint')}
+                                    label={t('settings.piarium.visual.field.installOrientation')}
+                                    description={t('settings.piarium.visual.field.installOrientationHint')}
                                     settingsItem="appearance.pwa-orientation"
                                     alignEnd={false}
                                     controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
@@ -1199,8 +1199,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void applyPwaOrientation(orientation);
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
-                                            <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
+                                        <SelectTrigger aria-label={t('settings.piarium.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                            <SelectValue placeholder={t('settings.piarium.visual.field.selectOrientationPlaceholder')}>
                                                 {selectedPwaOrientationLabel}
                                             </SelectValue>
                                         </SelectTrigger>
@@ -1221,7 +1221,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         }}
                                         disabled={pwaOrientation === 'system'}
                                         className={SETTINGS_ICON_BUTTON_CLASS}
-                                        aria-label={t('settings.openchamber.visual.actions.resetInstallOrientationAria')}
+                                        aria-label={t('settings.piarium.visual.actions.resetInstallOrientationAria')}
                                         title={t('settings.common.actions.reset')}
                                     >
                                         <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1231,8 +1231,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                             {showMobileKeyboardModeSetting && (
                                 <SettingsFieldRow
-                                    label={t('settings.openchamber.visual.field.mobileKeyboardMode')}
-                                    info={t('settings.openchamber.visual.field.mobileKeyboardModeHint')}
+                                    label={t('settings.piarium.visual.field.mobileKeyboardMode')}
+                                    info={t('settings.piarium.visual.field.mobileKeyboardModeHint')}
                                     settingsItem="appearance.mobile-keyboard-mode"
                                     alignEnd={false}
                                     controlClassName={SETTINGS_CONTROL_CLUSTER_CLASS}
@@ -1245,8 +1245,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void updateDesktopSettings({ mobileKeyboardMode: mode });
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
-                                            <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
+                                        <SelectTrigger aria-label={t('settings.piarium.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                            <SelectValue placeholder={t('settings.piarium.visual.field.selectMobileKeyboardModePlaceholder')}>
                                                 {selectedMobileKeyboardModeLabel}
                                             </SelectValue>
                                         </SelectTrigger>
@@ -1267,7 +1267,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         }}
                                         disabled={mobileKeyboardMode === 'native'}
                                         className={SETTINGS_ICON_BUTTON_CLASS}
-                                        aria-label={t('settings.openchamber.visual.actions.resetMobileKeyboardModeAria')}
+                                        aria-label={t('settings.piarium.visual.actions.resetMobileKeyboardModeAria')}
                                         title={t('settings.common.actions.reset')}
                                     >
                                         <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1281,17 +1281,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                 {/* --- Density & type --- */}
                 {hasLayoutSettings && (
-                    <SettingsSection title={t('settings.openchamber.visual.section.densityAndType')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
+                    <SettingsSection title={t('settings.piarium.visual.section.densityAndType')} contentClassName={SETTINGS_FIELDS_STACK_CLASS}>
                         {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') ? (
                             <SettingsTwoColumn>
                                 {shouldShow('fontSize') && !isMobile && (
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.visual.field.interfaceFont')}
+                                        label={t('settings.piarium.visual.field.interfaceFont')}
                                         settingsItem="appearance.interface-font-size"
                                         controlClassName="w-full"
                                     >
                                         <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.piarium.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1308,7 +1308,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onClick={() => setUiFont(DEFAULT_UI_FONT)}
                                             disabled={uiFont === DEFAULT_UI_FONT}
                                             className={SETTINGS_ICON_BUTTON_CLASS}
-                                            aria-label={t('settings.openchamber.visual.actions.resetInterfaceFontAria')}
+                                            aria-label={t('settings.piarium.visual.actions.resetInterfaceFontAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1317,11 +1317,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('terminalFontSize') && (
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.visual.field.codeFont')}
+                                        label={t('settings.piarium.visual.field.codeFont')}
                                         controlClassName="w-full"
                                     >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.piarium.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1338,7 +1338,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onClick={() => setMonoFont(DEFAULT_MONO_FONT)}
                                             disabled={monoFont === DEFAULT_MONO_FONT}
                                             className={SETTINGS_ICON_BUTTON_CLASS}
-                                            aria-label={t('settings.openchamber.visual.actions.resetCodeFontAria')}
+                                            aria-label={t('settings.piarium.visual.actions.resetCodeFontAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1352,7 +1352,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             <SettingsTwoColumn>
                                 {shouldShow('fontSize') && !isMobile && (
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.visual.field.interfaceFontSize')}
+                                        label={t('settings.piarium.visual.field.interfaceFontSize')}
                                         controlClassName="w-full"
                                     >
                                         <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
@@ -1362,7 +1362,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 min={50}
                                                 max={200}
                                                 step={5}
-                                                aria-label={t('settings.openchamber.visual.field.fontSizePercentageAria')}
+                                                aria-label={t('settings.piarium.visual.field.fontSizePercentageAria')}
                                             />
                                             <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
                                             <Button size="sm"
@@ -1371,7 +1371,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 onClick={() => setFontSize(100)}
                                                 disabled={fontSize === 100}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
-                                                aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
+                                                aria-label={t('settings.piarium.visual.actions.resetFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}
                                             >
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1381,7 +1381,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('terminalFontSize') && (
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.visual.field.terminalFontSize')}
+                                        label={t('settings.piarium.visual.field.terminalFontSize')}
                                         settingsItem="appearance.terminal-font-size"
                                         controlClassName="w-full"
                                     >
@@ -1400,7 +1400,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 onClick={() => setTerminalFontSize(13)}
                                                 disabled={terminalFontSize === 13}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
-                                                aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
+                                                aria-label={t('settings.piarium.visual.actions.resetTerminalFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}
                                             >
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1410,7 +1410,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('editorFontSize') && (
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.visual.field.editorFontSize')}
+                                        label={t('settings.piarium.visual.field.editorFontSize')}
                                         settingsItem="appearance.editor-font-size"
                                         controlClassName="w-full"
                                     >
@@ -1429,7 +1429,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 onClick={() => setEditorFontSize(13)}
                                                 disabled={editorFontSize === 13}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
-                                                aria-label={t('settings.openchamber.visual.actions.resetEditorFontSizeAria')}
+                                                aria-label={t('settings.piarium.visual.actions.resetEditorFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}
                                             >
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1444,7 +1444,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             <SettingsTwoColumn>
                                 {shouldShow('spacing') && (
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.visual.field.spacingDensity')}
+                                        label={t('settings.piarium.visual.field.spacingDensity')}
                                         settingsItem="appearance.spacing-density"
                                         controlClassName="w-full"
                                     >
@@ -1463,7 +1463,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 onClick={() => setPadding(100)}
                                                 disabled={padding === 100}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
-                                                aria-label={t('settings.openchamber.visual.actions.resetSpacingAria')}
+                                                aria-label={t('settings.piarium.visual.actions.resetSpacingAria')}
                                                 title={t('settings.common.actions.reset')}
                                             >
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1473,8 +1473,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('inputBarOffset') && isMobile && (
                                     <SettingsStackedField
-                                        label={t('settings.openchamber.visual.field.inputBarOffset')}
-                                        info={t('settings.openchamber.visual.field.inputBarOffsetTooltip')}
+                                        label={t('settings.piarium.visual.field.inputBarOffset')}
+                                        info={t('settings.piarium.visual.field.inputBarOffsetTooltip')}
                                         settingsItem="appearance.input-bar-offset"
                                         controlClassName="w-full"
                                     >
@@ -1493,7 +1493,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 onClick={() => setInputBarOffset(0)}
                                                 disabled={inputBarOffset === 0}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
-                                                aria-label={t('settings.openchamber.visual.actions.resetInputBarOffsetAria')}
+                                                aria-label={t('settings.piarium.visual.actions.resetInputBarOffsetAria')}
                                                 title={t('settings.common.actions.reset')}
                                             >
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1508,20 +1508,20 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                 {/* --- Navigation --- */}
                 {hasNavigationSettings && (
-                    <SettingsSection title={t('settings.openchamber.visual.section.navigation')} contentClassName="space-y-4">
+                    <SettingsSection title={t('settings.piarium.visual.section.navigation')} contentClassName="space-y-4">
                         {shouldShow('fileEditorKeymap') && (
                             <SettingsControlGroup
-                                title={t('settings.openchamber.visual.field.fileEditorKeymap')}
+                                title={t('settings.piarium.visual.field.fileEditorKeymap')}
                                 settingsItem="appearance.file-editor-keymap"
                             >
-                                <SettingsRadioGroup aria-label={t('settings.openchamber.visual.field.fileEditorKeymap')}>
+                                <SettingsRadioGroup aria-label={t('settings.piarium.visual.field.fileEditorKeymap')}>
                                     {(['default', 'vim'] as const).map((keymap) => (
                                         <SettingsRadioOption
                                             key={keymap}
                                             selected={fileEditorKeymap === keymap}
                                             onSelect={() => setFileEditorKeymap(keymap)}
-                                            label={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
-                                            ariaLabel={t(`settings.openchamber.visual.option.fileEditorKeymap.${keymap}`)}
+                                            label={t(`settings.piarium.visual.option.fileEditorKeymap.${keymap}`)}
+                                            ariaLabel={t(`settings.piarium.visual.option.fileEditorKeymap.${keymap}`)}
                                         />
                                     ))}
                                 </SettingsRadioGroup>
@@ -1532,9 +1532,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <SettingsCheckboxRow
                                     checked={autoSaveEnabled}
                                     onChange={setAutoSaveEnabled}
-                                    label={t('settings.openchamber.visual.field.autoSaveEnabled')}
-                                    ariaLabel={t('settings.openchamber.visual.field.autoSaveEnabledAria')}
-                                    info={t('settings.openchamber.visual.field.autoSaveEnabledInfo')}
+                                    label={t('settings.piarium.visual.field.autoSaveEnabled')}
+                                    ariaLabel={t('settings.piarium.visual.field.autoSaveEnabledAria')}
+                                    info={t('settings.piarium.visual.field.autoSaveEnabledInfo')}
                                     settingsItem="appearance.auto-save-enabled"
                                 />
                             )}
@@ -1542,8 +1542,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <SettingsCheckboxRow
                                     checked={expandedEditorToolbar}
                                     onChange={handleExpandedEditorToolbarChange}
-                                    label={t('settings.openchamber.visual.field.expandedEditorToolbar')}
-                                    ariaLabel={t('settings.openchamber.visual.field.expandedEditorToolbarAria')}
+                                    label={t('settings.piarium.visual.field.expandedEditorToolbar')}
+                                    ariaLabel={t('settings.piarium.visual.field.expandedEditorToolbarAria')}
                                     settingsItem="appearance.expanded-editor-toolbar"
                                 />
                             )}
@@ -1551,25 +1551,25 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <SettingsCheckboxRow
                                     checked={showTerminalQuickKeysOnDesktop}
                                     onChange={setShowTerminalQuickKeysOnDesktop}
-                                    label={t('settings.openchamber.visual.field.terminalQuickKeys')}
-                                    ariaLabel={t('settings.openchamber.visual.field.terminalQuickKeysAria')}
+                                    label={t('settings.piarium.visual.field.terminalQuickKeys')}
+                                    ariaLabel={t('settings.piarium.visual.field.terminalQuickKeysAria')}
                                     settingsItem="appearance.terminal-quick-keys"
-                                    info={t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
+                                    info={t('settings.piarium.visual.field.terminalQuickKeysTooltip')}
                                 />
                             )}
                             {showTerminalShellSetting && (
                                 <SettingsStackedField
-                                    label={t('settings.openchamber.visual.field.terminalShell')}
-                                    info={t('settings.openchamber.visual.field.terminalShellHint')}
+                                    label={t('settings.piarium.visual.field.terminalShell')}
+                                    info={t('settings.piarium.visual.field.terminalShellHint')}
                                     settingsItem="appearance.terminal-shell"
                                     className="pt-2"
                                 >
                                     <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.piarium.visual.field.terminalShellAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="auto">{t('settings.openchamber.visual.option.terminalShell.auto')}</SelectItem>
+                                            <SelectItem value="auto">{t('settings.piarium.visual.option.terminalShell.auto')}</SelectItem>
                                             {terminalShellOptions.map((shell) => (
                                                 <SelectItem key={shell.id} value={shell.id}>{shell.name}</SelectItem>
                                             ))}
@@ -1581,8 +1581,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <SettingsCheckboxRow
                                     checked={terminalLoginShellEnabled}
                                     onChange={setTerminalLoginShellEnabled}
-                                    label={t('settings.openchamber.visual.field.terminalLoginShell')}
-                                    ariaLabel={t('settings.openchamber.visual.field.terminalLoginShell')}
+                                    label={t('settings.piarium.visual.field.terminalLoginShell')}
+                                    ariaLabel={t('settings.piarium.visual.field.terminalLoginShell')}
                                     settingsItem="appearance.terminal-login-shell"
                                 />
                             )}
@@ -1594,16 +1594,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     <>
                         {showBehaviorDisplaySettings && (
                             <SettingsSection
-                                title={t('settings.openchamber.visual.section.chatDisplay')}
+                                title={t('settings.piarium.visual.section.chatDisplay')}
                                 divider={behaviorSectionDivider}
                                 contentClassName="space-y-6"
                             >
                                 {shouldShow('chatRenderMode') && (
                                     <SettingsControlGroup
-                                        title={t('settings.openchamber.visual.section.chatRenderMode')}
+                                        title={t('settings.piarium.visual.section.chatRenderMode')}
                                         settingsItem="chat.render-mode"
                                     >
-                                        <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.chatRenderModeAria')} className="grid w-full max-w-[26rem] grid-cols-1 gap-3 @xl:grid-cols-2">
+                                        <div role="radiogroup" aria-label={t('settings.piarium.visual.section.chatRenderModeAria')} className="grid w-full max-w-[26rem] grid-cols-1 gap-3 @xl:grid-cols-2">
                                             {CHAT_RENDER_MODE_OPTIONS.map((option) => {
                                                 const selected = chatRenderMode === option.id;
                                                 const previewPhase = chatRenderPreviewTick % 12;
@@ -1685,15 +1685,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
 
                                 {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
-                                    <SettingsControlGroup title={t('settings.openchamber.visual.section.activityDefault')}>
-                                        <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.activityDefaultAria')}>
+                                    <SettingsControlGroup title={t('settings.piarium.visual.section.activityDefault')}>
+                                        <SettingsRadioGroup aria-label={t('settings.piarium.visual.section.activityDefaultAria')}>
                                             {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => (
                                                 <SettingsRadioOption
                                                     key={option.id}
                                                     selected={activityRenderMode === option.id}
                                                     onSelect={() => handleActivityRenderModeChange(option.id)}
                                                     label={tUnsafe(option.labelKey)}
-                                                    ariaLabel={t('settings.openchamber.visual.field.activityDefaultModeAria', { option: tUnsafe(option.labelKey) })}
+                                                    ariaLabel={t('settings.piarium.visual.field.activityDefaultModeAria', { option: tUnsafe(option.labelKey) })}
                                                 />
                                             ))}
                                         </SettingsRadioGroup>
@@ -1704,21 +1704,21 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                         {showBehaviorMessageOptions && (
                             <SettingsSection
-                                title={t('settings.openchamber.visual.section.chatMessageOptions')}
+                                title={t('settings.piarium.visual.section.chatMessageOptions')}
                                 divider={showBehaviorDisplaySettings || behaviorSectionDivider}
                             >
                                 {/* Flat 2×2 grid so row headers share a baseline (not stacked columns). */}
                                 <SettingsTwoColumn className="lg:gap-y-6">
                                     {shouldShow('userMessageRendering') && (
-                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.userMessageRendering')}>
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.userMessageRenderingAria')}>
+                                        <SettingsControlGroup title={t('settings.piarium.visual.section.userMessageRendering')}>
+                                            <SettingsRadioGroup aria-label={t('settings.piarium.visual.section.userMessageRenderingAria')}>
                                                 {USER_MESSAGE_RENDERING_OPTIONS.map((option) => (
                                                     <SettingsRadioOption
                                                         key={option.id}
                                                         selected={normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id}
                                                         onSelect={() => handleUserMessageRenderingModeChange(option.id)}
                                                         label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
+                                                        ariaLabel={t('settings.piarium.visual.field.userMessageRenderingAria', { option: tUnsafe(option.labelKey) })}
                                                     />
                                                 ))}
                                             </SettingsRadioGroup>
@@ -1726,15 +1726,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     )}
 
                                     {shouldShow('mermaidRendering') && (
-                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.mermaidRendering')}>
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.mermaidRenderingAria')}>
+                                        <SettingsControlGroup title={t('settings.piarium.visual.section.mermaidRendering')}>
+                                            <SettingsRadioGroup aria-label={t('settings.piarium.visual.section.mermaidRenderingAria')}>
                                                 {MERMAID_RENDERING_OPTIONS.map((option) => (
                                                     <SettingsRadioOption
                                                         key={option.id}
                                                         selected={mermaidRenderingMode === option.id}
                                                         onSelect={() => handleMermaidRenderingModeChange(option.id)}
                                                         label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
+                                                        ariaLabel={t('settings.piarium.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
                                                     />
                                                 ))}
                                             </SettingsRadioGroup>
@@ -1742,15 +1742,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     )}
 
                                     {shouldShow('diffLayout') && !isVSCode && (
-                                        <SettingsControlGroup title={t('settings.openchamber.visual.section.diffLayout')}>
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.diffLayoutAria')}>
+                                        <SettingsControlGroup title={t('settings.piarium.visual.section.diffLayout')}>
+                                            <SettingsRadioGroup aria-label={t('settings.piarium.visual.section.diffLayoutAria')}>
                                                 {DIFF_LAYOUT_OPTIONS.map((option) => (
                                                     <SettingsRadioOption
                                                         key={option.id}
                                                         selected={diffLayoutPreference === option.id}
                                                         onSelect={() => setDiffLayoutPreference(option.id)}
                                                         label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
+                                                        ariaLabel={t('settings.piarium.visual.field.diffLayoutAria', { option: tUnsafe(option.labelKey) })}
                                                     />
                                                 ))}
                                             </SettingsRadioGroup>
@@ -1759,17 +1759,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('followUpBehavior') && (
                                         <SettingsControlGroup
-                                            title={t('settings.openchamber.visual.section.followUpBehavior')}
+                                            title={t('settings.piarium.visual.section.followUpBehavior')}
                                             settingsItem="chat.follow-up-behavior"
                                         >
-                                            <SettingsRadioGroup aria-label={t('settings.openchamber.visual.section.followUpBehaviorAria')}>
+                                            <SettingsRadioGroup aria-label={t('settings.piarium.visual.section.followUpBehaviorAria')}>
                                                 {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
                                                     <SettingsRadioOption
                                                         key={option.id}
                                                         selected={followUpBehavior === option.id}
                                                         onSelect={() => setFollowUpBehavior(option.id)}
                                                         label={tUnsafe(option.labelKey)}
-                                                        ariaLabel={t('settings.openchamber.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
+                                                        ariaLabel={t('settings.piarium.visual.field.followUpBehaviorAria', { option: tUnsafe(option.labelKey) })}
                                                     />
                                                 ))}
                                             </SettingsRadioGroup>
@@ -1783,27 +1783,27 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             <>
                                 {shouldShow('expandedTools') && (
                                     <SettingsSection
-                                        title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
+                                        title={t('settings.piarium.visual.section.showToolsOpenedByDefault')}
                                         divider={showBehaviorDisplaySettings || showBehaviorMessageOptions || behaviorSectionDivider}
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
                                         <SettingsCheckboxRow
                                             checked={showExpandedBashTools}
                                             onChange={handleShowExpandedBashToolsChange}
-                                            label={t('settings.openchamber.visual.field.bash')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
+                                            label={t('settings.piarium.visual.field.bash')}
+                                            ariaLabel={t('settings.piarium.visual.field.showExpandedBashToolsAria')}
                                         />
                                         <SettingsCheckboxRow
                                             checked={showExpandedEditTools}
                                             onChange={handleShowExpandedEditToolsChange}
-                                            label={t('settings.openchamber.visual.field.editTools')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
+                                            label={t('settings.piarium.visual.field.editTools')}
+                                            ariaLabel={t('settings.piarium.visual.field.showExpandedEditToolsAria')}
                                         />
                                     </SettingsSection>
                                 )}
                                 {(shouldShow('draftStartersVisible') || shouldShow('subagentReadOnlyBanner')) && (
                                     <SettingsSection
-                                        title={t('settings.openchamber.visual.section.sessionAssistance')}
+                                        title={t('settings.piarium.visual.section.sessionAssistance')}
                                         settingsItem="chat.session-assistance"
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
@@ -1811,8 +1811,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <SettingsCheckboxRow
                                                 checked={draftStartersVisible}
                                                 onChange={handleDraftStartersVisibleChange}
-                                                label={t('settings.openchamber.visual.field.draftStartersVisible')}
-                                                ariaLabel={t('settings.openchamber.visual.field.draftStartersVisibleAria')}
+                                                label={t('settings.piarium.visual.field.draftStartersVisible')}
+                                                ariaLabel={t('settings.piarium.visual.field.draftStartersVisibleAria')}
                                                 settingsItem="chat.draft-starters-visible"
                                             />
                                         )}
@@ -1820,8 +1820,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <SettingsCheckboxRow
                                                 checked={allowPromptingSubagentSessions}
                                                 onChange={setAllowPromptingSubagentSessions}
-                                                label={t('settings.openchamber.visual.field.allowPromptingSubagentSessions')}
-                                                ariaLabel={t('settings.openchamber.visual.field.allowPromptingSubagentSessionsAria')}
+                                                label={t('settings.piarium.visual.field.allowPromptingSubagentSessions')}
+                                                ariaLabel={t('settings.piarium.visual.field.allowPromptingSubagentSessionsAria')}
                                                 settingsItem="chat.subagent-read-only-banner"
                                             />
                                         )}
@@ -1829,23 +1829,23 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 )}
                                 {shouldShow('reasoning') && (
                                     <SettingsSection
-                                        title={t('settings.openchamber.visual.section.reasoning')}
+                                        title={t('settings.piarium.visual.section.reasoning')}
                                         settingsItem="chat.reasoning"
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
                                         <SettingsCheckboxRow
                                             checked={showReasoningTraces}
                                             onChange={setShowReasoningTraces}
-                                            label={t('settings.openchamber.visual.field.showReasoningTraces')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
+                                            label={t('settings.piarium.visual.field.showReasoningTraces')}
+                                            ariaLabel={t('settings.piarium.visual.field.showReasoningTracesAria')}
                                             settingsItem="chat.reasoning-traces"
                                         />
                                         {showReasoningTraces && (
                                             <SettingsCheckboxRow
                                                 checked={collapsibleThinkingBlocks}
                                                 onChange={setCollapsibleThinkingBlocks}
-                                                label={t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}
-                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
+                                                label={t('settings.piarium.visual.field.collapsibleThinkingBlocks')}
+                                                ariaLabel={t('settings.piarium.visual.field.collapsibleThinkingBlocksAria')}
                                             />
                                         )}
                                     </SettingsSection>
@@ -1853,7 +1853,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                 {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap')) && (
                                 <SettingsSection
-                                    title={t('settings.openchamber.visual.section.messageAppearance')}
+                                    title={t('settings.piarium.visual.section.messageAppearance')}
                                     settingsItem="chat.message-appearance"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                 >
@@ -1861,8 +1861,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={collapsibleUserMessages}
                                         onChange={handleCollapsibleUserMessagesChange}
-                                        label={t('settings.openchamber.visual.field.collapsibleUserMessages')}
-                                        ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
+                                        label={t('settings.piarium.visual.field.collapsibleUserMessages')}
+                                        ariaLabel={t('settings.piarium.visual.field.collapsibleUserMessagesAria')}
                                         settingsItem="chat.collapsible-user-messages"
                                     />
                                 )}
@@ -1871,8 +1871,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={stickyUserHeader}
                                         onChange={handleStickyUserHeaderChange}
-                                        label={t('settings.openchamber.visual.field.stickyUserHeader')}
-                                        ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
+                                        label={t('settings.piarium.visual.field.stickyUserHeader')}
+                                        ariaLabel={t('settings.piarium.visual.field.stickyUserHeaderAria')}
                                         settingsItem="chat.sticky-user-header"
                                     />
                                 )}
@@ -1881,8 +1881,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={promptNavigatorEnabled}
                                         onChange={handlePromptNavigatorEnabledChange}
-                                        label={t('settings.openchamber.visual.field.promptNavigatorEnabled')}
-                                        ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+                                        label={t('settings.piarium.visual.field.promptNavigatorEnabled')}
+                                        ariaLabel={t('settings.piarium.visual.field.promptNavigatorEnabledAria')}
                                         settingsItem="chat.prompt-navigator"
                                     />
                                 )}
@@ -1891,8 +1891,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={wideChatLayoutEnabled}
                                         onChange={handleWideChatLayoutChange}
-                                        label={t('settings.openchamber.visual.field.wideChatLayout')}
-                                        ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
+                                        label={t('settings.piarium.visual.field.wideChatLayout')}
+                                        ariaLabel={t('settings.piarium.visual.field.wideChatLayoutAria')}
                                         settingsItem="chat.wide-layout"
                                     />
                                 )}
@@ -1901,10 +1901,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={showSplitAssistantMessageActions}
                                         onChange={handleShowSplitAssistantMessageActionsChange}
-                                        label={t('settings.openchamber.visual.field.showSplitAssistantMessageActions')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsAria')}
+                                        label={t('settings.piarium.visual.field.showSplitAssistantMessageActions')}
+                                        ariaLabel={t('settings.piarium.visual.field.showSplitAssistantMessageActionsAria')}
                                         settingsItem="chat.inline-assistant-actions"
-                                        info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
+                                        info={t('settings.piarium.visual.field.showSplitAssistantMessageActionsTooltip')}
                                     />
                                 )}
 
@@ -1912,8 +1912,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={codeBlockLineWrap}
                                         onChange={setCodeBlockLineWrap}
-                                        label={t('settings.openchamber.visual.field.codeBlockLineWrap')}
-                                        ariaLabel={t('settings.openchamber.visual.field.codeBlockLineWrapAria')}
+                                        label={t('settings.piarium.visual.field.codeBlockLineWrap')}
+                                        ariaLabel={t('settings.piarium.visual.field.codeBlockLineWrapAria')}
                                         settingsItem="chat.code-block-line-wrap"
                                     />
                                 )}
@@ -1922,7 +1922,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                 {(shouldShow('showToolFileIcons') || shouldShow('showTurnChangedFiles') || (shouldShow('dotfiles') && !isVSCodeRuntime()) || shouldShow('fileViewerPreview')) && (
                                 <SettingsSection
-                                    title={t('settings.openchamber.visual.section.toolsAndFiles')}
+                                    title={t('settings.piarium.visual.section.toolsAndFiles')}
                                     settingsItem="chat.tools-and-files"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                 >
@@ -1930,8 +1930,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={showToolFileIcons}
                                         onChange={handleShowToolFileIconsChange}
-                                        label={t('settings.openchamber.visual.field.showToolFileIcons')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showToolFileIconsAria')}
+                                        label={t('settings.piarium.visual.field.showToolFileIcons')}
+                                        ariaLabel={t('settings.piarium.visual.field.showToolFileIconsAria')}
                                         settingsItem="chat.tool-file-icons"
                                     />
                                 )}
@@ -1940,8 +1940,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={showTurnChangedFiles}
                                         onChange={handleShowTurnChangedFilesChange}
-                                        label={t('settings.openchamber.visual.field.showTurnChangedFiles')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showTurnChangedFilesAria')}
+                                        label={t('settings.piarium.visual.field.showTurnChangedFiles')}
+                                        ariaLabel={t('settings.piarium.visual.field.showTurnChangedFilesAria')}
                                         settingsItem="chat.changed-files"
                                     />
                                 )}
@@ -1950,8 +1950,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={directoryShowHidden}
                                         onChange={setDirectoryShowHidden}
-                                        label={t('settings.openchamber.visual.field.showDotfiles')}
-                                        ariaLabel={t('settings.openchamber.visual.field.showDotfilesAria')}
+                                        label={t('settings.piarium.visual.field.showDotfiles')}
+                                        ariaLabel={t('settings.piarium.visual.field.showDotfilesAria')}
                                         settingsItem="chat.dotfiles"
                                     />
                                 )}
@@ -1960,8 +1960,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={settingsDefaultFileViewerPreview}
                                         onChange={handleFileViewerPreviewChange}
-                                        label={t('settings.openchamber.defaults.field.openFilesPreview')}
-                                        ariaLabel={t('settings.openchamber.defaults.field.openFilesPreviewAria')}
+                                        label={t('settings.piarium.defaults.field.openFilesPreview')}
+                                        ariaLabel={t('settings.piarium.defaults.field.openFilesPreviewAria')}
                                     />
                                 )}
                                 </SettingsSection>
@@ -1969,7 +1969,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                 {(shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
                                 <SettingsSection
-                                    title={t('settings.openchamber.visual.section.composer')}
+                                    title={t('settings.piarium.visual.section.composer')}
                                     settingsItem="chat.composer"
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                 >
@@ -1977,8 +1977,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={persistChatDraft}
                                         onChange={setPersistChatDraft}
-                                        label={t('settings.openchamber.visual.field.persistDraftMessages')}
-                                        ariaLabel={t('settings.openchamber.visual.field.persistDraftMessagesAria')}
+                                        label={t('settings.piarium.visual.field.persistDraftMessages')}
+                                        ariaLabel={t('settings.piarium.visual.field.persistDraftMessagesAria')}
                                         settingsItem="chat.persist-drafts"
                                     />
                                 )}
@@ -1987,8 +1987,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <SettingsCheckboxRow
                                         checked={inputSpellcheckEnabled}
                                         onChange={handleInputSpellcheckChange}
-                                        label={t('settings.openchamber.visual.field.enableSpellcheckInTextInputs')}
-                                        ariaLabel={t('settings.openchamber.visual.field.enableSpellcheckInTextInputsAria')}
+                                        label={t('settings.piarium.visual.field.enableSpellcheckInTextInputs')}
+                                        ariaLabel={t('settings.piarium.visual.field.enableSpellcheckInTextInputsAria')}
                                         settingsItem="chat.spellcheck"
                                     />
                                 )}
@@ -2001,13 +2001,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                 {/* --- Privacy & Data --- */}
                 {shouldShow('reportUsage') && (
-                    <SettingsSection title={t('settings.openchamber.visual.section.privacy')}>
+                    <SettingsSection title={t('settings.piarium.visual.section.privacy')}>
                         <SettingsCheckboxRow
                             checked={reportUsage}
                             onChange={handleReportUsageChange}
-                            label={t('settings.openchamber.visual.field.sendAnonymousUsageReports')}
-                            info={t('settings.openchamber.visual.field.sendAnonymousUsageReportsHint')}
-                            ariaLabel={t('settings.openchamber.visual.field.sendAnonymousUsageReportsAria')}
+                            label={t('settings.piarium.visual.field.sendAnonymousUsageReports')}
+                            info={t('settings.piarium.visual.field.sendAnonymousUsageReportsHint')}
+                            ariaLabel={t('settings.piarium.visual.field.sendAnonymousUsageReportsAria')}
                             settingsItem="appearance.usage-reports"
                         />
                     </SettingsSection>

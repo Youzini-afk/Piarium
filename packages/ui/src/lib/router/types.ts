@@ -41,7 +41,6 @@ export const VALID_SETTINGS_SECTIONS: readonly SidebarSection[] = [
  */
 export const ROUTE_PARAMS = {
   SESSION: 'session',
-  LEGACY_SESSION: 'sessionId',
   DIRECTORY: 'directory',
   TAB: 'tab',
   SETTINGS: 'settings',

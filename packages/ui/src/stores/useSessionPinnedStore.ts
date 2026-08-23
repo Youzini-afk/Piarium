@@ -3,12 +3,11 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 
-const STORAGE_KEY = 'oc.sessions.pinned.v2';
-const LEGACY_STORAGE_KEY = 'oc.sessions.pinned';
+const STORAGE_KEY = 'piarium.sessionPinned.v1';
 
 export type SessionPinnedTarget = { directory: string; sessionId: string };
 
-type PersistedPins = { version: 2; sessions: Record<string, number> };
+type PersistedPins = { sessions: Record<string, number> };
 
 type PinnedSessionState = {
   ids: Set<string>;
@@ -50,12 +49,11 @@ export const isSessionPinned = (ids: Set<string>, directory: string | null | und
 };
 
 const readPinned = (): PinnedSessionState => {
-  storage.removeItem(LEGACY_STORAGE_KEY);
   const raw = storage.getItem(STORAGE_KEY);
   if (raw === null) return { ids: new Set(), touchedAt: {} };
   try {
     const parsed = JSON.parse(raw) as Partial<PersistedPins>;
-    if (parsed.version !== 2 || !parsed.sessions || typeof parsed.sessions !== 'object') return { ids: new Set(), touchedAt: {} };
+    if (!parsed.sessions || typeof parsed.sessions !== 'object') return { ids: new Set(), touchedAt: {} };
     const entries = Object.entries(parsed.sessions)
       .filter(([key, touchedAt]) => parsePinnedSessionKey(key) && typeof touchedAt === 'number' && Number.isFinite(touchedAt))
       .sort((left, right) => right[1] - left[1]);
@@ -79,7 +77,7 @@ const boundPinnedState = (ids: Set<string>, touchedAt: Record<string, number>): 
 
 const persistPinned = ({ ids, touchedAt }: PinnedSessionState): void => {
   const sessions = Object.fromEntries([...ids].map((key) => [key, touchedAt[key] ?? Date.now()]));
-  storage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, sessions }));
+  storage.setItem(STORAGE_KEY, JSON.stringify({ sessions }));
 };
 
 const initial = readPinned();

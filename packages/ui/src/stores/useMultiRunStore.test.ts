@@ -76,6 +76,14 @@ describe('useMultiRunStore', () => {
     isGitRepository = false;
     sessionCounter = 0;
     registerRuntimeAPIs({
+      documents: {
+        read: async (resource: { workspaceId: string; resourceId: string }) => ({ status: 'missing', resource }),
+        resolveWorkspace: async () => ({ hostId: 'test-host', workspaceId: 'home' }),
+      },
+      files: {
+        createDirectory: async () => ({ success: true }),
+        getHomeDirectory: async () => '/home/test',
+      },
       git: {
         checkIsGitRepository: async () => isGitRepository,
         getGitBranches: async () => ({

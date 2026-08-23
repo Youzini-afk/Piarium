@@ -5,9 +5,7 @@ import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import {
   DEFAULT_FOLLOW_UP_BEHAVIOR,
   isFollowUpBehavior,
-  normalizeFollowUpBehavior,
   useMessageQueueStore,
-  type FollowUpBehavior,
 } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
@@ -20,6 +18,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
+import { applyAuthoritativeSettings } from '@/lib/settingsApplication';
 import {
   usePreferencesStore,
   type PreferencesState,
@@ -40,8 +39,8 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
   }
 };
 
-const SETTINGS_MIRROR_INDEX_KEY = 'openchamber.settingsMirror.v2.index';
-const SETTINGS_MIRROR_KEY_PREFIX = 'openchamber.settingsMirror.v2:';
+const SETTINGS_MIRROR_INDEX_KEY = 'piarium.settingsMirror.v1.index';
+const SETTINGS_MIRROR_KEY_PREFIX = 'piarium.settingsMirror.v1:';
 const MAX_SETTINGS_MIRROR_RUNTIMES = 5;
 
 export const getRuntimeSettingsMirrorStorageKey = (runtimeKey: string): string =>
@@ -130,19 +129,6 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     localStorage.removeItem('pinnedDirectories');
   }
 
-  if (Array.isArray(settings.projects) && settings.projects.length > 0) {
-    const collapsed = settings.projects
-      .filter((project) => (project as unknown as { sidebarCollapsed?: boolean }).sidebarCollapsed === true)
-      .map((project) => project.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0);
-    if (collapsed.length > 0) {
-      localStorage.setItem('oc.sessions.projectCollapse', JSON.stringify(collapsed));
-    } else {
-      localStorage.removeItem('oc.sessions.projectCollapse');
-    }
-  } else {
-    localStorage.removeItem('oc.sessions.projectCollapse');
-  }
   if (typeof settings.gitmojiEnabled === 'boolean') {
     localStorage.setItem('gitmojiEnabled', String(settings.gitmojiEnabled));
   } else {
@@ -542,7 +528,6 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     summaryLength: defaults.summaryLength,
     maxLastMessageLength: defaults.maxLastMessageLength,
     inputSpellcheckEnabled: defaults.inputSpellcheckEnabled,
-    agentControlToolEnabled: defaults.agentControlToolEnabled,
     showToolFileIcons: defaults.showToolFileIcons,
     codeBlockLineWrap: defaults.codeBlockLineWrap,
     showTurnChangedFiles: defaults.showTurnChangedFiles,
@@ -597,7 +582,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
   };
 };
 
-const applyDesktopUiPreferences = (settings: DesktopSettings) => {
+const applyDesktopUiPreferences = (settings: DesktopSettings) => applyAuthoritativeSettings(() => {
   const store = useUIStore.getState();
   const preferences = usePreferencesStore.getState();
   const queueStore = useMessageQueueStore.getState();
@@ -641,14 +626,8 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
   }
 
-  let nextFollowUpBehavior: FollowUpBehavior | null = null;
-  if (isFollowUpBehavior(settings.followUpBehavior)) {
-    nextFollowUpBehavior = settings.followUpBehavior;
-  } else if (typeof settings.queueModeEnabled === 'boolean') {
-    nextFollowUpBehavior = normalizeFollowUpBehavior(undefined, settings.queueModeEnabled);
-  }
-  if (nextFollowUpBehavior && nextFollowUpBehavior !== queueStore.followUpBehavior) {
-    queueStore.setFollowUpBehavior(nextFollowUpBehavior);
+  if (isFollowUpBehavior(settings.followUpBehavior) && settings.followUpBehavior !== queueStore.followUpBehavior) {
+    queueStore.setFollowUpBehavior(settings.followUpBehavior);
   }
 
   if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
@@ -698,12 +677,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
     store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
   }
-  if (
-    typeof settings.agentControlToolEnabled === 'boolean'
-    && settings.agentControlToolEnabled !== store.agentControlToolEnabled
-  ) {
-    store.setAgentControlToolEnabled(settings.agentControlToolEnabled);
-  }
   if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
     store.setShowToolFileIcons(settings.showToolFileIcons);
   }
@@ -731,15 +704,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setWeekStartPreference(settings.weekStartPreference);
     }
   }
-  if (typeof settings.desktopWindowControlsPosition === 'string') {
-    const nextPosition = settings.desktopWindowControlsPosition === 'left'
-      ? 'left'
-      : (settings.desktopWindowControlsPosition === 'right' || settings.desktopWindowControlsPosition === 'auto')
-        ? 'right'
-        : null;
-    if (nextPosition && nextPosition !== store.desktopWindowControlsPosition) {
-      store.setDesktopWindowControlsPosition(nextPosition);
-    }
+  if (
+    (settings.desktopWindowControlsPosition === 'left' || settings.desktopWindowControlsPosition === 'right')
+    && settings.desktopWindowControlsPosition !== store.desktopWindowControlsPosition
+  ) {
+    store.setDesktopWindowControlsPosition(settings.desktopWindowControlsPosition);
   }
   if (typeof settings.desktopWindowControlsStyle === 'string') {
     const nextStyle = settings.desktopWindowControlsStyle === 'traffic-lights'
@@ -812,42 +781,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     store.setFontSize(settings.fontSize);
   }
   if (Array.isArray(settings.draftStarters)) {
-    let nextStarters = sanitizeStarterRefs(settings.draftStarters);
-    if (settings.draftStartersCraftGoalAdded !== true && !nextStarters.some((starter) => starter.type === 'command' && starter.name === 'craft-goal')) {
-      const planIndex = nextStarters.findIndex((starter) => starter.type === 'command' && starter.name === 'plan-feature');
-      const insertAt = planIndex >= 0 ? planIndex + 1 : nextStarters.length;
-      nextStarters = [
-        ...nextStarters.slice(0, insertAt),
-        { type: 'command', name: 'craft-goal' },
-        ...nextStarters.slice(insertAt),
-      ];
-    }
-    if (settings.draftStartersScheduleTaskAdded !== true && !nextStarters.some((starter) => starter.type === 'command' && starter.name === 'schedule-task')) {
-      const goalIndex = nextStarters.findIndex((starter) => starter.type === 'command' && starter.name === 'craft-goal');
-      const insertAt = goalIndex >= 0 ? goalIndex + 1 : nextStarters.length;
-      nextStarters = [
-        ...nextStarters.slice(0, insertAt),
-        { type: 'command', name: 'schedule-task' },
-        ...nextStarters.slice(insertAt),
-      ];
-    }
+    const nextStarters = sanitizeStarterRefs(settings.draftStarters);
     if (JSON.stringify(store.globalDraftStarters) !== JSON.stringify(nextStarters)) {
       store.setGlobalDraftStarters(nextStarters);
-    }
-    if (settings.draftStartersCraftGoalAdded !== true || settings.draftStartersScheduleTaskAdded !== true) {
-      settings.draftStarters = nextStarters;
-      settings.draftStartersCraftGoalAdded = true;
-      settings.draftStartersScheduleTaskAdded = true;
-    }
-  } else {
-    // The built-in default already contains Craft a Goal and Schedule a Task;
-    // only persist the markers so removing them later remains a durable user
-    // choice.
-    if (settings.draftStartersCraftGoalAdded !== true) {
-      settings.draftStartersCraftGoalAdded = true;
-    }
-    if (settings.draftStartersScheduleTaskAdded !== true) {
-      settings.draftStartersScheduleTaskAdded = true;
     }
   }
   if (typeof settings.draftStartersVisible === 'boolean' && settings.draftStartersVisible !== store.draftStartersVisible) {
@@ -1009,7 +945,7 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.filesViewShowGitignored === 'boolean') {
     setFilesViewShowGitignored(settings.filesViewShowGitignored, { persist: false });
   }
-};
+});
 
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (!payload || typeof payload !== 'object') {
@@ -1079,12 +1015,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.draftStartersVisible === 'boolean') {
     result.draftStartersVisible = candidate.draftStartersVisible;
-  }
-  if (typeof candidate.draftStartersCraftGoalAdded === 'boolean') {
-    result.draftStartersCraftGoalAdded = candidate.draftStartersCraftGoalAdded;
-  }
-  if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
-    result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
@@ -1191,8 +1121,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (isFollowUpBehavior(candidate.followUpBehavior)) {
     result.followUpBehavior = candidate.followUpBehavior;
-  } else if (typeof candidate.queueModeEnabled === 'boolean') {
-    result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
   }
   if (typeof candidate.showDeletionDialog === 'boolean') {
     result.showDeletionDialog = candidate.showDeletionDialog;
@@ -1371,9 +1299,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
   }
-  if (typeof candidate.agentControlToolEnabled === 'boolean') {
-    result.agentControlToolEnabled = candidate.agentControlToolEnabled;
-  }
   if (typeof candidate.showToolFileIcons === 'boolean') {
     result.showToolFileIcons = candidate.showToolFileIcons;
   }
@@ -1400,11 +1325,7 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.desktopWindowControlsPosition === 'string') {
     if (candidate.desktopWindowControlsPosition === 'left') {
       result.desktopWindowControlsPosition = 'left';
-    } else if (
-      candidate.desktopWindowControlsPosition === 'right'
-      || candidate.desktopWindowControlsPosition === 'auto'
-    ) {
-      // Legacy "auto" never read OS chrome config; treat as right.
+    } else if (candidate.desktopWindowControlsPosition === 'right') {
       result.desktopWindowControlsPosition = 'right';
     }
   }
@@ -1591,11 +1512,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (candidate.sttProvider === 'local' || candidate.sttProvider === 'openai-compatible') {
     result.sttProvider = candidate.sttProvider;
-  } else if (candidate.sttProvider === 'server') {
-    // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
-    result.sttProvider = 'openai-compatible';
-  } else if (candidate.sttProvider === 'browser' || candidate.sttProvider === 'wasm') {
-    result.sttProvider = 'local';
   }
   if (typeof candidate.sttServerUrl === 'string') {
     result.sttServerUrl = candidate.sttServerUrl.trim();
@@ -1760,14 +1676,6 @@ export const syncDesktopSettings = async (): Promise<void> => {
   // prevent server settings from reaching the Zustand store.
   const applySettings = async (settings: DesktopSettings) => {
     if (!isSettingsRuntimeContextCurrent(context)) return;
-    const shouldPersistCraftGoalMigration = settings.draftStartersCraftGoalAdded !== true
-      || settings.draftStartersScheduleTaskAdded !== true;
-    // `autoSaveEnabled` is new to the settings backend. Until the server has a
-    // value, materialize would invent the client default (true) and overwrite a
-    // deliberate legacy "off" preference migrated from
-    // `piarium:files:auto-save-enabled`. Prefer the hydrated store value and
-    // seed the backend once so later omitted→default authority is correct.
-    const shouldSeedAutoSaveEnabled = typeof settings.autoSaveEnabled !== 'boolean';
     const authoritativeSettings = materializeAuthoritativeUiSettings(settings);
     try {
       persistToLocalStorage(settings);
@@ -1776,9 +1684,6 @@ export const syncDesktopSettings = async (): Promise<void> => {
     }
     await waitForHydration();
     if (!isSettingsRuntimeContextCurrent(context)) return;
-    if (shouldSeedAutoSaveEnabled) {
-      authoritativeSettings.autoSaveEnabled = useUIStore.getState().autoSaveEnabled;
-    }
     if (settings.draftStarters === undefined) {
       useUIStore.setState({ globalDraftStarters: null });
     }
@@ -1787,22 +1692,6 @@ export const syncDesktopSettings = async (): Promise<void> => {
     } catch (error) {
       console.warn('applyDesktopUiPreferences failed:', error);
     }
-    const migrationPatch: Partial<DesktopSettings> = {};
-    if (shouldPersistCraftGoalMigration) {
-      if (authoritativeSettings.draftStarters) {
-        migrationPatch.draftStarters = authoritativeSettings.draftStarters;
-      }
-      migrationPatch.draftStartersCraftGoalAdded = true;
-      migrationPatch.draftStartersScheduleTaskAdded = true;
-    }
-    if (shouldSeedAutoSaveEnabled) {
-      migrationPatch.autoSaveEnabled = authoritativeSettings.autoSaveEnabled;
-    }
-    if (Object.keys(migrationPatch).length > 0) {
-      await updateDesktopSettings(migrationPatch);
-      if (!isSettingsRuntimeContextCurrent(context)) return;
-    }
-
     dispatchSettingsSynced(authoritativeSettings);
   };
 

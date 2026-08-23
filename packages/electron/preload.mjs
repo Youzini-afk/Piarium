@@ -138,7 +138,7 @@ const dispatchNativeEvent = (event, detail) => {
 const setVibrancyReady = (ready) => {
   if (!hasMacVibrancy) return;
   try {
-    document.documentElement.toggleAttribute('data-oc-vibrancy-ready', ready === true);
+    document.documentElement.toggleAttribute('data-piarium-vibrancy-ready', ready === true);
   } catch {
   }
 };

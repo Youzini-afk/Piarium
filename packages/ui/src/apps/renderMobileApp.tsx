@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@/styles/fonts';
-import '@/index.css';
+import '@/styles/application';
 import '@/lib/debug';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';

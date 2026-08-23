@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import * as safeStorageModule from './safeStorage';
 
 const importSafeStorage = async () => {
-    return await import(`./safeStorage.ts?test=${Date.now()}-${Math.random()}`) as typeof import('./safeStorage');
+    safeStorageModule.resetSafeStorageForTests();
+    return safeStorageModule;
 };
 
 const createFakeStorage = (): Storage => {

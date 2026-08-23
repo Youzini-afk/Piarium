@@ -356,3 +356,12 @@ export const getSafeSessionStorage = (): Storage => {
     }
     return safeSessionStorageInstance;
 };
+
+export const resetSafeStorageForTests = (): void => {
+    for (const flush of deferredFlushers) flush();
+    deferredFlushers.clear();
+    deferredFlushListenersRegistered = false;
+    deferredSafeStorageInstance = null;
+    safeSessionStorageInstance = null;
+    safeStorageInstance = null;
+};

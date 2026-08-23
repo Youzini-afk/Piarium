@@ -132,12 +132,12 @@ export const TitlebarLeftControls: React.FC = () => {
             directory={projectActionsContext.directory}
             // While the sidebar is open the controls sit over the frosted
             // sidebar — let the pill share its translucency instead of painting
-            // an opaque surface (handled under [data-oc-vibrancy] in CSS).
-            className={isSidebarOpen ? 'oc-vibrancy-pill' : undefined}
+            // an opaque surface (handled under [data-piarium-vibrancy] in CSS).
+            className={isSidebarOpen ? 'piarium-vibrancy-pill' : undefined}
           />
         ) : null}
 
-        <WorkbenchProfileSwitcher className={isSidebarOpen ? 'oc-vibrancy-pill' : undefined} />
+        <WorkbenchProfileSwitcher className={isSidebarOpen ? 'piarium-vibrancy-pill' : undefined} />
       </div>
     </div>
   );

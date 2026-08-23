@@ -65,7 +65,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     return all.filter((action) => action.id !== 'toggle_prompt_navigator');
   }, []);
   const actionLabel = React.useCallback((id: string, fallbackLabel: string): string => {
-    const key = `settings.openchamber.keyboardShortcuts.action.${id}.label`;
+    const key = `settings.piarium.keyboardShortcuts.action.${id}.label`;
     const translated = tUnsafe(key);
     return translated === key ? fallbackLabel : translated;
   }, [tUnsafe]);
@@ -112,7 +112,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     persistShortcutOverrides(nextOverrides);
     setPendingOverwrite(null);
     setErrorText('');
-    setWarningText(isRiskyBrowserShortcut(normalized) ? t('settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut') : '');
+    setWarningText(isRiskyBrowserShortcut(normalized) ? t('settings.piarium.keyboardShortcuts.warning.riskyBrowserShortcut') : '');
     setDraftByAction((current) => {
       const rest = { ...current };
       delete rest[actionId];
@@ -135,7 +135,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     persistShortcutOverrides(nextOverrides);
     setPendingOverwrite(null);
     setErrorText('');
-    setWarningText(isRiskyBrowserShortcut(pendingOverwrite.combo) ? t('settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut') : '');
+    setWarningText(isRiskyBrowserShortcut(pendingOverwrite.combo) ? t('settings.piarium.keyboardShortcuts.warning.riskyBrowserShortcut') : '');
     setDraftByAction((current) => {
       const rest = { ...current };
       delete rest[pendingOverwrite.actionId];
@@ -161,9 +161,9 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   return (
     <SettingsSection
       settingsItem="shortcuts.keyboard-shortcuts"
-      title={t('settings.openchamber.keyboardShortcuts.title')}
+      title={t('settings.piarium.keyboardShortcuts.title')}
       divider={false}
-      info={t('settings.openchamber.keyboardShortcuts.tooltip')}
+      info={t('settings.piarium.keyboardShortcuts.tooltip')}
       headerAction={(
         <Button
           type="button"
@@ -179,7 +179,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             setWarningText('');
           }}
         >
-          {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
+          {t('settings.piarium.keyboardShortcuts.actions.resetAll')}
         </Button>
       )}
     >
@@ -188,10 +188,10 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           {pendingOverwrite && (
             <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col @xl:flex-row @xl:items-center justify-between gap-3">
               <span className="typography-meta text-foreground">
-                {t('settings.openchamber.keyboardShortcuts.overwritePrompt')}
+                {t('settings.piarium.keyboardShortcuts.overwritePrompt')}
               </span>
               <div className="flex gap-2 shrink-0">
-                <Button type="button" size="xs" className="!font-normal" onClick={confirmOverwrite}>{t('settings.openchamber.keyboardShortcuts.actions.overwrite')}</Button>
+                <Button type="button" size="xs" className="!font-normal" onClick={confirmOverwrite}>{t('settings.piarium.keyboardShortcuts.actions.overwrite')}</Button>
                 <Button type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => setPendingOverwrite(null)}>{t('settings.common.actions.cancel')}</Button>
               </div>
             </div>
@@ -224,7 +224,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
               >
                 <Input
                   readOnly
-                  value={capturingActionId === action.id ? t('settings.openchamber.keyboardShortcuts.field.pressKeys') : formatShortcutForDisplay(displayCombo)}
+                  value={capturingActionId === action.id ? t('settings.piarium.keyboardShortcuts.field.pressKeys') : formatShortcutForDisplay(displayCombo)}
                   onFocus={() => {
                     setCapturingActionId(action.id);
                     setErrorText('');
@@ -266,7 +266,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                   onClick={() => {
                     const next = draftByAction[action.id];
                     if (!next) {
-                      setErrorText(t('settings.openchamber.keyboardShortcuts.error.captureFirst'));
+                      setErrorText(t('settings.piarium.keyboardShortcuts.error.captureFirst'));
                       return;
                     }
                     saveCombo(action.id, next);

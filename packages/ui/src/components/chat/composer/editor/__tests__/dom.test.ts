@@ -2,24 +2,28 @@ import { afterEach, expect, test } from 'bun:test';
 
 import { focusChatInput } from '../dom';
 
-const originalDocument = globalThis.document;
+const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
 
 afterEach(() => {
-    globalThis.document = originalDocument;
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
+    else delete (globalThis as { document?: unknown }).document;
 });
 
 test('focuses the CodeMirror chat input content', () => {
     let selector = '';
     let focused = false;
-    globalThis.document = {
-        querySelector: (value: string) => {
-            selector = value;
-            return { focus: () => { focused = true; } };
+    Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: {
+            querySelector: (value: string) => {
+                selector = value;
+                return { focus: () => { focused = true; } };
+            },
         },
-    } as unknown as Document;
+    });
 
     focusChatInput();
 
-    expect(selector).toBe('[data-chat-input="true"] .cm-content');
+    expect(selector).toBe('[data-pi-chat-input="true"], [data-chat-input="true"] .cm-content');
     expect(focused).toBe(true);
 });

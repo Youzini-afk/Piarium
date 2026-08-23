@@ -42,7 +42,7 @@ function getSearchParams(): URLSearchParams {
  * Returns null if missing or empty.
  */
 function parseSessionId(params: URLSearchParams): string | null {
-  const value = params.get(ROUTE_PARAMS.SESSION) ?? params.get(ROUTE_PARAMS.LEGACY_SESSION);
+  const value = params.get(ROUTE_PARAMS.SESSION);
   if (!value || value.trim().length === 0) {
     return null;
   }
@@ -89,11 +89,11 @@ function parseSettingsPath(params: URLSearchParams): string | null {
   }
 
   // Handle common aliases
-  if (normalized === 'openchamber' || normalized === 'general' || normalized === 'preferences') {
+  if (normalized === 'general' || normalized === 'preferences') {
     return 'home';
   }
 
-  // Keep legacy section ids as-is (mapping happens at apply time).
+  // Known section ids are applied directly; extension-defined ids pass through below.
   if ((VALID_SETTINGS_SECTIONS as readonly string[]).includes(normalized)) {
     return normalized;
   }
@@ -132,7 +132,6 @@ export function hasRouteParams(): boolean {
     const params = new URLSearchParams(window.location.search);
     return (
       params.has(ROUTE_PARAMS.SESSION) ||
-      params.has(ROUTE_PARAMS.LEGACY_SESSION) ||
       params.has(ROUTE_PARAMS.DIRECTORY) ||
       params.has(ROUTE_PARAMS.TAB) ||
       params.has(ROUTE_PARAMS.SETTINGS) ||

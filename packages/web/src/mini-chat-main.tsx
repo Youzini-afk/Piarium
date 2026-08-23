@@ -1,6 +1,6 @@
 import { createConfiguredWebAPIs } from './runtimeConfig';
 import type { RuntimeAPIs } from '@piarium/ui/lib/api/types';
-import '@piarium/ui/index.css';
+import '@piarium/ui/styles/application';
 import '@piarium/ui/styles/fonts';
 
 declare global {

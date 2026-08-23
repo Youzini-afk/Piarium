@@ -137,7 +137,6 @@ export type DesktopSettings = {
   openInAppId?: string;
   autoCreateWorktree?: boolean;
   followUpBehavior?: 'steer' | 'queue';
-  queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   defaultFileViewerPreview?: boolean;
   zenModel?: string;
@@ -149,8 +148,6 @@ export type DesktopSettings = {
   desktopWindowControlsPosition?: DesktopWindowControlsPosition;
   desktopWindowControlsStyle?: DesktopWindowControlsStyle;
   inputSpellcheckEnabled?: boolean;
-  agentControlToolEnabled?: boolean;
-  optimizeSystemPrompt?: boolean;
   showToolFileIcons?: boolean;
   codeBlockLineWrap?: boolean;
   showTurnChangedFiles?: boolean;
@@ -195,7 +192,7 @@ export type DesktopSettings = {
   // Message limit — controls fetch, trim, and Load More chunk size (default: 200)
   messageLimit?: number;
 
-  // User-added skills catalogs (persisted to ~/.config/openchamber/settings.json)
+  // User-added skills catalogs (persisted to Piarium's settings.json)
   skillCatalogs?: SkillCatalogConfig[];
   // Opt-in to send anonymous usage reports for update checks (default: true)
   reportUsage?: boolean;
@@ -220,9 +217,6 @@ export type DesktopSettings = {
   // Global draft welcome starters (pinned commands/skills), persisted to settings.json
   draftStarters?: DraftStarterRef[];
   draftStartersVisible?: boolean;
-  // One-time migration marker: Craft a Goal was offered in the starter row.
-  draftStartersCraftGoalAdded?: boolean;
-  draftStartersScheduleTaskAdded?: boolean;
 };
 
 type DesktopBridgeGlobal = {
@@ -272,16 +266,12 @@ export const usesFramelessElectronChrome = (): boolean => {
   return platform === 'win32' || platform === 'linux';
 };
 
-/** Normalize a stored preference; legacy `auto` maps to the right-side default. */
+/** Normalize a stored window-control preference. */
 export const normalizeDesktopWindowControlsPosition = (
   value: unknown,
 ): DesktopWindowControlsPosition | undefined => {
   if (value === 'left' || value === 'right') {
     return value;
-  }
-  // Legacy "auto" never read OS chrome config; treat it as the right default.
-  if (value === 'auto') {
-    return DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION;
   }
   return undefined;
 };

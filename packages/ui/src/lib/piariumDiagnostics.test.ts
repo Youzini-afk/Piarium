@@ -310,7 +310,7 @@ mock.module('@/stores/useProjectsStore', () => ({
 const {
   buildPiariumDiagnosticsReport,
   collectPiariumDiagnostics,
-} = await import(`./piariumDiagnostics?test=${Date.now()}`);
+} = await import('./piariumDiagnostics');
 
 describe('Piarium diagnostics', () => {
   test('collects Pi-native runtime and plugin summaries for the active session', async () => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
+import { PiariumVisualSettings } from './PiariumVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { CheckpointSettings } from './CheckpointSettings';
@@ -19,7 +19,7 @@ import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { PiSettingsContributionSlot } from '@/lib/extensions/pi-integration-registry';
-import type { OpenChamberSection } from './types';
+import type { PiariumSettingsSection } from './types';
 
 const useRuntimeEndpointEpoch = (): number => {
     const [epoch, setEpoch] = React.useState(0);
@@ -31,12 +31,12 @@ const useRuntimeEndpointEpoch = (): number => {
     return epoch;
 };
 
-interface OpenChamberPageProps {
+interface PiariumSettingsPageProps {
     /** Which section to display. If undefined, shows all sections (mobile/legacy behavior) */
-    section?: OpenChamberSection;
+    section?: PiariumSettingsSection;
 }
 
-export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => {
+export const PiariumSettingsPage: React.FC<PiariumSettingsPageProps> = ({ section }) => {
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
@@ -48,8 +48,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     // If no section specified, show all (mobile/legacy behavior)
     if (!section) {
         return (
-            <SettingsPageLayout showSaveStatus className="openchamber-page-body space-y-3 sm:space-y-6">
-                <OpenChamberVisualSettings />
+            <SettingsPageLayout showSaveStatus className="piarium-settings-page-body space-y-3 sm:space-y-6">
+                <PiariumVisualSettings />
                 <DefaultsSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 <SessionRetentionSettings />
@@ -124,7 +124,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
             title={pageTitle}
             description={pageDescription}
             showSaveStatus
-            className="openchamber-page-body"
+            className="piarium-settings-page-body"
         >
             {renderSectionContent()}
         </SettingsPageLayout>
@@ -149,7 +149,7 @@ const GeneralSectionContent: React.FC = () => {
         <>
             {showDesktopNetworkSettings && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
-            <OpenChamberVisualSettings visibleSettings={[
+            <PiariumVisualSettings visibleSettings={[
                 'fileEditorKeymap',
                 'autoSaveEnabled',
                 'expandedEditorToolbar',
@@ -165,7 +165,7 @@ const GeneralSectionContent: React.FC = () => {
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
-    return <OpenChamberVisualSettings visibleSettings={[
+    return <PiariumVisualSettings visibleSettings={[
         'theme',
         'windowControlsPosition',
         'pwaInstallName',
@@ -185,7 +185,7 @@ const VisualSectionContent: React.FC = () => {
 const ChatSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return (
-        <OpenChamberVisualSettings
+        <PiariumVisualSettings
             visibleSettings={[
                 'draftStartersVisible',
                 'chatRenderMode',

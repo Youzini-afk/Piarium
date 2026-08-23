@@ -13,15 +13,6 @@ describe('parseRoute', () => {
     expect(route.tab).toBe('diff');
   });
 
-  test('normalizes the legacy sessionId parameter through the same route contract', () => {
-    const route = parseRoute(new URLSearchParams({
-      directory: '/repo',
-      sessionId: 'legacy-session',
-    }));
-    expect(route.sessionId).toBe('legacy-session');
-    expect(route.directory).toBe('/repo');
-  });
-
   test('ignores empty session and directory values', () => {
     const route = parseRoute(new URLSearchParams('session=%20&directory=%20'));
     expect(route.sessionId).toBeNull();

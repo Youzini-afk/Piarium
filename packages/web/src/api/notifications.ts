@@ -2,7 +2,7 @@ import type { NotificationPayload, NotificationsAPI } from '@piarium/ui/lib/api/
 
 const SW_READY_TIMEOUT_MS = 1500;
 const NOTIFICATION_DEDUPE_TTL_MS = 5000;
-const NOTIFICATION_DEDUPE_STORAGE_PREFIX = 'openchamber-notification-claim:';
+const NOTIFICATION_DEDUPE_STORAGE_PREFIX = 'piarium.notificationClaim.v1:';
 
 const notificationClaims = new Map<string, number>();
 

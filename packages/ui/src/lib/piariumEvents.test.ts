@@ -29,7 +29,10 @@ class MockEventSource {
 describe('Piarium events', () => {
   beforeEach(() => {
     MockEventSource.instances = [];
-    globalThis.window = {} as Window & typeof globalThis;
+    globalThis.window = {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    } as unknown as Window & typeof globalThis;
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
   });
 

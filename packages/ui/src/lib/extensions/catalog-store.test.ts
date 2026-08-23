@@ -1,15 +1,11 @@
-import { beforeEach, expect, mock, test } from 'bun:test';
+import { beforeEach, expect, test } from 'bun:test';
 import type { PiariumExtensionHostStateSnapshot } from '@piarium/extension-contract';
 
 let refreshCount = 0;
-const refreshSurfaceExtensions = async (): Promise<void> => { refreshCount += 1; };
-
-mock.module('./managed-runtime', () => ({
-  refreshSurfaceExtensions,
-  surfaceExtensionLoader: {
-    applyCandidate: async () => { throw new Error('not used'); },
-  },
-}));
+const catalogSurfaceRuntime = {
+  applyCandidate: async (): Promise<never> => { throw new Error('not used'); },
+  refresh: async (): Promise<void> => { refreshCount += 1; },
+};
 
 const hostId = '2d7b1dc1-7ccd-4be7-9fd1-23f31dc8cf1a';
 
@@ -90,8 +86,8 @@ const waitUntil = async (predicate: () => boolean): Promise<void> => {
 
 beforeEach(async () => {
   const { resetPiariumExtensionCatalogForTests } = await import('./catalog-store');
-  resetPiariumExtensionCatalogForTests();
   refreshCount = 0;
+  resetPiariumExtensionCatalogForTests(catalogSurfaceRuntime);
 });
 
 test('rebuilds the authoritative baseline after a failed wait and resumes long-polling', async () => {

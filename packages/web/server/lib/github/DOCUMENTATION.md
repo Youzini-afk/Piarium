@@ -2,7 +2,7 @@
 
 ## Purpose
 
-- This module owns GitHub auth, Octokit access, repo resolution, and Pull Request status resolution for OpenChamber.
+- This module owns GitHub auth, Octokit access, repo resolution, and Pull Request status resolution for Piarium.
 - From user perspective, this is the layer that lets the app know which PR belongs to a local branch and keeps that UI feeling current.
 
 ## Entrypoints and structure
@@ -88,7 +88,7 @@
 
 ## Persistence
 
-- PR state is persisted in local storage under `openchamber.github-pr-status`.
+- PR state is persisted in local storage under `piarium.githubPrStatus.v1`.
 - Persisted fields include status, timestamps, identity, and resolved remote.
 - Runtime-only details are not persisted.
 - Persisted entries expire after 12 hours.

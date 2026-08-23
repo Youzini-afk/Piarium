@@ -53,7 +53,7 @@ export const CheckpointSettings: React.FC = () => {
       setRetentionLimit(normalizeRetentionLimit(nextStats.retentionLimit));
     } catch (error) {
       console.warn('[CheckpointSettings] failed to load checkpoint stats', error);
-      toast.error(t('settings.openchamber.checkpoints.toast.loadFailed'));
+      toast.error(t('settings.piarium.checkpoints.toast.loadFailed'));
     } finally {
       setLoadingStats(false);
     }
@@ -74,7 +74,7 @@ export const CheckpointSettings: React.FC = () => {
       } catch (error) {
         console.warn('[CheckpointSettings] failed to load checkpoint settings', error);
         if (!cancelled) {
-          toast.error(t('settings.openchamber.checkpoints.toast.loadFailed'));
+          toast.error(t('settings.piarium.checkpoints.toast.loadFailed'));
         }
       }
       if (!cancelled) {
@@ -116,7 +116,7 @@ export const CheckpointSettings: React.FC = () => {
           }
         } catch (error) {
           console.warn('[CheckpointSettings] failed to save checkpoint retention limit', error);
-          toast.error(t('settings.openchamber.checkpoints.toast.saveFailed'));
+          toast.error(t('settings.piarium.checkpoints.toast.saveFailed'));
         } finally {
           setSaving(false);
         }
@@ -128,8 +128,8 @@ export const CheckpointSettings: React.FC = () => {
     const normalized = normalizeCleanupResult(result);
     toast.success(t(
       clearAll
-        ? 'settings.openchamber.checkpoints.toast.clearComplete'
-        : 'settings.openchamber.checkpoints.toast.cleanupComplete',
+        ? 'settings.piarium.checkpoints.toast.clearComplete'
+        : 'settings.piarium.checkpoints.toast.cleanupComplete',
       {
         count: normalized.deletedCheckpoints,
         bytes: formatWorkspaceArchiveBytes(normalized.deletedBytes),
@@ -149,7 +149,7 @@ export const CheckpointSettings: React.FC = () => {
       await refreshStats();
     } catch (error) {
       console.warn('[CheckpointSettings] failed to apply checkpoint retention cleanup', error);
-      toast.error(t('settings.openchamber.checkpoints.toast.cleanupFailed'));
+      toast.error(t('settings.piarium.checkpoints.toast.cleanupFailed'));
     } finally {
       setCleaning(null);
     }
@@ -159,7 +159,7 @@ export const CheckpointSettings: React.FC = () => {
     if (!checkpoints?.cleanupAll || typeof window === 'undefined') {
       return;
     }
-    if (!window.confirm(t('settings.openchamber.checkpoints.confirm.clearAll'))) {
+    if (!window.confirm(t('settings.piarium.checkpoints.confirm.clearAll'))) {
       return;
     }
 
@@ -170,7 +170,7 @@ export const CheckpointSettings: React.FC = () => {
       await refreshStats();
     } catch (error) {
       console.warn('[CheckpointSettings] failed to clear checkpoint storage', error);
-      toast.error(t('settings.openchamber.checkpoints.toast.cleanupFailed'));
+      toast.error(t('settings.piarium.checkpoints.toast.cleanupFailed'));
     } finally {
       setCleaning(null);
     }
@@ -190,14 +190,14 @@ export const CheckpointSettings: React.FC = () => {
       <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
           <h3 className="typography-ui-header font-medium text-foreground">
-            {t('settings.openchamber.checkpoints.title')}
+            {t('settings.piarium.checkpoints.title')}
           </h3>
           <Tooltip>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.openchamber.checkpoints.tooltip')}
+              {t('settings.piarium.checkpoints.tooltip')}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -206,7 +206,7 @@ export const CheckpointSettings: React.FC = () => {
       <section className="px-2 pb-2 pt-0 space-y-0.5">
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.checkpoints.field.retentionLimit')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.piarium.checkpoints.field.retentionLimit')}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <NumberInput
@@ -215,7 +215,7 @@ export const CheckpointSettings: React.FC = () => {
               min={MIN_RETENTION_LIMIT}
               max={MAX_RETENTION_LIMIT}
               step={1}
-              aria-label={t('settings.openchamber.checkpoints.field.retentionLimitAria')}
+              aria-label={t('settings.piarium.checkpoints.field.retentionLimitAria')}
               className="w-20 tabular-nums"
             />
             <Button
@@ -225,7 +225,7 @@ export const CheckpointSettings: React.FC = () => {
               onClick={() => saveRetentionLimit(DEFAULT_RETENTION_LIMIT)}
               disabled={retentionLimit === DEFAULT_RETENTION_LIMIT || saving}
               className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-              aria-label={t('settings.openchamber.checkpoints.actions.resetRetentionAria')}
+              aria-label={t('settings.piarium.checkpoints.actions.resetRetentionAria')}
               title={t('settings.common.actions.reset')}
             >
               <RiRestartLine className="h-3.5 w-3.5" />
@@ -235,15 +235,15 @@ export const CheckpointSettings: React.FC = () => {
 
         <div className="grid gap-2 py-1.5 sm:grid-cols-3">
           <div className="flex min-w-0 items-baseline gap-2">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.checkpoints.field.checkpoints')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.piarium.checkpoints.field.checkpoints')}</span>
             <span className="typography-meta text-muted-foreground tabular-nums">{checkpointCount}</span>
           </div>
           <div className="flex min-w-0 items-baseline gap-2">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.checkpoints.field.sessions')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.piarium.checkpoints.field.sessions')}</span>
             <span className="typography-meta text-muted-foreground tabular-nums">{sessionCount}</span>
           </div>
           <div className="flex min-w-0 items-baseline gap-2">
-            <span className="typography-ui-label text-foreground">{t('settings.openchamber.checkpoints.field.storage')}</span>
+            <span className="typography-ui-label text-foreground">{t('settings.piarium.checkpoints.field.storage')}</span>
             <span className="typography-meta text-muted-foreground tabular-nums">{storageSize}</span>
           </div>
         </div>
@@ -252,7 +252,7 @@ export const CheckpointSettings: React.FC = () => {
       <div className="mt-1 px-2 py-1.5 space-y-1">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <p className="typography-meta text-foreground font-medium">{t('settings.openchamber.checkpoints.manualCleanup.title')}</p>
+            <p className="typography-meta text-foreground font-medium">{t('settings.piarium.checkpoints.manualCleanup.title')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:w-fit">
             <Button
@@ -264,7 +264,7 @@ export const CheckpointSettings: React.FC = () => {
               className="!font-normal gap-1.5"
             >
               <RiRefreshLine className="h-3.5 w-3.5" />
-              {t('settings.openchamber.checkpoints.actions.refreshStats')}
+              {t('settings.piarium.checkpoints.actions.refreshStats')}
             </Button>
             <Button
               type="button"
@@ -275,8 +275,8 @@ export const CheckpointSettings: React.FC = () => {
               className="!font-normal"
             >
               {cleaning === 'retention'
-                ? t('settings.openchamber.checkpoints.actions.cleaning')
-                : t('settings.openchamber.checkpoints.actions.applyRetention')}
+                ? t('settings.piarium.checkpoints.actions.cleaning')
+                : t('settings.piarium.checkpoints.actions.applyRetention')}
             </Button>
             <Button
               type="button"
@@ -288,8 +288,8 @@ export const CheckpointSettings: React.FC = () => {
             >
               <RiDeleteBinLine className="h-3.5 w-3.5" />
               {cleaning === 'all'
-                ? t('settings.openchamber.checkpoints.actions.cleaning')
-                : t('settings.openchamber.checkpoints.actions.clearAll')}
+                ? t('settings.piarium.checkpoints.actions.cleaning')
+                : t('settings.piarium.checkpoints.actions.clearAll')}
             </Button>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import type { FollowUpBehavior } from '@/stores/messageQueueStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -304,7 +305,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 event.key !== 'Enter'
                 || event.shiftKey
                 || composingRef.current
-                || event.nativeEvent.isComposing
+                || isIMECompositionEvent(event)
               ) return;
               event.preventDefault();
               if (canSend && !sending) void onSend();

@@ -220,10 +220,8 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
         },
       }),
       {
-        name: 'files-view-tabs-store',
-        version: 4,
+        name: 'piarium.filesExplorer.v1',
         storage: createDeferredSafeJSONStorage(),
-        migrate: (persistedState) => persistedState,
         partialize: (state) => ({
           activeRuntimeKey: state.activeRuntimeKey,
           runtimeSnapshots: {
@@ -248,6 +246,6 @@ export const useFilesExplorerStore = create<FilesExplorerStore>()(
         },
       },
     ),
-    { name: 'files-explorer-store' },
+    { name: 'piarium-files-explorer' },
   ),
 );

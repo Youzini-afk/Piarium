@@ -45,8 +45,8 @@ describe('prepareUserMarkdownContent', () => {
             skillInvocations: new Set(['skill:skill-name']),
         });
 
-        expect(content).toContain('[@agent](#openchamber-agent:build-agent)');
-        expect(content).toContain('[/skill:skill-name](#openchamber-skill:skill-name)');
+        expect(content).toContain('[@agent](#piarium-agent:build-agent)');
+        expect(content).toContain('[/skill:skill-name](#piarium-skill:skill-name)');
         expect(content).toContain('hello  \n[/skill:skill-name]');
     });
 
@@ -58,6 +58,6 @@ describe('prepareUserMarkdownContent', () => {
 
         expect(content).toContain('/skill-name');
         expect(content).not.toContain('[/skill-name]');
-        expect(content).toContain('[/skill:skill-name](#openchamber-skill:skill-name)');
+        expect(content).toContain('[/skill:skill-name](#piarium-skill:skill-name)');
     });
 });

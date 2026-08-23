@@ -24,7 +24,6 @@ const runtimeContext = (mcpInstalled: boolean): SettingsSearchAvailabilityContex
   isVSCode: false,
   isWeb: true,
   isWindows: false,
-  isWindowsArm64: false,
   mcpInstalled,
 });
 

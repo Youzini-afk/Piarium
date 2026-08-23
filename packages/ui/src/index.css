@@ -3,12 +3,6 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
-/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
-   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
-   first markdown render of a session; that late injection triggered a style
-   recalc during which the layered `.chat-message-column` width clamp briefly
-   lost, flashing message text to full width before it snapped back. */
-@import "katex/dist/katex.min.css";
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
@@ -66,55 +60,55 @@ button,
    The window is created transparent with a native 'sidebar' NSVisualEffectView
    behind it. We keep the whole app opaque (bg-background covers the window)
    EXCEPT the left sidebar, which is the only translucent surface that lets the
-   native vibrancy show through. `data-oc-vibrancy` = vibrancy active;
-   `data-oc-vibrancy-ready` = native layer has settled (set from the main
+   native vibrancy show through. `data-piarium-vibrancy` = vibrancy active;
+   `data-piarium-vibrancy-ready` = native layer has settled (set from the main
    process after show/restore) — until then the sidebar stays solid to avoid a
    flash of raw transparency. */
-html[data-oc-vibrancy] body,
-html[data-oc-vibrancy] #root {
+html[data-piarium-vibrancy] body,
+html[data-piarium-vibrancy] #root {
   background: transparent !important;
   background-color: transparent !important;
 }
 
-html[data-oc-vibrancy] .main-content-safe-area {
+html[data-piarium-vibrancy] .main-content-safe-area {
   background: transparent !important;
   background-color: transparent !important;
 }
 
 /* Left sidebar: solid until the native layer is ready, then a translucent
    overlay so the vibrancy frosts through. */
-html[data-oc-vibrancy] .oc-vibrancy-surface {
+html[data-piarium-vibrancy] .piarium-vibrancy-surface {
   background: var(--sidebar) !important;
 }
 
-html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+html[data-piarium-vibrancy][data-piarium-vibrancy-ready] .piarium-vibrancy-surface {
   background: var(--sidebar-vibrancy-overlay) !important;
 }
 
 /* Inner bg-sidebar elements inside the vibrant surface must not re-paint an
    opaque fill, or they'd cover the frosted effect. */
-html[data-oc-vibrancy] .oc-vibrancy-surface .bg-sidebar {
+html[data-piarium-vibrancy] .piarium-vibrancy-surface .bg-sidebar {
   background: transparent !important;
   background-color: transparent !important;
 }
 
 /* Project-actions pill over the open sidebar: drop its opaque surface so it
    frosts to the exact same level as the sidebar (border keeps its outline). */
-html[data-oc-vibrancy] .oc-vibrancy-pill {
+html[data-piarium-vibrancy] .piarium-vibrancy-pill {
   background: transparent !important;
   background-color: transparent !important;
 }
 
 /* Accessibility: drop translucency when the OS asks for reduced transparency. */
 @media (prefers-reduced-transparency: reduce) {
-  html[data-oc-vibrancy] body,
-  html[data-oc-vibrancy] #root,
-  html[data-oc-vibrancy] .main-content-safe-area {
+  html[data-piarium-vibrancy] body,
+  html[data-piarium-vibrancy] #root,
+  html[data-piarium-vibrancy] .main-content-safe-area {
     background: var(--surface-background) !important;
   }
 
-  html[data-oc-vibrancy] .oc-vibrancy-surface,
-  html[data-oc-vibrancy][data-oc-vibrancy-ready] .oc-vibrancy-surface {
+  html[data-piarium-vibrancy] .piarium-vibrancy-surface,
+  html[data-piarium-vibrancy][data-piarium-vibrancy-ready] .piarium-vibrancy-surface {
     background: var(--sidebar) !important;
   }
 }
@@ -1071,12 +1065,12 @@ html:not(.dark) .chat-scroll {
 }
 
 .markdown-content.markdown-reasoning a,
-.markdown-content.markdown-reasoning [data-openchamber-file-link="true"] {
+.markdown-content.markdown-reasoning [data-piarium-file-link="true"] {
   color: var(--surface-muted-foreground) !important;
 }
 
 .markdown-content.markdown-reasoning a:hover,
-.markdown-content.markdown-reasoning [data-openchamber-file-link="true"]:hover {
+.markdown-content.markdown-reasoning [data-piarium-file-link="true"]:hover {
   color: var(--surface-foreground) !important;
 }
 
@@ -1168,7 +1162,7 @@ html:not(.dark) .chat-scroll {
   color: var(--markdown-link-hover, var(--primary));
 }
 
-.markdown-content [data-openchamber-file-link="true"] {
+.markdown-content [data-piarium-file-link="true"] {
   color: var(--markdown-link, var(--primary));
   cursor: pointer;
   text-decoration: underline;
@@ -1177,17 +1171,17 @@ html:not(.dark) .chat-scroll {
   -webkit-user-select: text !important;
 }
 
-.markdown-content [data-openchamber-file-link="true"]:hover {
+.markdown-content [data-piarium-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
 }
 
 /* Agent/skill mentions use the primary accent, not the markdown link color */
-.markdown-content a[data-openchamber-agent-mention="true"],
+.markdown-content a[data-piarium-agent-mention="true"],
 .markdown-content a[data-skill-name] {
   color: var(--primary);
 }
 
-.markdown-content a[data-openchamber-agent-mention="true"]:hover,
+.markdown-content a[data-piarium-agent-mention="true"]:hover,
 .markdown-content a[data-skill-name]:hover {
   color: var(--primary);
 }
@@ -1781,6 +1775,6 @@ html.desktop-runtime
 html.desktop-runtime [class*="cursor-pointer"] {
   cursor: default !important;
 }
-html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
+html.desktop-runtime .markdown-content [data-piarium-file-link="true"] {
   cursor: default;
 }

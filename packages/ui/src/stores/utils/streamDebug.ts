@@ -1,13 +1,13 @@
 export const streamDebugEnabled = (): boolean => {
     if (typeof window === 'undefined') return false;
     try {
-        return window.localStorage.getItem('openchamber_stream_debug') === '1';
+        return window.localStorage.getItem('piarium_stream_debug') === '1';
     } catch {
         return false;
     }
 };
 
-const STREAM_PERF_STORAGE_KEY = 'openchamber_stream_perf';
+const STREAM_PERF_STORAGE_KEY = 'piarium_stream_perf';
 
 type PerfCounter = {
     count: number;
@@ -244,7 +244,7 @@ export const streamPerfMark = (metric: string): void => {
     if (!streamPerfEnabled || typeof performance === 'undefined' || typeof performance.mark !== 'function') {
         return;
     }
-    performance.mark(`openchamber.${metric}`);
+    performance.mark(`piarium.${metric}`);
 };
 
 export const streamPerfMeasure = <T>(metric: string, fn: () => T): T => {

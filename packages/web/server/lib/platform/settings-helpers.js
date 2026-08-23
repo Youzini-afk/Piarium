@@ -114,20 +114,6 @@ export const createSettingsHelpers = (dependencies) => {
     return MOBILE_KEYBOARD_MODE_VALUES.has(normalized) ? normalized : undefined;
   };
 
-  const normalizeFollowUpBehavior = (value, legacyQueueModeEnabled = null) => {
-    // "immediate" was removed (it was wire-identical to "steer"); collapse it.
-    if (value === 'immediate') {
-      return 'steer';
-    }
-    if (value === 'steer' || value === 'queue') {
-      return value;
-    }
-    if (legacyQueueModeEnabled === false) {
-      return 'steer';
-    }
-    return 'queue';
-  };
-
   const sanitizeSettingsUpdate = (payload) => {
     if (!payload || typeof payload !== 'object') {
       return {};
@@ -190,8 +176,7 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.desktopWindowControlsPosition === 'string') {
       const mode = candidate.desktopWindowControlsPosition.trim();
-      // Legacy "auto" never read OS chrome config; persist as the right default.
-      if (mode === 'auto' || mode === 'right') {
+      if (mode === 'right') {
         result.desktopWindowControlsPosition = 'right';
       } else if (mode === 'left') {
         result.desktopWindowControlsPosition = 'left';
@@ -260,14 +245,6 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.draftStartersVisible === 'boolean') {
       result.draftStartersVisible = candidate.draftStartersVisible;
     }
-    if (typeof candidate.draftStartersCraftGoalAdded === 'boolean') {
-      result.draftStartersCraftGoalAdded = candidate.draftStartersCraftGoalAdded;
-    }
-    if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
-      result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
-    }
-
-
     if (typeof candidate.uiFont === 'string' && candidate.uiFont.length > 0) {
       result.uiFont = candidate.uiFont;
     }
@@ -454,10 +431,8 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
     }
-    if (typeof candidate.followUpBehavior === 'string') {
-      result.followUpBehavior = normalizeFollowUpBehavior(candidate.followUpBehavior);
-    } else if (typeof candidate.queueModeEnabled === 'boolean') {
-      result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
+    if (candidate.followUpBehavior === 'steer' || candidate.followUpBehavior === 'queue') {
+      result.followUpBehavior = candidate.followUpBehavior;
     }
     if (typeof candidate.autoCreateWorktree === 'boolean') {
       result.autoCreateWorktree = candidate.autoCreateWorktree;
@@ -503,12 +478,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
       result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
-    }
-    if (typeof candidate.agentControlToolEnabled === 'boolean') {
-      result.agentControlToolEnabled = candidate.agentControlToolEnabled;
-    }
-    if (typeof candidate.optimizeSystemPrompt === 'boolean') {
-      result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
     }
     if (typeof candidate.showToolFileIcons === 'boolean') {
       result.showToolFileIcons = candidate.showToolFileIcons;
@@ -818,20 +787,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.dictationEnabled === 'boolean') {
       result.dictationEnabled = candidate.dictationEnabled;
     }
-    // STT provider migration (upstream voice/dictation adoption):
-    //   'browser' | 'wasm'  -> 'local'              (old on-device wasm/audioStreamService pipeline removed)
-    //   'server'            -> 'openai-compatible' (legacy remote endpoint rename)
-    //   'local' | 'openai-compatible' pass through unchanged.
-    // 'wasmSttModel' (old wasm pipeline) is no longer persisted; use 'sttLocalModel'.
-    // Unknown provider values are dropped.
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
       if (provider === 'local' || provider === 'openai-compatible') {
         result.sttProvider = provider;
-      } else if (provider === 'server') {
-        result.sttProvider = 'openai-compatible';
-      } else if (provider === 'browser' || provider === 'wasm') {
-        result.sttProvider = 'local';
       }
     }
     if (typeof candidate.sttServerUrl === 'string') {

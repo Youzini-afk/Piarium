@@ -4,6 +4,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
+import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
@@ -136,6 +137,11 @@ export const startAppearanceAutoSave = (): void => {
       diffLayoutPreference: state.diffLayoutPreference,
       gitChangesViewMode: state.gitChangesViewMode,
     };
+
+    if (isApplyingAuthoritativeSettings()) {
+      previous = current;
+      return;
+    }
 
     const diff: Partial<DesktopSettings> = {};
 

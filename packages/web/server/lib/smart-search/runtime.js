@@ -252,7 +252,7 @@ export const createSmartSearchRuntime = (dependencies = {}) => {
 
   const writeRawConfig = async (configFile, data) => {
     await fsPromises.mkdir(path.dirname(configFile), { recursive: true });
-    const tempFile = `${configFile}.openchamber-${process.pid}-${Date.now()}.tmp`;
+    const tempFile = `${configFile}.piarium-${process.pid}-${Date.now()}.tmp`;
     let mode = 0o600;
     try {
       const stat = await fsPromises.stat(configFile);

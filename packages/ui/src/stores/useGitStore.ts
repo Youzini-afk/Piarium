@@ -201,41 +201,23 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
 // refresh runs in the background (see ChatInput's draft-branch effect). Only the
 // branch list is cached — never status/log/diff.
 // ---------------------------------------------------------------------------
-const GIT_BRANCH_CACHE_KEY = 'oc.gitBranchCache';
-const GIT_BRANCH_CACHE_V2_KEY = 'oc.gitBranchCache.v2';
+const GIT_BRANCH_CACHE_KEY = 'piarium.gitBranchCache.v1';
 const MAX_BRANCH_CACHE_RUNTIMES = 8;
 const MAX_BRANCH_CACHE_DIRECTORIES = 50;
 type BranchCacheEnvelope = {
-  version: 2;
-  legacyClaimed: boolean;
   runtimes: Record<string, { updatedAt: number; directories: Record<string, { branches: GitBranch; updatedAt: number }> }>;
 };
 
-const emptyBranchCache = (): BranchCacheEnvelope => ({ version: 2, legacyClaimed: false, runtimes: {} });
+const emptyBranchCache = (): BranchCacheEnvelope => ({ runtimes: {} });
 
-const readBranchCacheEnvelope = (runtimeKey: string): BranchCacheEnvelope => {
+const readBranchCacheEnvelope = (): BranchCacheEnvelope => {
   try {
     const storage = getDeferredSafeStorage();
-    const raw = storage.getItem(GIT_BRANCH_CACHE_V2_KEY);
+    const raw = storage.getItem(GIT_BRANCH_CACHE_KEY);
     const parsed = raw ? JSON.parse(raw) as Partial<BranchCacheEnvelope> : emptyBranchCache();
-    const envelope: BranchCacheEnvelope = parsed?.version === 2 && parsed.runtimes && typeof parsed.runtimes === 'object'
-      ? { version: 2, legacyClaimed: Boolean(parsed.legacyClaimed), runtimes: parsed.runtimes }
+    const envelope: BranchCacheEnvelope = parsed.runtimes && typeof parsed.runtimes === 'object'
+      ? { runtimes: parsed.runtimes }
       : emptyBranchCache();
-    if (!envelope.legacyClaimed) {
-      const legacyRaw = storage.getItem(GIT_BRANCH_CACHE_KEY);
-      if (legacyRaw) {
-        const legacy = JSON.parse(legacyRaw) as Record<string, GitBranch>;
-        const directories: BranchCacheEnvelope['runtimes'][string]['directories'] = {};
-        for (const [directory, branches] of Object.entries(legacy ?? {})) {
-          if (directory && branches && Array.isArray(branches.all)) directories[directory] = { branches, updatedAt: 0 };
-        }
-        if (Object.keys(directories).length > 0) envelope.runtimes[runtimeKey] = { updatedAt: 0, directories };
-      }
-      envelope.legacyClaimed = true;
-      const serialized = JSON.stringify(envelope);
-      storage.setItem(GIT_BRANCH_CACHE_V2_KEY, serialized);
-      if (storage.getItem(GIT_BRANCH_CACHE_V2_KEY) === serialized) storage.removeItem(GIT_BRANCH_CACHE_KEY);
-    }
     return envelope;
   } catch {
     return emptyBranchCache();
@@ -245,7 +227,7 @@ const readBranchCacheEnvelope = (runtimeKey: string): BranchCacheEnvelope => {
 const writeCachedBranches = (runtimeKey: string, directory: string, branches: GitBranch): void => {
   if (!directory || !branches) return;
   try {
-    const envelope = readBranchCacheEnvelope(runtimeKey);
+    const envelope = readBranchCacheEnvelope();
     const now = Date.now();
     const current = envelope.runtimes[runtimeKey]?.directories ?? {};
     const directories = { ...current, [directory]: { branches, updatedAt: now } };
@@ -256,7 +238,7 @@ const writeCachedBranches = (runtimeKey: string, directory: string, branches: Gi
     envelope.runtimes = Object.fromEntries(
       Object.entries(envelope.runtimes).sort(([, left], [, right]) => right.updatedAt - left.updatedAt).slice(0, MAX_BRANCH_CACHE_RUNTIMES),
     );
-    getDeferredSafeStorage().setItem(GIT_BRANCH_CACHE_V2_KEY, JSON.stringify(envelope));
+    getDeferredSafeStorage().setItem(GIT_BRANCH_CACHE_KEY, JSON.stringify(envelope));
   } catch {
     // quota / serialization — ignore; live fetch still refreshes the store
   }
@@ -264,7 +246,7 @@ const writeCachedBranches = (runtimeKey: string, directory: string, branches: Gi
 
 const seedDirectoriesFromBranchCache = (runtimeKey: string): Map<string, DirectoryGitState> => {
   const directories = new Map<string, DirectoryGitState>();
-  const cache = readBranchCacheEnvelope(runtimeKey).runtimes[runtimeKey]?.directories ?? {};
+  const cache = readBranchCacheEnvelope().runtimes[runtimeKey]?.directories ?? {};
   for (const [directory, entry] of Object.entries(cache)) {
     const branches = entry.branches;
     if (!directory || !branches || !Array.isArray(branches.all)) continue;

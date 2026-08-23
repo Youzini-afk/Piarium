@@ -135,7 +135,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const dictationEnabled = usePiariumPreferencesStore((state) => state.dictationEnabled);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides));
-    // The dictation server (WebSocket + STT worker) lives in the OpenChamber
+    // The dictation server (WebSocket + STT worker) lives in the Piarium
     // web server; the VS Code bridge has no server process for it.
     const [supported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
 

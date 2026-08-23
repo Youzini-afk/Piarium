@@ -19,7 +19,7 @@ const resolveServerUrl = (req, explicitOrigin) => {
 };
 
 const requireMobileDevice = (deviceStore) => async (req, res, next) => {
-  const deviceId = normalizeString(req.headers['x-openchamber-device-id']) || normalizeString(req.body?.deviceId);
+  const deviceId = normalizeString(req.headers['x-piarium-device-id']) || normalizeString(req.body?.deviceId);
   const deviceToken = getBearerToken(req) || normalizeString(req.body?.deviceToken);
   const device = await deviceStore.authenticateDevice(deviceId, deviceToken);
   if (!device) {
@@ -43,7 +43,7 @@ export const registerMobileRoutes = (app, dependencies) => {
     if (req.path === '/pair/complete') {
       return next();
     }
-    const hasDeviceCredentials = Boolean(normalizeString(req.headers['x-openchamber-device-id']) && getBearerToken(req));
+    const hasDeviceCredentials = Boolean(normalizeString(req.headers['x-piarium-device-id']) && getBearerToken(req));
     if (hasDeviceCredentials) {
       return next();
     }

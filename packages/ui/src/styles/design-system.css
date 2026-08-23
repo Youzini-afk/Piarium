@@ -133,9 +133,9 @@
     background-color: var(--background) !important;
   }
 
-  :root.desktop-runtime[data-oc-vibrancy],
-  :root.desktop-runtime[data-oc-vibrancy] body,
-  :root.desktop-runtime[data-oc-vibrancy] #root {
+  :root.desktop-runtime[data-piarium-vibrancy],
+  :root.desktop-runtime[data-piarium-vibrancy] body,
+  :root.desktop-runtime[data-piarium-vibrancy] #root {
     background: transparent !important;
     background-color: transparent !important;
   }

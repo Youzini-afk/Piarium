@@ -154,7 +154,7 @@ describe('settings helpers', () => {
     });
   });
 
-  it('normalizes desktopWindowControlsPosition and maps legacy auto to right', () => {
+  it('accepts only supported desktopWindowControlsPosition values', () => {
     const helpers = createTestHelpers();
 
     expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'left' })).toEqual({
@@ -163,9 +163,7 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'right' })).toEqual({
       desktopWindowControlsPosition: 'right',
     });
-    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'auto' })).toEqual({
-      desktopWindowControlsPosition: 'right',
-    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'auto' })).toEqual({});
     expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'center' })).toEqual({});
   });
 
@@ -228,14 +226,11 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'fixed-layout' })).toEqual({});
   });
 
-  it('accepts STT settings as persisted shared settings (with provider migration)', () => {
+  it('accepts current STT settings as persisted shared settings', () => {
     const helpers = createTestHelpers();
 
-    // 'wasm' is a legacy on-device provider -> migrated to 'local'.
-    // 'wasmSttModel' (old wasm pipeline) is dropped; 'sttLocalModel' is the
-    // canonical local-model field. Fork VAD settings are preserved.
     expect(helpers.sanitizeSettingsUpdate({
-      sttProvider: 'wasm',
+      sttProvider: 'local',
       sttServerUrl: ' https://stt.example.test ',
       sttModel: ' whisper-large ',
       sttLocalModel: ' moonshine ',
@@ -255,17 +250,14 @@ describe('settings helpers', () => {
     });
   });
 
-  it('migrates legacy STT provider values to the upstream voice/dictation schema', () => {
+  it('accepts current and rejects obsolete STT provider values', () => {
     const helpers = createTestHelpers();
 
-    // Legacy on-device providers collapse to 'local'.
-    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'browser' }).sttProvider).toBe('local');
-    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'wasm' }).sttProvider).toBe('local');
-    // Legacy remote endpoint collapses to 'openai-compatible'.
-    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'server' }).sttProvider).toBe('openai-compatible');
-    // Current schema values pass through unchanged.
     expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'local' }).sttProvider).toBe('local');
     expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'openai-compatible' }).sttProvider).toBe('openai-compatible');
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'browser' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'wasm' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ sttProvider: 'server' })).toEqual({});
   });
 
   it('drops the removed wasmSttModel field (old wasm pipeline)', () => {
@@ -466,14 +458,6 @@ describe('settings helpers', () => {
       expect(helpers.sanitizeSettingsUpdate({ recentEfforts: { '': ['high'] } })).toEqual({});
       expect(helpers.sanitizeSettingsUpdate({ recentEfforts: { 'anthropic/claude-opus-4': [] } })).toEqual({});
       expect(helpers.sanitizeSettingsUpdate({ recentEfforts: { 'anthropic/claude-opus-4': [123, ''] } })).toEqual({});
-    });
-
-    it('persists only boolean system prompt optimization values', () => {
-      const helpers = createTestHelpersWithRealSanitizers();
-
-      expect(helpers.sanitizeSettingsUpdate({ optimizeSystemPrompt: true })).toEqual({ optimizeSystemPrompt: true });
-      expect(helpers.sanitizeSettingsUpdate({ optimizeSystemPrompt: false })).toEqual({ optimizeSystemPrompt: false });
-      expect(helpers.sanitizeSettingsUpdate({ optimizeSystemPrompt: 'true' })).toEqual({});
     });
 
     it('survives a full settings.json payload containing all four previously-dropped fields (regression)', () => {

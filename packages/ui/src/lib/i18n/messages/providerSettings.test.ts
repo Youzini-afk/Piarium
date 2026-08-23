@@ -11,8 +11,8 @@ describe('provider settings messages', () => {
     expect(zhSettingsDict['settings.providers.page.custom.placeholder.outputLimit']).toContain('可选');
   });
 
-  test('only requires a model ID for custom provider model rows', () => {
-    expect(enSettingsDict['settings.providers.page.toast.customProviderRequired']).toContain('model ID');
-    expect(zhSettingsDict['settings.providers.page.toast.customProviderRequired']).toContain('模型 ID');
+  test('requires the custom provider ID without requiring model rows', () => {
+    expect(enSettingsDict['settings.providers.page.toast.customProviderRequired']).toContain('Provider ID');
+    expect(zhSettingsDict['settings.providers.page.toast.customProviderRequired']).toContain('提供商 ID');
   });
 });

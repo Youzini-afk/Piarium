@@ -9,7 +9,6 @@ import type {
 } from '@piarium/extension-contract';
 import { serviceRoutingRuleKey } from '@piarium/extension-contract';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { refreshSurfaceExtensions, surfaceExtensionLoader } from './managed-runtime';
 
 export interface PiariumExtensionCatalogStoreState {
   busyExtensionId: string | null;
@@ -32,6 +31,28 @@ let watchController: AbortController | null = null;
 let mutationQueue: Promise<void> = Promise.resolve();
 let catalogConsumers = 0;
 const listeners = new Set<() => void>();
+
+interface CatalogSurfaceRuntime {
+  applyCandidate(
+    extensionId: string,
+    candidateIntegrity: string,
+    expectedRevision: number,
+  ): Promise<PiariumExtensionCatalogSnapshot>;
+  refresh(): Promise<void>;
+}
+
+let catalogSurfaceRuntimeOverride: CatalogSurfaceRuntime | null = null;
+
+const catalogSurfaceRuntime = async (): Promise<CatalogSurfaceRuntime> => {
+  if (catalogSurfaceRuntimeOverride) return catalogSurfaceRuntimeOverride;
+  const runtime = await import('./managed-runtime');
+  return {
+    applyCandidate: (extensionId, candidateIntegrity, expectedRevision) => (
+      runtime.surfaceExtensionLoader.applyCandidate(extensionId, candidateIntegrity, expectedRevision)
+    ),
+    refresh: runtime.refreshSurfaceExtensions,
+  };
+};
 
 const defaultWatchRetry = (attempt: number, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
   if (signal.aborted) {
@@ -241,15 +262,19 @@ export const reloadPiariumExtensionLocalSource = (
     throw new Error(`Reloaded local Piarium extension candidate is no longer current: ${extensionId}`);
   }
   if (!candidate.capabilitiesReviewed) return result.snapshot;
-  return surfaceExtensionLoader.applyCandidate(extensionId, candidate.integrity, result.snapshot.revision);
+  return (await catalogSurfaceRuntime()).applyCandidate(
+    extensionId,
+    candidate.integrity,
+    result.snapshot.revision,
+  );
 });
 
 export const selectPiariumExtensionCandidate = (
   extensionId: string,
   candidateIntegrity: string,
-): Promise<void> => runMutation(extensionId, (catalog) => (
-  surfaceExtensionLoader.applyCandidate(extensionId, candidateIntegrity, catalog.revision)
-));
+): Promise<void> => runMutation(extensionId, async (catalog) => {
+  return (await catalogSurfaceRuntime()).applyCandidate(extensionId, candidateIntegrity, catalog.revision);
+});
 
 export const discardPiariumExtensionCandidate = (
   extensionId: string,
@@ -266,7 +291,7 @@ export const removePiariumExtension = (
   const disabled = entry?.desired.enabled
     ? await extensionsApi().setEnabled(extensionId, false, catalog.revision)
     : catalog;
-  await refreshSurfaceExtensions();
+  await (await catalogSurfaceRuntime()).refresh();
   return extensionsApi().removeExtension({ deleteData, expectedRevision: disabled.revision, extensionId });
 });
 
@@ -343,13 +368,16 @@ export const getPiariumExtensionCatalogState = (): PiariumExtensionCatalogStoreS
 
 export const getPiariumExtensionCatalogWatchGeneration = (): number => generation;
 
-export const resetPiariumExtensionCatalogForTests = (): void => {
+export const resetPiariumExtensionCatalogForTests = (
+  surfaceRuntime: CatalogSurfaceRuntime | null = null,
+): void => {
   generation += 1;
   watchController?.abort('Piarium extension catalog reset');
   watchController = null;
   startPromise = null;
   catalogConsumers = 0;
   mutationQueue = Promise.resolve();
+  catalogSurfaceRuntimeOverride = surfaceRuntime;
   state = initialState();
   listeners.clear();
 };

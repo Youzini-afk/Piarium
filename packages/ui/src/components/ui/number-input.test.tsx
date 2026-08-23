@@ -62,6 +62,8 @@ interface FakeDocument extends FakeNode {
 
 interface FakeWindow {
   document: FakeDocument;
+  innerWidth: number;
+  location: { href: string; protocol: string; search: string };
   navigator: { userAgent: string; platform: string; maxTouchPoints: number };
   matchMedia(query: string): { matches: boolean; addEventListener(): void; removeEventListener(): void };
   addEventListener(): void;
@@ -162,6 +164,8 @@ function installDomStub(): { document: FakeDocument; restore: () => void } {
 
   document.defaultView = {
     document: document as unknown as FakeDocument,
+    innerWidth: 1024,
+    location: { href: "http://localhost/", protocol: "http:", search: "" },
     navigator: { userAgent: "test", platform: "test", maxTouchPoints: 0 },
     matchMedia() { return { matches: false, addEventListener() {}, removeEventListener() {} }; },
     addEventListener() { /* noop */ },
@@ -183,31 +187,36 @@ function installDomStub(): { document: FakeDocument; restore: () => void } {
   // each test runs. Bun's test runner shares globalThis across all tests in
   // a file, so a leaked DOM stub (or a sticky IS_REACT_ACT_ENVIRONMENT) would
   // bleed into unrelated tests.
-  const g = globalThis as unknown as {
-    document?: FakeDocument;
-    window?: FakeWindow;
-    navigator?: FakeWindow["navigator"];
-    IS_REACT_ACT_ENVIRONMENT?: boolean;
-  };
   const previous = {
-    document: g.document,
-    window: g.window,
-    navigator: g.navigator,
-    IS_REACT_ACT_ENVIRONMENT: g.IS_REACT_ACT_ENVIRONMENT,
+    document: Object.getOwnPropertyDescriptor(globalThis, "document"),
+    window: Object.getOwnPropertyDescriptor(globalThis, "window"),
+    navigator: Object.getOwnPropertyDescriptor(globalThis, "navigator"),
+    actEnvironment: Object.getOwnPropertyDescriptor(globalThis, "IS_REACT_ACT_ENVIRONMENT"),
+  };
+  const installGlobal = (key: string, value: unknown): void => {
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      writable: true,
+      value,
+    });
   };
 
-  g.IS_REACT_ACT_ENVIRONMENT = true;
-  g.document = document;
-  g.window = document.defaultView;
-  g.navigator = document.defaultView.navigator;
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  installGlobal("document", document);
+  installGlobal("window", document.defaultView);
+  installGlobal("navigator", document.defaultView.navigator);
 
   return {
     document,
     restore() {
-      g.document = previous.document;
-      g.window = previous.window;
-      g.navigator = previous.navigator;
-      g.IS_REACT_ACT_ENVIRONMENT = previous.IS_REACT_ACT_ENVIRONMENT;
+      const restoreGlobal = (key: string, descriptor: PropertyDescriptor | undefined): void => {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete (globalThis as Record<string, unknown>)[key];
+      };
+      restoreGlobal("document", previous.document);
+      restoreGlobal("window", previous.window);
+      restoreGlobal("navigator", previous.navigator);
+      restoreGlobal("IS_REACT_ACT_ENVIRONMENT", previous.actEnvironment);
     },
   };
 }

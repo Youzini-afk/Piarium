@@ -87,7 +87,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         setShowChecking(false);
         // Show toast if check completed with no update available
         if (didInitiateCheck.current && !updateStore.available && !updateStore.error) {
-          toast.success(t('settings.openchamber.about.toast.latestVersion'));
+          toast.success(t('settings.piarium.about.toast.latestVersion'));
           didInitiateCheck.current = false;
         }
       }, MIN_CHECKING_DURATION);
@@ -120,7 +120,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               className="h-10 w-auto justify-center gap-2 rounded-xl px-4"
             >
               {isChecking ? <Icon name="loader" className="size-4 animate-spin" /> : <Icon name="refresh" className="size-4" />}
-              {isChecking ? t('settings.openchamber.about.state.checking') : t('settings.openchamber.about.actions.checkForUpdates')}
+              {isChecking ? t('settings.piarium.about.state.checking') : t('settings.piarium.about.actions.checkForUpdates')}
             </Button>
           )}
 
@@ -133,7 +133,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               className="h-10 w-auto justify-center gap-2 rounded-xl px-4"
             >
               <Icon name="download" className="size-4" />
-              {t('settings.openchamber.about.actions.updateToVersion', { version: updateStore.info?.version || '' })}
+              {t('settings.piarium.about.actions.updateToVersion', { version: updateStore.info?.version || '' })}
             </Button>
           )}
         </div>
@@ -193,14 +193,14 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         <div className="flex flex-col @xl:flex-row @xl:items-center justify-between gap-4 px-4 py-3 border-b border-border/40">
           <div className="flex min-w-0 flex-col">
-            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.version')}</span>
+            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.piarium.about.field.version')}</span>
             <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
           </div>
           <div className="flex items-center gap-3">
             {updateStore.checking && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Icon name="loader" className="h-4 w-4 animate-spin" />
-                <span className="typography-meta">{t('settings.openchamber.about.state.checking')}</span>
+                <span className="typography-meta">{t('settings.piarium.about.state.checking')}</span>
               </div>
             )}
 
@@ -210,12 +210,12 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
                 onClick={() => setUpdateDialogOpen(true)}
               >
                 <Icon name="download" className="h-4 w-4 mr-1" />
-                {t('settings.openchamber.about.actions.updateToVersion', { version: updateStore.info?.version || '' })}
+                {t('settings.piarium.about.actions.updateToVersion', { version: updateStore.info?.version || '' })}
               </Button>
             )}
 
             {!updateStore.checking && !updateStore.available && !updateStore.error && (
-              <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
+              <span className="typography-meta text-muted-foreground">{t('settings.piarium.about.state.upToDate')}</span>
             )}
 
             <Button size="sm"
@@ -223,7 +223,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               onClick={() => updateStore.checkForUpdates()}
               disabled={updateStore.checking}
             >
-              {t('settings.openchamber.about.actions.checkForUpdates')}
+              {t('settings.piarium.about.actions.checkForUpdates')}
             </Button>
           </div>
         </div>
