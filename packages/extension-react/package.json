@@ -1,10 +1,12 @@
 {
   "name": "@piarium/extension-react",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Optional React 19 adapter for Piarium Surface extensions.",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -20,7 +22,9 @@
   },
   "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-react",
   "bugs": "https://github.com/Youzini-afk/Piarium/issues",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
   "scripts": {
     "build:dependencies": "bun run --cwd ../extension-sdk build",
@@ -29,7 +33,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
-  "dependencies": { "@piarium/extension-sdk": "0.1.0" },
+  "dependencies": {
+    "@piarium/extension-sdk": "0.2.0"
+  },
   "peerDependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

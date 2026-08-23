@@ -1,10 +1,12 @@
 {
   "name": "@piarium/extension-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Framework-neutral authoring SDK for Piarium Surface and Host extensions.",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -24,7 +26,9 @@
   },
   "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-sdk",
   "bugs": "https://github.com/Youzini-afk/Piarium/issues",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
   "scripts": {
     "build:dependencies": "bun run --cwd ../extension-contract build && bun run --cwd ../extension-surface build",
@@ -35,8 +39,10 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-contract": "0.1.0",
-    "@piarium/extension-surface": "0.1.0"
+    "@piarium/extension-contract": "0.2.0",
+    "@piarium/extension-surface": "0.2.0"
   },
-  "engines": { "node": ">=22.19.0" }
+  "engines": {
+    "node": ">=22.19.0"
+  }
 }

@@ -563,7 +563,7 @@ Piarium maintainers publish the five public authoring packages as one exact-vers
 Prepare the next version with:
 
 ```sh
-bun run release:npm:prepare 0.1.1
+bun run release:npm:prepare 0.2.0
 ```
 
 This updates all five manifests and their exact internal dependency versions, then refreshes the Bun
@@ -571,8 +571,8 @@ lockfile. Review and commit those changes on `main`. Pushing the matching dedica
 release:
 
 ```sh
-git tag -a npm-v0.1.1 -m "Publish Piarium npm tooling 0.1.1"
-git push origin npm-v0.1.1
+git tag -a npm-v0.2.0 -m "Publish Piarium npm tooling 0.2.0"
+git push origin npm-v0.2.0
 ```
 
 `.github/workflows/npm-publish.yml` accepts only `npm-v*` tags whose source commit is already on

@@ -23,9 +23,9 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-contract": "0.1.0",
-    "@piarium/extension-sdk": "0.1.0",
-    "@piarium/extension-surface": "0.1.0"
+    "@piarium/extension-contract": "workspace:*",
+    "@piarium/extension-sdk": "workspace:*",
+    "@piarium/extension-surface": "workspace:*"
   },
   "engines": { "node": ">=22.19.0" }
 }

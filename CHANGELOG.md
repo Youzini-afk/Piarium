@@ -3,6 +3,23 @@
 All notable changes to Piarium are recorded here. The project is pre-1.0; the
 private runtime protocol and product surfaces still move together.
 
+## 0.7.0
+
+Piarium's Workbench transitions are now extension-owned visual scenes instead of fixed Core UI.
+
+- Refine the full-screen lattice and Pi cube transition used when moving between Agent, IDE, and
+  custom Workbench Profiles
+- Cover the previous Workbench, commit the new Profile only while fully covered, and then reveal the
+  authoritative result with the same captured scene
+- Ship the default cube as an enabled-by-default Piarium extension that can be selected, disabled, or
+  replaced through `workbench.transition`
+- Keep complete scene ownership outside both Shells so a Shell can replace its entire interface
+  without inheriting Piarium's official page structure
+- Fall back to an opaque Core handoff when a selected scene is missing, malformed, disabled, withdrawn,
+  or fails to mount, while preserving the previous authoritative Shell on commit failure
+- Publish the Transition Scene contract, framework-neutral SDK mount helper, and React adapter in the
+  coordinated `@piarium/*` public tooling release 0.2.0
+
 ## 0.6.0
 
 Piarium's IDE Workbench release is now available as native desktop packages across Windows, macOS,

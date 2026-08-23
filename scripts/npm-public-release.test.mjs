@@ -42,7 +42,7 @@ const fixture = async () => {
     }, null, 2)}\n`);
   }
   await mkdir(path.join(root, 'packages/extension-cli/src'), { recursive: true });
-  await writeFile(path.join(root, 'packages/extension-cli/src/init.ts'), [
+  await writeFile(path.join(root, 'packages/extension-cli/src/templates.ts'), [
     'const dependencies = {',
     '  "@piarium/extension-contract": "0.1.0",',
     '  "@piarium/extension-sdk": "0.1.0",',
@@ -70,7 +70,7 @@ test('prepare updates every public package and its exact internal dependencies',
     assert.equal(cli.dependencies['@piarium/extension-contract'], '0.2.0');
     assert.equal(cli.dependencies['@piarium/extension-sdk'], '0.2.0');
     assert.equal(cli.dependencies['@piarium/extension-surface'], '0.2.0');
-    const template = await readFile(path.join(root, 'packages/extension-cli/src/init.ts'), 'utf8');
+    const template = await readFile(path.join(root, 'packages/extension-cli/src/templates.ts'), 'utf8');
     assert.match(template, /"@piarium\/extension-contract": "0\.2\.0"/);
     assert.match(template, /"@piarium\/extension-sdk": "0\.2\.0"/);
     assert.match(template, /"@piarium\/extension-cli": "0\.2\.0"/);

@@ -14,7 +14,7 @@ export const NPM_PUBLIC_PACKAGES = Object.freeze([
 const PUBLIC_PACKAGE_NAMES = new Set(NPM_PUBLIC_PACKAGES.map(({ name }) => name));
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const CLI_TEMPLATE_PATH = 'packages/extension-cli/src/init.ts';
+const CLI_TEMPLATE_PATH = 'packages/extension-cli/src/templates.ts';
 const CLI_TEMPLATE_PACKAGES = [
   '@piarium/extension-contract',
   '@piarium/extension-sdk',

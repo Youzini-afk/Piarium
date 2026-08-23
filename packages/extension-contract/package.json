@@ -1,6 +1,6 @@
 {
   "name": "@piarium/extension-contract",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Browser-safe contracts for Piarium extensions and extension-host catalogs.",
@@ -25,7 +25,9 @@
   },
   "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-contract",
   "bugs": "https://github.com/Youzini-afk/Piarium/issues",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

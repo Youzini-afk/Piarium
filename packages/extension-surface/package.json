@@ -1,6 +1,6 @@
 {
   "name": "@piarium/extension-surface",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Framework-neutral owner scopes and transactional Surface registries for Piarium extensions.",
@@ -22,7 +22,9 @@
   },
   "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-surface",
   "bugs": "https://github.com/Youzini-afk/Piarium/issues",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
   "scripts": {
     "build:dependencies": "bun run --cwd ../extension-contract build",
@@ -33,7 +35,7 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-contract": "0.1.0"
+    "@piarium/extension-contract": "0.2.0"
   },
   "engines": {
     "node": ">=22.19.0"

@@ -26,12 +26,12 @@ const packageJson = (options: {
     test: "piarium-extension test",
   },
   dependencies: {
-    "@piarium/extension-contract": "0.1.0",
-    "@piarium/extension-sdk": "0.1.0",
+    "@piarium/extension-contract": "0.2.0",
+    "@piarium/extension-sdk": "0.2.0",
     ...options.extraDependencies,
   },
   devDependencies: {
-    "@piarium/extension-cli": "0.1.0",
+    "@piarium/extension-cli": "0.2.0",
     typescript: "^5.9.0",
   },
   piarium: {

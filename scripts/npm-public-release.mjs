@@ -153,7 +153,7 @@ const publishRelease = async (tag, outputArgument) => {
 const prepareVersion = async (version) => {
   const tracked = [
     ...NPM_PUBLIC_PACKAGES.map(({ directory }) => path.join(ROOT, directory, 'package.json')),
-    path.join(ROOT, 'packages', 'extension-cli', 'src', 'init.ts'),
+    path.join(ROOT, 'packages', 'extension-cli', 'src', 'templates.ts'),
     path.join(ROOT, 'bun.lock'),
   ];
   const originals = new Map(await Promise.all(tracked.map(async (filePath) => [filePath, await readFile(filePath)])));

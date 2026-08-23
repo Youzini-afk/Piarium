@@ -1,6 +1,6 @@
 {
   "name": "@piarium/extension-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Author tooling for building and testing Piarium extensions.",
@@ -22,7 +22,9 @@
   },
   "homepage": "https://github.com/Youzini-afk/Piarium/tree/main/packages/extension-cli",
   "bugs": "https://github.com/Youzini-afk/Piarium/issues",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
   "bin": {
     "piarium-extension": "./dist/cli.js"
@@ -37,9 +39,9 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",
-    "@piarium/extension-contract": "0.1.0",
-    "@piarium/extension-sdk": "0.1.0",
-    "@piarium/extension-surface": "0.1.0",
+    "@piarium/extension-contract": "0.2.0",
+    "@piarium/extension-sdk": "0.2.0",
+    "@piarium/extension-surface": "0.2.0",
     "esbuild": "^0.28.1"
   },
   "engines": {

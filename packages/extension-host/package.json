@@ -26,8 +26,8 @@
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@piarium/extension-builtins": "0.1.0",
-    "@piarium/extension-contract": "0.1.0",
+    "@piarium/extension-builtins": "workspace:*",
+    "@piarium/extension-contract": "workspace:*",
     "esbuild": "^0.28.1",
     "tar": "^7.5.22"
   },
