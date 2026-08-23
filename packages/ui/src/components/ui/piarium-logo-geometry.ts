@@ -5,10 +5,10 @@
  * icon: no vanishing point, no size gradient, identical at any scale. `PiariumLogo` renders it, and the
  * app icons and favicons are cut from the same numbers.
  *
- * It is not what the splash draws. A cube in parallel projection has parallel base edges, and the
- * splash floor's lines converge, so the two cannot meet — `piarium-mark-perspective.ts` projects the
- * same cube through the splash camera instead. What that module does reuse from here is the lattice
- * subdivision and the per-cell opacity tables, so the two drawings of the cube are shaded alike.
+ * It is not what the splash draws. A cube in parallel projection has parallel base edges, and the splash
+ * floor's lines converge, so the two cannot meet. The splash builds a small CSS 3D cube inside the floor's
+ * own camera instead, reusing the glyph and per-cell opacity tables here so both marks remain recognisable
+ * as the same Piarium logo.
  */
 
 /** Cube edge length in the 100x100 viewBox. */

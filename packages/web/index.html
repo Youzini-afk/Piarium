@@ -547,7 +547,7 @@ inherits: true;
 initial-value: 0px;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] {
-animation: pi-splash-floor-unmask 420ms 260ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+animation: pi-splash-floor-unmask 520ms 40ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
 }
 @keyframes pi-splash-floor-unmask {
 to {
@@ -571,8 +571,8 @@ mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,0) var(--pi-splash-ope
    backdrop just fades and the sweep reads as a wipe over it. */
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
 animation:
-pi-splash-open 480ms 620ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
-pi-splash-backdrop-out 260ms 1100ms ease both;
+pi-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out 260ms 1340ms ease both;
 }
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {
 animation: pi-splash-backdrop-out 740ms ease both;
@@ -606,17 +606,32 @@ overflow: hidden;
 -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
 mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
 }
-/* Flat transform style on purpose: the cells are rasterised once and mapped by a single projective
-   transform, rather than each becoming a participant in a 3D rendering context. */
-.pi-splash-ground {
+/* One camera owns both the flattened floor layer and the small preserve-3d cube. The floor's descendants
+   remain flat, so this does not turn its hundreds of cells into separate 3D layers. */
+.pi-splash-camera {
 position: absolute;
 left: 50%;
 top: 56%;
+transform-origin: 0 0;
+transform-style: preserve-3d;
+transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1);
+}
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera {
+animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes pi-splash-camera-flatten {
+to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(var(--pi-floor-exit-scale, 1.158)); }
+}
+/* The grid is translated within that camera and flattened as a single layer. */
+.pi-splash-ground {
+position: absolute;
+left: 0;
+top: 0;
 display: grid;
 transform-origin: 0 0;
 grid-template-columns: repeat(24, 96px);
 grid-template-rows: repeat(24, 96px);
-transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1) translate(-1392px, -1392px);
+transform: translate(-1392px, -1392px);
 }
 /* A line-only continuation of the same registered grid reaches the horizon without hundreds more cells.
    The real cells paint over it and remain the opaque cover; this layer only prevents a tall viewport from
@@ -634,17 +649,11 @@ linear-gradient(to right, transparent 0 calc(100% - 1px), var(--splash-lattice-l
 linear-gradient(to bottom, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%);
 background-size: 96px 96px;
 }
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground {
-animation: pi-splash-floor-flatten 420ms 260ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
-}
-@keyframes pi-splash-floor-flatten {
-to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(var(--pi-floor-exit-scale, 1.158)) translate(-1392px, -1392px); }
-}
 .pi-splash[data-leaving='true'] .pi-splash-ground::before {
 animation: pi-splash-continuation-out 520ms ease both;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::before {
-animation-delay: 620ms;
+animation-delay: 860ms;
 }
 @keyframes pi-splash-continuation-out { to { opacity: 0; } }
 /* Opaque, because these cells are the cover. Two edges each, so neighbours do not stack into a 2px rule. */
@@ -670,7 +679,7 @@ animation: pi-splash-cell-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
 animation-delay: var(--pi-cell-delay);
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cell {
-animation-delay: calc(var(--pi-cell-delay) + 620ms);
+animation-delay: calc(var(--pi-cell-delay) + 860ms);
 }
 /* Each cell moves in the floor's own coordinate system before the parent camera projects it. On screen
    the squares therefore stay registered as perspective diamonds while the wave pushes them away from the
@@ -685,28 +694,43 @@ transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px
 }
 }
 
-/* The mark is placed by the cube's base centre, not by its box. Under perspective the projected cube is
-   asymmetric — the near corner grows, the far corner shrinks — so the base centre is nowhere near the
-   box's middle, and anchoring on the box or on its bottom edge is what left the cube hovering in three
-   earlier attempts. The translate is measured from the projection, and it is a constant only because the
-   cube's edge is. */
+/* Unlike the old pre-projected SVG, this is a small real cube inside the floor's camera. Only its three
+   visible faces participate in preserve-3d; the floor remains one flattened layer, so moving the camera
+   reprojects the logo without promoting the hundreds of cells behind it. */
 .pi-splash-mark {
 position: absolute;
-left: 50%;
-top: 56%;
-translate: -50% -75.23%;
-display: block;
-line-height: 0;
+left: -48px;
+top: -48px;
+width: 96px;
+height: 96px;
+transform-style: preserve-3d;
+transform: translateZ(48px);
 }
-/* The translate is a share of this box, so the box has to be exactly the drawing. An svg is inline by
-   default, which puts it on a baseline with descender space under it, and the cube would then stand that
-   many pixels above the floor for no visible reason. */
-.pi-splash-mark svg {
-display: block;
+.pi-splash-cube-face {
+position: absolute;
+inset: 0;
+box-sizing: border-box;
+display: grid;
+grid-template-columns: repeat(4, 1fr);
+grid-template-rows: repeat(4, 1fr);
+backface-visibility: hidden;
+background-color: var(--splash-background, var(--color-background, #151313));
+background-image: linear-gradient(var(--splash-face-fill), var(--splash-face-fill));
+box-shadow: inset 0 0 0 1px var(--splash-stroke);
 }
-/* The glyph on the open top, breathing. The rest of the cube holds still: the mark is the one thing the
-   eye is meant to settle on, and animating the faces as well made it restless. */
-.pi-splash-glyph {
+.pi-splash-cube-face-top { display: block; transform: translateZ(48px); }
+.pi-splash-cube-face-x { transform: rotateY(90deg) translateZ(48px); }
+.pi-splash-cube-face-y { transform: rotateX(-90deg) translateZ(48px); }
+.pi-splash-cube-cell {
+background: var(--splash-cell-fill);
+opacity: var(--pi-cube-cell-opacity);
+}
+.pi-splash-cube-glyph {
+display: block;
+width: 100%;
+height: 100%;
+overflow: visible;
+fill: var(--splash-stroke);
 animation: pi-splash-glyph-pulse 1.8s ease-in-out infinite;
 }
 @keyframes pi-splash-glyph-pulse {
@@ -752,21 +776,21 @@ animation: pi-splash-status-in 480ms 700ms ease both;
 }
 @keyframes pi-splash-status-in { to { opacity: 0.5; } }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-mark {
-animation: pi-splash-mark-press 520ms cubic-bezier(0.3, 0, 0.2, 1) both;
+animation: pi-splash-mark-press 960ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-mark {
-animation: pi-splash-mark-out 520ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
+animation: pi-splash-mark-out 960ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
 }
 .pi-splash[data-leaving='true'] .pi-splash-status {
 animation: pi-splash-status-out 180ms ease both;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::after {
-animation: pi-splash-contact-press 360ms cubic-bezier(0.3, 0, 0.2, 1) both;
+animation: pi-splash-contact-press 400ms 557ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-mark-press {
-0% { opacity: 1; transform: translateY(0); }
-72% { opacity: 1; transform: translateY(18px); }
-100% { opacity: 0; transform: translateY(24px); }
+0%, 58% { transform: translateZ(48px); }
+92% { transform: translateZ(-48px); }
+100% { transform: translateZ(-54px); }
 }
 @keyframes pi-splash-contact-press {
 0% { opacity: 0.35; transform: scale(1); }
@@ -784,7 +808,7 @@ to { opacity: 0; transform: translateY(5px); }
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
 .pi-splash:not([data-mode='switch'])[data-leaving='true'],
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground,
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera,
 .pi-splash[data-leaving='true'] .pi-splash-ground::before,
 .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-cell,
@@ -793,7 +817,7 @@ to { opacity: 0; transform: translateY(5px); }
 .pi-splash[data-leaving='true'] .pi-splash-mark,
 .pi-splash[data-leaving='true'] .pi-splash-status,
 .pi-splash:not([data-mode='switch']) .pi-splash-ground::after,
-.pi-splash-glyph,
+.pi-splash-cube-glyph,
 .pi-splash-status {
 animation: none;
 }
@@ -816,19 +840,19 @@ animation: none;
       <div class="pi-splash-backdrop" aria-hidden="true"></div>
       <div class="pi-splash-ground-clip" aria-hidden="true">
         <div class="pi-splash-horizon">
-          <div id="initial-loading-ground" class="pi-splash-ground"></div>
-        </div>
-      </div>
-      <!-- The cube, projected through the same camera that transforms the floor. A verbatim copy of
-           perspectiveMark(CUBE_EDGE_PX, PIARIUM_MARK_COLORS).svg from
-           packages/ui/src/components/ui/piarium-mark-perspective.ts, which the geometry test asserts, so
-           change that module rather than this block. The published isometric mark cannot be used here:
-           its base edges are parallel and the floor's converge, so the two could never meet. -->
+          <div class="pi-splash-camera">
+            <div id="initial-loading-ground" class="pi-splash-ground"></div>
+      <!-- The only preserve-3d object in the splash, inside the same camera as the flattened floor. A
+           verbatim copy of splashCubeMarkup() from packages/ui/src/components/ui/piarium-splash-cube.ts;
+           change that module and regenerate rather than editing this block. -->
       <span class="pi-splash-mark">
         <!-- SPLASH-MARK-BEGIN -->
-<svg width="143.71" height="158.11" viewBox="-71.86 -118.95 143.71 158.11" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M0 -116.95 L69.86 -83.78 L0 -48.35 L-69.86 -83.78 Z" fill="var(--splash-background, var(--color-background, #151313))"/><path d="M0 -48.35 L-69.86 -83.78 L-67.88 0 L0 37.16 Z" fill="var(--splash-background, var(--color-background, #151313))"/><path d="M0 -48.35 L69.86 -83.78 L67.88 0 L0 37.16 Z" fill="var(--splash-background, var(--color-background, #151313))"/><path d="M0 -48.35 L-69.86 -83.78 L-67.88 0 L0 37.16 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/><path d="M0 -48.35 L-17.91 -57.43 L-17.77 -35.69 L0 -26.5 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M-17.91 -57.43 L-35.51 -66.36 L-35.25 -44.74 L-17.77 -35.69 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M-35.51 -66.36 L-52.83 -75.14 L-52.44 -53.63 L-35.25 -44.74 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M-52.83 -75.14 L-69.86 -83.78 L-69.35 -62.38 L-52.44 -53.63 Z" fill="var(--splash-cell-fill)" opacity="0.55"/><path d="M0 -26.5 L-17.77 -35.69 L-17.64 -14.27 L0 -4.96 Z" fill="var(--splash-cell-fill)" opacity="0.35"/><path d="M-17.77 -35.69 L-35.25 -44.74 L-35 -23.43 L-17.64 -14.27 Z" fill="var(--splash-cell-fill)" opacity="0.1"/><path d="M-35.25 -44.74 L-52.44 -53.63 L-52.06 -32.43 L-35 -23.43 Z" fill="var(--splash-cell-fill)" opacity="0.5"/><path d="M-52.44 -53.63 L-69.35 -62.38 L-68.86 -41.29 L-52.06 -32.43 Z" fill="var(--splash-cell-fill)" opacity="0.25"/><path d="M0 -4.96 L-17.64 -14.27 L-17.51 6.84 L0 16.25 Z" fill="var(--splash-cell-fill)" opacity="0.4"/><path d="M-17.64 -14.27 L-35 -23.43 L-34.74 -2.42 L-17.51 6.84 Z" fill="var(--splash-cell-fill)" opacity="0.3"/><path d="M-35 -23.43 L-52.06 -32.43 L-51.69 -11.53 L-34.74 -2.42 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M-52.06 -32.43 L-68.86 -41.29 L-68.37 -20.5 L-51.69 -11.53 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M0 16.25 L-17.51 6.84 L-17.39 27.64 L0 37.16 Z" fill="var(--splash-cell-fill)" opacity="0.55"/><path d="M-17.51 6.84 L-34.74 -2.42 L-34.49 18.28 L-17.39 27.64 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M-34.74 -2.42 L-51.69 -11.53 L-51.32 9.07 L-34.49 18.28 Z" fill="var(--splash-cell-fill)" opacity="0.35"/><path d="M-51.69 -11.53 L-68.37 -20.5 L-67.88 0 L-51.32 9.07 Z" fill="var(--splash-cell-fill)" opacity="0.1"/><path d="M0 -48.35 L69.86 -83.78 L67.88 0 L0 37.16 Z" fill="var(--splash-face-fill)" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/><path d="M0 -48.35 L17.91 -57.43 L17.77 -35.69 L0 -26.5 Z" fill="var(--splash-cell-fill)" opacity="0.3"/><path d="M17.91 -57.43 L35.51 -66.36 L35.25 -44.74 L17.77 -35.69 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M35.51 -66.36 L52.83 -75.14 L52.44 -53.63 L35.25 -44.74 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M52.83 -75.14 L69.86 -83.78 L69.35 -62.38 L52.44 -53.63 Z" fill="var(--splash-cell-fill)" opacity="0.25"/><path d="M0 -26.5 L17.77 -35.69 L17.64 -14.27 L0 -4.96 Z" fill="var(--splash-cell-fill)" opacity="0.5"/><path d="M17.77 -35.69 L35.25 -44.74 L35 -23.43 L17.64 -14.27 Z" fill="var(--splash-cell-fill)" opacity="0.35"/><path d="M35.25 -44.74 L52.44 -53.63 L52.06 -32.43 L35 -23.43 Z" fill="var(--splash-cell-fill)" opacity="0.1"/><path d="M52.44 -53.63 L69.35 -62.38 L68.86 -41.29 L52.06 -32.43 Z" fill="var(--splash-cell-fill)" opacity="0.4"/><path d="M0 -4.96 L17.64 -14.27 L17.51 6.84 L0 16.25 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M17.64 -14.27 L35 -23.43 L34.74 -2.42 L17.51 6.84 Z" fill="var(--splash-cell-fill)" opacity="0.55"/><path d="M35 -23.43 L52.06 -32.43 L51.69 -11.53 L34.74 -2.42 Z" fill="var(--splash-cell-fill)" opacity="0.3"/><path d="M52.06 -32.43 L68.86 -41.29 L68.37 -20.5 L51.69 -11.53 Z" fill="var(--splash-cell-fill)" opacity="0.15"/><path d="M0 16.25 L17.51 6.84 L17.39 27.64 L0 37.16 Z" fill="var(--splash-cell-fill)" opacity="0.45"/><path d="M17.51 6.84 L34.74 -2.42 L34.49 18.28 L17.39 27.64 Z" fill="var(--splash-cell-fill)" opacity="0.25"/><path d="M34.74 -2.42 L51.69 -11.53 L51.32 9.07 L34.49 18.28 Z" fill="var(--splash-cell-fill)" opacity="0.4"/><path d="M51.69 -11.53 L68.37 -20.5 L67.88 0 L51.32 9.07 Z" fill="var(--splash-cell-fill)" opacity="0.2"/><path d="M0 -116.95 L69.86 -83.78 L0 -48.35 L-69.86 -83.78 Z" fill="none" stroke="var(--splash-stroke)" stroke-width="2" stroke-linejoin="round"/><path class="pi-splash-glyph" d="M-3.22 -101.15 L36.08 -82.17 L29.61 -78.94 L24.06 -81.63 L-2.21 -68.57 L-8.83 -71.87 L17.45 -84.85 L2.17 -92.28 L-24.11 -79.48 L-30.59 -82.71 L-4.32 -95.43 L-9.69 -98.04 Z" fill="var(--splash-stroke)"/></svg>
+<span class="pi-splash-cube-face pi-splash-cube-face-top"><svg class="pi-splash-cube-glyph" viewBox="-24 -24 48 48" aria-hidden="true" focusable="false"><path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" transform="scale(0.75)"/></svg></span><span class="pi-splash-cube-face pi-splash-cube-face-x"><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.3"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.15"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.45"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.25"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.5"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.35"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.1"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.4"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.2"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.55"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.3"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.15"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.45"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.25"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.4"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.2"></span></span><span class="pi-splash-cube-face pi-splash-cube-face-y"><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.2"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.45"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.15"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.55"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.35"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.1"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.5"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.25"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.4"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.3"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.45"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.15"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.55"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.2"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.35"></span><span class="pi-splash-cube-cell" style="--pi-cube-cell-opacity:0.1"></span></span>
         <!-- SPLASH-MARK-END -->
       </span>
+          </div>
+        </div>
+      </div>
       <div id="initial-loading-status" class="pi-splash-status"></div>
     </div>
 

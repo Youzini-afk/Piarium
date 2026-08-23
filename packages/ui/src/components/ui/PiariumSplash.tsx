@@ -1,10 +1,8 @@
 import React from 'react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
-import { perspectiveMark } from './piarium-mark-perspective';
+import { splashCubeMarkup } from './piarium-splash-cube';
 import {
   buildSplashCells,
-  CUBE_EDGE_PX,
-  PIARIUM_MARK_COLORS,
   PIARIUM_SPLASH_COLORS,
   splashExitScale,
   splashPlaneCss,
@@ -15,10 +13,10 @@ import {
 /**
  * The Piarium splash: the mark standing on a floor that is its own footprint extended outward.
  *
- * One camera defines both. The floor gets it as a CSS transform and the cube is projected through it into
- * SVG, so a floor cell is exactly the cube's base and the lines leaving the cube's base corners are the
- * floor's own lines. That is what makes the cube stand in the space instead of in front of it, and it is
- * the part three earlier attempts got wrong.
+ * One CSS camera owns both. The floor stays one flattened layer and the cube is the scene's only small
+ * preserve-3d object, so the camera turn reprojects them together. A floor cell is exactly the cube's base
+ * and the lines leaving its base corners are the floor's own lines; the cube stands in the space instead
+ * of being a screen-space sticker in front of it.
  *
  * Two behaviours share the component. `boot` covers startup and comes apart outward from the cube's feet.
  * `switch` covers a Workbench Profile change and sweeps along one floor axis, reversing with the direction
@@ -34,7 +32,7 @@ const STYLES = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
  * resolves itself, so nothing here can change while the splash is up. It runs during startup, when the
  * machine is at its busiest, which is the whole reason none of it is recomputed.
  */
-const MARK = perspectiveMark(CUBE_EDGE_PX, PIARIUM_MARK_COLORS);
+const CUBE_MARKUP = splashCubeMarkup();
 const SWEEP_CELLS = {
   forward: buildSplashCells('switch', 'forward', false),
   backward: buildSplashCells('switch', 'backward', false),
@@ -92,40 +90,29 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       <div className="pi-splash-backdrop" aria-hidden="true" />
       <div className="pi-splash-ground-clip" aria-hidden="true">
         <div className="pi-splash-horizon">
-          <div className="pi-splash-ground">
-            {cells.map((cell) => (
-              <span
-                key={cell.key}
-                className="pi-splash-cell"
-                data-breathe={cell.breatheDelayMs === null ? 'false' : 'true'}
-                style={{
-                  '--pi-cell-delay': `${cell.delayMs}ms`,
-                  '--pi-cell-scatter-x': `${cell.scatterXPx}px`,
-                  '--pi-cell-scatter-y': `${cell.scatterYPx}px`,
-                  ...(cell.breatheDelayMs === null
-                    ? {}
-                    : { '--pi-breathe-delay': `${cell.breatheDelayMs}ms` }),
-                } as React.CSSProperties}
-              />
-            ))}
+          <div className="pi-splash-camera">
+            <div className="pi-splash-ground">
+              {cells.map((cell) => (
+                <span
+                  key={cell.key}
+                  className="pi-splash-cell"
+                  data-breathe={cell.breatheDelayMs === null ? 'false' : 'true'}
+                  style={{
+                    '--pi-cell-delay': `${cell.delayMs}ms`,
+                    '--pi-cell-scatter-x': `${cell.scatterXPx}px`,
+                    '--pi-cell-scatter-y': `${cell.scatterYPx}px`,
+                    ...(cell.breatheDelayMs === null
+                      ? {}
+                      : { '--pi-breathe-delay': `${cell.breatheDelayMs}ms` }),
+                  } as React.CSSProperties}
+                />
+              ))}
+            </div>
+            {/* Generated from fixed Piarium geometry; no untrusted string reaches it. */}
+            <span className="pi-splash-mark" dangerouslySetInnerHTML={{ __html: CUBE_MARKUP }} />
           </div>
         </div>
       </div>
-
-      <span className="pi-splash-mark">
-        <svg
-          width={MARK.widthPx}
-          height={MARK.heightPx}
-          viewBox={MARK.viewBox}
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-          aria-hidden="true"
-          focusable="false"
-          /* Generated from this module's own geometry, so no untrusted string reaches it. Rendering the
-             paths as elements instead would hand React a list it has no reason to reconcile. */
-          dangerouslySetInnerHTML={{ __html: MARK.markup }}
-        />
-      </span>
       <div className="pi-splash-status">{status ?? ''}</div>
     </div>
   );

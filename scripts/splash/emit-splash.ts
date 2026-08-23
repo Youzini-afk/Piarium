@@ -12,16 +12,14 @@
  *
  * Three blocks per host, because they answer to three different generators:
  *   SPLASH-CSS   the shared stylesheet, including the camera transform and the cube's placement
- *   SPLASH-MARK  the projected cube as SVG (index.html only; mini-chat draws no cube)
+ *   SPLASH-MARK  the shared-camera CSS cube (index.html only; mini-chat draws no cube)
  *   SPLASH-JS    the script that fills the floor, with the per-cell exit delays baked in
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { perspectiveMark } from '../../packages/ui/src/components/ui/piarium-mark-perspective';
+import { splashCubeMarkup } from '../../packages/ui/src/components/ui/piarium-splash-cube';
 import {
-  CUBE_EDGE_PX,
-  PIARIUM_MARK_COLORS,
   PIARIUM_SPLASH_COLORS,
   splashGroundScript,
   splashPlaneCss,
@@ -63,7 +61,7 @@ const patch = (file: string, kind: keyof typeof SENTINELS, content: string): voi
 const groundScript = splashGroundScript(INITIAL_SPLASH_IDS.ground);
 
 patch('packages/web/index.html', 'css', splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true }).trim());
-patch('packages/web/index.html', 'mark', perspectiveMark(CUBE_EDGE_PX, PIARIUM_MARK_COLORS).svg);
+patch('packages/web/index.html', 'mark', splashCubeMarkup());
 patch('packages/web/index.html', 'js', groundScript);
 
 // Same palette, no cube. The mark's ink goes unused rather than being a separate palette, because

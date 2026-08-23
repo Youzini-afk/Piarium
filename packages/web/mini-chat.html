@@ -119,7 +119,7 @@ inherits: true;
 initial-value: 0px;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] {
-animation: pi-splash-floor-unmask 420ms 260ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+animation: pi-splash-floor-unmask 520ms 40ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
 }
 @keyframes pi-splash-floor-unmask {
 to {
@@ -143,8 +143,8 @@ mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,0) var(--pi-splash-ope
    backdrop just fades and the sweep reads as a wipe over it. */
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
 animation:
-pi-splash-open 480ms 620ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
-pi-splash-backdrop-out 260ms 1100ms ease both;
+pi-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out 260ms 1340ms ease both;
 }
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {
 animation: pi-splash-backdrop-out 740ms ease both;
@@ -178,17 +178,32 @@ overflow: hidden;
 -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
 mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
 }
-/* Flat transform style on purpose: the cells are rasterised once and mapped by a single projective
-   transform, rather than each becoming a participant in a 3D rendering context. */
-.pi-splash-ground {
+/* One camera owns both the flattened floor layer and the small preserve-3d cube. The floor's descendants
+   remain flat, so this does not turn its hundreds of cells into separate 3D layers. */
+.pi-splash-camera {
 position: absolute;
 left: 50%;
 top: 56%;
+transform-origin: 0 0;
+transform-style: preserve-3d;
+transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1);
+}
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera {
+animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes pi-splash-camera-flatten {
+to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(var(--pi-floor-exit-scale, 1.158)); }
+}
+/* The grid is translated within that camera and flattened as a single layer. */
+.pi-splash-ground {
+position: absolute;
+left: 0;
+top: 0;
 display: grid;
 transform-origin: 0 0;
 grid-template-columns: repeat(24, 96px);
 grid-template-rows: repeat(24, 96px);
-transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1) translate(-1392px, -1392px);
+transform: translate(-1392px, -1392px);
 }
 /* A line-only continuation of the same registered grid reaches the horizon without hundreds more cells.
    The real cells paint over it and remain the opaque cover; this layer only prevents a tall viewport from
@@ -206,17 +221,11 @@ linear-gradient(to right, transparent 0 calc(100% - 1px), var(--splash-lattice-l
 linear-gradient(to bottom, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%);
 background-size: 96px 96px;
 }
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground {
-animation: pi-splash-floor-flatten 420ms 260ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
-}
-@keyframes pi-splash-floor-flatten {
-to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(var(--pi-floor-exit-scale, 1.158)) translate(-1392px, -1392px); }
-}
 .pi-splash[data-leaving='true'] .pi-splash-ground::before {
 animation: pi-splash-continuation-out 520ms ease both;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::before {
-animation-delay: 620ms;
+animation-delay: 860ms;
 }
 @keyframes pi-splash-continuation-out { to { opacity: 0; } }
 /* Opaque, because these cells are the cover. Two edges each, so neighbours do not stack into a 2px rule. */
@@ -242,7 +251,7 @@ animation: pi-splash-cell-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
 animation-delay: var(--pi-cell-delay);
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cell {
-animation-delay: calc(var(--pi-cell-delay) + 620ms);
+animation-delay: calc(var(--pi-cell-delay) + 860ms);
 }
 /* Each cell moves in the floor's own coordinate system before the parent camera projects it. On screen
    the squares therefore stay registered as perspective diamonds while the wave pushes them away from the
@@ -262,7 +271,7 @@ transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
 .pi-splash:not([data-mode='switch'])[data-leaving='true'],
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground,
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera,
 .pi-splash[data-leaving='true'] .pi-splash-ground::before,
 .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-cell,
@@ -289,7 +298,9 @@ animation: none;
       <div class="pi-splash-backdrop" aria-hidden="true"></div>
       <div class="pi-splash-ground-clip" aria-hidden="true">
         <div class="pi-splash-horizon">
-          <div id="initial-loading-ground" class="pi-splash-ground"></div>
+          <div class="pi-splash-camera">
+            <div id="initial-loading-ground" class="pi-splash-ground"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -328,7 +339,7 @@ ground.innerHTML=buffer;
         var loading = document.getElementById('initial-loading');
         if (!loading || loading.dataset.leaving === 'true') return;
         loading.dataset.leaving = 'true';
-        setTimeout(function () { loading.remove(); }, 1660);
+        setTimeout(function () { loading.remove(); }, 1900);
       }, 8000);
     </script>
   </body>

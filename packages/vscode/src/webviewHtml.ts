@@ -1,29 +1,16 @@
 import * as os from 'node:os';
 import * as vscode from 'vscode';
-import { perspectiveMark } from '@piarium/ui/src/components/ui/piarium-mark-perspective';
+import { splashCubeMarkup } from '@piarium/ui/src/components/ui/piarium-splash-cube';
 import {
   buildSplashCells,
-  CUBE_EDGE_PX,
   splashPlaneCss,
 } from '@piarium/ui/src/components/ui/piarium-splash-lattice';
 import { getThemeKindName } from './theme';
 import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
-/**
- * The cube, projected through the same camera the floor is transformed by, in the editor's colours.
- *
- * Built once at module load. The geometry depends only on the cube's edge, which is a constant, and these
- * colours are CSS variables the editor resolves itself, so nothing here has to be rebuilt when the theme
- * changes.
- */
-const MARK = perspectiveMark(CUBE_EDGE_PX, {
-  stroke: 'var(--vscode-foreground)',
-  faceFill: 'var(--vscode-editorWidget-background, transparent)',
-  cellFill: 'var(--vscode-foreground)',
-  // Without this the floor shows straight through the cube's translucent faces.
-  occlusionFill: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
-});
+/** The same lightweight shared-camera cube as the other splash hosts. */
+const CUBE_MARKUP = splashCubeMarkup();
 
 /**
  * The floor, emitted as markup rather than built by a script, because this document is generated anyway
@@ -35,7 +22,7 @@ const MARK = perspectiveMark(CUBE_EDGE_PX, {
  * and a bit, so here it would only ever be dead weight in the document.
  */
 const GROUND_CELLS = buildSplashCells('boot', 'forward', false)
-  .map((cell) => `<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:${cell.delayMs}ms"></span>`)
+  .map((cell) => `<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:${cell.delayMs}ms;--pi-cell-scatter-x:${cell.scatterXPx}px;--pi-cell-scatter-y:${cell.scatterYPx}px"></span>`)
   .join('');
 
 /**
@@ -49,6 +36,8 @@ const SPLASH_CSS = splashPlaneCss(
     // Opaque, because the floor's cells are the cover: a translucent pulse would open a hole in it at
     // every peak. Mixed into the editor background rather than laid over it.
     cell: 'color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-editor-background, var(--vscode-sideBar-background)))',
+    face: 'color-mix(in srgb, var(--vscode-foreground) 15%, transparent)',
+    markCell: 'var(--vscode-foreground)',
     stroke: 'var(--vscode-foreground)',
   },
   { withMark: true },
@@ -153,8 +142,7 @@ ${SPLASH_CSS}
 <body>
   <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
     <div class="pi-splash-backdrop" aria-hidden="true"></div>
-    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-ground">${GROUND_CELLS}</div></div></div>
-    <span class="pi-splash-mark">${MARK.svg}</span>
+    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-camera"><div class="pi-splash-ground">${GROUND_CELLS}</div><span class="pi-splash-mark">${CUBE_MARKUP}</span></div></div></div>
     <div class="pi-splash-status">PIARIUM</div>
     <div id="loading-status" role="status" aria-live="polite"></div>
   </div>

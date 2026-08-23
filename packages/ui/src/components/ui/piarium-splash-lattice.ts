@@ -1,4 +1,3 @@
-import { markBox } from './piarium-mark-perspective';
 import {
   CAMERA_FLAT_FLOOR_TRANSFORM,
   CAMERA_FLOOR_TRANSFORM,
@@ -6,17 +5,15 @@ import {
   floorReach,
   HORIZON_RISE_PX,
   projectFlatFloorPoint,
-  projectPoint,
 } from './piarium-splash-camera';
 
 /**
  * The splash floor: a grid put into the camera's floor plane, with the cube standing on one of its cells.
  *
- * The floor and the mark agree because neither owns any geometry of its own. The floor receives the
- * camera as a CSS transform, the mark is projected through the same camera into SVG, and a cell is
- * exactly the cube's edge with the cube's base centred on one cell, so the cube's footprint *is* a floor
- * cell and the lines leaving its base corners are the floor's own lines. Three earlier attempts each
- * failed at that seam; there is no seam left to fail at.
+ * The floor and the mark agree because one CSS camera owns both. The floor stays one flattened layer while
+ * the mark is the scene's only preserve-3d object, and a cell is exactly the cube's edge with the cube's
+ * base centred on one cell. The camera therefore reprojects both together: the cube's footprint *is* a
+ * floor cell and the lines leaving its base corners are the floor's own lines.
  *
  * The floor keeps the default flat `transform-style`, so its cells are rasterised once and mapped by a
  * single projective transform. That is what makes perspective cost the same as the isometric version it
@@ -32,8 +29,7 @@ export type PiariumSplashDirection = 'forward' | 'backward';
  *
  * One value for every viewport, not a breakpoint pair. A floor cell is a size in the scene, so on a
  * narrow viewport the right answer is fewer cells on screen rather than smaller ones — and a fixed edge
- * is what lets the two hosts that cannot run the projection embed an exact cube instead of a resized
- * approximation of one, since a perspective drawing does not survive being scaled.
+ * is what lets every host use the same scene geometry without a breakpoint-specific logo.
  */
 export const CUBE_EDGE_PX = 96;
 
@@ -157,28 +153,23 @@ export const GROUND_REVEAL_RADIUS_PX = Math.floor(Math.min(
 ));
 
 const CELL_EXIT_MS = 520;
-const MARK_EXIT_MS = 520;
-/** The cube makes contact, then the camera is almost overhead before the first floor tile starts moving. */
-const BOOT_TILE_RELEASE_MS = 620;
-const FLOOR_FLATTEN_DELAY_MS = 260;
-const FLOOR_FLATTEN_MS = 420;
-/**
- * Screen-space travel produced by lowering a rigid cube by about a fifth of its height in the shared
- * camera. The SVG is already projected geometry, so translating that drawing is the inexpensive visual
- * equivalent of moving the solid down; unlike scaling one axis, it keeps every face and the glyph intact.
- */
-const MARK_PRESS_DISTANCE_PX = Math.round(projectPoint({
-  x: 0,
-  y: 0,
-  z: -CUBE_EDGE_PX * 0.22,
-}).y);
+const MARK_EXIT_MS = 960;
+/** The cube makes contact just before the first floor tile starts moving. */
+const BOOT_TILE_RELEASE_MS = 860;
+const FLOOR_FLATTEN_DELAY_MS = 40;
+const FLOOR_FLATTEN_MS = 520;
+/** The camera finishes its move first; only then does the cube travel through the floor. */
+const CUBE_PRESS_START_PCT = 58;
+const CUBE_CONTACT_PCT = 92;
+const CUBE_PRESS_DELAY_MS = Math.round(MARK_EXIT_MS * CUBE_PRESS_START_PCT / 100);
 /** Widest per-cell delay either mode schedules. */
 const MAX_CELL_DELAY_MS = 520;
 
 /** How long a caller must keep the splash mounted after asking it to leave. */
-export const SPLASH_EXIT_DURATION_MS = BOOT_TILE_RELEASE_MS
-  + MAX_CELL_DELAY_MS
-  + Math.max(CELL_EXIT_MS, MARK_EXIT_MS);
+export const SPLASH_EXIT_DURATION_MS = Math.max(
+  BOOT_TILE_RELEASE_MS + MAX_CELL_DELAY_MS + CELL_EXIT_MS,
+  MARK_EXIT_MS,
+);
 /** The reduced-motion path replaces every staged animation with one fade of the whole cover. */
 export const SPLASH_REDUCED_EXIT_DURATION_MS = 260;
 
@@ -359,11 +350,15 @@ export const buildSplashCells = (
  * translate, applied before the camera, slides the grid so the cube's cell centre is the point that
  * lands there.
  */
+const CAMERA_STYLE = {
+  transform: `${CAMERA_FLOOR_TRANSFORM} scale(1)`,
+  flattenedTransform: `${CAMERA_FLAT_FLOOR_TRANSFORM} scale(var(--pi-floor-exit-scale, ${splashExitScale(1920, 1080)}))`,
+} as const;
+
 const GROUND_STYLE = {
   gridTemplateColumns: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
   gridTemplateRows: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
-  transform: `${CAMERA_FLOOR_TRANSFORM} scale(1) translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
-  flattenedTransform: `${CAMERA_FLAT_FLOOR_TRANSFORM} scale(var(--pi-floor-exit-scale, ${splashExitScale(1920, 1080)})) translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
+  transform: `translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
 } as const;
 
 export interface SplashPlaneColors {
@@ -376,6 +371,10 @@ export interface SplashPlaneColors {
   readonly line: string;
   /** Fill a breathing cell reaches at the top of its pulse. */
   readonly cell: string;
+  /** Translucent wash over an opaque cube face. Used only when the host draws the mark. */
+  readonly face?: string;
+  /** Highlight colour for the cube's 4×4 wall cells. Used only when the host draws the mark. */
+  readonly markCell?: string;
   /**
    * Ink for the mark and the status line. Omitted by hosts that draw no mark, which is also the only
    * case where it goes unused.
@@ -402,17 +401,10 @@ export const PIARIUM_SPLASH_COLORS: SplashPlaneColors = {
   // and the fallback is the plain background, so a host that forgets to define it loses the pulse instead
   // of the cover.
   cell: 'var(--splash-cell-pulse, var(--splash-background, #151313))',
+  face: 'var(--splash-face-fill)',
+  markCell: 'var(--splash-cell-fill)',
   stroke: 'var(--splash-stroke)',
 };
-
-/** The same palette, as the projected mark needs it. */
-export const PIARIUM_MARK_COLORS = {
-  stroke: 'var(--splash-stroke)',
-  faceFill: 'var(--splash-face-fill)',
-  cellFill: 'var(--splash-cell-fill)',
-  // The faces are translucent washes, so the floor would otherwise show straight through the cube.
-  occlusionFill: PIARIUM_SPLASH_COLORS.background,
-} as const;
 
 /**
  * The splash's visual rules, as one string.
@@ -429,32 +421,48 @@ export const splashPlaneCss = (
   options: { withMark: boolean },
 ): string => {
   const ink = colors.stroke ?? colors.line;
-  const projectedMark = options.withMark ? markBox(CUBE_EDGE_PX) : null;
+  const face = colors.face ?? colors.cell;
+  const markCell = colors.markCell ?? ink;
 
   const markRules = options.withMark
     ? `
-/* The mark is placed by the cube's base centre, not by its box. Under perspective the projected cube is
-   asymmetric — the near corner grows, the far corner shrinks — so the base centre is nowhere near the
-   box's middle, and anchoring on the box or on its bottom edge is what left the cube hovering in three
-   earlier attempts. The translate is measured from the projection, and it is a constant only because the
-   cube's edge is. */
+/* Unlike the old pre-projected SVG, this is a small real cube inside the floor's camera. Only its three
+   visible faces participate in preserve-3d; the floor remains one flattened layer, so moving the camera
+   reprojects the logo without promoting the hundreds of cells behind it. */
 .pi-splash-mark {
 position: absolute;
-left: 50%;
-top: ${GROUND_ORIGIN_Y_PCT}%;
-translate: ${projectedMark?.originTranslate};
-display: block;
-line-height: 0;
+left: -${CUBE_EDGE_PX / 2}px;
+top: -${CUBE_EDGE_PX / 2}px;
+width: ${CUBE_EDGE_PX}px;
+height: ${CUBE_EDGE_PX}px;
+transform-style: preserve-3d;
+transform: translateZ(${CUBE_EDGE_PX / 2}px);
 }
-/* The translate is a share of this box, so the box has to be exactly the drawing. An svg is inline by
-   default, which puts it on a baseline with descender space under it, and the cube would then stand that
-   many pixels above the floor for no visible reason. */
-.pi-splash-mark svg {
-display: block;
+.pi-splash-cube-face {
+position: absolute;
+inset: 0;
+box-sizing: border-box;
+display: grid;
+grid-template-columns: repeat(4, 1fr);
+grid-template-rows: repeat(4, 1fr);
+backface-visibility: hidden;
+background-color: ${colors.background};
+background-image: linear-gradient(${face}, ${face});
+box-shadow: inset 0 0 0 1px ${ink};
 }
-/* The glyph on the open top, breathing. The rest of the cube holds still: the mark is the one thing the
-   eye is meant to settle on, and animating the faces as well made it restless. */
-.pi-splash-glyph {
+.pi-splash-cube-face-top { display: block; transform: translateZ(${CUBE_EDGE_PX / 2}px); }
+.pi-splash-cube-face-x { transform: rotateY(90deg) translateZ(${CUBE_EDGE_PX / 2}px); }
+.pi-splash-cube-face-y { transform: rotateX(-90deg) translateZ(${CUBE_EDGE_PX / 2}px); }
+.pi-splash-cube-cell {
+background: ${markCell};
+opacity: var(--pi-cube-cell-opacity);
+}
+.pi-splash-cube-glyph {
+display: block;
+width: 100%;
+height: 100%;
+overflow: visible;
+fill: ${ink};
 animation: pi-splash-glyph-pulse 1.8s ease-in-out infinite;
 }
 @keyframes pi-splash-glyph-pulse {
@@ -509,12 +517,12 @@ animation: pi-splash-mark-out ${MARK_EXIT_MS}ms 60ms cubic-bezier(0.4, 0, 0.3, 1
 animation: pi-splash-status-out 180ms ease both;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::after {
-animation: pi-splash-contact-press 360ms cubic-bezier(0.3, 0, 0.2, 1) both;
+animation: pi-splash-contact-press 400ms ${CUBE_PRESS_DELAY_MS}ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-mark-press {
-0% { opacity: 1; transform: translateY(0); }
-72% { opacity: 1; transform: translateY(${MARK_PRESS_DISTANCE_PX}px); }
-100% { opacity: 0; transform: translateY(${MARK_PRESS_DISTANCE_PX + 6}px); }
+0%, ${CUBE_PRESS_START_PCT}% { transform: translateZ(${CUBE_EDGE_PX / 2}px); }
+${CUBE_CONTACT_PCT}% { transform: translateZ(${-CUBE_EDGE_PX / 2}px); }
+100% { transform: translateZ(${-CUBE_EDGE_PX / 2 - 6}px); }
 }
 @keyframes pi-splash-contact-press {
 0% { opacity: 0.35; transform: scale(1); }
@@ -534,7 +542,7 @@ to { opacity: 0; transform: translateY(5px); }
 .pi-splash[data-leaving='true'] .pi-splash-mark,
 .pi-splash[data-leaving='true'] .pi-splash-status,
 .pi-splash:not([data-mode='switch']) .pi-splash-ground::after,
-.pi-splash-glyph,
+.pi-splash-cube-glyph,
 .pi-splash-status`
     : '';
 
@@ -647,12 +655,27 @@ overflow: hidden;
 -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_EDGE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_FADE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)));
 mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_EDGE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_FADE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)));
 }
-/* Flat transform style on purpose: the cells are rasterised once and mapped by a single projective
-   transform, rather than each becoming a participant in a 3D rendering context. */
-.pi-splash-ground {
+/* One camera owns both the flattened floor layer and the small preserve-3d cube. The floor's descendants
+   remain flat, so this does not turn its hundreds of cells into separate 3D layers. */
+.pi-splash-camera {
 position: absolute;
 left: 50%;
 top: ${GROUND_ORIGIN_Y_PCT}%;
+transform-origin: 0 0;
+transform-style: preserve-3d;
+transform: ${CAMERA_STYLE.transform};
+}
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera {
+animation: pi-splash-camera-flatten ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes pi-splash-camera-flatten {
+to { transform: ${CAMERA_STYLE.flattenedTransform}; }
+}
+/* The grid is translated within that camera and flattened as a single layer. */
+.pi-splash-ground {
+position: absolute;
+left: 0;
+top: 0;
 display: grid;
 transform-origin: 0 0;
 grid-template-columns: ${GROUND_STYLE.gridTemplateColumns};
@@ -674,12 +697,6 @@ background-image:
 linear-gradient(to right, transparent 0 calc(100% - 1px), ${colors.line} calc(100% - 1px) 100%),
 linear-gradient(to bottom, transparent 0 calc(100% - 1px), ${colors.line} calc(100% - 1px) 100%);
 background-size: ${CUBE_EDGE_PX}px ${CUBE_EDGE_PX}px;
-}
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground {
-animation: pi-splash-floor-flatten ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
-}
-@keyframes pi-splash-floor-flatten {
-to { transform: ${GROUND_STYLE.flattenedTransform}; }
 }
 .pi-splash[data-leaving='true'] .pi-splash-ground::before {
 animation: pi-splash-continuation-out ${CELL_EXIT_MS}ms ease both;
@@ -731,7 +748,7 @@ ${markRules}
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
 .pi-splash:not([data-mode='switch'])[data-leaving='true'],
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground,
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera,
 .pi-splash[data-leaving='true'] .pi-splash-ground::before,
 .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-cell,

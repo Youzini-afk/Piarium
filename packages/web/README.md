@@ -40,7 +40,7 @@ and preserves the workspace layout required by `resolveBundledPiHostEntry()`.
 `index.html` and `mini-chat.html` paint the splash before any module is evaluated, so they cannot
 import the modules that define it. They embed generated output instead, between `SPLASH-CSS`,
 `SPLASH-MARK`, and `SPLASH-JS` sentinels. After changing anything in
-`packages/ui/src/components/ui/piarium-splash-*.ts` or `piarium-mark-perspective.ts`:
+`packages/ui/src/components/ui/piarium-splash-*.ts`:
 
 ```bash
 bun run splash:emit
