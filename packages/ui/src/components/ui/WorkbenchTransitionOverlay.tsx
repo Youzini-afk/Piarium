@@ -1,16 +1,12 @@
 import React from 'react';
 import { PiariumSplash } from '@/components/ui/PiariumSplash';
-import {
-  SPLASH_EXIT_DURATION_MS,
-  SPLASH_REDUCED_EXIT_DURATION_MS,
-} from '@/components/ui/piarium-splash-lattice';
-import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { useI18n } from '@/lib/i18n';
 import { usePiariumExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
+  completeWorkbenchProfileTransition,
   getWorkbenchProfileTransitionSnapshot,
-  markWorkbenchProfileTransitionCoverReady,
+  markWorkbenchProfileTransitionCovered,
   subscribeWorkbenchProfileTransition,
 } from '@/lib/workbench/profile-transition';
 
@@ -25,50 +21,13 @@ import {
 export const WorkbenchTransitionOverlay: React.FC = () => {
   const { t } = useI18n();
   const catalog = usePiariumExtensionCatalog();
-  const reducedMotion = usePrefersReducedMotion();
   const transition = React.useSyncExternalStore(
     subscribeWorkbenchProfileTransition,
     getWorkbenchProfileTransitionSnapshot,
     getWorkbenchProfileTransitionSnapshot,
   );
-  // Kept mounted through the exit so the sweep can finish after the store has gone idle.
-  const [exiting, setExiting] = React.useState(false);
 
-  React.useEffect(() => {
-    if (!transition.isSwitching) return;
-    if (typeof requestAnimationFrame !== 'function') {
-      markWorkbenchProfileTransitionCoverReady();
-      return;
-    }
-
-    // A layout committed during an input event can still be replaced before the browser paints it. Two
-    // frames guarantee the cover has reached the screen once before the shell mutation is allowed to run.
-    let secondFrame = 0;
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(markWorkbenchProfileTransitionCoverReady);
-    });
-    return () => {
-      cancelAnimationFrame(firstFrame);
-      if (secondFrame !== 0) cancelAnimationFrame(secondFrame);
-    };
-  }, [transition.isSwitching, transition.toProfileId]);
-
-  React.useEffect(() => {
-    if (transition.isSwitching) {
-      setExiting(false);
-      return;
-    }
-    if (!exiting) return;
-    const duration = reducedMotion ? SPLASH_REDUCED_EXIT_DURATION_MS : SPLASH_EXIT_DURATION_MS;
-    const timer = setTimeout(() => setExiting(false), duration);
-    return () => clearTimeout(timer);
-  }, [transition.isSwitching, exiting, reducedMotion]);
-
-  React.useEffect(() => {
-    if (transition.isSwitching) setExiting(true);
-  }, [transition.isSwitching]);
-
-  if (!transition.isSwitching && !exiting) return null;
+  if (transition.phase === 'idle') return null;
 
   const profiles = catalog.snapshot?.workbench?.document.profiles ?? [];
   const target = profiles.find((profile) => profile.id === transition.toProfileId);
@@ -80,9 +39,17 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
     <PiariumSplash
       mode="switch"
       direction={transition.direction}
+      phase={transition.phase}
+      tempo={transition.tempo}
       label={t('splash.aria.switching')}
       status={status}
-      leaving={!transition.isSwitching}
+      onPhaseComplete={() => {
+        if (transition.phase === 'covering') {
+          markWorkbenchProfileTransitionCovered(transition.id);
+        } else if (transition.phase === 'revealing') {
+          completeWorkbenchProfileTransition(transition.id);
+        }
+      }}
     />
   );
 };

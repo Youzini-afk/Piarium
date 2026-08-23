@@ -1,67 +1,63 @@
 /**
- * Publishes the state of a Workbench Profile switch so a shell-independent overlay can cover it.
+ * Shell-independent state machine for a Workbench Profile transition.
  *
- * The state cannot live in `WorkbenchProfileSwitcher`: that component is rendered inside the shell
- * being replaced, so its local state is destroyed at the swap and its `finally` never reaches the
- * overlay. It also cannot live in the shell host, because the host is what re-renders. A module
- * store is the only place that survives the whole transition.
- *
- * A profile switch has no measurable progress. What it has is a start, an end, and a boolean
- * outcome, so this exposes exactly that and no invented percentage. What it does add is a floor on
- * how long the cover stays up: a builtin-to-builtin switch can settle in well under a frame, and an
- * overlay that appears and vanishes reads as a glitch rather than as a transition.
+ * The old shell owns the switcher and is destroyed during a successful switch, so neither component-local
+ * state nor the shell host can own the animation. This store keeps one scene alive across both shells:
+ * reverse playback covers the old shell, the candidate commits only while fully covered, and forward
+ * playback reveals either the new shell or the still-authoritative old shell after a failure.
  */
 
 export type WorkbenchProfileTransitionDirection = 'forward' | 'backward';
+export type WorkbenchProfileTransitionPhase = 'idle' | 'covering' | 'covered' | 'revealing';
+export type WorkbenchProfileTransitionTempo = 'quick' | 'standard';
 
 export interface WorkbenchProfileTransitionState {
-  readonly isSwitching: boolean;
-  /** Drives the sweep direction so the animation matches which way the user moved. */
   readonly direction: WorkbenchProfileTransitionDirection;
   readonly fromProfileId: string | null;
+  readonly id: number;
+  readonly phase: WorkbenchProfileTransitionPhase;
+  readonly tempo: WorkbenchProfileTransitionTempo;
   readonly toProfileId: string | null;
 }
 
 /**
- * Long enough for the sweep to read as deliberate. Below roughly a third of a second a cover looks
- * like a flicker; much above it and a fast switch feels padded.
+ * A candidate prepared before the cover closed still counts as quick if its authoritative commit settles
+ * within the previous transition's visible floor. This is not an operation timeout: slower candidates stay
+ * safely covered and use the standard reveal rather than being cancelled.
  */
 export const MIN_TRANSITION_VISIBLE_MS = 340;
 
 /**
- * A stuck transition must not hold the workbench behind a cover forever. The underlying switch
- * either resolves or rejects, so this is a backstop for a caller that never settles at all.
+ * Backstop only for a missing animation-completion signal. It advances the visual phase; it never aborts a
+ * candidate, rejects a valid slow switch, or forces the covered hold to end while work is still running.
  */
 export const MAX_TRANSITION_VISIBLE_MS = 8000;
 
 const IDLE: WorkbenchProfileTransitionState = {
-  isSwitching: false,
   direction: 'forward',
   fromProfileId: null,
+  id: 0,
+  phase: 'idle',
+  tempo: 'standard',
   toProfileId: null,
 };
 
 type Listener = (state: WorkbenchProfileTransitionState) => void;
-type CoverWaiter = (covered: boolean) => void;
+type CoveredWaiter = (covered: boolean) => void;
 
 const listeners = new Set<Listener>();
-const coverWaiters = new Set<CoverWaiter>();
+const coveredWaiters = new Set<CoveredWaiter>();
 const idleWaiters = new Set<() => void>();
 let state: WorkbenchProfileTransitionState = IDLE;
-let startedAt = 0;
-let coverReady = false;
-let hideTimer: ReturnType<typeof setTimeout> | null = null;
-let maxTimer: ReturnType<typeof setTimeout> | null = null;
+let nextTransitionId = 1;
+let phaseTimer: ReturnType<typeof setTimeout> | null = null;
+let operationPreparedBeforeCover = false;
+let coveredAt = 0;
 
-const clearTimers = (): void => {
-  if (hideTimer !== null) {
-    clearTimeout(hideTimer);
-    hideTimer = null;
-  }
-  if (maxTimer !== null) {
-    clearTimeout(maxTimer);
-    maxTimer = null;
-  }
+const clearPhaseTimer = (): void => {
+  if (phaseTimer === null) return;
+  clearTimeout(phaseTimer);
+  phaseTimer = null;
 };
 
 const publish = (next: WorkbenchProfileTransitionState): void => {
@@ -69,9 +65,9 @@ const publish = (next: WorkbenchProfileTransitionState): void => {
   listeners.forEach((listener) => listener(state));
 };
 
-const resolveCoverWaiters = (covered: boolean): void => {
-  for (const resolve of coverWaiters) resolve(covered);
-  coverWaiters.clear();
+const resolveCoveredWaiters = (covered: boolean): void => {
+  for (const resolve of coveredWaiters) resolve(covered);
+  coveredWaiters.clear();
 };
 
 const resolveIdleWaiters = (): void => {
@@ -79,19 +75,14 @@ const resolveIdleWaiters = (): void => {
   idleWaiters.clear();
 };
 
-const settle = (): void => {
-  clearTimers();
-  if (!state.isSwitching) return;
-  resolveCoverWaiters(false);
-  coverReady = false;
-  startedAt = 0;
-  publish(IDLE);
-  resolveIdleWaiters();
+const armPhaseFallback = (advance: () => void): void => {
+  clearPhaseTimer();
+  phaseTimer = setTimeout(advance, MAX_TRANSITION_VISIBLE_MS);
 };
 
 /**
- * Decide the sweep direction from the profile order, so switching back reverses the animation.
- * Unknown ordering falls back to `forward` rather than guessing.
+ * Decide the visual direction from profile order. Unknown ordering falls forward instead of pretending to
+ * know where an extension-defined profile belongs.
  */
 export const resolveTransitionDirection = (
   profileIds: readonly string[],
@@ -109,72 +100,93 @@ export const beginWorkbenchProfileTransition = (input: {
   fromProfileId?: string | null;
   toProfileId: string;
   direction?: WorkbenchProfileTransitionDirection;
-}): void => {
-  clearTimers();
-  // A new transaction supersedes a cover wait left by a caller that never completed.
-  resolveCoverWaiters(false);
+}): number => {
+  clearPhaseTimer();
+  // A newer user choice supersedes promises owned by a transition that can no longer become authoritative.
+  resolveCoveredWaiters(false);
   resolveIdleWaiters();
-  coverReady = false;
-  startedAt = Date.now();
+  operationPreparedBeforeCover = false;
+  coveredAt = 0;
+  const id = nextTransitionId;
+  nextTransitionId += 1;
   publish({
-    isSwitching: true,
     direction: input.direction ?? 'forward',
     fromProfileId: input.fromProfileId ?? null,
+    id,
+    phase: 'covering',
+    // Covering is always responsive. A slow candidate holds the completed cover and later reveals at the
+    // standard tempo; a candidate already prepared behind it keeps the quick tempo in both directions.
+    tempo: 'quick',
     toProfileId: input.toProfileId,
   });
-  maxTimer = setTimeout(settle, MAX_TRANSITION_VISIBLE_MS);
+  armPhaseFallback(() => markWorkbenchProfileTransitionCovered(id));
+  return id;
 };
 
-/**
- * Called by the application-level overlay after the browser has painted it once.
- *
- * Starting the shell mutation before this acknowledgement lets a fast profile switch consume the same
- * frame as the transition state update, so the overlay exists in React state but never reaches the screen.
- */
-export const markWorkbenchProfileTransitionCoverReady = (): void => {
-  if (!state.isSwitching || coverReady) return;
-  coverReady = true;
-  // The minimum is visible time, not time spent waiting for React and the browser to paint the cover.
-  startedAt = Date.now();
-  resolveCoverWaiters(true);
+/** Records that preparation reached the authoritative commit boundary. */
+export const markWorkbenchProfileTransitionOperationPrepared = (id: number): void => {
+  if (state.id === id && state.phase === 'covering') operationPreparedBeforeCover = true;
 };
 
-/** Wait until the overlay confirms a painted frame, or the transition backstop releases it. */
-export const waitForWorkbenchProfileTransitionCover = (): Promise<boolean> => {
-  if (!state.isSwitching || coverReady) return Promise.resolve(coverReady);
+/** Called by the transition scene after reverse playback has made the cover fully opaque. */
+export const markWorkbenchProfileTransitionCovered = (id: number): void => {
+  if (state.id !== id || state.phase !== 'covering') return;
+  clearPhaseTimer();
+  coveredAt = Date.now();
+  publish({
+    ...state,
+    phase: 'covered',
+    tempo: operationPreparedBeforeCover ? 'quick' : 'standard',
+  });
+  resolveCoveredWaiters(true);
+};
+
+export const waitForWorkbenchProfileTransitionCovered = (id: number): Promise<boolean> => {
+  if (state.id !== id) return Promise.resolve(false);
+  if (state.phase === 'covered' || state.phase === 'revealing') return Promise.resolve(true);
+  if (state.phase === 'idle') return Promise.resolve(false);
   return new Promise((resolve) => {
-    coverWaiters.add(resolve);
+    coveredWaiters.add(resolve);
   });
 };
 
 const waitForWorkbenchProfileTransitionIdle = (): Promise<void> => {
-  if (!state.isSwitching) return Promise.resolve();
+  if (state.phase === 'idle') return Promise.resolve();
   return new Promise((resolve) => {
     idleWaiters.add(resolve);
   });
 };
 
 /**
- * Ends the transition, holding the cover until the minimum has elapsed.
- *
- * Safe to call when no transition is running, and safe to call twice: a switch can fail after the
- * shell was already proven ready, and both paths funnel through here.
+ * Starts forward playback after commit or failure. A prepared candidate only keeps quick playback when the
+ * covered commit also settled promptly; a genuine wait gets the standard reveal instead of a sudden rush.
  */
-export const finishWorkbenchProfileTransition = (): Promise<void> => {
-  if (!state.isSwitching) {
-    clearTimers();
-    return Promise.resolve();
+export const revealWorkbenchProfileTransition = async (id: number): Promise<void> => {
+  if (state.id !== id || state.phase === 'idle') return;
+  if (state.phase === 'covering') {
+    const covered = await waitForWorkbenchProfileTransitionCovered(id);
+    if (!covered) return;
   }
-  if (hideTimer !== null) return waitForWorkbenchProfileTransitionIdle();
+  if (state.id !== id) return;
+  if (state.phase === 'revealing') return waitForWorkbenchProfileTransitionIdle();
+  if (state.phase !== 'covered') return;
 
-  const remaining = MIN_TRANSITION_VISIBLE_MS - (Date.now() - startedAt);
-  if (remaining <= 0) {
-    settle();
-    return Promise.resolve();
-  }
-  const idle = waitForWorkbenchProfileTransitionIdle();
-  hideTimer = setTimeout(settle, remaining);
-  return idle;
+  const quick = operationPreparedBeforeCover
+    && coveredAt > 0
+    && Date.now() - coveredAt <= MIN_TRANSITION_VISIBLE_MS;
+  publish({ ...state, phase: 'revealing', tempo: quick ? 'quick' : 'standard' });
+  armPhaseFallback(() => completeWorkbenchProfileTransition(id));
+  return waitForWorkbenchProfileTransitionIdle();
+};
+
+/** Called by the scene after forward playback has fully exposed the authoritative shell. */
+export const completeWorkbenchProfileTransition = (id: number): void => {
+  if (state.id !== id || state.phase !== 'revealing') return;
+  clearPhaseTimer();
+  publish(IDLE);
+  operationPreparedBeforeCover = false;
+  coveredAt = 0;
+  resolveIdleWaiters();
 };
 
 export const subscribeWorkbenchProfileTransition = (listener: Listener): (() => void) => {
@@ -189,11 +201,12 @@ export const getWorkbenchProfileTransitionSnapshot = (): WorkbenchProfileTransit
 
 /** Test seam: drop all state and timers so one case cannot leak into the next. */
 export const resetWorkbenchProfileTransitionForTests = (): void => {
-  clearTimers();
-  resolveCoverWaiters(false);
+  clearPhaseTimer();
+  resolveCoveredWaiters(false);
   resolveIdleWaiters();
   state = IDLE;
-  startedAt = 0;
-  coverReady = false;
+  nextTransitionId = 1;
+  operationPreparedBeforeCover = false;
+  coveredAt = 0;
   listeners.clear();
 };

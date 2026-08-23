@@ -94,6 +94,7 @@ z-index: 9998;
 overflow: hidden;
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
+.pi-splash[data-mode='switch'][data-phase='revealing'] { pointer-events: none; }
 
 /* The cover is the floor's cells, not this element.
    That is the whole exit: each cell is opaque, so when one shrinks away the app shows through the gap it
@@ -265,6 +266,7 @@ background: var(--splash-cell-pulse, var(--splash-background, #151313));
 transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px)) scale(0.56);
 }
 }
+
 
 
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the

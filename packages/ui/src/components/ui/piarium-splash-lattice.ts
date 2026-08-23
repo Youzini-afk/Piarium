@@ -23,6 +23,8 @@ import {
 
 export type PiariumSplashMode = 'boot' | 'switch';
 export type PiariumSplashDirection = 'forward' | 'backward';
+export type PiariumSplashPhase = 'covering' | 'covered' | 'revealing';
+export type PiariumSplashTempo = 'quick' | 'standard';
 
 /**
  * Cube edge in pixels, and therefore the floor's cell size, which is what registers the two.
@@ -189,6 +191,71 @@ const REVEAL_MS = 480;
 const BACKDROP_FADE_MS = 260;
 /** Soft edge on the hole. Wide enough not to read as a circle, narrow enough not to leak past the cells. */
 const REVEAL_EDGE_PX = 64;
+
+/**
+ * Fast workbench playback uses the duration of the original directional sweep. It therefore preserves a
+ * timing that was already visually accepted instead of inventing a new short cutoff, while still playing
+ * every camera, cube, contact, and floor keyframe in the full mirrored sequence.
+ */
+export const SPLASH_WORKBENCH_QUICK_DURATION_MS = MAX_CELL_DELAY_MS + CELL_EXIT_MS;
+const WORKBENCH_QUICK_SCALE = SPLASH_WORKBENCH_QUICK_DURATION_MS / SPLASH_EXIT_DURATION_MS;
+
+interface SplashTimeline {
+  readonly backdropFadeMs: number;
+  readonly cellExitMs: number;
+  readonly contactDelayMs: number;
+  readonly contactPressMs: number;
+  readonly floorDelayMs: number;
+  readonly floorDurationMs: number;
+  readonly markExitMs: number;
+  readonly maxCellDelayMs: number;
+  readonly revealMs: number;
+  readonly statusOutMs: number;
+  readonly tileReleaseMs: number;
+  readonly totalMs: number;
+}
+
+const timelineAt = (scale: number): SplashTimeline => {
+  const at = (value: number): number => Math.round(value * scale);
+  return {
+    backdropFadeMs: at(BACKDROP_FADE_MS),
+    cellExitMs: at(CELL_EXIT_MS),
+    contactDelayMs: at(CUBE_PRESS_DELAY_MS),
+    contactPressMs: at(CONTACT_PRESS_MS),
+    floorDelayMs: at(FLOOR_FLATTEN_DELAY_MS),
+    floorDurationMs: at(FLOOR_FLATTEN_MS),
+    markExitMs: at(MARK_EXIT_MS),
+    maxCellDelayMs: at(MAX_CELL_DELAY_MS),
+    revealMs: at(REVEAL_MS),
+    statusOutMs: at(180),
+    tileReleaseMs: at(BOOT_TILE_RELEASE_MS),
+    totalMs: at(SPLASH_EXIT_DURATION_MS),
+  };
+};
+
+const WORKBENCH_TIMELINES: Readonly<Record<PiariumSplashTempo, SplashTimeline>> = {
+  quick: timelineAt(WORKBENCH_QUICK_SCALE),
+  standard: timelineAt(1),
+};
+
+export const splashWorkbenchPhaseDurationMs = (
+  tempo: PiariumSplashTempo,
+  reducedMotion = false,
+): number => reducedMotion ? SPLASH_REDUCED_EXIT_DURATION_MS : WORKBENCH_TIMELINES[tempo].totalMs;
+
+export const splashWorkbenchCellDelays = (
+  delayMs: number,
+  tempo: PiariumSplashTempo,
+): { coverDelayMs: number; revealDelayMs: number } => {
+  const timeline = WORKBENCH_TIMELINES[tempo];
+  const scaledDelay = Math.round(delayMs * timeline.maxCellDelayMs / MAX_CELL_DELAY_MS);
+  const revealDelayMs = timeline.tileReleaseMs + scaledDelay;
+  return {
+    // Exact global time reversal: the cell that finishes last while revealing begins first while covering.
+    coverDelayMs: Math.max(0, timeline.totalMs - revealDelayMs - timeline.cellExitMs),
+    revealDelayMs,
+  };
+};
 
 /** Fraction of cells that join the idle breathing. */
 const BREATHE_SHARE = 0.1;
@@ -429,6 +496,93 @@ export const splashPlaneCss = (
   const face = colors.face ?? colors.cell;
   const markCell = colors.markCell ?? ink;
 
+  const workbenchPhaseRules = options.withMark
+    ? (Object.entries(WORKBENCH_TIMELINES) as Array<[PiariumSplashTempo, SplashTimeline]>)
+      .map(([tempo, timeline]) => {
+        const revealFadeDelay = timeline.tileReleaseMs + timeline.revealMs;
+        const coverFloorDelay = timeline.totalMs - timeline.floorDelayMs - timeline.floorDurationMs;
+        const coverMarkDelay = timeline.totalMs - timeline.markExitMs;
+        const coverOpenDelay = timeline.totalMs - timeline.tileReleaseMs - timeline.revealMs;
+        const coverFadeDelay = timeline.totalMs - revealFadeDelay - timeline.backdropFadeMs;
+        const coverContactDelay = timeline.totalMs - timeline.contactDelayMs - timeline.contactPressMs;
+        const coverContinuationDelay = timeline.totalMs - timeline.tileReleaseMs - timeline.cellExitMs;
+        const coverStatusDelay = timeline.totalMs - timeline.statusOutMs;
+        const covering = `.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='${tempo}']`;
+        const revealing = `.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='${tempo}']`;
+        return `
+${covering} {
+animation: pi-splash-floor-unmask ${timeline.floorDurationMs}ms ${coverFloorDelay}ms cubic-bezier(0.25, 0.7, 0.25, 1) reverse both;
+}
+${revealing} {
+pointer-events: none;
+animation: pi-splash-floor-unmask ${timeline.floorDurationMs}ms ${timeline.floorDelayMs}ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+}
+${covering} .pi-splash-phase-clock,
+${revealing} .pi-splash-phase-clock {
+animation-duration: ${timeline.totalMs}ms;
+animation-timing-function: linear;
+animation-fill-mode: both;
+}
+${covering} .pi-splash-phase-clock { animation-name: pi-splash-cover-clock; }
+${revealing} .pi-splash-phase-clock { animation-name: pi-splash-reveal-clock; }
+${covering} .pi-splash-backdrop {
+animation:
+pi-splash-open ${timeline.revealMs}ms ${coverOpenDelay}ms cubic-bezier(0.25, 0.6, 0.3, 1) reverse both,
+pi-splash-backdrop-out ${timeline.backdropFadeMs}ms ${coverFadeDelay}ms ease reverse both;
+}
+${revealing} .pi-splash-backdrop {
+animation:
+pi-splash-open ${timeline.revealMs}ms ${timeline.tileReleaseMs}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out ${timeline.backdropFadeMs}ms ${revealFadeDelay}ms ease both;
+}
+${covering} .pi-splash-camera {
+animation: pi-splash-camera-flatten ${timeline.floorDurationMs}ms ${coverFloorDelay}ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
+}
+${revealing} .pi-splash-camera {
+animation: pi-splash-camera-flatten ${timeline.floorDurationMs}ms ${timeline.floorDelayMs}ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+${covering} .pi-splash-ground::before {
+animation: pi-splash-continuation-out ${timeline.cellExitMs}ms ${coverContinuationDelay}ms ease reverse both;
+}
+${revealing} .pi-splash-ground::before {
+animation: pi-splash-continuation-out ${timeline.cellExitMs}ms ${timeline.tileReleaseMs}ms ease both;
+}
+${covering} .pi-splash-cell {
+animation: pi-splash-cell-out ${timeline.cellExitMs}ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
+animation-delay: var(--pi-cell-cover-delay-${tempo});
+}
+${revealing} .pi-splash-cell {
+animation: pi-splash-cell-out ${timeline.cellExitMs}ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cell-reveal-delay-${tempo});
+}
+${covering} .pi-splash-mark {
+animation: pi-splash-mark-press ${timeline.markExitMs}ms ${coverMarkDelay}ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
+}
+${revealing} .pi-splash-mark {
+animation: pi-splash-mark-press ${timeline.markExitMs}ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+${covering} .pi-splash-cube-face {
+animation: pi-splash-cube-bury ${timeline.markExitMs}ms ${coverMarkDelay}ms linear reverse both;
+}
+${revealing} .pi-splash-cube-face {
+animation: pi-splash-cube-bury ${timeline.markExitMs}ms linear both;
+}
+${covering} .pi-splash-ground::after {
+animation: pi-splash-contact-press ${timeline.contactPressMs}ms ${coverContactDelay}ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
+}
+${revealing} .pi-splash-ground::after {
+animation: pi-splash-contact-press ${timeline.contactPressMs}ms ${timeline.contactDelayMs}ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+${covering} .pi-splash-status {
+animation: pi-splash-status-out ${timeline.statusOutMs}ms ${coverStatusDelay}ms ease reverse both;
+}
+${revealing} .pi-splash-status {
+animation: pi-splash-status-out ${timeline.statusOutMs}ms ease both;
+}`;
+      })
+      .join('\n')
+    : '';
+
   const markRules = options.withMark
     ? `
 /* Unlike the old pre-projected SVG, this is a small real cube inside the floor's camera. Only its three
@@ -477,7 +631,8 @@ animation: pi-splash-glyph-pulse 1.8s ease-in-out infinite;
 /* The one animated floor element during the wait state is the cube's own footprint. It is positioned in
    floor coordinates and receives the same camera as every cell, so the glyph pulse has a physical answer
    on the plane rather than a separate screen-space glow. */
-.pi-splash:not([data-mode='switch']) .pi-splash-ground::after {
+.pi-splash:not([data-mode='switch']) .pi-splash-ground::after,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after {
 content: '';
 position: absolute;
 left: ${GROUND_SHAPE.offsetPx - CUBE_EDGE_PX / 2}px;
@@ -519,6 +674,10 @@ animation: pi-splash-mark-press ${MARK_EXIT_MS}ms cubic-bezier(0.3, 0, 0.2, 1) b
 animation: pi-splash-cube-bury ${MARK_EXIT_MS}ms linear both;
 }
 .pi-splash[data-leaving='true'] .pi-splash-cube-glyph {
+animation: none;
+filter: none;
+}
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-cube-glyph {
 animation: none;
 filter: none;
 }
@@ -568,6 +727,40 @@ to { opacity: 0; transform: translateY(5px); }
 .pi-splash-status { opacity: 0.5; }`
     : '';
 
+  const reducedWorkbenchSelectors = options.withMark
+    ? `,
+.pi-splash[data-mode='switch'][data-phase],
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-backdrop,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-camera,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::before,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-cell,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-mark,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-cube-face,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-status`
+    : '';
+
+  const reducedWorkbenchRules = options.withMark
+    ? `
+.pi-splash[data-mode='switch'][data-phase='covering'] {
+opacity: 0;
+animation: pi-splash-cover-fade ${SPLASH_REDUCED_EXIT_DURATION_MS}ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'] {
+opacity: 1;
+animation: pi-splash-reveal-fade ${SPLASH_REDUCED_EXIT_DURATION_MS}ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-phase-clock {
+animation-duration: ${SPLASH_REDUCED_EXIT_DURATION_MS}ms;
+animation-timing-function: linear;
+animation-fill-mode: both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'] .pi-splash-phase-clock { animation-name: pi-splash-cover-clock; }
+.pi-splash[data-mode='switch'][data-phase='revealing'] .pi-splash-phase-clock { animation-name: pi-splash-reveal-clock; }
+@keyframes pi-splash-cover-fade { to { opacity: 1; } }
+@keyframes pi-splash-reveal-fade { to { opacity: 0; } }`
+    : '';
+
   // The visible line plane extends past the real cells, so its idle mask uses that larger registered
   // outline. During exit the radius grows past the viewport while the camera turns overhead, removing the
   // atmospheric edge without a discrete mask swap.
@@ -588,6 +781,7 @@ z-index: 9998;
 overflow: hidden;
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
+.pi-splash[data-mode='switch'][data-phase='revealing'] { pointer-events: none; }
 
 /* The cover is the floor's cells, not this element.
    That is the whole exit: each cell is opaque, so when one shrinks away the app shows through the gap it
@@ -760,19 +954,40 @@ transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px
 }
 }
 ${markRules}
+${options.withMark ? `
+.pi-splash-phase-clock {
+position: absolute;
+width: 0;
+height: 0;
+opacity: 0;
+pointer-events: none;
+}
+@keyframes pi-splash-cover-clock {
+from { opacity: 0; }
+to { opacity: 0.001; }
+}
+@keyframes pi-splash-reveal-clock {
+from { opacity: 0; }
+to { opacity: 0.001; }
+}
+.pi-splash[data-mode='switch'][data-phase='covered'] .pi-splash-status {
+opacity: 0.5;
+animation: none;
+}
+${workbenchPhaseRules}` : ''}
 
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
 .pi-splash:not([data-mode='switch'])[data-leaving='true'],
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera,
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera${reducedWorkbenchSelectors},
 .pi-splash[data-leaving='true'] .pi-splash-ground::before,
 .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop${reducedMarkRules} {
 animation: none;
-}${reducedStatusRule}
+}${reducedStatusRule}${reducedWorkbenchRules}
 .pi-splash { transition: opacity ${SPLASH_REDUCED_EXIT_DURATION_MS}ms ease; }
 .pi-splash[data-leaving='true'] { opacity: 0; }
 }

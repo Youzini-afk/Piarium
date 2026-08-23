@@ -22,9 +22,10 @@ import {
 } from './catalog-store';
 import {
   beginWorkbenchProfileTransition,
-  finishWorkbenchProfileTransition,
+  markWorkbenchProfileTransitionOperationPrepared,
+  revealWorkbenchProfileTransition,
   resolveTransitionDirection,
-  waitForWorkbenchProfileTransitionCover,
+  waitForWorkbenchProfileTransitionCovered,
 } from '@/lib/workbench/profile-transition';
 import { startWorkbenchMountSession } from './workbench-mount';
 import {
@@ -64,6 +65,8 @@ export class WorkbenchShellTransitionAbortedError extends Error {
 }
 
 export interface WorkbenchProfileTransitionOptions {
+  /** Internal commit gate used by the live cover transaction after candidate preparation succeeds. */
+  beforeCommit?: () => Promise<void>;
   enableShell?: boolean;
 }
 
@@ -313,6 +316,7 @@ const persistReplacementSelection = async (
 const commitCandidateShell = async (
   deps: WorkbenchShellTransitionDependencies,
   input: {
+    beforeCommit?: () => Promise<void>;
     enableShell?: boolean;
     profileId: string;
     replacementSelections: Readonly<Record<string, string>>;
@@ -343,6 +347,8 @@ const commitCandidateShell = async (
     }
     const captured = captureIdentity(deps);
     if (inspected.status === 'builtin') {
+      await input.beforeCommit?.();
+      assertSameIdentity(captured, deps);
       await input.persist(captured.revision);
       committed = true;
       return;
@@ -362,6 +368,8 @@ const commitCandidateShell = async (
       captured,
     );
     try {
+      assertSameIdentity(captured, deps);
+      await input.beforeCommit?.();
       assertSameIdentity(captured, deps);
       await input.persist(captured.revision);
       committed = true;
@@ -393,6 +401,7 @@ export const runSelectActiveWorkbenchProfile = (
     ...(workspaceId ? { workspaceId } : {}),
   }, profileId);
   await commitCandidateShell(deps, {
+    ...(options?.beforeCommit ? { beforeCommit: options.beforeCommit } : {}),
     persist: (expectedRevision) => persistProfileSelection(deps, profileId, workspaceId, expectedRevision),
     profileId,
     replacementSelections: layout.replacementSelections,
@@ -455,26 +464,37 @@ export const selectActiveWorkbenchProfile = async (
     }).profileId
     : null;
 
-  beginWorkbenchProfileTransition({
+  const transitionId = beginWorkbenchProfileTransition({
     direction: resolveTransitionDirection(profileIds, fromProfileId, profileId),
     fromProfileId,
     toProfileId: profileId,
   });
 
-  // Do not let the shell replacement consume the same frame as the overlay state update. The overlay
-  // acknowledges after a painted frame, making the transition deterministic on both fast and busy hosts.
-  await waitForWorkbenchProfileTransitionCover();
-
+  let failure: unknown;
   try {
     await runSelectActiveWorkbenchProfile(
       createLiveWorkbenchShellTransitionDependencies(),
       profileId,
       workspaceId,
-      options,
+      {
+        ...options,
+        beforeCommit: async () => {
+          markWorkbenchProfileTransitionOperationPrepared(transitionId);
+          const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
+          if (!covered) throw new WorkbenchShellTransitionAbortedError();
+        },
+      },
     );
-  } finally {
-    await finishWorkbenchProfileTransition();
+  } catch (error) {
+    failure = error;
+    // A preparation failure is also a settled result. If it happened while covering, reveal the previous
+    // authoritative shell at the quick tempo after the reverse animation completes.
+    markWorkbenchProfileTransitionOperationPrepared(transitionId);
   }
+
+  const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
+  if (covered) await revealWorkbenchProfileTransition(transitionId);
+  if (failure !== undefined) throw failure;
 };
 
 export const setWorkbenchReplacementSelection = (

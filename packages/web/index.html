@@ -522,6 +522,7 @@ z-index: 9998;
 overflow: hidden;
 }
 .pi-splash[data-leaving='true'] { pointer-events: none; }
+.pi-splash[data-mode='switch'][data-phase='revealing'] { pointer-events: none; }
 
 /* The cover is the floor's cells, not this element.
    That is the whole exit: each cell is opaque, so when one shrinks away the app shows through the gap it
@@ -740,7 +741,8 @@ animation: pi-splash-glyph-pulse 1.8s ease-in-out infinite;
 /* The one animated floor element during the wait state is the cube's own footprint. It is positioned in
    floor coordinates and receives the same camera as every cell, so the glyph pulse has a physical answer
    on the plane rather than a separate screen-space glow. */
-.pi-splash:not([data-mode='switch']) .pi-splash-ground::after {
+.pi-splash:not([data-mode='switch']) .pi-splash-ground::after,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after {
 content: '';
 position: absolute;
 left: 1344px;
@@ -785,6 +787,10 @@ animation: pi-splash-cube-bury 960ms linear both;
 animation: none;
 filter: none;
 }
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-cube-glyph {
+animation: none;
+filter: none;
+}
 .pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-mark {
 animation: pi-splash-mark-out 960ms 60ms cubic-bezier(0.4, 0, 0.3, 1) both;
 }
@@ -815,11 +821,180 @@ to { opacity: 0; }
 to { opacity: 0; transform: translateY(5px); }
 }
 
+.pi-splash-phase-clock {
+position: absolute;
+width: 0;
+height: 0;
+opacity: 0;
+pointer-events: none;
+}
+@keyframes pi-splash-cover-clock {
+from { opacity: 0; }
+to { opacity: 0.001; }
+}
+@keyframes pi-splash-reveal-clock {
+from { opacity: 0; }
+to { opacity: 0.001; }
+}
+.pi-splash[data-mode='switch'][data-phase='covered'] .pi-splash-status {
+opacity: 0.5;
+animation: none;
+}
+
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] {
+animation: pi-splash-floor-unmask 285ms 733ms cubic-bezier(0.25, 0.7, 0.25, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] {
+pointer-events: none;
+animation: pi-splash-floor-unmask 285ms 22ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-phase-clock,
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-phase-clock {
+animation-duration: 1040ms;
+animation-timing-function: linear;
+animation-fill-mode: both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-phase-clock { animation-name: pi-splash-cover-clock; }
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-phase-clock { animation-name: pi-splash-reveal-clock; }
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-backdrop {
+animation:
+pi-splash-open 263ms 306ms cubic-bezier(0.25, 0.6, 0.3, 1) reverse both,
+pi-splash-backdrop-out 142ms 164ms ease reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-backdrop {
+animation:
+pi-splash-open 263ms 471ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out 142ms 734ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-camera {
+animation: pi-splash-camera-flatten 285ms 733ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-camera {
+animation: pi-splash-camera-flatten 285ms 22ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-ground::before {
+animation: pi-splash-continuation-out 285ms 284ms ease reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-ground::before {
+animation: pi-splash-continuation-out 285ms 471ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-cell {
+animation: pi-splash-cell-out 285ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
+animation-delay: var(--pi-cell-cover-delay-quick);
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-cell {
+animation: pi-splash-cell-out 285ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cell-reveal-delay-quick);
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-mark {
+animation: pi-splash-mark-press 525ms 515ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-mark {
+animation: pi-splash-mark-press 525ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-cube-face {
+animation: pi-splash-cube-bury 525ms 515ms linear reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-cube-face {
+animation: pi-splash-cube-bury 525ms linear both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-ground::after {
+animation: pi-splash-contact-press 166ms 569ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-ground::after {
+animation: pi-splash-contact-press 166ms 305ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-status {
+animation: pi-splash-status-out 99ms 941ms ease reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-status {
+animation: pi-splash-status-out 99ms ease both;
+}
+
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] {
+animation: pi-splash-floor-unmask 520ms 1340ms cubic-bezier(0.25, 0.7, 0.25, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] {
+pointer-events: none;
+animation: pi-splash-floor-unmask 520ms 40ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-phase-clock,
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-phase-clock {
+animation-duration: 1900ms;
+animation-timing-function: linear;
+animation-fill-mode: both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-phase-clock { animation-name: pi-splash-cover-clock; }
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-phase-clock { animation-name: pi-splash-reveal-clock; }
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-backdrop {
+animation:
+pi-splash-open 480ms 560ms cubic-bezier(0.25, 0.6, 0.3, 1) reverse both,
+pi-splash-backdrop-out 260ms 300ms ease reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-backdrop {
+animation:
+pi-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
+pi-splash-backdrop-out 260ms 1340ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-camera {
+animation: pi-splash-camera-flatten 520ms 1340ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-camera {
+animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-ground::before {
+animation: pi-splash-continuation-out 520ms 520ms ease reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-ground::before {
+animation: pi-splash-continuation-out 520ms 860ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-cell {
+animation: pi-splash-cell-out 520ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
+animation-delay: var(--pi-cell-cover-delay-standard);
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-cell {
+animation: pi-splash-cell-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cell-reveal-delay-standard);
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-mark {
+animation: pi-splash-mark-press 960ms 940ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-mark {
+animation: pi-splash-mark-press 960ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-cube-face {
+animation: pi-splash-cube-bury 960ms 940ms linear reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-cube-face {
+animation: pi-splash-cube-bury 960ms linear both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-ground::after {
+animation: pi-splash-contact-press 303ms 1040ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-ground::after {
+animation: pi-splash-contact-press 303ms 557ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-status {
+animation: pi-splash-status-out 180ms 1720ms ease reverse both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-status {
+animation: pi-splash-status-out 180ms ease both;
+}
+
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {
 .pi-splash:not([data-mode='switch'])[data-leaving='true'],
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera,
+.pi-splash[data-mode='switch'][data-phase],
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-backdrop,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-camera,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::before,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-cell,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-mark,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-cube-face,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-status,
 .pi-splash[data-leaving='true'] .pi-splash-ground::before,
 .pi-splash-cell,
 .pi-splash[data-leaving='true'] .pi-splash-cell,
@@ -834,6 +1009,23 @@ to { opacity: 0; transform: translateY(5px); }
 animation: none;
 }
 .pi-splash-status { opacity: 0.5; }
+.pi-splash[data-mode='switch'][data-phase='covering'] {
+opacity: 0;
+animation: pi-splash-cover-fade 260ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase='revealing'] {
+opacity: 1;
+animation: pi-splash-reveal-fade 260ms ease both;
+}
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-phase-clock {
+animation-duration: 260ms;
+animation-timing-function: linear;
+animation-fill-mode: both;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'] .pi-splash-phase-clock { animation-name: pi-splash-cover-clock; }
+.pi-splash[data-mode='switch'][data-phase='revealing'] .pi-splash-phase-clock { animation-name: pi-splash-reveal-clock; }
+@keyframes pi-splash-cover-fade { to { opacity: 1; } }
+@keyframes pi-splash-reveal-fade { to { opacity: 0; } }
 .pi-splash { transition: opacity 260ms ease; }
 .pi-splash[data-leaving='true'] { opacity: 0; }
 }

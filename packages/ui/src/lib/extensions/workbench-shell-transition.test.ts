@@ -238,6 +238,31 @@ test('enable-and-switch turns the shell on and commits after a render-ready cand
   expect(harness.disposed).toBe(1);
 });
 
+test('prepares the candidate behind the old shell and commits only after the cover gate', async () => {
+  const harness = createDeps({ entry: shellEntry(true), implementation: { render: () => 'ready' } });
+  let releaseGate: (() => void) | undefined;
+  let reachedGate: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+  const reached = new Promise<void>((resolve) => { reachedGate = resolve; });
+
+  const switching = runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, {
+    beforeCommit: async () => {
+      reachedGate?.();
+      await gate;
+    },
+  });
+  await reached;
+
+  expect(harness.renders).toBe(1);
+  expect(harness.persistedProfiles).toEqual([]);
+  expect(harness.disposed).toBe(0);
+
+  releaseGate?.();
+  await switching;
+  expect(harness.persistedProfiles).toEqual(['studio']);
+  expect(harness.disposed).toBe(1);
+});
+
 test('sync, async, and isolated mounts commit only after they become ready', async () => {
   for (const implementation of [
     { mount: () => () => undefined },
@@ -306,6 +331,28 @@ test('rejects a candidate after the catalog generation changes', async () => {
 test('builtin profiles persist without staging a shell', async () => {
   const harness = createDeps({ entry: shellEntry(true) });
   await runSelectActiveWorkbenchProfile(harness.deps, 'default');
+  expect(harness.persistedProfiles).toEqual(['default']);
+  expect(harness.mounts).toBe(0);
+});
+
+test('builtin Agent and IDE profile commits obey the same cover gate', async () => {
+  const harness = createDeps({ entry: shellEntry(true) });
+  let releaseGate: (() => void) | undefined;
+  let reachedGate: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+  const reached = new Promise<void>((resolve) => { reachedGate = resolve; });
+
+  const switching = runSelectActiveWorkbenchProfile(harness.deps, 'default', undefined, {
+    beforeCommit: async () => {
+      reachedGate?.();
+      await gate;
+    },
+  });
+  await reached;
+  expect(harness.persistedProfiles).toEqual([]);
+
+  releaseGate?.();
+  await switching;
   expect(harness.persistedProfiles).toEqual(['default']);
   expect(harness.mounts).toBe(0);
 });

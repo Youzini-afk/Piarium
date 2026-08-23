@@ -22,10 +22,14 @@ import {
   GROUND_SHAPE,
   PIARIUM_SPLASH_COLORS,
   SPLASH_EXIT_DURATION_MS,
+  SPLASH_REDUCED_EXIT_DURATION_MS,
+  SPLASH_WORKBENCH_QUICK_DURATION_MS,
   buildSplashCells,
   splashExitScale,
   splashGroundScript,
   splashPlaneCss,
+  splashWorkbenchCellDelays,
+  splashWorkbenchPhaseDurationMs,
 } from './piarium-splash-lattice';
 import { INITIAL_SPLASH_IDS } from '@/lib/splash';
 
@@ -439,7 +443,9 @@ describe('exit choreography', () => {
 
   test('the waiting pulse is drawn on the cube footprint in floor space', () => {
     const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
-    expect(css).toContain(".pi-splash:not([data-mode='switch']) .pi-splash-ground::after {");
+    expect(css).toContain(
+      ".pi-splash:not([data-mode='switch']) .pi-splash-ground::after,\n.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after {",
+    );
     expect(css).toContain(`left: ${GROUND_SHAPE.offsetPx - CUBE_EDGE_PX / 2}px;`);
     expect(css).toContain(`top: ${GROUND_SHAPE.offsetPx - CUBE_EDGE_PX / 2}px;`);
     expect(css).toContain('animation: pi-splash-contact-pulse 1.8s ease-in-out infinite;');
@@ -452,6 +458,37 @@ describe('exit choreography', () => {
         expect(cell.delayMs).toBeLessThanOrEqual(520);
       }
     }
+  });
+
+  test('workbench covering is the exact time reversal of revealing at both tempos', () => {
+    const cells = buildSplashCells('switch', 'forward', false);
+    for (const tempo of ['quick', 'standard'] as const) {
+      const timings = cells.map((cell) => splashWorkbenchCellDelays(cell.delayMs, tempo));
+      const mirroredSums = new Set(timings.map((timing) => timing.coverDelayMs + timing.revealDelayMs));
+      expect(mirroredSums.size).toBe(1);
+      const firstReveal = timings.reduce((best, timing) => (
+        timing.revealDelayMs < best.revealDelayMs ? timing : best
+      ));
+      const firstCover = timings.reduce((best, timing) => (
+        timing.coverDelayMs < best.coverDelayMs ? timing : best
+      ));
+      expect(firstReveal.coverDelayMs).toBeGreaterThan(firstCover.coverDelayMs);
+      expect(firstCover.revealDelayMs).toBeGreaterThan(firstReveal.revealDelayMs);
+    }
+  });
+
+  test('quick workbench playback keeps every phase but uses the accepted sweep duration', () => {
+    expect(splashWorkbenchPhaseDurationMs('quick')).toBe(SPLASH_WORKBENCH_QUICK_DURATION_MS);
+    expect(splashWorkbenchPhaseDurationMs('standard')).toBe(SPLASH_EXIT_DURATION_MS);
+    expect(splashWorkbenchPhaseDurationMs('quick', true)).toBe(SPLASH_REDUCED_EXIT_DURATION_MS);
+
+    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
+    expect(css).toContain("[data-phase='covering'][data-tempo='quick'] .pi-splash-mark {");
+    expect(css).toContain('pi-splash-mark-press 525ms 515ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;');
+    expect(css).toContain("[data-phase='revealing'][data-tempo='quick'] .pi-splash-mark {");
+    expect(css).toContain('animation-duration: 1040ms;');
+    expect(css).toContain('animation-name: pi-splash-cover-clock;');
+    expect(css).toContain('animation-name: pi-splash-reveal-clock;');
   });
 
   test('breathing is opt-in and sparse', () => {

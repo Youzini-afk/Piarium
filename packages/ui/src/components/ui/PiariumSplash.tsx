@@ -5,9 +5,12 @@ import {
   buildSplashCells,
   PIARIUM_SPLASH_COLORS,
   splashExitScale,
+  splashWorkbenchCellDelays,
   splashPlaneCss,
   type PiariumSplashDirection,
   type PiariumSplashMode,
+  type PiariumSplashPhase,
+  type PiariumSplashTempo,
 } from './piarium-splash-lattice';
 
 /**
@@ -47,6 +50,10 @@ export interface PiariumSplashProps {
   direction?: PiariumSplashDirection;
   /** Flip to run the exit. Keep the component mounted for `SPLASH_EXIT_DURATION_MS` afterwards. */
   leaving?: boolean;
+  /** Workbench-only mirrored phase. Boot keeps using `leaving` because its cover already exists pre-paint. */
+  phase?: PiariumSplashPhase;
+  tempo?: PiariumSplashTempo;
+  onPhaseComplete?: () => void;
   className?: string;
 }
 
@@ -56,6 +63,9 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
   status,
   direction = 'forward',
   leaving = false,
+  phase,
+  tempo = 'standard',
+  onPhaseComplete,
   className,
 }) => {
   const reducedMotion = usePrefersReducedMotion();
@@ -79,10 +89,18 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       className={['pi-splash', className].filter(Boolean).join(' ')}
       data-leaving={leaving ? 'true' : 'false'}
       data-mode={mode}
+      data-phase={phase}
+      data-tempo={tempo}
       style={{ '--pi-floor-exit-scale': exitScale } as React.CSSProperties}
       role="status"
       aria-live="polite"
       aria-label={label}
+      onAnimationEnd={(event) => {
+        if (
+          event.animationName === 'pi-splash-cover-clock'
+          || event.animationName === 'pi-splash-reveal-clock'
+        ) onPhaseComplete?.();
+      }}
     >
       <style>{STYLES}</style>
       {/* The cover for everything the floor's cells cannot reach. A hole opens in it from the cube's feet
@@ -92,7 +110,14 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
         <div className="pi-splash-horizon">
           <div className="pi-splash-camera">
             <div className="pi-splash-ground">
-              {cells.map((cell) => (
+              {cells.map((cell) => {
+                const standard = mode === 'switch'
+                  ? splashWorkbenchCellDelays(cell.delayMs, 'standard')
+                  : null;
+                const quick = mode === 'switch'
+                  ? splashWorkbenchCellDelays(cell.delayMs, 'quick')
+                  : null;
+                return (
                 <span
                   key={cell.key}
                   className="pi-splash-cell"
@@ -101,18 +126,26 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
                     '--pi-cell-delay': `${cell.delayMs}ms`,
                     '--pi-cell-scatter-x': `${cell.scatterXPx}px`,
                     '--pi-cell-scatter-y': `${cell.scatterYPx}px`,
+                    ...(standard && quick ? {
+                      '--pi-cell-cover-delay-standard': `${standard.coverDelayMs}ms`,
+                      '--pi-cell-reveal-delay-standard': `${standard.revealDelayMs}ms`,
+                      '--pi-cell-cover-delay-quick': `${quick.coverDelayMs}ms`,
+                      '--pi-cell-reveal-delay-quick': `${quick.revealDelayMs}ms`,
+                    } : {}),
                     ...(cell.breatheDelayMs === null
                       ? {}
                       : { '--pi-breathe-delay': `${cell.breatheDelayMs}ms` }),
                   } as React.CSSProperties}
                 />
-              ))}
+                );
+              })}
             </div>
             {/* Generated from fixed Piarium geometry; no untrusted string reaches it. */}
             <span className="pi-splash-mark" dangerouslySetInnerHTML={{ __html: CUBE_MARKUP }} />
           </div>
         </div>
       </div>
+      <span className="pi-splash-phase-clock" aria-hidden="true" />
       <div className="pi-splash-status">{status ?? ''}</div>
     </div>
   );
