@@ -3171,6 +3171,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': 'Barra lateral secundaria',
   'settings.piarium.extensions.workbench.target.panel': 'Panel',
   'settings.piarium.extensions.workbench.target.status': 'Barra de estado',
+  'settings.piarium.extensions.workbench.target.transition': 'Escena de transición',
   'settings.piarium.extensions.candidate.title': 'Actualización candidata v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Capacidades revisadas',
   'settings.piarium.extensions.candidate.deny': 'Denegar',

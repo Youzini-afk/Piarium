@@ -3171,6 +3171,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': 'Додаткова бічна панель',
   'settings.piarium.extensions.workbench.target.panel': 'Панель',
   'settings.piarium.extensions.workbench.target.status': 'Рядок стану',
+  'settings.piarium.extensions.workbench.target.transition': 'Сцена переходу',
   'settings.piarium.extensions.candidate.title': 'Кандидат оновлення v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Можливості перевірено',
   'settings.piarium.extensions.candidate.deny': 'Відхилити',

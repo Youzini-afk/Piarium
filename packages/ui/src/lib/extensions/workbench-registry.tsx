@@ -160,12 +160,14 @@ const WorkbenchMountHost = <TProps extends object>({
   contribution,
   fallback,
   implementation,
+  onMountReady,
   props,
 }: {
   className?: string;
   contribution: SurfaceContribution;
   fallback: React.ReactNode;
   implementation: MountImplementation<TProps>;
+  onMountReady?: () => void;
   props: TProps;
 }): React.ReactNode => {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -179,6 +181,7 @@ const WorkbenchMountHost = <TProps extends object>({
     const container = containerRef.current;
     if (!container) return;
     let active = true;
+    let mountFailed = false;
     const session = startWorkbenchMountSession({
       container,
       contributionId: contribution.descriptor.id,
@@ -191,15 +194,19 @@ const WorkbenchMountHost = <TProps extends object>({
           error,
         );
         if (!active || phase === 'dispose') return;
+        mountFailed = true;
         setFailure({ contributionKey, implementation, props });
         void session.dispose(error);
       },
+    });
+    void session.mounted.then(() => {
+      if (active && !mountFailed) onMountReady?.();
     });
     return () => {
       active = false;
       void session.dispose(`Surface contribution ${contribution.descriptor.id} was unmounted`);
     };
-  }, [contribution, contributionKey, implementation, props]);
+  }, [contribution, contributionKey, implementation, onMountReady, props]);
 
   if (failed) return fallback;
   return (
@@ -224,12 +231,14 @@ export function WorkbenchSurfaceContributionHost<TProps extends object>({
   contribution,
   fallback,
   isolatedProps,
+  onMountReady,
   props,
 }: {
   className?: string;
   contribution: SurfaceContribution;
   fallback: React.ReactNode;
   isolatedProps?: JsonValue;
+  onMountReady?: () => void;
   props: TProps;
 }): React.ReactNode {
   useVisibleContributionActivation([contribution]);
@@ -257,20 +266,33 @@ export function WorkbenchSurfaceContributionHost<TProps extends object>({
         contribution={contribution}
         fallback={fallback}
         implementation={contribution.implementation}
+        onMountReady={onMountReady}
         props={props}
       />
     );
   }
   return (
     <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={fallback}>
-      <WorkbenchRenderImplementation
-        fallbackOnEmpty={fallback}
-        implementation={contribution.implementation}
-        props={props}
-      />
+      <ContributionReadySignal onReady={onMountReady}>
+        <WorkbenchRenderImplementation
+          fallbackOnEmpty={fallback}
+          implementation={contribution.implementation}
+          props={props}
+        />
+      </ContributionReadySignal>
     </ContributionRenderBoundary>
   );
 }
+
+const ContributionReadySignal: React.FC<{
+  children: React.ReactNode;
+  onReady?: () => void;
+}> = ({ children, onReady }) => {
+  React.useEffect(() => {
+    onReady?.();
+  }, [onReady]);
+  return <>{children}</>;
+};
 
 export const useSurfaceRegistrySnapshot = (): SurfaceRegistrySnapshot => React.useSyncExternalStore(
   piariumSurfaceRuntime.subscribe,

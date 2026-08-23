@@ -3171,6 +3171,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': 'Secondary sidebar',
   'settings.piarium.extensions.workbench.target.panel': 'Panel',
   'settings.piarium.extensions.workbench.target.status': 'Status bar',
+  'settings.piarium.extensions.workbench.target.transition': 'Transition scene',
   'settings.piarium.extensions.candidate.title': 'Update candidate v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Capabilities reviewed',
   'settings.piarium.extensions.candidate.deny': 'Deny',

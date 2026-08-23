@@ -45,6 +45,8 @@ export interface PiariumSplashProps {
   mode: PiariumSplashMode;
   /** Accessible name for the cover, since the mark inside it is decorative. */
   label: string;
+  /** The outer Transition Scene host owns announcements for switch mode. Boot announces itself. */
+  announce?: boolean;
   /** Already-translated status line. Omit to leave the line empty but keep its height reserved. */
   status?: string;
   direction?: PiariumSplashDirection;
@@ -53,6 +55,8 @@ export interface PiariumSplashProps {
   /** Workbench-only mirrored phase. Boot keeps using `leaving` because its cover already exists pre-paint. */
   phase?: PiariumSplashPhase;
   tempo?: PiariumSplashTempo;
+  /** Captured transition preference. Boot omits it and follows the live media query. */
+  reducedMotion?: boolean;
   onPhaseComplete?: () => void;
   className?: string;
 }
@@ -60,15 +64,18 @@ export interface PiariumSplashProps {
 export const PiariumSplash: React.FC<PiariumSplashProps> = ({
   mode,
   label,
+  announce = true,
   status,
   direction = 'forward',
   leaving = false,
   phase,
   tempo = 'standard',
+  reducedMotion: reducedMotionOverride,
   onPhaseComplete,
   className,
 }) => {
-  const reducedMotion = usePrefersReducedMotion();
+  const systemReducedMotion = usePrefersReducedMotion();
+  const reducedMotion = reducedMotionOverride ?? systemReducedMotion;
   // Re-evaluate on the render that flips `leaving`: a slow startup may have been resized since mount, and
   // the flattened floor must contain the viewport that actually exists at handoff time.
   const exitScale = typeof window === 'undefined'
@@ -92,9 +99,10 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       data-phase={phase}
       data-tempo={tempo}
       style={{ '--pi-floor-exit-scale': exitScale } as React.CSSProperties}
-      role="status"
-      aria-live="polite"
-      aria-label={label}
+      role={announce ? 'status' : undefined}
+      aria-live={announce ? 'polite' : undefined}
+      aria-label={announce ? label : undefined}
+      aria-hidden={announce ? undefined : true}
       onAnimationEnd={(event) => {
         if (
           event.animationName === 'pi-splash-cover-clock'

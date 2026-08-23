@@ -1,55 +1,86 @@
 import React from 'react';
-import { PiariumSplash } from '@/components/ui/PiariumSplash';
+import type { JsonValue } from '@piarium/extension-contract';
 import { useI18n } from '@/lib/i18n';
-import { usePiariumExtensionCatalog } from '@/lib/extensions/catalog-store';
-import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import {
-  completeWorkbenchProfileTransition,
+  WorkbenchSurfaceContributionHost,
+  useSurfaceRegistrySnapshot,
+  workbenchContributionInstanceKey,
+} from '@/lib/extensions/workbench-registry';
+import { findCapturedWorkbenchTransitionScene } from '@/lib/extensions/workbench-transition-scene';
+import {
+  armWorkbenchProfileTransitionPhase,
+  createWorkbenchTransitionSceneController,
   getWorkbenchProfileTransitionSnapshot,
-  markWorkbenchProfileTransitionCovered,
   subscribeWorkbenchProfileTransition,
 } from '@/lib/workbench/profile-transition';
 
+const CoreTransitionFallback: React.FC<{ onReady(): void }> = ({ onReady }) => {
+  React.useEffect(() => {
+    onReady();
+  }, [onReady]);
+  return <div className="absolute inset-0 bg-background" aria-hidden="true" />;
+};
+
 /**
- * Covers a Workbench Profile switch.
- *
- * Mounted next to the other application-level overlays rather than inside the shell host, so the
- * shared kernel underneath — documents, editor groups, terminals, the Pi session — keeps running and
- * only the presentation changes. It also masks the shell host's own loading state, which is an
- * unstyled background-coloured div and would otherwise flash between the two shells.
+ * Shell-independent Transition Scene host. The captured contribution is mounted once outside both
+ * Shells; Profile commit can therefore replace the entire workbench without replacing its visual
+ * owner halfway through cover/reveal.
  */
 export const WorkbenchTransitionOverlay: React.FC = () => {
   const { t } = useI18n();
-  const catalog = usePiariumExtensionCatalog();
   const transition = React.useSyncExternalStore(
     subscribeWorkbenchProfileTransition,
     getWorkbenchProfileTransitionSnapshot,
     getWorkbenchProfileTransitionSnapshot,
   );
+  const surface = useSurfaceRegistrySnapshot();
+  const controller = React.useMemo(() => transition.id > 0
+    ? createWorkbenchTransitionSceneController(transition.id)
+    : null, [transition.id]);
+  const sceneProps = React.useMemo(() => controller ? { transition: controller } : null, [controller]);
+  const contribution = findCapturedWorkbenchTransitionScene(surface, transition.scene);
+  const readinessKey = `${transition.id}\0${contribution
+    ? workbenchContributionInstanceKey(contribution)
+    : 'core-fallback'}`;
+  const [readyKey, setReadyKey] = React.useState<string | null>(null);
+  const onMountReady = React.useCallback(() => {
+    setReadyKey(readinessKey);
+  }, [readinessKey]);
+  React.useEffect(() => {
+    if (readyKey !== readinessKey) return;
+    if (transition.phase === 'covering' || transition.phase === 'revealing') {
+      armWorkbenchProfileTransitionPhase(transition.id, transition.phase);
+    }
+  }, [readinessKey, readyKey, transition.id, transition.phase]);
 
-  if (transition.phase === 'idle') return null;
+  if (transition.phase === 'idle' || !controller || !sceneProps) return null;
 
-  const profiles = catalog.snapshot?.workbench?.document.profiles ?? [];
-  const target = profiles.find((profile) => profile.id === transition.toProfileId);
-  const status = target
-    ? t('splash.switchingTo', { profile: workbenchProfileLabel(target, t) })
-    : t('splash.switching');
+  const frame = controller.getSnapshot();
+  const isolatedFrame = contribution ? {
+    contributionId: contribution.descriptor.id,
+    frame,
+    type: 'motion.transition.frame',
+  } as unknown as JsonValue : undefined;
+  const fallback = <CoreTransitionFallback onReady={onMountReady} />;
 
   return (
-    <PiariumSplash
-      mode="switch"
-      direction={transition.direction}
-      phase={transition.phase}
-      tempo={transition.tempo}
-      label={t('splash.aria.switching')}
-      status={status}
-      onPhaseComplete={() => {
-        if (transition.phase === 'covering') {
-          markWorkbenchProfileTransitionCovered(transition.id);
-        } else if (transition.phase === 'revealing') {
-          completeWorkbenchProfileTransition(transition.id);
-        }
-      }}
-    />
+    <div
+      className={`fixed inset-0 z-[9998] overflow-hidden ${transition.phase === 'revealing' ? 'pointer-events-none' : 'pointer-events-auto'}`}
+      role="status"
+      aria-live="polite"
+      aria-label={t('splash.aria.switching')}
+      data-piarium-transition-scene={contribution?.descriptor.id ?? 'core-fallback'}
+    >
+      {contribution ? (
+        <WorkbenchSurfaceContributionHost
+          className="h-full min-h-0 w-full min-w-0"
+          contribution={contribution}
+          fallback={fallback}
+          isolatedProps={isolatedFrame}
+          onMountReady={onMountReady}
+          props={sceneProps}
+        />
+      ) : fallback}
+    </div>
   );
 };

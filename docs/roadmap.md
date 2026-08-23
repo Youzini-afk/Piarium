@@ -562,6 +562,12 @@ It does not define a fixed page-element schema: complete Shells continue to own 
 architecture and internal animation, while Core owns only cross-owner staging, authoritative handoff,
 failure recovery, and the first-paint bootstrap boundary.
 
+The public Transition Scene contract and its first runtime consumer are delivered. The default cube
+scene is an enabled-by-default built-in Piarium extension selected through `workbench.transition`,
+while a complete external scene can replace it without importing Piarium's product React tree. The
+remaining Motion work is the pre-React bootstrap projection and the optional generic service for
+Shell-owned local motion; neither introduces fixed page-element names.
+
 Not yet recorded: the plan's final convergence verification run (full workspace type-check/lint,
 public package build/pack/conformance, production Web build, Electron bundled and Windows
 package/smoke, hosted cloud smoke, mobile Agent Profile smoke, VS Code Companion package, and a

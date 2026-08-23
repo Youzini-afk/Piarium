@@ -13,6 +13,7 @@ import {
 } from '@piarium/extension-contract';
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import type { PiariumExtensionCatalogStoreState } from './catalog-store';
 import {
   getPiariumExtensionCatalogState,
@@ -33,6 +34,7 @@ import {
   type WorkbenchShellRenderStagingHandle,
 } from './workbench-shell-staging-store';
 import { piariumSurfaceRuntime } from './surface-runtime';
+import { prepareWorkbenchTransitionScene } from './workbench-transition-scene';
 
 export type WorkbenchShellUnavailableStatus = Extract<PiariumWorkbenchShellStatus, 'disabled' | 'failed' | 'missing'>;
 
@@ -456,45 +458,67 @@ export const selectActiveWorkbenchProfile = async (
 ): Promise<void> => {
   const workbench = getPiariumExtensionCatalogState().snapshot?.workbench;
   const profileIds = workbench?.document.profiles.map((profile) => profile.id) ?? [];
+  const transitionContext = {
+    surface: piariumSurfaceRuntime.surface,
+    userId: 'default',
+    ...(workspaceId ? { workspaceId } : {}),
+  };
   const fromProfileId = workbench?.authoritative
-    ? resolvePiariumWorkbenchLayout(workbench.document, {
-      surface: piariumSurfaceRuntime.surface,
-      userId: 'default',
-      ...(workspaceId ? { workspaceId } : {}),
-    }).profileId
+    ? resolvePiariumWorkbenchLayout(workbench.document, transitionContext).profileId
     : null;
 
+  const targetLayout = workbench?.authoritative
+    ? resolvePiariumWorkbenchLayoutForProfile(workbench.document, transitionContext, profileId)
+    : null;
+  const scenePreparation = prepareWorkbenchTransitionScene(targetLayout?.replacementSelections ?? {});
+  let resolveTransitionId!: (id: number) => void;
+  const transitionIdReady = new Promise<number>((resolve) => {
+    resolveTransitionId = resolve;
+  });
+  // Candidate Shell staging starts immediately and runs beside lazy scene activation. Its commit gate
+  // waits for the scene transaction to exist and then for that scene to report a fully opaque cover.
+  const candidate = runSelectActiveWorkbenchProfile(
+    createLiveWorkbenchShellTransitionDependencies(),
+    profileId,
+    workspaceId,
+    {
+      ...options,
+      beforeCommit: async () => {
+        await options?.beforeCommit?.();
+        const transitionId = await transitionIdReady;
+        markWorkbenchProfileTransitionOperationPrepared(transitionId);
+        const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
+        if (!covered) throw new WorkbenchShellTransitionAbortedError();
+      },
+    },
+  ).then(
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ error, ok: false as const }),
+  );
+
+  const preparedScene = await scenePreparation;
+  if (preparedScene.status === 'failed') {
+    console.error('[Piarium Motion] Transition Scene preparation failed; using Core fallback:', preparedScene.error);
+  }
   const transitionId = beginWorkbenchProfileTransition({
     direction: resolveTransitionDirection(profileIds, fromProfileId, profileId),
     fromProfileId,
+    reducedMotion: prefersReducedMotion(),
+    scene: preparedScene.scene,
     toProfileId: profileId,
   });
+  resolveTransitionId(transitionId);
 
-  let failure: unknown;
-  try {
-    await runSelectActiveWorkbenchProfile(
-      createLiveWorkbenchShellTransitionDependencies(),
-      profileId,
-      workspaceId,
-      {
-        ...options,
-        beforeCommit: async () => {
-          markWorkbenchProfileTransitionOperationPrepared(transitionId);
-          const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
-          if (!covered) throw new WorkbenchShellTransitionAbortedError();
-        },
-      },
-    );
-  } catch (error) {
-    failure = error;
-    // A preparation failure is also a settled result. If it happened while covering, reveal the previous
-    // authoritative shell at the quick tempo after the reverse animation completes.
+  const result = await candidate;
+  if (!result.ok) {
+    // A preparation failure is also a settled result. If it happened while covering, reveal the
+    // previous authoritative shell at the scene's quick tempo after cover completes.
     markWorkbenchProfileTransitionOperationPrepared(transitionId);
   }
 
   const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);
   if (covered) await revealWorkbenchProfileTransition(transitionId);
-  if (failure !== undefined) throw failure;
+  if (!result.ok) throw result.error;
 };
 
 export const setWorkbenchReplacementSelection = (

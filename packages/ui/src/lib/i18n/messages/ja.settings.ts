@@ -2847,6 +2847,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': 'セカンダリサイドバー',
   'settings.piarium.extensions.workbench.target.panel': 'パネル',
   'settings.piarium.extensions.workbench.target.status': 'ステータスバー',
+  'settings.piarium.extensions.workbench.target.transition': 'トランジションシーン',
   'settings.piarium.extensions.candidate.title': '更新候補 v{version}',
   'settings.piarium.extensions.candidate.reviewed': '機能を確認済み',
   'settings.piarium.extensions.candidate.deny': '拒否',

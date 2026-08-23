@@ -3171,6 +3171,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': '次侧栏',
   'settings.piarium.extensions.workbench.target.panel': '面板',
   'settings.piarium.extensions.workbench.target.status': '状态栏',
+  'settings.piarium.extensions.workbench.target.transition': '过渡场景',
   'settings.piarium.extensions.candidate.title': '候选更新 v{version}',
   'settings.piarium.extensions.candidate.reviewed': '能力已审查',
   'settings.piarium.extensions.candidate.deny': '拒绝',

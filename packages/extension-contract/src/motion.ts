@@ -1,8 +1,8 @@
-import type { JsonObject } from "./types.js";
-
 export const PIARIUM_TRANSITION_SCENE_DATA_CONTRACT = "piarium-transition-scene/v1" as const;
 export const PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION = 1 as const;
 export const PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE = "workbench-profile" as const;
+export const PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION_ID = "piarium.builtin.transition-scene" as const;
+export const PIARIUM_BUILTIN_TRANSITION_SCENE_CONTRIBUTION_ID = "piarium.builtin.transition-scene.default" as const;
 
 export type PiariumTransitionSceneId = typeof PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE;
 export type PiariumTransitionSceneDirection = "backward" | "forward";
@@ -168,7 +168,3 @@ export const piariumTransitionSceneDuration = (
   const timings = data.durations[input.scene][input.phase];
   return input.reducedMotion ? timings.reduced : timings[input.tempo];
 };
-
-export const transitionSceneDataAsJson = (
-  data: PiariumTransitionSceneContributionDataV1,
-): JsonObject => data as unknown as JsonObject;

@@ -8,7 +8,7 @@ const QUERY = '(prefers-reduced-motion: reduce)';
  * Returns `false` when there is no `matchMedia`, because a server or test environment cannot know
  * the preference and animating is the documented default.
  */
-const prefersReducedMotion = (): boolean => {
+export const prefersReducedMotion = (): boolean => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
   return window.matchMedia(QUERY).matches;
 };

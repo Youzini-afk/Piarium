@@ -3171,6 +3171,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': '次要側欄',
   'settings.piarium.extensions.workbench.target.panel': '面板',
   'settings.piarium.extensions.workbench.target.status': '狀態列',
+  'settings.piarium.extensions.workbench.target.transition': '轉場場景',
   'settings.piarium.extensions.candidate.title': '候選更新 v{version}',
   'settings.piarium.extensions.candidate.reviewed': '能力已審查',
   'settings.piarium.extensions.candidate.deny': '拒絕',

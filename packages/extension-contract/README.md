@@ -32,6 +32,8 @@ enable or disable extensions.
 Replaceable Motion and cross-Shell handoff are specified in
 [`docs/piarium-motion-platform.md`](../../docs/piarium-motion-platform.md). The contract describes
 transition lifecycles and owner identity; it does not prescribe which elements a Shell must render.
+`transition-scene` contributions replace `workbench.transition`; the default cube scene is an
+ordinary enabled-by-default built-in contribution rather than a Core rendering requirement.
 
 Core workbench services use versioned IDs `piarium.workspace.search` and `piarium.language`.
 Those IDs identify Host services; they are not a second plugin manager.

@@ -111,6 +111,7 @@ const WORKBENCH_TARGET_LABELS: Readonly<Record<string, I18nKey>> = {
   [WORKBENCH_REPLACEMENT_TARGETS.secondarySidebar]: 'settings.piarium.extensions.workbench.target.secondarySidebar',
   [WORKBENCH_REPLACEMENT_TARGETS.panel]: 'settings.piarium.extensions.workbench.target.panel',
   [WORKBENCH_REPLACEMENT_TARGETS.status]: 'settings.piarium.extensions.workbench.target.status',
+  [WORKBENCH_REPLACEMENT_TARGETS.transition]: 'settings.piarium.extensions.workbench.target.transition',
 };
 
 const SHELL_STATUS_KEYS: Readonly<Record<ReturnType<typeof resolvePiariumWorkbenchProfile>['status'], I18nKey>> = {

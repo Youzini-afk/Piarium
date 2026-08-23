@@ -32,6 +32,7 @@ import { WebAccessSettings } from '@/components/sections/plugin-settings/WebAcce
 import { WorkspaceHistorySettings } from '@/components/sections/plugin-settings/WorkspaceHistorySettings';
 import { WtfSettings } from '@/components/sections/plugin-settings/WtfSettings';
 import { Button } from '@/components/ui/button';
+import { BuiltinWorkbenchTransitionScene } from '@/components/ui/BuiltinWorkbenchTransitionScene';
 import { useI18n } from '@/lib/i18n';
 import type { SettingsPageImplementation } from '@/lib/settings/page-types';
 import { useUIStore } from '@/stores/useUIStore';
@@ -164,6 +165,9 @@ const contributionImplementation = (
       ? IdeWorkbenchShell
       : AgentWorkspaceShell;
     return { framework: 'react-19', Component };
+  }
+  if (contribution?.kind === 'transition-scene') {
+    return { framework: 'react-19', Component: BuiltinWorkbenchTransitionScene };
   }
   if (contribution?.kind === 'settings-page') return pageImplementation(definition);
   if (contribution?.kind === 'panel' && contribution.data.contract === 'pi-plugin-settings-adapter/v1') {

@@ -3172,6 +3172,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': 'Dodatkowy pasek boczny',
   'settings.piarium.extensions.workbench.target.panel': 'Panel',
   'settings.piarium.extensions.workbench.target.status': 'Pasek stanu',
+  'settings.piarium.extensions.workbench.target.transition': 'Scena przejścia',
   'settings.piarium.extensions.candidate.title': 'Kandydat aktualizacji v{version}',
   'settings.piarium.extensions.candidate.reviewed': 'Uprawnienia sprawdzone',
   'settings.piarium.extensions.candidate.deny': 'Odmów',

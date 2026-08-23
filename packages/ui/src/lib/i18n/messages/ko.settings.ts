@@ -3171,6 +3171,7 @@ export const settingsDict = {
   'settings.piarium.extensions.workbench.target.secondarySidebar': '보조 사이드바',
   'settings.piarium.extensions.workbench.target.panel': '패널',
   'settings.piarium.extensions.workbench.target.status': '상태 표시줄',
+  'settings.piarium.extensions.workbench.target.transition': '전환 장면',
   'settings.piarium.extensions.candidate.title': '업데이트 후보 v{version}',
   'settings.piarium.extensions.candidate.reviewed': '기능 검토 완료',
   'settings.piarium.extensions.candidate.deny': '거부',

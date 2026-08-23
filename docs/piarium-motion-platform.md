@@ -1,6 +1,6 @@
 # Piarium Motion 与可替换过渡场景
 
-Status: Phase 1 设计冻结；Workbench Transition Scene 正在实现
+Status: Phase 1–3 已交付；Bootstrap Projection 与通用 Motion service 待实施
 
 Last updated: 2026-08-23
 
@@ -226,8 +226,8 @@ interface PiariumTransitionSceneFrameV1 {
   direction: 'forward' | 'backward'
   tempo: 'quick' | 'standard'
   reducedMotion: boolean
-  from?: { profileId: string }
-  to: { profileId: string }
+  fromProfileId: string | null
+  toProfileId: string
 }
 
 interface PiariumTransitionSceneControllerV1 {
@@ -351,6 +351,10 @@ Extension Inspector 后续显示：
 - public tests 覆盖 malformed data、zero duration、controller stale completion 和 export shape；
 - 不发布 npm tag，等待单独批准。
 
+Implementation status (2026-08-23): complete. `transition-scene`、`workbench.transition`、manifest
+data/frame parser、framework-neutral controller/mount helper、React adapter 和 fallback conflict
+validation 已进入公共包；没有发布 npm tag。
+
 ### Phase 3 — Workbench runtime consumer
 
 - 当前立方体场景注册为 built-in Piarium extension；
@@ -360,6 +364,11 @@ Extension Inspector 后续显示：
 - missing/disabled/render failure/withdraw 使用 Core fallback；
 - Agent / IDE / custom Shell 均走同一事务；
 - Extensions 页面可以选择 `workbench.transition` replacement。
+
+Implementation status (2026-08-23): complete. 立方体/地板场景现在由
+`piarium.builtin.transition-scene` 提供；目标 Profile 的 scene 与 candidate Shell 并行准备，完整 owner
+generation 捕获到 revealing 结束。Scene mount 实际 ready 后才启动其声明时钟；malformed、missing、
+disabled、withdrawn 或 render failure 使用 Core 的不透明即时交接。
 
 ### Phase 4 — Bootstrap projection
 
@@ -395,4 +404,3 @@ Extension Inspector 后续显示：
 - 不让 renderer 获得新的文件、进程或凭据权限；
 - 不用猜测性最大时长或扩展数量限制代替 owner cleanup；
 - 不在 Transition Scene Phase 顺手重构官方 Shell 内部微动画。
-

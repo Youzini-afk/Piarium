@@ -1,11 +1,19 @@
 /**
  * Shell-independent state machine for a Workbench Profile transition.
  *
- * The old shell owns the switcher and is destroyed during a successful switch, so neither component-local
- * state nor the shell host can own the animation. This store keeps one scene alive across both shells:
- * reverse playback covers the old shell, the candidate commits only while fully covered, and forward
- * playback reveals either the new shell or the still-authoritative old shell after a failure.
+ * A Transition Scene owns pixels and timing. Core owns candidate readiness and the authoritative
+ * Profile commit: reverse playback covers the old shell, commit happens only while covered, and
+ * forward playback reveals either the new shell or the still-authoritative old shell after failure.
  */
+
+import {
+  PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION,
+  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+  piariumTransitionSceneDuration,
+  type PiariumTransitionSceneAnimatedPhase,
+  type PiariumTransitionSceneFrameV1,
+} from '@piarium/extension-contract';
+import type { WorkbenchTransitionSceneCapture } from '@/lib/extensions/workbench-transition-scene';
 
 export type WorkbenchProfileTransitionDirection = 'forward' | 'backward';
 export type WorkbenchProfileTransitionPhase = 'idle' | 'covering' | 'covered' | 'revealing';
@@ -13,31 +21,37 @@ export type WorkbenchProfileTransitionTempo = 'quick' | 'standard';
 
 export interface WorkbenchProfileTransitionState {
   readonly direction: WorkbenchProfileTransitionDirection;
+  readonly durationMs: number;
   readonly fromProfileId: string | null;
   readonly id: number;
   readonly phase: WorkbenchProfileTransitionPhase;
+  readonly reducedMotion: boolean;
+  readonly scene: WorkbenchTransitionSceneCapture | null;
   readonly tempo: WorkbenchProfileTransitionTempo;
   readonly toProfileId: string | null;
 }
 
-/**
- * A candidate prepared before the cover closed still counts as quick if its authoritative commit settles
- * within the previous transition's visible floor. This is not an operation timeout: slower candidates stay
- * safely covered and use the standard reveal rather than being cancelled.
- */
-export const MIN_TRANSITION_VISIBLE_MS = 340;
+export interface WorkbenchTransitionSceneController {
+  complete(transitionId: number, phase: PiariumTransitionSceneAnimatedPhase): void;
+  getSnapshot(): PiariumTransitionSceneFrameV1;
+  subscribe(listener: () => void): () => void;
+}
 
 /**
- * Backstop only for a missing animation-completion signal. It advances the visual phase; it never aborts a
- * candidate, rejects a valid slow switch, or forces the covered hold to end while work is still running.
+ * A candidate prepared before the cover closed still counts as quick if its authoritative commit
+ * settles within this already-established visible grace. It is not an operation timeout: slower
+ * candidates stay safely covered and use the scene's standard reveal duration.
  */
-export const MAX_TRANSITION_VISIBLE_MS = 8000;
+export const QUICK_TRANSITION_COMMIT_GRACE_MS = 340;
 
 const IDLE: WorkbenchProfileTransitionState = {
   direction: 'forward',
+  durationMs: 0,
   fromProfileId: null,
   id: 0,
   phase: 'idle',
+  reducedMotion: false,
+  scene: null,
   tempo: 'standard',
   toProfileId: null,
 };
@@ -51,6 +65,7 @@ const idleWaiters = new Set<() => void>();
 let state: WorkbenchProfileTransitionState = IDLE;
 let nextTransitionId = 1;
 let phaseTimer: ReturnType<typeof setTimeout> | null = null;
+let phaseArmed = false;
 let operationPreparedBeforeCover = false;
 let coveredAt = 0;
 
@@ -75,15 +90,26 @@ const resolveIdleWaiters = (): void => {
   idleWaiters.clear();
 };
 
-const armPhaseFallback = (advance: () => void): void => {
+const armPhaseCompletion = (durationMs: number, advance: () => void): void => {
   clearPhaseTimer();
-  phaseTimer = setTimeout(advance, MAX_TRANSITION_VISIBLE_MS);
+  phaseTimer = setTimeout(advance, durationMs);
 };
 
-/**
- * Decide the visual direction from profile order. Unknown ordering falls forward instead of pretending to
- * know where an extension-defined profile belongs.
- */
+const phaseDuration = (
+  scene: WorkbenchTransitionSceneCapture | null,
+  phase: PiariumTransitionSceneAnimatedPhase,
+  tempo: WorkbenchProfileTransitionTempo,
+  reducedMotion: boolean,
+): number => scene
+  ? piariumTransitionSceneDuration(scene.data, {
+      phase,
+      reducedMotion,
+      scene: PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+      tempo,
+    })
+  : 0;
+
+/** Unknown profile ordering falls forward instead of pretending to know extension-defined layout. */
 export const resolveTransitionDirection = (
   profileIds: readonly string[],
   fromProfileId: string | null,
@@ -97,44 +123,69 @@ export const resolveTransitionDirection = (
 };
 
 export const beginWorkbenchProfileTransition = (input: {
-  fromProfileId?: string | null;
-  toProfileId: string;
   direction?: WorkbenchProfileTransitionDirection;
+  fromProfileId?: string | null;
+  reducedMotion?: boolean;
+  scene?: WorkbenchTransitionSceneCapture | null;
+  toProfileId: string;
 }): number => {
   clearPhaseTimer();
   // A newer user choice supersedes promises owned by a transition that can no longer become authoritative.
   resolveCoveredWaiters(false);
   resolveIdleWaiters();
   operationPreparedBeforeCover = false;
+  phaseArmed = false;
   coveredAt = 0;
   const id = nextTransitionId;
   nextTransitionId += 1;
+  const scene = input.scene ?? null;
+  const reducedMotion = input.reducedMotion ?? false;
+  const durationMs = phaseDuration(scene, 'covering', 'quick', reducedMotion);
   publish({
     direction: input.direction ?? 'forward',
+    durationMs,
     fromProfileId: input.fromProfileId ?? null,
     id,
     phase: 'covering',
-    // Covering is always responsive. A slow candidate holds the completed cover and later reveals at the
-    // standard tempo; a candidate already prepared behind it keeps the quick tempo in both directions.
+    reducedMotion,
+    scene,
     tempo: 'quick',
     toProfileId: input.toProfileId,
   });
-  armPhaseFallback(() => markWorkbenchProfileTransitionCovered(id));
   return id;
 };
 
-/** Records that preparation reached the authoritative commit boundary. */
+/**
+ * Starts the selected scene's declared-duration clock only after its mounted pixels have committed.
+ * This prevents an async mount or a busy main thread from consuming the cover budget before a scene
+ * was visible. Repeated readiness signals for the same phase are no-ops.
+ */
+export const armWorkbenchProfileTransitionPhase = (
+  id: number,
+  phase: PiariumTransitionSceneAnimatedPhase,
+): void => {
+  if (state.id !== id || state.phase !== phase || phaseArmed) return;
+  phaseArmed = true;
+  armPhaseCompletion(state.durationMs, () => {
+    if (phase === 'covering') markWorkbenchProfileTransitionCovered(id);
+    else completeWorkbenchProfileTransition(id);
+  });
+};
+
+/** Records that candidate preparation reached the authoritative commit boundary. */
 export const markWorkbenchProfileTransitionOperationPrepared = (id: number): void => {
   if (state.id === id && state.phase === 'covering') operationPreparedBeforeCover = true;
 };
 
-/** Called by the transition scene after reverse playback has made the cover fully opaque. */
+/** Called by the scene (or its declared-duration clock) after the cover is fully opaque. */
 export const markWorkbenchProfileTransitionCovered = (id: number): void => {
-  if (state.id !== id || state.phase !== 'covering') return;
+  if (state.id !== id || state.phase !== 'covering' || !phaseArmed) return;
   clearPhaseTimer();
+  phaseArmed = false;
   coveredAt = Date.now();
   publish({
     ...state,
+    durationMs: 0,
     phase: 'covered',
     tempo: operationPreparedBeforeCover ? 'quick' : 'standard',
   });
@@ -157,10 +208,7 @@ const waitForWorkbenchProfileTransitionIdle = (): Promise<void> => {
   });
 };
 
-/**
- * Starts forward playback after commit or failure. A prepared candidate only keeps quick playback when the
- * covered commit also settled promptly; a genuine wait gets the standard reveal instead of a sudden rush.
- */
+/** Starts forward playback after commit or failure and waits for the selected scene to finish. */
 export const revealWorkbenchProfileTransition = async (id: number): Promise<void> => {
   if (state.id !== id || state.phase === 'idle') return;
   if (state.phase === 'covering') {
@@ -173,16 +221,19 @@ export const revealWorkbenchProfileTransition = async (id: number): Promise<void
 
   const quick = operationPreparedBeforeCover
     && coveredAt > 0
-    && Date.now() - coveredAt <= MIN_TRANSITION_VISIBLE_MS;
-  publish({ ...state, phase: 'revealing', tempo: quick ? 'quick' : 'standard' });
-  armPhaseFallback(() => completeWorkbenchProfileTransition(id));
+    && Date.now() - coveredAt <= QUICK_TRANSITION_COMMIT_GRACE_MS;
+  const tempo = quick ? 'quick' : 'standard';
+  const durationMs = phaseDuration(state.scene, 'revealing', tempo, state.reducedMotion);
+  phaseArmed = false;
+  publish({ ...state, durationMs, phase: 'revealing', tempo });
   return waitForWorkbenchProfileTransitionIdle();
 };
 
-/** Called by the scene after forward playback has fully exposed the authoritative shell. */
+/** Called by the scene (or its declared-duration clock) after the authoritative shell is exposed. */
 export const completeWorkbenchProfileTransition = (id: number): void => {
-  if (state.id !== id || state.phase !== 'revealing') return;
+  if (state.id !== id || state.phase !== 'revealing' || !phaseArmed) return;
   clearPhaseTimer();
+  phaseArmed = false;
   publish(IDLE);
   operationPreparedBeforeCover = false;
   coveredAt = 0;
@@ -199,6 +250,58 @@ export const subscribeWorkbenchProfileTransition = (listener: Listener): (() => 
 
 export const getWorkbenchProfileTransitionSnapshot = (): WorkbenchProfileTransitionState => state;
 
+const frameFrom = (current: WorkbenchProfileTransitionState): PiariumTransitionSceneFrameV1 => {
+  if (current.phase === 'idle' || !current.toProfileId) {
+    throw new Error('Cannot create a Transition Scene frame for an idle transition');
+  }
+  return {
+    contractVersion: PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION,
+    direction: current.direction,
+    fromProfileId: current.fromProfileId,
+    phase: current.phase,
+    reducedMotion: current.reducedMotion,
+    scene: PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+    tempo: current.tempo,
+    toProfileId: current.toProfileId,
+    transitionId: current.id,
+  };
+};
+
+/**
+ * One stable controller is mounted for the complete transaction. It keeps the last valid frame while
+ * React unmounts after idle, and validates both transition ID and phase on completion.
+ */
+export const createWorkbenchTransitionSceneController = (
+  id: number,
+): WorkbenchTransitionSceneController => {
+  if (state.id !== id || state.phase === 'idle') {
+    throw new Error(`Workbench transition ${id} is not active`);
+  }
+  let observedState = state;
+  let frame = frameFrom(state);
+  const readFrame = (): PiariumTransitionSceneFrameV1 => {
+    if (state.id === id && state.phase !== 'idle' && state !== observedState) {
+      observedState = state;
+      frame = frameFrom(state);
+    }
+    return frame;
+  };
+  return {
+    complete: (transitionId, phase) => {
+      if (transitionId !== id) return;
+      if (phase === 'covering') markWorkbenchProfileTransitionCovered(id);
+      else completeWorkbenchProfileTransition(id);
+    },
+    getSnapshot: readFrame,
+    subscribe: (listener) => subscribeWorkbenchProfileTransition((next) => {
+      if (next.id !== id || next.phase === 'idle') return;
+      observedState = next;
+      frame = frameFrom(next);
+      listener();
+    }),
+  };
+};
+
 /** Test seam: drop all state and timers so one case cannot leak into the next. */
 export const resetWorkbenchProfileTransitionForTests = (): void => {
   clearPhaseTimer();
@@ -207,6 +310,7 @@ export const resetWorkbenchProfileTransitionForTests = (): void => {
   state = IDLE;
   nextTransitionId = 1;
   operationPreparedBeforeCover = false;
+  phaseArmed = false;
   coveredAt = 0;
   listeners.clear();
 };

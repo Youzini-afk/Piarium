@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION } from '@piarium/extension-builtins';
+import {
+  PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+  parsePiariumTransitionSceneContributionData,
+  piariumTransitionSceneDuration,
+} from '@piarium/extension-contract';
 import { LOGO_GRID_SIZE } from './piarium-logo-geometry';
 import { splashCubeMarkup } from './piarium-splash-cube';
 import {
@@ -489,6 +495,28 @@ describe('exit choreography', () => {
     expect(css).toContain('animation-duration: 1040ms;');
     expect(css).toContain('animation-name: pi-splash-cover-clock;');
     expect(css).toContain('animation-name: pi-splash-reveal-clock;');
+  });
+
+  test('the built-in extension declares the exact duration of the scene it renders', () => {
+    const contribution = PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.contributions?.[0];
+    expect(contribution?.kind).toBe('transition-scene');
+    const data = parsePiariumTransitionSceneContributionData(contribution?.data);
+    for (const phase of ['covering', 'revealing'] as const) {
+      for (const tempo of ['quick', 'standard'] as const) {
+        expect(piariumTransitionSceneDuration(data, {
+          phase,
+          reducedMotion: false,
+          scene: PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+          tempo,
+        })).toBe(splashWorkbenchPhaseDurationMs(tempo));
+      }
+      expect(piariumTransitionSceneDuration(data, {
+        phase,
+        reducedMotion: true,
+        scene: PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
+        tempo: 'standard',
+      })).toBe(SPLASH_REDUCED_EXIT_DURATION_MS);
+    }
   });
 
   test('breathing is opt-in and sparse', () => {
