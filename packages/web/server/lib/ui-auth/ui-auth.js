@@ -880,9 +880,9 @@ export const createUiAuth = ({
     res.status(statusCode).json({ error: error?.message || 'Passkey request failed' });
   };
 
-  const handlePasskeyStatus = (req, res) => {
+  const handlePasskeyStatus = async (req, res) => {
     try {
-      res.json(passkeyController.getStatus(req));
+      res.json(await passkeyController.getStatus(req));
     } catch (error) {
       respondPasskeyError(res, error);
     }
@@ -945,26 +945,26 @@ export const createUiAuth = ({
     }
   };
 
-  const handlePasskeyList = (req, res) => {
+  const handlePasskeyList = async (req, res) => {
     try {
-      res.json({ passkeys: passkeyController.listPasskeys(req) });
+      res.json({ passkeys: await passkeyController.listPasskeys(req) });
     } catch (error) {
       respondPasskeyError(res, error);
     }
   };
 
-  const handlePasskeyRevoke = (req, res) => {
+  const handlePasskeyRevoke = async (req, res) => {
     try {
-      const result = passkeyController.revokePasskey(req, req.params?.id);
+      const result = await passkeyController.revokePasskey(req, req.params?.id);
       res.json(result);
     } catch (error) {
       respondPasskeyError(res, error);
     }
   };
 
-  const handleResetAuth = (req, res) => {
+  const handleResetAuth = async (req, res) => {
     try {
-      const passkeyResult = passkeyController.clearAllPasskeys();
+      const passkeyResult = await passkeyController.clearAllPasskeys();
       rotateJwtSecret();
       clearSessionCookie(req, res);
       res.json({

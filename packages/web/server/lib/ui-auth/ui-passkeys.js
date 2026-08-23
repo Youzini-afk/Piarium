@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import fs from 'fs';
 import path from 'path';
 import {
   generateAuthenticationOptions,
@@ -7,6 +6,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
+import { createSettingsFileStore } from '@piarium/settings-store';
 import { resolvePiariumDataDir } from '../platform/data-paths.js';
 
 const DEFAULT_STORE_VERSION = 1;
@@ -115,18 +115,11 @@ export const createUiPasskeys = ({
   storeFile = PASSKEY_STORE_FILE,
   rpName = DEFAULT_RP_NAME,
   challengeTtlMs = DEFAULT_CHALLENGE_TTL_MS,
+  passkeyStore: providedPasskeyStore,
 } = {}) => {
+  passwordBinding = typeof passwordBinding === 'string' ? passwordBinding : '';
   const registrationChallenges = new Map();
   const authenticationChallenges = new Map();
-
-  const ensureStoreDirectory = () => {
-    fs.mkdirSync(path.dirname(storeFile), { recursive: true });
-  };
-
-  const persistStore = (store) => {
-    ensureStoreDirectory();
-    fs.writeFileSync(storeFile, JSON.stringify(store, null, 2));
-  };
 
   const createEmptyStore = () => ({
     version: DEFAULT_STORE_VERSION,
@@ -134,50 +127,65 @@ export const createUiPasskeys = ({
     passwordBinding,
     passkeys: [],
   });
+  const passkeyStore = providedPasskeyStore ?? createSettingsFileStore({
+    filePath: storeFile,
+    defaultValue: createEmptyStore(),
+  });
 
-  const loadStore = () => {
-    let store = createEmptyStore();
-
-    try {
-      if (fs.existsSync(storeFile)) {
-        const raw = fs.readFileSync(storeFile, 'utf8');
-        const parsed = JSON.parse(raw);
-        store = {
-          version: DEFAULT_STORE_VERSION,
-          userID: decodeUserId(parsed?.userID) ? parsed.userID : store.userID,
-          passwordBinding: typeof parsed?.passwordBinding === 'string' ? parsed.passwordBinding : '',
-          passkeys: Array.isArray(parsed?.passkeys) ? parsed.passkeys.map(parseStoredPasskey).filter(Boolean) : [],
-        };
-      }
-    } catch (error) {
-      console.warn('[UI Passkeys] Failed to read passkey store:', error?.message || error);
+  const normalizeStore = (candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate) || candidate.version !== DEFAULT_STORE_VERSION) {
+      throw new Error(`Unsupported passkey store version: ${String(candidate?.version)}`);
     }
-
-    if (!passwordBinding) {
-      if (store.passkeys.length > 0 || store.passwordBinding) {
-        store = { ...store, passkeys: [], passwordBinding: '' };
-        persistStore(store);
-      }
-      return store;
+    if (!decodeUserId(candidate.userID) || typeof candidate.passwordBinding !== 'string' || !Array.isArray(candidate.passkeys)) {
+      throw new Error('Passkey store is malformed');
     }
-
-    if (store.passwordBinding !== passwordBinding) {
-        store = {
-          version: DEFAULT_STORE_VERSION,
-          userID: store.userID || createUserId(),
-          passwordBinding,
-          passkeys: [],
-        };
-      persistStore(store);
-      return store;
+    const passkeys = candidate.passkeys.map(parseStoredPasskey);
+    if (passkeys.some((passkey) => passkey === null)) {
+      throw new Error('Passkey store contains an invalid credential');
     }
-
-    if (!fs.existsSync(storeFile)) {
-      persistStore(store);
-    }
-
-    return store;
+    return {
+      version: DEFAULT_STORE_VERSION,
+      userID: candidate.userID,
+      passwordBinding: candidate.passwordBinding,
+      passkeys,
+    };
   };
+
+  const applyPasswordBinding = (store) => {
+    if (!passwordBinding) {
+      if (store.passkeys.length === 0 && !store.passwordBinding) return { store, changed: false };
+      return { store: { ...store, passkeys: [], passwordBinding: '' }, changed: true };
+    }
+    if (store.passwordBinding === passwordBinding) return { store, changed: false };
+    return {
+      store: {
+        version: DEFAULT_STORE_VERSION,
+        userID: store.userID,
+        passwordBinding,
+        passkeys: [],
+      },
+      changed: true,
+    };
+  };
+
+  const loadStore = () => passkeyStore.transact((persisted) => {
+    const binding = applyPasswordBinding(normalizeStore(persisted));
+    return {
+      document: binding.store,
+      result: binding.store,
+      write: binding.changed,
+    };
+  });
+
+  const mutateStore = (mutator) => passkeyStore.transact(async (persisted) => {
+    const binding = applyPasswordBinding(normalizeStore(persisted));
+    const transaction = await mutator(binding.store);
+    return {
+      document: binding.store,
+      result: transaction.result,
+      write: binding.changed || transaction.write !== false,
+    };
+  });
 
   const cleanupChallengeMap = (map) => {
     const now = Date.now();
@@ -216,8 +224,8 @@ export const createUiPasskeys = ({
 
   const getPasskeysForRpId = (store, rpID) => store.passkeys.filter((passkey) => passkey.rpID === rpID);
 
-  const getStatus = (req) => {
-    const store = loadStore();
+  const getStatus = async (req) => {
+    const store = await loadStore();
     const rpID = getCurrentRpId(req);
     return {
       enabled: Boolean(passwordBinding),
@@ -227,10 +235,10 @@ export const createUiPasskeys = ({
     };
   };
 
-  const listPasskeys = (req) => {
+  const listPasskeys = async (req) => {
     assertEnabled();
 
-    const store = loadStore();
+    const store = await loadStore();
     const rpID = getCurrentRpId(req);
     if (!rpID) {
       return [];
@@ -246,7 +254,7 @@ export const createUiPasskeys = ({
     }));
   };
 
-  const revokePasskey = (req, passkeyId) => {
+  const revokePasskey = async (req, passkeyId) => {
     assertEnabled();
 
     const normalizedPasskeyId = typeof passkeyId === 'string' ? passkeyId.trim() : '';
@@ -256,45 +264,33 @@ export const createUiPasskeys = ({
       throw error;
     }
 
-    const store = loadStore();
     const rpID = getCurrentRpId(req);
-    const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
+    return mutateStore(async (store) => {
+      const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
+      if (!existingPasskey) {
+        const error = new Error('Passkey not found for this host');
+        error.statusCode = 404;
+        throw error;
+      }
 
-    if (!existingPasskey) {
-      const error = new Error('Passkey not found for this host');
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const nextPasskeys = store.passkeys.filter((passkey) => !(passkey.id === normalizedPasskeyId && passkey.rpID === rpID));
-    persistStore({
-      ...store,
-      passwordBinding,
-      passkeys: nextPasskeys,
+      store.passkeys = store.passkeys.filter((passkey) => !(passkey.id === normalizedPasskeyId && passkey.rpID === rpID));
+      return {
+        result: {
+          revoked: true,
+          passkeyCount: store.passkeys.filter((passkey) => passkey.rpID === rpID).length,
+        },
+      };
     });
-
-    return {
-      revoked: true,
-      passkeyCount: nextPasskeys.filter((passkey) => passkey.rpID === rpID).length,
-    };
   };
 
-  const clearAllPasskeys = () => {
+  const clearAllPasskeys = async () => {
     assertEnabled();
-
-    const store = loadStore();
-    const clearedCount = store.passkeys.length;
-    persistStore({
-      ...store,
-      userID: crypto.randomBytes(32).toString('base64url'),
-      passwordBinding,
-      passkeys: [],
+    return mutateStore(async (store) => {
+      const clearedCount = store.passkeys.length;
+      store.userID = crypto.randomBytes(32).toString('base64url');
+      store.passkeys = [];
+      return { result: { cleared: true, clearedCount } };
     });
-
-    return {
-      cleared: true,
-      clearedCount,
-    };
   };
 
   const beginRegistration = async (req, { label } = {}) => {
@@ -315,7 +311,7 @@ export const createUiPasskeys = ({
       throw error;
     }
 
-    const store = loadStore();
+    const store = await loadStore();
     const userID = decodeUserId(store.userID);
     if (!userID) {
       const error = new Error('Passkey storage is invalid. Please try again.');
@@ -361,7 +357,6 @@ export const createUiPasskeys = ({
     assertEnabled();
     cleanupChallengeMap(registrationChallenges);
 
-    const store = loadStore();
     const requestId = typeof payload?.requestId === 'string' ? payload.requestId : '';
     const response = payload?.response;
 
@@ -394,37 +389,35 @@ export const createUiPasskeys = ({
       credentialBackedUp,
     } = verification.registrationInfo;
 
-    const nextPasskeys = store.passkeys.filter((passkey) => passkey.id !== credential.id);
-    nextPasskeys.push({
-      id: credential.id,
-      publicKey: Buffer.from(credential.publicKey).toString('base64url'),
-      counter: credential.counter,
-      transports: Array.isArray(credential.transports) ? credential.transports.filter((value) => typeof value === 'string') : [],
-      deviceType: credentialDeviceType,
-      backedUp: credentialBackedUp,
-      createdAt: Date.now(),
-      lastUsedAt: null,
-      label: matchingRecord.label,
-      rpID: matchingRecord.rpID,
-    });
+    return mutateStore(async (store) => {
+      store.passkeys = store.passkeys.filter((passkey) => passkey.id !== credential.id);
+      store.passkeys.push({
+        id: credential.id,
+        publicKey: Buffer.from(credential.publicKey).toString('base64url'),
+        counter: credential.counter,
+        transports: Array.isArray(credential.transports) ? credential.transports.filter((value) => typeof value === 'string') : [],
+        deviceType: credentialDeviceType,
+        backedUp: credentialBackedUp,
+        createdAt: Date.now(),
+        lastUsedAt: null,
+        label: matchingRecord.label,
+        rpID: matchingRecord.rpID,
+      });
 
-    persistStore({
-      ...store,
-      passwordBinding,
-      passkeys: nextPasskeys,
+      return {
+        result: {
+          verified: true,
+          passkeyCount: store.passkeys.filter((passkey) => passkey.rpID === matchingRecord.rpID).length,
+        },
+      };
     });
-
-    return {
-      verified: true,
-      passkeyCount: nextPasskeys.filter((passkey) => passkey.rpID === matchingRecord.rpID).length,
-    };
   };
 
   const beginAuthentication = async (req) => {
     assertEnabled();
     cleanupChallengeMap(authenticationChallenges);
 
-    const store = loadStore();
+    const store = await loadStore();
     const rpID = getCurrentRpId(req);
     const passkeys = getPasskeysForRpId(store, rpID);
 
@@ -464,15 +457,6 @@ export const createUiPasskeys = ({
 
     const requestId = typeof payload?.requestId === 'string' ? payload.requestId : '';
     const response = payload?.response;
-    const store = loadStore();
-    const passkey = store.passkeys.find((item) => item.id === response?.id);
-
-    if (!passkey) {
-      const error = new Error('That passkey is not registered for this Piarium instance');
-      error.statusCode = 404;
-      throw error;
-    }
-
     const matchingRecord = requestId ? authenticationChallenges.get(requestId) : null;
     if (!matchingRecord) {
       const error = new Error('Passkey sign-in has expired. Please try again.');
@@ -481,44 +465,38 @@ export const createUiPasskeys = ({
     }
 
     authenticationChallenges.delete(requestId);
+    return mutateStore(async (store) => {
+      const passkey = store.passkeys.find((item) => item.id === response?.id);
+      if (!passkey) {
+        const error = new Error('That passkey is not registered for this Piarium instance');
+        error.statusCode = 404;
+        throw error;
+      }
 
-    const verification = await verifyAuthenticationResponse({
-      response,
-      expectedChallenge: matchingRecord.challenge,
-      expectedOrigin: matchingRecord.expectedOrigins,
-      expectedRPID: matchingRecord.expectedRPIDs,
-      credential: {
-        id: passkey.id,
-        publicKey: Buffer.from(passkey.publicKey, 'base64url'),
-        counter: passkey.counter,
-        transports: passkey.transports,
-      },
-      requireUserVerification: true,
+      const verification = await verifyAuthenticationResponse({
+        response,
+        expectedChallenge: matchingRecord.challenge,
+        expectedOrigin: matchingRecord.expectedOrigins,
+        expectedRPID: matchingRecord.expectedRPIDs,
+        credential: {
+          id: passkey.id,
+          publicKey: Buffer.from(passkey.publicKey, 'base64url'),
+          counter: passkey.counter,
+          transports: passkey.transports,
+        },
+        requireUserVerification: true,
+      });
+
+      if (!verification.verified || !verification.authenticationInfo) {
+        const error = new Error('Passkey sign-in could not be verified');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      passkey.counter = verification.authenticationInfo.newCounter;
+      passkey.lastUsedAt = Date.now();
+      return { result: { verified: true } };
     });
-
-    if (!verification.verified || !verification.authenticationInfo) {
-      const error = new Error('Passkey sign-in could not be verified');
-      error.statusCode = 400;
-      throw error;
-    }
-
-    const nextPasskeys = store.passkeys.map((item) => (
-      item.id === passkey.id
-        ? {
-            ...item,
-            counter: verification.authenticationInfo.newCounter,
-            lastUsedAt: Date.now(),
-          }
-        : item
-    ));
-
-    persistStore({
-      ...store,
-      passwordBinding,
-      passkeys: nextPasskeys,
-    });
-
-    return { verified: true };
   };
 
   const dispose = () => {

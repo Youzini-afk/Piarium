@@ -1,0 +1,100 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { createUiPasskeys } from './ui-passkeys.js';
+
+const roots = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+});
+
+const createHarness = async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'piarium-passkeys-'));
+  roots.push(root);
+  return { storeFile: path.join(root, 'ui-passkeys.json') };
+};
+
+const requestForHost = (host) => ({
+  headers: { host },
+  socket: { encrypted: true },
+});
+
+const storedPasskey = (id) => ({
+  id,
+  publicKey: Buffer.from(`public-${id}`).toString('base64url'),
+  counter: 0,
+  transports: [],
+  deviceType: 'singleDevice',
+  backedUp: false,
+  createdAt: Date.now(),
+  lastUsedAt: null,
+  label: id,
+  rpID: 'example.com',
+});
+
+describe('passkey store', () => {
+  it('reports passkeys disabled without creating invalid password state', async () => {
+    const { storeFile } = await createHarness();
+    const controller = createUiPasskeys({ storeFile });
+
+    await expect(controller.getStatus(requestForHost('localhost'))).resolves.toMatchObject({
+      enabled: false,
+      hasPasskeys: false,
+      passkeyCount: 0,
+    });
+  });
+
+  it('serializes revocations from independent controllers', async () => {
+    const { storeFile } = await createHarness();
+    await fs.writeFile(storeFile, JSON.stringify({
+      version: 1,
+      userID: crypto.randomBytes(32).toString('base64url'),
+      passwordBinding: 'binding',
+      passkeys: [storedPasskey('key-a'), storedPasskey('key-b')],
+    }), 'utf8');
+    const first = createUiPasskeys({ passwordBinding: 'binding', storeFile });
+    const second = createUiPasskeys({ passwordBinding: 'binding', storeFile });
+
+    await Promise.all([
+      first.revokePasskey(requestForHost('example.com'), 'key-a'),
+      second.revokePasskey(requestForHost('example.com'), 'key-b'),
+    ]);
+
+    await expect(first.listPasskeys(requestForHost('example.com'))).resolves.toEqual([]);
+  });
+
+  it('preserves malformed credentials instead of replacing them', async () => {
+    const { storeFile } = await createHarness();
+    const malformed = '{"version":1,"passkeys":';
+    await fs.writeFile(storeFile, malformed, 'utf8');
+    const controller = createUiPasskeys({ passwordBinding: 'binding', storeFile });
+
+    await expect(controller.getStatus(requestForHost('example.com'))).rejects.toBeInstanceOf(SyntaxError);
+    await expect(fs.readFile(storeFile, 'utf8')).resolves.toBe(malformed);
+  });
+
+  it('atomically invalidates credentials when the UI password changes', async () => {
+    const { storeFile } = await createHarness();
+    await fs.writeFile(storeFile, JSON.stringify({
+      version: 1,
+      userID: crypto.randomBytes(32).toString('base64url'),
+      passwordBinding: 'old-binding',
+      passkeys: [storedPasskey('key-a')],
+    }), 'utf8');
+    const controller = createUiPasskeys({ passwordBinding: 'new-binding', storeFile });
+
+    await expect(controller.getStatus(requestForHost('example.com'))).resolves.toMatchObject({
+      enabled: true,
+      hasPasskeys: false,
+      passkeyCount: 0,
+    });
+    const persisted = JSON.parse(await fs.readFile(storeFile, 'utf8'));
+    expect(persisted.passwordBinding).toBe('new-binding');
+    expect(persisted.passkeys).toEqual([]);
+  });
+});
