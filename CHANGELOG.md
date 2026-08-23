@@ -3,6 +3,24 @@
 All notable changes to Piarium are recorded here. The project is pre-1.0; the
 private runtime protocol and product surfaces still move together.
 
+## 0.8.0
+
+Piarium 0.8.0 focuses on making the existing desktop, Web, IDE, and extension experience more
+reliable before broader community use.
+
+- Make remote authentication, passkeys, mobile credentials, notification registration, and
+  application settings durable under concurrent updates and partial failure
+- Establish one settings, project-configuration, and theme persistence contract across hosts
+- Reduce startup work by deferring optional browser capabilities until the UI can use them
+- Harden trusted desktop document writes and remove obsolete compatibility and duplicate ownership
+  paths left from the OpenChamber product base
+- Apply Piarium's Bun patches consistently in clean installs and container builds
+- Update the maintained Pi extension integrations for `pi-subagents` 0.55, Magic Context 0.39,
+  `pi-web-access` 0.24, `pi-openai-codex-compat` 0.0.9, AFT 0.52, Permission System 27, and
+  the maintained `pi-mcp-adapter` 2.27 fork
+- Keep Magic Context's published flat configuration and new harness-scoped Pi model configuration
+  visible through one version-aware editor without overwriting complex model entries
+
 ## 0.7.0
 
 Piarium's Workbench transitions are now extension-owned visual scenes instead of fixed Core UI.
