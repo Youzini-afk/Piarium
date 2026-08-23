@@ -2,16 +2,16 @@
 /**
  * Piarium local development helper.
  *
- * This script owns the interactive `bun run oc-dev` menu and the equivalent
+ * This script owns the interactive `bun run piarium-dev` menu and the equivalent
  * non-interactive commands for common local workflows: web deploys, mobile
  * builds/device deploys, Electron, VS Code, and maintainer release tasks.
  *
  * Personal or machine-specific options are intentionally kept out of git.
  * The only supported user config is:
  *
- *   ~/.config/piarium/oc-dev.json
+ *   ~/.config/piarium/piarium-dev.json
  *
- * See `scripts/oc-dev.config.example.json` for the shape. The config can set
+ * See `scripts/piarium-dev.config.example.json` for the shape. The config can set
  * local device/app preferences such as `ios.deviceName`, `ios.useXcodeBeta`,
  * and `ios.xcodeAppName`, and can define `remoteDeployments`. Remote deploy
  * menu entries are shown only when configured. Maintainer-only actions such as
@@ -32,7 +32,7 @@ import { installCloudRuntimeDependencies } from './build-cloud-runtime.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
-const configPath = path.join(os.homedir(), '.config', 'piarium', 'oc-dev.json');
+const configPath = path.join(os.homedir(), '.config', 'piarium', 'piarium-dev.json');
 
 const GLOBAL_PORT = '2606';
 const TESTING_PORT = '1202';
@@ -47,8 +47,8 @@ const isMac = process.platform === 'darwin';
 
 function printHelp() {
   console.log(`Usage:
-  bun run oc-dev [action] [options]
-  node scripts/oc-dev.mjs [action] [options]
+  bun run piarium-dev [action] [options]
+  node scripts/piarium-dev.mjs [action] [options]
 
 Actions:
   build-deploy-web                 Build and deploy a local cloud runtime

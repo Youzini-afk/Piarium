@@ -117,8 +117,8 @@ Remote requirements:
 - `tar` and normal POSIX filesystem symlink support;
 - a stable directory for Piarium data that is not inside an individual release.
 
-Configure targets in `~/.config/piarium/oc-dev.json`. Start from
-[`scripts/oc-dev.config.example.json`](../scripts/oc-dev.config.example.json):
+Configure targets in `~/.config/piarium/piarium-dev.json`. Start from
+[`scripts/piarium-dev.config.example.json`](../scripts/piarium-dev.config.example.json):
 
 ```json
 {
@@ -155,7 +155,7 @@ Deployment refuses to source the file unless it is owned by the SSH deployment u
 Deploy with:
 
 ```bash
-bun run oc-dev remote-deploy-web --remote-id production
+bun run piarium-dev remote-deploy-web --remote-id production
 ```
 
 The remote directory contains:

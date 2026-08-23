@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const deployScript = fs.readFileSync(path.join(repoRoot, 'scripts', 'deploy-cloud-runtime.sh'), 'utf8');
-const developmentHelper = fs.readFileSync(path.join(repoRoot, 'scripts', 'oc-dev.mjs'), 'utf8');
+const developmentHelper = fs.readFileSync(path.join(repoRoot, 'scripts', 'piarium-dev.mjs'), 'utf8');
 const configExample = JSON.parse(fs.readFileSync(
-  path.join(repoRoot, 'scripts', 'oc-dev.config.example.json'),
+  path.join(repoRoot, 'scripts', 'piarium-dev.config.example.json'),
   'utf8',
 ));
 
