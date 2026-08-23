@@ -647,7 +647,6 @@ position: absolute;
 left: 50%;
 top: 56%;
 translate: -50% -75.23%;
-transform-origin: 50% 75.22999999999999%;
 display: block;
 line-height: 0;
 }
@@ -717,14 +716,14 @@ animation: pi-splash-status-out 180ms ease both;
 animation: pi-splash-contact-press 360ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-mark-press {
-0% { opacity: 1; transform: scaleX(1) scaleY(1); }
-72% { opacity: 1; transform: scaleX(0.94) scaleY(0.18); }
-100% { opacity: 0; transform: scaleX(0.9) scaleY(0.06); }
+0% { opacity: 1; transform: translateY(0); }
+72% { opacity: 1; transform: translateY(18px); }
+100% { opacity: 0; transform: translateY(24px); }
 }
 @keyframes pi-splash-contact-press {
 0% { opacity: 0.35; transform: scale(1); }
-55% { opacity: 0.9; transform: scale(0.72); }
-100% { opacity: 0; transform: scale(0.24); }
+50% { opacity: 0.95; transform: scale(0.9); }
+100% { opacity: 0; transform: scale(1.18); }
 }
 @keyframes pi-splash-mark-out {
 to { opacity: 0; }

@@ -365,12 +365,14 @@ describe('exit choreography', () => {
 
   test('boot presses the cube into its registered footprint before the floor opens', () => {
     const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
-    const box = markBox(CUBE_EDGE_PX);
-    expect(css).toContain(
-      `transform-origin: ${box.originFraction.x * 100}% ${box.originFraction.y * 100}%;`,
-    );
     expect(css).toContain('@keyframes pi-splash-mark-press');
-    expect(css).toContain('scaleX(0.94) scaleY(0.18)');
+    const press = css.slice(
+      css.indexOf('@keyframes pi-splash-mark-press'),
+      css.indexOf('@keyframes pi-splash-contact-press'),
+    );
+    expect(press).toMatch(/translateY\(\d+px\)/);
+    expect(press).not.toContain('scaleX');
+    expect(press).not.toContain('scaleY');
     expect(css).toMatch(/animation-delay: calc\(var\(--pi-cell-delay\) \+ \d+ms\)/);
     expect(css).toContain(
       'transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px)) scale(0.56);',

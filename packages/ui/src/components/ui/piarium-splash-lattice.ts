@@ -4,6 +4,7 @@ import {
   floorInscribedRadius,
   floorReach,
   HORIZON_RISE_PX,
+  projectPoint,
 } from './piarium-splash-camera';
 
 /**
@@ -135,6 +136,16 @@ const CELL_EXIT_MS = 520;
 const MARK_EXIT_MS = 520;
 /** The cube makes contact before the first floor tile starts moving. */
 const BOOT_PRESS_LEAD_MS = 240;
+/**
+ * Screen-space travel produced by lowering a rigid cube by about a fifth of its height in the shared
+ * camera. The SVG is already projected geometry, so translating that drawing is the inexpensive visual
+ * equivalent of moving the solid down; unlike scaling one axis, it keeps every face and the glyph intact.
+ */
+const MARK_PRESS_DISTANCE_PX = Math.round(projectPoint({
+  x: 0,
+  y: 0,
+  z: -CUBE_EDGE_PX * 0.22,
+}).y);
 /** Widest per-cell delay either mode schedules. */
 const MAX_CELL_DELAY_MS = 520;
 
@@ -331,7 +342,6 @@ position: absolute;
 left: 50%;
 top: ${GROUND_ORIGIN_Y_PCT}%;
 translate: ${projectedMark?.originTranslate};
-transform-origin: ${(projectedMark?.originFraction.x ?? 0) * 100}% ${(projectedMark?.originFraction.y ?? 0) * 100}%;
 display: block;
 line-height: 0;
 }
@@ -401,14 +411,14 @@ animation: pi-splash-status-out 180ms ease both;
 animation: pi-splash-contact-press 360ms cubic-bezier(0.3, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-mark-press {
-0% { opacity: 1; transform: scaleX(1) scaleY(1); }
-72% { opacity: 1; transform: scaleX(0.94) scaleY(0.18); }
-100% { opacity: 0; transform: scaleX(0.9) scaleY(0.06); }
+0% { opacity: 1; transform: translateY(0); }
+72% { opacity: 1; transform: translateY(${MARK_PRESS_DISTANCE_PX}px); }
+100% { opacity: 0; transform: translateY(${MARK_PRESS_DISTANCE_PX + 6}px); }
 }
 @keyframes pi-splash-contact-press {
 0% { opacity: 0.35; transform: scale(1); }
-55% { opacity: 0.9; transform: scale(0.72); }
-100% { opacity: 0; transform: scale(0.24); }
+50% { opacity: 0.95; transform: scale(0.9); }
+100% { opacity: 0; transform: scale(1.18); }
 }
 @keyframes pi-splash-mark-out {
 to { opacity: 0; }
