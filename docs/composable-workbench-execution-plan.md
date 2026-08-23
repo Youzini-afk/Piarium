@@ -9,6 +9,8 @@ Last updated: 2026-08-22
 [roadmap.md](roadmap.md) 的 Phase 10。切片编号只用于两份文档对读,不代表尚未完成的工作。
 
 正文为中文。英文读者可先看 [architecture.md](architecture.md) 第 4 节的工作台概述。
+跨 Shell 动画、首帧启动投影和不规定页面元素的 Motion 边界见
+[piarium-motion-platform.md](piarium-motion-platform.md)。
 
 ## 1. 目标
 

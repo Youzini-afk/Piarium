@@ -29,6 +29,10 @@ label `Agent`; official UI localizes that name. Its default `workbench.shell` co
 and `piarium.builtin.ide-workbench.shell` on web and desktop only. Selecting a profile does not
 enable or disable extensions.
 
+Replaceable Motion and cross-Shell handoff are specified in
+[`docs/piarium-motion-platform.md`](../../docs/piarium-motion-platform.md). The contract describes
+transition lifecycles and owner identity; it does not prescribe which elements a Shell must render.
+
 Core workbench services use versioned IDs `piarium.workspace.search` and `piarium.language`.
 Those IDs identify Host services; they are not a second plugin manager.
 

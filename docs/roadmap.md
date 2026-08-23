@@ -557,6 +557,11 @@ perform no background work; language, debug, and test results are provider-isola
 results rejected and project trust enforced at the host; and no Pi plugin private state is copied
 into the renderer.
 
+The next composability slice is [Piarium Motion and replaceable transition scenes](piarium-motion-platform.md).
+It does not define a fixed page-element schema: complete Shells continue to own their information
+architecture and internal animation, while Core owns only cross-owner staging, authoritative handoff,
+failure recovery, and the first-paint bootstrap boundary.
+
 Not yet recorded: the plan's final convergence verification run (full workspace type-check/lint,
 public package build/pack/conformance, production Web build, Electron bundled and Windows
 package/smoke, hosted cloud smoke, mobile Agent Profile smoke, VS Code Companion package, and a

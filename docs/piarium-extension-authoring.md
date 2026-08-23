@@ -69,6 +69,11 @@ and sessions stay in Core even when a community Shell fully redraws the chrome.
 `@piarium/extension-react` remains optional. `defineReactShell`, `defineReactView`, and
 `defineReactEditor` wrap the same mount contract.
 
+Animation does not impose an official page structure on a Shell. The versioned Transition Scene and
+future optional Motion-service boundary are specified in
+[Piarium Motion and replaceable transition scenes](piarium-motion-platform.md). A complete Shell owns
+its internal elements and animation; Piarium only coordinates cross-owner handoff.
+
 Language, debug, and test helpers accept either a static descriptor or a function receiving the
 brokered Host context. Use `context.assets.path("runtime/server.mjs")` for an executable shipped in the
 extension package. Piarium resolves the path inside the immutable selected artifact; it is not relative
