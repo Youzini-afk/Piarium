@@ -6,15 +6,7 @@ import type {
 
 export type PiSubagentsDefinitionMode =
   | 'create-agent'
-  | 'create-workflow'
-  | 'update-agent'
-  | 'update-workflow';
-
-export interface PiSubagentsWorkflowStepDraft {
-  agent: string;
-  config: Record<string, JsonValue>;
-  task: string;
-}
+  | 'update-agent';
 
 export const PI_SUBAGENTS_THINKING_LEVELS = [
   'off',
@@ -48,7 +40,6 @@ export interface PiSubagentsDefinitionDraft {
   thinking: string;
   timeoutMs: string;
   tools: string;
-  workflowSteps: PiSubagentsWorkflowStepDraft[];
 }
 
 export type PiSubagentsDefinitionIssue =
@@ -57,9 +48,7 @@ export type PiSubagentsDefinitionIssue =
   | { code: 'json-object' }
   | { code: 'name-description-required' }
   | { code: 'no-changes' }
-  | { code: 'unsupported-advanced-field'; field: string }
-  | { code: 'unsupported-workflow-step-field'; field: string; index: number }
-  | { code: 'workflow-step-agent'; index: number };
+  | { code: 'unsupported-advanced-field'; field: string };
 
 export type PiSubagentsDefinitionBuildResult =
   | { config: Record<string, JsonValue>; issue?: never }
@@ -94,7 +83,7 @@ export async function runPiSubagentsDefinitionAction(
   input: PiSubagentsDefinitionActionInput,
   dependencies: PiSubagentsDefinitionActionDependencies,
 ): Promise<PiSubagentsDefinitionActionResult> {
-  const creating = input.mode === 'create-agent' || input.mode === 'create-workflow';
+  const creating = input.mode === 'create-agent';
   const action = creating ? input.mode : 'update';
   if (!creating && !input.agent) {
     return { message: 'No agent selected', success: false };
@@ -182,7 +171,6 @@ const FORM_FIELDS = new Set([
   'model',
   'name',
   'skills',
-  'steps',
   'systemPrompt',
   'thinking',
   'timeoutMs',
@@ -192,11 +180,13 @@ const FORM_FIELDS = new Set([
 const AGENT_ADVANCED_FIELDS = new Set([
   'acceptance',
   'acceptanceRole',
+  'aliases',
   'async',
   'completionGuard',
   'inheritProjectContext',
   'inheritSkills',
   'output',
+  'outputMode',
   'package',
   'progress',
   'reads',
@@ -205,20 +195,6 @@ const AGENT_ADVANCED_FIELDS = new Set([
   'systemPromptMode',
   'toolBudget',
   'turnBudget',
-]);
-
-const WORKFLOW_STEP_FIELDS = new Set([
-  'as',
-  'label',
-  'model',
-  'output',
-  'outputMode',
-  'outputSchema',
-  'phase',
-  'progress',
-  'reads',
-  'skills',
-  'toolBudget',
 ]);
 
 function descriptorConfig(agent?: PiAgentDescriptor): Record<string, JsonValue> {
@@ -235,28 +211,23 @@ function descriptorConfig(agent?: PiAgentDescriptor): Record<string, JsonValue> 
 
 function actionableAdvancedConfig(
   config: Record<string, JsonValue>,
-  mode: PiSubagentsDefinitionMode,
 ): Record<string, JsonValue> {
-  const workflow = mode === 'create-workflow' || mode === 'update-workflow';
   return Object.fromEntries(Object.entries(config).filter(([key]) => (
-    !FORM_FIELDS.has(key) && (key === 'package' || (!workflow && AGENT_ADVANCED_FIELDS.has(key)))
+    !FORM_FIELDS.has(key) && (key === 'package' || AGENT_ADVANCED_FIELDS.has(key))
   )));
 }
 
 function advancedConfig(
   config: Record<string, JsonValue>,
-  workflow: boolean,
 ): Record<string, JsonValue> {
-  return actionableAdvancedConfig(config, workflow ? 'update-workflow' : 'update-agent');
+  return actionableAdvancedConfig(config);
 }
 
 function unsupportedAdvancedField(
   config: Record<string, JsonValue>,
-  mode: PiSubagentsDefinitionMode,
 ): string | undefined {
-  const workflow = mode === 'create-workflow' || mode === 'update-workflow';
   return Object.keys(config).find((key) => (
-    FORM_FIELDS.has(key) || (key !== 'package' && (workflow || !AGENT_ADVANCED_FIELDS.has(key)))
+    FORM_FIELDS.has(key) || (key !== 'package' && !AGENT_ADVANCED_FIELDS.has(key))
   ));
 }
 
@@ -281,6 +252,8 @@ function clearedAdvancedValue(
     case 'inheritSkills':
     case 'progress':
       return false;
+    case 'outputMode':
+      return 'inline';
     case 'systemPromptMode':
       return localDefinitionName(draft.name) === 'delegate' ? 'append' : 'replace';
     default:
@@ -293,79 +266,12 @@ function configString(config: Record<string, JsonValue>, key: string): string {
   return typeof value === 'string' ? value : '';
 }
 
-function createWorkflowStepDraft(value: JsonValue): PiSubagentsWorkflowStepDraft | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const agent = typeof value.agent === 'string' ? value.agent : '';
-  const task = typeof value.task === 'string' ? value.task : '';
-  const config = Object.fromEntries(Object.entries(value).filter(([key]) => (
-    WORKFLOW_STEP_FIELDS.has(key)
-  )));
-  return { agent, config, task };
-}
-
-function buildWorkflowSteps(
-  draft: PiSubagentsDefinitionDraft,
-): { issue?: PiSubagentsDefinitionIssue; steps?: Array<Record<string, JsonValue>> } {
-  const steps: Array<Record<string, JsonValue>> = [];
-  for (let index = 0; index < draft.workflowSteps.length; index += 1) {
-    const step = draft.workflowSteps[index];
-    const agent = step?.agent.trim() ?? '';
-    if (!agent) return { issue: { code: 'workflow-step-agent', index } };
-    const unsupportedField = Object.keys(step?.config ?? {}).find((key) => !WORKFLOW_STEP_FIELDS.has(key));
-    if (unsupportedField) {
-      return { issue: { code: 'unsupported-workflow-step-field', field: unsupportedField, index } };
-    }
-    steps.push({ ...(step?.config ?? {}), agent, task: step?.task ?? '' });
-  }
-  return { steps };
-}
-
-function normalizedWorkflowSteps(value: JsonValue | undefined): Array<Record<string, JsonValue>> | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const steps = value.map(createWorkflowStepDraft)
-    .filter((step): step is PiSubagentsWorkflowStepDraft => step !== undefined);
-  return steps.map((step) => ({ ...step.config, agent: step.agent, task: step.task }));
-}
-
-function nonRoundTrippableWorkflowIssue(
-  mode: PiSubagentsDefinitionMode,
-  original?: PiAgentDescriptor,
-): PiSubagentsDefinitionIssue | undefined {
-  if (mode !== 'update-workflow' || !original) return undefined;
-  const config = descriptorConfig(original);
-  const steps = config.steps;
-  if (Array.isArray(steps)) {
-    for (let index = 0; index < steps.length; index += 1) {
-      const step = steps[index];
-      if (typeof step !== 'object' || step === null || Array.isArray(step)) continue;
-      const field = Object.keys(step).find((key) => (
-        key !== 'agent' && key !== 'task' && !WORKFLOW_STEP_FIELDS.has(key)
-      ));
-      if (field) return { code: 'unsupported-workflow-step-field', field, index };
-    }
-  }
-  if (original.source.path?.endsWith('.chain.json')) {
-    const field = Object.entries(config).find(([key, value]) => (
-      key !== 'description'
-      && key !== 'name'
-      && key !== 'package'
-      && key !== 'steps'
-      && typeof value !== 'string'
-    ))?.[0];
-    if (field) return { code: 'unsupported-advanced-field', field };
-  }
-  return undefined;
-}
-
 export function createPiSubagentsDefinitionDraft(
   agent?: PiAgentDescriptor,
 ): PiSubagentsDefinitionDraft {
   const config = descriptorConfig(agent);
-  const steps = Array.isArray(config.steps)
-    ? config.steps.map(createWorkflowStepDraft).filter((step): step is PiSubagentsWorkflowStepDraft => step !== undefined)
-    : [];
   return {
-    advancedJson: JSON.stringify(advancedConfig(config, agent?.kind === 'workflow'), null, 2),
+    advancedJson: JSON.stringify(advancedConfig(config), null, 2),
     defaultContext: config.defaultContext === 'fresh' || config.defaultContext === 'fork'
       ? config.defaultContext
       : '',
@@ -380,7 +286,6 @@ export function createPiSubagentsDefinitionDraft(
     thinking: configString(config, 'thinking'),
     timeoutMs: typeof config.timeoutMs === 'number' ? String(config.timeoutMs) : '',
     tools: configStringList(config.tools).join('\n'),
-    workflowSteps: steps.length ? steps : [{ agent: '', config: {}, task: '' }],
   };
 }
 
@@ -391,25 +296,23 @@ export function buildPiSubagentsDefinitionConfig(
 ): PiSubagentsDefinitionBuildResult {
   const advanced = parseAdvanced(draft.advancedJson);
   if (advanced.issue) return advanced;
-  const unsupportedField = unsupportedAdvancedField(advanced.config, mode);
+  const unsupportedField = unsupportedAdvancedField(advanced.config);
   if (unsupportedField) return { issue: { code: 'unsupported-advanced-field', field: unsupportedField } };
-  const roundTripIssue = nonRoundTrippableWorkflowIssue(mode, original);
-  if (roundTripIssue) return { issue: roundTripIssue };
   const config: Record<string, JsonValue> = {};
   const name = draft.name.trim();
   const description = draft.description.trim();
-  if ((mode === 'create-agent' || mode === 'create-workflow') && (!name || !description)) {
+  if (mode === 'create-agent' && (!name || !description)) {
     return { issue: { code: 'name-description-required' } };
   }
 
-  if (mode === 'create-agent' || mode === 'create-workflow') {
-    Object.assign(config, actionableAdvancedConfig(advanced.config, mode));
+  if (mode === 'create-agent') {
+    Object.assign(config, actionableAdvancedConfig(advanced.config));
     config.name = name;
     config.description = description;
   } else if (original) {
     const originalConfig = descriptorConfig(original);
-    const originalAdvanced = actionableAdvancedConfig(originalConfig, mode);
-    const editedAdvanced = actionableAdvancedConfig(advanced.config, mode);
+    const originalAdvanced = actionableAdvancedConfig(originalConfig);
+    const editedAdvanced = actionableAdvancedConfig(advanced.config);
     for (const key of new Set([...Object.keys(originalAdvanced), ...Object.keys(editedAdvanced)])) {
       if (Object.prototype.hasOwnProperty.call(editedAdvanced, key)) {
         const value = editedAdvanced[key];
@@ -422,17 +325,6 @@ export function buildPiSubagentsDefinitionConfig(
     if (name !== (configString(originalConfig, 'name') || original.name)) config.name = name;
     if (description !== (configString(originalConfig, 'description') || original.description)) {
       config.description = description;
-    }
-  }
-
-  if (mode === 'create-workflow' || mode === 'update-workflow') {
-    const workflow = buildWorkflowSteps(draft);
-    if (workflow.issue) return { issue: workflow.issue };
-    if (mode === 'create-workflow') {
-      config.steps = workflow.steps!;
-    } else if (original) {
-      const originalSteps = normalizedWorkflowSteps(descriptorConfig(original).steps);
-      if (!jsonEqual(workflow.steps as JsonValue, originalSteps)) config.steps = workflow.steps!;
     }
   }
 

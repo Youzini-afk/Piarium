@@ -158,6 +158,56 @@ const OverrideModelField: React.FC<OverrideFieldProps> = ({
   );
 };
 
+const OverrideStringOrClearField: React.FC<OverrideFieldProps> = ({
+  disabled,
+  draft,
+  label,
+  onRemove,
+  onSet,
+  path,
+  placeholder,
+}) => {
+  const { t } = useI18n();
+  const raw = readJsonPath(draft, path);
+  const mode = raw === false ? 'clear' : typeof raw === 'string' ? 'override' : 'inherit';
+  return (
+    <SettingsFieldRow label={label} alignEnd={false} controlClassName="w-full max-w-lg items-start">
+      <div className="flex min-w-0 flex-1 flex-col gap-2 @xl:flex-row">
+        <Select
+          value={mode}
+          disabled={disabled}
+          onValueChange={(next) => {
+            if (next === 'inherit') onRemove(path);
+            else if (next === 'clear') onSet(path, false);
+            else onSet(path, typeof raw === 'string' ? raw : '');
+          }}
+        >
+          <SelectTrigger size="settings" className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={label}>
+            <SelectValue>
+              {t(`settings.piarium.pluginSettings.subagents.overrides.mode.${mode}` as Parameters<typeof t>[0])}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inherit">{t('settings.piarium.pluginSettings.subagents.overrides.mode.inherit')}</SelectItem>
+            <SelectItem value="clear">{t('settings.piarium.pluginSettings.subagents.overrides.mode.clear')}</SelectItem>
+            <SelectItem value="override">{t('settings.piarium.pluginSettings.subagents.overrides.mode.override')}</SelectItem>
+          </SelectContent>
+        </Select>
+        {mode === 'override' ? (
+          <Input
+            value={typeof raw === 'string' ? raw : ''}
+            disabled={disabled}
+            placeholder={placeholder}
+            aria-label={label}
+            onChange={(event) => onSet(path, event.target.value)}
+            className="min-w-0 flex-1"
+          />
+        ) : null}
+      </div>
+    </SettingsFieldRow>
+  );
+};
+
 const OverrideThinkingField: React.FC<OverrideFieldProps> = ({
   disabled,
   draft,
@@ -429,18 +479,12 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
   const targetKeyRef = React.useRef(targetKey);
   targetKeyRef.current = targetKey;
   const listId = React.useId();
-  const actionLabel = React.useCallback((
-    action: PiAgentActionDescriptor,
-    kind: PiAgentCatalogSnapshot['agents'][number]['kind'],
-  ): string => {
+  const actionLabel = React.useCallback((action: PiAgentActionDescriptor): string => {
     switch (action.id) {
       case 'create-agent': return t('settings.piarium.agents.definition.createAgent');
-      case 'create-workflow': return t('settings.piarium.agents.definition.createWorkflow');
       case 'models': return t('settings.piarium.agents.actions.models');
       case 'inspect': return t('settings.piarium.agents.actions.inspect');
-      case 'update': return t(kind === 'workflow'
-        ? 'settings.piarium.agents.definition.editWorkflow'
-        : 'settings.piarium.agents.definition.editAgent');
+      case 'update': return t('settings.piarium.agents.definition.editAgent');
       case 'delete': return t('settings.common.actions.delete');
       case 'eject': return t('settings.piarium.agents.actions.copyToScope');
       case 'disable': return t('settings.piarium.agents.actions.disable');
@@ -504,8 +548,7 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
   const selectedOverrideAgent = overridableAgents.find((agent) => agent.name === selectedOverrideName);
   const fieldProps = { disabled: disabled || !selectedOverrideName, draft, onRemove, onSet };
   const createAgentAvailable = provider?.actions.some((action) => action.id === 'create-agent') === true;
-  const createWorkflowAvailable = provider?.actions.some((action) => action.id === 'create-workflow') === true;
-  const definitionAgent = definitionMode === 'update-agent' || definitionMode === 'update-workflow'
+  const definitionAgent = definitionMode === 'update-agent'
     ? selectedAgent
     : undefined;
 
@@ -557,10 +600,6 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
             <Icon name="add" className="size-4" />
             {t('settings.piarium.agents.definition.createAgent')}
           </Button>
-          <Button type="button" variant="outline" size="sm" disabled={!createWorkflowAvailable || submitting} onClick={() => setDefinitionMode('create-workflow')}>
-            <Icon name="node-tree" className="size-4" />
-            {t('settings.piarium.agents.definition.createWorkflow')}
-          </Button>
           <Button type="button" variant="ghost" size="sm" disabled={catalogLoading} onClick={() => void refreshCatalog()}>
             <Icon name="refresh" className={catalogLoading ? 'size-4 animate-spin' : 'size-4'} />
             {t('settings.piarium.recovery.actions.refresh')}
@@ -606,12 +645,10 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
                 <h4 className="typography-settings-group-title text-foreground">{selectedAgent.name}</h4>
                 <p className="mt-1 typography-meta text-muted-foreground">{selectedAgent.description}</p>
               </div>
-              {selectedAgent.actions.some((action) => action.id === 'update') ? (
-                <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={() => setDefinitionMode(selectedAgent.kind === 'workflow' ? 'update-workflow' : 'update-agent')}>
+              {selectedAgent.kind === 'delegatable' && selectedAgent.actions.some((action) => action.id === 'update') ? (
+                <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={() => setDefinitionMode('update-agent')}>
                   <Icon name="edit" className="size-4" />
-                  {selectedAgent.kind === 'workflow'
-                    ? t('settings.piarium.agents.definition.editWorkflow')
-                    : t('settings.piarium.agents.definition.editAgent')}
+                  {t('settings.piarium.agents.definition.editAgent')}
                 </Button>
               ) : null}
             </div>
@@ -622,7 +659,7 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
               <div><dt className="typography-micro text-muted-foreground">{t('settings.piarium.agents.detail.provider')}</dt><dd className="typography-meta text-foreground">{provider?.label ?? selectedAgent.providerId}</dd></div>
               <div><dt className="typography-micro text-muted-foreground">{t('settings.piarium.agents.detail.model')}</dt><dd className="typography-meta text-foreground">{selectedAgent.model ?? t('settings.piarium.agents.detail.inherited')}</dd></div>
               {selectedAgent.thinking ? <div><dt className="typography-micro text-muted-foreground">{t('settings.piarium.agents.detail.thinking')}</dt><dd className="typography-meta text-foreground">{isSupportedPiSubagentsThinking(selectedAgent.thinking) ? tx(`settings.piarium.pluginSettings.subagents.thinking.${selectedAgent.thinking}`) : t('settings.piarium.pluginSettings.field.unsupportedValue')}</dd></div> : null}
-              <div><dt className="typography-micro text-muted-foreground">{tx('settings.piarium.pluginSettings.subagents.definition.actions')}</dt><dd className="typography-meta text-foreground">{selectedAgent.actions.map((action) => actionLabel(action, selectedAgent.kind)).join(', ') || tx('settings.piarium.pluginSettings.subagents.value.none')}</dd></div>
+              <div><dt className="typography-micro text-muted-foreground">{tx('settings.piarium.pluginSettings.subagents.definition.actions')}</dt><dd className="typography-meta text-foreground">{selectedAgent.actions.map(actionLabel).join(', ') || tx('settings.piarium.pluginSettings.subagents.value.none')}</dd></div>
             </dl>
           </div>
         ) : null}
@@ -666,6 +703,7 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
               </div>
               <SettingsControlGroup title={tx('settings.piarium.pluginSettings.subagents.overrides.modelSection')} contentClassName="space-y-4">
                 <OverrideModelField {...fieldProps} path={[...selectedPath, 'model']} label={tx('settings.piarium.pluginSettings.subagents.field.primaryModel')} placeholder={tx('settings.piarium.pluginSettings.subagents.value.inheritModel')} />
+                <OverrideStringOrClearField {...fieldProps} path={[...selectedPath, 'defaultProvider']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultProvider')} placeholder="openai" />
                 <OverrideThinkingField {...fieldProps} path={[...selectedPath, 'thinking']} label={tx('settings.piarium.pluginSettings.subagents.field.thinkingLevel')} />
                 <OverrideListOrClearField {...fieldProps} path={[...selectedPath, 'fallbackModels']} label={tx('settings.piarium.pluginSettings.subagents.field.fallbackModels')} placeholder="provider/model" />
               </SettingsControlGroup>
@@ -678,6 +716,12 @@ export const SubagentsAgentOverrides: React.FC<SubagentsAgentOverridesProps> = (
                 ]} />
                 <PluginOptionalBooleanField {...fieldProps} path={[...selectedPath, 'inheritProjectContext']} label={tx('settings.piarium.pluginSettings.subagents.field.inheritProjectContext')} />
                 <PluginOptionalBooleanField {...fieldProps} path={[...selectedPath, 'inheritSkills']} label={tx('settings.piarium.pluginSettings.subagents.field.inheritSkills')} />
+                <OverrideStringOrClearField {...fieldProps} path={[...selectedPath, 'output']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultOutput')} placeholder="output.md" />
+                <PluginOptionalSelectField {...fieldProps} path={[...selectedPath, 'outputMode']} label={tx('settings.piarium.pluginSettings.subagents.field.outputMode')} options={[
+                  { value: 'inline', label: 'inline' },
+                  { value: 'file-only', label: 'file-only' },
+                ]} />
+                <OverrideListOrClearField {...fieldProps} path={[...selectedPath, 'defaultReads']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultReads')} placeholder={'brief.md\nrequirements.md'} />
                 <OverrideListOrClearField {...fieldProps} path={[...selectedPath, 'tools']} label={tx('settings.piarium.pluginSettings.subagents.field.allowedTools')} placeholder="read" />
                 <OverrideListOrClearField {...fieldProps} path={[...selectedPath, 'skills']} label={tx('settings.piarium.pluginSettings.subagents.field.skills')} placeholder="skill-name" />
                 <OverrideListOrClearField {...fieldProps} path={[...selectedPath, 'extensions']} label={tx('settings.piarium.pluginSettings.subagents.field.extensions')} placeholder="extension/path.ts" />

@@ -171,7 +171,7 @@ value.
 
 | Adapter | Quick tasks | Native authority shown in the quick view | Advanced-only by default | Local warnings that remain visible |
 | --- | --- | --- | --- | --- |
-| pi-subagents | Agents and workflows; definition actions; per-scope model/thinking/fallback overrides; delegation; review; limits | Provider actions/Agent Markdown, user/project `settings.json#subagents`, and global runtime `config.json` are three distinct save owners | worktree/storage paths, Intercom, notification batching, detailed LSP/retry tuning, complex prompts and future runtime fields | definition versus override precedence, project trust, hard budgets and destructive provider actions |
+| pi-subagents | Agents and definition actions; per-scope model/provider/thinking/output overrides; delegation; review; limits | Provider actions/Agent Markdown, user/project `settings.json#subagents`, and global runtime `config.json` are three distinct save owners | per-agent model-scope maps, external runners, worktree/storage paths, Intercom, notification batching, detailed LSP/retry tuning, complex prompts and future runtime fields | definition versus override precedence, project trust, hard budgets and destructive provider actions |
 | Magic Context | Context; memory; internal models; maintenance schedules and session operations | Independent user/project JSONC drafts with ignored project keys reported | per-model maps, prompts/permissions, sampling fine-tuning, SQLite/Synapse details and experimental fields | fail-closed behavior, lossy compression, project-ignored keys, model-cost maintenance actions |
 | pi-web-access | Search; providers and credential sources; Browser/Curator; content; safety | Agent-root `web-search.json`; command presence is only loaded-state evidence | custom tool names, provider-specific fine tuning and future fields | executable credential sources, browser-cookie access, remote bind, fresh scraping and SSRF exceptions |
 | pi-mcp-adapter | Runtime servers and actions; selected-source server overrides; behavior and interaction policy | One visibly selected source from the documented six-layer precedence; the dedicated MCP page remains canonical | bearer/OAuth details, complex output guards, tracing/filter details and future fields | URL credential reset, sampling auto-approval, socket trust and source-local versus effective state |
@@ -211,47 +211,43 @@ Authority:
 
 Target settings sections:
 
-1. Agents & workflows: the real provider catalog, immediate create/edit definition actions, and a
+1. Agents: the real provider catalog, immediate create/edit definition actions, and a
    visibly separate user/project `agentOverrides` editor.
-2. Delegation: scoped model defaults and allowlist plus separately saved global spawn/wait behavior.
+2. Delegation: scoped model/provider/thinking defaults, thinking ceiling, global and per-agent model
+   scope policy, plus separately saved global spawn/wait behavior.
 3. Review: watchdog activation, main/child review models, severity, and blocker follow-up.
 4. Limits: global depth, spawn, concurrency, parallelism, and budget guardrails.
 5. Advanced within each save owner: the complete scoped settings object or global runtime document,
    sharing the visible form's draft and Save action.
 
-The current settings adapter also discovers agents and workflows from the live `pi-subagents`
+The current settings adapter discovers agents from the live `pi-subagents`
 catalog, exposes provider-advertised create/update actions, and uses
 the descriptor's runtime `name`—never Piarium's opaque descriptor id—as the `agentOverrides` key.
 The definition dialog's Advanced JSON is specifically the plugin's management-action config, not a
-raw editor for Agent Markdown or `.chain.md` files. It exposes only top-level fields accepted by the
-installed 0.37.2 management `create`/`update` contract. Unknown native frontmatter remains
+raw editor for Agent Markdown. It exposes only top-level fields accepted by the installed 0.55
+management `create`/`update` contract. Unknown native frontmatter remains
 plugin-owned and is not shown as editable JSON; normal updates preserve it through the plugin's
 serializer. Manually adding an unsupported action key is rejected before dispatch instead of being
 silently ignored. Removing a supported advanced key sends that field's plugin-defined clear or
 default value, so a JSON edit cannot degrade into a misleading “no changes” response.
 
-Saved workflow steps expose the complete 0.37.2 management/Markdown contract as task-oriented
-controls: agent and task, phase and label, named output (`as`), output schema path and return mode,
-model, saved output, reads, skills, progress tracking, and tool-call budget. Each supported value can
-be created, loaded, changed, or cleared. Unknown step keys are not offered as editable Advanced JSON
-because the 0.37.2 management parser rebuilds a whitelist step and cannot round-trip them. The host
-still projects such native keys as preservation evidence, and the dialog refuses a lossy workflow
-update rather than erasing them. It applies the same guard to non-string unknown root values in a
-`.chain.json` file, which that version's serializer also cannot retain. Future thinking tokens
-likewise render as an unsupported value and remain unchanged until the user chooses a supported
-level.
+`pi-subagents` 0.55 removed durable `.chain.*` definitions. Piarium therefore no longer advertises
+create/edit workflow resources that the plugin rejects. Repeatable orchestration remains plugin-owned
+through `workflowScript` and `/prompt-workflow`; it is an execution flow, not a persisted Agent
+catalog entity. Future thinking tokens still render as an unsupported value and remain unchanged
+until the user chooses a supported level.
 
-It supports the complete current override contract, including a structured three-state
-`toolBudget`, while preserving arbitrary future agent names and unknown future keys. Fields known
-to belong to agent Markdown or an individual run contract are diagnosed instead of being saved to
-a location the plugin ignores. `false` is rendered as the plugin's
+It supports the complete current override contract, including `defaultProvider`, saved output,
+output return mode, default reads, `tools: "inherit"`, and a structured three-state `toolBudget`,
+while preserving arbitrary future agent names and unknown future keys. `false` is rendered as the plugin's
 “clear resolved value” sentinel, which is distinct from an absent override and, for list fields,
 from an explicit empty array. Runtime configuration includes the current control notification
 event/channel lists and proactive skill-delegation settings. The one-value watchdog delivery and
 late-warning enums remain in Advanced until the plugin exposes an actual user choice.
 
-Agents consumes every provider action currently advertised by the extension: create, edit/inspect,
-update, delete, eject, enable, disable, and reset. It does not stop at displaying action badges.
+Agents consumes every current provider action advertised by the extension: create, edit/inspect,
+update, delete, eject, enable, disable, reset, and model-resolution inspection. It does not stop at
+displaying action badges.
 
 Fleet is a separate live-work surface. It is provider-neutral: each Host adapter reports its own
 `active` / `degraded` / `incompatible` / `unavailable` state, and the registry merges entries under

@@ -22,7 +22,6 @@ describe("SessionHost agent providers", () => {
     const home = join(root, "home");
     const actionLog = join(root, "subagent-actions.jsonl");
     const customAgentPath = join(root, "custom.md");
-    const workflowPath = join(root, "verify.chain.md");
     const previousHome = process.env.HOME;
     const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
     process.env.HOME = home;
@@ -38,33 +37,21 @@ description: Custom role
 model: test/custom
 fallbackModels: test/fallback
 thinking: medium
+aliases: review
 tools: read, grep
 skills: review-skill
 extensions: extension-a
 defaultContext: fork
 timeoutMs: 30000
 maxSubagentDepth: 1
+output: review.md
+outputMode: file-only
+defaultReads: brief.md, requirements.md
+defaultProgress: true
 futureOption: preserve-me
 ---
 
 Review carefully.
-`,
-      "utf8",
-    );
-    await writeFile(
-      workflowPath,
-      `---
-name: verify
-description: Verify workflow
-futureWorkflowOption: preserve-me
----
-
-## worker
-phase: research
-model: test/worker
-futureStepOption: preserve-me
-
-Verify the change.
 `,
       "utf8",
     );
@@ -80,11 +67,11 @@ export default function (pi: any) {
     parameters: Type.Object({}, { additionalProperties: true }),
     async execute(_id: string, params: any) {
       appendFileSync(${JSON.stringify(actionLog)}, JSON.stringify(params) + "\\n", "utf8");
-      if (params.action === "list") return { content: [{ type: "text", text: "Executable agents:\\n- custom (user): Custom role\\n- worker (builtin, context: fork): Built-in worker\\n\\nChains:\\n- verify (project): Verify workflow" }], details: { mode: "management", results: [] } };
+      if (params.action === "list") return { content: [{ type: "text", text: "Executable agents:\\nUser agents\\n- custom (user, aliases: review): Custom role\\n\\nRuntime agents\\n- dynamic (runtime): Runtime role\\n\\nBuiltin agents\\n- worker (builtin, context: fork): Built-in worker" }], details: { mode: "management", results: [] } };
       if (params.action === "get" && params.agent === "custom") return { content: [{ type: "text", text: "Agent: custom (user)\\nPath: " + ${JSON.stringify(customAgentPath)} + "\\nDescription: Custom role\\nModel: test/custom\\nFallback models: test/fallback\\nTools: read, grep\\nSkills: review-skill\\nDefault context: fork\\nTimeout: 30000ms\\nExtensions: extension-a\\nThinking: medium\\nMax subagent depth: 1\\n\\nSystem Prompt:\\nReview carefully." }], details: { mode: "management", results: [] } };
       if (params.action === "get" && params.agent === "worker") return { content: [{ type: "text", text: "Agent: worker (builtin)\\nPath: /builtin/worker.md\\nDescription: Built-in worker" }], details: { mode: "management", results: [] } };
+      if (params.action === "get" && params.agent === "dynamic") return { content: [{ type: "text", text: "Agent: dynamic (runtime)\\nPath: /runtime/dynamic.md\\nDescription: Runtime role" }], details: { mode: "management", results: [] } };
       if (params.action === "get" && params.agent === "disabled") return { content: [{ type: "text", text: "Agent: disabled (builtin)\\nPath: /builtin/disabled.md\\nDescription: Disabled role\\nModel: test/model\\nThinking: high\\nDisabled: true" }], details: { mode: "management", results: [] } };
-      if (params.action === "get" && params.chainName === "verify") return { content: [{ type: "text", text: "Chain: verify (project)\\nPath: " + ${JSON.stringify(workflowPath)} + "\\nDescription: Verify workflow\\n\\nSteps:\\n1. worker\\n   Task: Verify the change.\\n   Model: test/worker" }], details: { mode: "management", results: [] } };
       if (params.action === "get") return { content: [{ type: "text", text: "Agent 'missing' not found. Available: custom, disabled, worker." }], isError: true, details: { mode: "management", results: [] } };
       return { content: [{ type: "text", text: "Applied " + params.action }], details: { mode: "management", results: [] } };
     },
@@ -182,6 +169,7 @@ export default function (pi: any) {
       assert.equal(byName.get("pi-subagents:custom")?.model, "test/custom");
       assert.deepEqual(byName.get("pi-subagents:custom")?.fallbackModels, ["test/fallback"]);
       assert.deepEqual(byName.get("pi-subagents:custom")?.definition?.config, {
+        aliases: "review",
         defaultContext: "fork",
         description: "Custom role",
         extensions: "extension-a",
@@ -190,34 +178,18 @@ export default function (pi: any) {
         maxSubagentDepth: 1,
         model: "test/custom",
         name: "custom",
+        output: "review.md",
+        outputMode: "file-only",
+        progress: true,
+        reads: "brief.md, requirements.md",
         skills: "review-skill",
         systemPrompt: "Review carefully.",
         thinking: "medium",
         timeoutMs: 30_000,
         tools: "read, grep",
       });
-      assert.equal(byName.get("pi-subagents:verify")?.kind, "workflow");
-      assert.deepEqual(byName.get("pi-subagents:verify")?.invocation, {
-        command: "run-chain",
-        kind: "slash-command",
-        taskSeparator: "double-dash",
-      });
-      assert.deepEqual(
-        byName.get("pi-subagents:verify")?.actions.map((action) => action.id),
-        ["inspect", "update", "delete"],
-      );
-      assert.deepEqual(byName.get("pi-subagents:verify")?.definition?.config, {
-        description: "Verify workflow",
-        futureWorkflowOption: "preserve-me",
-        name: "verify",
-        steps: [{
-          agent: "worker",
-          futureStepOption: "preserve-me",
-          model: "test/worker",
-          phase: "research",
-          task: "Verify the change.",
-        }],
-      });
+      assert.equal(byName.get("pi-subagents:dynamic")?.source.scope, "runtime");
+      assert.deepEqual(byName.get("pi-subagents:dynamic")?.actions.map((action) => action.id), ["inspect"]);
       assert.equal(byName.get("pi-subagents:disabled")?.status, "disabled");
       assert.equal(byName.get("pi-subagents:disabled")?.model, "test/model");
       assert.equal(byName.get("magic-context:historian")?.model, "user/historian");
@@ -262,18 +234,6 @@ export default function (pi: any) {
       );
       assert.equal(updated.success, true);
       assert.match(updated.message, /Applied update/);
-      const workflow = byName.get("pi-subagents:verify");
-      assert.ok(workflow);
-      const updatedWorkflow = await host.runAgentProviderAction(
-        "pi-subagents",
-        "update",
-        workflow.id,
-        {
-          config: { steps: [{ agent: "worker", task: "Run focused verification" }] },
-          scope: "project",
-        },
-      );
-      assert.equal(updatedWorkflow.success, true);
       const createdProjectAgent = await host.runAgentProviderAction(
         "pi-subagents",
         "create-agent",
@@ -295,7 +255,7 @@ export default function (pi: any) {
           undefined,
           { config: { description: "Missing steps", name: "broken-workflow" }, scope: "user" },
         ),
-        (error: unknown) => error instanceof HostError && error.code === "invalid_params",
+        (error: unknown) => error instanceof HostError && error.code === "unsupported_agent_action",
       );
       const actions = (await readFile(actionLog, "utf8"))
         .trim()
@@ -309,14 +269,6 @@ export default function (pi: any) {
             && action.agentScope === "user",
         ),
       );
-      assert.ok(actions.some(
-        (action) => action.action === "update"
-          && action.chainName === "verify"
-          && action.agentScope === "project"
-          && JSON.stringify(action.config) === JSON.stringify({
-            steps: [{ agent: "worker", task: "Run focused verification" }],
-          }),
-      ));
       assert.ok(
         actions.some(
           (action) =>
@@ -357,11 +309,10 @@ export default function (pi: any) {
     parameters: Type.Object({}, { additionalProperties: true }),
     async execute(_id: string, params: any) {
       appendFileSync(${JSON.stringify(actionLog)}, JSON.stringify(params) + "\\n", "utf8");
-      if (params.action === "list") return { content: [{ type: "text", text: "Executable agents:\\n- custom (user): Custom role\\n- worker (builtin): Worker\\n\\nChains:\\n- verify (project): Verify" }], details: {} };
+      if (params.action === "list") return { content: [{ type: "text", text: "Executable agents:\\nUser agents\\n- custom (user): Custom role\\n\\nBuiltin agents\\n- worker (builtin): Worker" }], details: {} };
       if (params.action === "get" && params.agent === "custom") return { content: [{ type: "text", text: "Agent: custom (user)\\nDescription: Custom role" }], details: {} };
       if (params.action === "get" && params.agent === "worker") return { content: [{ type: "text", text: "Agent: worker (builtin)\\nDescription: Worker" }], details: {} };
       if (params.action === "get" && params.agent === "disabled") return { content: [{ type: "text", text: "Agent: disabled (builtin)\\nDescription: Disabled role\\nDisabled: true" }], details: {} };
-      if (params.action === "get" && params.chainName === "verify") return { content: [{ type: "text", text: "Chain: verify (project)\\nDescription: Verify" }], details: {} };
       if (params.action === "get") return { content: [{ type: "text", text: "Agent not found. Available: custom, disabled, worker." }], isError: true, details: {} };
       return { content: [{ type: "text", text: "Applied " + params.action }], details: {} };
     },
@@ -378,11 +329,9 @@ export default function (pi: any) {
       const custom = byName.get("custom");
       const worker = byName.get("worker");
       const disabled = byName.get("disabled");
-      const workflow = byName.get("verify");
       assert.ok(custom);
       assert.ok(worker);
       assert.ok(disabled);
-      assert.ok(workflow);
       assert.equal((await host.runAgentProviderAction("pi-subagents", "models", undefined, undefined)).success, true);
       assert.equal((await host.runAgentProviderAction("pi-subagents", "inspect", custom.id, undefined)).success, true);
       assert.equal((await host.runAgentProviderAction("pi-subagents", "disable", custom.id, undefined)).success, true);
@@ -392,7 +341,6 @@ export default function (pi: any) {
       assert.equal((await host.runAgentProviderAction("pi-subagents", "disable", worker.id, { scope: "user" })).success, true);
       assert.equal((await host.runAgentProviderAction("pi-subagents", "enable", disabled.id, { scope: "user" })).success, true);
       assert.equal((await host.runAgentProviderAction("pi-subagents", "reset", worker.id, { scope: "user" })).success, true);
-      assert.equal((await host.runAgentProviderAction("pi-subagents", "delete", workflow.id, undefined)).success, true);
       const actions = (await readFile(actionLog, "utf8"))
         .trim()
         .split(/\r?\n/)
@@ -401,9 +349,6 @@ export default function (pi: any) {
         assert.ok(actions.some((action) => action.action === actionName), `missing ${actionName} action`);
       }
       assert.ok(actions.some((action) => action.action === "get" && action.agent === "custom"));
-      assert.ok(actions.some(
-        (action) => action.action === "delete" && action.chainName === "verify" && action.agentScope === "project",
-      ));
     } finally {
       await host.dispose();
       await rm(root, { force: true, recursive: true });

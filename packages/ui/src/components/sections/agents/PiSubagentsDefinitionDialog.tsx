@@ -22,7 +22,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { NumberInput } from '@/components/ui/number-input';
 import {
   Select,
   SelectContent,
@@ -40,7 +39,6 @@ import {
   type PiSubagentsDefinitionDraft,
   type PiSubagentsDefinitionIssue,
   type PiSubagentsDefinitionMode,
-  type PiSubagentsWorkflowStepDraft,
 } from './pi-subagents-action-model';
 
 type ActionScope = 'user' | 'project';
@@ -62,360 +60,14 @@ interface PiSubagentsDefinitionDialogProps {
   submitting: boolean;
 }
 
-function stepConfigString(step: PiSubagentsWorkflowStepDraft, key: string): string {
-  const value = step.config[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function stepConfigStringList(
-  step: PiSubagentsWorkflowStepDraft,
-  key: 'reads' | 'skills',
-): string[] | undefined {
-  const value = step.config[key];
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === 'string')
-    : undefined;
-}
-
-const WorkflowStepEditor: React.FC<{
-  disabled: boolean;
-  onChange: (step: PiSubagentsWorkflowStepDraft) => void;
-  step: PiSubagentsWorkflowStepDraft;
-}> = ({ disabled, onChange, step }) => {
-  const { t } = useI18n();
-  const setConfig = React.useCallback((key: string, value: JsonValue | undefined) => {
-    const config = { ...step.config };
-    if (value === undefined) delete config[key];
-    else config[key] = value;
-    onChange({ ...step, config });
-  }, [onChange, step]);
-  const setToolBudgetField = React.useCallback((key: string, value: JsonValue | undefined) => {
-    const raw = step.config.toolBudget;
-    const budget: Record<string, JsonValue> = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
-      ? { ...raw }
-      : { hard: 16 };
-    if (value === undefined) delete budget[key];
-    else budget[key] = value;
-    setConfig('toolBudget', budget);
-  }, [setConfig, step.config.toolBudget]);
-
-  const output = step.config.output;
-  const outputBehavior = output === false ? 'disabled' : typeof output === 'string' ? 'file' : 'default';
-  const reads = stepConfigStringList(step, 'reads');
-  const readsMode = step.config.reads === false ? 'disabled' : reads ? 'selected' : 'default';
-  const skills = stepConfigStringList(step, 'skills');
-  const skillsMode = step.config.skills === false ? 'disabled' : skills ? 'selected' : 'default';
-  const progress = typeof step.config.progress === 'boolean'
-    ? step.config.progress ? 'enabled' : 'disabled'
-    : 'default';
-  const rawBudget = step.config.toolBudget;
-  const budget = typeof rawBudget === 'object' && rawBudget !== null && !Array.isArray(rawBudget)
-    ? rawBudget
-    : undefined;
-  const budgetMode = rawBudget === undefined ? 'default' : 'override';
-  const block = budget?.block;
-  const blockList = Array.isArray(block)
-    ? block.filter((entry): entry is string => typeof entry === 'string')
-    : undefined;
-  const blockMode = block === '*' ? 'all' : blockList ? 'selected' : 'default';
-  const model = stepConfigString(step, 'model');
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-3 @xl:grid-cols-2">
-        <SettingsFieldRow label={t('settings.piarium.agents.definition.field.phase')} alignEnd={false} controlClassName="w-full items-start">
-          <Input
-            value={stepConfigString(step, 'phase')}
-            disabled={disabled}
-            placeholder="research"
-            onChange={(event) => setConfig('phase', event.target.value || undefined)}
-          />
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.piarium.agents.definition.field.stepLabel')} alignEnd={false} controlClassName="w-full items-start">
-          <Input
-            value={stepConfigString(step, 'label')}
-            disabled={disabled}
-            placeholder="Map the change"
-            onChange={(event) => setConfig('label', event.target.value || undefined)}
-          />
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.piarium.agents.definition.field.namedResult')} alignEnd={false} controlClassName="w-full items-start">
-          <Input
-            value={stepConfigString(step, 'as')}
-            disabled={disabled}
-            placeholder="research"
-            onChange={(event) => setConfig('as', event.target.value || undefined)}
-          />
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.piarium.agents.definition.field.outputSchemaFile')} alignEnd={false} controlClassName="w-full items-start">
-          <Input
-            value={stepConfigString(step, 'outputSchema')}
-            disabled={disabled}
-            placeholder="schemas/result.json"
-            onChange={(event) => setConfig('outputSchema', event.target.value || undefined)}
-          />
-        </SettingsFieldRow>
-      </div>
-
-      <SettingsFieldRow label={t('settings.piarium.agents.definition.field.primaryModel')} controlClassName="w-full max-w-lg">
-        <div
-          aria-disabled={disabled}
-          className={disabled ? 'pointer-events-none opacity-60' : undefined}
-          inert={disabled ? true : undefined}
-        >
-          <ModelSelector
-            {...splitModel(model)}
-            placeholder={t('settings.piarium.agents.definition.placeholder.inheritModel')}
-            onChange={(providerId, modelId) => setConfig(
-              'model',
-              providerId && modelId ? `${providerId}/${modelId}` : undefined,
-            )}
-            className="w-full max-w-72 justify-between"
-            dropdownPortalToBody
-          />
-        </div>
-      </SettingsFieldRow>
-
-      <div className="grid gap-3 @xl:grid-cols-2">
-        <SettingsFieldRow label={t('settings.piarium.agents.definition.field.savedOutput')} alignEnd={false} controlClassName="w-full items-start">
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <Select
-              value={outputBehavior}
-              disabled={disabled}
-              onValueChange={(value) => {
-                if (value === 'default') setConfig('output', undefined);
-                else if (value === 'disabled') setConfig('output', false);
-                else setConfig('output', typeof output === 'string' ? output : 'output.md');
-              }}
-            >
-              <SelectTrigger size="settings" className="w-full">
-                <SelectValue>
-                  {outputBehavior === 'default'
-                    ? t('settings.piarium.pluginSettings.field.pluginDefault')
-                    : outputBehavior === 'disabled'
-                      ? t('settings.piarium.pluginSettings.field.disabled')
-                      : t('settings.piarium.pluginSettings.field.enabled')}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
-                <SelectItem value="disabled">{t('settings.piarium.pluginSettings.field.disabled')}</SelectItem>
-                <SelectItem value="file">{t('settings.piarium.pluginSettings.field.enabled')}</SelectItem>
-              </SelectContent>
-            </Select>
-            {outputBehavior === 'file' ? (
-              <Input
-                value={typeof output === 'string' ? output : ''}
-                disabled={disabled}
-                placeholder="output.md"
-                onChange={(event) => setConfig('output', event.target.value)}
-              />
-            ) : null}
-          </div>
-        </SettingsFieldRow>
-        <SettingsFieldRow label={t('settings.piarium.agents.definition.field.outputReturnMode')} controlClassName="w-full">
-          <Select
-            value={stepConfigString(step, 'outputMode') || 'default'}
-            disabled={disabled}
-            onValueChange={(value) => setConfig('outputMode', value === 'default' ? undefined : value)}
-          >
-            <SelectTrigger size="settings" className="w-full">
-              <SelectValue>
-                {stepConfigString(step, 'outputMode') || t('settings.piarium.pluginSettings.field.pluginDefault')}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
-              <SelectItem value="inline">inline</SelectItem>
-              <SelectItem value="file-only">file-only</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingsFieldRow>
-      </div>
-
-      <div className="grid gap-3 @xl:grid-cols-2">
-        {([
-          ['reads', t('settings.piarium.agents.definition.field.filesReadBeforeStep'), readsMode, reads],
-          ['skills', t('settings.piarium.agents.definition.field.availableSkills'), skillsMode, skills],
-        ] as const).map(([key, label, mode, values]) => (
-          <SettingsFieldRow key={key} label={label} alignEnd={false} controlClassName="w-full items-start">
-            <div className="flex min-w-0 flex-1 flex-col gap-2">
-              <Select
-                value={mode}
-                disabled={disabled}
-                onValueChange={(value) => {
-                  if (value === 'default') setConfig(key, undefined);
-                  else if (value === 'disabled') setConfig(key, false);
-                  else setConfig(key, values ?? []);
-                }}
-              >
-                <SelectTrigger size="settings" className="w-full">
-                  <SelectValue>
-                    {mode === 'default'
-                      ? t('settings.piarium.pluginSettings.field.pluginDefault')
-                      : mode === 'disabled'
-                        ? t('settings.piarium.pluginSettings.field.disabled')
-                        : t('settings.piarium.pluginSettings.subagents.value.selectedTools')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
-                  <SelectItem value="disabled">{t('settings.piarium.pluginSettings.field.disabled')}</SelectItem>
-                  <SelectItem value="selected">{t('settings.piarium.pluginSettings.subagents.value.selectedTools')}</SelectItem>
-                </SelectContent>
-              </Select>
-              {mode === 'selected' ? (
-                <Textarea
-                  value={(values ?? []).join('\n')}
-                  disabled={disabled}
-                  placeholder={key === 'reads' ? 'brief.md\nrequirements.md' : 'skill-name'}
-                  onChange={(event) => setConfig(key, event.target.value
-                    .split(/\r?\n/)
-                    .map((entry) => entry.trim())
-                    .filter(Boolean))}
-                  className="min-h-20 font-mono"
-                />
-              ) : null}
-            </div>
-          </SettingsFieldRow>
-        ))}
-      </div>
-
-      <SettingsFieldRow label={t('settings.piarium.agents.definition.field.progressTracking')} controlClassName="w-full max-w-lg">
-        <Select
-          value={progress}
-          disabled={disabled}
-          onValueChange={(value) => setConfig(
-            'progress',
-            value === 'default' ? undefined : value === 'enabled',
-          )}
-        >
-          <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
-            <SelectValue>
-              {progress === 'default'
-                ? t('settings.piarium.pluginSettings.field.pluginDefault')
-                : t(progress === 'enabled'
-                  ? 'settings.piarium.pluginSettings.field.enabled'
-                  : 'settings.piarium.pluginSettings.field.disabled')}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
-            <SelectItem value="enabled">{t('settings.piarium.pluginSettings.field.enabled')}</SelectItem>
-            <SelectItem value="disabled">{t('settings.piarium.pluginSettings.field.disabled')}</SelectItem>
-          </SelectContent>
-        </Select>
-      </SettingsFieldRow>
-
-      <div className="space-y-3 border-t border-border/60 pt-3">
-        <SettingsFieldRow label={t('settings.piarium.pluginSettings.subagents.field.toolBudget')} controlClassName="w-full max-w-lg">
-          <Select
-            value={budgetMode}
-            disabled={disabled}
-            onValueChange={(value) => setConfig('toolBudget', value === 'default' ? undefined : (budget ?? { hard: 16 }))}
-          >
-            <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
-              <SelectValue>
-                {budgetMode === 'default'
-                  ? t('settings.piarium.pluginSettings.field.pluginDefault')
-                  : budget
-                    ? t('settings.piarium.pluginSettings.subagents.overrides.mode.override')
-                    : t('settings.piarium.pluginSettings.field.unsupportedValue')}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
-              <SelectItem value="override">{t('settings.piarium.pluginSettings.subagents.overrides.mode.override')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingsFieldRow>
-        {budgetMode === 'override' ? (
-          <div className="grid gap-3 @xl:grid-cols-2">
-            <SettingsFieldRow label={t('settings.piarium.pluginSettings.subagents.field.toolBudgetHard')} controlClassName="w-full">
-              <NumberInput
-                value={typeof budget?.hard === 'number' ? budget.hard : undefined}
-                fallbackValue={16}
-                disabled={disabled}
-                min={1}
-                step={1}
-                onValueChange={(value) => setToolBudgetField('hard', value)}
-                containerClassName="w-36"
-              />
-            </SettingsFieldRow>
-            <SettingsFieldRow label={t('settings.piarium.pluginSettings.subagents.field.toolBudgetSoft')} controlClassName="w-full">
-              <NumberInput
-                value={typeof budget?.soft === 'number' ? budget.soft : undefined}
-                fallbackValue={10}
-                disabled={disabled}
-                min={1}
-                step={1}
-                onClear={() => setToolBudgetField('soft', undefined)}
-                onValueChange={(value) => setToolBudgetField('soft', value)}
-                containerClassName="w-36"
-                emptyLabel={t('settings.piarium.pluginSettings.field.pluginDefault')}
-              />
-            </SettingsFieldRow>
-            <SettingsFieldRow label={t('settings.piarium.pluginSettings.subagents.field.toolsAfterBudget')} alignEnd={false} controlClassName="w-full items-start @xl:col-span-2">
-              <div className="flex min-w-0 flex-1 flex-col gap-2 @xl:flex-row">
-                <Select
-                  value={blockMode}
-                  disabled={disabled}
-                  onValueChange={(value) => {
-                    if (value === 'default') setToolBudgetField('block', undefined);
-                    else if (value === 'all') setToolBudgetField('block', '*');
-                    else setToolBudgetField('block', blockList ?? ['read', 'grep', 'find', 'ls']);
-                  }}
-                >
-                  <SelectTrigger size="settings" className="w-full min-w-40 max-w-48">
-                    <SelectValue>
-                      {blockMode === 'default'
-                        ? t('settings.piarium.pluginSettings.field.pluginDefault')
-                        : t(blockMode === 'all'
-                          ? 'settings.piarium.pluginSettings.subagents.value.allTools'
-                          : 'settings.piarium.pluginSettings.subagents.value.selectedTools')}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="default">{t('settings.piarium.pluginSettings.field.pluginDefault')}</SelectItem>
-                    <SelectItem value="all">{t('settings.piarium.pluginSettings.subagents.value.allTools')}</SelectItem>
-                    <SelectItem value="selected">{t('settings.piarium.pluginSettings.subagents.value.selectedTools')}</SelectItem>
-                  </SelectContent>
-                </Select>
-                {blockMode === 'selected' ? (
-                  <Textarea
-                    value={(blockList ?? []).join('\n')}
-                    disabled={disabled}
-                    placeholder={'read\ngrep\nfind\nls'}
-                    onChange={(event) => setToolBudgetField('block', event.target.value
-                      .split(/\r?\n/)
-                      .map((entry) => entry.trim())
-                      .filter(Boolean))}
-                    className="min-h-20 min-w-0 flex-1 font-mono"
-                  />
-                ) : null}
-              </div>
-            </SettingsFieldRow>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
-
 function titleKey(mode: PiSubagentsDefinitionMode):
   | 'settings.piarium.agents.definition.createAgent'
-  | 'settings.piarium.agents.definition.createWorkflow'
-  | 'settings.piarium.agents.definition.editAgent'
-  | 'settings.piarium.agents.definition.editWorkflow' {
+  | 'settings.piarium.agents.definition.editAgent' {
   switch (mode) {
     case 'create-agent':
       return 'settings.piarium.agents.definition.createAgent';
-    case 'create-workflow':
-      return 'settings.piarium.agents.definition.createWorkflow';
     case 'update-agent':
       return 'settings.piarium.agents.definition.editAgent';
-    case 'update-workflow':
-      return 'settings.piarium.agents.definition.editWorkflow';
   }
 }
 
@@ -436,7 +88,7 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
   ));
   const [issue, setIssue] = React.useState<PiSubagentsDefinitionIssue | null>(null);
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
-  const createMode = mode === 'create-agent' || mode === 'create-workflow';
+  const createMode = mode === 'create-agent';
 
   React.useEffect(() => {
     if (!open || !mode) return;
@@ -473,10 +125,6 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
         return t('settings.piarium.agents.definition.validation.noChanges');
       case 'unsupported-advanced-field':
         return `${t('settings.piarium.pluginSettings.field.unsupportedValue')}: ${issue.field}`;
-      case 'unsupported-workflow-step-field':
-        return `${t('settings.piarium.pluginSettings.field.unsupportedValue')}: ${t('settings.piarium.agents.definition.step', { index: issue.index + 1 })} · ${issue.field}`;
-      case 'workflow-step-agent':
-        return t('settings.piarium.agents.definition.validation.stepAgent', { index: issue.index + 1 });
     }
   }, [issue, t, tx]);
 
@@ -543,91 +191,6 @@ export const PiSubagentsDefinitionDialog: React.FC<PiSubagentsDefinitionDialogPr
               />
             </SettingsFieldRow>
           </SettingsControlGroup>
-
-          {mode === 'create-workflow' || mode === 'update-workflow' ? (
-            <SettingsControlGroup
-              className="border-t border-border/60 pt-5"
-              title={t('settings.piarium.agents.definition.steps')}
-              contentClassName="space-y-3"
-            >
-              {draft.workflowSteps.map((step, index) => (
-                <div key={index} className="border-t border-border/60 pt-3 first:border-t-0 first:pt-0">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className={SETTINGS_FIELD_LABEL_CLASS}>
-                      {t('settings.piarium.agents.definition.step', { index: index + 1 })}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      disabled={submitting || draft.workflowSteps.length === 1}
-                      onClick={() => update(
-                        'workflowSteps',
-                        draft.workflowSteps.filter((_, candidate) => candidate !== index),
-                      )}
-                    >
-                      <Icon name="delete-bin" className="size-3.5" />
-                      {t('settings.piarium.agents.definition.removeStep')}
-                    </Button>
-                  </div>
-                  <div className="space-y-3">
-                    <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.stepAgent')} controlClassName="w-full max-w-lg">
-                      <Input
-                        value={step.agent}
-                        disabled={submitting}
-                        placeholder={tx('settings.piarium.agents.definition.placeholder.stepAgent')}
-                        onChange={(event) => update(
-                          'workflowSteps',
-                          draft.workflowSteps.map((current, candidate) => (
-                            candidate === index ? { ...current, agent: event.target.value } : current
-                          )),
-                        )}
-                      />
-                    </SettingsFieldRow>
-                    <SettingsFieldRow label={tx('settings.piarium.agents.definition.field.stepTask')} alignEnd={false} controlClassName="w-full max-w-lg items-start">
-                      <Textarea
-                        value={step.task}
-                        disabled={submitting}
-                        placeholder={tx('settings.piarium.agents.definition.placeholder.stepTask')}
-                        onChange={(event) => update(
-                          'workflowSteps',
-                          draft.workflowSteps.map((current, candidate) => (
-                            candidate === index ? { ...current, task: event.target.value } : current
-                          )),
-                        )}
-                        className="min-h-16"
-                      />
-                    </SettingsFieldRow>
-                    <div className="border-t border-border/60 pt-3">
-                      <WorkflowStepEditor
-                        disabled={submitting}
-                        step={step}
-                        onChange={(next) => update(
-                          'workflowSteps',
-                          draft.workflowSteps.map((current, candidate) => (
-                            candidate === index ? next : current
-                          )),
-                        )}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={submitting}
-                onClick={() => update('workflowSteps', [
-                  ...draft.workflowSteps,
-                  { agent: '', config: {}, task: '' },
-                ])}
-              >
-                <Icon name="add" className="size-4" />
-                {t('settings.piarium.agents.definition.addStep')}
-              </Button>
-            </SettingsControlGroup>
-          ) : null}
 
           {mode === 'create-agent' || mode === 'update-agent' ? (
             <>

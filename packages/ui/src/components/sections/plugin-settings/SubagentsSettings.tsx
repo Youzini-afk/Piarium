@@ -16,6 +16,7 @@ import {
   PluginOptionalNumberField,
   PluginOptionalSelectField,
   PluginSelectField,
+  PluginStringField,
   PluginStringListField,
 } from './PluginConfigFields';
 import { PluginAdvancedDraftEditor } from './PluginAdvancedDraftEditor';
@@ -140,6 +141,9 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
   const issueFieldLabel = React.useCallback((field: string): string => {
     const directLabels: Record<string, string> = {
       'agentOverrides': t('settings.piarium.pluginSettings.subagents.overrides.validationCollection'),
+      'defaultProvider': t('settings.piarium.pluginSettings.subagents.field.defaultProvider'),
+      'maxThinking': t('settings.piarium.pluginSettings.subagents.field.maxThinking'),
+      'modelScope': t('settings.piarium.pluginSettings.subagents.delegation.modelAccess'),
       'modelScope.allow': t('settings.piarium.pluginSettings.subagents.field.allowedModels'),
       'toolBudget': t('settings.piarium.pluginSettings.subagents.field.toolBudget'),
       'toolBudget.hard': t('settings.piarium.pluginSettings.subagents.field.toolHardLimit'),
@@ -157,6 +161,9 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
     };
     const direct = directLabels[field];
     if (direct) return direct;
+    if (field.startsWith('modelScope.agents.')) {
+      return t('settings.piarium.pluginSettings.subagents.delegation.modelAccess');
+    }
     const overrideMatch = /^agentOverrides\.([^.]+)(?:\.(.+))?$/.exec(field);
     if (!overrideMatch) return t('settings.piarium.pluginSettings.subagents.overrides.validationCollection');
     const agent = overrideMatch[1] ?? '';
@@ -165,12 +172,16 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
       acceptanceRole: t('settings.piarium.pluginSettings.subagents.field.acceptanceRole'),
       completionGuard: t('settings.piarium.pluginSettings.subagents.field.completionGuard'),
       defaultContext: t('settings.piarium.pluginSettings.subagents.field.defaultContext'),
+      defaultProvider: t('settings.piarium.pluginSettings.subagents.field.defaultProvider'),
+      defaultReads: t('settings.piarium.pluginSettings.subagents.field.defaultReads'),
       disabled: t('settings.piarium.pluginSettings.subagents.field.agentAvailability'),
       extensions: t('settings.piarium.pluginSettings.subagents.field.extensions'),
       fallbackModels: t('settings.piarium.pluginSettings.subagents.field.fallbackModels'),
       inheritProjectContext: t('settings.piarium.pluginSettings.subagents.field.inheritProjectContext'),
       inheritSkills: t('settings.piarium.pluginSettings.subagents.field.inheritSkills'),
       model: t('settings.piarium.pluginSettings.subagents.field.primaryModel'),
+      output: t('settings.piarium.pluginSettings.subagents.field.defaultOutput'),
+      outputMode: t('settings.piarium.pluginSettings.subagents.field.outputMode'),
       skills: t('settings.piarium.pluginSettings.subagents.field.skills'),
       subagentOnlyExtensions: t('settings.piarium.pluginSettings.subagents.field.subagentExtensions'),
       thinking: t('settings.piarium.pluginSettings.subagents.field.thinkingLevel'),
@@ -324,13 +335,16 @@ export const SubagentsSettings: React.FC<SubagentsSettingsProps> = ({ runtimeTar
             <PluginConfigSource controller={settings} />
             <SettingsControlGroup title={tx('settings.piarium.pluginSettings.subagents.delegation.modelDefaults')} contentClassName="space-y-4">
               <PluginModelField {...settingsFields} path={['defaultModel']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultModel')} placeholder={tx('settings.piarium.pluginSettings.subagents.value.inheritModel')} />
+              <PluginStringField {...settingsFields} path={['defaultProvider']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultProvider')} placeholder="openai" />
               <PluginOptionalSelectField {...settingsFields} path={['defaultThinking']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultThinking')} options={thinkingOptions} />
+              <PluginOptionalSelectField {...settingsFields} path={['maxThinking']} label={tx('settings.piarium.pluginSettings.subagents.field.maxThinking')} options={thinkingOptions} />
               <PluginStringListField {...settingsFields} path={['defaultExtensions']} label={tx('settings.piarium.pluginSettings.subagents.field.defaultExtensions')} placeholder="extension/path.ts" emptyArrayOnClear />
               <PluginBooleanField {...settingsFields} path={['disableThinking']} label={tx('settings.piarium.pluginSettings.subagents.field.disableThinking')} defaultValue={false} />
             </SettingsControlGroup>
             <SettingsControlGroup className={SUBGROUP_CLASS} title={tx('settings.piarium.pluginSettings.subagents.delegation.modelAccess')} description={tx('settings.piarium.pluginSettings.subagents.delegation.modelAccessDescription')} contentClassName="space-y-4">
               <PluginBooleanField {...settingsFields} path={['disableBuiltins']} label={tx('settings.piarium.pluginSettings.subagents.field.disableBuiltins')} defaultValue={false} />
               <PluginBooleanField {...settingsFields} path={['modelScope', 'enforce']} label={tx('settings.piarium.pluginSettings.subagents.field.enforceModelAllowlist')} defaultValue={false} />
+              <PluginBooleanField {...settingsFields} path={['modelScope', 'strict']} label={tx('settings.piarium.pluginSettings.subagents.field.strictModelAllowlist')} defaultValue={false} />
               <PluginStringListField {...settingsFields} path={['modelScope', 'allow']} label={tx('settings.piarium.pluginSettings.subagents.field.allowedModels')} placeholder="provider/*" />
             </SettingsControlGroup>
             {scope === 'project' ? (

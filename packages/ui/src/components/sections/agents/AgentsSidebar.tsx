@@ -80,7 +80,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   const definitionActions = state.catalog.providers
     .filter((provider) => provider.id === 'pi-subagents' && provider.available)
     .flatMap((provider) => provider.actions)
-    .filter((action) => action.id === 'create-agent' || action.id === 'create-workflow');
+    .filter((action) => action.id === 'create-agent');
 
   return (
     <SettingsSidebarLayout
@@ -104,13 +104,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                       <DropdownMenuItem
                         key={action.id}
                         onClick={() => {
-                          requestAgentsCatalogDefinition(action.id as 'create-agent' | 'create-workflow');
+                          requestAgentsCatalogDefinition('create-agent');
                           onItemSelect?.();
                         }}
                       >
-                        {action.id === 'create-agent'
-                          ? t('settings.piarium.agents.definition.createAgent')
-                          : t('settings.piarium.agents.definition.createWorkflow')}
+                        {t('settings.piarium.agents.definition.createAgent')}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>

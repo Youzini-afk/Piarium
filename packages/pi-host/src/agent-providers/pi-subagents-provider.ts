@@ -59,7 +59,6 @@ const RESET_ACTION: PiAgentActionDescriptor = {
 
 interface ParsedListEntry {
   description: string;
-  kind: "delegatable" | "workflow";
   name: string;
   source: PiAgentSourceScope;
 }
@@ -73,14 +72,6 @@ interface ParsedAgentDetail {
   path?: string;
   source: PiAgentSourceScope;
   thinking?: string;
-}
-
-interface ParsedChainDetail {
-  description: string;
-  name: string;
-  packageName?: string;
-  path?: string;
-  source: PiAgentSourceScope;
 }
 
 function foldFrontmatterBlock(block: string): string {
@@ -214,74 +205,12 @@ function normalizedFrontmatterConfig(
   return config;
 }
 
-function parseChainStep(agent: string, section: string): Record<string, JsonValue> {
-  const lines = section.split("\n");
-  const blank = lines.findIndex((line) => !line.trim());
-  const configLines = blank < 0 ? lines : lines.slice(0, blank);
-  const step: Record<string, JsonValue> = {
-    agent,
-    task: (blank < 0 ? "" : lines.slice(blank + 1).join("\n")).trim(),
-  };
-  for (const line of configLines) {
-    const match = /^([\w-]+):\s*(.*)$/.exec(line);
-    if (!match?.[1]) continue;
-    const key = match[1].toLowerCase();
-    const raw = (match[2] ?? "").trim();
-    if (["phase", "label", "as", "outputschema", "outputmode", "model"].includes(key)) {
-      if (raw) {
-        const outputKey = key === "outputschema" ? "outputSchema" : key === "outputmode" ? "outputMode" : key;
-        step[outputKey] = raw;
-      }
-    } else if (key === "output") {
-      step.output = raw === "false" ? false : raw;
-    } else if (key === "reads" || key === "skills") {
-      step[key] = raw === "false" ? false : parseCsv(raw);
-    } else if (key === "progress") {
-      if (raw === "true" || raw === "false") step.progress = raw === "true";
-    } else if (key === "toolbudget") {
-      try {
-        step.toolBudget = JSON.parse(raw) as JsonValue;
-      } catch {
-        step.toolBudget = raw;
-      }
-    } else {
-      // The management API in pi-subagents 0.37.2 rebuilds a whitelist step on
-      // update. Surface unknown native fields to the renderer so it can refuse
-      // a lossy edit instead of silently erasing them from the workflow file.
-      step[match[1]] = raw;
-    }
-  }
-  return step;
-}
-
-function parseMarkdownChain(content: string): Record<string, JsonValue> {
-  const { body, frontmatter } = parseFrontmatter(content);
-  const config = normalizedFrontmatterConfig(frontmatter);
-  const matches = [...body.matchAll(/^##\s+(.+)[^\S\n]*$/gm)];
-  config.steps = matches.map((match, index) => {
-    const start = (match.index ?? 0) + match[0].length + (body[(match.index ?? 0) + match[0].length] === "\n" ? 1 : 0);
-    const end = matches[index + 1]?.index ?? body.length;
-    return parseChainStep((match[1] ?? "").trim(), body.slice(start, end).trimEnd());
-  });
-  return config;
-}
-
 async function readDefinition(
-  kind: ParsedListEntry["kind"],
   path: string | undefined,
 ): Promise<Record<string, JsonValue> | undefined> {
   if (!path) return undefined;
   try {
     const content = await readFile(path, "utf8");
-    if (kind === "workflow" && path.endsWith(".chain.json")) {
-      const parsed = JSON.parse(content) as unknown;
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
-      const config = { ...(parsed as Record<string, JsonValue>) };
-      if (Array.isArray(config.chain)) config.steps = config.chain;
-      delete config.chain;
-      return config;
-    }
-    if (kind === "workflow") return parseMarkdownChain(content);
     const { body, frontmatter } = parseFrontmatter(content);
     return { ...normalizedFrontmatterConfig(frontmatter), systemPrompt: body };
   } catch {
@@ -306,7 +235,6 @@ function optionalScope(record: Record<string, JsonValue>): "user" | "project" | 
 function createConfigForScope(
   value: JsonValue,
   scope: "user" | "project",
-  kind: "agent" | "workflow",
 ): Record<string, JsonValue> {
   let parsed: JsonValue = value;
   if (typeof value === "string") {
@@ -323,11 +251,11 @@ function createConfigForScope(
     ...(parsed as Record<string, JsonValue>),
     scope,
   };
-  if (kind === "workflow" && (!Array.isArray(config.steps) || config.steps.length === 0)) {
-    throw new HostError("invalid_params", "input.config.steps is required for create-workflow");
-  }
-  if (kind === "agent" && config.steps !== undefined) {
-    throw new HostError("invalid_params", "input.config.steps is only valid for create-workflow");
+  if (config.steps !== undefined) {
+    throw new HostError(
+      "invalid_params",
+      "pi-subagents no longer accepts durable workflow definitions; use workflowScript or /prompt-workflow",
+    );
   }
   return config;
 }
@@ -355,28 +283,23 @@ function toolResultText(result: unknown): { message: string; success: boolean } 
 
 function parseList(text: string): ParsedListEntry[] {
   const entries: ParsedListEntry[] = [];
-  let section: "agent" | "workflow" | undefined;
+  let inExecutableAgents = false;
   for (const line of text.split(/\r?\n/)) {
     if (line.trim() === "Executable agents:") {
-      section = "agent";
+      inExecutableAgents = true;
       continue;
     }
-    if (line.trim() === "Chains:") {
-      section = "workflow";
+    if (line.startsWith("Restricted agents") || line.endsWith("diagnostics:")) {
+      inExecutableAgents = false;
       continue;
     }
-    if (line.endsWith("diagnostics:")) {
-      section = undefined;
-      continue;
-    }
-    if (!section) continue;
-    const match = /^-\s+(.+?)\s+\((builtin|package|user|project)(?:,[^)]*)?\):\s*(.*)$/.exec(
+    if (!inExecutableAgents) continue;
+    const match = /^-\s+(.+?)\s+\((builtin|package|user|project|runtime)(?:,[^)]*)?\):\s*(.*)$/.exec(
       line.trim(),
     );
     if (!match) continue;
     entries.push({
       description: match[3] ?? "",
-      kind: section === "agent" ? "delegatable" : "workflow",
       name: match[1] ?? "",
       source: match[2] as PiAgentSourceScope,
     });
@@ -397,7 +320,7 @@ function valueAfterLabel(text: string, label: string): string | undefined {
 }
 
 function parseAgentDetail(text: string): ParsedAgentDetail | undefined {
-  const header = /^Agent:\s+(.+?)\s+\((builtin|package|user|project)\)$/m.exec(text);
+  const header = /^Agent:\s+(.+?)\s+\((builtin|package|user|project|runtime)\)$/m.exec(text);
   if (!header) return undefined;
   const csv = (label: string) => valueAfterLabel(text, label)?.split(",").map((value) => value.trim()).filter(Boolean);
   const fallbackModels = csv("Fallback models");
@@ -417,28 +340,13 @@ function parseAgentDetail(text: string): ParsedAgentDetail | undefined {
   };
 }
 
-function parseChainDetail(text: string): ParsedChainDetail | undefined {
-  const header = /^Chain:\s+(.+?)\s+\((package|user|project)\)$/m.exec(text);
-  if (!header) return undefined;
-  const packageName = valueAfterLabel(text, "Package");
-  const path = valueAfterLabel(text, "Path");
-  return {
-    description: valueAfterLabel(text, "Description") ?? "",
-    name: header[1] ?? "",
-    ...(packageName ? { packageName } : {}),
-    ...(path ? { path } : {}),
-    source: header[2] as PiAgentSourceScope,
-  };
-}
-
 function actionsFor(
   source: PiAgentSourceScope,
   disabled: boolean,
-  kind: ParsedListEntry["kind"],
 ): PiAgentActionDescriptor[] {
   const actions: PiAgentActionDescriptor[] = [INSPECT_ACTION];
+  if (source === "runtime") return actions;
   if (source === "user" || source === "project") actions.push(UPDATE_ACTION, DELETE_ACTION);
-  if (kind === "workflow") return actions;
   if (source === "builtin" || source === "package") actions.push(EJECT_ACTION);
   actions.push(disabled ? ENABLE_ACTION : DISABLE_ACTION, RESET_ACTION);
   return actions;
@@ -446,16 +354,16 @@ function actionsFor(
 
 function descriptorFor(entry: ParsedListEntry, disabled: boolean): PiAgentDescriptor {
   return {
-    actions: actionsFor(entry.source, disabled, entry.kind),
+    actions: actionsFor(entry.source, disabled),
     configuration: CONFIGURATION,
     description: entry.description,
-    id: agentProviderEntityId(PROVIDER_ID, entry.kind, entry.name),
+    id: agentProviderEntityId(PROVIDER_ID, "delegatable", entry.name),
     invocation: {
-      command: entry.kind === "workflow" ? "run-chain" : "run",
+      command: "run",
       kind: "slash-command",
-      taskSeparator: entry.kind === "workflow" ? "double-dash" : "space",
+      taskSeparator: "space",
     },
-    kind: entry.kind,
+    kind: "delegatable",
     name: entry.name,
     providerId: PROVIDER_ID,
     source: { scope: entry.source },
@@ -478,12 +386,11 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
     this.descriptor = {
       actions: [
         { id: "create-agent", label: "Create agent", requiresScope: true },
-        { id: "create-workflow", label: "Create workflow", requiresScope: true },
         { id: "models", label: "Inspect model resolution" },
       ],
       available: tool !== undefined,
       configuration: CONFIGURATION,
-      description: "Delegatable agents and workflows owned by pi-subagents",
+      description: "Delegatable agents owned by pi-subagents",
       id: PROVIDER_ID,
       label: "Pi Subagents",
       ...(tool?.sourceInfo.source === undefined
@@ -513,35 +420,19 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
     const entries = parseList(listed.message);
     const detailResults = await Promise.all(entries.map((entry) => this.#execute({
       action: "get",
-      ...(entry.kind === "workflow" ? { chainName: entry.name } : { agent: entry.name }),
+      agent: entry.name,
       agentScope: "both",
     })));
     const definitions = await Promise.all(entries.map((entry, index) => {
       if (entry.source !== "user" && entry.source !== "project") return undefined;
       const detailText = detailResults[index]?.message ?? "";
-      const path = entry.kind === "workflow"
-        ? parseChainDetail(detailText)?.path
-        : parseAgentDetail(detailText)?.path;
-      return readDefinition(entry.kind, path);
+      const path = parseAgentDetail(detailText)?.path;
+      return readDefinition(path);
     }));
     const agents = entries.map((entry, index): PiAgentDescriptor => {
       const descriptor = descriptorFor(entry, false);
       const detailText = detailResults[index]?.message ?? "";
       const definition = definitions[index];
-      if (entry.kind === "workflow") {
-        const detail = parseChainDetail(detailText);
-        if (!detail) return descriptor;
-        return {
-          ...descriptor,
-          ...(definition === undefined ? {} : { definition: { config: definition } }),
-          description: detail.description || descriptor.description,
-          source: {
-            ...(detail.packageName === undefined ? {} : { packageName: detail.packageName }),
-            ...(detail.path === undefined ? {} : { path: detail.path }),
-            scope: detail.source,
-          },
-        };
-      }
       const detail = parseAgentDetail(detailText);
       if (!detail) return descriptor;
       return {
@@ -559,7 +450,7 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
       };
     });
     const activeNames = new Set(
-      agents.filter((agent) => agent.kind === "delegatable").map((agent) => agent.name),
+      agents.map((agent) => agent.name),
     );
     const probe = await this.#execute({
       action: "get",
@@ -572,11 +463,11 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
       const detail = parseAgentDetail(detailResult.message);
       if (!detail) continue;
       const definition = detail.source === "user" || detail.source === "project"
-        ? await readDefinition("delegatable", detail.path)
+        ? await readDefinition(detail.path)
         : undefined;
       agents.push({
         ...descriptorFor(
-          { description: detail.description, kind: "delegatable", name: detail.name, source: detail.source },
+          { description: detail.description, name: detail.name, source: detail.source },
           true,
         ),
         ...(definition === undefined ? {} : { definition: { config: definition } }),
@@ -608,7 +499,13 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
     if (action === "models") {
       return this.#result(action, agentId, await this.#execute({ action: "models" }));
     }
-    if (action === "create-agent" || action === "create-workflow") {
+    if (action === "create-workflow") {
+      throw new HostError(
+        "unsupported_agent_action",
+        "pi-subagents no longer supports durable workflow definitions",
+      );
+    }
+    if (action === "create-agent") {
       if (!scope) throw new HostError("invalid_params", "input.scope is required");
       if (record.config === undefined) throw new HostError("invalid_params", "input.config is required");
       const result = await this.#execute({
@@ -620,7 +517,6 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
         config: createConfigForScope(
           record.config,
           scope,
-          action === "create-workflow" ? "workflow" : "agent",
         ),
       });
       if (result.success) await this.#context.session.reload();
@@ -629,8 +525,7 @@ export class PiSubagentsProvider implements AgentProviderAdapter {
     if (!agentId) throw new HostError("invalid_params", "agentId is required");
     const agent = (await this.list()).agents.find((candidate) => candidate.id === agentId);
     if (!agent) throw new HostError("agent_not_found", `Unknown pi-subagents agent: ${agentId}`);
-    const targetKey = agent.kind === "workflow" ? "chainName" : "agent";
-    const params: Record<string, unknown> = { action, [targetKey]: agent.name };
+    const params: Record<string, unknown> = { action, agent: agent.name };
     const mutable = new Set(["update", "delete", "eject", "disable", "enable", "reset"]);
     if (!new Set(["inspect", ...mutable]).has(action)) {
       throw new HostError("unsupported_agent_action", `Unsupported pi-subagents action: ${action}`);

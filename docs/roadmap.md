@@ -233,12 +233,14 @@ the integration surface each adapter consumes is recorded in
   `pi-subagents` and Magic Context. Subagent tree controls and Magic Context memory/session
   diagnostics remain dependent on their public event/data contracts.
 - Implemented: the first-class `pi-subagents` settings surface now edits scoped defaults and model
-  policy, the current Watchdog review/LSP schema, Fleet and async behavior, delegation limits,
+  policy (including default provider, thinking ceiling, strict and per-agent scopes), the current
+  Watchdog review/LSP schema, Fleet and async behavior, delegation limits,
   sessions/artifacts/worktrees, Intercom, scheduled runs, completion/control notifications, and
   turn/tool/usage budgets in the plugin's native documents. Unknown keys remain intact and the raw
   documents remain authoritative. Per-agent overrides now use the live provider catalog's runtime
   names while still accepting arbitrary future/package names; all current scalar/list/clear
-  sentinels and per-agent tool budgets are structured, and custom/package frontmatter precedence is
+  sentinels, output defaults, pre-read files, provider overrides and per-agent tool budgets are
+  structured, and custom/package frontmatter precedence is
   explained rather than flattened into the generic Agents page. Fields owned by Agent Markdown or
   individual runs are diagnosed at their invalid override path, while unknown future keys remain
   round-trippable. Current notification channels/events and proactive skill delegation are also
@@ -264,9 +266,10 @@ the integration surface each adapter consumes is recorded in
   is fabricated where Pi exposes no such contract.
 - Implemented: Agents executes every action advertised by the `pi-subagents` provider instead of
   rendering inert badges. Provider-level creation and model-resolution actions, structured agent
-  and workflow editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused
+  editors, scope selection, inspect/update/eject/enable/disable/reset/delete, focused
   destructive confirmation, project-trust gating, result reporting, and catalog refresh all route
-  through the plugin-owned management tool.
+  through the plugin-owned management tool. Durable workflow definitions were removed with
+  `pi-subagents` 0.55; `workflowScript` and `/prompt-workflow` remain plugin-owned execution flows.
 - Implemented: Fleet is a provider-neutral live-work surface. `pi-subagents` still uses public
   `subagents:rpc:v1` `fleetStatus` v1 for delegated agents. `pi-background-tasks@2.4.2` uses EventBus
   v1 for background agents and shell tasks, including advertised `run`, bounded `logs`, and `kill`.

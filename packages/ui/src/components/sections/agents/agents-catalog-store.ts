@@ -20,7 +20,7 @@ export interface AgentsCatalogState {
   selectedAgentId: string | null;
   statusFilter: AgentStatusFilter;
   targetKey: string;
-  definitionRequest: 'create-agent' | 'create-workflow' | null;
+  definitionRequest: 'create-agent' | null;
 }
 
 export const EMPTY_AGENT_CATALOG: PiAgentCatalogSnapshot = {
@@ -80,7 +80,7 @@ export function selectAgentsCatalogAgent(selectedAgentId: string | null): void {
 }
 
 export function requestAgentsCatalogDefinition(
-  definitionRequest: 'create-agent' | 'create-workflow' | null,
+  definitionRequest: 'create-agent' | null,
 ): void {
   publish({ ...state, definitionRequest });
 }

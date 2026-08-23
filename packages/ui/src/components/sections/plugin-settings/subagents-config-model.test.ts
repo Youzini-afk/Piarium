@@ -17,6 +17,18 @@ describe('subagents config model', () => {
       code: 'model-scope-allow-required',
       field: 'modelScope.allow',
     });
+    expect(subagentsSettingsDraftIssue({
+      modelScope: {
+        agents: { reviewer: { allow: ['openai/*'], enforce: true, strict: true } },
+        enforce: true,
+      },
+    })).toBeNull();
+    expect(subagentsSettingsDraftIssue({
+      modelScope: { agents: { reviewer: { allow: [] } } },
+    })).toEqual({
+      code: 'model-scope-allow-required',
+      field: 'modelScope.agents.reviewer.allow',
+    });
   });
 
   test('accepts the current pi-subagents override contract and rejects malformed known fields', () => {
@@ -26,14 +38,18 @@ describe('subagents config model', () => {
           acceptanceRole: false,
           completionGuard: true,
           defaultContext: 'fork',
+          defaultProvider: 'openai',
+          defaultReads: ['brief.md'],
           extensions: false,
           fallbackModels: ['anthropic/claude-sonnet-4-5'],
           inheritProjectContext: true,
           model: 'openai/gpt-5.2',
+          output: 'review.md',
+          outputMode: 'file-only',
           systemPromptMode: 'append',
           thinking: false,
           toolBudget: { block: ['read', 'grep'], hard: 20, soft: 10 },
-          tools: [],
+          tools: 'inherit',
           unknownFutureField: { preserved: true },
         },
       },
@@ -51,10 +67,18 @@ describe('subagents config model', () => {
       field: 'agentOverrides.reviewer.defaultContext',
     });
     expect(subagentsSettingsDraftIssue({
-      agentOverrides: { reviewer: { output: 'json' } },
+      defaultProvider: 'openai',
+      maxThinking: 'high',
+    })).toBeNull();
+    expect(subagentsSettingsDraftIssue({ maxThinking: 'ultra' })).toEqual({
+      code: 'invalid-value',
+      field: 'maxThinking',
+    });
+    expect(subagentsSettingsDraftIssue({
+      agentOverrides: { reviewer: { outputMode: 'stream' } },
     })).toEqual({
       code: 'invalid-value',
-      field: 'agentOverrides.reviewer.output',
+      field: 'agentOverrides.reviewer.outputMode',
     });
     expect(subagentsSettingsDraftIssue({
       agentOverrides: { reviewer: { toolBudget: { hard: 5, block: [] } } },

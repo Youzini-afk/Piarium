@@ -6,7 +6,7 @@ import {
 } from './plugin-config-model';
 
 export type SubagentsDraftIssue =
-  | { code: 'model-scope-allow-required'; field: 'modelScope.allow' }
+  | { code: 'model-scope-allow-required'; field: string }
   | { code: 'required'; field: string }
   | { code: 'invalid-number'; field: string }
   | { code: 'invalid-value'; field: string }
@@ -23,19 +23,23 @@ function positiveNumber(value: JsonValue | undefined, integer: boolean): number 
   return !integer || Number.isInteger(value) ? value : undefined;
 }
 
-const UNSUPPORTED_AGENT_OVERRIDE_FIELDS = new Set([
-  'acceptance',
-  'maxRuntimeMs',
-  'mcpDirectTools',
-  'memory',
-  'output',
-  'outputSchema',
-  'skillPath',
-  'timeoutMs',
-  'turnBudget',
-  'usageBudget',
-  'worktree',
-]);
+const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+
+function modelScopeRuleIssue(
+  rule: JsonObject,
+  field: string,
+): SubagentsDraftIssue | null {
+  for (const key of ['enforce', 'strict'] as const) {
+    if (rule[key] !== undefined && typeof rule[key] !== 'boolean') {
+      return { code: 'invalid-value', field: `${field}.${key}` };
+    }
+  }
+  if (rule.allow !== undefined) {
+    const allow = validStringArray(rule.allow)?.map((entry) => entry.trim()).filter(Boolean);
+    if (!allow?.length) return { code: 'model-scope-allow-required', field: `${field}.allow` };
+  }
+  return null;
+}
 
 function toolBudgetIssue(
   raw: JsonValue | undefined,
@@ -65,15 +69,40 @@ function toolBudgetIssue(
 }
 
 export function subagentsSettingsDraftIssue(draft: JsonObject): SubagentsDraftIssue | null {
-  const rawAllow = readJsonPath(draft, ['modelScope', 'allow']);
-  const allow = validStringArray(rawAllow)
-    ?.map((entry) => entry.trim())
-    .filter(Boolean);
-  if (rawAllow !== undefined && !allow?.length) {
-    return { code: 'model-scope-allow-required', field: 'modelScope.allow' };
+  const defaultProvider = readJsonPath(draft, ['defaultProvider']);
+  if (defaultProvider !== undefined && (typeof defaultProvider !== 'string' || !defaultProvider.trim())) {
+    return { code: 'invalid-value', field: 'defaultProvider' };
   }
-  if (readJsonPath(draft, ['modelScope', 'enforce']) === true && !allow?.length) {
-    return { code: 'model-scope-allow-required', field: 'modelScope.allow' };
+  const maxThinking = readJsonPath(draft, ['maxThinking']);
+  if (maxThinking !== undefined && (typeof maxThinking !== 'string' || !THINKING_LEVELS.has(maxThinking))) {
+    return { code: 'invalid-value', field: 'maxThinking' };
+  }
+
+  const rawModelScope = readJsonPath(draft, ['modelScope']);
+  if (rawModelScope !== undefined) {
+    const modelScope = asObject(rawModelScope);
+    if (!modelScope) return { code: 'invalid-value', field: 'modelScope' };
+    const issue = modelScopeRuleIssue(modelScope, 'modelScope');
+    if (issue) return issue;
+    const rawAgents = modelScope.agents;
+    let hasAgentAllow = false;
+    if (rawAgents !== undefined) {
+      const agents = asObject(rawAgents);
+      if (!agents) return { code: 'invalid-value', field: 'modelScope.agents' };
+      for (const [name, rawRule] of Object.entries(agents)) {
+        const rule = asObject(rawRule);
+        if (!name.trim() || !rule || rule.agents !== undefined) {
+          return { code: 'invalid-value', field: `modelScope.agents.${name || '?'}` };
+        }
+        const agentIssue = modelScopeRuleIssue(rule, `modelScope.agents.${name}`);
+        if (agentIssue) return agentIssue;
+        hasAgentAllow ||= validStringArray(rule.allow)?.some((entry) => Boolean(entry.trim())) === true;
+      }
+    }
+    const hasGlobalAllow = validStringArray(modelScope.allow)?.some((entry) => Boolean(entry.trim())) === true;
+    if (modelScope.enforce === true && !hasGlobalAllow && !hasAgentAllow) {
+      return { code: 'model-scope-allow-required', field: 'modelScope.allow' };
+    }
   }
 
   const rawOverrides = readJsonPath(draft, ['agentOverrides']);
@@ -81,11 +110,11 @@ export function subagentsSettingsDraftIssue(draft: JsonObject): SubagentsDraftIs
   const overrides = asObject(rawOverrides);
   if (!overrides) return { code: 'invalid-value', field: 'agentOverrides' };
 
-  const stringOrFalseFields = ['model', 'thinking'] as const;
+  const stringOrFalseFields = ['defaultProvider', 'model', 'output', 'thinking'] as const;
   const stringArrayOrFalseFields = [
+    'defaultReads',
     'fallbackModels',
     'skills',
-    'tools',
     'extensions',
     'subagentOnlyExtensions',
   ] as const;
@@ -99,18 +128,29 @@ export function subagentsSettingsDraftIssue(draft: JsonObject): SubagentsDraftIs
   for (const [name, rawOverride] of Object.entries(overrides)) {
     const override = asObject(rawOverride);
     if (!override) return { code: 'invalid-value', field: `agentOverrides.${name}` };
-    const unsupported = Object.keys(override).find((field) => (
-      UNSUPPORTED_AGENT_OVERRIDE_FIELDS.has(field)
-    ));
-    if (unsupported) {
-      return { code: 'invalid-value', field: `agentOverrides.${name}.${unsupported}` };
-    }
-
     for (const field of stringOrFalseFields) {
       const value = override[field];
       if (value !== undefined && value !== false && typeof value !== 'string') {
         return { code: 'invalid-value', field: `agentOverrides.${name}.${field}` };
       }
+      if ((field === 'defaultProvider' || field === 'output') && typeof value === 'string' && !value.trim()) {
+        return { code: 'invalid-value', field: `agentOverrides.${name}.${field}` };
+      }
+    }
+    if (
+      override.tools !== undefined
+      && override.tools !== false
+      && override.tools !== 'inherit'
+      && !validStringArray(override.tools)
+    ) {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.tools` };
+    }
+    if (
+      override.outputMode !== undefined
+      && override.outputMode !== 'inline'
+      && override.outputMode !== 'file-only'
+    ) {
+      return { code: 'invalid-value', field: `agentOverrides.${name}.outputMode` };
     }
     for (const field of stringArrayOrFalseFields) {
       const value = override[field];

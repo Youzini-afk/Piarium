@@ -49,7 +49,7 @@ Each row is the public contract Piarium consumes. Piarium owns none of these fil
 | --- | --- | --- |
 | `pi-wtf` | Registered prompt-repair commands | Plugin-owned `wtf.json` |
 | `pi-workspace-history` | `session_before_tree` hook plus registered undo/redo/checkpoint commands | Plugin-owned history store |
-| `pi-subagents` | Public `subagents:rpc:v1` with advertised `fleetStatus: { version: 1 }`; provider-owned management tool | Plugin-owned scoped JSONC |
+| `pi-subagents` | Public `subagents:rpc:v1` with advertised `fleetStatus: { version: 1 }`; provider-owned agent management tool | Scoped Pi `settings.json`, Agent Markdown, and global runtime JSON |
 | `pi-background-tasks` | Public EventBus v1 `request`/`response`/`terminal` for Fleet run, bounded logs, kill | Plugin-owned task store |
 | `pi-mcp-adapter` | Public `status/v1` snapshots and read-only `configCatalog/v1`; adapter commands | Six adapter-owned JSON/JSONC sources |
 | `pi-web-access` | Registered command catalog for Curator, account diagnostics, stored results | Agent-level `web-search.json` |

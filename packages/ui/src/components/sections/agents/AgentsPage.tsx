@@ -271,7 +271,7 @@ export const AgentsPage: React.FC = () => {
     ? actionState
     : null;
   const effectiveDefinitionMode = definitionMode ?? catalogState.definitionRequest;
-  const definitionAgent = effectiveDefinitionMode === 'update-agent' || effectiveDefinitionMode === 'update-workflow'
+  const definitionAgent = effectiveDefinitionMode === 'update-agent'
     ? selectedAgent ?? undefined
     : undefined;
 
@@ -284,8 +284,6 @@ export const AgentsPage: React.FC = () => {
     switch (action.id) {
       case 'create-agent':
         return t('settings.piarium.agents.definition.createAgent');
-      case 'create-workflow':
-        return t('settings.piarium.agents.definition.createWorkflow');
       case 'models':
         return t('settings.piarium.agents.actions.models');
       case 'inspect':
@@ -314,7 +312,7 @@ export const AgentsPage: React.FC = () => {
     config: Record<string, JsonValue>,
   ): Promise<boolean> => {
     if (!effectiveDefinitionMode) return false;
-    const creating = effectiveDefinitionMode === 'create-agent' || effectiveDefinitionMode === 'create-workflow';
+    const creating = effectiveDefinitionMode === 'create-agent';
     const action = creating ? effectiveDefinitionMode : 'update';
     const agent = creating ? undefined : definitionAgent;
     return runAction({
@@ -331,7 +329,7 @@ export const AgentsPage: React.FC = () => {
     action: PiAgentActionDescriptor,
   ) => {
     if (agent.providerId === 'pi-subagents' && action.id === 'update') {
-      setDefinitionMode(agent.kind === 'workflow' ? 'update-workflow' : 'update-agent');
+      setDefinitionMode('update-agent');
       return;
     }
     const inferredScope = agent.source.scope === 'user' || agent.source.scope === 'project'
@@ -462,7 +460,7 @@ export const AgentsPage: React.FC = () => {
                       {activeProvider.actions.map((action) => {
                         const loadingAction = providerActionState?.loading === true && providerActionState.action === action.id;
                         const createAction = activeProvider.id === 'pi-subagents'
-                          && (action.id === 'create-agent' || action.id === 'create-workflow');
+                          && action.id === 'create-agent';
                         return (
                           <Button
                             key={action.id}
@@ -472,7 +470,7 @@ export const AgentsPage: React.FC = () => {
                             disabled={!activeProvider.available || actionState?.loading === true}
                             onClick={() => {
                               if (createAction) {
-                                setDefinitionMode(action.id as 'create-agent' | 'create-workflow');
+                                setDefinitionMode('create-agent');
                                 return;
                               }
                               void runAction({ action: action.id, providerId: activeProvider.id });
@@ -543,7 +541,7 @@ export const AgentsPage: React.FC = () => {
               <div className="mt-4 flex flex-wrap justify-center gap-2">
                 {catalog.providers.flatMap((provider) => provider.actions.map((action) => ({ action, provider }))).map(({ action, provider }) => {
                   const createAction = provider.id === 'pi-subagents'
-                    && (action.id === 'create-agent' || action.id === 'create-workflow');
+                    && action.id === 'create-agent';
                   if (!createAction) return null;
                   return (
                     <Button
@@ -552,7 +550,7 @@ export const AgentsPage: React.FC = () => {
                       variant="outline"
                       size="sm"
                       disabled={!provider.available || actionState?.loading === true}
-                      onClick={() => setDefinitionMode(action.id as 'create-agent' | 'create-workflow')}
+                      onClick={() => setDefinitionMode('create-agent')}
                     >
                       {displayActionLabel(provider.id, action)}
                     </Button>
