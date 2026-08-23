@@ -2801,6 +2801,7 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.magic.ui.thinking.minimal': '最少',
   'settings.piarium.pluginSettings.magic.ui.thinking.off': '關閉',
   'settings.piarium.pluginSettings.magic.ui.thinking.xhigh': '極高',
+  'settings.piarium.pluginSettings.magic.ui.thinking.max': '最高',
   'settings.piarium.pluginSettings.magic.ui.thinkingLevel': '思考級別',
   'settings.piarium.pluginSettings.magic.ui.timeout': '時間限制',
   'settings.piarium.pluginSettings.magic.ui.tokenThresholds': '各模型的 Token 閾值',

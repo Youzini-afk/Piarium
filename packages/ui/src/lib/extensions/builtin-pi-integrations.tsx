@@ -120,6 +120,7 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
         return (
           <MagicContextSettings
             initialPanel={props.navigationSection === 'agents' ? 'agents' : undefined}
+            packageVersion={props.packageVersion}
             runtimeTarget={props.runtimeTarget}
             targetKey={props.targetKey}
           />

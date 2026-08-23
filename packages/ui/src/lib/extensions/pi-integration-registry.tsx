@@ -10,6 +10,7 @@ export interface PiPluginSettingsAdapterRenderProps {
   activeSessionId: string | null;
   currentDirectory: string;
   navigationSection?: string;
+  packageVersion: string | null;
   runtimeTarget: RuntimeContextTarget;
   targetKey: string;
 }

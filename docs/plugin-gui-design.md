@@ -310,7 +310,11 @@ user/project drafts, hides fields the real project loader strips, reports ignore
 present in a project document, validates the plugin's numeric five-field cron and embedding
 requirements, and preserves polymorphic per-model maps for Advanced JSONC editing instead of
 flattening them into scalar controls. TodoWrite and the top-level `mural` block use their current
-native paths rather than the removed experimental namespace.
+native paths rather than the removed experimental namespace. Starting with Magic Context 0.39,
+Historian and Dreamer model execution is harness-scoped; Piarium uses `historian.pi`, `dreamer.pi`,
+and `dreamer.pi.tasks` for new values on that version. A legacy flat value already accepted by the
+plugin remains visible and editable until the user or plugin migrates it, while an existing nested
+Pi value wins exactly as it does in the plugin loader.
 
 Implemented session-operations slice: when a live session advertises the current command set, the
 adapter opens the plugin-owned status dialog, flushes pending context, queries embedding status,

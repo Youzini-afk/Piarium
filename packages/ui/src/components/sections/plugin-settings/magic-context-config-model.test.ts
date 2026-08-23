@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  MAGIC_CONTEXT_THINKING_LEVELS,
   isValidMagicContextSchedule,
+  magicContextAgentExecutionFieldPath,
   magicContextDraftIssue,
+  magicContextHasHarnessScopedModels,
   magicContextProjectIgnoredPaths,
+  magicContextTaskExecutionFieldPath,
+  magicContextUsesHarnessScopedModels,
 } from './magic-context-config-model';
 
 describe('Magic Context config model', () => {
@@ -19,16 +24,57 @@ describe('Magic Context config model', () => {
     expect(magicContextProjectIgnoredPaths({
       language: 'zh',
       embedding: { endpoint: 'https://example.test', model: 'embed' },
-      historian: { model: 'provider/model', temperature: 0.2 },
+      mural: { enabled: true, model: 'provider/model' },
+      historian: {
+        model: 'provider/model',
+        pi: { model: 'provider/pi-model', thinking_level: 'max' },
+        temperature: 0.2,
+      },
       dreamer: { prompt: 'unsafe', tasks: {} },
       pi: { subagent_extensions: ['extension.ts'] },
     })).toEqual([
       'language',
       'pi.subagent_extensions',
       'embedding.endpoint',
+      'mural.model',
       'historian.model',
+      'historian.pi.model',
+      'historian.pi.thinking_level',
       'dreamer.prompt',
     ]);
+  });
+
+  test('selects the 0.39 Pi harness paths without hiding accepted legacy fields', () => {
+    expect(magicContextUsesHarnessScopedModels('0.38.1')).toBe(false);
+    expect(magicContextUsesHarnessScopedModels('0.39.0')).toBe(true);
+    expect(magicContextUsesHarnessScopedModels('1.0.0')).toBe(true);
+    expect(magicContextHasHarnessScopedModels({ historian: { opencode: { model: 'provider/model' } } }))
+      .toBe(true);
+    expect(MAGIC_CONTEXT_THINKING_LEVELS).toContain('max');
+
+    expect(magicContextAgentExecutionFieldPath({}, 'historian', 'model', true))
+      .toEqual(['historian', 'pi', 'model']);
+    expect(magicContextAgentExecutionFieldPath({ historian: { model: 'legacy/model' } }, 'historian', 'model', true))
+      .toEqual(['historian', 'model']);
+    expect(magicContextAgentExecutionFieldPath({
+      historian: { model: 'legacy/model', pi: { model: 'provider/model' } },
+    }, 'historian', 'model', true)).toEqual(['historian', 'pi', 'model']);
+    expect(magicContextAgentExecutionFieldPath({}, 'sidekick', 'model', true))
+      .toEqual(['sidekick', 'model']);
+    expect(magicContextTaskExecutionFieldPath({}, 'verify', 'model', true))
+      .toEqual(['dreamer', 'pi', 'tasks', 'verify', 'model']);
+    expect(magicContextTaskExecutionFieldPath({
+      dreamer: { tasks: { verify: { model: 'legacy/model' } } },
+    }, 'verify', 'model', true)).toEqual(['dreamer', 'tasks', 'verify', 'model']);
+    expect(magicContextTaskExecutionFieldPath({
+      dreamer: {
+        pi: { tasks: { verify: { model: 'provider/model' } } },
+        tasks: { verify: { model: 'legacy/model' } },
+      },
+    }, 'verify', 'model', true)).toEqual(['dreamer', 'pi', 'tasks', 'verify', 'model']);
+    expect(magicContextAgentExecutionFieldPath({
+      dreamer: { model: 'legacy/model', pi: { fallback_models: ['provider/fallback'] } },
+    }, 'dreamer', 'model', true)).toEqual(['dreamer', 'model']);
   });
 
   test('guards plugin failure cases without rejecting future unknown keys', () => {
@@ -67,7 +113,7 @@ describe('Magic Context config model', () => {
     });
     expect(magicContextDraftIssue({
       mural: { model: '  ' },
-    }, 'project')).toEqual({
+    }, 'user')).toEqual({
       code: 'invalid-value',
       field: 'mural.model',
     });
@@ -97,7 +143,7 @@ describe('Magic Context config model', () => {
       field: 'cache_ttl',
     });
     expect(magicContextDraftIssue({
-      execute_threshold_percentage: { default: 65, 'provider/model': 81 },
+      execute_threshold_percentage: { default: 65, 'provider/model': 91 },
     }, 'user')).toEqual({
       code: 'invalid-value',
       field: 'execute_threshold_percentage',
@@ -116,6 +162,26 @@ describe('Magic Context config model', () => {
     }, 'user')).toEqual({
       code: 'invalid-value',
       field: 'sidekick.permission.bash',
+    });
+
+    expect(magicContextDraftIssue({
+      historian: {
+        pi: {
+          model: { model: 'provider/model', thinking_level: 'max' },
+          fallback_models: ['provider/fallback'],
+          thinking_level: 'high',
+        },
+      },
+      dreamer: {
+        pi: { tasks: { verify: { timeout_minutes: 15 } } },
+        tasks: { verify: { schedule: '0 3 * * *' } },
+      },
+    }, 'user')).toBeNull();
+    expect(magicContextDraftIssue({
+      dreamer: { pi: { fallback_models: 'provider/fallback' } },
+    }, 'user')).toEqual({
+      code: 'invalid-value',
+      field: 'dreamer.pi.fallback_models',
     });
   });
 });

@@ -2338,6 +2338,7 @@ export const settingsDict = {
   "settings.piarium.pluginSettings.magic.ui.thinking.medium": "Moyen",
   "settings.piarium.pluginSettings.magic.ui.thinking.high": "Haut",
   "settings.piarium.pluginSettings.magic.ui.thinking.xhigh": "Très élevé",
+  "settings.piarium.pluginSettings.magic.ui.thinking.max": "Au maximum",
   "settings.piarium.pluginSettings.magic.ui.timeout": "Limite de temps",
   "settings.piarium.pluginSettings.magic.ui.maintenanceSchedules": "Calendriers d'entretien",
   "settings.piarium.pluginSettings.magic.ui.maintenanceSchedulesInfo": "Ces planifications Dreamer enregistrées et ces remplacements de modèle sont distincts des actions de session d'exécution immédiate ci-dessus.",

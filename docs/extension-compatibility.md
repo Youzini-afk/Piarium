@@ -2,7 +2,7 @@
 
 Status: integration contract, not a per-release certification
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## What this document is
 
@@ -40,6 +40,31 @@ registered commands and public read-only MCP catalog when present, then disposes
 test state. It invokes no network, model, recovery, or destructive commands, so it proves entry-point
 loading and command registration and nothing more. Published tarballs work when their `pi.extensions`
 entries and production dependencies are present.
+
+## Current upstream source audit
+
+The versions below are the sources reviewed on 2026-08-23, not a promise that every runtime path was
+exercised on every operating system. They record which upstream contract changed and why an adapter
+did or did not need code changes. Published versions come from the npm registry; the local extension
+source checkouts used for the audit were fast-forwarded to their tracked upstreams.
+
+| Extension | Source reviewed | Adapter result |
+| --- | --- | --- |
+| `pi-subagents` | npm/source `0.55.0` | Removed the deleted durable-chain catalog, accepted grouped runtime output, and added the current provider/thinking/output overrides. |
+| `pi-background-tasks` | npm/source `2.4.2` | EventBus v1 and Fleet ownership are unchanged; no adapter change. |
+| `@cortexkit/pi-magic-context` | npm `0.38.1`; source tag `0.39.0` | Added Todo/Mural controls and `/todos`; 0.39 installations write Pi model execution under `historian.pi` / `dreamer.pi`, while plugin-supported legacy fields remain visible until migrated. |
+| `pi-openai-codex-compat` | npm/source `0.0.9` | Recommendation now uses the stable tag and exposes `applyPatchDebug`. |
+| `pi-observational-memory` | npm/source `3.0.4` | Native settings and public commands are unchanged; no adapter change. |
+| `context-mode` | npm/source `1.0.169` | Still has no single native settings authority; the generic configuration surface remains correct. |
+| `@cortexkit/aft-pi` | npm/source `0.52.1` | Added the inspect diagnostics deadline and user-only GitHub CLI shim with the plugin's real project-strip rules. |
+| `pi-lens` | npm/source `4.1.1` | The only relevant schema addition is project Helm configuration, already covered by the adapter. |
+| `@gotgenes/pi-permission-system` | npm/source `27.0.0` | Public configuration paths consumed by Piarium are unchanged; documentation now names the current strict schema. |
+| `pi-hermes-memory` | npm/source `0.9.6` | Native authority and command observation are unchanged; no adapter change. |
+| `pi-rtk-optimizer` | npm/source `0.9.0` | Native JSON and `rtk` command contract are unchanged; the narrower upstream peer range remains metadata, not a Piarium compatibility layer. |
+| `pi-mcp-adapter` | upstream `2.27.0`; maintained fork `4f6c08a` | Merged upstream into the maintained fork without dropping `configCatalog/v1`; the catalog now also reflects the plugin's exclusive one-source mode. |
+| `pi-web-access` | npm/source `0.24.2` | Added the complete provider list, OpenAI auth-provider priority, summary/inline limits, image/PDF controls, new credentials and API gateway fields. |
+| `pi-workspace-history` | npm/source `0.2.2` | Recovery hooks, commands, and settings authority are unchanged; no adapter change. |
+| `pi-wtf` | npm/source `0.2.4` | Commands and `wtf.json` contract are unchanged; no adapter change. |
 
 ## Integration surface per extension
 

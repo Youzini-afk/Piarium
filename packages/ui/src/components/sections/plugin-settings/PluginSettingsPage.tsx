@@ -84,6 +84,7 @@ export const PluginSettingsPage: React.FC = () => {
                     activeSessionId,
                     currentDirectory,
                     navigationSection: navigationTarget?.section,
+                    packageVersion: entry.version ?? null,
                     runtimeTarget,
                     targetKey: `${runtimeTargetKey}:${identity}`,
                   })

@@ -2191,6 +2191,7 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.magic.ui.thinking.medium': '中',
   'settings.piarium.pluginSettings.magic.ui.thinking.high': '高',
   'settings.piarium.pluginSettings.magic.ui.thinking.xhigh': '特に高い',
+  'settings.piarium.pluginSettings.magic.ui.thinking.max': '最大',
   'settings.piarium.pluginSettings.magic.ui.timeout': '制限時間',
   'settings.piarium.pluginSettings.magic.ui.maintenanceSchedules': 'メンテナンススケジュール',
   'settings.piarium.pluginSettings.magic.ui.maintenanceSchedulesInfo': '保存した Dreamer のスケジュールとモデル上書きは、上記の今すぐ実行するセッション操作とは別です。',

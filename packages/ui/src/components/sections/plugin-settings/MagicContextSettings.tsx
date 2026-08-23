@@ -35,8 +35,12 @@ import {
   MAGIC_CONTEXT_DREAMER_TASK_DEFAULTS,
   MAGIC_CONTEXT_PANELS,
   MAGIC_CONTEXT_THINKING_LEVELS,
+  magicContextAgentExecutionFieldPath,
   magicContextDraftIssue,
+  magicContextHasHarnessScopedModels,
   magicContextProjectIgnoredPaths,
+  magicContextTaskExecutionFieldPath,
+  magicContextUsesHarnessScopedModels,
   type MagicContextAgent,
   type MagicContextDraftIssue,
   type MagicContextDreamerTask,
@@ -48,6 +52,7 @@ import { MagicContextRuntimePanel } from './MagicContextRuntimePanel';
 
 interface MagicContextSettingsProps {
   initialPanel?: MagicContextPanel;
+  packageVersion?: string | null;
   runtimeTarget: RuntimeContextTarget;
   targetKey: string;
 }
@@ -62,6 +67,10 @@ interface MagicFields {
 interface PanelProps {
   fields: MagicFields;
   scope: MagicContextScope;
+}
+
+interface ModelPanelProps extends PanelProps {
+  harnessScopedModels: boolean;
 }
 
 const MAGIC_USER_PATHS = ['cortexkit/magic-context.jsonc', 'cortexkit/magic-context.json'] as const;
@@ -89,6 +98,21 @@ const AdvancedMapNotice: React.FC<{ labelKey: string }> = ({ labelKey }) => {
     </PluginRuntimeNote>
   );
 };
+
+const AdvancedValueNotice: React.FC<{ labelKey: string }> = ({ labelKey }) => {
+  const { t } = useI18n();
+  return (
+    <PluginRuntimeNote>
+      <span className="font-medium text-foreground">{magicUi(t, labelKey)}:</span>{' '}
+      {t('settings.piarium.pluginSettings.magic.advancedValue.configured')}
+    </PluginRuntimeNote>
+  );
+};
+
+const hasComplexModelValue = (value: JsonValue | undefined): boolean => (
+  (typeof value === 'object' && value !== null && !Array.isArray(value))
+  || (Array.isArray(value) && value.some((entry) => typeof entry !== 'string'))
+);
 
 const ContextPanel: React.FC<PanelProps> = ({ fields, scope }) => {
   const { t } = useI18n();
@@ -140,7 +164,7 @@ const ContextPanel: React.FC<PanelProps> = ({ fields, scope }) => {
             label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.executionThreshold')}
             defaultValue={65}
             min={20}
-            max={80}
+            max={90}
             unit="%"
           />
         )}
@@ -167,7 +191,9 @@ const ContextPanel: React.FC<PanelProps> = ({ fields, scope }) => {
         <PluginBooleanField {...fields} path={['todowrite', 'enabled']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.todoEnabled')} defaultValue />
         <PluginBooleanField {...fields} path={['todowrite', 'overlay']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.todoOverlay')} defaultValue />
         <PluginBooleanField {...fields} path={['mural', 'enabled']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.muralEnabled')} defaultValue={false} />
-        <PluginStringField {...fields} path={['mural', 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.muralModel')} placeholder="provider/model" />
+        {scope === 'user' ? (
+          <PluginStringField {...fields} path={['mural', 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.muralModel')} placeholder="provider/model" />
+        ) : null}
       </SettingsControlGroup>
 
       <SettingsControlGroup
@@ -303,10 +329,15 @@ const MemoryPanel: React.FC<PanelProps> = ({ fields, scope }) => {
   );
 };
 
-const AgentPanel: React.FC<PanelProps> = ({ fields, scope }) => {
+const AgentPanel: React.FC<ModelPanelProps> = ({ fields, harnessScopedModels, scope }) => {
   const { t } = useI18n();
   const [agent, setAgent] = React.useState<MagicContextAgent>('historian');
   const historianProject = scope === 'project' && agent === 'historian';
+  const modelPath = magicContextAgentExecutionFieldPath(fields.draft, agent, 'model', harnessScopedModels);
+  const fallbackModelsPath = magicContextAgentExecutionFieldPath(fields.draft, agent, 'fallback_models', harnessScopedModels);
+  const thinkingLevelPath = magicContextAgentExecutionFieldPath(fields.draft, agent, 'thinking_level', harnessScopedModels);
+  const modelIsComplex = hasComplexModelValue(readJsonPath(fields.draft, modelPath));
+  const fallbacksAreComplex = hasComplexModelValue(readJsonPath(fields.draft, fallbackModelsPath));
   const timeoutPath = agent === 'historian'
     ? ['historian_timeout_ms']
     : agent === 'sidekick' ? ['sidekick', 'timeout_ms'] : null;
@@ -339,19 +370,25 @@ const AgentPanel: React.FC<PanelProps> = ({ fields, scope }) => {
           info={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.disabledAgentInfo')}
           defaultValue={false}
         />
-        {!historianProject ? (
-          <PluginStringField {...fields} path={[agent, 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.primaryModel')} placeholder="provider/model" />
+        {!historianProject && modelIsComplex ? (
+          <AdvancedValueNotice labelKey="settings.piarium.pluginSettings.magic.ui.primaryModel" />
+        ) : !historianProject ? (
+          <PluginStringField {...fields} path={modelPath} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.primaryModel')} placeholder="provider/model" />
+        ) : null}
+        {!historianProject && fallbacksAreComplex ? (
+          <AdvancedValueNotice labelKey="settings.piarium.pluginSettings.magic.ui.fallbackModels" />
+        ) : !historianProject ? (
+          <PluginStringListField {...fields} path={fallbackModelsPath} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackModels')} placeholder="provider/model" />
         ) : null}
         {!historianProject ? (
-          <PluginStringListField {...fields} path={[agent, 'fallback_models']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackModels')} placeholder="provider/model" />
+          <PluginOptionalSelectField {...fields} path={thinkingLevelPath} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.thinkingLevel')} options={thinkingOptions(t)} />
         ) : null}
-        <PluginOptionalSelectField {...fields} path={[agent, 'thinking_level']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.thinkingLevel')} options={thinkingOptions(t)} />
         {timeoutPath ? (
           <PluginNumberField
             {...fields}
             path={timeoutPath}
             label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.timeout')}
-            defaultValue={agent === 'sidekick' ? 30000 : 300000}
+            defaultValue={agent === 'sidekick' ? 30000 : 600000}
             min={agent === 'sidekick' ? 1000 : 60000}
             unit="ms"
           />
@@ -361,11 +398,18 @@ const AgentPanel: React.FC<PanelProps> = ({ fields, scope }) => {
   );
 };
 
-const MaintenancePanel: React.FC<PanelProps> = ({ fields }) => {
+const MaintenancePanel: React.FC<ModelPanelProps> = ({ fields, harnessScopedModels }) => {
   const { t } = useI18n();
   const [task, setTask] = React.useState<MagicContextDreamerTask>('map-memories');
   const defaults = MAGIC_CONTEXT_DREAMER_TASK_DEFAULTS[task];
   const promotionThreshold = 'promotionThreshold' in defaults ? defaults.promotionThreshold : undefined;
+  const metadataPath = ['dreamer', 'tasks', task] as const;
+  const modelPath = magicContextTaskExecutionFieldPath(fields.draft, task, 'model', harnessScopedModels);
+  const fallbackModelsPath = magicContextTaskExecutionFieldPath(fields.draft, task, 'fallback_models', harnessScopedModels);
+  const thinkingLevelPath = magicContextTaskExecutionFieldPath(fields.draft, task, 'thinking_level', harnessScopedModels);
+  const timeoutPath = magicContextTaskExecutionFieldPath(fields.draft, task, 'timeout_minutes', harnessScopedModels);
+  const modelIsComplex = hasComplexModelValue(readJsonPath(fields.draft, modelPath));
+  const fallbacksAreComplex = hasComplexModelValue(readJsonPath(fields.draft, fallbackModelsPath));
   return (
     <SettingsControlGroup
       title={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.maintenanceSchedules')}
@@ -386,21 +430,29 @@ const MaintenancePanel: React.FC<PanelProps> = ({ fields }) => {
       </SettingsFieldRow>
       <PluginStringField
         {...fields}
-        path={['dreamer', 'tasks', task, 'schedule']}
+        path={[...metadataPath, 'schedule']}
         label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.schedule')}
         info={t('settings.piarium.pluginSettings.magic.tasks.schedule.description')}
         defaultValue={defaults.schedule}
         allowEmpty
         placeholder="0 3 * * *"
       />
-      <PluginStringField {...fields} path={['dreamer', 'tasks', task, 'model']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.dreamerModel')} placeholder="provider/model" />
-      <PluginStringListField {...fields} path={['dreamer', 'tasks', task, 'fallback_models']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackModels')} placeholder="provider/model" />
-      <PluginOptionalSelectField {...fields} path={['dreamer', 'tasks', task, 'thinking_level']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.thinkingLevel')} options={thinkingOptions(t)} />
-      <PluginNumberField {...fields} path={['dreamer', 'tasks', task, 'timeout_minutes']} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.timeout')} defaultValue={defaults.timeout} min={5} unit="min" />
+      {modelIsComplex ? (
+        <AdvancedValueNotice labelKey="settings.piarium.pluginSettings.magic.ui.dreamerModel" />
+      ) : (
+        <PluginStringField {...fields} path={modelPath} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.dreamerModel')} placeholder="provider/model" />
+      )}
+      {fallbacksAreComplex ? (
+        <AdvancedValueNotice labelKey="settings.piarium.pluginSettings.magic.ui.fallbackModels" />
+      ) : (
+        <PluginStringListField {...fields} path={fallbackModelsPath} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.fallbackModels')} placeholder="provider/model" />
+      )}
+      <PluginOptionalSelectField {...fields} path={thinkingLevelPath} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.thinkingLevel')} options={thinkingOptions(t)} />
+      <PluginNumberField {...fields} path={timeoutPath} label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.timeout')} defaultValue={defaults.timeout} min={5} unit="min" />
       {promotionThreshold !== undefined ? (
         <PluginNumberField
           {...fields}
-          path={['dreamer', 'tasks', task, 'promotion_threshold']}
+          path={[...metadataPath, 'promotion_threshold']}
           label={magicUi(t, 'settings.piarium.pluginSettings.magic.ui.promotionThreshold')}
           info={t('settings.piarium.pluginSettings.magic.tasks.promotionDescription')}
           defaultValue={promotionThreshold}
@@ -452,6 +504,7 @@ function issueMessage(issue: MagicContextDraftIssue, t: ReturnType<typeof useI18
 }
 
 const ignoredFieldLabel = (t: ReturnType<typeof useI18n>['t'], path: string): string => {
+  if (path === 'mural.model') return magicUi(t, 'settings.piarium.pluginSettings.magic.ui.muralModel');
   const key = ({
     language: 'language',
     'pi.subagent_extensions': 'piChildExtensions',
@@ -483,6 +536,7 @@ const ignoredFieldLabel = (t: ReturnType<typeof useI18n>['t'], path: string): st
 
 export const MagicContextSettings: React.FC<MagicContextSettingsProps> = ({
   initialPanel = 'context',
+  packageVersion,
   runtimeTarget,
   targetKey,
 }) => {
@@ -505,6 +559,10 @@ export const MagicContextSettings: React.FC<MagicContextSettingsProps> = ({
     () => scope === 'project' ? magicContextProjectIgnoredPaths(controller.draft) : [],
     [controller.draft, scope],
   );
+  const harnessScopedModels = React.useMemo(() => (
+    magicContextUsesHarnessScopedModels(packageVersion)
+    || magicContextHasHarnessScopedModels(controller.draft)
+  ), [controller.draft, packageVersion]);
   const fields: MagicFields = {
     disabled: !controller.loaded || controller.loading || controller.saving || controller.rawError !== null || trustBlocked,
     draft: controller.draft,
@@ -565,8 +623,8 @@ export const MagicContextSettings: React.FC<MagicContextSettingsProps> = ({
 
       {panel === 'context' ? <ContextPanel fields={fields} scope={scope} /> : null}
       {panel === 'memory' ? <MemoryPanel fields={fields} scope={scope} /> : null}
-      {panel === 'models' ? <AgentPanel fields={fields} scope={scope} /> : null}
-      {panel === 'maintenance' ? <MaintenancePanel fields={fields} scope={scope} /> : null}
+      {panel === 'models' ? <AgentPanel fields={fields} harnessScopedModels={harnessScopedModels} scope={scope} /> : null}
+      {panel === 'maintenance' ? <MaintenancePanel fields={fields} harnessScopedModels={harnessScopedModels} scope={scope} /> : null}
 
       <PluginAdvancedDraftEditor controller={controller} blocked={trustBlocked} />
       <PluginDraftFooter

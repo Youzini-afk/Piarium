@@ -39,7 +39,11 @@ export const MAGIC_CONTEXT_THINKING_LEVELS = [
   'medium',
   'high',
   'xhigh',
+  'max',
 ] as const;
+
+type MagicContextModelExecutionField = 'fallback_models' | 'model' | 'thinking_level';
+type MagicContextTaskExecutionField = MagicContextModelExecutionField | 'timeout_minutes';
 
 export const MAGIC_CONTEXT_DREAMER_TASK_DEFAULTS = {
   'map-memories': { schedule: '0 2 * * *', timeout: 20 },
@@ -135,8 +139,17 @@ const PROJECT_IGNORED_PATHS: readonly (readonly string[])[] = [
   ['embedding', 'provider'],
   ['embedding', 'endpoint'],
   ['embedding', 'fallback_provider'],
+  ['mural', 'model'],
   ['historian', 'model'],
   ['historian', 'fallback_models'],
+  ['historian', 'variant'],
+  ['historian', 'thinking_level'],
+  ['historian', 'opencode', 'model'],
+  ['historian', 'opencode', 'fallback_models'],
+  ['historian', 'opencode', 'variant'],
+  ['historian', 'pi', 'model'],
+  ['historian', 'pi', 'fallback_models'],
+  ['historian', 'pi', 'thinking_level'],
   ...MAGIC_CONTEXT_AGENTS.flatMap((agent) => ([
     [agent, 'prompt'] as const,
     [agent, 'permission'] as const,
@@ -144,6 +157,46 @@ const PROJECT_IGNORED_PATHS: readonly (readonly string[])[] = [
     [agent, 'system_prompt'] as const,
   ])),
 ];
+
+export function magicContextUsesHarnessScopedModels(version: string | null | undefined): boolean {
+  const match = version?.trim().match(/^(\d+)\.(\d+)/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 0 || minor >= 39;
+}
+
+export function magicContextHasHarnessScopedModels(draft: JsonObject): boolean {
+  return ['historian', 'dreamer'].some((agent) => (
+    hasJsonPath(draft, [agent, 'pi']) || hasJsonPath(draft, [agent, 'opencode'])
+  ));
+}
+
+export function magicContextAgentExecutionFieldPath(
+  draft: JsonObject,
+  agent: MagicContextAgent,
+  field: MagicContextModelExecutionField,
+  harnessScopedModels: boolean,
+): readonly string[] {
+  const legacyPath = [agent, field] as const;
+  if (agent === 'sidekick' || !harnessScopedModels) return legacyPath;
+  const harnessPath = [agent, 'pi', field] as const;
+  if (hasJsonPath(draft, harnessPath)) return harnessPath;
+  return hasJsonPath(draft, legacyPath) ? legacyPath : harnessPath;
+}
+
+export function magicContextTaskExecutionFieldPath(
+  draft: JsonObject,
+  task: MagicContextDreamerTask,
+  field: MagicContextTaskExecutionField,
+  harnessScopedModels: boolean,
+): readonly string[] {
+  const legacyPath = ['dreamer', 'tasks', task, field] as const;
+  if (!harnessScopedModels) return legacyPath;
+  const harnessPath = ['dreamer', 'pi', 'tasks', task, field] as const;
+  if (hasJsonPath(draft, harnessPath)) return harnessPath;
+  return hasJsonPath(draft, legacyPath) ? legacyPath : harnessPath;
+}
 
 const EXPOSED_BOOLEAN_PATHS: readonly (readonly string[])[] = [
   ['enabled'],
@@ -201,6 +254,61 @@ const permissionValue = (value: JsonValue | undefined): boolean => (
   typeof value === 'string' && ['ask', 'allow', 'deny'].includes(value)
 );
 
+const validThinkingLevel = (value: JsonValue | undefined): boolean => (
+  value === undefined
+  || (typeof value === 'string'
+    && (MAGIC_CONTEXT_THINKING_LEVELS as readonly string[]).includes(value))
+);
+
+function piModelEntryIssue(
+  value: JsonValue | undefined,
+  field: string,
+): MagicContextDraftIssue | null {
+  if (typeof value === 'string') return null;
+  if (!isObject(value) || typeof value.model !== 'string') {
+    return { code: 'invalid-value', field };
+  }
+  return validThinkingLevel(value.thinking_level)
+    ? null
+    : { code: 'invalid-value', field: `${field}.thinking_level` };
+}
+
+function piExecutionIssue(
+  draft: JsonObject,
+  path: readonly string[],
+  options: { timeout?: boolean } = {},
+): MagicContextDraftIssue | null {
+  const block = readJsonPath(draft, path);
+  if (block === undefined) return null;
+  if (!isObject(block)) return { code: 'invalid-value', field: path.join('.') };
+
+  if (block.model !== undefined) {
+    const issue = piModelEntryIssue(block.model, `${path.join('.')}.model`);
+    if (issue) return issue;
+  }
+  if (block.fallback_models !== undefined) {
+    if (!Array.isArray(block.fallback_models)) {
+      return { code: 'invalid-value', field: `${path.join('.')}.fallback_models` };
+    }
+    for (let index = 0; index < block.fallback_models.length; index += 1) {
+      const issue = piModelEntryIssue(
+        block.fallback_models[index],
+        `${path.join('.')}.fallback_models.${index}`,
+      );
+      if (issue) return issue;
+    }
+  }
+  if (!validThinkingLevel(block.thinking_level)) {
+    return { code: 'invalid-value', field: `${path.join('.')}.thinking_level` };
+  }
+  if (options.timeout && block.timeout_minutes !== undefined && (
+    typeof block.timeout_minutes !== 'number'
+    || !Number.isFinite(block.timeout_minutes)
+    || block.timeout_minutes < 5
+  )) return { code: 'invalid-value', field: `${path.join('.')}.timeout_minutes` };
+  return null;
+}
+
 function agentIssue(
   draft: JsonObject,
   agent: MagicContextAgent,
@@ -211,7 +319,7 @@ function agentIssue(
   if (!isObject(block)) return { code: 'invalid-value', field: agent };
 
   const stringKeys = agent === 'historian' && scope === 'project'
-    ? ['description', 'variant'] as const
+    ? ['description'] as const
     : ['model', 'description', 'variant'] as const;
   for (const key of stringKeys) {
     if (block[key] !== undefined && typeof block[key] !== 'string') {
@@ -254,11 +362,7 @@ function agentIssue(
   }
 
   const thinking = block.thinking_level;
-  if (
-    thinking !== undefined
-    && (typeof thinking !== 'string'
-      || !(MAGIC_CONTEXT_THINKING_LEVELS as readonly string[]).includes(thinking))
-  ) {
+  if (!(agent === 'historian' && scope === 'project') && !validThinkingLevel(thinking)) {
     return { code: 'invalid-value', field: `${agent}.thinking_level` };
   }
 
@@ -362,7 +466,7 @@ export function magicContextDraftIssue(
   }
 
   const muralModel = readJsonPath(draft, ['mural', 'model']);
-  if (hasJsonPath(draft, ['mural', 'model']) && !nonEmptyString(muralModel)) {
+  if (scope === 'user' && hasJsonPath(draft, ['mural', 'model']) && !nonEmptyString(muralModel)) {
     return { code: 'invalid-value', field: 'mural.model' };
   }
 
@@ -375,8 +479,17 @@ export function magicContextDraftIssue(
     const issue = agentIssue(draft, agent, scope);
     if (issue) return issue;
   }
+  for (const agent of ['historian', 'dreamer'] as const) {
+    if (scope === 'project' && agent === 'historian') continue;
+    const issue = piExecutionIssue(draft, [agent, 'pi']);
+    if (issue) return issue;
+  }
   const taskIssue = dreamerTaskIssue(draft);
   if (taskIssue) return taskIssue;
+  for (const task of Object.keys(MAGIC_CONTEXT_DREAMER_TASK_DEFAULTS) as MagicContextDreamerTask[]) {
+    const issue = piExecutionIssue(draft, ['dreamer', 'pi', 'tasks', task], { timeout: true });
+    if (issue) return issue;
+  }
 
   const cacheTtl = readJsonPath(draft, ['cache_ttl']);
   if (cacheTtl !== undefined && typeof cacheTtl !== 'string' && (
@@ -386,10 +499,10 @@ export function magicContextDraftIssue(
   const percentage = readJsonPath(draft, ['execute_threshold_percentage']);
   if (percentage !== undefined) {
     if (typeof percentage === 'number') {
-      if (!Number.isFinite(percentage) || percentage < 20 || percentage > 80) {
+      if (!Number.isFinite(percentage) || percentage < 20 || percentage > 90) {
         return { code: 'invalid-value', field: 'execute_threshold_percentage' };
       }
-    } else if (!isObject(percentage) || invalidRecordValue(percentage, 'number', true, 20, 80)) {
+    } else if (!isObject(percentage) || invalidRecordValue(percentage, 'number', true, 20, 90)) {
       return { code: 'invalid-value', field: 'execute_threshold_percentage' };
     }
   }

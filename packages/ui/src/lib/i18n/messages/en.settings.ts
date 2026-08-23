@@ -2363,6 +2363,7 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.magic.ui.thinking.medium': 'Medium',
   'settings.piarium.pluginSettings.magic.ui.thinking.high': 'High',
   'settings.piarium.pluginSettings.magic.ui.thinking.xhigh': 'Extra high',
+  'settings.piarium.pluginSettings.magic.ui.thinking.max': 'Maximum',
   'settings.piarium.pluginSettings.magic.ui.timeout': 'Time limit',
   'settings.piarium.pluginSettings.magic.ui.maintenanceSchedules': 'Maintenance schedules',
   'settings.piarium.pluginSettings.magic.ui.maintenanceSchedulesInfo': 'These saved Dreamer schedules and model overrides are separate from the run-now session actions above.',

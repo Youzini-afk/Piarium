@@ -2791,6 +2791,7 @@ export const settingsDict = {
   'settings.piarium.pluginSettings.magic.ui.thinking.medium': 'Середній',
   'settings.piarium.pluginSettings.magic.ui.thinking.high': 'Високий',
   'settings.piarium.pluginSettings.magic.ui.thinking.xhigh': 'Дуже високий',
+  'settings.piarium.pluginSettings.magic.ui.thinking.max': 'Максимальний',
   'settings.piarium.pluginSettings.magic.ui.timeout': 'Обмеження часу',
   'settings.piarium.pluginSettings.magic.ui.maintenanceSchedules': 'Розклади обслуговування',
   'settings.piarium.pluginSettings.magic.ui.maintenanceSchedulesInfo': 'Ці збережені розклади та перевизначення моделей Мрійника відокремлені від наведених вище дій сеансу «запустити зараз».',
