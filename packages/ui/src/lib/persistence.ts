@@ -39,13 +39,6 @@ export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void
   }
 };
 
-const SETTINGS_MIRROR_INDEX_KEY = 'piarium.settingsMirror.v1.index';
-const SETTINGS_MIRROR_KEY_PREFIX = 'piarium.settingsMirror.v1:';
-const MAX_SETTINGS_MIRROR_RUNTIMES = 5;
-
-export const getRuntimeSettingsMirrorStorageKey = (runtimeKey: string): string =>
-  `${SETTINGS_MIRROR_KEY_PREFIX}${encodeURIComponent(runtimeKey)}`;
-
 const setOrRemoveLocalStorage = (key: string, value: string | null): void => {
   if (value === null) {
     localStorage.removeItem(key);
@@ -54,58 +47,11 @@ const setOrRemoveLocalStorage = (key: string, value: string | null): void => {
   }
 };
 
-const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: string): void => {
-  const mirror = {
-    themeId: settings.themeId,
-    themeVariant: settings.themeVariant,
-    lightThemeId: settings.lightThemeId,
-    darkThemeId: settings.darkThemeId,
-    useSystemTheme: settings.useSystemTheme,
-    lastDirectory: settings.lastDirectory,
-    homeDirectory: settings.homeDirectory,
-    projects: settings.projects,
-    activeProjectId: settings.activeProjectId,
-    pinnedDirectories: settings.pinnedDirectories,
-    gitmojiEnabled: settings.gitmojiEnabled,
-    directoryShowHidden: settings.directoryShowHidden,
-    filesViewShowGitignored: settings.filesViewShowGitignored,
-    openInAppId: settings.openInAppId,
-    pwaAppName: settings.pwaAppName,
-    mobileKeyboardMode: settings.mobileKeyboardMode,
-    dictationEnabled: settings.dictationEnabled,
-    sttProvider: settings.sttProvider,
-    sttServerUrl: settings.sttServerUrl,
-    sttModel: settings.sttModel,
-    sttLocalModel: settings.sttLocalModel,
-    sttLanguage: settings.sttLanguage,
-  };
-  localStorage.setItem(getRuntimeSettingsMirrorStorageKey(runtimeKey), JSON.stringify(mirror));
-
-  let previous: string[] = [];
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SETTINGS_MIRROR_INDEX_KEY) ?? '[]') as unknown;
-    if (Array.isArray(parsed)) previous = parsed.filter((entry): entry is string => typeof entry === 'string');
-  } catch {
-    previous = [];
-  }
-  const runtimes = [runtimeKey, ...previous.filter((entry) => entry !== runtimeKey)].slice(0, MAX_SETTINGS_MIRROR_RUNTIMES);
-  for (const staleRuntime of previous) {
-    if (!runtimes.includes(staleRuntime)) localStorage.removeItem(getRuntimeSettingsMirrorStorageKey(staleRuntime));
-  }
-  localStorage.setItem(SETTINGS_MIRROR_INDEX_KEY, JSON.stringify(runtimes));
-};
-
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
     return;
   }
 
-  persistRuntimeSettingsMirror(settings, getRuntimeKey());
-  setOrRemoveLocalStorage('selectedThemeId', settings.themeId || null);
-  setOrRemoveLocalStorage('selectedThemeVariant', settings.themeVariant || null);
-  setOrRemoveLocalStorage('lightThemeId', settings.lightThemeId || null);
-  setOrRemoveLocalStorage('darkThemeId', settings.darkThemeId || null);
-  setOrRemoveLocalStorage('useSystemTheme', typeof settings.useSystemTheme === 'boolean' ? String(settings.useSystemTheme) : null);
   setOrRemoveLocalStorage('lastDirectory', settings.lastDirectory || null);
   if (settings.homeDirectory) {
     localStorage.setItem('homeDirectory', settings.homeDirectory);

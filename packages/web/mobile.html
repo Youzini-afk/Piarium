@@ -15,19 +15,14 @@
       // theme the app itself persisted to localStorage; no server involved.
       (function () {
         try {
-          var themeMode = localStorage.getItem('themeMode');
-          var useSystem = localStorage.getItem('useSystemTheme');
-          var variant = localStorage.getItem('selectedThemeVariant');
+          var storedTheme = JSON.parse(localStorage.getItem('piarium.theme.v1') || 'null');
+          var themeMode = storedTheme && storedTheme.mode;
           var isDark;
 
           if (themeMode === 'dark') {
             isDark = true;
           } else if (themeMode === 'light') {
             isDark = false;
-          } else if (themeMode === 'system' || useSystem === null || useSystem === 'true') {
-            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          } else if (variant === 'light' || variant === 'dark') {
-            isDark = variant === 'dark';
           } else {
             isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           }
@@ -38,14 +33,15 @@
           // CSS/React loads matches instead of defaulting to light.
           root.style.setProperty('color-scheme', isDark ? 'dark' : 'light');
 
-          // splashBg* are the resolved theme surface.background colors persisted by the app
+          // The stored splash colors are the resolved theme surface backgrounds persisted by the app
           // theme system (see ThemeSystemContext). When absent (e.g. a fresh install before
           // the theme has been persisted once), fall back to the default theme's
           // surface.background — flexoki-dark/light (see lib/theme/themes), which is what the
           // app renders on first launch — so the pre-paint matches instead of flashing a
           // different colour.
-          var bgDark = localStorage.getItem('splashBgDark') || '#171515';
-          var bgLight = localStorage.getItem('splashBgLight') || '#fffdf4';
+          var splash = storedTheme && storedTheme.splash;
+          var bgDark = (splash && splash.dark && splash.dark.background) || '#171515';
+          var bgLight = (splash && splash.light && splash.light.background) || '#fffdf4';
           var bg = isDark ? bgDark : bgLight;
 
           // Set the actual --background CSS variable, not just the element background.

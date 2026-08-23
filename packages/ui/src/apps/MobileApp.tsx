@@ -33,6 +33,7 @@ import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
 import { useOrientation } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIPadApp } from '@/lib/platform';
+import { readStoredThemeState } from '@/lib/theme/themeStorage';
 import { resolveProjectForDirectory } from '@/lib/projectResolution';
 import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
 import { clampPercent, formatQuotaResetLabel, formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
@@ -271,9 +272,10 @@ const useNativeMobileChrome = (): void => {
           // enforced and both calls are no-ops — there the app pads itself via the
           // Capacitor-injected --safe-area-inset-* CSS vars (see mobile.css, oc-platform-android).
           const isDark = document.documentElement.classList.contains('dark');
-          const themeBg =
-            (isDark ? localStorage.getItem('splashBgDark') : localStorage.getItem('splashBgLight')) ||
-            (isDark ? '#171515' : '#fffdf4');
+          const storedTheme = readStoredThemeState();
+          const themeBg = (isDark
+            ? storedTheme?.splash.dark.background
+            : storedTheme?.splash.light.background) || (isDark ? '#171515' : '#fffdf4');
           await StatusBar.setOverlaysWebView({ overlay: false }).catch(() => undefined);
           await StatusBar.setBackgroundColor({ color: themeBg }).catch(() => undefined);
           // Capacitor Style is named for the CONTENT: Style.Light = dark text (light bg),

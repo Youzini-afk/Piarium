@@ -8,7 +8,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import {
   applyPersistedHomeDirectoryToWindow,
-  getRuntimeSettingsMirrorStorageKey,
   getSettingsSaveState,
   invalidateSettingsCache,
   subscribeToSettingsSaveState,
@@ -317,13 +316,12 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().terminalShell).toBe('bash');
   });
 
-  test('isolates local settings mirrors and removes values omitted by the next runtime', async () => {
+  test('removes browser projections omitted by the next authoritative runtime', async () => {
     getWindow();
     localStorage.clear();
     switchRuntimeEndpoint({ apiBaseUrl: 'https://mirror-a.example', runtimeKey: 'mirror-a' });
     registerSettingsApi(async () => ({}), async () => ({
       settings: {
-        themeId: 'theme-a',
         directoryShowHidden: true,
         sttModel: 'model-a',
       },
@@ -338,15 +336,8 @@ describe('updateDesktopSettings', () => {
     }));
     await syncDesktopSettings();
 
-    expect(localStorage.getItem('selectedThemeId')).toBeNull();
     expect(localStorage.getItem('directoryTreeShowHidden')).toBeNull();
     expect(localStorage.getItem('sttModel')).toBeNull();
-    expect(JSON.parse(localStorage.getItem(getRuntimeSettingsMirrorStorageKey('mirror-a')) ?? '{}')).toEqual({
-      themeId: 'theme-a',
-      directoryShowHidden: true,
-      sttModel: 'model-a',
-    });
-    expect(JSON.parse(localStorage.getItem(getRuntimeSettingsMirrorStorageKey('mirror-b')) ?? '{}')).toEqual({});
   });
 
   test('resets in-memory preferences omitted by an authoritative runtime snapshot', async () => {
@@ -392,7 +383,6 @@ describe('updateDesktopSettings', () => {
 
   test('treats settings save responses as partial patches', async () => {
     getWindow();
-    localStorage.setItem('selectedThemeId', 'existing-theme');
     useUIStore.getState().setTerminalShell('fish');
     registerSettingsSave(async () => ({ showReasoningTraces: false }));
 
@@ -400,7 +390,6 @@ describe('updateDesktopSettings', () => {
 
     expect(useUIStore.getState().showReasoningTraces).toBe(false);
     expect(useUIStore.getState().terminalShell).toBe('fish');
-    expect(localStorage.getItem('selectedThemeId')).toBe('existing-theme');
   });
 
   test('applies model selector settings from server settings', async () => {

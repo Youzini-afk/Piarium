@@ -10,19 +10,14 @@
       // branded splash instead of flashing white while React/CSS load.
       (function() {
         try {
-          var themeMode = localStorage.getItem('themeMode');
-          var variant = localStorage.getItem('selectedThemeVariant');
-          var useSystem = localStorage.getItem('useSystemTheme');
+          var storedTheme = JSON.parse(localStorage.getItem('piarium.theme.v1') || 'null');
+          var themeMode = storedTheme && storedTheme.mode;
           var isDark;
 
           if (themeMode === 'dark') {
             isDark = true;
           } else if (themeMode === 'light') {
             isDark = false;
-          } else if (themeMode === 'system' || useSystem === null || useSystem === 'true') {
-            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          } else if (variant === 'light' || variant === 'dark') {
-            isDark = variant === 'dark';
           } else {
             isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           }
@@ -31,10 +26,11 @@
           document.documentElement.setAttribute('data-splash-variant', isDark ? 'dark' : 'light');
           document.documentElement.style.setProperty('color-scheme', isDark ? 'dark' : 'light');
 
-          var splashBgLight = localStorage.getItem('splashBgLight');
-          var splashFgLight = localStorage.getItem('splashFgLight');
-          var splashBgDark = localStorage.getItem('splashBgDark');
-          var splashFgDark = localStorage.getItem('splashFgDark');
+          var splash = storedTheme && storedTheme.splash;
+          var splashBgLight = splash && splash.light && splash.light.background;
+          var splashFgLight = splash && splash.light && splash.light.foreground;
+          var splashBgDark = splash && splash.dark && splash.dark.background;
+          var splashFgDark = splash && splash.dark && splash.dark.foreground;
 
           if (splashBgLight) document.documentElement.style.setProperty('--splash-background-light', splashBgLight);
           if (splashFgLight) document.documentElement.style.setProperty('--splash-stroke-light', splashFgLight);
