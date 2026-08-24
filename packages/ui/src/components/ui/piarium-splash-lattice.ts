@@ -193,9 +193,9 @@ const BACKDROP_FADE_MS = 260;
 const REVEAL_EDGE_PX = 64;
 
 /**
- * Fast workbench playback uses the duration of the original directional sweep. It therefore preserves a
- * timing that was already visually accepted instead of inventing a new short cutoff, while still playing
- * every camera, cube, contact, and floor keyframe in the full mirrored sequence.
+ * Fast workbench playback keeps the duration already accepted for profile switching instead of inventing
+ * a new short cutoff, while still playing every camera, cube, contact, and floor keyframe in the full
+ * mirrored sequence.
  */
 export const SPLASH_WORKBENCH_QUICK_DURATION_MS = MAX_TILE_DELAY_MS + TILE_EXIT_MS;
 const WORKBENCH_QUICK_SCALE = SPLASH_WORKBENCH_QUICK_DURATION_MS / SPLASH_EXIT_DURATION_MS;
@@ -711,9 +711,8 @@ background: ${colors.background};
 mask-image: ${hole};
 }
 /* Boot only, which is also the default: the three hosts that paint before any module is evaluated set no
-   mode, and boot is the only thing they cover. A profile switch sweeps its cells along one floor axis
-   instead of radiating, so a hole opening from the middle would be travelling the wrong way; there the
-   backdrop just fades and the sweep reads as a wipe over it. */
+   mode, and boot is the only thing they cover. Workbench transitions use explicit phase rules above;
+   the leaving flag on a switch is only a compatibility fade and does not own their concentric choreography. */
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
 animation:
 pi-splash-open ${REVEAL_MS}ms ${BOOT_TILE_RELEASE_MS}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,

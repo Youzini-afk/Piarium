@@ -445,9 +445,9 @@ describe('the floor is the cover', () => {
     expect(delayMs + fadeMs).toBeLessThan(SPLASH_EXIT_DURATION_MS);
   });
 
-  test('the reveal is boot-only, and boot is what a host gets by saying nothing', () => {
-    // A profile switch sweeps its cells along one axis, so a hole opening from the middle would travel the
-    // wrong way. The three hosts that paint pre-module set no mode and must still get the reveal.
+  test('the leaving-prop reveal is boot-only, and boot is what a host gets by saying nothing', () => {
+    // Workbench transitions use explicit mirrored phases. The three hosts that paint pre-module set no
+    // mode and must still get the boot reveal through the older `leaving` boundary.
     expect(css).toContain(".pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {\nanimation:\npi-splash-open");
     expect(css).toContain(".pi-splash[data-mode='switch'][data-leaving='true'] .pi-splash-backdrop {\nanimation: pi-splash-backdrop-out");
     for (const body of [readWebShell(), readMiniChat(), readWebview()]) {
@@ -479,21 +479,30 @@ describe('exit choreography', () => {
       .toBeLessThan(0);
   });
 
-  test('switch reverses with the direction', () => {
+  test('switch closes from the perimeter and reveals from the cube regardless of profile ordering', () => {
     const forwardField = buildField(1920, 1080, { mode: 'switch', direction: 'forward' });
     const backwardField = buildField(1920, 1080, { mode: 'switch', direction: 'backward' });
     const forward = forwardField.tiles;
     const backward = backwardField.tiles;
 
-    const column = (cells: typeof forward, index: number): number[] =>
-      cells.filter((cell) => cell.xPx === index * CUBE_EDGE_PX).map((cell) => cell.delayMs);
+    expect(backward).toEqual(forward);
+    const centre = forward.find((cell) => cell.key === '0:0');
+    const furthest = forward.reduce((best, tile) => (
+      Math.hypot(tile.xPx, tile.yPx) > Math.hypot(best.xPx, best.yPx) ? tile : best
+    ));
+    expect(centre).toMatchObject({ delayMs: 0, scatterXPx: 0, scatterYPx: 0 });
+    expect(furthest.delayMs).toBe(Math.max(...forward.map((tile) => tile.delayMs)));
+    expect(forward.find((cell) => cell.key === '0:1')?.scatterXPx).toBeGreaterThan(0);
+    expect(forward.find((cell) => cell.key === '0:-1')?.scatterXPx).toBeLessThan(0);
+    expect(forward.find((cell) => cell.key === '1:0')?.scatterYPx).toBeGreaterThan(0);
+    expect(forward.find((cell) => cell.key === '-1:0')?.scatterYPx).toBeLessThan(0);
 
-    expect(Math.min(...column(forward, forwardField.minCol)))
-      .toBeLessThan(Math.min(...column(forward, forwardField.maxCol)));
-    expect(Math.min(...column(backward, backwardField.maxCol)))
-      .toBeLessThan(Math.min(...column(backward, backwardField.minCol)));
-    expect(forward.every((cell) => cell.scatterXPx > 0 && cell.scatterYPx === 0)).toBe(true);
-    expect(backward.every((cell) => cell.scatterXPx < 0 && cell.scatterYPx === 0)).toBe(true);
+    for (const tempo of ['quick', 'standard'] as const) {
+      const centreTiming = splashWorkbenchTileDelays(centre?.delayMs ?? -1, tempo);
+      const perimeterTiming = splashWorkbenchTileDelays(furthest.delayMs, tempo);
+      expect(perimeterTiming.coverDelayMs).toBeLessThan(centreTiming.coverDelayMs);
+      expect(centreTiming.revealDelayMs).toBeLessThan(perimeterTiming.revealDelayMs);
+    }
   });
 
   test('tile playback stays in one Canvas rather than rebuilding DOM paint owners', () => {
@@ -604,7 +613,7 @@ describe('exit choreography', () => {
     }
   });
 
-  test('quick workbench playback keeps every phase but uses the accepted sweep duration', () => {
+  test('quick workbench playback keeps every phase and the accepted transition duration', () => {
     expect(splashWorkbenchPhaseDurationMs('quick')).toBe(SPLASH_WORKBENCH_QUICK_DURATION_MS);
     expect(splashWorkbenchPhaseDurationMs('standard')).toBe(SPLASH_EXIT_DURATION_MS);
     expect(splashWorkbenchPhaseDurationMs('quick', true)).toBe(SPLASH_REDUCED_EXIT_DURATION_MS);

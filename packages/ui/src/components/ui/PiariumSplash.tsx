@@ -27,8 +27,8 @@ import {
  * screen-space sticker in front of it.
  *
  * Two behaviours share the component. `boot` covers startup and comes apart outward from the cube's feet.
- * `switch` covers a Workbench Profile change and sweeps along one floor axis, reversing with the direction
- * the user moved, so a profile change reads as a re-layout rather than as a restart.
+ * `switch` covers a Workbench Profile change concentrically: the perimeter closes toward the registered
+ * footprint, the cube appears, and revealing plays that same scene in exact reverse.
  */
 
 const STYLES = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });

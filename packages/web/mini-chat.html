@@ -165,9 +165,8 @@ background: var(--splash-background, var(--color-background, #151313));
 mask-image: radial-gradient(circle at 50% 56%, rgba(0,0,0,0) var(--pi-splash-open, 0px), rgba(0,0,0,1) calc(var(--pi-splash-open, 0px) + 64px));
 }
 /* Boot only, which is also the default: the three hosts that paint before any module is evaluated set no
-   mode, and boot is the only thing they cover. A profile switch sweeps its cells along one floor axis
-   instead of radiating, so a hole opening from the middle would be travelling the wrong way; there the
-   backdrop just fades and the sweep reads as a wipe over it. */
+   mode, and boot is the only thing they cover. Workbench transitions use explicit phase rules above;
+   the leaving flag on a switch is only a compatibility fade and does not own their concentric choreography. */
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop {
 animation:
 pi-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
@@ -323,7 +322,7 @@ var build=(function buildAdaptiveSplashTiles(input) {
       }
   }
   floorPoints.push({ x: 0, y: 0 });
-  const overscanCells = 2, minX = Math.min(...floorPoints.map((point) => point.x)), maxX = Math.max(...floorPoints.map((point) => point.x)), minY = Math.min(...floorPoints.map((point) => point.y)), maxY = Math.max(...floorPoints.map((point) => point.y)), minCol = Math.floor(minX / cellPx) - overscanCells, maxCol = Math.ceil(maxX / cellPx) + overscanCells, minRow = Math.floor(minY / cellPx) - overscanCells, maxRow = Math.ceil(maxY / cellPx) + overscanCells, maxRadius = Math.max(1, Math.hypot(minCol, minRow), Math.hypot(minCol, maxRow), Math.hypot(maxCol, minRow), Math.hypot(maxCol, maxRow)), sweepWidth = Math.max(1, maxCol - minCol), sweepHeight = Math.max(1, maxRow - minRow), skew = 0.22, maxDelayMs = 520, breatheSpreadMs = 2200, randomAt = (row, col, salt) => {
+  const overscanCells = 2, minX = Math.min(...floorPoints.map((point) => point.x)), maxX = Math.max(...floorPoints.map((point) => point.x)), minY = Math.min(...floorPoints.map((point) => point.y)), maxY = Math.max(...floorPoints.map((point) => point.y)), minCol = Math.floor(minX / cellPx) - overscanCells, maxCol = Math.ceil(maxX / cellPx) + overscanCells, minRow = Math.floor(minY / cellPx) - overscanCells, maxRow = Math.ceil(maxY / cellPx) + overscanCells, maxRadius = Math.max(1, Math.hypot(minCol, minRow), Math.hypot(minCol, maxRow), Math.hypot(maxCol, minRow), Math.hypot(maxCol, maxRow)), maxDelayMs = 520, breatheSpreadMs = 2200, randomAt = (row, col, salt) => {
     let value = input.randomSeed ^ salt;
     value = Math.imul(value ^ row, 73244475);
     value = Math.imul(value ^ col, 295559667);
@@ -332,22 +331,7 @@ var build=(function buildAdaptiveSplashTiles(input) {
   }, tiles = [];
   for (let row = minRow;row <= maxRow; row += 1)
     for (let col = minCol;col <= maxCol; col += 1) {
-      const radius = Math.hypot(col, row);
-      let fraction;
-      if (input.mode === "boot")
-        fraction = radius / maxRadius;
-      else
-        fraction = ((input.direction === "forward" ? col - minCol : maxCol - col) + (row - minRow) * skew) / (sweepWidth + sweepHeight * skew);
-      let scatterXPx, scatterYPx;
-      if (input.mode === "boot") {
-        const magnitude = radius === 0 ? 0 : cellPx * (0.18 + 0.36 * clamp(radius / 6, 0, 1));
-        scatterXPx = radius === 0 ? 0 : Math.round(col / radius * magnitude);
-        scatterYPx = radius === 0 ? 0 : Math.round(row / radius * magnitude);
-      } else {
-        scatterXPx = Math.round(cellPx * 0.28) * (input.direction === "forward" ? 1 : -1);
-        scatterYPx = 0;
-      }
-      const breathes = input.breatheShare > 0 && randomAt(row, col, 1757159915) < clamp(input.breatheShare, 0, 1);
+      const radius = Math.hypot(col, row), fraction = radius / maxRadius, magnitude = radius === 0 ? 0 : cellPx * (0.18 + 0.36 * clamp(radius / 6, 0, 1)), scatterXPx = radius === 0 ? 0 : Math.round(col / radius * magnitude), scatterYPx = radius === 0 ? 0 : Math.round(row / radius * magnitude), breathes = input.breatheShare > 0 && randomAt(row, col, 1757159915) < clamp(input.breatheShare, 0, 1);
       tiles.push({
         breatheDelayMs: breathes ? Math.round(randomAt(row, col, 48610963) * breatheSpreadMs) : null,
         delayMs: Math.round(clamp(fraction, 0, 1) * maxDelayMs),

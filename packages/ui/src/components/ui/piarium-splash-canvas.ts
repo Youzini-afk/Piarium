@@ -226,9 +226,6 @@ export function buildAdaptiveSplashTiles(input: SplashTileFieldInput): SplashTil
     Math.hypot(maxCol, minRow),
     Math.hypot(maxCol, maxRow),
   );
-  const sweepWidth = Math.max(1, maxCol - minCol);
-  const sweepHeight = Math.max(1, maxRow - minRow);
-  const skew = 0.22;
   const maxDelayMs = 520;
   const breatheSpreadMs = 2_200;
 
@@ -244,25 +241,17 @@ export function buildAdaptiveSplashTiles(input: SplashTileFieldInput): SplashTil
   for (let row = minRow; row <= maxRow; row += 1) {
     for (let col = minCol; col <= maxCol; col += 1) {
       const radius = Math.hypot(col, row);
-      let fraction: number;
-      if (input.mode === 'boot') {
-        fraction = radius / maxRadius;
-      } else {
-        const along = input.direction === 'forward' ? col - minCol : maxCol - col;
-        fraction = (along + (row - minRow) * skew) / (sweepWidth + sweepHeight * skew);
-      }
-      let scatterXPx: number;
-      let scatterYPx: number;
-      if (input.mode === 'boot') {
-        const magnitude = radius === 0
-          ? 0
-          : cellPx * (0.18 + 0.36 * clamp(radius / 6, 0, 1));
-        scatterXPx = radius === 0 ? 0 : Math.round(col / radius * magnitude);
-        scatterYPx = radius === 0 ? 0 : Math.round(row / radius * magnitude);
-      } else {
-        scatterXPx = Math.round(cellPx * 0.28) * (input.direction === 'forward' ? 1 : -1);
-        scatterYPx = 0;
-      }
+      // Both boot and the built-in Workbench scene are centred on the cube's registered footprint. Reveal
+      // starts at 0:0 and travels outward; covering is its exact global time reversal, so the perimeter
+      // settles first and the field closes concentrically before the cube becomes visible. Profile ordering
+      // remains in the public frame for custom scenes, but must not turn Piarium's default scene into a
+      // corner-origin wipe.
+      const fraction = radius / maxRadius;
+      const magnitude = radius === 0
+        ? 0
+        : cellPx * (0.18 + 0.36 * clamp(radius / 6, 0, 1));
+      const scatterXPx = radius === 0 ? 0 : Math.round(col / radius * magnitude);
+      const scatterYPx = radius === 0 ? 0 : Math.round(row / radius * magnitude);
       const breathes = input.breatheShare > 0
         && randomAt(row, col, 0x68bc21eb) < clamp(input.breatheShare, 0, 1);
       tiles.push({
