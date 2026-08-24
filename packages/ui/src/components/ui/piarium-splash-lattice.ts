@@ -5,7 +5,7 @@ import {
   floorReach,
   HORIZON_RISE_PX,
 } from './piarium-splash-camera';
-import { WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE } from '@/lib/workbench/transition-paint-handoff';
+import { WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE } from '../../lib/workbench/transition-paint-handoff';
 
 /**
  * The splash floor: a grid put into the camera's floor plane, with the cube standing on one of its cells.
