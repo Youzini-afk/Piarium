@@ -97,7 +97,8 @@ The repository does not ship another product's Firebase or Apple credentials.
 
 ## Generated Assets
 
-Launcher, adaptive, and splash assets are generated from Piarium's maintained desktop product icon:
+Launcher, adaptive, and splash assets are generated from Piarium's shared startup-cube mark. From the
+repository root, regenerate every product surface together:
 
 ```sh
 bun run branding:generate

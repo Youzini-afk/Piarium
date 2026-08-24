@@ -78,6 +78,10 @@ Build output goes to `packages/electron/dist`.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 
+Every desktop icon, Web/README mark, VS Code icon, and mobile launcher asset is generated from the same
+startup-cube projection with `bun run branding:generate`. macOS packaging additionally compiles the
+generated light/dark Icon Composer sources into `Assets.car` on the native Mac runner before packaging.
+
 For a local or CI Windows x64 NSIS build, run from the repo root:
 
 ```bash

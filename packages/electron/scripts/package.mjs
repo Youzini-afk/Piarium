@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -56,6 +56,14 @@ if (process.platform === 'linux' && !builderArgs.some((argument) => (
   argument === '--x64' || argument === '--arm64' || argument === '--arch' || argument.startsWith('--arch=')
 ))) {
   builderArgs.push(`--${targetArchitecture.electronBuilder}`);
+}
+
+if (process.platform === 'darwin') {
+  execFileSync(process.execPath, [path.join(electronDir, 'scripts', 'generate-macos-icon-assets.cjs')], {
+    cwd: electronDir,
+    env,
+    stdio: 'inherit',
+  });
 }
 
 const child = spawn(bunBinary, ['x', 'electron-builder', ...builderArgs], {

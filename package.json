@@ -44,6 +44,7 @@
     "lint:mobile": "bun run --cwd packages/mobile lint",
     "clean": "bun run --filter '*' clean",
     "changelog-card": "node scripts/changelog-card/generate.mjs",
+    "branding:generate": "bun run scripts/generate-product-brand-assets.ts && bun run --cwd packages/mobile branding:generate",
     "postinstall": "node ./scripts/fix-deprecation.js && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
     "test:pi": "bun run --sequential --filter '@piarium/*' test",
     "test:pi:dist": "bun run --sequential --filter '@piarium/*' test:dist",

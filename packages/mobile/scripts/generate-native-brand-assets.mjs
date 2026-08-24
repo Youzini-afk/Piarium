@@ -5,23 +5,13 @@ import sharp from 'sharp';
 
 const mobileRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const productIconPath = resolve(mobileRoot, '..', 'electron', 'resources', 'icons', 'app-icon.png');
+const darkSurfaceMarkPath = resolve(mobileRoot, '..', 'web', 'public', 'logo-dark-512x512.svg');
+const lightSurfaceMarkPath = resolve(mobileRoot, '..', 'web', 'public', 'logo-light-512x512.svg');
 const androidRes = join(mobileRoot, 'android', 'app', 'src', 'main', 'res');
 const iosAssets = join(mobileRoot, 'ios', 'App', 'App', 'Assets.xcassets');
 const brandAssets = join(mobileRoot, 'assets');
-const background = '#10130f';
+const background = '#151313';
 const splashBackground = '#f7f4eb';
-
-const glyphSvg = Buffer.from(`
-<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <g transform="translate(512, 500) scale(7.3)">
-    <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="#26372f" stroke="#f6e7b0" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M0 0 L41.568 -24 L41.568 24 L0 48 Z" fill="#3a5746" stroke="#f6e7b0" stroke-width="3" stroke-linejoin="round"/>
-    <path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z" fill="#725f2b" stroke="#f6e7b0" stroke-width="3" stroke-linejoin="round"/>
-    <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, -24) scale(0.75)">
-      <path d="M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z" fill="#f4cf70"/>
-    </g>
-  </g>
-</svg>`);
 
 const ensureParent = async (path) => mkdir(dirname(path), { recursive: true });
 const save = async (path, bytes) => {
@@ -30,7 +20,8 @@ const save = async (path, bytes) => {
 };
 
 const productIcon = await sharp(productIconPath).resize(1024, 1024).png().toBuffer();
-const glyph = await sharp(glyphSvg).png().toBuffer();
+const glyph = await sharp(darkSurfaceMarkPath).resize(1024, 1024).png().toBuffer();
+const lightSurfaceMark = await sharp(lightSurfaceMarkPath).resize(1024, 1024).png().toBuffer();
 const solidBackground = await sharp({
   create: { width: 1024, height: 1024, channels: 4, background },
 }).png().toBuffer();
@@ -52,7 +43,7 @@ const densitySizes = new Map([
 for (const [density, size] of densitySizes) {
   const directory = join(androidRes, `mipmap-${density}`);
   const icon = await sharp(productIcon).resize(size, size).png().toBuffer();
-  const foregroundSize = Math.max(1, Math.round(size * 0.78));
+  const foregroundSize = Math.max(1, Math.round(size * 0.72));
   const inset = Math.floor((size - foregroundSize) / 2);
   const foreground = await sharp(glyph)
     .resize(foregroundSize, foregroundSize, { fit: 'contain' })
@@ -77,7 +68,7 @@ for (const [density, size] of densitySizes) {
 
 const renderSplash = async (width, height) => {
   const markSize = Math.max(72, Math.round(Math.min(width, height) * 0.28));
-  const mark = await sharp(productIcon).resize(markSize, markSize).png().toBuffer();
+  const mark = await sharp(lightSurfaceMark).resize(markSize, markSize).png().toBuffer();
   return sharp({
     create: { width, height, channels: 4, background: splashBackground },
   })

@@ -1,23 +1,18 @@
-﻿/**
- * The Piarium mark's isometric geometry, in one place.
+import { projectPoint } from './piarium-splash-camera';
+
+/**
+ * Piarium's static mark, projected from the same cube and camera pose as the startup scene.
  *
- * This is the published mark, and it is a parallel projection because that is the right thing for an
- * icon: no vanishing point, no size gradient, identical at any scale. `PiariumLogo` renders it, and the
- * app icons and favicons are cut from the same numbers.
- *
- * It is not what the splash draws. A cube in parallel projection has parallel base edges, and the splash
- * floor's lines converge, so the two cannot meet. The splash builds a small CSS 3D cube inside the floor's
- * own camera instead, reusing the glyph and per-cell opacity tables here so both marks remain recognisable
- * as the same Piarium logo.
+ * The splash keeps a real CSS 3D cube because it has to move. Static surfaces do not need that runtime
+ * cost, so this module projects the three visible faces, their 4×4 cells, and the π glyph once into a
+ * 100×100 SVG viewBox. App icons, README artwork, favicons, and `PiariumLogo` all consume these paths.
  */
 
-/** Cube edge length in the 100x100 viewBox. */
-const LOGO_EDGE = 48;
-/** Exported because the splash lattice reuses the same projection. */
-const LOGO_COS30 = 0.866;
-const LOGO_SIN30 = 0.5;
-const LOGO_CENTER_X = 50;
-const LOGO_CENTER_Y = 50;
+const LOGO_EDGE = 96;
+const LOGO_HALF_EDGE = LOGO_EDGE / 2;
+const LOGO_TOP_Z = LOGO_EDGE;
+const LOGO_VIEWBOX_PADDING = 4;
+
 export const LOGO_VIEWBOX = '0 0 100 100';
 export const LOGO_GRID_SIZE = 4;
 
@@ -26,49 +21,85 @@ export interface LogoPoint {
   readonly y: number;
 }
 
-/**
- * Coordinates are rounded before they reach a path string.
- *
- * `48 * 0.866` is not exact in binary floating point, so the raw products would emit paths like
- * `L8.432000000000002 26`. Rounding keeps the emitted geometry readable, keeps it identical to the
- * literal copy inlined in `index.html`, and is far below the precision a 100-unit viewBox can show.
- */
-const round = (value: number): number => Math.round(value * 1000) / 1000;
+interface LogoPoint3 extends LogoPoint {
+  readonly z: number;
+}
 
-const halfWidth = round(LOGO_EDGE * LOGO_COS30);
-const halfHeight = round(LOGO_EDGE * LOGO_SIN30);
+const round = (value: number): number => Math.round(value * 1_000) / 1_000;
 
-/**
- * Named vertices of the isometric cube.
- *
- * Rounded per coordinate, not only per half-extent: `50 - 41.568` reintroduces float noise even when
- * the operand is already clean.
- */
-export const LOGO_VERTICES = {
-  top: { x: LOGO_CENTER_X, y: round(LOGO_CENTER_Y - LOGO_EDGE) },
-  left: { x: round(LOGO_CENTER_X - halfWidth), y: round(LOGO_CENTER_Y - halfHeight) },
-  right: { x: round(LOGO_CENTER_X + halfWidth), y: round(LOGO_CENTER_Y - halfHeight) },
-  center: { x: LOGO_CENTER_X, y: LOGO_CENTER_Y },
-  bottomLeft: { x: round(LOGO_CENTER_X - halfWidth), y: round(LOGO_CENTER_Y + halfHeight) },
-  bottomRight: { x: round(LOGO_CENTER_X + halfWidth), y: round(LOGO_CENTER_Y + halfHeight) },
-  bottom: { x: LOGO_CENTER_X, y: round(LOGO_CENTER_Y + LOGO_EDGE) },
-} as const satisfies Record<string, LogoPoint>;
+const RAW_VERTICES = {
+  top: { x: -LOGO_HALF_EDGE, y: -LOGO_HALF_EDGE, z: LOGO_TOP_Z },
+  left: { x: -LOGO_HALF_EDGE, y: LOGO_HALF_EDGE, z: LOGO_TOP_Z },
+  right: { x: LOGO_HALF_EDGE, y: -LOGO_HALF_EDGE, z: LOGO_TOP_Z },
+  center: { x: LOGO_HALF_EDGE, y: LOGO_HALF_EDGE, z: LOGO_TOP_Z },
+  bottomLeft: { x: -LOGO_HALF_EDGE, y: LOGO_HALF_EDGE, z: 0 },
+  bottomRight: { x: LOGO_HALF_EDGE, y: -LOGO_HALF_EDGE, z: 0 },
+  bottom: { x: LOGO_HALF_EDGE, y: LOGO_HALF_EDGE, z: 0 },
+} as const satisfies Record<string, LogoPoint3>;
 
-/** Centre of the open top face, which is where the mark sits. */
-const LOGO_TOP_FACE_CENTER_Y = (
-  LOGO_VERTICES.top.y + LOGO_VERTICES.left.y + LOGO_VERTICES.center.y + LOGO_VERTICES.right.y
-) / 4;
+const rawProjectedVertices = Object.values(RAW_VERTICES).map(projectPoint);
+const rawMinX = Math.min(...rawProjectedVertices.map((point) => point.x));
+const rawMaxX = Math.max(...rawProjectedVertices.map((point) => point.x));
+const rawMinY = Math.min(...rawProjectedVertices.map((point) => point.y));
+const rawMaxY = Math.max(...rawProjectedVertices.map((point) => point.y));
+const drawableSize = 100 - LOGO_VIEWBOX_PADDING * 2;
+const projectionScale = Math.min(
+  drawableSize / (rawMaxX - rawMinX),
+  drawableSize / (rawMaxY - rawMinY),
+);
+const projectionOffsetX = 50 - (rawMinX + rawMaxX) * projectionScale / 2;
+const projectionOffsetY = 50 - (rawMinY + rawMaxY) * projectionScale / 2;
 
-/**
- * Maps a unit square onto the isometric rhombus. The splash lattice uses the same matrix, which is
- * why a flat CSS grid can tile the cube's own lattice without any per-cell trigonometry.
- */
-export const LOGO_ISO_MATRIX =
-  `matrix(${LOGO_COS30}, ${LOGO_SIN30}, ${-LOGO_COS30}, ${LOGO_SIN30}, ${LOGO_CENTER_X}, ${LOGO_TOP_FACE_CENTER_Y})`;
+const projectLogoPoint = (point: LogoPoint3): LogoPoint => {
+  const projected = projectPoint(point);
+  return {
+    x: round(projected.x * projectionScale + projectionOffsetX),
+    y: round(projected.y * projectionScale + projectionOffsetY),
+  };
+};
 
-/** The π glyph, drawn in the top face's local space. */
+/** Named vertices retained for consumers that inspect the mark's projected outline. */
+export const LOGO_VERTICES = Object.fromEntries(
+  Object.entries(RAW_VERTICES).map(([name, point]) => [name, projectLogoPoint(point)]),
+) as Record<keyof typeof RAW_VERTICES, LogoPoint>;
+
+const quadPath = (...points: LogoPoint[]): string =>
+  `M${points.map((point) => `${point.x} ${point.y}`).join(' L')} Z`;
+
+export const LOGO_LEFT_FACE_PATH = quadPath(
+  LOGO_VERTICES.center,
+  LOGO_VERTICES.left,
+  LOGO_VERTICES.bottomLeft,
+  LOGO_VERTICES.bottom,
+);
+export const LOGO_RIGHT_FACE_PATH = quadPath(
+  LOGO_VERTICES.center,
+  LOGO_VERTICES.right,
+  LOGO_VERTICES.bottomRight,
+  LOGO_VERTICES.bottom,
+);
+export const LOGO_TOP_FACE_PATH = quadPath(
+  LOGO_VERTICES.top,
+  LOGO_VERTICES.left,
+  LOGO_VERTICES.center,
+  LOGO_VERTICES.right,
+);
+
+/** The π glyph in the top face's local floor coordinates. */
 export const LOGO_MARK_PATH = 'M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z';
 export const LOGO_MARK_SCALE = 0.75;
+
+const MARK_POINTS: ReadonlyArray<readonly [number, number]> = [
+  [-18, -15], [18, -15], [18, -9], [13, -9], [13, 15], [7, 15],
+  [7, -9], [-7, -9], [-7, 15], [-13, 15], [-13, -9], [-18, -9],
+];
+
+/** The splash's top-face glyph after the shared camera projection. */
+export const LOGO_PROJECTED_MARK_PATH = quadPath(...MARK_POINTS.map(([x, y]) => projectLogoPoint({
+  x: x * LOGO_MARK_SCALE,
+  y: y * LOGO_MARK_SCALE,
+  z: LOGO_TOP_Z,
+})));
 
 export const LEFT_FACE_CELL_OPACITIES = [
   0.2, 0.45, 0.15, 0.55,
@@ -90,51 +121,34 @@ export interface LogoFaceCell {
   readonly col: number;
 }
 
-const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-
-const bilinear = (
-  topLeft: number,
-  topRight: number,
-  bottomRight: number,
-  bottomLeft: number,
-  t: number,
-  s: number,
-): number => lerp(lerp(topLeft, topRight, t), lerp(bottomLeft, bottomRight, t), s);
+type SplashFace = 'x' | 'y';
 
 /**
- * Subdivide a face quad into a `gridSize` x `gridSize` lattice of parallelograms.
+ * Reproduce the CSS cube's local face grid before projecting it.
  *
- * Bilinear interpolation rather than a fixed step, so the same routine works for either visible
- * face and would still work if the cube's proportions changed.
+ * The X wall rotates local columns into height while the Y wall rotates local rows into height. Keeping
+ * that mapping is what makes the static mosaic identical to the animated cube rather than merely similar.
  */
-export const generateFaceGrid = (
-  topLeft: LogoPoint,
-  topRight: LogoPoint,
-  bottomRight: LogoPoint,
-  bottomLeft: LogoPoint,
-  gridSize: number = LOGO_GRID_SIZE,
-): LogoFaceCell[] => {
+const generateSplashFaceGrid = (face: SplashFace): LogoFaceCell[] => {
   const cells: LogoFaceCell[] = [];
+  const step = LOGO_EDGE / LOGO_GRID_SIZE;
+  const worldPoint = (u: number, v: number): LogoPoint3 => face === 'x'
+    ? { x: LOGO_HALF_EDGE, y: v, z: LOGO_HALF_EDGE - u }
+    : { x: u, y: LOGO_HALF_EDGE, z: LOGO_HALF_EDGE - v };
 
-  for (let row = 0; row < gridSize; row += 1) {
-    for (let col = 0; col < gridSize; col += 1) {
-      const t1 = col / gridSize;
-      const t2 = (col + 1) / gridSize;
-      const s1 = row / gridSize;
-      const s2 = (row + 1) / gridSize;
-
-      const corner = (t: number, s: number): LogoPoint => ({
-        x: round(bilinear(topLeft.x, topRight.x, bottomRight.x, bottomLeft.x, t, s)),
-        y: round(bilinear(topLeft.y, topRight.y, bottomRight.y, bottomLeft.y, t, s)),
-      });
-
-      const p1 = corner(t1, s1);
-      const p2 = corner(t2, s1);
-      const p3 = corner(t2, s2);
-      const p4 = corner(t1, s2);
-
+  for (let row = 0; row < LOGO_GRID_SIZE; row += 1) {
+    for (let col = 0; col < LOGO_GRID_SIZE; col += 1) {
+      const u1 = -LOGO_HALF_EDGE + col * step;
+      const u2 = u1 + step;
+      const v1 = -LOGO_HALF_EDGE + row * step;
+      const v2 = v1 + step;
       cells.push({
-        path: `M${p1.x} ${p1.y} L${p2.x} ${p2.y} L${p3.x} ${p3.y} L${p4.x} ${p4.y} Z`,
+        path: quadPath(
+          projectLogoPoint(worldPoint(u1, v1)),
+          projectLogoPoint(worldPoint(u2, v1)),
+          projectLogoPoint(worldPoint(u2, v2)),
+          projectLogoPoint(worldPoint(u1, v2)),
+        ),
         row,
         col,
       });
@@ -144,31 +158,8 @@ export const generateFaceGrid = (
   return cells;
 };
 
-const quadPath = (...points: LogoPoint[]): string =>
-  `M${points.map((point) => `${point.x} ${point.y}`).join(' L')} Z`;
-
-export const LOGO_LEFT_FACE_PATH = quadPath(
-  LOGO_VERTICES.center, LOGO_VERTICES.left, LOGO_VERTICES.bottomLeft, LOGO_VERTICES.bottom,
-);
-export const LOGO_RIGHT_FACE_PATH = quadPath(
-  LOGO_VERTICES.center, LOGO_VERTICES.right, LOGO_VERTICES.bottomRight, LOGO_VERTICES.bottom,
-);
-export const LOGO_TOP_FACE_PATH = quadPath(
-  LOGO_VERTICES.top, LOGO_VERTICES.left, LOGO_VERTICES.center, LOGO_VERTICES.right,
-);
-
-/**
- * Both faces are wound from the shared front vertex outward, which makes them mirror images of each
- * other. The left face used to be wound from its outer edge inward, and the logo compensated by
- * reading its opacity row backwards; winding them the same way removes that compensation and makes
- * the emitted paths identical to the copy inlined in `index.html`.
- */
-export const LOGO_LEFT_FACE_CELLS = generateFaceGrid(
-  LOGO_VERTICES.center, LOGO_VERTICES.left, LOGO_VERTICES.bottomLeft, LOGO_VERTICES.bottom,
-);
-export const LOGO_RIGHT_FACE_CELLS = generateFaceGrid(
-  LOGO_VERTICES.center, LOGO_VERTICES.right, LOGO_VERTICES.bottomRight, LOGO_VERTICES.bottom,
-);
+export const LOGO_LEFT_FACE_CELLS = generateSplashFaceGrid('y');
+export const LOGO_RIGHT_FACE_CELLS = generateSplashFaceGrid('x');
 
 export const leftFaceCellOpacity = (cell: LogoFaceCell): number =>
   LEFT_FACE_CELL_OPACITIES[cell.row * LOGO_GRID_SIZE + cell.col] ?? 0.35;

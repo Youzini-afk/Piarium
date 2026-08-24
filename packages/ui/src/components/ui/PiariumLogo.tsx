@@ -2,11 +2,9 @@ import React, { useMemo } from 'react';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import {
-  LOGO_ISO_MATRIX,
   LOGO_LEFT_FACE_CELLS,
   LOGO_LEFT_FACE_PATH,
-  LOGO_MARK_PATH,
-  LOGO_MARK_SCALE,
+  LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
   LOGO_RIGHT_FACE_PATH,
   LOGO_TOP_FACE_PATH,
@@ -116,9 +114,6 @@ export const PiariumLogo: React.FC<PiariumLogoProps> = ({
       <path
         d={LOGO_LEFT_FACE_PATH}
         fill={fillColor}
-        stroke={strokeColor}
-        strokeWidth="2"
-        strokeLinejoin="round"
       />
 
       {/* Left face - grid cells with varying opacity */}
@@ -135,9 +130,6 @@ export const PiariumLogo: React.FC<PiariumLogoProps> = ({
       <path
         d={LOGO_RIGHT_FACE_PATH}
         fill={fillColor}
-        stroke={strokeColor}
-        strokeWidth="2"
-        strokeLinejoin="round"
       />
 
       {/* Right face - grid cells with varying opacity */}
@@ -150,24 +142,26 @@ export const PiariumLogo: React.FC<PiariumLogoProps> = ({
         />
       ))}
 
-      {/* Top face - open (no fill), only stroke */}
+      {/* Top face - the same subtle surface used by the startup cube. */}
       <path
         d={LOGO_TOP_FACE_PATH}
-        fill="none"
-        stroke={strokeColor}
-        strokeWidth="2"
-        strokeLinejoin="round"
+        fill={fillColor}
       />
 
-      {/* Piarium's π mark on the open top face. */}
+      {/* Face outlines paint after the mosaic, matching the splash cube's inset edges. */}
+      <g fill="none" stroke={strokeColor} strokeWidth="2" strokeLinejoin="round">
+        <path d={LOGO_LEFT_FACE_PATH} />
+        <path d={LOGO_RIGHT_FACE_PATH} />
+        <path d={LOGO_TOP_FACE_PATH} />
+      </g>
+
+      {/* Piarium's π mark projected through the startup camera. */}
       <g
         opacity={1}
         className={isAnimated ? 'piarium-logo-glow' : undefined}
         style={isAnimated ? ({ '--piarium-glow-color': strokeColor } as React.CSSProperties) : undefined}
       >
-        <g transform={`${LOGO_ISO_MATRIX} scale(${LOGO_MARK_SCALE})`}>
-          <path d={LOGO_MARK_PATH} fill={strokeColor} />
-        </g>
+        <path d={LOGO_PROJECTED_MARK_PATH} fill={strokeColor} />
       </g>
     </svg>
   );
