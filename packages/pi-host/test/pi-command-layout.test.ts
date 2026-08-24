@@ -6,12 +6,12 @@ import { describe, it } from "node:test";
 import { resolvePiCommandLayout } from "../src/pi-command-layout.js";
 
 async function writeCodingAgent(packageRoot: string): Promise<void> {
-  await mkdir(join(packageRoot, "dist"), { recursive: true });
+  await mkdir(join(packageRoot, "dist", "bundle"), { recursive: true });
   await writeFile(
     join(packageRoot, "package.json"),
-    JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.84.1" }),
+    JSON.stringify({ name: "@earendil-works/pi-coding-agent", version: "0.84.3" }),
   );
-  await writeFile(join(packageRoot, "dist", "cli.js"), "console.log('0.84.1');\n");
+  await writeFile(join(packageRoot, "dist", "bundle", "cli.js"), "console.log('0.84.3');\n");
 }
 
 describe("resolvePiCommandLayout", () => {
@@ -28,7 +28,7 @@ describe("resolvePiCommandLayout", () => {
           "@ECHO off",
           "SET dp0=%~dp0",
           'IF EXIST "%dp0%\\node.exe" SET "_prog=%dp0%\\node.exe"',
-          'endLocal & "%_prog%"  "%dp0%\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.js" %*',
+          'endLocal & "%_prog%"  "%dp0%\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\bundle\\cli.js" %*',
           "",
         ].join("\r\n"),
       );
@@ -52,7 +52,7 @@ describe("resolvePiCommandLayout", () => {
         command,
         `#!/usr/bin/env node
 const basedir = ${JSON.stringify(root)};
-// "${join(root, "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js")}"
+// "${join(root, "lib", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "bundle", "cli.js")}"
 `,
       );
       const resolved = resolvePiCommandLayout(command);
@@ -73,7 +73,7 @@ const basedir = ${JSON.stringify(root)};
         command,
         [
           "@echo off",
-          `"${join(root, "node.exe")}" "${join(codingAgent, "dist", "cli.js")}" %*`,
+          `"${join(root, "node.exe")}" "${join(codingAgent, "dist", "bundle", "cli.js")}" %*`,
           "",
         ].join("\r\n"),
       );
@@ -96,7 +96,7 @@ const basedir = ${JSON.stringify(root)};
         [
           "#!/usr/bin/env pwsh",
           `$basedir = ${JSON.stringify(root)}`,
-          `& "$basedir/node.exe" "${join(codingAgent, "dist", "cli.js")}" $args`,
+          `& "$basedir/node.exe" "${join(codingAgent, "dist", "bundle", "cli.js")}" $args`,
           "",
         ].join("\n"),
       );
@@ -116,7 +116,7 @@ const basedir = ${JSON.stringify(root)};
       await writeCodingAgent(codingAgent);
       const command = join(root, "bin", "pi");
       await mkdir(join(root, "bin"), { recursive: true });
-      await symlink(join(codingAgent, "dist", "cli.js"), command);
+      await symlink(join(codingAgent, "dist", "bundle", "cli.js"), command);
       const resolved = resolvePiCommandLayout(command);
       assert.equal(resolved.packageRoot, codingAgent);
     } finally {

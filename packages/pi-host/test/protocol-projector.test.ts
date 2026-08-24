@@ -76,6 +76,28 @@ describe("Pi protocol projector", () => {
     assert.equal("partial" in projected.update, false);
   });
 
+  it("preserves Pi 0.84.3 tool-call identity without forwarding the partial message", () => {
+    const projected = projectAgentEvent({
+      assistantMessageEvent: {
+        contentIndex: 2,
+        partial: assistant,
+        type: "toolcall_start",
+      },
+      message: assistant,
+      type: "message_update",
+    } as AgentSessionEvent);
+
+    assert.equal(projected.type, "message_update");
+    if (projected.type !== "message_update") return;
+    assert.deepEqual(projected.update, {
+      contentIndex: 2,
+      id: "call-1",
+      toolName: "read",
+      type: "toolcall_start",
+    });
+    assert.equal("partial" in projected.update, false);
+  });
+
   it("preserves Pi 0.84 deferred completion state", () => {
     const deferredAssistant = {
       ...assistant,

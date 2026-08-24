@@ -2,7 +2,7 @@
 
 Status: Pi-native host, desktop, recovery, and extension boundaries in place; release verification active
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 ## Protected assets
 
@@ -94,7 +94,7 @@ deleting the security boundary that module currently enforces.
 
 ## Upstream dependency baseline
 
-Pi `0.84.2` publishes `brace-expansion` `5.0.9` and `undici` `8.9.0` in its npm shrinkwrap, so
+Pi `0.84.3` publishes `brace-expansion` `5.0.9` and `undici` `8.9.0` in its npm shrinkwrap, so
 Piarium no longer mutates Pi's installed dependency tree after installation. The root, cloud, and
 isolated VS Code lockfiles keep those resolved versions reproducible, and the VS Code packaged
 runtime smoke still rejects `brace-expansion <5.0.9` or `undici <8.9.0`. Confirm both resolutions

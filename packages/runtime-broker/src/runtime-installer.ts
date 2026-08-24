@@ -62,7 +62,7 @@ async function writeUnixPiEntry(commandPath: string, runtimeDir: string): Promis
   const script = `#!/usr/bin/env bash
 DIR=${JSON.stringify(runtimeDir)}
 if [ -x "$DIR/bin/node" ]; then
-  exec "$DIR/bin/node" "$DIR/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$@"
+  exec "$DIR/bin/node" "$DIR/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" "$@"
 fi
 exec "$DIR/bin/pi" "$@"
 `;
@@ -75,7 +75,7 @@ async function writeWindowsPiEntry(commandPath: string, runtimeDir: string): Pro
   const script = `@echo off\r
 set "DIR=${runtimeDir}"\r
 if exist "%DIR%\\bin\\node.exe" (\r
-  "%DIR%\\bin\\node.exe" "%DIR%\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.js" %*\r
+  "%DIR%\\bin\\node.exe" "%DIR%\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\bundle\\cli.js" %*\r
   exit /b %ERRORLEVEL%\r
 )\r
 "%DIR%\\bin\\pi.exe" %*\r

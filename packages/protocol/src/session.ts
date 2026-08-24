@@ -243,7 +243,7 @@ export type PiAssistantStreamUpdate =
   | { contentIndex: number; type: "thinking_start" }
   | { contentIndex: number; delta: string; type: "thinking_delta" }
   | { content: string; contentIndex: number; type: "thinking_end" }
-  | { contentIndex: number; type: "toolcall_start" }
+  | { contentIndex: number; id: string; toolName: string; type: "toolcall_start" }
   | { contentIndex: number; delta: string; type: "toolcall_delta" }
   | { contentIndex: number; toolCall: PiToolCall; type: "toolcall_end" }
   | { reason: "stop" | "length" | "toolUse" | "deferred"; type: "done" }

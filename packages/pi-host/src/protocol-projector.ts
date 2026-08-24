@@ -281,8 +281,19 @@ function projectAssistantUpdate(event: AssistantMessageEvent): PiAssistantStream
       return { type: "start" };
     case "text_start":
     case "thinking_start":
-    case "toolcall_start":
       return { contentIndex: event.contentIndex, type: event.type };
+    case "toolcall_start": {
+      const toolCall = event.partial.content[event.contentIndex];
+      if (toolCall?.type !== "toolCall") {
+        throw new Error(`toolcall_start content at index ${event.contentIndex} is not a tool call`);
+      }
+      return {
+        contentIndex: event.contentIndex,
+        id: toolCall.id,
+        toolName: toolCall.name,
+        type: "toolcall_start",
+      };
+    }
     case "text_delta":
     case "thinking_delta":
     case "toolcall_delta":

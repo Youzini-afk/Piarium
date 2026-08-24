@@ -5,9 +5,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.84.2",
-    "@earendil-works/pi-ai": "0.84.2",
-    "@earendil-works/pi-coding-agent": "0.84.2",
+    "@earendil-works/pi-agent-core": "0.84.3",
+    "@earendil-works/pi-ai": "0.84.3",
+    "@earendil-works/pi-coding-agent": "0.84.3",
     "jsonc-parser": "3.3.1",
     "proper-lockfile": "4.1.2"
   },

@@ -83,7 +83,10 @@ test("installs a standalone payload to the user-global location and skips a newe
     );
     assert.equal(first.exitCode, 0);
     const locations = standaloneRuntimeLocations("win32", env);
-    assert.match(await readFile(locations.commandPath, "utf8"), /pi-coding-agent/);
+    assert.match(
+      await readFile(locations.commandPath, "utf8"),
+      /pi-coding-agent\\dist\\bundle\\cli\.js/,
+    );
     const skipped = await executePiInstallPlan(
       {
         action: "upgrade",
