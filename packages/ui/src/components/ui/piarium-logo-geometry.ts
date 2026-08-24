@@ -12,6 +12,7 @@ const LOGO_EDGE = 96;
 const LOGO_HALF_EDGE = LOGO_EDGE / 2;
 const LOGO_TOP_Z = LOGO_EDGE;
 const LOGO_VIEWBOX_PADDING = 4;
+const LOGO_MARK_VIEWBOX_EDGE = 48;
 
 export const LOGO_VIEWBOX = '0 0 100 100';
 export const LOGO_GRID_SIZE = 4;
@@ -49,6 +50,9 @@ const projectionScale = Math.min(
 );
 const projectionOffsetX = 50 - (rawMinX + rawMaxX) * projectionScale / 2;
 const projectionOffsetY = 50 - (rawMinY + rawMaxY) * projectionScale / 2;
+
+/** One splash CSS pixel expressed in the normalized static-logo viewBox. */
+export const LOGO_STROKE_WIDTH = round(projectionScale);
 
 const projectLogoPoint = (point: LogoPoint3): LogoPoint => {
   const projected = projectPoint(point);
@@ -88,6 +92,7 @@ export const LOGO_TOP_FACE_PATH = quadPath(
 /** The π glyph in the top face's local floor coordinates. */
 export const LOGO_MARK_PATH = 'M-18 -15 H18 V-9 H13 V15 H7 V-9 H-7 V15 H-13 V-9 H-18 Z';
 export const LOGO_MARK_SCALE = 0.75;
+const logoMarkWorldScale = LOGO_MARK_SCALE * LOGO_EDGE / LOGO_MARK_VIEWBOX_EDGE;
 
 const MARK_POINTS: ReadonlyArray<readonly [number, number]> = [
   [-18, -15], [18, -15], [18, -9], [13, -9], [13, 15], [7, 15],
@@ -96,8 +101,8 @@ const MARK_POINTS: ReadonlyArray<readonly [number, number]> = [
 
 /** The splash's top-face glyph after the shared camera projection. */
 export const LOGO_PROJECTED_MARK_PATH = quadPath(...MARK_POINTS.map(([x, y]) => projectLogoPoint({
-  x: x * LOGO_MARK_SCALE,
-  y: y * LOGO_MARK_SCALE,
+  x: x * logoMarkWorldScale,
+  y: y * logoMarkWorldScale,
   z: LOGO_TOP_Z,
 })));
 

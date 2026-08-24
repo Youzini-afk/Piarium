@@ -9,6 +9,7 @@ import {
   LOGO_MARK_PATH,
   LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
+  LOGO_STROKE_WIDTH,
   LOGO_TOP_FACE_PATH,
   LOGO_VERTICES,
   RIGHT_FACE_CELL_OPACITIES,
@@ -48,6 +49,17 @@ describe('logo geometry', () => {
     expect(LOGO_PROJECTED_MARK_PATH).toMatch(/^M[\d.]+ [\d.]+ L/);
     expect(LOGO_PROJECTED_MARK_PATH.endsWith('Z')).toBe(true);
     expect(LOGO_PROJECTED_MARK_PATH).not.toContain('matrix(');
+
+    const coordinates = [...LOGO_PROJECTED_MARK_PATH.matchAll(/-?\d+(?:\.\d+)?/g)]
+      .map((match) => Number(match[0]));
+    const xCoordinates = coordinates.filter((_, index) => index % 2 === 0);
+    const markWidth = Math.max(...xCoordinates) - Math.min(...xCoordinates);
+    const topFaceWidth = LOGO_VERTICES.right.x - LOGO_VERTICES.left.x;
+    // The splash's 48-unit glyph viewBox is stretched over a 96px face before its authored 0.75 scale.
+    // Omitting that 2× conversion produces the visibly tiny mark this regression test was added for.
+    expect(markWidth / topFaceWidth).toBeGreaterThan(0.45);
+    expect(markWidth / topFaceWidth).toBeLessThan(0.52);
+    expect(LOGO_STROKE_WIDTH).toBeLessThan(1);
   });
 
   test('the glyph path closes back on itself', () => {

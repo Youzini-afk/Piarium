@@ -7,6 +7,7 @@ import {
   LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
   LOGO_RIGHT_FACE_PATH,
+  LOGO_STROKE_WIDTH,
   LOGO_TOP_FACE_PATH,
   LOGO_VIEWBOX,
   leftFaceCellOpacity,
@@ -149,7 +150,7 @@ export const PiariumLogo: React.FC<PiariumLogoProps> = ({
       />
 
       {/* Face outlines paint after the mosaic, matching the splash cube's inset edges. */}
-      <g fill="none" stroke={strokeColor} strokeWidth="2" strokeLinejoin="round">
+      <g fill="none" stroke={strokeColor} strokeWidth={LOGO_STROKE_WIDTH} strokeLinejoin="round">
         <path d={LOGO_LEFT_FACE_PATH} />
         <path d={LOGO_RIGHT_FACE_PATH} />
         <path d={LOGO_TOP_FACE_PATH} />

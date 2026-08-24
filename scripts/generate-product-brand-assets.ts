@@ -8,6 +8,7 @@ import {
   LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
   LOGO_RIGHT_FACE_PATH,
+  LOGO_STROKE_WIDTH,
   LOGO_TOP_FACE_PATH,
   leftFaceCellOpacity,
   rightFaceCellOpacity,
@@ -41,7 +42,7 @@ const faceCells = (
   )).join('');
 
 const markBody = (ink: string, compact = false): string => {
-  const strokeWidth = compact ? 3.4 : 2.2;
+  const strokeWidth = compact ? 3.4 : LOGO_STROKE_WIDTH;
   return [
     `<path d="${LOGO_LEFT_FACE_PATH}" fill="${ink}" fill-opacity="0.15"/>`,
     faceCells(LOGO_LEFT_FACE_CELLS, leftFaceCellOpacity, ink, compact),
