@@ -28,6 +28,16 @@
 export const SPLASH_CAMERA_TILT_DEG = 58;
 
 /**
+ * Low angle held at the start of the cube press.
+ *
+ * At 22 degrees the centre of a 96px cube still sits about 18px above its footprint on screen. That is
+ * the same visible travel as the earlier, well-read rigid press, while leaving the final overhead move to
+ * happen together with the cube sinking through the floor. If the camera reached zero first, a real Z
+ * translation would collapse to an almost pure size change and the press would feel weightless.
+ */
+export const SPLASH_CAMERA_PRESS_TILT_DEG = 22;
+
+/**
  * Rotation within the plane. 45 degrees puts a cube corner toward the viewer, which is the three
  * quarter view the mark is recognised by.
  */
@@ -178,6 +188,10 @@ export const floorInscribedRadius = (far: number, near: number): number => {
 /** The CSS transform that puts a flat element into the floor plane under this same camera. */
 export const CAMERA_FLOOR_TRANSFORM =
   `perspective(${SPLASH_CAMERA_DISTANCE_PX}px) rotateX(${SPLASH_CAMERA_TILT_DEG}deg) rotateZ(${SPLASH_CAMERA_SPIN_DEG}deg)`;
+
+/** Camera pose retained while the rigid cube begins moving into the floor. */
+export const CAMERA_PRESS_FLOOR_TRANSFORM =
+  `perspective(${SPLASH_CAMERA_DISTANCE_PX}px) rotateX(${SPLASH_CAMERA_PRESS_TILT_DEG}deg) rotateZ(${SPLASH_CAMERA_SPIN_DEG}deg)`;
 
 /** Same camera after it has moved overhead, with an identical transform list for smooth interpolation. */
 export const CAMERA_FLAT_FLOOR_TRANSFORM =

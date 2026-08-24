@@ -17,8 +17,10 @@ import { splashCubeMarkup } from './piarium-splash-cube';
 import {
   CAMERA_FLAT_FLOOR_TRANSFORM,
   CAMERA_FLOOR_TRANSFORM,
+  CAMERA_PRESS_FLOOR_TRANSFORM,
   HORIZON_RISE_PX,
   SPLASH_CAMERA_DISTANCE_PX,
+  SPLASH_CAMERA_PRESS_TILT_DEG,
   SPLASH_CAMERA_SPIN_DEG,
   SPLASH_CAMERA_TILT_DEG,
   cameraDepth,
@@ -491,10 +493,47 @@ describe('exit choreography', () => {
     expect(press).not.toContain('scaleX');
     expect(press).not.toContain('scaleY');
     expect(css).toContain('@keyframes pi-splash-camera-flatten');
+    expect(css).toContain(CAMERA_PRESS_FLOOR_TRANSFORM);
     expect(css).toContain(CAMERA_FLAT_FLOOR_TRANSFORM);
-    expect(css).toContain(`to { transform: ${CAMERA_FLAT_FLOOR_TRANSFORM} scale(1); }`);
+    expect(css).toContain(`100% { transform: ${CAMERA_FLAT_FLOOR_TRANSFORM} scale(1); }`);
     const centre = buildField().tiles.find((tile) => tile.key === '0:0');
     expect(centre).toMatchObject({ delayMs: 0, scatterXPx: 0, scatterYPx: 0 });
+  });
+
+  test('the camera preserves enough angle for the rigid press to travel on screen', () => {
+    const timing = splashTilePlaybackTiming('standard');
+    const tilt = SPLASH_CAMERA_PRESS_TILT_DEG * Math.PI / 180;
+    const cubeCentre = CUBE_EDGE_PX / 2;
+    const pressStartY = -cubeCentre * Math.sin(tilt)
+      / (1 - cubeCentre * Math.cos(tilt) / SPLASH_CAMERA_DISTANCE_PX);
+    const previousRigidPress = Math.abs(projectPoint({
+      x: 0,
+      y: 0,
+      z: -CUBE_EDGE_PX * 0.22,
+    }).y);
+
+    // The first camera leg retains the accepted visible press distance; the second leg ends with the
+    // cube's full burial and the centre tile release, so the Z motion is never hidden by an early top view.
+    expect(Math.abs(pressStartY)).toBeGreaterThanOrEqual(previousRigidPress);
+    expect(timing.cameraKneeProgress).toBeGreaterThan(0);
+    expect(timing.cameraKneeProgress).toBeLessThan(1);
+    expect(timing.cameraDelayMs + timing.cameraDurationMs).toBe(timing.releaseMs);
+
+    const renderer = mountSplashTileCanvas.toString();
+    expect(renderer).toContain('forwardProgress <= knee');
+    expect(renderer).toContain('options.camera.pressTiltDeg');
+  });
+
+  test('the contact footprint flashes solid and sends a short floor-space echo', () => {
+    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
+    const contact = css.slice(
+      css.indexOf('@keyframes pi-splash-contact-press'),
+      css.indexOf('@keyframes pi-splash-mark-out'),
+    );
+    expect(contact).toContain(`background: ${PIARIUM_SPLASH_COLORS.stroke};`);
+    expect(contact).toContain('transform: scale(0.82);');
+    expect(contact).toContain('transform: scale(1.28);');
+    expect(contact).toContain('0 0 0 18px transparent');
   });
 
   test('the buried cube is gone before the centre floor cell opens', () => {
