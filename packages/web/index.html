@@ -612,17 +612,17 @@ overflow: hidden;
 -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
 mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
 }
-/* One camera owns both the flattened floor layer and the small preserve-3d cube. The floor's descendants
-   remain flat, so its visual tiles do not become separate 3D layers. */
+/* The adaptive Canvas owns the live tilt and writes it here in the same rAF that draws the floor. The
+   fallback value is the authored idle camera, so the cube remains valid before the controller mounts. */
 .pi-splash-camera {
 position: absolute;
 left: 50%;
 top: 56%;
 transform-origin: 0 0;
 transform-style: preserve-3d;
-transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1);
+transform: perspective(1800px) rotateX(var(--pi-splash-camera-tilt, 58deg)) rotateZ(45deg) scale(1);
 }
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera {
+.pi-splash:not([data-mode='switch']):not([data-piarium-camera-owner='canvas'])[data-leaving='true'] .pi-splash-camera {
 animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-camera-flatten {
@@ -825,10 +825,10 @@ animation:
 pi-splash-open 263ms 471ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
 pi-splash-backdrop-out 142ms 734ms ease both;
 }
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-camera {
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick']:not([data-piarium-camera-owner='canvas']) .pi-splash-camera {
 animation: pi-splash-camera-flatten 285ms 733ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
 }
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-camera {
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick']:not([data-piarium-camera-owner='canvas']) .pi-splash-camera {
 animation: pi-splash-camera-flatten 285ms 22ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-mark {
@@ -881,10 +881,10 @@ animation:
 pi-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
 pi-splash-backdrop-out 260ms 1340ms ease both;
 }
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-camera {
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard']:not([data-piarium-camera-owner='canvas']) .pi-splash-camera {
 animation: pi-splash-camera-flatten 520ms 1340ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
 }
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-camera {
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard']:not([data-piarium-camera-owner='canvas']) .pi-splash-camera {
 animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-mark {
@@ -1084,7 +1084,10 @@ var mount=(function mountSplashTileCanvas(canvas, options, buildTileField = buil
         high = candidate;
     }
     return cubicCoordinate(0, 1, (low + high) / 2);
-  }, colorProbe = canvas.ownerDocument.createElement("span");
+  }, splashElement = canvas.closest(".pi-splash"), cameraElement = canvas.parentElement?.querySelector(".pi-splash-camera") ?? null;
+  if (splashElement && cameraElement)
+    splashElement.setAttribute("data-piarium-camera-owner", "canvas");
+  const colorProbe = canvas.ownerDocument.createElement("span");
   colorProbe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
   (canvas.parentElement ?? canvas.ownerDocument.documentElement).append(colorProbe);
   const resolveColor = (expression) => {
@@ -1403,7 +1406,7 @@ void main() {
     renderer.resize(viewport);
     canvas.setAttribute("data-piarium-splash-renderer", renderer.kind);
   }
-  let playback = options.playback, playbackStartedAt = performance.now(), animationFrame = 0, disposed = !1;
+  let playback = options.playback, playbackStartedAt = performance.now(), appliedCameraTiltDeg = null, animationFrame = 0, disposed = !1;
   const cameraTiltAt = (elapsed) => {
     if (playback.reducedMotion || playback.kind === "idle" || playback.kind === "covered")
       return options.camera.tiltDeg;
@@ -1452,9 +1455,13 @@ void main() {
   }, draw = (now) => {
     if (disposed)
       return;
-    const elapsed = Math.max(0, now - playbackStartedAt);
+    const elapsed = Math.max(0, now - playbackStartedAt), tiltDeg = cameraTiltAt(elapsed);
     updateFrames(elapsed);
-    renderer?.draw(frames, viewport, cameraTiltAt(elapsed));
+    if (cameraElement && (appliedCameraTiltDeg === null || Math.abs(appliedCameraTiltDeg - tiltDeg) > 0.0001)) {
+      cameraElement.style.setProperty(options.camera.tiltProperty, `${tiltDeg}deg`);
+      appliedCameraTiltDeg = tiltDeg;
+    }
+    renderer?.draw(frames, viewport, tiltDeg);
     if (shouldContinue(elapsed))
       animationFrame = requestAnimationFrame(draw);
     else
@@ -1495,6 +1502,9 @@ void main() {
       animationFrame = 0;
       renderer?.dispose();
       renderer = null;
+      cameraElement?.style.removeProperty(options.camera.tiltProperty);
+      if (splashElement?.getAttribute("data-piarium-camera-owner") === "canvas")
+        splashElement.removeAttribute("data-piarium-camera-owner");
       canvas.removeAttribute("data-piarium-splash-renderer");
     },
     setPlayback: (next) => {
@@ -1507,7 +1517,7 @@ void main() {
     }
   };
 });
-var controller=mount(canvas,{"camera":{"distancePx":1800,"originYPct":56,"spinDeg":45,"tiltDeg":58,"visibleFarRisePx":726.331414},"cellPx":96,"colors":{"background":"var(--splash-background, var(--color-background, #151313))","cell":"var(--splash-cell-pulse, var(--splash-background, #151313))","line":"var(--splash-lattice-line, rgba(255, 255, 255, 0.22))"},"field":{"breatheShare":0.1,"direction":"forward","mode":"boot","randomSeed":49734321},"playback":{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"idle","reducedMotion":false,"releaseMs":860,"totalMs":1900}},build);
+var controller=mount(canvas,{"camera":{"distancePx":1800,"originYPct":56,"spinDeg":45,"tiltProperty":"--pi-splash-camera-tilt","tiltDeg":58,"visibleFarRisePx":726.331414},"cellPx":96,"colors":{"background":"var(--splash-background, var(--color-background, #151313))","cell":"var(--splash-cell-pulse, var(--splash-background, #151313))","line":"var(--splash-lattice-line, rgba(255, 255, 255, 0.22))"},"field":{"breatheShare":0.1,"direction":"forward","mode":"boot","randomSeed":49734321},"playback":{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"idle","reducedMotion":false,"releaseMs":860,"totalMs":1900}},build);
 var reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 var observer=new MutationObserver(function(){
 if(!splash||splash.getAttribute('data-leaving')!=='true')return;

@@ -1,10 +1,11 @@
 /**
- * One camera, shared by the splash floor and the splash mark.
+ * One camera model, shared by the splash floor and the splash mark.
  *
  * The floor and the mark have to agree exactly or the mark stops standing on it, and the previous
- * three attempts each failed at that seam. This module removes the seam: the camera is defined once,
- * the floor gets it as a CSS transform, and the mark gets it as projected SVG geometry. Neither can
- * drift because neither owns any of the numbers.
+ * three attempts each failed at that seam. This module removes the numeric seam: the camera is defined
+ * once, the Canvas projects the floor with it, and the DOM cube receives the same live tilt through one
+ * CSS custom property. The Canvas frame loop owns that property while it owns the floor, so the two
+ * projections are sampled from the same timestamp instead of racing separate CSS and JavaScript clocks.
  *
  * Why perspective at all. Isometric is a parallel projection, so a ground plane drawn in it has no
  * vanishing point and no size gradient, which leaves the eye no cue to decide whether the plane
@@ -14,9 +15,9 @@
  * Why not CSS 3D. `transform-style: preserve-3d` stops a subtree being flattened, so every descendant
  * is composited in the parent's 3D space instead of the subtree being rasterised once. With a few
  * hundred floor cells that is a cost paid during startup, when the machine is already busiest. A single
- * `perspective() rotateX() rotateZ()` on the floor container keeps the default flat behaviour, so the
- * floor stays one transformed layer exactly as the isometric version did, and the mark is projected
- * here into ordinary SVG. Perspective without the bill.
+ * arithmetic in one Canvas draw keeps the floor behind one owner, while only the three cube faces use a
+ * small `preserve-3d` subtree. Perspective without promoting the adaptive tile field into hundreds or
+ * thousands of composited layers.
  */
 
 /**
@@ -42,6 +43,9 @@ export const SPLASH_CAMERA_SPIN_DEG = 45;
  * infinity, and past it the image inverts.
  */
 export const SPLASH_CAMERA_DISTANCE_PX = 1800;
+
+/** Live tilt written by the Canvas camera owner onto the DOM cube's camera element. */
+export const SPLASH_CAMERA_TILT_CSS_PROPERTY = '--pi-splash-camera-tilt';
 
 const RAD = Math.PI / 180;
 const cosTilt = Math.cos(SPLASH_CAMERA_TILT_DEG * RAD);
@@ -175,9 +179,13 @@ export const floorInscribedRadius = (far: number, near: number): number => {
   }));
 };
 
-/** The CSS transform that puts a flat element into the floor plane under this same camera. */
+/** Fixed idle transform used by geometry checks and the no-JavaScript fallback. */
 export const CAMERA_FLOOR_TRANSFORM =
   `perspective(${SPLASH_CAMERA_DISTANCE_PX}px) rotateX(${SPLASH_CAMERA_TILT_DEG}deg) rotateZ(${SPLASH_CAMERA_SPIN_DEG}deg)`;
+
+/** Runtime camera transform: the Canvas owner updates the tilt variable in the same frame it draws. */
+export const CAMERA_DYNAMIC_FLOOR_TRANSFORM =
+  `perspective(${SPLASH_CAMERA_DISTANCE_PX}px) rotateX(var(${SPLASH_CAMERA_TILT_CSS_PROPERTY}, ${SPLASH_CAMERA_TILT_DEG}deg)) rotateZ(${SPLASH_CAMERA_SPIN_DEG}deg)`;
 
 /** Same camera after it has moved overhead, with an identical transform list for smooth interpolation. */
 export const CAMERA_FLAT_FLOOR_TRANSFORM =

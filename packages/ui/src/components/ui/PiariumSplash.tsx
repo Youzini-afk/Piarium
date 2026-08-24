@@ -20,10 +20,11 @@ import {
 /**
  * The Piarium splash: the mark standing on a floor that is its own footprint extended outward.
  *
- * One CSS camera owns both. The floor stays one flattened layer and the cube is the scene's only small
- * preserve-3d object, so the camera turn reprojects them together. A floor cell is exactly the cube's base
- * and the lines leaving its base corners are the floor's own lines; the cube stands in the space instead
- * of being a screen-space sticker in front of it.
+ * One frame clock owns both. The Canvas projects the floor and writes the identical camera tilt into the
+ * cube's small preserve-3d camera before paint, so a dropped or delayed frame freezes/catches up as one
+ * scene instead of letting either half run ahead. A floor cell is exactly the cube's base and the lines
+ * leaving its base corners are the floor's own lines; the cube stands in the space instead of being a
+ * screen-space sticker in front of it.
  *
  * Two behaviours share the component. `boot` covers startup and comes apart outward from the cube's feet.
  * `switch` covers a Workbench Profile change and sweeps along one floor axis, reversing with the direction

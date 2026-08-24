@@ -1,6 +1,6 @@
 import {
+  CAMERA_DYNAMIC_FLOOR_TRANSFORM,
   CAMERA_FLAT_FLOOR_TRANSFORM,
-  CAMERA_FLOOR_TRANSFORM,
   floorInscribedRadius,
   floorReach,
   HORIZON_RISE_PX,
@@ -9,10 +9,10 @@ import {
 /**
  * The splash floor: a grid put into the camera's floor plane, with the cube standing on one of its cells.
  *
- * The floor and the mark agree because one CSS camera owns both. The floor stays one flattened layer while
- * the mark is the scene's only preserve-3d object, and a cell is exactly the cube's edge with the cube's
- * base centred on one cell. The camera therefore reprojects both together: the cube's footprint *is* a
- * floor cell and the lines leaving its base corners are the floor's own lines.
+ * The floor and the mark agree because one Canvas frame owns both camera samples. It projects the floor and
+ * writes the same tilt into the mark's small preserve-3d camera before paint. A cell is exactly the cube's
+ * edge with the cube's base centred on one cell, so the cube's footprint *is* a floor cell and the lines
+ * leaving its base corners are the floor's own lines.
  *
  * The floor keeps one Canvas owner and projects an adaptive tile field through the same camera arithmetic,
  * so every visible tile keeps independent motion without promoting hundreds or thousands of DOM elements
@@ -290,7 +290,7 @@ export const splashWorkbenchTileDelays = (
  * lands there.
  */
 const CAMERA_STYLE = {
-  transform: `${CAMERA_FLOOR_TRANSFORM} scale(1)`,
+  transform: `${CAMERA_DYNAMIC_FLOOR_TRANSFORM} scale(1)`,
   flattenedTransform: `${CAMERA_FLAT_FLOOR_TRANSFORM} scale(1)`,
 } as const;
 
@@ -401,10 +401,10 @@ animation:
 pi-splash-open ${timeline.revealMs}ms ${timeline.tileReleaseMs}ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
 pi-splash-backdrop-out ${timeline.backdropFadeMs}ms ${revealFadeDelay}ms ease both;
 }
-${covering} .pi-splash-camera {
+${covering}:not([data-piarium-camera-owner='canvas']) .pi-splash-camera {
 animation: pi-splash-camera-flatten ${timeline.floorDurationMs}ms ${coverFloorDelay}ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
 }
-${revealing} .pi-splash-camera {
+${revealing}:not([data-piarium-camera-owner='canvas']) .pi-splash-camera {
 animation: pi-splash-camera-flatten ${timeline.floorDurationMs}ms ${timeline.floorDelayMs}ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 ${covering} .pi-splash-mark {
@@ -730,8 +730,8 @@ overflow: hidden;
 -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${SPLASH_GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_EDGE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(${SPLASH_GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_FADE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)));
 mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${SPLASH_GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_EDGE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(${SPLASH_GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_FADE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)));
 }
-/* One camera owns both the flattened floor layer and the small preserve-3d cube. The floor's descendants
-   remain flat, so its visual tiles do not become separate 3D layers. */
+/* The adaptive Canvas owns the live tilt and writes it here in the same rAF that draws the floor. The
+   fallback value is the authored idle camera, so the cube remains valid before the controller mounts. */
 .pi-splash-camera {
 position: absolute;
 left: 50%;
@@ -740,7 +740,7 @@ transform-origin: 0 0;
 transform-style: preserve-3d;
 transform: ${CAMERA_STYLE.transform};
 }
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera {
+.pi-splash:not([data-mode='switch']):not([data-piarium-camera-owner='canvas'])[data-leaving='true'] .pi-splash-camera {
 animation: pi-splash-camera-flatten ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-camera-flatten {

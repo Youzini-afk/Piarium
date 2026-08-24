@@ -3,6 +3,7 @@
 import {
   SPLASH_CAMERA_DISTANCE_PX,
   SPLASH_CAMERA_SPIN_DEG,
+  SPLASH_CAMERA_TILT_CSS_PROPERTY,
   SPLASH_CAMERA_TILT_DEG,
 } from './piarium-splash-camera';
 import {
@@ -69,6 +70,7 @@ interface SplashCanvasCameraOptions {
   readonly distancePx: number;
   readonly originYPct: number;
   readonly spinDeg: number;
+  readonly tiltProperty: string;
   readonly tiltDeg: number;
   readonly visibleFarRisePx: number;
 }
@@ -134,6 +136,7 @@ export const createSplashCanvasMountOptions = (input: {
       distancePx: SPLASH_CAMERA_DISTANCE_PX,
       originYPct: SPLASH_GROUND_ORIGIN_Y_PCT,
       spinDeg: SPLASH_CAMERA_SPIN_DEG,
+      tiltProperty: SPLASH_CAMERA_TILT_CSS_PROPERTY,
       tiltDeg: SPLASH_CAMERA_TILT_DEG,
       visibleFarRisePx: SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
     },
@@ -312,6 +315,16 @@ export function mountSplashTileCanvas(
     }
     return cubicCoordinate(0, 1, (low + high) / 2);
   };
+
+  // The floor and cube used to animate this angle on independent clocks: Canvas rAF for the floor and a
+  // CSS animation for the cube. A delayed commit or frame could therefore put them at visibly different
+  // tilts. While this controller owns the Canvas, it owns the DOM camera tilt too and writes both from the
+  // same elapsed timestamp in draw(). The CSS camera animation remains only as a no-JavaScript fallback.
+  const splashElement = canvas.closest<HTMLElement>('.pi-splash');
+  const cameraElement = canvas.parentElement?.querySelector<HTMLElement>('.pi-splash-camera') ?? null;
+  if (splashElement && cameraElement) {
+    splashElement.setAttribute('data-piarium-camera-owner', 'canvas');
+  }
 
   const colorProbe = canvas.ownerDocument.createElement('span');
   colorProbe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
@@ -688,6 +701,7 @@ void main() {
 
   let playback = options.playback;
   let playbackStartedAt = performance.now();
+  let appliedCameraTiltDeg: number | null = null;
   let animationFrame = 0;
   let disposed = false;
 
@@ -755,8 +769,13 @@ void main() {
   const draw = (now: number): void => {
     if (disposed) return;
     const elapsed = Math.max(0, now - playbackStartedAt);
+    const tiltDeg = cameraTiltAt(elapsed);
     updateFrames(elapsed);
-    renderer?.draw(frames, viewport, cameraTiltAt(elapsed));
+    if (cameraElement && (appliedCameraTiltDeg === null || Math.abs(appliedCameraTiltDeg - tiltDeg) > 1e-4)) {
+      cameraElement.style.setProperty(options.camera.tiltProperty, `${tiltDeg}deg`);
+      appliedCameraTiltDeg = tiltDeg;
+    }
+    renderer?.draw(frames, viewport, tiltDeg);
     if (shouldContinue(elapsed)) animationFrame = requestAnimationFrame(draw);
     else animationFrame = 0;
   };
@@ -796,6 +815,10 @@ void main() {
       animationFrame = 0;
       renderer?.dispose();
       renderer = null;
+      cameraElement?.style.removeProperty(options.camera.tiltProperty);
+      if (splashElement?.getAttribute('data-piarium-camera-owner') === 'canvas') {
+        splashElement.removeAttribute('data-piarium-camera-owner');
+      }
       canvas.removeAttribute('data-piarium-splash-renderer');
     },
     setPlayback: (next) => {
