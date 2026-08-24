@@ -13,15 +13,15 @@
  * Three blocks per host, because they answer to three different generators:
  *   SPLASH-CSS   the shared stylesheet, including the camera transform and the cube's placement
  *   SPLASH-MARK  the shared-camera CSS cube (index.html only; mini-chat draws no cube)
- *   SPLASH-JS    the script that fills the floor, with the tile-cluster exit delays baked in
+ *   SPLASH-JS    the script that mounts the shared Canvas renderer, with per-tile choreography baked in
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { splashCubeMarkup } from '../../packages/ui/src/components/ui/piarium-splash-cube';
+import { splashGroundScript } from '../../packages/ui/src/components/ui/piarium-splash-canvas';
 import {
   PIARIUM_SPLASH_COLORS,
-  splashGroundScript,
   splashPlaneCss,
 } from '../../packages/ui/src/components/ui/piarium-splash-lattice';
 import { INITIAL_SPLASH_IDS } from '../../packages/ui/src/lib/splash';

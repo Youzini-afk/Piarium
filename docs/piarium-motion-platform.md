@@ -2,7 +2,7 @@
 
 Status: Phase 1–3 已交付；Bootstrap Projection 与通用 Motion service 待实施
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 本文规定 Piarium 动画与界面交接的产品边界、公共契约和实施顺序。它建立在
 [可组合工作台约定](composable-workbench-execution-plan.md) 之上，不新增第二套扩展系统，也不把
@@ -284,10 +284,18 @@ Transition Scene contribution，因此能够被选择、停用和替换。
 现有默认场景的 quick/standard/reduced duration 是已实现视觉时间轴的事实，不是平台级上限。第三方
 场景可以声明不同数值。
 
-默认立方体场景自身还有一项实现不变量：视觉上的 24×24 地板不等于 576 个独立动画 owner。它由
-8×8 个连续 3×3 瓦片簇绘制；簇在播放期间只改变 `transform` 和 `opacity`，大面积地板 mask 在不透明
-backdrop 下离散交接，不能重新变成每帧使整个地板栅格化的插值。这个数字是默认场景依据实测成本
-选择的内部几何，不是 Transition Scene 平台对第三方 Canvas、WebGL 或 DOM 场景施加的元素上限。
+默认立方体场景自身还有一项实现不变量：瓦片数量不是固定值。Renderer 会把当前 viewport 沿镜头从
+透视到俯视的路径反投影回地板坐标，生成覆盖该视口所需的真实瓦片；窗口越大，瓦片越多，单块尺寸和
+Logo 基座仍保持一致。Resize 只重建瓦片数据与 GPU buffer，不重建 React 或 DOM。每块瓦片保留自己的
+延迟、位移、缩放、透明度和稳定的呼吸选择，但整片地板只有一个 Canvas owner：优先用 WebGL2 的
+instanced draw（一次提交绘制所有瓦片），不可用时回退到 Canvas 2D。大面积地板 mask 在不透明
+backdrop 下离散交接，避免每帧重新栅格化整棵 DOM。
+
+远景同样由真实瓦片构成，不再用只能画线、不能呼吸或逐片消散的 repeating-gradient 冒充。透视接近
+地平线后，瓦片投影会趋近于不可辨识尺寸，scene 才通过 horizon mask 渐隐；地平线以上继续由同色
+不透明 backdrop 接住，不暴露尚未就绪的应用。覆盖与增长关系以手机、常见桌面、5K 超宽与 8K
+viewport 的几何测试固定。瓦片数量是当前视口和相机几何的结果，不是 Canvas renderer 或 Transition
+Scene 平台的硬上限。
 
 ## 9. Surface 与执行模式
 

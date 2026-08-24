@@ -8,9 +8,9 @@ import {
 /**
  * Markup for the one real 3D object in the splash scene.
  *
- * The floor stays flat and paints its 24×24 lattice through 8×8 compact tile clusters. Only this cube
- * participates in `preserve-3d`, so moving the shared camera reprojects the logo without turning startup
- * into hundreds of composited 3D layers.
+ * The floor projects a viewport-adaptive field of independently choreographed tiles through one Canvas
+ * owner. Only this cube participates in `preserve-3d`, so moving the shared camera reprojects the logo
+ * without turning startup into hundreds or thousands of composited DOM or 3D layers.
  *
  * The camera never rotates around the cube, only from its initial tilt to directly overhead. Consequently
  * the same two walls stay visible until they become edge-on; the two permanently hidden walls and the base

@@ -1,7 +1,4 @@
-import {
-  SPLASH_EXIT_DURATION_MS,
-  splashExitScale,
-} from '@/components/ui/piarium-splash-lattice';
+import { SPLASH_EXIT_DURATION_MS } from '@/components/ui/piarium-splash-lattice';
 
 /**
  * Talks to the pre-paint splash in `packages/web/index.html`.
@@ -62,14 +59,6 @@ export const dismissInitialSplash = (): void => {
   const element = splashElement();
   if (!element || removalTimer !== null) return;
 
-  // The pre-paint script fitted the initial viewport. Fit again at the moment of handoff in case the
-  // window changed size while startup work was still running.
-  if (typeof window !== 'undefined') {
-    element.style.setProperty(
-      '--pi-floor-exit-scale',
-      String(splashExitScale(window.innerWidth, window.innerHeight)),
-    );
-  }
   element.setAttribute(LEAVING_ATTRIBUTE, 'true');
   removalTimer = setTimeout(() => {
     removalTimer = null;

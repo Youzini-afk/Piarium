@@ -626,86 +626,32 @@ transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1);
 animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-camera-flatten {
-to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(var(--pi-floor-exit-scale, 1.158)); }
+to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(1); }
 }
-/* The grid is translated within that camera and flattened as a single layer. */
+/* The logical ground remains in the shared camera only as the cube's registered contact footprint. The
+   adaptive tile field is a viewport Canvas beside this camera and performs the same projection itself. */
 .pi-splash-ground {
 position: absolute;
 left: 0;
 top: 0;
-display: grid;
 transform-origin: 0 0;
-grid-template-columns: repeat(8, 288px);
-grid-template-rows: repeat(8, 288px);
+width: 2304px;
+height: 2304px;
 transform: translate(-1392px, -1392px);
 }
-/* A line-only continuation of the same registered grid reaches the horizon without hundreds more cells.
-   The real cells paint over it and remain the opaque cover; this layer only prevents a tall viewport from
-   ending in an unrelated blank band above a visibly finite floor. */
-.pi-splash-ground::before {
-content: '';
+/* The runtime projects an adaptive field of real tiles into this one viewport Canvas. Its opaque fallback
+   keeps startup covered if neither renderer can start; it deliberately draws no fake far-field tiles. */
+.pi-splash-ground-canvas {
 position: absolute;
-left: -1344px;
-top: -1344px;
-right: 0;
-bottom: 0;
+inset: 0;
+display: block;
+width: 100%;
+height: 100%;
 pointer-events: none;
-background-image:
-linear-gradient(to right, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%),
-linear-gradient(to bottom, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%);
-background-size: 96px 96px;
-}
-.pi-splash[data-leaving='true'] .pi-splash-ground::before {
-animation: pi-splash-continuation-out 520ms ease both;
-}
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::before {
-animation-delay: 860ms;
-}
-@keyframes pi-splash-continuation-out { to { opacity: 0; } }
-/* Opaque, contiguous 3×3 tile clusters. The repeated backgrounds preserve the original 96px lattice,
-   while one compact cluster replaces nine independently styled and animated elements. */
-.pi-splash-tile-cluster {
-contain: paint;
 background-color: var(--splash-background, var(--color-background, #151313));
-background-image:
-linear-gradient(to right, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%),
-linear-gradient(to bottom, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%);
-background-size: 96px 96px;
-transform-origin: center;
 }
-.pi-splash[data-mode='switch'][data-phase='covering'] .pi-splash-tile-cluster,
-.pi-splash[data-mode='switch'][data-phase='revealing'] .pi-splash-tile-cluster {
-will-change: transform, opacity;
-}
-/* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
-   there is genuinely something to wait for. Both ends are opaque colours: a translucent pulse would have
-   punched a hole in the cover for half of every cycle. */
-.pi-splash-tile-cluster[data-breathe='true'] {
-animation: pi-splash-breathe 2.8s ease-in-out infinite;
-animation-delay: calc(1.2s + var(--pi-breathe-delay));
-}
-@keyframes pi-splash-breathe {
-0%, 100% { background-color: var(--splash-background, var(--color-background, #151313)); }
-50% { background-color: var(--splash-cell-pulse, var(--splash-background, #151313)); }
-}
-/* Declared after the breathing rule so equal specificity lets the exit win without !important. */
-.pi-splash[data-leaving='true'] .pi-splash-tile-cluster {
-animation: pi-splash-tile-cluster-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cluster-delay);
-will-change: transform, opacity;
-}
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-tile-cluster {
-animation-delay: calc(var(--pi-cluster-delay) + 860ms);
-}
-/* Each cluster moves in the floor's own coordinate system before the parent camera projects it. Its nine
-   tiles therefore stay registered as perspective diamonds while the wave pushes the cluster away from the
-   cube's footprint. Only transform and opacity vary per frame, so the cluster can remain compositor-only. */
-@keyframes pi-splash-tile-cluster-out {
-0%, 55% { opacity: 1; }
-to {
-opacity: 0;
-transform: translate(var(--pi-cluster-scatter-x, 0px), var(--pi-cluster-scatter-y, 0px)) scale(0.56);
-}
+.pi-splash-ground-canvas[data-piarium-splash-renderer] {
+background: none;
 }
 
 /* Unlike the old pre-projected SVG, this is a small real cube inside the floor's camera. Only its three
@@ -885,20 +831,6 @@ animation: pi-splash-camera-flatten 285ms 733ms cubic-bezier(0.4, 0, 0.2, 1) rev
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-camera {
 animation: pi-splash-camera-flatten 285ms 22ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-ground::before {
-animation: pi-splash-continuation-out 285ms 284ms ease reverse both;
-}
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-ground::before {
-animation: pi-splash-continuation-out 285ms 471ms ease both;
-}
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-tile-cluster {
-animation: pi-splash-tile-cluster-out 285ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
-animation-delay: var(--pi-cluster-cover-delay-quick);
-}
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-tile-cluster {
-animation: pi-splash-tile-cluster-out 285ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cluster-reveal-delay-quick);
-}
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-mark {
 animation: pi-splash-mark-press 525ms 515ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
 }
@@ -955,20 +887,6 @@ animation: pi-splash-camera-flatten 520ms 1340ms cubic-bezier(0.4, 0, 0.2, 1) re
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-camera {
 animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-ground::before {
-animation: pi-splash-continuation-out 520ms 520ms ease reverse both;
-}
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-ground::before {
-animation: pi-splash-continuation-out 520ms 860ms ease both;
-}
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-tile-cluster {
-animation: pi-splash-tile-cluster-out 520ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
-animation-delay: var(--pi-cluster-cover-delay-standard);
-}
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-tile-cluster {
-animation: pi-splash-tile-cluster-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cluster-reveal-delay-standard);
-}
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-mark {
 animation: pi-splash-mark-press 960ms 940ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
 }
@@ -1002,15 +920,10 @@ animation: pi-splash-status-out 180ms ease both;
 .pi-splash[data-mode='switch'][data-phase],
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-backdrop,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-camera,
-.pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::before,
-.pi-splash[data-mode='switch'][data-phase] .pi-splash-tile-cluster,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-mark,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-cube-face,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-status,
-.pi-splash[data-leaving='true'] .pi-splash-ground::before,
-.pi-splash-tile-cluster,
-.pi-splash[data-leaving='true'] .pi-splash-tile-cluster,
 .pi-splash[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash[data-leaving='true'] .pi-splash-mark,
@@ -1086,21 +999,501 @@ animation-fill-mode: both;
       // nothing to rebuild on resize: a wider window simply reveals more of the same grid.
       /* SPLASH-JS-BEGIN */
 (function(){
-var ground=document.getElementById('initial-loading-ground');
+var ground=document.getElementById("initial-loading-ground");
 if(!ground)return;
 var splash=ground.closest('.pi-splash');
-if(splash)splash.style.setProperty('--pi-floor-exit-scale',(function(w,h){var e=[{"normalX":1629.174024,"normalY":-1629.174024,"support":3207168.000288},{"normalX":1629.174024,"normalY":1629.174024,"support":2101248.000189},{"normalX":-1629.174024,"normalY":1629.174024,"support":2101248.000189},{"normalX":-1629.174024,"normalY":-1629.174024,"support":3207168.000288}];var oy=h*0.56;var p=[[-w/2,-oy],[w/2,-oy],[w/2,h-oy],[-w/2,h-oy]];var s=1;for(var i=0;i<e.length;i++){for(var j=0;j<p.length;j++){s=Math.max(s,(e[i].normalX*p[j][0]+e[i].normalY*p[j][1])/e[i].support)}}return Math.ceil(s*1.04*1000)/1000})(innerWidth,innerHeight));
-var delays=[520,460,411,379,368,379,411,460,460,390,331,291,276,291,331,390,411,331,260,206,184,206,260,331,379,291,206,130,92,130,206,291,368,276,184,92,0,92,184,276,379,291,206,130,92,130,206,291,411,331,260,206,184,206,260,331,460,390,331,291,276,291,331,390];
-var breathes=[-1,-1,-1,-1,-1,2082,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,993,-1,-1,-1,-1,-1,-1,-1,982,-1,-1,-1,-1,-1,725,-1,-1,-1,-1,-1,-1,-1,1060,-1,-1,-1,-1,-1,-1,-1,-1,-1];
-var scatterXs=[-35,-28,-19,-10,0,10,19,28,-37,-29,-21,-11,0,11,21,29,-38,-32,-24,-13,0,13,24,32,-40,-34,-27,-18,0,18,27,34,-40,-35,-29,-23,0,23,29,35,-40,-34,-27,-18,0,18,27,34,-38,-32,-24,-13,0,13,24,32,-37,-29,-21,-11,0,11,21,29];
-var scatterYs=[-35,-37,-38,-40,-40,-40,-38,-37,-28,-29,-32,-34,-35,-34,-32,-29,-19,-21,-24,-27,-29,-27,-24,-21,-10,-11,-13,-18,-23,-18,-13,-11,0,0,0,0,0,0,0,0,10,11,13,18,23,18,13,11,19,21,24,27,29,27,24,21,28,29,32,34,35,34,32,29];
-var buffer='';
-for(var i=0;i<delays.length;i++){
-var style='--pi-cluster-delay:'+delays[i]+'ms;--pi-cluster-scatter-x:'+scatterXs[i]+'px;--pi-cluster-scatter-y:'+scatterYs[i]+'px';
-if(breathes[i]>=0)style+=';--pi-breathe-delay:'+breathes[i]+'ms';
-buffer+='<span class="pi-splash-tile-cluster" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
+var horizon=ground.closest('.pi-splash-horizon');
+if(!horizon)return;
+var canvas=document.createElement('canvas');
+canvas.className='pi-splash-ground-canvas';
+canvas.setAttribute('aria-hidden','true');
+horizon.insertBefore(canvas,horizon.firstChild);
+var build=(function buildAdaptiveSplashTiles(input) {
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value)), width = Math.max(1, Number.isFinite(input.viewportWidth) ? input.viewportWidth : 1), height = Math.max(1, Number.isFinite(input.viewportHeight) ? input.viewportHeight : 1), cellPx = Math.max(Number.EPSILON, input.cellPx), originY = height * input.originYPct / 100, spin = input.cameraSpinDeg * Math.PI / 180, cosSpin = Math.cos(spin), sinSpin = Math.sin(spin), inverseProject = (screenX, screenY, tiltDeg) => {
+    const tilt = tiltDeg * Math.PI / 180, cosTilt = Math.cos(tilt), sinTilt = Math.sin(tilt), denominator = cosTilt + screenY * sinTilt / input.cameraDistancePx;
+    if (denominator <= 0.0001)
+      return null;
+    const spunY = screenY / denominator, perspectiveW = 1 - spunY * sinTilt / input.cameraDistancePx, spunX = screenX * perspectiveW;
+    return {
+      x: spunX * cosSpin + spunY * sinSpin,
+      y: -spunX * sinSpin + spunY * cosSpin
+    };
+  }, floorPoints = [], tiltSteps = Math.max(1, Math.ceil(Math.abs(input.cameraTiltDeg)));
+  for (let step = 0;step <= tiltSteps; step += 1) {
+    const fraction = step / tiltSteps, tilt = input.cameraTiltDeg * (1 - fraction), top = tilt <= 0.000001 ? -originY : Math.max(-originY, -input.visibleFarRisePx), bottom = height - originY;
+    for (const screenX of [-width / 2, width / 2])
+      for (const screenY of [top, bottom]) {
+        const point = inverseProject(screenX, screenY, tilt);
+        if (point)
+          floorPoints.push(point);
+      }
+  }
+  floorPoints.push({ x: 0, y: 0 });
+  const overscanCells = 2, minX = Math.min(...floorPoints.map((point) => point.x)), maxX = Math.max(...floorPoints.map((point) => point.x)), minY = Math.min(...floorPoints.map((point) => point.y)), maxY = Math.max(...floorPoints.map((point) => point.y)), minCol = Math.floor(minX / cellPx) - overscanCells, maxCol = Math.ceil(maxX / cellPx) + overscanCells, minRow = Math.floor(minY / cellPx) - overscanCells, maxRow = Math.ceil(maxY / cellPx) + overscanCells, maxRadius = Math.max(1, Math.hypot(minCol, minRow), Math.hypot(minCol, maxRow), Math.hypot(maxCol, minRow), Math.hypot(maxCol, maxRow)), sweepWidth = Math.max(1, maxCol - minCol), sweepHeight = Math.max(1, maxRow - minRow), skew = 0.22, maxDelayMs = 520, breatheSpreadMs = 2200, randomAt = (row, col, salt) => {
+    let value = input.randomSeed ^ salt;
+    value = Math.imul(value ^ row, 73244475);
+    value = Math.imul(value ^ col, 295559667);
+    value ^= value >>> 16;
+    return (value >>> 0) / 4294967296;
+  }, tiles = [];
+  for (let row = minRow;row <= maxRow; row += 1)
+    for (let col = minCol;col <= maxCol; col += 1) {
+      const radius = Math.hypot(col, row);
+      let fraction;
+      if (input.mode === "boot")
+        fraction = radius / maxRadius;
+      else
+        fraction = ((input.direction === "forward" ? col - minCol : maxCol - col) + (row - minRow) * skew) / (sweepWidth + sweepHeight * skew);
+      let scatterXPx, scatterYPx;
+      if (input.mode === "boot") {
+        const magnitude = radius === 0 ? 0 : cellPx * (0.18 + 0.36 * clamp(radius / 6, 0, 1));
+        scatterXPx = radius === 0 ? 0 : Math.round(col / radius * magnitude);
+        scatterYPx = radius === 0 ? 0 : Math.round(row / radius * magnitude);
+      } else {
+        scatterXPx = Math.round(cellPx * 0.28) * (input.direction === "forward" ? 1 : -1);
+        scatterYPx = 0;
+      }
+      const breathes = input.breatheShare > 0 && randomAt(row, col, 1757159915) < clamp(input.breatheShare, 0, 1);
+      tiles.push({
+        breatheDelayMs: breathes ? Math.round(randomAt(row, col, 48610963) * breatheSpreadMs) : null,
+        delayMs: Math.round(clamp(fraction, 0, 1) * maxDelayMs),
+        key: `${row}:${col}`,
+        scatterXPx,
+        scatterYPx,
+        xPx: col * cellPx,
+        yPx: row * cellPx
+      });
+    }
+  return { maxCol, maxRow, minCol, minRow, tiles };
+});
+var mount=(function mountSplashTileCanvas(canvas, options, buildTileField = buildAdaptiveSplashTiles) {
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value)), mix = (from, to, progress) => from + (to - from) * progress, smoothstep = (from, to, value) => {
+    const progress = clamp((value - from) / Math.max(0.000001, to - from), 0, 1);
+    return progress * progress * (3 - 2 * progress);
+  }, cubicCoordinate = (a, b, value) => {
+    const inverse = 1 - value;
+    return 3 * inverse * inverse * value * a + 3 * inverse * value * value * b + value * value * value;
+  }, cubicEase = (progress, x1, x2) => {
+    const target = clamp(progress, 0, 1);
+    let low = 0, high = 1;
+    for (let index = 0;index < 12; index += 1) {
+      const candidate = (low + high) / 2;
+      if (cubicCoordinate(x1, x2, candidate) < target)
+        low = candidate;
+      else
+        high = candidate;
+    }
+    return cubicCoordinate(0, 1, (low + high) / 2);
+  }, colorProbe = canvas.ownerDocument.createElement("span");
+  colorProbe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+  (canvas.parentElement ?? canvas.ownerDocument.documentElement).append(colorProbe);
+  const resolveColor = (expression) => {
+    colorProbe.style.color = "";
+    colorProbe.style.color = expression;
+    return getComputedStyle(colorProbe).color;
+  }, colorCanvas = canvas.ownerDocument.createElement("canvas");
+  colorCanvas.width = 1;
+  colorCanvas.height = 1;
+  const colorContext = colorCanvas.getContext("2d", { willReadFrequently: !0 }), rgba = (expression) => {
+    const resolved = resolveColor(expression);
+    if (!colorContext)
+      return [0, 0, 0, 1];
+    colorContext.clearRect(0, 0, 1, 1);
+    colorContext.fillStyle = resolved;
+    colorContext.fillRect(0, 0, 1, 1);
+    const value = colorContext.getImageData(0, 0, 1, 1).data;
+    return [value[0] / 255, value[1] / 255, value[2] / 255, value[3] / 255];
+  }, background = rgba(options.colors.background), line = rgba(options.colors.line), pulse = rgba(options.colors.cell);
+  colorProbe.remove();
+  const measureViewport = () => {
+    const bounds = canvas.parentElement?.getBoundingClientRect(), view = canvas.ownerDocument.defaultView;
+    return {
+      height: Math.max(1, Math.round(bounds?.height || view?.innerHeight || canvas.clientHeight || 1)),
+      width: Math.max(1, Math.round(bounds?.width || view?.innerWidth || canvas.clientWidth || 1))
+    };
+  }, createWebGlRenderer = () => {
+    const gl = canvas.getContext("webgl2", {
+      alpha: !0,
+      antialias: !1,
+      depth: !1,
+      powerPreference: "high-performance",
+      premultipliedAlpha: !0
+    });
+    if (!gl)
+      return null;
+    const compile = (type, source) => {
+      const shader = gl.createShader(type);
+      if (!shader)
+        throw Error("Unable to allocate splash shader");
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const message = gl.getShaderInfoLog(shader) || "Splash shader compilation failed";
+        gl.deleteShader(shader);
+        throw Error(message);
+      }
+      return shader;
+    };
+    try {
+      const vertex = compile(gl.VERTEX_SHADER, `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aCenter;
+layout(location=1) in float aScale;
+layout(location=2) in float aOpacity;
+layout(location=3) in float aFillMix;
+uniform vec2 uViewport;
+uniform vec2 uOrigin;
+uniform float uCellSize;
+uniform float uDistance;
+uniform float uSpin;
+uniform float uTilt;
+out vec2 vUv;
+out float vOpacity;
+out float vFillMix;
+const vec2 corners[6] = vec2[6](
+  vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(-0.5,0.5),
+  vec2(-0.5,0.5), vec2(0.5,-0.5), vec2(0.5,0.5)
+);
+void main() {
+  vec2 corner = corners[gl_VertexID];
+  vec2 floorPoint = aCenter + corner * uCellSize * aScale;
+  float cosSpin = cos(uSpin);
+  float sinSpin = sin(uSpin);
+  float spunX = floorPoint.x * cosSpin - floorPoint.y * sinSpin;
+  float spunY = floorPoint.x * sinSpin + floorPoint.y * cosSpin;
+  float perspectiveW = 1.0 - spunY * sin(uTilt) / uDistance;
+  if (perspectiveW <= 0.02) {
+    gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
+    vOpacity = 0.0;
+  } else {
+    vec2 screen = vec2(spunX, spunY * cos(uTilt)) / perspectiveW + uOrigin;
+    vec2 clip = screen / uViewport * 2.0 - 1.0;
+    gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+    vOpacity = aOpacity;
+  }
+  vUv = corner + 0.5;
+  vFillMix = aFillMix;
+}`), fragment = compile(gl.FRAGMENT_SHADER, `#version 300 es
+precision highp float;
+uniform vec4 uBackground;
+uniform vec4 uLine;
+uniform vec4 uPulse;
+uniform float uBorder;
+in vec2 vUv;
+in float vOpacity;
+in float vFillMix;
+out vec4 outputColor;
+void main() {
+  vec4 tile = mix(uBackground, uPulse, vFillMix);
+  vec4 color = (vUv.x >= 1.0 - uBorder || vUv.y >= 1.0 - uBorder) ? uLine : tile;
+  outputColor = vec4(color.rgb, color.a * vOpacity);
+}`), program = gl.createProgram();
+      if (!program)
+        throw Error("Unable to allocate splash program");
+      gl.attachShader(program, vertex);
+      gl.attachShader(program, fragment);
+      gl.linkProgram(program);
+      gl.deleteShader(vertex);
+      gl.deleteShader(fragment);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        const message = gl.getProgramInfoLog(program) || "Splash program link failed";
+        gl.deleteProgram(program);
+        throw Error(message);
+      }
+      gl.useProgram(program);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      const buffer = gl.createBuffer(), vertexArray = gl.createVertexArray();
+      if (!buffer || !vertexArray)
+        throw Error("Unable to allocate splash instance buffer");
+      gl.bindVertexArray(vertexArray);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      const stride = 5 * Float32Array.BYTES_PER_ELEMENT;
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, stride, 0);
+      gl.vertexAttribDivisor(0, 1);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 1, gl.FLOAT, !1, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
+      gl.vertexAttribDivisor(1, 1);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, !1, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
+      gl.vertexAttribDivisor(2, 1);
+      gl.enableVertexAttribArray(3);
+      gl.vertexAttribPointer(3, 1, gl.FLOAT, !1, stride, 4 * Float32Array.BYTES_PER_ELEMENT);
+      gl.vertexAttribDivisor(3, 1);
+      const uniform = (name) => {
+        const location = gl.getUniformLocation(program, name);
+        if (location === null)
+          throw Error(`Splash uniform ${name} is missing`);
+        return location;
+      }, uniforms = {
+        background: uniform("uBackground"),
+        border: uniform("uBorder"),
+        cellSize: uniform("uCellSize"),
+        distance: uniform("uDistance"),
+        line: uniform("uLine"),
+        origin: uniform("uOrigin"),
+        pulse: uniform("uPulse"),
+        spin: uniform("uSpin"),
+        tilt: uniform("uTilt"),
+        viewport: uniform("uViewport")
+      };
+      gl.uniform1f(uniforms.cellSize, options.cellPx);
+      gl.uniform1f(uniforms.distance, options.camera.distancePx);
+      gl.uniform1f(uniforms.spin, options.camera.spinDeg * Math.PI / 180);
+      gl.uniform1f(uniforms.border, 1 / options.cellPx);
+      gl.uniform4fv(uniforms.background, new Float32Array(background));
+      gl.uniform4fv(uniforms.line, new Float32Array(line));
+      gl.uniform4fv(uniforms.pulse, new Float32Array(pulse));
+      let data = new Float32Array(0);
+      return {
+        kind: "webgl2",
+        dispose: () => {
+          gl.deleteBuffer(buffer);
+          gl.deleteVertexArray(vertexArray);
+          gl.deleteProgram(program);
+          gl.getExtension("WEBGL_lose_context")?.loseContext();
+        },
+        draw: (values, viewport, tiltDeg) => {
+          const requiredLength = values.length * 5;
+          if (data.length !== requiredLength) {
+            data = new Float32Array(requiredLength);
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, data.byteLength, gl.DYNAMIC_DRAW);
+          }
+          for (let index = 0;index < values.length; index += 1) {
+            const value = values[index], offset = index * 5;
+            data[offset] = value.x;
+            data[offset + 1] = value.y;
+            data[offset + 2] = value.scale;
+            data[offset + 3] = value.opacity;
+            data[offset + 4] = value.fillMix;
+          }
+          gl.bindVertexArray(vertexArray);
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+          gl.uniform2f(uniforms.viewport, viewport.width, viewport.height);
+          gl.uniform2f(uniforms.origin, viewport.width / 2, viewport.height * options.camera.originYPct / 100);
+          gl.uniform1f(uniforms.tilt, tiltDeg * Math.PI / 180);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, values.length);
+        },
+        resize: (viewport) => {
+          const maxRenderbuffer = Number(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)) || 1, maxViewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS), maxWidth = Math.min(maxRenderbuffer, Number(maxViewport[0]) || maxRenderbuffer), maxHeight = Math.min(maxRenderbuffer, Number(maxViewport[1]) || maxRenderbuffer), requestedScale = Math.max(1, canvas.ownerDocument.defaultView?.devicePixelRatio || 1), renderScale = Math.max(Number.EPSILON, Math.min(requestedScale, maxWidth / viewport.width, maxHeight / viewport.height));
+          canvas.width = Math.max(1, Math.round(viewport.width * renderScale));
+          canvas.height = Math.max(1, Math.round(viewport.height * renderScale));
+          gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+      };
+    } catch {
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      return null;
+    }
+  }, createTwoDimensionalRenderer = () => {
+    const context = canvas.getContext("2d");
+    if (!context)
+      return null;
+    const cssColor = (value) => `rgba(${Math.round((value[0] ?? 0) * 255)},${Math.round((value[1] ?? 0) * 255)},${Math.round((value[2] ?? 0) * 255)},${value[3] ?? 1})`, project = (x, y, viewport, tiltDeg) => {
+      const spin = options.camera.spinDeg * Math.PI / 180, tilt = tiltDeg * Math.PI / 180, spunX = x * Math.cos(spin) - y * Math.sin(spin), spunY = x * Math.sin(spin) + y * Math.cos(spin), perspectiveW = 1 - spunY * Math.sin(tilt) / options.camera.distancePx;
+      if (perspectiveW <= 0.02)
+        return null;
+      return {
+        x: viewport.width / 2 + spunX / perspectiveW,
+        y: viewport.height * options.camera.originYPct / 100 + spunY * Math.cos(tilt) / perspectiveW
+      };
+    };
+    return {
+      kind: "2d",
+      dispose: () => {
+        return;
+      },
+      draw: (values, viewport, tiltDeg) => {
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, viewport.width, viewport.height);
+        for (const value of values) {
+          if (value.opacity <= 0)
+            continue;
+          const half = options.cellPx * value.scale / 2, corners = [
+            project(value.x - half, value.y - half, viewport, tiltDeg),
+            project(value.x + half, value.y - half, viewport, tiltDeg),
+            project(value.x + half, value.y + half, viewport, tiltDeg),
+            project(value.x - half, value.y + half, viewport, tiltDeg)
+          ];
+          if (corners.some((corner) => corner === null))
+            continue;
+          const [topLeft, topRight, bottomRight, bottomLeft] = corners, fill = background.map((channel, index) => mix(channel, pulse[index] ?? channel, value.fillMix));
+          context.globalAlpha = value.opacity;
+          context.fillStyle = cssColor(fill);
+          context.beginPath();
+          context.moveTo(topLeft.x, topLeft.y);
+          context.lineTo(topRight.x, topRight.y);
+          context.lineTo(bottomRight.x, bottomRight.y);
+          context.lineTo(bottomLeft.x, bottomLeft.y);
+          context.closePath();
+          context.fill();
+          context.strokeStyle = cssColor(line);
+          context.lineWidth = 1;
+          context.beginPath();
+          context.moveTo(topRight.x, topRight.y);
+          context.lineTo(bottomRight.x, bottomRight.y);
+          context.lineTo(bottomLeft.x, bottomLeft.y);
+          context.stroke();
+        }
+        context.globalAlpha = 1;
+      },
+      resize: (viewport) => {
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+      }
+    };
+  };
+  let viewport = measureViewport();
+  const buildField = () => buildTileField({
+    ...options.field,
+    cameraDistancePx: options.camera.distancePx,
+    cameraSpinDeg: options.camera.spinDeg,
+    cameraTiltDeg: options.camera.tiltDeg,
+    cellPx: options.cellPx,
+    originYPct: options.camera.originYPct,
+    viewportHeight: viewport.height,
+    viewportWidth: viewport.width,
+    visibleFarRisePx: options.camera.visibleFarRisePx
+  });
+  let field = buildField(), frames = field.tiles.map((tile) => ({
+    fillMix: 0,
+    opacity: 1,
+    scale: 1,
+    x: tile.xPx,
+    y: tile.yPx
+  })), hasBreathingTiles = field.tiles.some((tile) => tile.breatheDelayMs !== null), renderer = createWebGlRenderer();
+  if (!renderer)
+    renderer = createTwoDimensionalRenderer();
+  if (renderer) {
+    renderer.resize(viewport);
+    canvas.setAttribute("data-piarium-splash-renderer", renderer.kind);
+  }
+  let playback = options.playback, playbackStartedAt = performance.now(), animationFrame = 0, disposed = !1;
+  const cameraTiltAt = (elapsed) => {
+    if (playback.reducedMotion || playback.kind === "idle" || playback.kind === "covered")
+      return options.camera.tiltDeg;
+    const delay = playback.kind === "revealing" ? playback.cameraDelayMs : Math.max(0, playback.totalMs - playback.cameraDelayMs - playback.cameraDurationMs), raw = clamp((elapsed - delay) / Math.max(1, playback.cameraDurationMs), 0, 1), forwardProgress = playback.kind === "revealing" ? raw : 1 - raw;
+    return options.camera.tiltDeg * (1 - cubicEase(forwardProgress, 0.4, 0.2));
+  }, updateFrames = (elapsed) => {
+    const motionByDelay = new Map, motionActive = !playback.reducedMotion && (playback.kind === "covering" || playback.kind === "revealing"), restingMotion = { eased: 0, fillMix: 0, opacity: 1 };
+    for (let index = 0;index < field.tiles.length; index += 1) {
+      const tile = field.tiles[index], frame = frames[index];
+      let motion = motionActive ? motionByDelay.get(tile.delayMs) : restingMotion;
+      if (!motion) {
+        let progress = 0;
+        if (playback.kind === "revealing") {
+          const delay = playback.releaseMs + tile.delayMs * playback.delayScale;
+          progress = clamp((elapsed - delay) / Math.max(1, playback.exitMs), 0, 1);
+        } else if (playback.kind === "covering") {
+          const revealDelay = playback.releaseMs + tile.delayMs * playback.delayScale, coverDelay = Math.max(0, playback.totalMs - revealDelay - playback.exitMs);
+          progress = 1 - clamp((elapsed - coverDelay) / Math.max(1, playback.exitMs), 0, 1);
+        }
+        motion = {
+          eased: progress <= 0 ? 0 : progress >= 1 ? 1 : cubicEase(progress, 0.32, 0.24),
+          fillMix: smoothstep(0, 0.32, progress),
+          opacity: progress <= 0.55 ? 1 : 1 - smoothstep(0.55, 1, progress)
+        };
+        motionByDelay.set(tile.delayMs, motion);
+      }
+      frame.x = tile.xPx + tile.scatterXPx * motion.eased;
+      frame.y = tile.yPx + tile.scatterYPx * motion.eased;
+      frame.scale = mix(1, 0.56, motion.eased);
+      frame.opacity = motion.opacity;
+      frame.fillMix = motion.fillMix;
+      if (playback.kind === "idle" && !playback.reducedMotion && tile.breatheDelayMs !== null) {
+        const breathingElapsed = elapsed - 1200 - tile.breatheDelayMs;
+        if (breathingElapsed >= 0) {
+          const cycle = breathingElapsed % 2800 / 2800;
+          frame.fillMix = (1 - Math.cos(cycle * Math.PI * 2)) / 2;
+        }
+      }
+    }
+  }, shouldContinue = (elapsed) => {
+    if (playback.reducedMotion || playback.kind === "covered")
+      return !1;
+    if (playback.kind === "idle")
+      return hasBreathingTiles;
+    return elapsed < playback.totalMs;
+  }, draw = (now) => {
+    if (disposed)
+      return;
+    const elapsed = Math.max(0, now - playbackStartedAt);
+    updateFrames(elapsed);
+    renderer?.draw(frames, viewport, cameraTiltAt(elapsed));
+    if (shouldContinue(elapsed))
+      animationFrame = requestAnimationFrame(draw);
+    else
+      animationFrame = 0;
+  }, start = () => {
+    if (animationFrame)
+      cancelAnimationFrame(animationFrame);
+    playbackStartedAt = performance.now();
+    draw(playbackStartedAt);
+  }, rebuildForViewport = () => {
+    const nextViewport = measureViewport();
+    if (nextViewport.width === viewport.width && nextViewport.height === viewport.height)
+      return;
+    viewport = nextViewport;
+    field = buildField();
+    frames = field.tiles.map((tile) => ({
+      fillMix: 0,
+      opacity: 1,
+      scale: 1,
+      x: tile.xPx,
+      y: tile.yPx
+    }));
+    hasBreathingTiles = field.tiles.some((tile) => tile.breatheDelayMs !== null);
+    renderer?.resize(viewport);
+    if (!animationFrame)
+      draw(performance.now());
+  }, view = canvas.ownerDocument.defaultView;
+  view?.addEventListener("resize", rebuildForViewport);
+  start();
+  return {
+    dispose: () => {
+      if (disposed)
+        return;
+      disposed = !0;
+      view?.removeEventListener("resize", rebuildForViewport);
+      if (animationFrame)
+        cancelAnimationFrame(animationFrame);
+      animationFrame = 0;
+      renderer?.dispose();
+      renderer = null;
+      canvas.removeAttribute("data-piarium-splash-renderer");
+    },
+    setPlayback: (next) => {
+      if (disposed)
+        return;
+      if (playback.cameraDelayMs === next.cameraDelayMs && playback.cameraDurationMs === next.cameraDurationMs && playback.kind === next.kind && playback.delayScale === next.delayScale && playback.exitMs === next.exitMs && playback.reducedMotion === next.reducedMotion && playback.releaseMs === next.releaseMs && playback.totalMs === next.totalMs)
+        return;
+      playback = next;
+      start();
+    }
+  };
+});
+var controller=mount(canvas,{"camera":{"distancePx":1800,"originYPct":56,"spinDeg":45,"tiltDeg":58,"visibleFarRisePx":726.331414},"cellPx":96,"colors":{"background":"var(--splash-background, var(--color-background, #151313))","cell":"var(--splash-cell-pulse, var(--splash-background, #151313))","line":"var(--splash-lattice-line, rgba(255, 255, 255, 0.22))"},"field":{"breatheShare":0.1,"direction":"forward","mode":"boot","randomSeed":49734321},"playback":{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"idle","reducedMotion":false,"releaseMs":860,"totalMs":1900}},build);
+var reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+var observer=new MutationObserver(function(){
+if(!splash||splash.getAttribute('data-leaving')!=='true')return;
+observer.disconnect();
+controller.setPlayback(reduced?{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"revealing","reducedMotion":true,"releaseMs":860,"totalMs":1900}:{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"revealing","reducedMotion":false,"releaseMs":860,"totalMs":1900});
+});
+if(splash)observer.observe(splash,{attributes:true,attributeFilter:['data-leaving']});
+if(splash&&splash.parentNode){
+var removalObserver=new MutationObserver(function(){
+if(splash.isConnected)return;
+removalObserver.disconnect();
+controller.dispose();
+});
+removalObserver.observe(splash.parentNode,{childList:true});
 }
-ground.innerHTML=buffer;
 })();
       /* SPLASH-JS-END */
     </script>

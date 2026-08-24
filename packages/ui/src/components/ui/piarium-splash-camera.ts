@@ -25,13 +25,13 @@
  * looking up the floor. Fifty-eight keeps a real vanishing point while showing enough of the plane for
  * the cube's footprint and the outward tile motion to read as one surface.
  */
-const CAMERA_TILT_DEG = 58;
+export const SPLASH_CAMERA_TILT_DEG = 58;
 
 /**
  * Rotation within the plane. 45 degrees puts a cube corner toward the viewer, which is the three
  * quarter view the mark is recognised by.
  */
-const CAMERA_SPIN_DEG = 45;
+export const SPLASH_CAMERA_SPIN_DEG = 45;
 
 /**
  * Distance from the eye to the projection plane, in pixels.
@@ -41,13 +41,13 @@ const CAMERA_SPIN_DEG = 45;
  * It also bounds how far the floor may extend: a point whose depth approaches this distance projects to
  * infinity, and past it the image inverts.
  */
-const CAMERA_DISTANCE_PX = 1800;
+export const SPLASH_CAMERA_DISTANCE_PX = 1800;
 
 const RAD = Math.PI / 180;
-const cosTilt = Math.cos(CAMERA_TILT_DEG * RAD);
-const sinTilt = Math.sin(CAMERA_TILT_DEG * RAD);
-const cosSpin = Math.cos(CAMERA_SPIN_DEG * RAD);
-const sinSpin = Math.sin(CAMERA_SPIN_DEG * RAD);
+const cosTilt = Math.cos(SPLASH_CAMERA_TILT_DEG * RAD);
+const sinTilt = Math.sin(SPLASH_CAMERA_TILT_DEG * RAD);
+const cosSpin = Math.cos(SPLASH_CAMERA_SPIN_DEG * RAD);
+const sinSpin = Math.sin(SPLASH_CAMERA_SPIN_DEG * RAD);
 
 export interface Point3 {
   readonly x: number;
@@ -86,7 +86,7 @@ export const projectPoint = (point: Point3): Point2 => {
   const tiltedY = spunY * cosTilt - point.z * sinTilt;
   const depth = spunY * sinTilt + point.z * cosTilt;
 
-  const w = 1 - depth / CAMERA_DISTANCE_PX;
+  const w = 1 - depth / SPLASH_CAMERA_DISTANCE_PX;
   return { x: spunX / w, y: tiltedY / w };
 };
 
@@ -110,7 +110,7 @@ export const projectFlatFloorPoint = (point: Pick<Point3, 'x' | 'y'>): Point2 =>
  * it is `distance / tan(tilt)`, which is why the splash fades the floor out below it rather than trying
  * to reach the top of a tall window.
  */
-export const HORIZON_RISE_PX = CAMERA_DISTANCE_PX / Math.tan(CAMERA_TILT_DEG * RAD);
+export const HORIZON_RISE_PX = SPLASH_CAMERA_DISTANCE_PX / Math.tan(SPLASH_CAMERA_TILT_DEG * RAD);
 
 export interface FloorReach {
   /** Screen pixels the far corner rises above the origin. Always below `HORIZON_RISE_PX`. */
@@ -177,8 +177,8 @@ export const floorInscribedRadius = (far: number, near: number): number => {
 
 /** The CSS transform that puts a flat element into the floor plane under this same camera. */
 export const CAMERA_FLOOR_TRANSFORM =
-  `perspective(${CAMERA_DISTANCE_PX}px) rotateX(${CAMERA_TILT_DEG}deg) rotateZ(${CAMERA_SPIN_DEG}deg)`;
+  `perspective(${SPLASH_CAMERA_DISTANCE_PX}px) rotateX(${SPLASH_CAMERA_TILT_DEG}deg) rotateZ(${SPLASH_CAMERA_SPIN_DEG}deg)`;
 
 /** Same camera after it has moved overhead, with an identical transform list for smooth interpolation. */
 export const CAMERA_FLAT_FLOOR_TRANSFORM =
-  `perspective(${CAMERA_DISTANCE_PX}px) rotateX(0deg) rotateZ(${CAMERA_SPIN_DEG}deg)`;
+  `perspective(${SPLASH_CAMERA_DISTANCE_PX}px) rotateX(0deg) rotateZ(${SPLASH_CAMERA_SPIN_DEG}deg)`;

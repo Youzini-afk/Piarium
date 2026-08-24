@@ -1,12 +1,15 @@
 import React from 'react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import {
+  createSplashCanvasMountOptions,
+  mountSplashTileCanvas,
+  resolveSplashCanvasPlayback,
+  type SplashCanvasController,
+} from './piarium-splash-canvas';
 import { splashCubeMarkup } from './piarium-splash-cube';
 import {
-  buildSplashTileClusters,
   PIARIUM_SPLASH_STYLE_ELEMENT_ID,
   PIARIUM_SPLASH_COLORS,
-  splashExitScale,
-  splashWorkbenchClusterDelays,
   splashPlaneCss,
   type PiariumSplashDirection,
   type PiariumSplashMode,
@@ -39,18 +42,8 @@ const usePiariumSplashStyles = (): void => {
   }, []);
 };
 
-/**
- * Both built once at module load rather than per render.
- *
- * The floor's extent and the cube's geometry are fixed, and the colours are custom properties the browser
- * resolves itself, so nothing here can change while the splash is up. It runs during startup, when the
- * machine is at its busiest, which is the whole reason none of it is recomputed.
- */
+/** Cube geometry is fixed and generated once rather than per scene mount. */
 const CUBE_MARKUP = splashCubeMarkup();
-const SWEEP_CLUSTERS = {
-  forward: buildSplashTileClusters('switch', 'forward', false),
-  backward: buildSplashTileClusters('switch', 'backward', false),
-} as const;
 
 export interface PiariumSplashProps {
   mode: PiariumSplashMode;
@@ -88,20 +81,37 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
   usePiariumSplashStyles();
   const systemReducedMotion = usePrefersReducedMotion();
   const reducedMotion = reducedMotionOverride ?? systemReducedMotion;
-  // Re-evaluate on the render that flips `leaving`: a slow startup may have been resized since mount, and
-  // the flattened floor must contain the viewport that actually exists at handoff time.
-  const exitScale = typeof window === 'undefined'
-    ? splashExitScale(1920, 1080)
-    : splashExitScale(window.innerWidth, window.innerHeight);
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const controllerRef = React.useRef<SplashCanvasController | null>(null);
+  const playback = React.useMemo(() => resolveSplashCanvasPlayback({
+    leaving,
+    mode,
+    phase,
+    reducedMotion,
+    tempo,
+  }), [leaving, mode, phase, reducedMotion, tempo]);
+  const playbackRef = React.useRef(playback);
+  playbackRef.current = playback;
 
-  // Which clusters breathe is drawn once per mount. Re-picking on every render would make the idle state
-  // shimmer randomly instead of pulsing steadily. The sweep has no random part, so it is a constant.
-  const clusters = React.useMemo(
-    () => (mode === 'boot'
-      ? buildSplashTileClusters('boot', direction, !reducedMotion)
-      : SWEEP_CLUSTERS[direction]),
-    [mode, direction, reducedMotion],
-  );
+  React.useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const controller = mountSplashTileCanvas(canvas, createSplashCanvasMountOptions({
+      breathe: mode === 'boot' && !reducedMotion,
+      direction,
+      mode,
+      playback: playbackRef.current,
+    }));
+    controllerRef.current = controller;
+    return () => {
+      if (controllerRef.current === controller) controllerRef.current = null;
+      controller.dispose();
+    };
+  }, [direction, mode, reducedMotion]);
+
+  React.useLayoutEffect(() => {
+    controllerRef.current?.setPlayback(playback);
+  }, [playback]);
 
   return (
     <div
@@ -110,7 +120,6 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       data-mode={mode}
       data-phase={phase}
       data-tempo={tempo}
-      style={{ '--pi-floor-exit-scale': exitScale } as React.CSSProperties}
       role={announce ? 'status' : undefined}
       aria-live={announce ? 'polite' : undefined}
       aria-label={announce ? label : undefined}
@@ -127,38 +136,9 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
       <div className="pi-splash-backdrop" aria-hidden="true" />
       <div className="pi-splash-ground-clip" aria-hidden="true">
         <div className="pi-splash-horizon">
+          <canvas ref={canvasRef} className="pi-splash-ground-canvas" aria-hidden="true" />
           <div className="pi-splash-camera">
-            <div className="pi-splash-ground">
-              {clusters.map((cluster) => {
-                const standard = mode === 'switch'
-                  ? splashWorkbenchClusterDelays(cluster.delayMs, 'standard')
-                  : null;
-                const quick = mode === 'switch'
-                  ? splashWorkbenchClusterDelays(cluster.delayMs, 'quick')
-                  : null;
-                return (
-                <span
-                  key={cluster.key}
-                  className="pi-splash-tile-cluster"
-                  data-breathe={cluster.breatheDelayMs === null ? 'false' : 'true'}
-                  style={{
-                    '--pi-cluster-delay': `${cluster.delayMs}ms`,
-                    '--pi-cluster-scatter-x': `${cluster.scatterXPx}px`,
-                    '--pi-cluster-scatter-y': `${cluster.scatterYPx}px`,
-                    ...(standard && quick ? {
-                      '--pi-cluster-cover-delay-standard': `${standard.coverDelayMs}ms`,
-                      '--pi-cluster-reveal-delay-standard': `${standard.revealDelayMs}ms`,
-                      '--pi-cluster-cover-delay-quick': `${quick.coverDelayMs}ms`,
-                      '--pi-cluster-reveal-delay-quick': `${quick.revealDelayMs}ms`,
-                    } : {}),
-                    ...(cluster.breatheDelayMs === null
-                      ? {}
-                      : { '--pi-breathe-delay': `${cluster.breatheDelayMs}ms` }),
-                  } as React.CSSProperties}
-                />
-                );
-              })}
-            </div>
+            <div className="pi-splash-ground" />
             {/* Generated from fixed Piarium geometry; no untrusted string reaches it. */}
             <span className="pi-splash-mark" dangerouslySetInnerHTML={{ __html: CUBE_MARKUP }} />
           </div>

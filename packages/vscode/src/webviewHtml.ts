@@ -1,10 +1,8 @@
 import * as os from 'node:os';
 import * as vscode from 'vscode';
+import { splashGroundScript } from '@piarium/ui/src/components/ui/piarium-splash-canvas';
 import { splashCubeMarkup } from '@piarium/ui/src/components/ui/piarium-splash-cube';
-import {
-  buildSplashTileClusters,
-  splashPlaneCss,
-} from '@piarium/ui/src/components/ui/piarium-splash-lattice';
+import { splashPlaneCss } from '@piarium/ui/src/components/ui/piarium-splash-lattice';
 import { getThemeKindName } from './theme';
 import type { PiRuntimeConnectionStatus } from './piRuntime';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
@@ -12,36 +10,24 @@ import type { WorkspaceFolderCandidate } from './workspaceResolver';
 /** The same lightweight shared-camera cube as the other splash hosts. */
 const CUBE_MARKUP = splashCubeMarkup();
 
-/**
- * The floor, emitted as markup rather than built by a script, because this document is generated anyway
- * and a webview's CSP is one less thing to reason about without another inline script.
- *
- * The floor's extent is fixed and larger than any panel, which is what makes emitting it here possible:
- * this shell cannot measure a panel that may be a narrow sidebar or a full editor tab, and it does not
- * have to. No breathing, though — the splash is up for a moment and the idle pulse starts after a second
- * and a bit, so here it would only ever be dead weight in the document.
- */
-const GROUND_CLUSTERS = buildSplashTileClusters('boot', 'forward', false)
-  .map((cluster) => `<span class="pi-splash-tile-cluster" data-breathe="false" style="--pi-cluster-delay:${cluster.delayMs}ms;--pi-cluster-scatter-x:${cluster.scatterXPx}px;--pi-cluster-scatter-y:${cluster.scatterYPx}px"></span>`)
-  .join('');
+const VSCODE_SPLASH_COLORS = {
+  background: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
+  line: 'var(--vscode-widget-border, var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.24)))',
+  cell: 'color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-editor-background, var(--vscode-sideBar-background)))',
+  face: 'color-mix(in srgb, var(--vscode-foreground) 15%, transparent)',
+  markCell: 'var(--vscode-foreground)',
+  stroke: 'var(--vscode-foreground)',
+} as const;
 
 /**
  * Splash rules, taken from the shared generator with the editor's own colours. A webview that ignores
  * its host's theme looks broken, which is the one thing this host must not share with the others.
  */
 const SPLASH_CSS = splashPlaneCss(
-  {
-    background: 'var(--vscode-editor-background, var(--vscode-sideBar-background))',
-    line: 'var(--vscode-widget-border, var(--vscode-editorIndentGuide-background, rgba(128,128,128,0.24)))',
-    // Opaque, because the floor's cells are the cover: a translucent pulse would open a hole in it at
-    // every peak. Mixed into the editor background rather than laid over it.
-    cell: 'color-mix(in srgb, var(--vscode-foreground) 7%, var(--vscode-editor-background, var(--vscode-sideBar-background)))',
-    face: 'color-mix(in srgb, var(--vscode-foreground) 15%, transparent)',
-    markCell: 'var(--vscode-foreground)',
-    stroke: 'var(--vscode-foreground)',
-  },
+  VSCODE_SPLASH_COLORS,
   { withMark: true },
 );
+const SPLASH_GROUND_SCRIPT = splashGroundScript('initial-loading-ground', VSCODE_SPLASH_COLORS);
 
 export interface WebviewHtmlOptions {
   devServerUrl?: string | null;
@@ -142,12 +128,13 @@ ${SPLASH_CSS}
 <body>
   <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
     <div class="pi-splash-backdrop" aria-hidden="true"></div>
-    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-camera"><div class="pi-splash-ground">${GROUND_CLUSTERS}</div><span class="pi-splash-mark">${CUBE_MARKUP}</span></div></div></div>
+    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-camera"><div id="initial-loading-ground" class="pi-splash-ground"></div><span class="pi-splash-mark">${CUBE_MARKUP}</span></div></div></div>
     <div class="pi-splash-status">PIARIUM</div>
     <div id="loading-status" role="status" aria-live="polite"></div>
   </div>
   <div id="root"></div>
   <script>
+    ${SPLASH_GROUND_SCRIPT}
     window.process = window.process || { env: { NODE_ENV: 'production' }, platform: '', version: '', browser: true };
     window.__VSCODE_CONFIG__ = ${bootstrapConfig};
     window.__PIARIUM_HOME__ = ${htmlSafeJson(os.homedir())};

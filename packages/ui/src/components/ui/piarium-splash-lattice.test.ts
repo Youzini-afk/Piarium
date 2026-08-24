@@ -8,11 +8,19 @@ import {
   piariumTransitionSceneDuration,
 } from '@piarium/extension-contract';
 import { LOGO_GRID_SIZE } from './piarium-logo-geometry';
+import {
+  buildAdaptiveSplashTiles,
+  mountSplashTileCanvas,
+  splashGroundScript,
+} from './piarium-splash-canvas';
 import { splashCubeMarkup } from './piarium-splash-cube';
 import {
   CAMERA_FLAT_FLOOR_TRANSFORM,
   CAMERA_FLOOR_TRANSFORM,
   HORIZON_RISE_PX,
+  SPLASH_CAMERA_DISTANCE_PX,
+  SPLASH_CAMERA_SPIN_DEG,
+  SPLASH_CAMERA_TILT_DEG,
   cameraDepth,
   floorInscribedRadius,
   floorReach,
@@ -21,9 +29,6 @@ import {
 } from './piarium-splash-camera';
 import {
   CUBE_EDGE_PX,
-  GROUND_CLUSTER_AXIS,
-  GROUND_CLUSTER_EDGE_CELLS,
-  GROUND_CLUSTER_EDGE_PX,
   GROUND_EDGE_RISE_PX,
   GROUND_FADE_RISE_PX,
   GROUND_REACH,
@@ -31,14 +36,14 @@ import {
   GROUND_SHAPE,
   PIARIUM_SPLASH_STYLE_ELEMENT_ID,
   PIARIUM_SPLASH_COLORS,
+  SPLASH_GROUND_ORIGIN_Y_PCT,
+  SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
   SPLASH_EXIT_DURATION_MS,
   SPLASH_REDUCED_EXIT_DURATION_MS,
   SPLASH_WORKBENCH_QUICK_DURATION_MS,
-  buildSplashTileClusters,
-  splashExitScale,
-  splashGroundScript,
   splashPlaneCss,
-  splashWorkbenchClusterDelays,
+  splashTilePlaybackTiming,
+  splashWorkbenchTileDelays,
   splashWorkbenchPhaseDurationMs,
 } from './piarium-splash-lattice';
 import { INITIAL_SPLASH_IDS } from '@/lib/splash';
@@ -61,6 +66,26 @@ const readRepoFile = (...segments: string[]): string =>
 const readWebShell = (): string => readRepoFile('packages', 'web', 'index.html');
 const readMiniChat = (): string => readRepoFile('packages', 'web', 'mini-chat.html');
 const readWebview = (): string => readRepoFile('packages', 'vscode', 'src', 'webviewHtml.ts');
+
+const buildField = (
+  viewportWidth = 1920,
+  viewportHeight = 1080,
+  overrides: Partial<Parameters<typeof buildAdaptiveSplashTiles>[0]> = {},
+) => buildAdaptiveSplashTiles({
+  breatheShare: 0,
+  cameraDistancePx: SPLASH_CAMERA_DISTANCE_PX,
+  cameraSpinDeg: SPLASH_CAMERA_SPIN_DEG,
+  cameraTiltDeg: SPLASH_CAMERA_TILT_DEG,
+  cellPx: CUBE_EDGE_PX,
+  direction: 'forward',
+  mode: 'boot',
+  originYPct: SPLASH_GROUND_ORIGIN_Y_PCT,
+  randomSeed: 0x02f6e2b1,
+  viewportHeight,
+  viewportWidth,
+  visibleFarRisePx: SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
+  ...overrides,
+});
 
 /** Content a host embeds verbatim between a pair of sentinels. */
 const between = (body: string, open: string, close: string): string => {
@@ -232,7 +257,8 @@ describe('the floor covers the window it has to cover', () => {
 
     const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
     expect(css).toContain('var(--pi-splash-horizon-lift, 0px)');
-    expect(css).toContain('.pi-splash-ground::before {');
+    expect(css).toContain('.pi-splash-ground-canvas {');
+    expect(css).not.toContain('.pi-splash-ground::before {');
   });
 
   test('the near corner stays in front of the camera', () => {
@@ -251,14 +277,21 @@ describe('the floor covers the window it has to cover', () => {
     expect(GROUND_REACH.nearDrop / GROUND_REACH.farRise).toBeLessThan(4);
   });
 
-  test('the full tile field is covered by at most 64 compositor clusters', () => {
-    // The former 576 per-tile animations generated thousands of Paint/Raster tasks in packaged Electron.
-    // Clusters preserve all 24×24 tile lines while bounding the independent animation fanout to 8×8.
-    expect(GROUND_CLUSTER_EDGE_CELLS).toBe(3);
-    expect(GROUND_CLUSTER_EDGE_PX).toBe(GROUND_CLUSTER_EDGE_CELLS * CUBE_EDGE_PX);
-    expect(GROUND_CLUSTER_AXIS * GROUND_CLUSTER_EDGE_CELLS).toBe(GROUND_SHAPE.axis);
-    expect(buildSplashTileClusters('boot', 'forward', false)).toHaveLength(GROUND_CLUSTER_AXIS ** 2);
-    expect(GROUND_CLUSTER_AXIS ** 2).toBeLessThanOrEqual(64);
+  test('tile count grows with the viewport behind one drawing owner', () => {
+    const desktop = buildField(1920, 1080).tiles;
+    const ultrawide = buildField(5120, 1440).tiles;
+    const eightK = buildField(7680, 4320).tiles;
+    expect(desktop.length).toBeGreaterThan(0);
+    expect(ultrawide.length).toBeGreaterThan(desktop.length);
+    expect(eightK.length).toBeGreaterThan(ultrawide.length);
+    expect(new Set(eightK.map((tile) => tile.key)).size).toBe(eightK.length);
+
+    // The visual granularity is restored without creating one animated DOM owner per tile. WebGL issues
+    // one instanced draw, and Canvas 2D is the renderer fallback when WebGL2 is unavailable.
+    const renderer = mountSplashTileCanvas.toString();
+    expect(renderer).toContain('drawArraysInstanced');
+    expect(renderer).toContain('getContext("2d")');
+    expect(renderer).toContain('requestAnimationFrame');
   });
 
   test.each([
@@ -267,17 +300,21 @@ describe('the floor covers the window it has to cover', () => {
     [2048, 1024],
     [2550, 1275],
     [3840, 2160],
-  ] as const)('the flattened floor contains every %ix%i viewport corner', (width, height) => {
-    const far = GROUND_SHAPE.offsetPx;
-    const near = (GROUND_SHAPE.axis - GROUND_SHAPE.originCell - 0.5) * GROUND_SHAPE.cellPx;
-    const scale = splashExitScale(width, height);
+    [5120, 1440],
+    [7680, 4320],
+  ] as const)('the adaptive overhead field contains every %ix%i viewport corner', (width, height) => {
+    const field = buildField(width, height);
+    const minX = (field.minCol - 0.5) * CUBE_EDGE_PX;
+    const maxX = (field.maxCol + 0.5) * CUBE_EDGE_PX;
+    const minY = (field.minRow - 0.5) * CUBE_EDGE_PX;
+    const maxY = (field.maxRow + 0.5) * CUBE_EDGE_PX;
     const outline = [
-      projectFlatFloorPoint({ x: -far, y: -far }),
-      projectFlatFloorPoint({ x: near, y: -far }),
-      projectFlatFloorPoint({ x: near, y: near }),
-      projectFlatFloorPoint({ x: -far, y: near }),
-    ].map((point) => ({ x: point.x * scale, y: point.y * scale }));
-    const originY = height * 0.56;
+      projectFlatFloorPoint({ x: minX, y: minY }),
+      projectFlatFloorPoint({ x: maxX, y: minY }),
+      projectFlatFloorPoint({ x: maxX, y: maxY }),
+      projectFlatFloorPoint({ x: minX, y: maxY }),
+    ];
+    const originY = height * SPLASH_GROUND_ORIGIN_Y_PCT / 100;
     const corners = [
       { x: -width / 2, y: -originY },
       { x: width / 2, y: -originY },
@@ -306,9 +343,11 @@ describe('the floor covers the window it has to cover', () => {
 describe('the floor is the cover', () => {
   const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
 
-  test('the tile clusters are opaque and retain the cell-sized grid', () => {
-    expect(css).toContain(`.pi-splash-tile-cluster {\ncontain: paint;\nbackground-color: ${PIARIUM_SPLASH_COLORS.background};`);
-    expect(css).toContain(`background-size: ${CUBE_EDGE_PX}px ${CUBE_EDGE_PX}px;`);
+  test('the Canvas fallback remains opaque without inventing a fake far-field grid', () => {
+    expect(css).toContain('.pi-splash-ground-canvas {');
+    expect(css).toContain(`background-color: ${PIARIUM_SPLASH_COLORS.background};`);
+    expect(css).toContain('.pi-splash-ground-canvas[data-piarium-splash-renderer] {\nbackground: none;');
+    expect(css).not.toContain('.pi-splash-ground::before');
   });
 
   test('the container is not, or the cells would reveal nothing', () => {
@@ -316,11 +355,13 @@ describe('the floor is the cover', () => {
     expect(container).not.toContain('background');
   });
 
-  test('the breathing pulse stays opaque at both ends', () => {
-    // A wash over transparency would have punched a hole in the cover twice a cycle, on a tenth of the
-    // cells, while the splash was just sitting there waiting.
-    const keyframes = css.slice(css.indexOf('@keyframes pi-splash-breathe'));
-    expect(keyframes.slice(0, keyframes.indexOf('}\n}'))).not.toContain('transparent');
+  test('renderer failure leaves the opaque registered grid in place', () => {
+    const fallback = css.slice(
+      css.indexOf('.pi-splash-ground-canvas {'),
+      css.indexOf('.pi-splash-ground-canvas[data-piarium-splash-renderer]'),
+    );
+    expect(fallback).toContain(`background-color: ${PIARIUM_SPLASH_COLORS.background};`);
+    expect(fallback).not.toContain('background-color: transparent');
   });
 
   test('the backdrop covers what the floor cannot, and opens from the cube', () => {
@@ -347,7 +388,7 @@ describe('the floor is the cover', () => {
 
   test('the peripheral falloff hands off once instead of rerasterizing the floor every frame', () => {
     // The backdrop hides the handoff after the camera reaches its endpoint. A discrete mask change avoids
-    // invalidating every cluster on every animation frame while preserving the atmospheric wait state.
+    // invalidating the large screen-space mask every frame while preserving the atmospheric wait state.
     expect(css).toContain('@property --pi-splash-floor-mask');
     expect(css).toContain('rgba(0,0,0,1) var(--pi-splash-floor-mask');
     expect(css).toContain('--pi-splash-floor-mask: 160vmax;');
@@ -378,53 +419,50 @@ describe('the floor is the cover', () => {
 });
 
 describe('exit choreography', () => {
-  test('boot starts at the cluster under the cube and ends at the far corner', () => {
-    const clusters = buildSplashTileClusters('boot', 'forward', false);
-    const originCluster = Math.floor(GROUND_SHAPE.originCell / GROUND_CLUSTER_EDGE_CELLS);
-    const atCube = clusters.find((cluster) => cluster.key === `${originCluster}-${originCluster}`);
-    const delays = clusters.map((cluster) => cluster.delayMs);
+  test('boot starts at the tile under the cube and ends at the far corner', () => {
+    const field = buildField();
+    const tiles = field.tiles;
+    const atCube = tiles.find((tile) => tile.key === '0:0');
+    const delays = tiles.map((tile) => tile.delayMs);
 
     expect(atCube?.delayMs).toBe(0);
     expect(Math.min(...delays)).toBe(0);
-    // The furthest cell is the one diagonally behind the cube, not a corner of a grid it sits in the
-    // middle of, because it does not sit in the middle of it.
-    const furthest = clusters.find((cluster) => cluster.key === '0-0');
+    const furthest = tiles.reduce((best, tile) => (
+      Math.hypot(tile.xPx, tile.yPx) > Math.hypot(best.xPx, best.yPx) ? tile : best
+    ));
     expect(furthest?.delayMs).toBe(Math.max(...delays));
-    expect(clusters.find((cluster) => cluster.key === `${GROUND_CLUSTER_AXIS - 1}-${GROUND_CLUSTER_AXIS - 1}`)?.delayMs)
-      .toBeLessThan(furthest?.delayMs as number);
     expect(atCube?.scatterXPx).toBe(0);
     expect(atCube?.scatterYPx).toBe(0);
-    expect(clusters.find((cluster) => cluster.key === `${originCluster}-${originCluster + 1}`)?.scatterXPx)
+    expect(tiles.find((tile) => tile.key === '0:1')?.scatterXPx)
       .toBeGreaterThan(0);
-    expect(clusters.find((cluster) => cluster.key === `${originCluster - 1}-${originCluster}`)?.scatterYPx)
+    expect(tiles.find((tile) => tile.key === '-1:0')?.scatterYPx)
       .toBeLessThan(0);
   });
 
   test('switch reverses with the direction', () => {
-    const forward = buildSplashTileClusters('switch', 'forward', false);
-    const backward = buildSplashTileClusters('switch', 'backward', false);
+    const forwardField = buildField(1920, 1080, { mode: 'switch', direction: 'forward' });
+    const backwardField = buildField(1920, 1080, { mode: 'switch', direction: 'backward' });
+    const forward = forwardField.tiles;
+    const backward = backwardField.tiles;
 
     const column = (cells: typeof forward, index: number): number[] =>
-      cells.filter((cell) => cell.key.endsWith(`-${index}`)).map((cell) => cell.delayMs);
-    const last = GROUND_CLUSTER_AXIS - 1;
+      cells.filter((cell) => cell.xPx === index * CUBE_EDGE_PX).map((cell) => cell.delayMs);
 
-    expect(Math.min(...column(forward, 0))).toBeLessThan(Math.min(...column(forward, last)));
-    expect(Math.min(...column(backward, last))).toBeLessThan(Math.min(...column(backward, 0)));
+    expect(Math.min(...column(forward, forwardField.minCol)))
+      .toBeLessThan(Math.min(...column(forward, forwardField.maxCol)));
+    expect(Math.min(...column(backward, backwardField.maxCol)))
+      .toBeLessThan(Math.min(...column(backward, backwardField.minCol)));
     expect(forward.every((cell) => cell.scatterXPx > 0 && cell.scatterYPx === 0)).toBe(true);
     expect(backward.every((cell) => cell.scatterXPx < 0 && cell.scatterYPx === 0)).toBe(true);
   });
 
-  test('cluster playback changes only compositor properties', () => {
+  test('tile playback stays in one Canvas rather than rebuilding DOM paint owners', () => {
     const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
-    const keyframes = css.slice(
-      css.indexOf('@keyframes pi-splash-tile-cluster-out'),
-      css.indexOf('.pi-splash-mark {'),
-    );
-    expect(keyframes).not.toContain('background:');
-    expect(keyframes).not.toContain('background-color:');
-    expect(keyframes).toContain('opacity: 0;');
-    expect(keyframes).toContain('transform: translate(');
-    expect(css).toContain('will-change: transform, opacity;');
+    const renderer = mountSplashTileCanvas.toString();
+    expect(css).not.toContain('.pi-splash-tile-cluster');
+    expect(renderer).toContain('tile.scatterXPx * motion.eased');
+    expect(renderer).toContain('frame.scale = mix(1, 0.56, motion.eased)');
+    expect(renderer).toContain('frame.opacity =');
   });
 
   test('boot presses the cube into its registered footprint before the floor opens', () => {
@@ -443,11 +481,9 @@ describe('exit choreography', () => {
     expect(press).not.toContain('scaleY');
     expect(css).toContain('@keyframes pi-splash-camera-flatten');
     expect(css).toContain(CAMERA_FLAT_FLOOR_TRANSFORM);
-    expect(css).toContain('scale(var(--pi-floor-exit-scale');
-    expect(css).toMatch(/animation-delay: calc\(var\(--pi-cluster-delay\) \+ \d+ms\)/);
-    expect(css).toContain(
-      'transform: translate(var(--pi-cluster-scatter-x, 0px), var(--pi-cluster-scatter-y, 0px)) scale(0.56);',
-    );
+    expect(css).toContain(`to { transform: ${CAMERA_FLAT_FLOOR_TRANSFORM} scale(1); }`);
+    const centre = buildField().tiles.find((tile) => tile.key === '0:0');
+    expect(centre).toMatchObject({ delayMs: 0, scatterXPx: 0, scatterYPx: 0 });
   });
 
   test('the buried cube is gone before the centre floor cell opens', () => {
@@ -460,8 +496,7 @@ describe('exit choreography', () => {
     );
     const [, hiddenPct] = /(\d+)%, 100% \{ opacity: 0; \}/.exec(bury)
       ?.map(Number) as [number, number];
-    const [, tileReleaseMs] = /animation-delay: calc\(var\(--pi-cluster-delay\) \+ (\d+)ms\)/
-      .exec(css)?.map(Number) as [number, number];
+    const tileReleaseMs = splashTilePlaybackTiming('standard').releaseMs;
 
     expect(faceDurationMs * hiddenPct / 100).toBeLessThan(tileReleaseMs);
     expect(css).toContain(".pi-splash[data-leaving='true'] .pi-splash-cube-glyph {\nanimation: none;");
@@ -483,7 +518,7 @@ describe('exit choreography', () => {
 
   test('every delay stays within the budget the exit duration is built from', () => {
     for (const mode of ['boot', 'switch'] as const) {
-      for (const cell of buildSplashTileClusters(mode, 'forward', false)) {
+      for (const cell of buildField(5120, 1440, { mode }).tiles) {
         expect(cell.delayMs).toBeGreaterThanOrEqual(0);
         expect(cell.delayMs).toBeLessThanOrEqual(520);
       }
@@ -491,9 +526,9 @@ describe('exit choreography', () => {
   });
 
   test('workbench covering is the exact time reversal of revealing at both tempos', () => {
-    const cells = buildSplashTileClusters('switch', 'forward', false);
+    const cells = buildField(1920, 1080, { mode: 'switch' }).tiles;
     for (const tempo of ['quick', 'standard'] as const) {
-      const timings = cells.map((cell) => splashWorkbenchClusterDelays(cell.delayMs, tempo));
+      const timings = cells.map((cell) => splashWorkbenchTileDelays(cell.delayMs, tempo));
       const mirroredSums = new Set(timings.map((timing) => timing.coverDelayMs + timing.revealDelayMs));
       expect(mirroredSums.size).toBe(1);
       const firstReveal = timings.reduce((best, timing) => (
@@ -543,16 +578,21 @@ describe('exit choreography', () => {
     }
   });
 
-  test('breathing is opt-in and sparse', () => {
-    const none = buildSplashTileClusters('boot', 'forward', false);
+  test('breathing is opt-in, deterministic, and reaches the real far tiles', () => {
+    const none = buildField(5120, 1440, { breatheShare: 0 }).tiles;
     expect(none.every((cell) => cell.breatheDelayMs === null)).toBe(true);
 
-    // A deterministic source, so the share is asserted rather than sampled.
-    const always = buildSplashTileClusters('boot', 'forward', true, () => 0);
-    expect(always.every((cell) => cell.breatheDelayMs === 0)).toBe(true);
+    const all = buildField(5120, 1440, { breatheShare: 1 }).tiles;
+    expect(all.every((cell) => cell.breatheDelayMs !== null)).toBe(true);
+    const farRadius = Math.max(...all.map((cell) => Math.hypot(cell.xPx, cell.yPx)));
+    expect(all.filter((cell) => Math.hypot(cell.xPx, cell.yPx) === farRadius)
+      .every((cell) => cell.breatheDelayMs !== null)).toBe(true);
 
-    const never = buildSplashTileClusters('boot', 'forward', true, () => 0.99);
-    expect(never.every((cell) => cell.breatheDelayMs === null)).toBe(true);
+    const normal = buildField(5120, 1440, { breatheShare: 0.1 }).tiles;
+    expect(normal).toEqual(buildField(5120, 1440, { breatheShare: 0.1 }).tiles);
+    expect(normal.some((cell) => (
+      cell.yPx < -GROUND_SHAPE.originCell * CUBE_EDGE_PX && cell.breatheDelayMs !== null
+    ))).toBe(true);
   });
 });
 
@@ -581,10 +621,15 @@ describe('every splash host carries the same generated bytes', () => {
       .toBe(splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: false }).trim());
   });
 
-  test('both pre-paint hosts embed the same generated floor script', () => {
-    const script = splashGroundScript(INITIAL_SPLASH_IDS.ground);
-    expect(between(readWebShell(), ...JS_SENTINELS)).toBe(script);
-    expect(between(readMiniChat(), ...JS_SENTINELS)).toBe(script);
+  test('both pre-paint hosts embed the same adaptive floor runtime', () => {
+    // Function.toString() formatting differs between Bun (the emitter) and Vitest's transform. The two
+    // shipped projections must still be byte-identical to each other, while the next test checks the live
+    // generator's semantic contract.
+    const webRuntime = between(readWebShell(), ...JS_SENTINELS);
+    const miniRuntime = between(readMiniChat(), ...JS_SENTINELS);
+    expect(webRuntime).toBe(miniRuntime);
+    expect(webRuntime).toContain('inverseProject');
+    expect(webRuntime).toContain('drawArraysInstanced');
   });
 
   test('the full pre-paint host exposes its stylesheet for later scene mounts to reuse', () => {
@@ -592,20 +637,17 @@ describe('every splash host carries the same generated bytes', () => {
     expect(readMiniChat()).toContain('<style id="piarium-splash-styles-no-mark">');
   });
 
-  test('the generated floor script carries one entry per tile cluster', () => {
-    // The delays are baked rather than recomputed in the emitted string, because the delay pattern is what
-    // ties the floor's exit to the cube it radiates from and a second implementation of it would drift.
+  test('the generated floor script builds its tile field from the live viewport', () => {
     const script = splashGroundScript(INITIAL_SPLASH_IDS.ground);
-    const delays = /var delays=\[([^\]]+)\]/.exec(script)?.[1]?.split(',') ?? [];
-    const breathes = /var breathes=\[([^\]]+)\]/.exec(script)?.[1]?.split(',') ?? [];
-    const scatterXs = /var scatterXs=\[([^\]]+)\]/.exec(script)?.[1]?.split(',') ?? [];
-    const scatterYs = /var scatterYs=\[([^\]]+)\]/.exec(script)?.[1]?.split(',') ?? [];
-    expect(delays).toHaveLength(GROUND_CLUSTER_AXIS ** 2);
-    expect(breathes).toHaveLength(GROUND_CLUSTER_AXIS ** 2);
-    expect(scatterXs).toHaveLength(GROUND_CLUSTER_AXIS ** 2);
-    expect(scatterYs).toHaveLength(GROUND_CLUSTER_AXIS ** 2);
-    expect(script).toContain(`getElementById('${INITIAL_SPLASH_IDS.ground}')`);
-    expect(script).toContain("style.setProperty('--pi-floor-exit-scale'");
+    expect(script).toContain(`getElementById(${JSON.stringify(INITIAL_SPLASH_IDS.ground)})`);
+    expect(script).toContain("createElement('canvas')");
+    expect(script).toContain('inverseProject');
+    expect(script).toContain('viewportWidth');
+    expect(script).toContain('addEventListener("resize"');
+    expect(script).toContain('drawArraysInstanced');
+    expect(script).toContain('getContext("2d")');
+    expect(script).toContain("data-piarium-splash-renderer");
+    expect(script).not.toContain('pi-splash-tile-cluster');
     // Raw trigonometric tails differ across platform math libraries and would make generated HTML drift.
     expect(script).not.toMatch(/\d+\.\d{7,}/);
   });
@@ -621,18 +663,17 @@ describe('every splash host carries the same generated bytes', () => {
     // the duplication grew rather than shrank.
     const source = readWebview();
     expect(source).toContain('splashPlaneCss(');
+    expect(source).toContain('splashGroundScript(');
     expect(source).toContain('splashCubeMarkup(');
     expect(source).not.toContain(CSS_SENTINELS[0]);
     expect(source).not.toContain('<svg');
   });
 
-  test('the pre-paint hosts apply the camera through CSS, with no projection of their own', () => {
-    // The whole reason the floor is a flat grid under one transform: a host that had to project it would
-    // need the arithmetic inline, and that arithmetic is what has to agree with the cube.
+  test('the pre-paint hosts carry the generated camera rather than a handwritten projection', () => {
     for (const body of [readWebShell(), readMiniChat()]) {
       expect(body).toContain(CAMERA_FLOOR_TRANSFORM);
       expect(body).toContain('class="pi-splash-camera"');
-      expect(body).not.toContain('Math.cos');
+      expect(body).toContain('inverseProject');
       expect(body).not.toContain('matrix(0.866');
     }
   });
@@ -722,6 +763,7 @@ describe('every splash host carries the same generated bytes', () => {
   test('the cover is opaque even with no cube on it, since a transparent one hides nothing', () => {
     const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: false });
     expect(css).toContain(`.pi-splash-backdrop {\nposition: absolute;\ninset: 0;\nbackground: ${PIARIUM_SPLASH_COLORS.background};`);
-    expect(css).toContain(`.pi-splash-tile-cluster {\ncontain: paint;\nbackground-color: ${PIARIUM_SPLASH_COLORS.background};`);
+    expect(css).toContain('.pi-splash-ground-canvas {');
+    expect(css).toContain(`background-color: ${PIARIUM_SPLASH_COLORS.background};`);
   });
 });
