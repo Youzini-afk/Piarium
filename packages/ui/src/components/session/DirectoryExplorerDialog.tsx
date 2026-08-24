@@ -420,24 +420,30 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     onOpenChange(false);
   }, [onOpenChange]);
 
-  const handleQuickAdd = React.useCallback((event: React.MouseEvent, path: string) => {
+  const handleQuickAdd = React.useCallback(async (event: React.MouseEvent, path: string) => {
     event.stopPropagation();
+    if (isConfirming) return;
     const normalized = normalizeDirectoryPath(path);
     if (normalized && addedProjectPaths.has(normalized)) return;
-    const added = addProject(path);
-    if (!added) {
-      toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
-        description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
-      });
-      return;
-    }
-    handleClose();
-    void startPiSessionDraftFromNavigation({ projectId: added.id }).catch((error) => {
+    setIsConfirming(true);
+    try {
+      const added = await addProject(path);
+      if (!added) {
+        toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
+          description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
+        });
+        return;
+      }
+      handleClose();
+      await startPiSessionDraftFromNavigation({ projectId: added.id });
+    } catch (error) {
       toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
         description: error instanceof Error ? error.message : String(error),
       });
-    });
-  }, [addProject, addedProjectPaths, handleClose, t]);
+    } finally {
+      setIsConfirming(false);
+    }
+  }, [addProject, addedProjectPaths, handleClose, isConfirming, t]);
 
   const finalizeSelection = React.useCallback(async (target: string) => {
     if (!target || isConfirming) return;
@@ -469,7 +475,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       } else if (shouldCreateSelection) {
         await files.createDirectory(target, { allowOutsideWorkspace: true });
       }
-      const added = addProject(selectedTarget);
+      const added = await addProject(selectedTarget);
       if (!added) {
         toast.error(t('directoryExplorerDialog.toast.failedToAddProject'), {
           description: t('directoryExplorerDialog.toast.selectValidDirectoryPath'),
@@ -707,7 +713,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                     <button
                       type="button"
                       onMouseDown={(event) => event.stopPropagation()}
-                      onClick={(event) => handleQuickAdd(event, row.path)}
+                      onClick={(event) => { void handleQuickAdd(event, row.path); }}
                       className="flex-shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
                       title={t('directoryExplorerDialog.browse.quickAdd')}
                     >

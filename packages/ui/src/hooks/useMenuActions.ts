@@ -167,7 +167,7 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
     const nextProject = projects[nextIndex];
     if (!nextProject) return;
 
-    setActiveProject(nextProject.id);
+    void setActiveProject(nextProject.id);
   }, []);
 
   const handleAction = React.useCallback(

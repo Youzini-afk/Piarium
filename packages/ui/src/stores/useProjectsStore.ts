@@ -48,9 +48,9 @@ interface ProjectsStore {
   activeProjectId: string | null;
   manualProjectOrder: string[];
 
-  addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
+  addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
   removeProject: (id: string) => void;
-  setActiveProject: (id: string | null) => void;
+  setActiveProject: (id: string | null) => Promise<boolean>;
   setActiveProjectIdOnly: (id: string | null) => void;
   renameProject: (id: string, label: string) => void;
   updateProjectMeta: (id: string, meta: {
@@ -364,15 +364,20 @@ const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null)
   }
 };
 
-const persistProjects = (projects: ProjectEntry[], activeProjectId: string | null, manualOrder?: string[]) => {
+const persistProjects = async (
+  projects: ProjectEntry[],
+  activeProjectId: string | null,
+  manualOrder?: string[],
+): Promise<boolean> => {
   cacheProjects(projects, activeProjectId);
   if (manualOrder) {
     persistManualProjectOrder(manualOrder);
   }
-  if (!isVSCodeProjectsRuntime) {
-    void updateDesktopSettings({ projects, activeProjectId });
-  }
+  if (isVSCodeProjectsRuntime) return true;
+  return updateDesktopSettings({ projects, activeProjectId });
 };
+
+let activeProjectSelectionGeneration = 0;
 
 const persistManualProjectOrder = (manualOrder: string[]) => {
   try {
@@ -576,7 +581,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       return { ok: true, normalizedPath: normalized };
     },
 
-    addProject: (path: string, options?: { label?: string; id?: string }) => {
+    addProject: async (path: string, options?: { label?: string; id?: string }) => {
       if (isVSCodeProjectsRuntime) {
         return null;
       }
@@ -589,7 +594,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       const normalizedPath = validation.normalizedPath;
       const existing = get().projects.find((project) => project.path === normalizedPath);
       if (existing) {
-        get().setActiveProject(existing.id);
+        if (!await get().setActiveProject(existing.id)) {
+          throw new Error('Failed to persist the selected workspace.');
+        }
         return existing;
       }
 
@@ -612,7 +619,14 @@ export const useProjectsStore = create<ProjectsStore>()(
         console.info('[ProjectsStore] Added project', entry);
       }
 
-      get().setActiveProject(entry.id);
+      const activated = await get().setActiveProject(entry.id);
+      if (!activated) {
+        const current = get();
+        const remainingProjects = current.projects.filter((project) => project.id !== entry.id);
+        set({ projects: remainingProjects });
+        cacheProjects(remainingProjects, current.activeProjectId);
+        throw new Error('Failed to persist the selected workspace.');
+      }
       void get().discoverProjectIcon(entry.id);
       return entry;
     },
@@ -631,7 +645,8 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       const nextManualOrder = get().manualProjectOrder.filter((oid) => oid !== id);
       set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
-      persistProjects(nextProjects, nextActiveId, nextManualOrder);
+      activeProjectSelectionGeneration += 1;
+      void persistProjects(nextProjects, nextActiveId, nextManualOrder);
 
       if (nextActiveId) {
         const nextActive = nextProjects.find((project) => project.id === nextActiveId);
@@ -643,20 +658,26 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
     },
 
-    setActiveProject: (id: string | null) => {
+    setActiveProject: async (id: string | null) => {
       const { projects, activeProjectId } = get();
       if (activeProjectId === id) {
-        return;
+        return true;
       }
+      const selectionGeneration = ++activeProjectSelectionGeneration;
       if (id === null) {
+        const persisted = await persistProjects(projects, null, get().manualProjectOrder).catch(() => false);
+        if (selectionGeneration !== activeProjectSelectionGeneration) return false;
+        if (!persisted) {
+          cacheProjects(projects, activeProjectId);
+          return false;
+        }
         set({ activeProjectId: null });
-        persistProjects(projects, null, get().manualProjectOrder);
-        void useDirectoryStore.getState().goHome();
-        return;
+        await useDirectoryStore.getState().goHome();
+        return true;
       }
       const target = projects.find((project) => project.id === id);
       if (!target) {
-        return;
+        return false;
       }
 
       const now = Date.now();
@@ -664,20 +685,26 @@ export const useProjectsStore = create<ProjectsStore>()(
         project.id === id ? { ...project, lastOpenedAt: now } : project
       );
 
+      const persisted = await persistProjects(nextProjects, id, get().manualProjectOrder).catch(() => false);
+      if (selectionGeneration !== activeProjectSelectionGeneration) return false;
+      if (!persisted) {
+        cacheProjects(projects, activeProjectId);
+        return false;
+      }
       set({ projects: nextProjects, activeProjectId: id });
-      persistProjects(nextProjects, id, get().manualProjectOrder);
-
       useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
+      return true;
     },
 
     setActiveProjectIdOnly: (id: string | null) => {
+      activeProjectSelectionGeneration += 1;
       const { projects, activeProjectId } = get();
       if (activeProjectId === id) {
         return;
       }
       if (id === null) {
         set({ activeProjectId: null });
-        persistProjects(projects, null, get().manualProjectOrder);
+        void persistProjects(projects, null, get().manualProjectOrder);
         return;
       }
       const target = projects.find((project) => project.id === id);
@@ -691,7 +718,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       );
 
       set({ projects: nextProjects, activeProjectId: id });
-      persistProjects(nextProjects, id, get().manualProjectOrder);
+      void persistProjects(nextProjects, id, get().manualProjectOrder);
     },
 
     renameProject: (id: string, label: string) => {
@@ -708,7 +735,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         project.id === id ? { ...project, label: trimmed } : project
       );
       set({ projects: nextProjects });
-      persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
+      void persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
     },
 
     updateProjectMeta: (id: string, meta: {
@@ -745,7 +772,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return updated;
       });
       set({ projects: nextProjects });
-      persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
+      void persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
     },
 
     uploadProjectIcon: async (id: string, file: File) => {
@@ -884,13 +911,14 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       const newOrder = nextProjects.map((p) => p.id);
       set({ projects: nextProjects, manualProjectOrder: newOrder });
-      persistProjects(nextProjects, activeProjectId, newOrder);
+      void persistProjects(nextProjects, activeProjectId, newOrder);
     },
 
     resetForRuntimeSwitch: () => {
       if (isVSCodeProjectsRuntime) {
         return;
       }
+      activeProjectSelectionGeneration += 1;
       const projects = readPersistedProjects();
       const activeProjectId = readPersistedActiveProjectId();
       const nextActiveProjectId = projects.some((project) => project.id === activeProjectId)

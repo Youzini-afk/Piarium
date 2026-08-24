@@ -5,6 +5,7 @@ import {
   requestDirectoryAccess,
   startAccessingDirectory,
 } from '@/lib/desktop';
+import type { ProjectEntry } from '@/lib/api/types';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
@@ -45,9 +46,17 @@ export const switchDesktopWorkspaceFromPicker = async (): Promise<DesktopWorkspa
 
   useWorkspaceStore.getState().clearWorkspaceCache();
 
-  const project = useProjectsStore.getState().addProject(selected.path);
+  let project: ProjectEntry | null;
+  try {
+    project = await useProjectsStore.getState().addProject(selected.path);
+  } catch (error) {
+    return {
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Failed to persist the selected workspace.',
+    };
+  }
   if (!project) {
-    useDirectoryStore.getState().setDirectory(selected.path, { showOverlay: false });
+    return { status: 'error', error: 'Failed to persist the selected workspace.' };
   }
 
   await useWorkspaceStore.getState().refreshWorkspace();

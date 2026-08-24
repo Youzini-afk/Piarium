@@ -69,7 +69,7 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
             value={activeProject?.id ?? ''}
             onValueChange={(value) => {
               if (!value) return;
-              setActiveProject(value);
+              void setActiveProject(value);
             }}
           >
             {sortedProjects.map((project) => {

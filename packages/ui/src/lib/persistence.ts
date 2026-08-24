@@ -1487,7 +1487,7 @@ let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: Sett
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
-let _settingsFlushWaiters: Array<() => void> = [];
+let _settingsFlushWaiters: Array<(persisted: boolean) => void> = [];
 let _settingsMutationRevision = 0;
 let _settingsLifecycleInitialized = false;
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
@@ -1665,6 +1665,7 @@ async function _flushSettingsUpdate(): Promise<void> {
   _pendingSettingsContext = null;
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
+  let persisted = false;
   const isCurrentMutation = (): boolean => Boolean(
     context
       && isSettingsRuntimeContextCurrent(context)
@@ -1681,6 +1682,7 @@ async function _flushSettingsUpdate(): Promise<void> {
     if (runtimeSettings) {
       try {
         const updated = await runtimeSettings.save(changes);
+        persisted = Boolean(updated);
         if (!isCurrentMutation()) return;
         if (updated) {
           applyDesktopUiPreferences(updated);
@@ -1706,14 +1708,16 @@ async function _flushSettingsUpdate(): Promise<void> {
         body: JSON.stringify(changes),
       });
 
-      if (!isCurrentMutation()) return;
       if (!response.ok) {
-        console.warn('Failed to update shared settings via API:', response.status, response.statusText);
-        dispatchSettingsSaveState('error');
+        if (isCurrentMutation()) {
+          console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+          dispatchSettingsSaveState('error');
+        }
         return;
       }
 
       const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
+      persisted = Boolean(updated);
       if (!isCurrentMutation()) return;
       if (updated) {
         applyDesktopUiPreferences(updated);
@@ -1731,13 +1735,13 @@ async function _flushSettingsUpdate(): Promise<void> {
       }
     }
   } finally {
-    waiters.forEach((resolve) => resolve());
+    waiters.forEach((resolve) => resolve(persisted));
   }
 }
 
-export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
+export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<boolean> => {
   if (typeof window === 'undefined') {
-    return;
+    return false;
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
@@ -1755,7 +1759,7 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
   }
-  const flushed = new Promise<void>((resolve) => {
+  const flushed = new Promise<boolean>((resolve) => {
     _settingsFlushWaiters.push(resolve);
   });
   _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);

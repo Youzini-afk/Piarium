@@ -116,6 +116,19 @@ export const useWorkbenchWorkspace = (): WorkbenchWorkspaceState => {
     ensureResolution(documents, currentDirectory, generation);
   }, [currentDirectory, documents, generation, runtimeEpoch]);
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const retryAfterSettingsSync = (): void => {
+      if (!currentDirectory) return;
+      const currentGeneration = getRuntimeEndpointGeneration();
+      const key = workspaceKey(currentDirectory, currentGeneration);
+      if (currentResolution.key !== key || currentResolution.status !== 'error') return;
+      ensureResolution(documents, currentDirectory, currentGeneration, true);
+    };
+    window.addEventListener('piarium:settings-synced', retryAfterSettingsSync);
+    return () => window.removeEventListener('piarium:settings-synced', retryAfterSettingsSync);
+  }, [currentDirectory, documents]);
+
   const effective = resolved.key === expectedKey
     ? resolved
     : currentDirectory

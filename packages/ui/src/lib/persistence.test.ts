@@ -6,6 +6,8 @@ import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import {
   applyPersistedHomeDirectoryToWindow,
   getSettingsSaveState,
@@ -232,11 +234,75 @@ describe('updateDesktopSettings', () => {
     });
 
     try {
-      await updateDesktopSettings({ useSystemTheme: false, themeVariant: 'light' });
+      const persisted = await updateDesktopSettings({ useSystemTheme: false, themeVariant: 'light' });
       // Success is silent: the shared state machine maps 'saved' back to 'idle'.
+      expect(persisted).toBe(true);
       expect(states).toEqual(['saving', 'idle']);
     } finally {
       unsubscribe();
+    }
+  });
+
+  test('activates a project directory only after its Host settings grant is persisted', async () => {
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const saveResult = deferred<SettingsPayload>();
+    const saveStarted = deferred<void>();
+    const project = { id: 'project-granted', path: 'D:/projects/granted', label: 'Granted' };
+    registerSettingsSave(async () => {
+      saveStarted.resolve();
+      return saveResult.promise;
+    });
+
+    try {
+      useDirectoryStore.setState({ currentDirectory: 'D:/projects/previous' });
+      useProjectsStore.setState({
+        activeProjectId: null,
+        manualProjectOrder: [],
+        projects: [project],
+      });
+
+      const activation = useProjectsStore.getState().setActiveProject(project.id);
+      await saveStarted.promise;
+      expect(useProjectsStore.getState().activeProjectId).toBeNull();
+      expect(useDirectoryStore.getState().currentDirectory).toBe('D:/projects/previous');
+
+      saveResult.resolve({ activeProjectId: project.id, projects: [project] });
+      expect(await activation).toBe(true);
+      expect(useProjectsStore.getState().activeProjectId).toBe(project.id);
+      expect(useDirectoryStore.getState().currentDirectory).toBe(project.path);
+    } finally {
+      useDirectoryStore.setState(originalDirectory, true);
+      useProjectsStore.setState(originalProjects, true);
+    }
+  });
+
+  test('preserves the previous project and directory when the Host grant fails', async () => {
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const previousFetch = globalThis.fetch;
+    const previous = { id: 'project-previous', path: 'D:/projects/previous', label: 'Previous' };
+    const target = { id: 'project-denied', path: 'D:/projects/denied', label: 'Denied' };
+    registerSettingsSave(async () => {
+      throw new Error('settings unavailable');
+    });
+    globalThis.fetch = (async () => new Response(null, { status: 503 })) as typeof fetch;
+
+    try {
+      useDirectoryStore.setState({ currentDirectory: previous.path });
+      useProjectsStore.setState({
+        activeProjectId: previous.id,
+        manualProjectOrder: [],
+        projects: [previous, target],
+      });
+
+      expect(await useProjectsStore.getState().setActiveProject(target.id)).toBe(false);
+      expect(useProjectsStore.getState().activeProjectId).toBe(previous.id);
+      expect(useDirectoryStore.getState().currentDirectory).toBe(previous.path);
+    } finally {
+      globalThis.fetch = previousFetch;
+      useDirectoryStore.setState(originalDirectory, true);
+      useProjectsStore.setState(originalProjects, true);
     }
   });
 
@@ -277,11 +343,11 @@ describe('updateDesktopSettings', () => {
     const firstUpdate = updateDesktopSettings({ terminalShell: 'zsh' });
     await firstSaveStarted.promise;
     const secondUpdate = updateDesktopSettings({ terminalShell: 'fish' });
-    await secondUpdate;
+    expect(await secondUpdate).toBe(true);
     expect(useUIStore.getState().terminalShell).toBe('fish');
 
     firstSave.resolve({ terminalShell: 'zsh' });
-    await firstUpdate;
+    expect(await firstUpdate).toBe(true);
     expect(useUIStore.getState().terminalShell).toBe('fish');
   });
 
