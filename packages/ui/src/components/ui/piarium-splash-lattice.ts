@@ -127,10 +127,11 @@ const VISUAL_GROUND_FADE_RISE_PX = floorReach(
   VISUAL_GROUND_BEHIND_PX - GROUND_FADE_ROWS * CUBE_EDGE_PX,
   GROUND_AHEAD_PX,
 ).farRise;
-const VISUAL_GROUND_RADIUS_PX = Math.floor(floorInscribedRadius(
-  VISUAL_GROUND_BEHIND_PX,
-  GROUND_AHEAD_PX,
-));
+/** Viewport-normalized peripheral fade: solid nearby, gently atmospheric at every screen edge. */
+const GROUND_PERIPHERAL_FADE_START_PCT = 30;
+const GROUND_PERIPHERAL_FADE_MID_PCT = 68;
+const GROUND_PERIPHERAL_FADE_END_PCT = 100;
+const GROUND_PERIPHERAL_UNMASK_PCT = 160;
 
 /** The last screen-space row the adaptive Canvas needs to project before the horizon mask reaches zero. */
 export const SPLASH_GROUND_VISIBLE_FAR_RISE_PX = Math.round(VISUAL_GROUND_EDGE_RISE_PX * 1e6) / 1e6;
@@ -614,25 +615,28 @@ animation-fill-mode: both;
 @keyframes pi-splash-reveal-fade { to { opacity: 0; } }`
     : '';
 
-  // The visible line plane extends past the real cells, so its idle mask uses that larger registered
-  // outline. During exit the radius grows past the viewport while the camera turns overhead, removing the
-  // atmospheric edge without a discrete mask swap.
-  const floorMask = `var(--pi-splash-floor-mask, ${VISUAL_GROUND_RADIUS_PX}px)`;
+  // Percentages are measured on an explicit viewport-shaped ellipse. The same progress therefore reaches
+  // the horizontal and vertical edges on ultrawide, portrait, and ordinary windows; pixel-radius circles
+  // made the left and right disappear much earlier on wide screens.
+  const floorMask = `var(--pi-splash-floor-mask, ${GROUND_PERIPHERAL_FADE_START_PCT}%)`;
   const falloff = [
     `rgba(0,0,0,1) ${floorMask}`,
-    `rgba(0,0,0,0.55) calc(${floorMask} + ${VISUAL_GROUND_RADIUS_PX * 2}px)`,
-    `rgba(0,0,0,0.3) calc(${floorMask} + ${VISUAL_GROUND_RADIUS_PX * 4}px)`,
+    `rgba(0,0,0,0.78) calc(${floorMask} + ${GROUND_PERIPHERAL_FADE_MID_PCT - GROUND_PERIPHERAL_FADE_START_PCT}%)`,
+    `rgba(0,0,0,0.46) calc(${floorMask} + ${GROUND_PERIPHERAL_FADE_END_PCT - GROUND_PERIPHERAL_FADE_START_PCT}%)`,
   ].join(', ');
-  const vignette = `radial-gradient(circle at 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}%, ${falloff})`;
+  const vignette = `radial-gradient(ellipse 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}% at 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}%, ${falloff})`;
   const hole = `radial-gradient(circle at 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,0) var(--pi-splash-open, 0px), rgba(0,0,0,1) calc(var(--pi-splash-open, 0px) + ${REVEAL_EDGE_PX}px))`;
 
   return `
 /* The splash and the application are sibling paint owners. Keep their shared canvas colour stable for one
    committed application frame after the splash is removed; otherwise a delayed theme/root paint can expose
    the browser's white default between the two owners. */
-html[${SPLASH_HANDOFF_ATTRIBUTE}='true'],
-html[${SPLASH_HANDOFF_ATTRIBUTE}='true'] body,
-html[${SPLASH_HANDOFF_ATTRIBUTE}='true'] #root {
+html:root[${SPLASH_HANDOFF_ATTRIBUTE}='true'],
+html:root[${SPLASH_HANDOFF_ATTRIBUTE}='true'] body,
+html:root[${SPLASH_HANDOFF_ATTRIBUTE}='true'] #root,
+html:root.desktop-runtime[${SPLASH_HANDOFF_ATTRIBUTE}='true'] body,
+html:root.desktop-runtime[${SPLASH_HANDOFF_ATTRIBUTE}='true'] #root {
+background: ${colors.background} !important;
 background-color: ${colors.background} !important;
 }
 .pi-splash {
@@ -658,9 +662,9 @@ inherits: false;
 initial-value: 0px;
 }
 @property --pi-splash-floor-mask {
-syntax: '<length>';
+syntax: '<percentage>';
 inherits: true;
-initial-value: ${VISUAL_GROUND_RADIUS_PX}px;
+initial-value: ${GROUND_PERIPHERAL_FADE_START_PCT}%;
 }
 @property --pi-splash-horizon-lift {
 syntax: '<length>';
@@ -672,21 +676,21 @@ animation: pi-splash-floor-unmask ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS
 }
 @keyframes pi-splash-floor-unmask {
 from {
---pi-splash-floor-mask: ${VISUAL_GROUND_RADIUS_PX}px;
+--pi-splash-floor-mask: ${GROUND_PERIPHERAL_FADE_START_PCT}%;
 --pi-splash-horizon-lift: 0px;
 }
 to {
---pi-splash-floor-mask: 160vmax;
+--pi-splash-floor-mask: ${GROUND_PERIPHERAL_UNMASK_PCT}%;
 --pi-splash-horizon-lift: 160vmax;
 }
 }
 @keyframes pi-splash-floor-mask {
 from {
---pi-splash-floor-mask: 160vmax;
+--pi-splash-floor-mask: ${GROUND_PERIPHERAL_UNMASK_PCT}%;
 --pi-splash-horizon-lift: 160vmax;
 }
 to {
---pi-splash-floor-mask: ${VISUAL_GROUND_RADIUS_PX}px;
+--pi-splash-floor-mask: ${GROUND_PERIPHERAL_FADE_START_PCT}%;
 --pi-splash-horizon-lift: 0px;
 }
 }

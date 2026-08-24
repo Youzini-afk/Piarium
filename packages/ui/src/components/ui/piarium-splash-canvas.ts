@@ -315,9 +315,6 @@ export function mountSplashTileCanvas(
     }
     return cubicCoordinate(0, 1, (low + high) / 2);
   };
-  const lineFadeStart = 0.08;
-  const lineFadeEnd = 0.92;
-
   // The floor and cube used to animate this angle on independent clocks: Canvas rAF for the floor and a
   // CSS animation for the cube. A delayed commit or frame could therefore put them at visibly different
   // tilts. While this controller owns the Canvas, it owns the DOM camera tilt too and writes both from the
@@ -415,13 +412,11 @@ uniform vec2 uViewport;
 uniform vec2 uOrigin;
 uniform float uCellSize;
 uniform float uDistance;
-uniform float uLineFadeRadius;
 uniform float uSpin;
 uniform float uTilt;
 out vec2 vUv;
 out float vOpacity;
 out float vFillMix;
-out float vLineOpacity;
 const vec2 corners[6] = vec2[6](
   vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(-0.5,0.5),
   vec2(-0.5,0.5), vec2(0.5,-0.5), vec2(0.5,0.5)
@@ -437,7 +432,6 @@ void main() {
   if (perspectiveW <= 0.02) {
     gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
     vOpacity = 0.0;
-    vLineOpacity = 0.0;
   } else {
     // Preserve the projection denominator as homogeneous W. Besides landing at the same screen point,
     // this lets the rasterizer perspective-correct vUv across both triangles, avoiding a derivative seam
@@ -446,11 +440,6 @@ void main() {
     vec2 homogeneousClip = (projected + uOrigin * perspectiveW) / uViewport * 2.0 - vec2(perspectiveW);
     gl_Position = vec4(homogeneousClip.x, -homogeneousClip.y, 0.0, perspectiveW);
     vOpacity = aOpacity;
-    // Screen-space radial attenuation keeps the visible result centred on the logo at every camera tilt.
-    // It is evaluated per vertex and interpolated across the cell, so neighbouring lines share a continuous
-    // fade without adding a per-fragment distance calculation or another draw owner.
-    float radialProgress = length(projected / perspectiveW) / max(uLineFadeRadius, 1.0);
-    vLineOpacity = 1.0 - smoothstep(${lineFadeStart}, ${lineFadeEnd}, radialProgress);
   }
   vUv = corner + 0.5;
   vFillMix = aFillMix;
@@ -465,7 +454,6 @@ uniform float uRenderScale;
 in vec2 vUv;
 in float vOpacity;
 in float vFillMix;
-in float vLineOpacity;
 out vec4 outputColor;
 void main() {
   vec4 tile = mix(uBackground, uPulse, vFillMix);
@@ -489,7 +477,7 @@ void main() {
   vec2 cellSpanPx = vec2(1.0) / footprint;
   vec2 densityFade = smoothstep(vec2(uRenderScale * 3.0), vec2(uRenderScale * 6.0), cellSpanPx);
   float coverage = max(lineCoverage.x * densityFade.x, lineCoverage.y * densityFade.y);
-  float lineMix = clamp(coverage * uLine.a * vLineOpacity, 0.0, 1.0);
+  float lineMix = clamp(coverage * uLine.a, 0.0, 1.0);
   vec3 color = mix(tile.rgb, uLine.rgb, lineMix);
   // The line is composited over the opaque tile instead of replacing its alpha. Visually this matches the
   // semantic translucent line token while preserving the splash's promise that intact tiles are a cover.
@@ -542,7 +530,6 @@ void main() {
         cellSize: uniform('uCellSize'),
         distance: uniform('uDistance'),
         line: uniform('uLine'),
-        lineFadeRadius: uniform('uLineFadeRadius'),
         origin: uniform('uOrigin'),
         pulse: uniform('uPulse'),
         renderScale: uniform('uRenderScale'),
@@ -590,12 +577,6 @@ void main() {
           const originX = viewport.width / 2;
           const originY = viewport.height * options.camera.originYPct / 100;
           gl.uniform2f(uniforms.origin, originX, originY);
-          gl.uniform1f(uniforms.lineFadeRadius, Math.max(
-            Math.hypot(originX, originY),
-            Math.hypot(viewport.width - originX, originY),
-            Math.hypot(originX, viewport.height - originY),
-            Math.hypot(viewport.width - originX, viewport.height - originY),
-          ));
           gl.uniform1f(uniforms.tilt, tiltDeg * Math.PI / 180);
           gl.clearColor(0, 0, 0, 0);
           gl.clear(gl.COLOR_BUFFER_BIT);
@@ -651,14 +632,6 @@ void main() {
       draw: (values, viewport, tiltDeg) => {
         context.setTransform(1, 0, 0, 1, 0, 0);
         context.clearRect(0, 0, viewport.width, viewport.height);
-        const originX = viewport.width / 2;
-        const originY = viewport.height * options.camera.originYPct / 100;
-        const lineFadeRadius = Math.max(
-          Math.hypot(originX, originY),
-          Math.hypot(viewport.width - originX, originY),
-          Math.hypot(originX, viewport.height - originY),
-          Math.hypot(viewport.width - originX, viewport.height - originY),
-        );
         for (const value of values) {
           if (value.opacity <= 0) continue;
           const half = options.cellPx * value.scale / 2;
@@ -680,12 +653,6 @@ void main() {
           context.lineTo(bottomLeft.x, bottomLeft.y);
           context.closePath();
           context.fill();
-          const centre = project(value.x, value.y, viewport, tiltDeg);
-          const radialProgress = centre
-            ? Math.hypot(centre.x - originX, centre.y - originY) / Math.max(1, lineFadeRadius)
-            : 1;
-          const lineOpacity = 1 - smoothstep(lineFadeStart, lineFadeEnd, radialProgress);
-          context.globalAlpha = value.opacity * lineOpacity;
           context.strokeStyle = cssColor(line);
           context.lineWidth = 1;
           context.beginPath();

@@ -301,13 +301,16 @@ describe('the floor covers the window it has to cover', () => {
     expect(renderer).toContain('requestAnimationFrame');
   });
 
-  test('line contrast falls continuously in screen space from the logo to the viewport boundary', () => {
+  test('the viewport wrapper owns one aspect-correct peripheral fade', () => {
     const renderer = mountSplashTileCanvas.toString();
-    expect(renderer).toContain('uniform float uLineFadeRadius');
-    expect(renderer).toContain('radialProgress = length(projected / perspectiveW)');
-    expect(renderer).toContain('vLineOpacity = 1.0 - smoothstep');
-    expect(renderer).toContain('value.opacity * lineOpacity');
-    expect(renderer).not.toContain('value.opacity * value.lineOpacity');
+    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
+    expect(css).toContain(
+      `radial-gradient(ellipse 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}% at 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}%`,
+    );
+    expect(renderer).not.toContain('uLineFadeRadius');
+    expect(renderer).not.toContain('radialProgress');
+    expect(renderer).not.toContain('vLineOpacity');
+    expect(renderer).not.toContain('lineOpacity');
   });
 
   test('perspective grid lines use screen-space analytic antialiasing', () => {
@@ -315,7 +318,7 @@ describe('the floor covers the window it has to cover', () => {
     expect(renderer).toContain('fwidth(vUv)');
     expect(renderer).toContain('lineWidthPx = max(projectedLinePx, vec2(uRenderScale))');
     expect(renderer).toContain('densityFade = smoothstep');
-    expect(renderer).toContain('coverage * uLine.a * vLineOpacity');
+    expect(renderer).toContain('coverage * uLine.a');
     expect(renderer).toContain('tile.a * vOpacity');
     expect(renderer).toContain('homogeneousClip.x, -homogeneousClip.y, 0.0, perspectiveW');
     expect(renderer).not.toContain('? uLine : tile');
@@ -383,8 +386,9 @@ describe('the floor is the cover', () => {
   });
 
   test('the application handoff keeps the splash background through the first committed frame', () => {
-    expect(css).toContain(`html[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] body`);
-    expect(css).toContain(`html[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] #root`);
+    expect(css).toContain(`html:root.desktop-runtime[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] body`);
+    expect(css).toContain(`html:root.desktop-runtime[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] #root`);
+    expect(css).toContain(`background: ${PIARIUM_SPLASH_COLORS.background} !important;`);
     expect(css).toContain(`background-color: ${PIARIUM_SPLASH_COLORS.background} !important;`);
   });
 
@@ -424,7 +428,7 @@ describe('the floor is the cover', () => {
     // invalidating the large screen-space mask every frame while preserving the atmospheric wait state.
     expect(css).toContain('@property --pi-splash-floor-mask');
     expect(css).toContain('rgba(0,0,0,1) var(--pi-splash-floor-mask');
-    expect(css).toContain('--pi-splash-floor-mask: 160vmax;');
+    expect(css).toContain('--pi-splash-floor-mask: 160%;');
     expect(css).toContain('pi-splash-floor-unmask');
     expect(css).toContain('steps(1, end) both;');
   });
