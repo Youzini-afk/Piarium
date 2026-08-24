@@ -2,7 +2,6 @@
 
 import {
   SPLASH_CAMERA_DISTANCE_PX,
-  SPLASH_CAMERA_PRESS_TILT_DEG,
   SPLASH_CAMERA_SPIN_DEG,
   SPLASH_CAMERA_TILT_DEG,
 } from './piarium-splash-camera';
@@ -24,7 +23,6 @@ export type SplashCanvasPlaybackKind = 'covered' | 'covering' | 'idle' | 'reveal
 export interface SplashCanvasPlayback {
   readonly cameraDelayMs: number;
   readonly cameraDurationMs: number;
-  readonly cameraKneeProgress: number;
   readonly delayScale: number;
   readonly exitMs: number;
   readonly kind: SplashCanvasPlaybackKind;
@@ -70,7 +68,6 @@ export interface SplashTileFieldInput {
 interface SplashCanvasCameraOptions {
   readonly distancePx: number;
   readonly originYPct: number;
-  readonly pressTiltDeg: number;
   readonly spinDeg: number;
   readonly tiltDeg: number;
   readonly visibleFarRisePx: number;
@@ -114,7 +111,6 @@ export const resolveSplashCanvasPlayback = (input: {
   return {
     cameraDelayMs: timing.cameraDelayMs,
     cameraDurationMs: timing.cameraDurationMs,
-    cameraKneeProgress: timing.cameraKneeProgress,
     delayScale: timing.maxDelayMs / STANDARD_MAX_DELAY_MS,
     exitMs: timing.exitMs,
     kind,
@@ -137,7 +133,6 @@ export const createSplashCanvasMountOptions = (input: {
     camera: {
       distancePx: SPLASH_CAMERA_DISTANCE_PX,
       originYPct: SPLASH_GROUND_ORIGIN_Y_PCT,
-      pressTiltDeg: SPLASH_CAMERA_PRESS_TILT_DEG,
       spinDeg: SPLASH_CAMERA_SPIN_DEG,
       tiltDeg: SPLASH_CAMERA_TILT_DEG,
       visibleFarRisePx: SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
@@ -705,13 +700,7 @@ void main() {
       : Math.max(0, playback.totalMs - playback.cameraDelayMs - playback.cameraDurationMs);
     const raw = clamp((elapsed - delay) / Math.max(1, playback.cameraDurationMs), 0, 1);
     const forwardProgress = playback.kind === 'revealing' ? raw : 1 - raw;
-    const knee = clamp(playback.cameraKneeProgress, 1e-6, 1 - 1e-6);
-    if (forwardProgress <= knee) {
-      const approach = cubicEase(forwardProgress / knee, 0.4, 0.2);
-      return mix(options.camera.tiltDeg, options.camera.pressTiltDeg, approach);
-    }
-    const press = cubicEase((forwardProgress - knee) / (1 - knee), 0.4, 0.2);
-    return mix(options.camera.pressTiltDeg, 0, press);
+    return options.camera.tiltDeg * (1 - cubicEase(forwardProgress, 0.4, 0.2));
   };
 
   const updateFrames = (elapsed: number): void => {
@@ -813,7 +802,6 @@ void main() {
       if (disposed) return;
       const unchanged = playback.cameraDelayMs === next.cameraDelayMs
         && playback.cameraDurationMs === next.cameraDurationMs
-        && playback.cameraKneeProgress === next.cameraKneeProgress
         && playback.kind === next.kind
         && playback.delayScale === next.delayScale
         && playback.exitMs === next.exitMs

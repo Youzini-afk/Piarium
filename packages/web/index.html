@@ -539,7 +539,7 @@ inherits: true;
 initial-value: 0px;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] {
-animation: pi-splash-floor-unmask 820ms 40ms steps(1, end) both;
+animation: pi-splash-floor-unmask 520ms 40ms steps(1, end) both;
 }
 @keyframes pi-splash-floor-unmask {
 from {
@@ -623,12 +623,10 @@ transform-style: preserve-3d;
 transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1);
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera {
-animation: pi-splash-camera-flatten 820ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
+animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-camera-flatten {
-0% { transform: perspective(1800px) rotateX(58deg) rotateZ(45deg) scale(1); }
-63.415% { transform: perspective(1800px) rotateX(22deg) rotateZ(45deg) scale(1); }
-100% { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(1); }
+to { transform: perspective(1800px) rotateX(0deg) rotateZ(45deg) scale(1); }
 }
 /* The logical ground remains in the shared camera only as the cube's registered contact footprint. The
    adaptive tile field is a viewport Canvas beside this camera and performs the same projection itself. */
@@ -763,38 +761,17 @@ animation: pi-splash-contact-press 303ms 557ms cubic-bezier(0.3, 0, 0.2, 1) both
 }
 @keyframes pi-splash-mark-press {
 0%, 58% { transform: translateZ(48px); }
-89.583% { transform: translateZ(-48px); }
+92% { transform: translateZ(-48px); }
 100% { transform: translateZ(-54px); }
 }
 @keyframes pi-splash-cube-bury {
-0%, 78% { opacity: 1; }
-88%, 100% { opacity: 0; }
+0%, 72% { opacity: 1; }
+86%, 100% { opacity: 0; }
 }
 @keyframes pi-splash-contact-press {
-0% {
-opacity: 0.32;
-transform: scale(1);
-background: var(--splash-background, var(--color-background, #151313));
-box-shadow: inset 0 0 0 1px var(--splash-stroke), 0 0 0 0 transparent;
-}
-58% {
-opacity: 0.58;
-transform: scale(0.86);
-background: var(--splash-cell-pulse, var(--splash-background, #151313));
-box-shadow: inset 0 0 0 1px var(--splash-stroke), 0 0 0 0 transparent;
-}
-78% {
-opacity: 0.98;
-transform: scale(0.82);
-background: var(--splash-stroke);
-box-shadow: inset 0 0 0 1px var(--splash-stroke), 0 0 0 0 var(--splash-stroke);
-}
-100% {
-opacity: 0;
-transform: scale(1.28);
-background: var(--splash-stroke);
-box-shadow: inset 0 0 0 1px var(--splash-stroke), 0 0 0 18px transparent;
-}
+0% { opacity: 0.35; transform: scale(1); }
+50% { opacity: 0.95; transform: scale(0.9); }
+100% { opacity: 0; transform: scale(1.18); }
 }
 @keyframes pi-splash-mark-out {
 to { opacity: 0; }
@@ -824,11 +801,11 @@ animation: none;
 }
 
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] {
-animation: pi-splash-floor-mask 449ms 569ms steps(1, end) both;
+animation: pi-splash-floor-mask 285ms 733ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] {
 pointer-events: none;
-animation: pi-splash-floor-unmask 449ms 22ms steps(1, end) both;
+animation: pi-splash-floor-unmask 285ms 22ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-phase-clock,
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-phase-clock {
@@ -849,10 +826,10 @@ pi-splash-open 263ms 471ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
 pi-splash-backdrop-out 142ms 734ms ease both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-camera {
-animation: pi-splash-camera-flatten 449ms 569ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
+animation: pi-splash-camera-flatten 285ms 733ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
 }
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-camera {
-animation: pi-splash-camera-flatten 449ms 22ms cubic-bezier(0.4, 0, 0.2, 1) both;
+animation: pi-splash-camera-flatten 285ms 22ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-mark {
 animation: pi-splash-mark-press 525ms 515ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
@@ -880,11 +857,11 @@ animation: pi-splash-status-out 99ms ease both;
 }
 
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] {
-animation: pi-splash-floor-mask 820ms 1040ms steps(1, end) both;
+animation: pi-splash-floor-mask 520ms 1340ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] {
 pointer-events: none;
-animation: pi-splash-floor-unmask 820ms 40ms steps(1, end) both;
+animation: pi-splash-floor-unmask 520ms 40ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-phase-clock,
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-phase-clock {
@@ -905,10 +882,10 @@ pi-splash-open 480ms 860ms cubic-bezier(0.25, 0.6, 0.3, 1) both,
 pi-splash-backdrop-out 260ms 1340ms ease both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-camera {
-animation: pi-splash-camera-flatten 820ms 1040ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
+animation: pi-splash-camera-flatten 520ms 1340ms cubic-bezier(0.4, 0, 0.2, 1) reverse both;
 }
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-camera {
-animation: pi-splash-camera-flatten 820ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
+animation: pi-splash-camera-flatten 520ms 40ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-mark {
 animation: pi-splash-mark-press 960ms 940ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
@@ -1430,13 +1407,8 @@ void main() {
   const cameraTiltAt = (elapsed) => {
     if (playback.reducedMotion || playback.kind === "idle" || playback.kind === "covered")
       return options.camera.tiltDeg;
-    const delay = playback.kind === "revealing" ? playback.cameraDelayMs : Math.max(0, playback.totalMs - playback.cameraDelayMs - playback.cameraDurationMs), raw = clamp((elapsed - delay) / Math.max(1, playback.cameraDurationMs), 0, 1), forwardProgress = playback.kind === "revealing" ? raw : 1 - raw, knee = clamp(playback.cameraKneeProgress, 0.000001, 0.999999);
-    if (forwardProgress <= knee) {
-      const approach = cubicEase(forwardProgress / knee, 0.4, 0.2);
-      return mix(options.camera.tiltDeg, options.camera.pressTiltDeg, approach);
-    }
-    const press = cubicEase((forwardProgress - knee) / (1 - knee), 0.4, 0.2);
-    return mix(options.camera.pressTiltDeg, 0, press);
+    const delay = playback.kind === "revealing" ? playback.cameraDelayMs : Math.max(0, playback.totalMs - playback.cameraDelayMs - playback.cameraDurationMs), raw = clamp((elapsed - delay) / Math.max(1, playback.cameraDurationMs), 0, 1), forwardProgress = playback.kind === "revealing" ? raw : 1 - raw;
+    return options.camera.tiltDeg * (1 - cubicEase(forwardProgress, 0.4, 0.2));
   }, updateFrames = (elapsed) => {
     const motionByDelay = new Map, motionActive = !playback.reducedMotion && (playback.kind === "covering" || playback.kind === "revealing"), restingMotion = { eased: 0, fillMix: 0, opacity: 1 };
     for (let index = 0;index < field.tiles.length; index += 1) {
@@ -1528,19 +1500,19 @@ void main() {
     setPlayback: (next) => {
       if (disposed)
         return;
-      if (playback.cameraDelayMs === next.cameraDelayMs && playback.cameraDurationMs === next.cameraDurationMs && playback.cameraKneeProgress === next.cameraKneeProgress && playback.kind === next.kind && playback.delayScale === next.delayScale && playback.exitMs === next.exitMs && playback.reducedMotion === next.reducedMotion && playback.releaseMs === next.releaseMs && playback.totalMs === next.totalMs)
+      if (playback.cameraDelayMs === next.cameraDelayMs && playback.cameraDurationMs === next.cameraDurationMs && playback.kind === next.kind && playback.delayScale === next.delayScale && playback.exitMs === next.exitMs && playback.reducedMotion === next.reducedMotion && playback.releaseMs === next.releaseMs && playback.totalMs === next.totalMs)
         return;
       playback = next;
       start();
     }
   };
 });
-var controller=mount(canvas,{"camera":{"distancePx":1800,"originYPct":56,"pressTiltDeg":22,"spinDeg":45,"tiltDeg":58,"visibleFarRisePx":726.331414},"cellPx":96,"colors":{"background":"var(--splash-background, var(--color-background, #151313))","cell":"var(--splash-cell-pulse, var(--splash-background, #151313))","line":"var(--splash-lattice-line, rgba(255, 255, 255, 0.22))"},"field":{"breatheShare":0.1,"direction":"forward","mode":"boot","randomSeed":49734321},"playback":{"cameraDelayMs":40,"cameraDurationMs":820,"cameraKneeProgress":0.63415,"delayScale":1,"exitMs":520,"kind":"idle","reducedMotion":false,"releaseMs":860,"totalMs":1900}},build);
+var controller=mount(canvas,{"camera":{"distancePx":1800,"originYPct":56,"spinDeg":45,"tiltDeg":58,"visibleFarRisePx":726.331414},"cellPx":96,"colors":{"background":"var(--splash-background, var(--color-background, #151313))","cell":"var(--splash-cell-pulse, var(--splash-background, #151313))","line":"var(--splash-lattice-line, rgba(255, 255, 255, 0.22))"},"field":{"breatheShare":0.1,"direction":"forward","mode":"boot","randomSeed":49734321},"playback":{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"idle","reducedMotion":false,"releaseMs":860,"totalMs":1900}},build);
 var reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 var observer=new MutationObserver(function(){
 if(!splash||splash.getAttribute('data-leaving')!=='true')return;
 observer.disconnect();
-controller.setPlayback(reduced?{"cameraDelayMs":40,"cameraDurationMs":820,"cameraKneeProgress":0.63415,"delayScale":1,"exitMs":520,"kind":"revealing","reducedMotion":true,"releaseMs":860,"totalMs":1900}:{"cameraDelayMs":40,"cameraDurationMs":820,"cameraKneeProgress":0.63415,"delayScale":1,"exitMs":520,"kind":"revealing","reducedMotion":false,"releaseMs":860,"totalMs":1900});
+controller.setPlayback(reduced?{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"revealing","reducedMotion":true,"releaseMs":860,"totalMs":1900}:{"cameraDelayMs":40,"cameraDurationMs":520,"delayScale":1,"exitMs":520,"kind":"revealing","reducedMotion":false,"releaseMs":860,"totalMs":1900});
 });
 if(splash)observer.observe(splash,{attributes:true,attributeFilter:['data-leaving']});
 if(splash&&splash.parentNode){

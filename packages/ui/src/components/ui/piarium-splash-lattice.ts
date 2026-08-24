@@ -1,7 +1,6 @@
 import {
   CAMERA_FLAT_FLOOR_TRANSFORM,
   CAMERA_FLOOR_TRANSFORM,
-  CAMERA_PRESS_FLOOR_TRANSFORM,
   floorInscribedRadius,
   floorReach,
   HORIZON_RISE_PX,
@@ -155,25 +154,16 @@ export const GROUND_REVEAL_RADIUS_PX = Math.floor(Math.min(
 
 const TILE_EXIT_MS = 520;
 const MARK_EXIT_MS = 960;
-/** The cube finishes sinking as the first floor tile starts moving. */
+/** The cube makes contact just before the first floor tile starts moving. */
 const BOOT_TILE_RELEASE_MS = 860;
 const FLOOR_FLATTEN_DELAY_MS = 40;
-/** The camera reaches its low press pose on the old, already accepted 520ms approach. */
-const FLOOR_CAMERA_APPROACH_MS = 520;
-/** The camera completes the overhead move exactly when the centre floor tile is released. */
-const FLOOR_FLATTEN_MS = BOOT_TILE_RELEASE_MS - FLOOR_FLATTEN_DELAY_MS;
-/** Stable shared keyframe ratio for CSS and the serialized Canvas renderer. */
-const FLOOR_CAMERA_APPROACH_PCT = Math.round(
-  FLOOR_CAMERA_APPROACH_MS / FLOOR_FLATTEN_MS * 100_000,
-) / 1_000;
-const FLOOR_CAMERA_APPROACH_PROGRESS = FLOOR_CAMERA_APPROACH_PCT / 100;
-/** The cube begins sinking as the camera reaches the low press pose. */
+const FLOOR_FLATTEN_MS = 520;
+/** The camera finishes its move first; only then does the cube travel through the floor. */
 const CUBE_PRESS_START_PCT = 58;
-/** Full burial and the centre tile release are one physical event. */
-const CUBE_CONTACT_PCT = Math.round(BOOT_TILE_RELEASE_MS / MARK_EXIT_MS * 100_000) / 1_000;
+const CUBE_CONTACT_PCT = 92;
 /** The real cube faces are gone before its floor cell opens, so the buried mark cannot shine through. */
-const CUBE_FACE_FADE_START_PCT = 78;
-const CUBE_FACE_FADE_END_PCT = 88;
+const CUBE_FACE_FADE_START_PCT = 72;
+const CUBE_FACE_FADE_END_PCT = 86;
 const CUBE_PRESS_DELAY_MS = Math.round(MARK_EXIT_MS * CUBE_PRESS_START_PCT / 100);
 /** The contact light ends exactly as the centre tile is released. */
 const CONTACT_PRESS_MS = BOOT_TILE_RELEASE_MS - CUBE_PRESS_DELAY_MS;
@@ -254,7 +244,6 @@ export const splashWorkbenchPhaseDurationMs = (
 export interface SplashTilePlaybackTiming {
   readonly cameraDelayMs: number;
   readonly cameraDurationMs: number;
-  readonly cameraKneeProgress: number;
   readonly exitMs: number;
   readonly maxDelayMs: number;
   readonly releaseMs: number;
@@ -269,7 +258,6 @@ export const splashTilePlaybackTiming = (
   return {
     cameraDelayMs: timeline.floorDelayMs,
     cameraDurationMs: timeline.floorDurationMs,
-    cameraKneeProgress: FLOOR_CAMERA_APPROACH_PROGRESS,
     exitMs: timeline.tileExitMs,
     // Scaling every base delay into the exact remaining interval avoids a one-millisecond rounding spill
     // in quick playback and keeps covering a true time reversal of revealing.
@@ -303,7 +291,6 @@ export const splashWorkbenchTileDelays = (
  */
 const CAMERA_STYLE = {
   transform: `${CAMERA_FLOOR_TRANSFORM} scale(1)`,
-  pressTransform: `${CAMERA_PRESS_FLOOR_TRANSFORM} scale(1)`,
   flattenedTransform: `${CAMERA_FLAT_FLOOR_TRANSFORM} scale(1)`,
 } as const;
 
@@ -565,30 +552,9 @@ ${CUBE_CONTACT_PCT}% { transform: translateZ(${-CUBE_EDGE_PX / 2}px); }
 ${CUBE_FACE_FADE_END_PCT}%, 100% { opacity: 0; }
 }
 @keyframes pi-splash-contact-press {
-0% {
-opacity: 0.32;
-transform: scale(1);
-background: ${colors.background};
-box-shadow: inset 0 0 0 1px ${ink}, 0 0 0 0 transparent;
-}
-58% {
-opacity: 0.58;
-transform: scale(0.86);
-background: ${colors.cell};
-box-shadow: inset 0 0 0 1px ${ink}, 0 0 0 0 transparent;
-}
-78% {
-opacity: 0.98;
-transform: scale(0.82);
-background: ${ink};
-box-shadow: inset 0 0 0 1px ${ink}, 0 0 0 0 ${ink};
-}
-100% {
-opacity: 0;
-transform: scale(1.28);
-background: ${ink};
-box-shadow: inset 0 0 0 1px ${ink}, 0 0 0 18px transparent;
-}
+0% { opacity: 0.35; transform: scale(1); }
+50% { opacity: 0.95; transform: scale(0.9); }
+100% { opacity: 0; transform: scale(1.18); }
 }
 @keyframes pi-splash-mark-out {
 to { opacity: 0; }
@@ -778,9 +744,7 @@ transform: ${CAMERA_STYLE.transform};
 animation: pi-splash-camera-flatten ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 @keyframes pi-splash-camera-flatten {
-0% { transform: ${CAMERA_STYLE.transform}; }
-${FLOOR_CAMERA_APPROACH_PCT}% { transform: ${CAMERA_STYLE.pressTransform}; }
-100% { transform: ${CAMERA_STYLE.flattenedTransform}; }
+to { transform: ${CAMERA_STYLE.flattenedTransform}; }
 }
 /* The logical ground remains in the shared camera only as the cube's registered contact footprint. The
    adaptive tile field is a viewport Canvas beside this camera and performs the same projection itself. */
