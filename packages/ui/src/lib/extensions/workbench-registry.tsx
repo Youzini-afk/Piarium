@@ -366,16 +366,30 @@ const selectedReplacement = (
 
 export const WorkbenchReplacement: React.FC<{
   errorFallback?: React.ReactNode;
+  expectedContributionId?: string;
   fallback: React.ReactNode;
+  onMountReady?(contributionId: string, contributionInstanceKey: string): void;
   target: string;
-}> = ({ errorFallback, fallback, target }) => {
+}> = ({ errorFallback, expectedContributionId, fallback, onMountReady, target }) => {
   const snapshot = useSurfaceRegistrySnapshot();
   const mountProps = React.useMemo<MountReplacementProps>(() => ({ target }), [target]);
-  const contribution = selectedReplacement(snapshot, target);
-  const failureFallback = errorFallback ?? fallback;
+  const selected = selectedReplacement(snapshot, target);
+  const contribution = selected?.descriptor.id === expectedContributionId || expectedContributionId === undefined
+    ? selected
+    : undefined;
+  const contributionId = contribution?.descriptor.id;
+  const contributionInstanceKey = contribution ? workbenchContributionInstanceKey(contribution) : undefined;
+  const signalReady = React.useCallback(() => {
+    if (contributionId && contributionInstanceKey) onMountReady?.(contributionId, contributionInstanceKey);
+  }, [contributionId, contributionInstanceKey, onMountReady]);
   useVisibleContributionActivation(contribution ? [contribution] : []);
   if (!contribution) return <>{fallback}</>;
   const contributionKey = workbenchContributionInstanceKey(contribution);
+  const failureFallback = (
+    <ContributionReadySignal onReady={signalReady}>
+      {errorFallback ?? fallback}
+    </ContributionReadySignal>
+  );
   if (isMountImplementation<MountReplacementProps>(contribution.implementation)) {
     return (
       <WorkbenchMountHost
@@ -384,17 +398,20 @@ export const WorkbenchReplacement: React.FC<{
         contribution={contribution}
         fallback={failureFallback}
         implementation={contribution.implementation}
+        onMountReady={signalReady}
         props={mountProps}
       />
     );
   }
   return (
     <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={failureFallback}>
-      <WorkbenchRenderImplementation
-        fallbackOnEmpty={fallback}
-        implementation={contribution.implementation}
-        props={{ fallback, target } satisfies ReactReplacementProps}
-      />
+      <ContributionReadySignal onReady={signalReady}>
+        <WorkbenchRenderImplementation
+          fallbackOnEmpty={fallback}
+          implementation={contribution.implementation}
+          props={{ fallback, target } satisfies ReactReplacementProps}
+        />
+      </ContributionReadySignal>
     </ContributionRenderBoundary>
   );
 };

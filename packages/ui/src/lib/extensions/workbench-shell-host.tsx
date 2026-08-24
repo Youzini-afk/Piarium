@@ -2,12 +2,18 @@ import React from 'react';
 import { WorkbenchRecoveryShell } from '@/components/layout/WorkbenchRecoveryShell';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
+import {
+  getWorkbenchProfileTransitionSnapshot,
+  markWorkbenchProfileTransitionTargetPainted,
+  subscribeWorkbenchProfileTransition,
+} from '@/lib/workbench/profile-transition';
 import { usePiariumExtensionCatalog } from './catalog-store';
 import { piariumSurfaceRuntime } from './surface-runtime';
 import {
   WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
   useSurfaceRegistrySnapshot,
+  workbenchContributionInstanceKey,
 } from './workbench-registry';
 import { WorkbenchShellStagingHost } from './workbench-shell-staging';
 import { useWorkbenchWorkspace } from './workbench-workspace';
@@ -37,6 +43,15 @@ export const WorkbenchShellHost: React.FC<{
   const catalog = usePiariumExtensionCatalog();
   const surfaceSnapshot = useSurfaceRegistrySnapshot();
   const workspace = useWorkbenchWorkspace();
+  const transition = React.useSyncExternalStore(
+    subscribeWorkbenchProfileTransition,
+    getWorkbenchProfileTransitionSnapshot,
+    getWorkbenchProfileTransitionSnapshot,
+  );
+  const [mountedShell, setMountedShell] = React.useState<{
+    contributionId: string;
+    contributionInstanceKey: string;
+  } | null>(null);
   const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
   const { resolved, view } = resolveWorkbenchShellView(
     catalog.snapshot,
@@ -44,6 +59,62 @@ export const WorkbenchShellHost: React.FC<{
     workspaceId,
     surfaceSnapshot,
   );
+  const resolvedProfileId = resolved?.profileId;
+  const resolvedShellContributionId = resolved?.shellContributionId;
+  const selectedShell = surfaceSnapshot.visibleContributions.find((contribution) => (
+    contribution.descriptor.replacement?.target === WORKBENCH_REPLACEMENT_TARGETS.shell
+  ));
+  const selectedShellInstanceKey = selectedShell ? workbenchContributionInstanceKey(selectedShell) : null;
+  const handleShellMountReady = React.useCallback((
+    contributionId: string,
+    contributionInstanceKey: string,
+  ) => {
+    setMountedShell({ contributionId, contributionInstanceKey });
+  }, []);
+
+  React.useEffect(() => {
+    if (transition.phase !== 'covered') return;
+    const targetProfileId = transition.toProfileId;
+    if (!targetProfileId) return;
+    const targetShellReady = (
+      workspace.status !== 'loading'
+      && workspace.status !== 'error'
+      && view === 'ready'
+      && Boolean(resolvedShellContributionId)
+      && resolvedProfileId === transition.toProfileId
+      && mountedShell?.contributionId === resolvedShellContributionId
+      && mountedShell?.contributionInstanceKey === selectedShellInstanceKey
+    );
+    const recoveryReady = workspace.status === 'error'
+      || (view === 'recovery' && resolvedProfileId === transition.toProfileId);
+    if (!targetShellReady && !recoveryReady) return;
+
+    const transitionId = transition.id;
+    const profileId = targetProfileId;
+    let firstFrame: number | null = null;
+    let secondFrame: number | null = null;
+    firstFrame = window.requestAnimationFrame(() => {
+      firstFrame = null;
+      secondFrame = window.requestAnimationFrame(() => {
+        secondFrame = null;
+        markWorkbenchProfileTransitionTargetPainted(transitionId, profileId);
+      });
+    });
+    return () => {
+      if (firstFrame !== null) window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [
+    mountedShell,
+    resolvedProfileId,
+    resolvedShellContributionId,
+    selectedShellInstanceKey,
+    transition.id,
+    transition.phase,
+    transition.toProfileId,
+    view,
+    workspace.status,
+  ]);
 
   let content: React.ReactNode;
   if (workspace.status === 'loading') content = fallback;
@@ -56,9 +127,11 @@ export const WorkbenchShellHost: React.FC<{
     const recovery = <WorkbenchRecoveryShell resolved={resolved} workspaceId={workspaceId} />;
     content = (
       <WorkbenchReplacement
+        expectedContributionId={resolved.shellContributionId}
         target={WORKBENCH_REPLACEMENT_TARGETS.shell}
         fallback={fallback}
         errorFallback={recovery}
+        onMountReady={handleShellMountReady}
       />
     );
   }

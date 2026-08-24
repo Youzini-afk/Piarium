@@ -27,6 +27,7 @@ import {
   revealWorkbenchProfileTransition,
   resolveTransitionDirection,
   waitForWorkbenchProfileTransitionCovered,
+  waitForWorkbenchProfileTransitionTargetPainted,
 } from '@/lib/workbench/profile-transition';
 import { startWorkbenchMountSession } from './workbench-mount';
 import {
@@ -514,6 +515,11 @@ export const selectActiveWorkbenchProfile = async (
     // A preparation failure is also a settled result. If it happened while covering, reveal the
     // previous authoritative shell at the scene's quick tempo after cover completes.
     markWorkbenchProfileTransitionOperationPrepared(transitionId);
+  } else {
+    const targetPainted = await waitForWorkbenchProfileTransitionTargetPainted(transitionId);
+    // A newer selection can supersede this transaction after its persistence completed. Its Shell
+    // owns the next reveal, so this stale caller must not expose or complete that newer scene.
+    if (!targetPainted) return;
   }
 
   const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);

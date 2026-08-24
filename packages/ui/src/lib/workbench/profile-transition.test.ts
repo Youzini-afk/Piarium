@@ -13,11 +13,13 @@ import {
   getWorkbenchProfileTransitionSnapshot,
   markWorkbenchProfileTransitionCovered,
   markWorkbenchProfileTransitionOperationPrepared,
+  markWorkbenchProfileTransitionTargetPainted,
   resetWorkbenchProfileTransitionForTests,
   resolveTransitionDirection,
   revealWorkbenchProfileTransition,
   subscribeWorkbenchProfileTransition,
   waitForWorkbenchProfileTransitionCovered,
+  waitForWorkbenchProfileTransitionTargetPainted,
 } from './profile-transition';
 import type { WorkbenchTransitionSceneCapture } from '@/lib/extensions/workbench-transition-scene';
 
@@ -134,6 +136,29 @@ describe('workbench profile transition state machine', () => {
     completeWorkbenchProfileTransition(id);
     await revealed;
     expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+  });
+
+  test('keeps the cover closed until the authoritative target Shell has painted', async () => {
+    const id = beginWorkbenchProfileTransition({
+      fromProfileId: 'default',
+      toProfileId: 'piarium.ide',
+    });
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    markWorkbenchProfileTransitionCovered(id);
+    let settled: boolean | undefined;
+    const painted = waitForWorkbenchProfileTransitionTargetPainted(id).then((value) => {
+      settled = value;
+      return value;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBeUndefined();
+    markWorkbenchProfileTransitionTargetPainted(id, 'default');
+    await Promise.resolve();
+    expect(settled).toBeUndefined();
+
+    markWorkbenchProfileTransitionTargetPainted(id, 'piarium.ide');
+    await expect(painted).resolves.toBe(true);
   });
 
   test('a candidate that reaches the boundary after covering uses the standard reveal', async () => {
@@ -254,6 +279,16 @@ describe('workbench profile transition state machine', () => {
 
     await expect(first).resolves.toBe(false);
     expect(getWorkbenchProfileTransitionSnapshot().toProfileId).toBe('default');
+  });
+
+  test('a newer selection releases a superseded target-paint waiter', async () => {
+    const firstId = beginWorkbenchProfileTransition({ toProfileId: 'piarium.ide' });
+    armWorkbenchProfileTransitionPhase(firstId, 'covering');
+    markWorkbenchProfileTransitionCovered(firstId);
+    const first = waitForWorkbenchProfileTransitionTargetPainted(firstId);
+    beginWorkbenchProfileTransition({ toProfileId: 'default' });
+
+    await expect(first).resolves.toBe(false);
   });
 
   test('a late animation event cannot advance a newer transition', () => {

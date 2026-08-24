@@ -58,16 +58,19 @@ const IDLE: WorkbenchProfileTransitionState = {
 
 type Listener = (state: WorkbenchProfileTransitionState) => void;
 type CoveredWaiter = (covered: boolean) => void;
+type TargetPaintWaiter = (painted: boolean) => void;
 
 const listeners = new Set<Listener>();
 const coveredWaiters = new Set<CoveredWaiter>();
 const idleWaiters = new Set<() => void>();
+const targetPaintWaiters = new Set<TargetPaintWaiter>();
 let state: WorkbenchProfileTransitionState = IDLE;
 let nextTransitionId = 1;
 let phaseTimer: ReturnType<typeof setTimeout> | null = null;
 let phaseArmed = false;
 let operationPreparedBeforeCover = false;
 let coveredAt = 0;
+let targetPainted = false;
 
 const clearPhaseTimer = (): void => {
   if (phaseTimer === null) return;
@@ -88,6 +91,11 @@ const resolveCoveredWaiters = (covered: boolean): void => {
 const resolveIdleWaiters = (): void => {
   for (const resolve of idleWaiters) resolve();
   idleWaiters.clear();
+};
+
+const resolveTargetPaintWaiters = (painted: boolean): void => {
+  for (const resolve of targetPaintWaiters) resolve(painted);
+  targetPaintWaiters.clear();
 };
 
 const armPhaseCompletion = (durationMs: number, advance: () => void): void => {
@@ -133,9 +141,11 @@ export const beginWorkbenchProfileTransition = (input: {
   // A newer user choice supersedes promises owned by a transition that can no longer become authoritative.
   resolveCoveredWaiters(false);
   resolveIdleWaiters();
+  resolveTargetPaintWaiters(false);
   operationPreparedBeforeCover = false;
   phaseArmed = false;
   coveredAt = 0;
+  targetPainted = false;
   const id = nextTransitionId;
   nextTransitionId += 1;
   const scene = input.scene ?? null;
@@ -201,6 +211,33 @@ export const waitForWorkbenchProfileTransitionCovered = (id: number): Promise<bo
   });
 };
 
+/**
+ * The profile document being committed does not mean its Shell has reached the compositor. The live
+ * Shell host reports this only after the selected contribution committed and crossed a paint boundary;
+ * reveal must remain fully covered until then.
+ */
+export const markWorkbenchProfileTransitionTargetPainted = (
+  id: number,
+  profileId: string,
+): void => {
+  if (
+    state.id !== id
+    || state.phase !== 'covered'
+    || state.toProfileId !== profileId
+    || targetPainted
+  ) return;
+  targetPainted = true;
+  resolveTargetPaintWaiters(true);
+};
+
+export const waitForWorkbenchProfileTransitionTargetPainted = (id: number): Promise<boolean> => {
+  if (state.id !== id || state.phase === 'idle' || state.phase === 'revealing') return Promise.resolve(false);
+  if (targetPainted) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    targetPaintWaiters.add(resolve);
+  });
+};
+
 const waitForWorkbenchProfileTransitionIdle = (): Promise<void> => {
   if (state.phase === 'idle') return Promise.resolve();
   return new Promise((resolve) => {
@@ -237,6 +274,8 @@ export const completeWorkbenchProfileTransition = (id: number): void => {
   publish(IDLE);
   operationPreparedBeforeCover = false;
   coveredAt = 0;
+  targetPainted = false;
+  resolveTargetPaintWaiters(false);
   resolveIdleWaiters();
 };
 
@@ -307,10 +346,12 @@ export const resetWorkbenchProfileTransitionForTests = (): void => {
   clearPhaseTimer();
   resolveCoveredWaiters(false);
   resolveIdleWaiters();
+  resolveTargetPaintWaiters(false);
   state = IDLE;
   nextTransitionId = 1;
   operationPreparedBeforeCover = false;
   phaseArmed = false;
   coveredAt = 0;
+  targetPainted = false;
   listeners.clear();
 };

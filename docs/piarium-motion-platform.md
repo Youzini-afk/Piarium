@@ -2,7 +2,7 @@
 
 Status: Phase 1–3 已交付；Bootstrap Projection 与通用 Motion service 待实施
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 本文规定 Piarium 动画与界面交接的产品边界、公共契约和实施顺序。它建立在
 [可组合工作台约定](composable-workbench-execution-plan.md) 之上，不新增第二套扩展系统，也不把
@@ -155,6 +155,8 @@ resolve target Profile
                          │ success              │ failure
                          ▼                      ▼
                     new Shell              old Shell
+                         │                      │
+               commit + first paint            │
                          └──────── scene revealing ────────┘
                                           ▼
                                       dispose scene
@@ -172,6 +174,8 @@ resolve target Profile
 7. committed Shell 不因之后出现的另一切换而回滚；
 8. Profile 选择不隐式 enable scene 或 Shell extension；disabled/missing selection 使用 fallback；
 9. Profile 切换不重新读取全部文档、不销毁终端、不重建 Pi session。
+10. 成功提交 Profile 只表示配置权威已切换；scene 必须继续保持完全覆盖，直到目标 Shell contribution
+    已实际挂载并跨过浏览器绘制边界。旧 transition 的 mount/paint 完成信号不能揭示新 transition。
 
 ## 6. 公共 Transition Scene 契约
 
