@@ -24,6 +24,7 @@ interface PaintHandoffScheduler {
 export interface WorkbenchTransitionPaintHandoff {
   dispose(): void;
   hold(): void;
+  retireSceneAfterPaint(onRetired: () => void): void;
   releaseAfterPaint(): void;
 }
 
@@ -43,6 +44,9 @@ export const createWorkbenchTransitionPaintHandoff = (
   let firstFrame: number | null = null;
   let secondFrame: number | null = null;
   let fallbackTask: number | null = null;
+  let retirementFirstFrame: number | null = null;
+  let retirementSecondFrame: number | null = null;
+  let retirementFallbackTask: number | null = null;
   let generation = 0;
   let owned = false;
 
@@ -51,9 +55,15 @@ export const createWorkbenchTransitionPaintHandoff = (
     if (firstFrame !== null) scheduler.cancelFrame(firstFrame);
     if (secondFrame !== null) scheduler.cancelFrame(secondFrame);
     if (fallbackTask !== null) scheduler.cancelTask(fallbackTask);
+    if (retirementFirstFrame !== null) scheduler.cancelFrame(retirementFirstFrame);
+    if (retirementSecondFrame !== null) scheduler.cancelFrame(retirementSecondFrame);
+    if (retirementFallbackTask !== null) scheduler.cancelTask(retirementFallbackTask);
     firstFrame = null;
     secondFrame = null;
     fallbackTask = null;
+    retirementFirstFrame = null;
+    retirementSecondFrame = null;
+    retirementFallbackTask = null;
   };
 
   const release = (capturedGeneration: number): void => {
@@ -72,6 +82,33 @@ export const createWorkbenchTransitionPaintHandoff = (
       cancelPendingRelease();
       owned = true;
       root.setAttribute(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE, 'true');
+    },
+    retireSceneAfterPaint: (onRetired) => {
+      if (
+        !owned
+        || retirementFirstFrame !== null
+        || retirementSecondFrame !== null
+        || retirementFallbackTask !== null
+      ) return;
+      const capturedGeneration = generation;
+      const retire = () => {
+        if (!owned || generation !== capturedGeneration) return;
+        retirementFirstFrame = null;
+        retirementSecondFrame = null;
+        retirementFallbackTask = null;
+        onRetired();
+      };
+      retirementFirstFrame = scheduler.requestFrame(() => {
+        retirementFirstFrame = null;
+        if (generation !== capturedGeneration) return;
+        retirementSecondFrame = scheduler.requestFrame(retire);
+        if (retirementSecondFrame === null) {
+          retirementFallbackTask = scheduler.scheduleTask(retire);
+        }
+      });
+      if (retirementFirstFrame === null) {
+        retirementFallbackTask = scheduler.scheduleTask(retire);
+      }
     },
     releaseAfterPaint: () => {
       if (!owned || firstFrame !== null || secondFrame !== null || fallbackTask !== null) return;

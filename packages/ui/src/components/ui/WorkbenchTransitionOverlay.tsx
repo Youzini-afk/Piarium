@@ -38,27 +38,53 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
     getWorkbenchProfileTransitionSnapshot,
   );
   const paintHandoffRef = React.useRef<WorkbenchTransitionPaintHandoff | null>(null);
+  const renderedTransitionRef = React.useRef<{
+    controller: ReturnType<typeof createWorkbenchTransitionSceneController>;
+    id: number;
+    scene: typeof transition.scene;
+  } | null>(null);
+  const [retiredTransitionId, setRetiredTransitionId] = React.useState<number | null>(null);
+  if (
+    transition.phase !== 'idle'
+    && renderedTransitionRef.current?.id !== transition.id
+  ) {
+    renderedTransitionRef.current = {
+      controller: createWorkbenchTransitionSceneController(transition.id),
+      id: transition.id,
+      scene: transition.scene,
+    };
+  }
+  const renderedTransition = renderedTransitionRef.current;
+  const sceneRetired = renderedTransition?.id === retiredTransitionId;
   React.useLayoutEffect(() => {
-    if (transition.phase === 'idle') {
-      paintHandoffRef.current?.releaseAfterPaint();
-      return;
-    }
-    if (!paintHandoffRef.current && typeof document !== 'undefined') {
+    if (
+      !paintHandoffRef.current
+      && transition.phase !== 'idle'
+      && typeof document !== 'undefined'
+    ) {
       paintHandoffRef.current = createWorkbenchTransitionPaintHandoff(document.documentElement);
     }
-    paintHandoffRef.current?.hold();
-  }, [transition.id, transition.phase]);
+    const handoff = paintHandoffRef.current;
+    if (!handoff) return;
+    if (transition.phase !== 'idle') {
+      handoff.hold();
+      return;
+    }
+    if (renderedTransition && !sceneRetired) {
+      handoff.retireSceneAfterPaint(() => setRetiredTransitionId(renderedTransition.id));
+      return;
+    }
+    handoff.releaseAfterPaint();
+  }, [renderedTransition, sceneRetired, transition.id, transition.phase]);
   React.useLayoutEffect(() => () => {
     paintHandoffRef.current?.dispose();
     paintHandoffRef.current = null;
   }, []);
   const surface = useSurfaceRegistrySnapshot();
-  const controller = React.useMemo(() => transition.id > 0
-    ? createWorkbenchTransitionSceneController(transition.id)
-    : null, [transition.id]);
+  const controller = renderedTransition?.controller ?? null;
   const sceneProps = React.useMemo(() => controller ? { transition: controller } : null, [controller]);
-  const contribution = findCapturedWorkbenchTransitionScene(surface, transition.scene);
-  const readinessKey = `${transition.id}\0${contribution
+  const contribution = findCapturedWorkbenchTransitionScene(surface, renderedTransition?.scene ?? null);
+  const readinessKey = `${renderedTransition?.id ?? 0}\0${contribution
     ? workbenchContributionInstanceKey(contribution)
     : 'core-fallback'}`;
   const [readyKey, setReadyKey] = React.useState<string | null>(null);
@@ -72,7 +98,7 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
     }
   }, [readinessKey, readyKey, transition.id, transition.phase]);
 
-  if (transition.phase === 'idle' || !controller || !sceneProps) return null;
+  if (!renderedTransition || sceneRetired || !controller || !sceneProps) return null;
 
   const frame = controller.getSnapshot();
   const isolatedFrame = contribution ? {
@@ -84,7 +110,7 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
 
   return (
     <div
-      className={`fixed inset-0 z-[9998] overflow-hidden ${transition.phase === 'revealing' ? 'pointer-events-none' : 'pointer-events-auto'}`}
+      className={`fixed inset-0 z-[9998] overflow-hidden ${frame.phase === 'revealing' ? 'pointer-events-none' : 'pointer-events-auto'}`}
       role="status"
       aria-live="polite"
       aria-label={t('splash.aria.switching')}

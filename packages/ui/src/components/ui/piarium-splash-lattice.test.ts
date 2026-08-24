@@ -514,6 +514,17 @@ describe('exit choreography', () => {
     expect(renderer).toContain('frame.opacity =');
   });
 
+  test('WebGL context loss waits until the full-screen Canvas has detached', () => {
+    const renderer = mountSplashTileCanvas.toString();
+    const disposal = /kind: "webgl2",\s*dispose: \(\) => \{([\s\S]*?)\n\s*\},\s*draw:/
+      .exec(renderer)?.[1] ?? '';
+    expect(disposal).toContain('if (!canvas.isConnected) contextLoss.loseContext()');
+    expect(disposal).toMatch(
+      /targetView\.requestAnimationFrame\(\(\) => \{\s*targetView\.requestAnimationFrame\(loseIfDetached\)/,
+    );
+    expect(disposal).not.toContain("gl.getExtension(\"WEBGL_lose_context\")?.loseContext()");
+  });
+
   test('boot presses the cube into its registered footprint before the floor opens', () => {
     const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
     expect(css).toContain('@keyframes pi-splash-mark-press');

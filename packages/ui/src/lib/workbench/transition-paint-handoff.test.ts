@@ -56,6 +56,38 @@ describe('workbench transition paint handoff', () => {
     expect(attributes.has(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe(false);
   });
 
+  test('retires the scene only after a committed frame and releases the background afterwards', () => {
+    const { attributes, handoff, runFrame } = fixture();
+    let retired = false;
+    handoff.hold();
+    handoff.retireSceneAfterPaint(() => { retired = true; });
+
+    runFrame();
+    expect(retired).toBe(false);
+    expect(attributes.get(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe('true');
+    runFrame();
+    expect(retired).toBe(true);
+    expect(attributes.get(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe('true');
+
+    handoff.releaseAfterPaint();
+    runFrame();
+    expect(attributes.get(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe('true');
+    runFrame();
+    expect(attributes.has(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe(false);
+  });
+
+  test('a newer transition cancels stale scene retirement', () => {
+    const { handoff, runFrame } = fixture();
+    let retired = false;
+    handoff.hold();
+    handoff.retireSceneAfterPaint(() => { retired = true; });
+    runFrame();
+
+    handoff.hold();
+    expect(() => runFrame()).toThrow('No frame is scheduled');
+    expect(retired).toBe(false);
+  });
+
   test('a newer transition cancels a stale release from the previous switch', () => {
     const { attributes, frames, handoff, runFrame } = fixture();
     handoff.hold();

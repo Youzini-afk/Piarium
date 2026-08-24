@@ -281,6 +281,8 @@ Transition Scene contribution，因此能够被选择、停用和替换。
 - hidden/inactive scenes 没有 RAF、timer、listener 或渲染工作；
 - scene geometry 不在每帧 React render 中重建；
 - owner、transition 和 timer cleanup 可重复调用且只生效一次；
+- scene 的透明终帧先跨过浏览器绘制边界，再从 DOM 和 compositor 脱离；全屏 WebGL Canvas
+  脱离前不得强制丢失 context，GPU context 在脱离后的绘制边界释放；
 - Profile commit 后不重新 mount scene；同一实例完成 revealing；
 - catalog 变化只检查捕获的 owner identity，不扫描页面 DOM；
 - bootstrap projection 保持足够小以直接参与首帧，不在首帧加载完整扩展 catalog。

@@ -541,7 +541,24 @@ void main() {
           gl.deleteBuffer(buffer);
           gl.deleteVertexArray(vertexArray);
           gl.deleteProgram(program);
-          gl.getExtension('WEBGL_lose_context')?.loseContext();
+          const contextLoss = gl.getExtension('WEBGL_lose_context');
+          if (!contextLoss) return;
+          const targetView = canvas.ownerDocument.defaultView;
+          const loseIfDetached = () => {
+            if (!canvas.isConnected) contextLoss.loseContext();
+          };
+          // React runs layout-effect cleanup before deleting the Canvas node. Losing the context there can
+          // clear a full-screen compositor surface while it is still visible. Cross one committed paint
+          // after detachment first; the root handoff remains opaque while the GPU context is then retired.
+          if (typeof targetView?.requestAnimationFrame === 'function') {
+            targetView.requestAnimationFrame(() => {
+              targetView.requestAnimationFrame(loseIfDetached);
+            });
+          } else if (targetView) {
+            targetView.setTimeout(loseIfDetached, 0);
+          } else {
+            loseIfDetached();
+          }
         },
         draw: (values, viewport, tiltDeg) => {
           const requiredLength = values.length * 5;

@@ -1284,7 +1284,21 @@ void main() {
           gl.deleteBuffer(buffer);
           gl.deleteVertexArray(vertexArray);
           gl.deleteProgram(program);
-          gl.getExtension("WEBGL_lose_context")?.loseContext();
+          const contextLoss = gl.getExtension("WEBGL_lose_context");
+          if (!contextLoss)
+            return;
+          const targetView = canvas.ownerDocument.defaultView, loseIfDetached = () => {
+            if (!canvas.isConnected)
+              contextLoss.loseContext();
+          };
+          if (typeof targetView?.requestAnimationFrame === "function")
+            targetView.requestAnimationFrame(() => {
+              targetView.requestAnimationFrame(loseIfDetached);
+            });
+          else if (targetView)
+            targetView.setTimeout(loseIfDetached, 0);
+          else
+            loseIfDetached();
         },
         draw: (values, viewport, tiltDeg) => {
           const requiredLength = values.length * 5;
