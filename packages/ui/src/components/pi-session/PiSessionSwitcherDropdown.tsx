@@ -100,7 +100,6 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   const records = usePiSessionStore((state) => state.records);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const untitled = t('sessions.sidebar.session.untitled');
   const groups = React.useMemo(() => groupPiSessionForestByWorkspace(
     buildPiSessionForest(
@@ -113,7 +112,7 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
     ...group,
     label: group.project?.label?.trim()
       || (group.path ? formatDirectoryName(group.path, null) || group.path : null)
-      || t('sessions.sidebar.workspacePicker.recent'),
+      || t('sessions.sidebar.grouping.recent'),
   })), [pinnedIds, projects, sessions, t]);
   const busySessionIds = React.useMemo(() => new Set(
     Object.values(records)
@@ -131,11 +130,11 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
 
   const create = React.useCallback(async () => {
     try {
-      await startPiSessionDraftFromNavigation({ projectId: activeProjectId });
+      await startPiSessionDraftFromNavigation({ projectId: null });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [activeProjectId]);
+  }, []);
 
   return (
     <DropdownMenu>

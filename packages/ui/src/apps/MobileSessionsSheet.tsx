@@ -34,7 +34,6 @@ import { CSS } from '@dnd-kit/utilities';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
-import { SessionWorkspacePicker } from '@/components/pi-session/SessionWorkspacePicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -238,6 +237,33 @@ const ActiveDot: React.FC<{ ariaLabel?: string }> = ({ ariaLabel }) => (
     aria-label={ariaLabel}
   />
 );
+
+const NewSessionIconButton: React.FC<{
+  label: string;
+  onClick: () => void;
+  className?: string;
+}> = ({ label, onClick, className }) => {
+  const { t } = useI18n();
+  const ariaLabel = t('sessions.sidebar.group.actions.newDraftInGroupAria', { label });
+  return (
+    <button
+      type="button"
+      className={cn(
+        'flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
+        className,
+      )}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      style={{ touchAction: 'manipulation' }}
+    >
+      <Icon name="chat-new" className="size-4" />
+    </button>
+  );
+};
 
 const NewWorktreeIconButton: React.FC<{
   onClick: () => void;
@@ -704,7 +730,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const recentBucket = React.useMemo<WorktreeBucket>(() => ({
     key: '__recent__',
-    label: t('sessions.sidebar.workspacePicker.recent'),
+    label: t('sessions.sidebar.grouping.recent'),
     path: '',
     sessions: recentSessions,
     worktree: null,
@@ -874,7 +900,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   };
 
   const handleStartNewChat = () => {
-    void startPiSessionDraftFromNavigation()
+    void startPiSessionDraftFromNavigation({ projectId: null })
       .then(() => onOpenChange(false))
       .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
@@ -915,7 +941,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     (session: SessionSummary): string => {
       const directory = getSessionDirectory(session);
       const project = resolveSessionProject(session);
-      if (!project) return t('sessions.sidebar.workspacePicker.recent');
+      if (!project) return t('sessions.sidebar.grouping.recent');
       const matchedWorktree = findWorktreeMatch(project, directory);
       if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
       return project.label;
@@ -1027,13 +1053,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const surfaceContent = (
       <div className="flex h-full flex-col">
-        <div className={cn('shrink-0 px-4 pb-1 pt-2', editingOrder && 'hidden')}>
-          <SessionWorkspacePicker
-            onAddWorkspace={() => setDirectoryDialogOpen(true)}
-            onSelectionComplete={() => onOpenChange(false)}
-          />
-        </div>
-        <div className={cn('shrink-0 px-4 pb-2 pt-1', editingOrder && 'hidden')}>
+        <div className={cn('shrink-0 px-4 pb-2 pt-2', editingOrder && 'hidden')}>
           <div className="relative">
             <RiSearchLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -1178,18 +1198,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
-              {recentSessions.length > 0 ? (
-                <section className="pb-2">
-                  <div className="flex min-h-12 items-center gap-2 px-3 py-2 text-muted-foreground">
-                    <Icon name="history" className="size-4 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
-                      {t('sessions.sidebar.workspacePicker.recent')}
-                    </span>
-                    <span className="shrink-0 typography-micro tabular-nums">{recentSessions.length}</span>
-                  </div>
-                  {renderBucketSessions(recentNode, recentBucket, PROJECT_SESSION_INDENT)}
-                </section>
-              ) : null}
               {orderedNodes.map((node, nodeIndex) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
@@ -1203,7 +1211,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 return (
                   <section
                     key={node.project.id}
-                    className={cn((nodeIndex > 0 || recentSessions.length > 0) && 'border-t border-border/30')}
+                    className={cn(nodeIndex > 0 && 'border-t border-border/30')}
                   >
                     <div className="flex min-h-14 w-full items-center">
                       <button
@@ -1227,6 +1235,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           {node.totalSessions}
                         </span>
                       </button>
+                      <NewSessionIconButton
+                        label={node.project.label}
+                        className={node.project.isGitRepo ? undefined : 'mr-2'}
+                        onClick={() => handleSelectProject(node.project)}
+                      />
                       {node.project.isGitRepo ? (
                         <NewWorktreeIconButton
                           className="mr-2"
@@ -1302,6 +1315,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   </section>
                 );
               })}
+              {recentSessions.length > 0 ? (
+                <section className={cn('pb-2', orderedNodes.length > 0 && 'border-t border-border/30')}>
+                  <div className="flex min-h-12 items-center gap-2 px-3 py-2 text-muted-foreground">
+                    <Icon name="history" className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                      {t('sessions.sidebar.grouping.recent')}
+                    </span>
+                    {recentNode.isActive ? <ActiveDot ariaLabel={t('mobile.sessions.activeProjectAria')} /> : null}
+                    <span className="shrink-0 typography-micro tabular-nums">{recentSessions.length}</span>
+                  </div>
+                  {renderBucketSessions(recentNode, recentBucket, PROJECT_SESSION_INDENT)}
+                </section>
+              ) : null}
             </div>
           )}
         </ScrollShadow>

@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
@@ -44,6 +45,7 @@ import {
 } from '@/stores/useSessionPinnedStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
+import { workspaceEvents } from '@/lib/workspaceEvents';
 import {
   buildPiSessionForest,
   collectPiSessionSubtreeIds,
@@ -54,7 +56,6 @@ import {
   type PiSessionNode,
 } from './sessionPresentation';
 import { PiSessionActivityDuration } from './PiSessionActivityDuration';
-import { SessionWorkspacePicker } from './SessionWorkspacePicker';
 import {
   renderFirstWorkbenchMatch,
   useWorkbenchMatchRenderers,
@@ -302,6 +303,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   onRequestClose,
 }) => {
   const { t } = useI18n();
+  const { runtime } = useRuntimeAPIs();
   const summaries = usePiSessionStore((state) => state.summaries);
   const activeSessions = usePiSessionStore(selectActivePiSessions);
   const archivedSessions = usePiSessionStore(selectArchivedPiSessions);
@@ -325,7 +327,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     return counts;
   }, [pendingDialogs]);
   const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const togglePinned = useSessionPinnedStore((state) => state.toggle);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
@@ -333,6 +334,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const [query, setQuery] = React.useState('');
   const [showArchived, setShowArchived] = React.useState(false);
+  const [collapsedGroupIds, setCollapsedGroupIds] = React.useState<Set<string>>(() => new Set());
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editingName, setEditingName] = React.useState('');
@@ -351,15 +353,25 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const groups = React.useMemo(() => {
     const source = showArchived ? archivedSessions : activeSessions;
     const forest = buildPiSessionForest(source, isPinned);
-    return groupPiSessionForestByWorkspace(forest, projects, isPinned).map((group) => {
-      return {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return groupPiSessionForestByWorkspace(forest, projects, isPinned, {
+      includeEmptyProjects: !showArchived,
+    }).flatMap((group) => {
+      const label = group.project?.label?.trim()
+        || (group.path ? formatDirectoryName(group.path, null) || group.path : null)
+        || t('sessions.sidebar.grouping.recent');
+      const groupMatches = normalizedQuery.length > 0
+        && `${label}\n${group.path ?? ''}`.toLocaleLowerCase().includes(normalizedQuery);
+      const filteredForest = groupMatches
+        ? group.forest
+        : filterPiSessionForest(group.forest, query, untitled);
+      if (normalizedQuery.length > 0 && !groupMatches && filteredForest.length === 0) return [];
+      return [{
         ...group,
-        label: group.project?.label?.trim()
-          || (group.path ? formatDirectoryName(group.path, null) || group.path : null)
-          || t('sessions.sidebar.workspacePicker.recent'),
-        forest: filterPiSessionForest(group.forest, query, untitled),
-      };
-    }).filter((group) => group.forest.length > 0);
+        label,
+        forest: filteredForest,
+      }];
+    });
   }, [activeSessions, archivedSessions, isPinned, projects, query, showArchived, t, untitled]);
 
   const handleSelect = React.useCallback(async (session: SessionSummary) => {
@@ -373,15 +385,15 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     }
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen]);
 
-  const handleCreate = React.useCallback(async () => {
+  const handleCreate = React.useCallback(async (projectId: string | null) => {
     try {
-      await startPiSessionDraftFromNavigation({ projectId: activeProjectId });
+      await startPiSessionDraftFromNavigation({ projectId });
       if (mobileVariant) setSessionSwitcherOpen(false);
       onRequestClose?.();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [activeProjectId, mobileVariant, onRequestClose, setSessionSwitcherOpen]);
+  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) setSessionSwitcherOpen(false);
@@ -467,7 +479,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
         <div className="flex shrink-0 items-center gap-1 px-2.5 pt-1.5">
           <button
             type="button"
-            onClick={() => void handleCreate()}
+            onClick={() => void handleCreate(null)}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left typography-ui-label font-normal text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             <Icon name="chat-new" className="size-4 shrink-0" />
@@ -489,6 +501,21 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
             </TooltipTrigger>
             <TooltipContent side="bottom">{t('sessions.sidebar.nav.archive')}</TooltipContent>
           </Tooltip>
+          {!runtime.isVSCode ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => workspaceEvents.requestDirectoryDialog()}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                  aria-label={t('sessions.sidebar.header.actions.addProject')}
+                >
+                  <Icon name="folder-add" className="size-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.addProject')}</TooltipContent>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -503,15 +530,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
             </TooltipTrigger>
             <TooltipContent side="bottom">{t('sessions.sidebar.group.empty.retry')}</TooltipContent>
           </Tooltip>
-        </div>
-
-        <div className="shrink-0 px-2.5 pt-2">
-          <SessionWorkspacePicker
-            onSelectionComplete={() => {
-              if (mobileVariant) setSessionSwitcherOpen(false);
-              onRequestClose?.();
-            }}
-          />
         </div>
 
         <div className="shrink-0 px-2.5 py-2">
@@ -576,19 +594,54 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               </p>
             </div>
           ) : (
-            groups.map((group) => (
-              <section key={group.id} className="mb-3">
-                <div className="flex min-w-0 items-center gap-2 px-1.5 py-1.5 text-muted-foreground">
-                  <Icon
-                    name={showArchived ? 'archive' : group.id === 'recent' ? 'history' : 'folder'}
-                    className="size-3.5 shrink-0"
-                  />
-                  <span className="min-w-0 flex-1 truncate typography-micro font-medium uppercase tracking-wide">
-                    {group.label}
-                  </span>
-                  <span className="typography-micro opacity-70">{group.forest.length}</span>
+            groups.map((group) => {
+              const expanded = query.trim().length > 0 || !collapsedGroupIds.has(group.id);
+              return (
+              <section key={group.id} className="group/workspace mb-2">
+                <div className="flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground">
+                  <button
+                    type="button"
+                    onClick={() => setCollapsedGroupIds((current) => {
+                      const next = new Set(current);
+                      if (next.has(group.id)) next.delete(group.id);
+                      else next.add(group.id);
+                      return next;
+                    })}
+                    className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                    aria-expanded={expanded}
+                    aria-label={t(expanded
+                      ? 'sessions.sidebar.group.collapseAria'
+                      : 'sessions.sidebar.group.expandAria', { label: group.label })}
+                  >
+                    <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 shrink-0 opacity-70" />
+                    <Icon
+                      name={showArchived ? 'archive' : group.id === 'recent' ? 'history' : 'folder'}
+                      className="size-3.5 shrink-0"
+                    />
+                    <span className="min-w-0 flex-1 truncate typography-ui-label font-medium">
+                      {group.label}
+                    </span>
+                  </button>
+                  <span className="shrink-0 typography-micro opacity-70">{group.forest.length}</span>
+                  {!showArchived ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => void handleCreate(group.project?.id ?? null)}
+                          className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-70 hover:bg-interactive-hover hover:text-foreground focus-visible:opacity-100 group-hover/workspace:opacity-100"
+                          aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
+                        >
+                          <Icon name="add" className="size-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        {t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
                 </div>
-                <div className="space-y-0.5">
+                {expanded ? <div className="space-y-0.5 pl-2">
                   {group.forest.map((node) => (
                     <PiSessionRow
                       key={node.session.id}
@@ -645,9 +698,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       }}
                     />
                   ))}
-                </div>
+                </div> : null}
               </section>
-            ))
+              );
+            })
           )}
         </div>
 

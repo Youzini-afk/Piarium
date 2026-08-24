@@ -96,7 +96,7 @@ export function ArchiveView(): React.ReactNode {
       id: group.id,
       label: group.project?.label?.trim()
         || (group.path ? formatDirectoryName(group.path, homeDirectory) || group.path : null)
-        || t('sessions.sidebar.workspacePicker.recent'),
+        || t('sessions.sidebar.grouping.recent'),
       path: group.path,
       sessions: flattenSessionNodes(group.forest)
         .sort((left, right) => sessionTimestamp(right) - sessionTimestamp(left)),

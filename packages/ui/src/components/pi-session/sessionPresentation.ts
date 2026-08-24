@@ -215,6 +215,7 @@ export const groupPiSessionForestByWorkspace = (
   forest: PiSessionNode[],
   projects: PiSessionWorkspaceProject[],
   isPinned: PiSessionPinnedPredicate = () => false,
+  options: { includeEmptyProjects?: boolean } = {},
 ): PiSessionWorkspaceGroup[] => {
   const normalizedProjects = normalizeWorkspaceProjects(projects);
   const groups = new Map<string, PiSessionWorkspaceGroup>();
@@ -232,6 +233,10 @@ export const groupPiSessionForestByWorkspace = (
     groups.set(id, group);
     return group;
   };
+
+  if (options.includeEmptyProjects) {
+    for (const project of normalizedProjects) ensureGroup(project);
+  }
 
   const visit = (
     node: PiSessionNode,

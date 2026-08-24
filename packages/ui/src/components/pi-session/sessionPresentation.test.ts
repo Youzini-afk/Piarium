@@ -165,6 +165,20 @@ describe('Pi session presentation', () => {
     )?.id).toBe('repo');
   });
 
+  test('can keep empty projects visible for a unified workspace session list', () => {
+    const projects = [
+      { id: 'first', label: 'First', path: 'D:/work/first' },
+      { id: 'second', label: 'Second', path: 'D:/work/second' },
+    ];
+
+    const groups = groupPiSessionForestByWorkspace([], projects, undefined, {
+      includeEmptyProjects: true,
+    });
+
+    expect(groups.map((group) => group.id)).toEqual(['workspace:first', 'workspace:second']);
+    expect(groups.every((group) => group.forest.length === 0)).toBe(true);
+  });
+
   test('detaches children whose workspace differs from their parent', () => {
     const projects = [{ id: 'repo', label: 'Repo', path: 'D:/work/repo' }];
     const forest = buildPiSessionForest([
