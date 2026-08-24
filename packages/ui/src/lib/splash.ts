@@ -25,7 +25,9 @@ const GROUND_ID = 'initial-loading-ground';
  */
 const LEAVING_ATTRIBUTE = 'data-leaving';
 
-let removalTimer: ReturnType<typeof setTimeout> | null = null;
+type TimerHandle = ReturnType<typeof setTimeout> | number;
+
+let removalTimer: TimerHandle | null = null;
 
 const splashElement = (): HTMLElement | null => {
   if (typeof document === 'undefined') return null;
@@ -62,24 +64,32 @@ export const dismissInitialSplash = (): void => {
   const element = splashElement();
   if (!element || removalTimer !== null) return;
 
-  const ownerDocument = element.ownerDocument;
-  const documentElement = ownerDocument.documentElement;
-  documentElement.setAttribute(SPLASH_HANDOFF_ATTRIBUTE, 'true');
+  // The handoff background is a visual continuity aid, not a prerequisite for dismissing the cover. A
+  // reduced DOM host can omit document/window framing and must still be allowed to remove the splash.
+  const ownerDocument = element.ownerDocument ?? (typeof document === 'undefined' ? null : document);
+  const documentElement = ownerDocument?.documentElement ?? null;
+  const ownerWindow = ownerDocument?.defaultView ?? null;
+  const scheduleTimeout = (callback: () => void, delayMs: number): TimerHandle => (
+    ownerWindow
+      ? ownerWindow.setTimeout(callback, delayMs)
+      : setTimeout(callback, delayMs)
+  );
+  documentElement?.setAttribute(SPLASH_HANDOFF_ATTRIBUTE, 'true');
   element.setAttribute(LEAVING_ATTRIBUTE, 'true');
-  removalTimer = setTimeout(() => {
+  removalTimer = scheduleTimeout(() => {
     removalTimer = null;
     element.remove();
 
     // `requestAnimationFrame` runs before paint. Waiting for the following frame keeps the semantic splash
     // background underneath the first fully committed application frame, then releases it without extending
     // the visible transition. The timeout fallback is only for DOM hosts without a visual frame scheduler.
-    const requestFrame = ownerDocument.defaultView?.requestAnimationFrame?.bind(ownerDocument.defaultView);
+    const requestFrame = ownerWindow?.requestAnimationFrame?.bind(ownerWindow);
     if (!requestFrame) {
-      setTimeout(() => documentElement.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE), 0);
+      scheduleTimeout(() => documentElement?.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE), 0);
       return;
     }
     requestFrame(() => {
-      requestFrame(() => documentElement.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE));
+      requestFrame(() => documentElement?.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE));
     });
   }, SPLASH_EXIT_DURATION_MS);
 };

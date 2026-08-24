@@ -44,38 +44,59 @@ const resetHarness = () => {
   runtimeKey = 'local';
   runtimeStatusCode = 401;
   restoreDirectoryPreferences = () => Promise.resolve();
-  initialLoadingFaded = false;
+  initialLoadingLeaving = false;
   initialLoadingRemoved = false;
+  initialSplashHandoffSet = false;
+  initialSplashHandoffReleased = false;
   runtimeEndpointChangedListener = null;
   desktopInvoke = async () => null;
   desktopHostsGetCalls = 0;
   desktopHostsSetCalls = 0;
   runtimeSwitchCalls = 0;
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: {
-      isSecureContext: false,
-      localStorage: {
-        getItem: () => null,
-        setItem: () => undefined,
-      },
-      setTimeout: (callback: () => void) => {
-        queueMicrotask(callback);
-        return 0;
-      },
-      clearTimeout: () => undefined,
+  const testWindow = {
+    isSecureContext: false,
+    localStorage: {
+      getItem: () => null,
+      setItem: () => undefined,
     },
-  });
+    setTimeout: (callback: () => void) => {
+      queueMicrotask(callback);
+      return 0;
+    },
+    clearTimeout: () => undefined,
+    requestAnimationFrame: (callback: FrameRequestCallback) => {
+      queueMicrotask(() => callback(0));
+      return 0;
+    },
+  };
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: testWindow });
+  const documentElement = {
+    setAttribute: (name: string, value: string) => {
+      if (name === 'data-piarium-splash-handoff' && value === 'true') initialSplashHandoffSet = true;
+    },
+    removeAttribute: (name: string) => {
+      if (name === 'data-piarium-splash-handoff') initialSplashHandoffReleased = true;
+    },
+  };
+  const testDocument = {
+    defaultView: testWindow,
+    documentElement,
+    getElementById: (id: string): unknown => {
+      void id;
+      return null;
+    },
+  };
+  const initialLoadingElement = {
+    ownerDocument: testDocument,
+    setAttribute: (name: string, value: string) => {
+      if (name === 'data-leaving' && value === 'true') initialLoadingLeaving = true;
+    },
+    remove: () => { initialLoadingRemoved = true; },
+  };
+  testDocument.getElementById = (id: string) => id === 'initial-loading' ? initialLoadingElement : null;
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
-    value: {
-      getElementById: (id: string) => id === 'initial-loading'
-        ? {
-            classList: { add: () => { initialLoadingFaded = true; } },
-            remove: () => { initialLoadingRemoved = true; },
-          }
-        : null,
-    },
+    value: testDocument,
   });
 };
 
@@ -214,8 +235,10 @@ let desktopInvoke: () => Promise<unknown> = async () => null;
 let desktopHostsGetCalls = 0;
 let desktopHostsSetCalls = 0;
 let runtimeSwitchCalls = 0;
-let initialLoadingFaded = false;
+let initialLoadingLeaving = false;
 let initialLoadingRemoved = false;
+let initialSplashHandoffSet = false;
+let initialSplashHandoffReleased = false;
 
 mock.module('react/jsx-runtime', () => reactJsxRuntime);
 mock.module('react/jsx-dev-runtime', () => reactJsxRuntime);
@@ -412,8 +435,10 @@ describe('SessionAuthGate status-check failure behavior', () => {
 
     expect(text).toContain('sessionAuth.locked.unlockTitle');
     expect(text).not.toContain('sessionAuth.error.networkTitle');
-    expect(initialLoadingFaded).toBe(true);
+    expect(initialLoadingLeaving).toBe(true);
     expect(initialLoadingRemoved).toBe(true);
+    expect(initialSplashHandoffSet).toBe(true);
+    expect(initialSplashHandoffReleased).toBe(true);
   });
 
   test('waits for authenticated settings and workspace restoration before mounting the app', async () => {
