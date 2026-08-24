@@ -86,8 +86,9 @@ bun run electron:build:win
 
 This is equivalent to running `bun run --cwd packages/electron package:win:x64` and produces `packages/electron/dist/*.exe`, `*.blockmap`, and `latest.yml`.
 
-The assisted NSIS directory page treats the path it displays or the user selects as the final installation
-root. Piarium does not append another product-name directory beneath that path.
+The assisted NSIS directory page treats a browsed path as the parent directory and displays the resolved
+installation root. Selecting `D:\` therefore becomes `D:\Piarium`; selecting an existing `D:\Piarium`
+remains unchanged instead of becoming `D:\Piarium\Piarium`.
 
 Release ARM64 packages run natively on GitHub's `windows-11-arm` runner. The workflow sets
 `PIARIUM_TARGET_ARCH=arm64`, packages with `--win --arm64`, executes the unpacked ARM64 application,
