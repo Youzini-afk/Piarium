@@ -131,11 +131,11 @@ export const createSplashCanvasMountOptions = (input: {
   const colors = input.colors ?? PIARIUM_SPLASH_COLORS;
   return {
     camera: {
-    distancePx: SPLASH_CAMERA_DISTANCE_PX,
-    originYPct: SPLASH_GROUND_ORIGIN_Y_PCT,
-    spinDeg: SPLASH_CAMERA_SPIN_DEG,
-    tiltDeg: SPLASH_CAMERA_TILT_DEG,
-    visibleFarRisePx: SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
+      distancePx: SPLASH_CAMERA_DISTANCE_PX,
+      originYPct: SPLASH_GROUND_ORIGIN_Y_PCT,
+      spinDeg: SPLASH_CAMERA_SPIN_DEG,
+      tiltDeg: SPLASH_CAMERA_TILT_DEG,
+      visibleFarRisePx: SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
     },
     cellPx: CUBE_EDGE_PX,
     colors: {
@@ -421,9 +421,12 @@ void main() {
     gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
     vOpacity = 0.0;
   } else {
-    vec2 screen = vec2(spunX, spunY * cos(uTilt)) / perspectiveW + uOrigin;
-    vec2 clip = screen / uViewport * 2.0 - 1.0;
-    gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+    // Preserve the projection denominator as homogeneous W. Besides landing at the same screen point,
+    // this lets the rasterizer perspective-correct vUv across both triangles, avoiding a derivative seam
+    // through the middle of each diamond.
+    vec2 projected = vec2(spunX, spunY * cos(uTilt));
+    vec2 homogeneousClip = (projected + uOrigin * perspectiveW) / uViewport * 2.0 - vec2(perspectiveW);
+    gl_Position = vec4(homogeneousClip.x, -homogeneousClip.y, 0.0, perspectiveW);
     vOpacity = aOpacity;
   }
   vUv = corner + 0.5;
@@ -435,14 +438,38 @@ uniform vec4 uBackground;
 uniform vec4 uLine;
 uniform vec4 uPulse;
 uniform float uBorder;
+uniform float uRenderScale;
 in vec2 vUv;
 in float vOpacity;
 in float vFillMix;
 out vec4 outputColor;
 void main() {
   vec4 tile = mix(uBackground, uPulse, vFillMix);
-  vec4 color = (vUv.x >= 1.0 - uBorder || vUv.y >= 1.0 - uBorder) ? uLine : tile;
-  outputColor = vec4(color.rgb, color.a * vOpacity);
+  // fwidth(vUv) is the UV distance covered by one physical framebuffer pixel. Converting both the
+  // authored floor-space border and the distance to the tile edge through it keeps diagonal lines
+  // continuous after perspective compresses them below a CSS pixel, without paying for full-canvas MSAA.
+  vec2 footprint = max(fwidth(vUv), vec2(0.000001));
+  vec2 edgeDistancePx = (vec2(1.0) - vUv) / footprint;
+  vec2 projectedLinePx = vec2(uBorder) / footprint;
+  vec2 lineWidthPx = max(projectedLinePx, vec2(uRenderScale));
+  vec2 antialiasRadius = vec2(0.75);
+  vec2 lineCoverage = vec2(1.0) - smoothstep(
+    max(lineWidthPx - antialiasRadius, vec2(0.0)),
+    lineWidthPx + antialiasRadius,
+    edgeDistancePx
+  );
+
+  // Once one cell period is only a few line widths, a continuous grid has no readable gap left. Fade each
+  // axis independently between three and six line widths instead of letting undersampled fragments turn
+  // into dots or letting the two line families merge into a bright horizon band.
+  vec2 cellSpanPx = vec2(1.0) / footprint;
+  vec2 densityFade = smoothstep(vec2(uRenderScale * 3.0), vec2(uRenderScale * 6.0), cellSpanPx);
+  float coverage = max(lineCoverage.x * densityFade.x, lineCoverage.y * densityFade.y);
+  float lineMix = clamp(coverage * uLine.a, 0.0, 1.0);
+  vec3 color = mix(tile.rgb, uLine.rgb, lineMix);
+  // The line is composited over the opaque tile instead of replacing its alpha. Visually this matches the
+  // semantic translucent line token while preserving the splash's promise that intact tiles are a cover.
+  outputColor = vec4(color, tile.a * vOpacity);
 }`);
       const program = gl.createProgram();
       if (!program) throw new Error('Unable to allocate splash program');
@@ -493,6 +520,7 @@ void main() {
         line: uniform('uLine'),
         origin: uniform('uOrigin'),
         pulse: uniform('uPulse'),
+        renderScale: uniform('uRenderScale'),
         spin: uniform('uSpin'),
         tilt: uniform('uTilt'),
         viewport: uniform('uViewport'),
@@ -553,6 +581,7 @@ void main() {
           canvas.width = Math.max(1, Math.round(viewport.width * renderScale));
           canvas.height = Math.max(1, Math.round(viewport.height * renderScale));
           gl.viewport(0, 0, canvas.width, canvas.height);
+          gl.uniform1f(uniforms.renderScale, renderScale);
         },
       };
     } catch {

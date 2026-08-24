@@ -294,6 +294,17 @@ describe('the floor covers the window it has to cover', () => {
     expect(renderer).toContain('requestAnimationFrame');
   });
 
+  test('perspective grid lines use screen-space analytic antialiasing', () => {
+    const renderer = mountSplashTileCanvas.toString();
+    expect(renderer).toContain('fwidth(vUv)');
+    expect(renderer).toContain('lineWidthPx = max(projectedLinePx, vec2(uRenderScale))');
+    expect(renderer).toContain('densityFade = smoothstep');
+    expect(renderer).toContain('coverage * uLine.a');
+    expect(renderer).toContain('tile.a * vOpacity');
+    expect(renderer).toContain('homogeneousClip.x, -homogeneousClip.y, 0.0, perspectiveW');
+    expect(renderer).not.toContain('? uLine : tile');
+  });
+
   test.each([
     [390, 700],
     [1280, 800],
