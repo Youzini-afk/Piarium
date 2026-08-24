@@ -13,6 +13,7 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpointSafely } from '@/lib/runtime-switch';
+import { dismissInitialSplash } from '@/lib/splash';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { resolveStatusCheckFailureState, runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
@@ -602,13 +603,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
   React.useEffect(() => {
     if (state !== 'locked' && state !== 'error' && state !== 'rate-limited') return;
-    const loadingElement = typeof document === 'undefined'
-      ? null
-      : document.getElementById('initial-loading');
-    if (!loadingElement) return;
-    loadingElement.classList.add('fade-out');
-    const timer = window.setTimeout(() => loadingElement.remove(), 300);
-    return () => window.clearTimeout(timer);
+    dismissInitialSplash();
   }, [state]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {

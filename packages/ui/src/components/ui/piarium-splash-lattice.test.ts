@@ -301,12 +301,21 @@ describe('the floor covers the window it has to cover', () => {
     expect(renderer).toContain('requestAnimationFrame');
   });
 
+  test('line contrast falls continuously in screen space from the logo to the viewport boundary', () => {
+    const renderer = mountSplashTileCanvas.toString();
+    expect(renderer).toContain('uniform float uLineFadeRadius');
+    expect(renderer).toContain('radialProgress = length(projected / perspectiveW)');
+    expect(renderer).toContain('vLineOpacity = 1.0 - smoothstep');
+    expect(renderer).toContain('value.opacity * lineOpacity');
+    expect(renderer).not.toContain('value.opacity * value.lineOpacity');
+  });
+
   test('perspective grid lines use screen-space analytic antialiasing', () => {
     const renderer = mountSplashTileCanvas.toString();
     expect(renderer).toContain('fwidth(vUv)');
     expect(renderer).toContain('lineWidthPx = max(projectedLinePx, vec2(uRenderScale))');
     expect(renderer).toContain('densityFade = smoothstep');
-    expect(renderer).toContain('coverage * uLine.a');
+    expect(renderer).toContain('coverage * uLine.a * vLineOpacity');
     expect(renderer).toContain('tile.a * vOpacity');
     expect(renderer).toContain('homogeneousClip.x, -homogeneousClip.y, 0.0, perspectiveW');
     expect(renderer).not.toContain('? uLine : tile');
@@ -371,6 +380,12 @@ describe('the floor is the cover', () => {
   test('the container is not, or the cells would reveal nothing', () => {
     const container = css.slice(css.indexOf('.pi-splash {'), css.indexOf('.pi-splash[data-leaving'));
     expect(container).not.toContain('background');
+  });
+
+  test('the application handoff keeps the splash background through the first committed frame', () => {
+    expect(css).toContain(`html[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] body`);
+    expect(css).toContain(`html[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] #root`);
+    expect(css).toContain(`background-color: ${PIARIUM_SPLASH_COLORS.background} !important;`);
   });
 
   test('renderer failure leaves the opaque registered grid in place', () => {

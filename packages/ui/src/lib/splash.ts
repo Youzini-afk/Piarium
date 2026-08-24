@@ -1,4 +1,7 @@
-import { SPLASH_EXIT_DURATION_MS } from '@/components/ui/piarium-splash-lattice';
+import {
+  SPLASH_EXIT_DURATION_MS,
+  SPLASH_HANDOFF_ATTRIBUTE,
+} from '@/components/ui/piarium-splash-lattice';
 
 /**
  * Talks to the pre-paint splash in `packages/web/index.html`.
@@ -59,10 +62,25 @@ export const dismissInitialSplash = (): void => {
   const element = splashElement();
   if (!element || removalTimer !== null) return;
 
+  const ownerDocument = element.ownerDocument;
+  const documentElement = ownerDocument.documentElement;
+  documentElement.setAttribute(SPLASH_HANDOFF_ATTRIBUTE, 'true');
   element.setAttribute(LEAVING_ATTRIBUTE, 'true');
   removalTimer = setTimeout(() => {
     removalTimer = null;
     element.remove();
+
+    // `requestAnimationFrame` runs before paint. Waiting for the following frame keeps the semantic splash
+    // background underneath the first fully committed application frame, then releases it without extending
+    // the visible transition. The timeout fallback is only for DOM hosts without a visual frame scheduler.
+    const requestFrame = ownerDocument.defaultView?.requestAnimationFrame?.bind(ownerDocument.defaultView);
+    if (!requestFrame) {
+      setTimeout(() => documentElement.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE), 0);
+      return;
+    }
+    requestFrame(() => {
+      requestFrame(() => documentElement.removeAttribute(SPLASH_HANDOFF_ATTRIBUTE));
+    });
   }, SPLASH_EXIT_DURATION_MS);
 };
 
@@ -75,5 +93,6 @@ export const INITIAL_SPLASH_IDS = {
   root: SPLASH_ID,
   status: STATUS_ID,
   ground: GROUND_ID,
+  handoffAttribute: SPLASH_HANDOFF_ATTRIBUTE,
   leavingAttribute: LEAVING_ATTRIBUTE,
 } as const;

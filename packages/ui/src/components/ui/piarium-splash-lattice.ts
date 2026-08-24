@@ -321,6 +321,9 @@ export interface SplashPlaneColors {
   readonly stroke?: string;
 }
 
+/** Keeps the first application frame on the splash palette while the splash node is being detached. */
+export const SPLASH_HANDOFF_ATTRIBUTE = 'data-piarium-splash-handoff';
+
 /**
  * Piarium's own splash palette.
  *
@@ -624,6 +627,14 @@ animation-fill-mode: both;
   const hole = `radial-gradient(circle at 50% ${SPLASH_GROUND_ORIGIN_Y_PCT}%, rgba(0,0,0,0) var(--pi-splash-open, 0px), rgba(0,0,0,1) calc(var(--pi-splash-open, 0px) + ${REVEAL_EDGE_PX}px))`;
 
   return `
+/* The splash and the application are sibling paint owners. Keep their shared canvas colour stable for one
+   committed application frame after the splash is removed; otherwise a delayed theme/root paint can expose
+   the browser's white default between the two owners. */
+html[${SPLASH_HANDOFF_ATTRIBUTE}='true'],
+html[${SPLASH_HANDOFF_ATTRIBUTE}='true'] body,
+html[${SPLASH_HANDOFF_ATTRIBUTE}='true'] #root {
+background-color: ${colors.background} !important;
+}
 .pi-splash {
 position: fixed;
 inset: 0;
