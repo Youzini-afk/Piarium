@@ -284,6 +284,11 @@ Transition Scene contribution，因此能够被选择、停用和替换。
 现有默认场景的 quick/standard/reduced duration 是已实现视觉时间轴的事实，不是平台级上限。第三方
 场景可以声明不同数值。
 
+默认立方体场景自身还有一项实现不变量：视觉上的 24×24 地板不等于 576 个独立动画 owner。它由
+8×8 个连续 3×3 瓦片簇绘制；簇在播放期间只改变 `transform` 和 `opacity`，大面积地板 mask 在不透明
+backdrop 下离散交接，不能重新变成每帧使整个地板栅格化的插值。这个数字是默认场景依据实测成本
+选择的内部几何，不是 Transition Scene 平台对第三方 Canvas、WebGL 或 DOM 场景施加的元素上限。
+
 ## 9. Surface 与执行模式
 
 | Surface / mode | Workbench Transition Scene |

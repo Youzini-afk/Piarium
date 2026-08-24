@@ -421,7 +421,7 @@
     <meta name="apple-mobile-web-app-title" content="Piarium" />
 
     <!-- Inline CSS for loading screen and Nerd Fonts (before Tailwind loads) -->
-    <style>
+    <style id="piarium-splash-styles">
       /* Nerd Font @font-face declarations for terminal icon support */
       @font-face {
         font-family: 'JetBrainsMono Nerd Font';
@@ -539,12 +539,26 @@ inherits: true;
 initial-value: 0px;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] {
-animation: pi-splash-floor-unmask 520ms 40ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+animation: pi-splash-floor-unmask 520ms 40ms steps(1, end) both;
 }
 @keyframes pi-splash-floor-unmask {
+from {
+--pi-splash-floor-mask: 713px;
+--pi-splash-horizon-lift: 0px;
+}
 to {
 --pi-splash-floor-mask: 160vmax;
 --pi-splash-horizon-lift: 160vmax;
+}
+}
+@keyframes pi-splash-floor-mask {
+from {
+--pi-splash-floor-mask: 160vmax;
+--pi-splash-horizon-lift: 160vmax;
+}
+to {
+--pi-splash-floor-mask: 713px;
+--pi-splash-horizon-lift: 0px;
 }
 }
 /* The floor is a quadrilateral in projection and a window is a rectangle, so the cells cannot cover the
@@ -599,7 +613,7 @@ overflow: hidden;
 mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(56% - 726px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(56% - 687px - var(--pi-splash-horizon-lift, 0px)));
 }
 /* One camera owns both the flattened floor layer and the small preserve-3d cube. The floor's descendants
-   remain flat, so this does not turn its hundreds of cells into separate 3D layers. */
+   remain flat, so its visual tiles do not become separate 3D layers. */
 .pi-splash-camera {
 position: absolute;
 left: 50%;
@@ -621,8 +635,8 @@ left: 0;
 top: 0;
 display: grid;
 transform-origin: 0 0;
-grid-template-columns: repeat(24, 96px);
-grid-template-rows: repeat(24, 96px);
+grid-template-columns: repeat(8, 288px);
+grid-template-rows: repeat(8, 288px);
 transform: translate(-1392px, -1392px);
 }
 /* A line-only continuation of the same registered grid reaches the horizon without hundreds more cells.
@@ -648,47 +662,55 @@ animation: pi-splash-continuation-out 520ms ease both;
 animation-delay: 860ms;
 }
 @keyframes pi-splash-continuation-out { to { opacity: 0; } }
-/* Opaque, because these cells are the cover. Two edges each, so neighbours do not stack into a 2px rule. */
-.pi-splash-cell {
-background: var(--splash-background, var(--color-background, #151313));
-box-shadow: inset -1px -1px 0 var(--splash-lattice-line, rgba(255, 255, 255, 0.22));
+/* Opaque, contiguous 3×3 tile clusters. The repeated backgrounds preserve the original 96px lattice,
+   while one compact cluster replaces nine independently styled and animated elements. */
+.pi-splash-tile-cluster {
+contain: paint;
+background-color: var(--splash-background, var(--color-background, #151313));
+background-image:
+linear-gradient(to right, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%),
+linear-gradient(to bottom, transparent 0 calc(100% - 1px), var(--splash-lattice-line, rgba(255, 255, 255, 0.22)) calc(100% - 1px) 100%);
+background-size: 96px 96px;
 transform-origin: center;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'] .pi-splash-tile-cluster,
+.pi-splash[data-mode='switch'][data-phase='revealing'] .pi-splash-tile-cluster {
+will-change: transform, opacity;
 }
 /* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
    there is genuinely something to wait for. Both ends are opaque colours: a translucent pulse would have
    punched a hole in the cover for half of every cycle. */
-.pi-splash-cell[data-breathe='true'] {
+.pi-splash-tile-cluster[data-breathe='true'] {
 animation: pi-splash-breathe 2.8s ease-in-out infinite;
 animation-delay: calc(1.2s + var(--pi-breathe-delay));
 }
 @keyframes pi-splash-breathe {
-0%, 100% { background: var(--splash-background, var(--color-background, #151313)); }
-50% { background: var(--splash-cell-pulse, var(--splash-background, #151313)); }
+0%, 100% { background-color: var(--splash-background, var(--color-background, #151313)); }
+50% { background-color: var(--splash-cell-pulse, var(--splash-background, #151313)); }
 }
 /* Declared after the breathing rule so equal specificity lets the exit win without !important. */
-.pi-splash[data-leaving='true'] .pi-splash-cell {
-animation: pi-splash-cell-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cell-delay);
+.pi-splash[data-leaving='true'] .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cluster-delay);
+will-change: transform, opacity;
 }
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cell {
-animation-delay: calc(var(--pi-cell-delay) + 860ms);
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-tile-cluster {
+animation-delay: calc(var(--pi-cluster-delay) + 860ms);
 }
-/* Each cell moves in the floor's own coordinate system before the parent camera projects it. On screen
-   the squares therefore stay registered as perspective diamonds while the wave pushes them away from the
-   cube's footprint. Opacity holds for the first half so the separation is visible before they dissolve. */
-@keyframes pi-splash-cell-out {
-0% { background: var(--splash-background, var(--color-background, #151313)); }
-32%, 55% { opacity: 1; background: var(--splash-cell-pulse, var(--splash-background, #151313)); }
+/* Each cluster moves in the floor's own coordinate system before the parent camera projects it. Its nine
+   tiles therefore stay registered as perspective diamonds while the wave pushes the cluster away from the
+   cube's footprint. Only transform and opacity vary per frame, so the cluster can remain compositor-only. */
+@keyframes pi-splash-tile-cluster-out {
+0%, 55% { opacity: 1; }
 to {
 opacity: 0;
-background: var(--splash-cell-pulse, var(--splash-background, #151313));
-transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px)) scale(0.56);
+transform: translate(var(--pi-cluster-scatter-x, 0px), var(--pi-cluster-scatter-y, 0px)) scale(0.56);
 }
 }
 
 /* Unlike the old pre-projected SVG, this is a small real cube inside the floor's camera. Only its three
    visible faces participate in preserve-3d; the floor remains one flattened layer, so moving the camera
-   reprojects the logo without promoting the hundreds of cells behind it. */
+   reprojects the logo without promoting the entire tile field behind it. */
 .pi-splash-mark {
 position: absolute;
 left: -48px;
@@ -833,11 +855,11 @@ animation: none;
 }
 
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] {
-animation: pi-splash-floor-unmask 285ms 733ms cubic-bezier(0.25, 0.7, 0.25, 1) reverse both;
+animation: pi-splash-floor-mask 285ms 733ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] {
 pointer-events: none;
-animation: pi-splash-floor-unmask 285ms 22ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+animation: pi-splash-floor-unmask 285ms 22ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-phase-clock,
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-phase-clock {
@@ -869,13 +891,13 @@ animation: pi-splash-continuation-out 285ms 284ms ease reverse both;
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-ground::before {
 animation: pi-splash-continuation-out 285ms 471ms ease both;
 }
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-cell {
-animation: pi-splash-cell-out 285ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
-animation-delay: var(--pi-cell-cover-delay-quick);
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out 285ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
+animation-delay: var(--pi-cluster-cover-delay-quick);
 }
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-cell {
-animation: pi-splash-cell-out 285ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cell-reveal-delay-quick);
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='quick'] .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out 285ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cluster-reveal-delay-quick);
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='quick'] .pi-splash-mark {
 animation: pi-splash-mark-press 525ms 515ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
@@ -903,11 +925,11 @@ animation: pi-splash-status-out 99ms ease both;
 }
 
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] {
-animation: pi-splash-floor-unmask 520ms 1340ms cubic-bezier(0.25, 0.7, 0.25, 1) reverse both;
+animation: pi-splash-floor-mask 520ms 1340ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] {
 pointer-events: none;
-animation: pi-splash-floor-unmask 520ms 40ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+animation: pi-splash-floor-unmask 520ms 40ms steps(1, end) both;
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-phase-clock,
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-phase-clock {
@@ -939,13 +961,13 @@ animation: pi-splash-continuation-out 520ms 520ms ease reverse both;
 .pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-ground::before {
 animation: pi-splash-continuation-out 520ms 860ms ease both;
 }
-.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-cell {
-animation: pi-splash-cell-out 520ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
-animation-delay: var(--pi-cell-cover-delay-standard);
+.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out 520ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
+animation-delay: var(--pi-cluster-cover-delay-standard);
 }
-.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-cell {
-animation: pi-splash-cell-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cell-reveal-delay-standard);
+.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='standard'] .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out 520ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cluster-reveal-delay-standard);
 }
 .pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='standard'] .pi-splash-mark {
 animation: pi-splash-mark-press 960ms 940ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
@@ -981,14 +1003,14 @@ animation: pi-splash-status-out 180ms ease both;
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-backdrop,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-camera,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::before,
-.pi-splash[data-mode='switch'][data-phase] .pi-splash-cell,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-tile-cluster,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-mark,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-cube-face,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-status,
 .pi-splash[data-leaving='true'] .pi-splash-ground::before,
-.pi-splash-cell,
-.pi-splash[data-leaving='true'] .pi-splash-cell,
+.pi-splash-tile-cluster,
+.pi-splash[data-leaving='true'] .pi-splash-tile-cluster,
 .pi-splash[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash[data-leaving='true'] .pi-splash-mark,
@@ -1068,15 +1090,15 @@ var ground=document.getElementById('initial-loading-ground');
 if(!ground)return;
 var splash=ground.closest('.pi-splash');
 if(splash)splash.style.setProperty('--pi-floor-exit-scale',(function(w,h){var e=[{"normalX":1629.174024,"normalY":-1629.174024,"support":3207168.000288},{"normalX":1629.174024,"normalY":1629.174024,"support":2101248.000189},{"normalX":-1629.174024,"normalY":1629.174024,"support":2101248.000189},{"normalX":-1629.174024,"normalY":-1629.174024,"support":3207168.000288}];var oy=h*0.56;var p=[[-w/2,-oy],[w/2,-oy],[w/2,h-oy],[-w/2,h-oy]];var s=1;for(var i=0;i<e.length;i++){for(var j=0;j<p.length;j++){s=Math.max(s,(e[i].normalX*p[j][0]+e[i].normalY*p[j][1])/e[i].support)}}return Math.ceil(s*1.04*1000)/1000})(innerWidth,innerHeight));
-var delays=[520,502,484,468,452,437,423,411,400,390,382,376,371,369,368,369,371,376,382,390,400,411,423,437,502,483,465,447,431,415,401,388,376,366,357,350,345,342,341,342,345,350,357,366,376,388,401,415,484,465,446,428,410,394,379,365,352,341,332,325,320,316,315,316,320,325,332,341,352,365,379,394,468,447,428,409,390,373,357,342,329,317,307,299,294,290,289,290,294,299,307,317,329,342,357,373,452,431,410,390,371,353,336,321,306,294,283,274,268,264,263,264,268,274,283,294,306,321,336,353,437,415,394,373,353,334,316,299,284,270,259,249,242,238,236,238,242,249,259,270,284,299,316,334,423,401,379,357,336,316,297,279,263,248,235,224,217,212,210,212,217,224,235,248,263,279,297,316,411,388,365,342,321,299,279,260,242,226,212,200,191,186,184,186,191,200,212,226,242,260,279,299,400,376,352,329,306,284,263,242,223,205,189,176,166,160,158,160,166,176,189,205,223,242,263,284,390,366,341,317,294,270,248,226,205,186,168,153,141,134,131,134,141,153,168,186,205,226,248,270,382,357,332,307,283,259,235,212,189,168,149,131,117,108,105,108,117,131,149,168,189,212,235,259,376,350,325,299,274,249,224,200,176,153,131,111,95,83,79,83,95,111,131,153,176,200,224,249,371,345,320,294,268,242,217,191,166,141,117,95,74,59,53,59,74,95,117,141,166,191,217,242,369,342,316,290,264,238,212,186,160,134,108,83,59,37,26,37,59,83,108,134,160,186,212,238,368,341,315,289,263,236,210,184,158,131,105,79,53,26,0,26,53,79,105,131,158,184,210,236,369,342,316,290,264,238,212,186,160,134,108,83,59,37,26,37,59,83,108,134,160,186,212,238,371,345,320,294,268,242,217,191,166,141,117,95,74,59,53,59,74,95,117,141,166,191,217,242,376,350,325,299,274,249,224,200,176,153,131,111,95,83,79,83,95,111,131,153,176,200,224,249,382,357,332,307,283,259,235,212,189,168,149,131,117,108,105,108,117,131,149,168,189,212,235,259,390,366,341,317,294,270,248,226,205,186,168,153,141,134,131,134,141,153,168,186,205,226,248,270,400,376,352,329,306,284,263,242,223,205,189,176,166,160,158,160,166,176,189,205,223,242,263,284,411,388,365,342,321,299,279,260,242,226,212,200,191,186,184,186,191,200,212,226,242,260,279,299,423,401,379,357,336,316,297,279,263,248,235,224,217,212,210,212,217,224,235,248,263,279,297,316,437,415,394,373,353,334,316,299,284,270,259,249,242,238,236,238,242,249,259,270,284,299,316,334];
-var breathes=[-1,-1,-1,-1,-1,2082,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,993,-1,-1,-1,-1,-1,-1,-1,982,-1,-1,-1,-1,-1,725,-1,-1,-1,-1,-1,-1,-1,1060,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1705,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1828,-1,-1,-1,-1,-1,-1,1764,-1,70,-1,55,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1699,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1626,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1035,-1,-1,-1,-1,1771,-1,-1,-1,1271,-1,-1,-1,-1,-1,-1,2180,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1671,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1912,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1587,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1056,-1,-1,-1,-1,-1,-1,-1,1266,-1,-1,-1,2150,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1309,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1999,-1,1916,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1375,-1,-1,-1,-1,-1,-1,-1,-1,583,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,717,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,708,-1,-1,-1,-1,-1,2165,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1743,2184,-1,-1,229,-1,-1,248,-1,-1,-1,-1,-1,-1,2115,173,-1,-1,155,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,95,-1,-1,1869,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1105,-1,-1,-1,1033,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1525,-1,637,-1,-1,-1,-1,-1,-1,57,-1,-1,-1,-1,-1,-1,-1,777,-1,154,-1,-1,1924,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,1306,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,789,-1,-1,-1,-1,2094,-1,-1,-1,-1,-1,-1];
-var scatterXs=[-37,-35,-34,-32,-30,-28,-26,-23,-20,-17,-14,-11,-7,-4,0,4,7,11,14,17,20,23,26,28,-38,-37,-35,-33,-32,-30,-27,-25,-22,-19,-15,-12,-8,-4,0,4,8,12,15,19,22,25,27,30,-39,-38,-37,-35,-33,-31,-29,-26,-23,-20,-16,-13,-9,-4,0,4,9,13,16,20,23,26,29,31,-41,-40,-38,-37,-35,-33,-30,-28,-25,-21,-18,-14,-9,-5,0,5,9,14,18,21,25,28,30,33,-42,-41,-40,-38,-37,-35,-32,-30,-27,-23,-19,-15,-10,-5,0,5,10,15,19,23,27,30,32,35,-44,-43,-41,-40,-39,-37,-34,-32,-29,-25,-21,-16,-11,-6,0,6,11,16,21,25,29,32,34,37,-45,-44,-43,-42,-40,-39,-37,-34,-31,-27,-23,-18,-13,-6,0,6,13,18,23,27,31,34,37,39,-46,-46,-45,-44,-42,-41,-39,-37,-34,-30,-26,-20,-14,-7,0,7,14,20,26,30,34,37,39,41,-48,-47,-46,-46,-44,-43,-41,-39,-37,-33,-29,-23,-16,-9,0,9,16,23,29,33,37,39,41,43,-49,-48,-48,-47,-46,-45,-44,-42,-40,-37,-32,-26,-18,-9,0,9,18,26,32,37,40,42,44,45,-50,-50,-49,-49,-48,-47,-46,-45,-43,-40,-35,-28,-19,-10,0,10,19,28,35,40,43,45,46,47,-51,-51,-50,-50,-50,-49,-49,-48,-46,-44,-37,-29,-21,-11,0,11,21,29,37,44,46,48,49,49,-51,-51,-51,-51,-51,-51,-50,-50,-49,-45,-38,-32,-24,-13,0,13,24,32,38,45,49,50,50,51,-52,-52,-52,-52,-52,-52,-51,-51,-51,-46,-40,-34,-27,-18,0,18,27,34,40,46,51,51,51,52,-52,-52,-52,-52,-52,-52,-52,-52,-52,-46,-40,-35,-29,-23,0,23,29,35,40,46,52,52,52,52,-52,-52,-52,-52,-52,-52,-51,-51,-51,-46,-40,-34,-27,-18,0,18,27,34,40,46,51,51,51,52,-51,-51,-51,-51,-51,-51,-50,-50,-49,-45,-38,-32,-24,-13,0,13,24,32,38,45,49,50,50,51,-51,-51,-50,-50,-50,-49,-49,-48,-46,-44,-37,-29,-21,-11,0,11,21,29,37,44,46,48,49,49,-50,-50,-49,-49,-48,-47,-46,-45,-43,-40,-35,-28,-19,-10,0,10,19,28,35,40,43,45,46,47,-49,-48,-48,-47,-46,-45,-44,-42,-40,-37,-32,-26,-18,-9,0,9,18,26,32,37,40,42,44,45,-48,-47,-46,-46,-44,-43,-41,-39,-37,-33,-29,-23,-16,-9,0,9,16,23,29,33,37,39,41,43,-46,-46,-45,-44,-42,-41,-39,-37,-34,-30,-26,-20,-14,-7,0,7,14,20,26,30,34,37,39,41,-45,-44,-43,-42,-40,-39,-37,-34,-31,-27,-23,-18,-13,-6,0,6,13,18,23,27,31,34,37,39,-44,-43,-41,-40,-39,-37,-34,-32,-29,-25,-21,-16,-11,-6,0,6,11,16,21,25,29,32,34,37];
-var scatterYs=[-37,-38,-39,-41,-42,-44,-45,-46,-48,-49,-50,-51,-51,-52,-52,-52,-51,-51,-50,-49,-48,-46,-45,-44,-35,-37,-38,-40,-41,-43,-44,-46,-47,-48,-50,-51,-51,-52,-52,-52,-51,-51,-50,-48,-47,-46,-44,-43,-34,-35,-37,-38,-40,-41,-43,-45,-46,-48,-49,-50,-51,-52,-52,-52,-51,-50,-49,-48,-46,-45,-43,-41,-32,-33,-35,-37,-38,-40,-42,-44,-46,-47,-49,-50,-51,-52,-52,-52,-51,-50,-49,-47,-46,-44,-42,-40,-30,-32,-33,-35,-37,-39,-40,-42,-44,-46,-48,-50,-51,-52,-52,-52,-51,-50,-48,-46,-44,-42,-40,-39,-28,-30,-31,-33,-35,-37,-39,-41,-43,-45,-47,-49,-51,-52,-52,-52,-51,-49,-47,-45,-43,-41,-39,-37,-26,-27,-29,-30,-32,-34,-37,-39,-41,-44,-46,-49,-50,-51,-52,-51,-50,-49,-46,-44,-41,-39,-37,-34,-23,-25,-26,-28,-30,-32,-34,-37,-39,-42,-45,-48,-50,-51,-52,-51,-50,-48,-45,-42,-39,-37,-34,-32,-20,-22,-23,-25,-27,-29,-31,-34,-37,-40,-43,-46,-49,-51,-52,-51,-49,-46,-43,-40,-37,-34,-31,-29,-17,-19,-20,-21,-23,-25,-27,-30,-33,-37,-40,-44,-45,-46,-46,-46,-45,-44,-40,-37,-33,-30,-27,-25,-14,-15,-16,-18,-19,-21,-23,-26,-29,-32,-35,-37,-38,-40,-40,-40,-38,-37,-35,-32,-29,-26,-23,-21,-11,-12,-13,-14,-15,-16,-18,-20,-23,-26,-28,-29,-32,-34,-35,-34,-32,-29,-28,-26,-23,-20,-18,-16,-7,-8,-9,-9,-10,-11,-13,-14,-16,-18,-19,-21,-24,-27,-29,-27,-24,-21,-19,-18,-16,-14,-13,-11,-4,-4,-4,-5,-5,-6,-6,-7,-9,-9,-10,-11,-13,-18,-23,-18,-13,-11,-10,-9,-9,-7,-6,-6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,4,5,5,6,6,7,9,9,10,11,13,18,23,18,13,11,10,9,9,7,6,6,7,8,9,9,10,11,13,14,16,18,19,21,24,27,29,27,24,21,19,18,16,14,13,11,11,12,13,14,15,16,18,20,23,26,28,29,32,34,35,34,32,29,28,26,23,20,18,16,14,15,16,18,19,21,23,26,29,32,35,37,38,40,40,40,38,37,35,32,29,26,23,21,17,19,20,21,23,25,27,30,33,37,40,44,45,46,46,46,45,44,40,37,33,30,27,25,20,22,23,25,27,29,31,34,37,40,43,46,49,51,52,51,49,46,43,40,37,34,31,29,23,25,26,28,30,32,34,37,39,42,45,48,50,51,52,51,50,48,45,42,39,37,34,32,26,27,29,30,32,34,37,39,41,44,46,49,50,51,52,51,50,49,46,44,41,39,37,34,28,30,31,33,35,37,39,41,43,45,47,49,51,52,52,52,51,49,47,45,43,41,39,37];
+var delays=[520,460,411,379,368,379,411,460,460,390,331,291,276,291,331,390,411,331,260,206,184,206,260,331,379,291,206,130,92,130,206,291,368,276,184,92,0,92,184,276,379,291,206,130,92,130,206,291,411,331,260,206,184,206,260,331,460,390,331,291,276,291,331,390];
+var breathes=[-1,-1,-1,-1,-1,2082,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,993,-1,-1,-1,-1,-1,-1,-1,982,-1,-1,-1,-1,-1,725,-1,-1,-1,-1,-1,-1,-1,1060,-1,-1,-1,-1,-1,-1,-1,-1,-1];
+var scatterXs=[-35,-28,-19,-10,0,10,19,28,-37,-29,-21,-11,0,11,21,29,-38,-32,-24,-13,0,13,24,32,-40,-34,-27,-18,0,18,27,34,-40,-35,-29,-23,0,23,29,35,-40,-34,-27,-18,0,18,27,34,-38,-32,-24,-13,0,13,24,32,-37,-29,-21,-11,0,11,21,29];
+var scatterYs=[-35,-37,-38,-40,-40,-40,-38,-37,-28,-29,-32,-34,-35,-34,-32,-29,-19,-21,-24,-27,-29,-27,-24,-21,-10,-11,-13,-18,-23,-18,-13,-11,0,0,0,0,0,0,0,0,10,11,13,18,23,18,13,11,19,21,24,27,29,27,24,21,28,29,32,34,35,34,32,29];
 var buffer='';
 for(var i=0;i<delays.length;i++){
-var style='--pi-cell-delay:'+delays[i]+'ms;--pi-cell-scatter-x:'+scatterXs[i]+'px;--pi-cell-scatter-y:'+scatterYs[i]+'px';
+var style='--pi-cluster-delay:'+delays[i]+'ms;--pi-cluster-scatter-x:'+scatterXs[i]+'px;--pi-cluster-scatter-y:'+scatterYs[i]+'px';
 if(breathes[i]>=0)style+=';--pi-breathe-delay:'+breathes[i]+'ms';
-buffer+='<span class="pi-splash-cell" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
+buffer+='<span class="pi-splash-tile-cluster" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
 }
 ground.innerHTML=buffer;
 })();

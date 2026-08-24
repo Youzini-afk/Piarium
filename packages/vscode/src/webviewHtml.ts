@@ -2,7 +2,7 @@ import * as os from 'node:os';
 import * as vscode from 'vscode';
 import { splashCubeMarkup } from '@piarium/ui/src/components/ui/piarium-splash-cube';
 import {
-  buildSplashCells,
+  buildSplashTileClusters,
   splashPlaneCss,
 } from '@piarium/ui/src/components/ui/piarium-splash-lattice';
 import { getThemeKindName } from './theme';
@@ -21,8 +21,8 @@ const CUBE_MARKUP = splashCubeMarkup();
  * have to. No breathing, though — the splash is up for a moment and the idle pulse starts after a second
  * and a bit, so here it would only ever be dead weight in the document.
  */
-const GROUND_CELLS = buildSplashCells('boot', 'forward', false)
-  .map((cell) => `<span class="pi-splash-cell" data-breathe="false" style="--pi-cell-delay:${cell.delayMs}ms;--pi-cell-scatter-x:${cell.scatterXPx}px;--pi-cell-scatter-y:${cell.scatterYPx}px"></span>`)
+const GROUND_CLUSTERS = buildSplashTileClusters('boot', 'forward', false)
+  .map((cluster) => `<span class="pi-splash-tile-cluster" data-breathe="false" style="--pi-cluster-delay:${cluster.delayMs}ms;--pi-cluster-scatter-x:${cluster.scatterXPx}px;--pi-cluster-scatter-y:${cluster.scatterYPx}px"></span>`)
   .join('');
 
 /**
@@ -142,7 +142,7 @@ ${SPLASH_CSS}
 <body>
   <div id="initial-loading" class="pi-splash" data-leaving="false" role="status">
     <div class="pi-splash-backdrop" aria-hidden="true"></div>
-    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-camera"><div class="pi-splash-ground">${GROUND_CELLS}</div><span class="pi-splash-mark">${CUBE_MARKUP}</span></div></div></div>
+    <div class="pi-splash-ground-clip" aria-hidden="true"><div class="pi-splash-horizon"><div class="pi-splash-camera"><div class="pi-splash-ground">${GROUND_CLUSTERS}</div><span class="pi-splash-mark">${CUBE_MARKUP}</span></div></div></div>
     <div class="pi-splash-status">PIARIUM</div>
     <div id="loading-status" role="status" aria-live="polite"></div>
   </div>

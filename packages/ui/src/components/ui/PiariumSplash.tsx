@@ -2,10 +2,11 @@ import React from 'react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { splashCubeMarkup } from './piarium-splash-cube';
 import {
-  buildSplashCells,
+  buildSplashTileClusters,
+  PIARIUM_SPLASH_STYLE_ELEMENT_ID,
   PIARIUM_SPLASH_COLORS,
   splashExitScale,
-  splashWorkbenchCellDelays,
+  splashWorkbenchClusterDelays,
   splashPlaneCss,
   type PiariumSplashDirection,
   type PiariumSplashMode,
@@ -28,6 +29,16 @@ import {
 
 const STYLES = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
 
+const usePiariumSplashStyles = (): void => {
+  React.useInsertionEffect(() => {
+    if (typeof document === 'undefined' || document.getElementById(PIARIUM_SPLASH_STYLE_ELEMENT_ID)) return;
+    const style = document.createElement('style');
+    style.id = PIARIUM_SPLASH_STYLE_ELEMENT_ID;
+    style.textContent = STYLES;
+    document.head.append(style);
+  }, []);
+};
+
 /**
  * Both built once at module load rather than per render.
  *
@@ -36,9 +47,9 @@ const STYLES = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
  * machine is at its busiest, which is the whole reason none of it is recomputed.
  */
 const CUBE_MARKUP = splashCubeMarkup();
-const SWEEP_CELLS = {
-  forward: buildSplashCells('switch', 'forward', false),
-  backward: buildSplashCells('switch', 'backward', false),
+const SWEEP_CLUSTERS = {
+  forward: buildSplashTileClusters('switch', 'forward', false),
+  backward: buildSplashTileClusters('switch', 'backward', false),
 } as const;
 
 export interface PiariumSplashProps {
@@ -74,6 +85,7 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
   onPhaseComplete,
   className,
 }) => {
+  usePiariumSplashStyles();
   const systemReducedMotion = usePrefersReducedMotion();
   const reducedMotion = reducedMotionOverride ?? systemReducedMotion;
   // Re-evaluate on the render that flips `leaving`: a slow startup may have been resized since mount, and
@@ -82,12 +94,12 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
     ? splashExitScale(1920, 1080)
     : splashExitScale(window.innerWidth, window.innerHeight);
 
-  // Which cells breathe is drawn once per mount. Re-picking on every render would make the idle state
+  // Which clusters breathe is drawn once per mount. Re-picking on every render would make the idle state
   // shimmer randomly instead of pulsing steadily. The sweep has no random part, so it is a constant.
-  const cells = React.useMemo(
+  const clusters = React.useMemo(
     () => (mode === 'boot'
-      ? buildSplashCells('boot', direction, !reducedMotion)
-      : SWEEP_CELLS[direction]),
+      ? buildSplashTileClusters('boot', direction, !reducedMotion)
+      : SWEEP_CLUSTERS[direction]),
     [mode, direction, reducedMotion],
   );
 
@@ -110,7 +122,6 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
         ) onPhaseComplete?.();
       }}
     >
-      <style>{STYLES}</style>
       {/* The cover for everything the floor's cells cannot reach. A hole opens in it from the cube's feet
           during the exit, so where the cells are the cover, they are the only cover. */}
       <div className="pi-splash-backdrop" aria-hidden="true" />
@@ -118,31 +129,31 @@ export const PiariumSplash: React.FC<PiariumSplashProps> = ({
         <div className="pi-splash-horizon">
           <div className="pi-splash-camera">
             <div className="pi-splash-ground">
-              {cells.map((cell) => {
+              {clusters.map((cluster) => {
                 const standard = mode === 'switch'
-                  ? splashWorkbenchCellDelays(cell.delayMs, 'standard')
+                  ? splashWorkbenchClusterDelays(cluster.delayMs, 'standard')
                   : null;
                 const quick = mode === 'switch'
-                  ? splashWorkbenchCellDelays(cell.delayMs, 'quick')
+                  ? splashWorkbenchClusterDelays(cluster.delayMs, 'quick')
                   : null;
                 return (
                 <span
-                  key={cell.key}
-                  className="pi-splash-cell"
-                  data-breathe={cell.breatheDelayMs === null ? 'false' : 'true'}
+                  key={cluster.key}
+                  className="pi-splash-tile-cluster"
+                  data-breathe={cluster.breatheDelayMs === null ? 'false' : 'true'}
                   style={{
-                    '--pi-cell-delay': `${cell.delayMs}ms`,
-                    '--pi-cell-scatter-x': `${cell.scatterXPx}px`,
-                    '--pi-cell-scatter-y': `${cell.scatterYPx}px`,
+                    '--pi-cluster-delay': `${cluster.delayMs}ms`,
+                    '--pi-cluster-scatter-x': `${cluster.scatterXPx}px`,
+                    '--pi-cluster-scatter-y': `${cluster.scatterYPx}px`,
                     ...(standard && quick ? {
-                      '--pi-cell-cover-delay-standard': `${standard.coverDelayMs}ms`,
-                      '--pi-cell-reveal-delay-standard': `${standard.revealDelayMs}ms`,
-                      '--pi-cell-cover-delay-quick': `${quick.coverDelayMs}ms`,
-                      '--pi-cell-reveal-delay-quick': `${quick.revealDelayMs}ms`,
+                      '--pi-cluster-cover-delay-standard': `${standard.coverDelayMs}ms`,
+                      '--pi-cluster-reveal-delay-standard': `${standard.revealDelayMs}ms`,
+                      '--pi-cluster-cover-delay-quick': `${quick.coverDelayMs}ms`,
+                      '--pi-cluster-reveal-delay-quick': `${quick.revealDelayMs}ms`,
                     } : {}),
-                    ...(cell.breatheDelayMs === null
+                    ...(cluster.breatheDelayMs === null
                       ? {}
-                      : { '--pi-breathe-delay': `${cell.breatheDelayMs}ms` }),
+                      : { '--pi-breathe-delay': `${cluster.breatheDelayMs}ms` }),
                   } as React.CSSProperties}
                 />
                 );

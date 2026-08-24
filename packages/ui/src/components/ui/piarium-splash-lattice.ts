@@ -15,16 +15,16 @@ import {
  * base centred on one cell. The camera therefore reprojects both together: the cube's footprint *is* a
  * floor cell and the lines leaving its base corners are the floor's own lines.
  *
- * The floor keeps the default flat `transform-style`, so its cells are rasterised once and mapped by a
- * single projective transform. That is what makes perspective cost the same as the isometric version it
- * replaces, rather than promoting several hundred cells into a 3D rendering context during startup, when
- * the machine is already at its busiest.
+ * The floor keeps the default flat `transform-style`. Its 24×24 visual grid is painted by 8×8 contiguous
+ * clusters and mapped through one projective camera, so the scene never promotes hundreds of independent
+ * tile elements while startup and Shell activation are already competing for the renderer.
  */
 
 export type PiariumSplashMode = 'boot' | 'switch';
 export type PiariumSplashDirection = 'forward' | 'backward';
 export type PiariumSplashPhase = 'covering' | 'covered' | 'revealing';
 export type PiariumSplashTempo = 'quick' | 'standard';
+export const PIARIUM_SPLASH_STYLE_ELEMENT_ID = 'piarium-splash-styles';
 
 /**
  * Cube edge in pixels, and therefore the floor's cell size, which is what registers the two.
@@ -50,8 +50,8 @@ export const CUBE_EDGE_PX = 96;
  * projection divides by zero and the image turns inside out. Nine leaves room and still puts the near
  * corner well below any window's bottom edge.
  *
- * Together these cover roughly 2700 by 4600 CSS pixels of window at 576 cells, which is the same element
- * count the isometric version reached at its largest.
+ * Together these cover roughly 2700 by 4600 CSS pixels of window. The visual geometry remains 576 tiles,
+ * while the DOM and animation geometry below deliberately group them into 64 contiguous clusters.
  */
 const GROUND_CELLS_BEHIND = 14;
 const GROUND_CELLS_AHEAD = 9;
@@ -59,8 +59,8 @@ const GROUND_CELLS_AHEAD = 9;
 /**
  * The visible line plane extends farther toward the horizon without adding DOM cells.
  *
- * The 24×24 real cells remain the opaque cover and the things that scatter. A single repeating-gradient
- * continuation behind them carries the same registered grid farther away, so tall windows do not end in a
+ * The 24×24 real tiles remain the opaque cover and scatter as 8×8 contiguous clusters. A single repeating-
+ * gradient continuation behind them carries the same registered grid farther away, so tall windows do not end in a
  * blank strip above a finite floor. It extends only away from the camera: adding near rows would approach
  * the perspective plane and magnify them into huge foreground slabs.
  */
@@ -68,6 +68,15 @@ const VISUAL_GROUND_CELLS_BEHIND = 28;
 
 /** Cells per axis: the ones behind, the cube's own, and the ones in front. */
 const GROUND_AXIS = GROUND_CELLS_BEHIND + 1 + GROUND_CELLS_AHEAD;
+/**
+ * The floor is painted as contiguous 3×3 tile clusters rather than 576 independently animated DOM
+ * elements. Each cluster is one compositor candidate with a compact raster rectangle; all clusters
+ * together still cover the exact 24×24 floor. This removes the per-tile Paint/Raster fanout measured in
+ * packaged Electron while preserving the same camera and tile grid on every Surface.
+ */
+export const GROUND_CLUSTER_EDGE_CELLS = 3;
+export const GROUND_CLUSTER_AXIS = GROUND_AXIS / GROUND_CLUSTER_EDGE_CELLS;
+export const GROUND_CLUSTER_EDGE_PX = GROUND_CLUSTER_EDGE_CELLS * CUBE_EDGE_PX;
 /** Floor-space extent from the origin, in each of the two directions. */
 const GROUND_BEHIND_PX = (GROUND_CELLS_BEHIND + 0.5) * CUBE_EDGE_PX;
 const GROUND_AHEAD_PX = (GROUND_CELLS_AHEAD + 0.5) * CUBE_EDGE_PX;
@@ -109,6 +118,10 @@ export const GROUND_SHAPE: GroundShape = {
   offsetPx: GROUND_BEHIND_PX,
 };
 
+if (!Number.isInteger(GROUND_CLUSTER_AXIS)) {
+  throw new Error('Splash ground axis must be divisible into whole tile clusters');
+}
+
 /** How far the floor's extremes land from the origin on screen, under the shared camera. */
 export const GROUND_REACH = floorReach(GROUND_BEHIND_PX, GROUND_AHEAD_PX);
 const VISUAL_GROUND_REACH = floorReach(VISUAL_GROUND_BEHIND_PX, GROUND_AHEAD_PX);
@@ -138,10 +151,10 @@ const VISUAL_GROUND_RADIUS_PX = Math.floor(floorInscribedRadius(
 ));
 
 /**
- * How far from the cube's feet the exit reveals the app one cell at a time.
+ * How far from the cube's feet the exit reveals the app cluster by cluster.
  *
- * The floor's cells are the cover inside this radius: they are opaque, so as each one shrinks away the
- * app shows through the hole it leaves. That only works where the screen is actually paved with cells at
+ * The floor's clusters are the cover inside this radius: they are opaque, so as each one shrinks away the
+ * app shows through the hole it leaves. That only works where the screen is actually paved with tiles at
  * full opacity, which bounds the radius twice over — by the floor's projected outline, which is a
  * quadrilateral and cannot reach the corners of a rectangular window, and by the horizon ramp, past which
  * the cells are no longer opaque enough to hide anything.
@@ -154,7 +167,7 @@ export const GROUND_REVEAL_RADIUS_PX = Math.floor(Math.min(
   GROUND_FADE_RISE_PX,
 ));
 
-const CELL_EXIT_MS = 520;
+const CLUSTER_EXIT_MS = 520;
 const MARK_EXIT_MS = 960;
 /** The cube makes contact just before the first floor tile starts moving. */
 const BOOT_TILE_RELEASE_MS = 860;
@@ -169,12 +182,12 @@ const CUBE_FACE_FADE_END_PCT = 86;
 const CUBE_PRESS_DELAY_MS = Math.round(MARK_EXIT_MS * CUBE_PRESS_START_PCT / 100);
 /** The contact light ends exactly as the centre tile is released. */
 const CONTACT_PRESS_MS = BOOT_TILE_RELEASE_MS - CUBE_PRESS_DELAY_MS;
-/** Widest per-cell delay either mode schedules. */
-const MAX_CELL_DELAY_MS = 520;
+/** Widest per-cluster delay either mode schedules. */
+const MAX_CLUSTER_DELAY_MS = 520;
 
 /** How long a caller must keep the splash mounted after asking it to leave. */
 export const SPLASH_EXIT_DURATION_MS = Math.max(
-  BOOT_TILE_RELEASE_MS + MAX_CELL_DELAY_MS + CELL_EXIT_MS,
+  BOOT_TILE_RELEASE_MS + MAX_CLUSTER_DELAY_MS + CLUSTER_EXIT_MS,
   MARK_EXIT_MS,
 );
 /** The reduced-motion path replaces every staged animation with one fade of the whole cover. */
@@ -183,9 +196,9 @@ export const SPLASH_REDUCED_EXIT_DURATION_MS = 260;
 /**
  * The reveal's own timings.
  *
- * The hole opens roughly as fast as the cell wave travels, so a cell has usually gone by the time the
+ * The hole opens roughly as fast as the cluster wave travels, so a cluster has usually gone by the time the
  * hole reaches it; the backdrop then fades once the hole has stopped growing, and finishes before the
- * outermost cells do, so those are seen coming apart against the app rather than against flat colour.
+ * outermost clusters do, so those are seen coming apart against the app rather than against flat colour.
  */
 const REVEAL_MS = 480;
 const BACKDROP_FADE_MS = 260;
@@ -197,18 +210,18 @@ const REVEAL_EDGE_PX = 64;
  * timing that was already visually accepted instead of inventing a new short cutoff, while still playing
  * every camera, cube, contact, and floor keyframe in the full mirrored sequence.
  */
-export const SPLASH_WORKBENCH_QUICK_DURATION_MS = MAX_CELL_DELAY_MS + CELL_EXIT_MS;
+export const SPLASH_WORKBENCH_QUICK_DURATION_MS = MAX_CLUSTER_DELAY_MS + CLUSTER_EXIT_MS;
 const WORKBENCH_QUICK_SCALE = SPLASH_WORKBENCH_QUICK_DURATION_MS / SPLASH_EXIT_DURATION_MS;
 
 interface SplashTimeline {
   readonly backdropFadeMs: number;
-  readonly cellExitMs: number;
+  readonly clusterExitMs: number;
   readonly contactDelayMs: number;
   readonly contactPressMs: number;
   readonly floorDelayMs: number;
   readonly floorDurationMs: number;
   readonly markExitMs: number;
-  readonly maxCellDelayMs: number;
+  readonly maxClusterDelayMs: number;
   readonly revealMs: number;
   readonly statusOutMs: number;
   readonly tileReleaseMs: number;
@@ -219,13 +232,13 @@ const timelineAt = (scale: number): SplashTimeline => {
   const at = (value: number): number => Math.round(value * scale);
   return {
     backdropFadeMs: at(BACKDROP_FADE_MS),
-    cellExitMs: at(CELL_EXIT_MS),
+    clusterExitMs: at(CLUSTER_EXIT_MS),
     contactDelayMs: at(CUBE_PRESS_DELAY_MS),
     contactPressMs: at(CONTACT_PRESS_MS),
     floorDelayMs: at(FLOOR_FLATTEN_DELAY_MS),
     floorDurationMs: at(FLOOR_FLATTEN_MS),
     markExitMs: at(MARK_EXIT_MS),
-    maxCellDelayMs: at(MAX_CELL_DELAY_MS),
+    maxClusterDelayMs: at(MAX_CLUSTER_DELAY_MS),
     revealMs: at(REVEAL_MS),
     statusOutMs: at(180),
     tileReleaseMs: at(BOOT_TILE_RELEASE_MS),
@@ -243,21 +256,21 @@ export const splashWorkbenchPhaseDurationMs = (
   reducedMotion = false,
 ): number => reducedMotion ? SPLASH_REDUCED_EXIT_DURATION_MS : WORKBENCH_TIMELINES[tempo].totalMs;
 
-export const splashWorkbenchCellDelays = (
+export const splashWorkbenchClusterDelays = (
   delayMs: number,
   tempo: PiariumSplashTempo,
 ): { coverDelayMs: number; revealDelayMs: number } => {
   const timeline = WORKBENCH_TIMELINES[tempo];
-  const scaledDelay = Math.round(delayMs * timeline.maxCellDelayMs / MAX_CELL_DELAY_MS);
+  const scaledDelay = Math.round(delayMs * timeline.maxClusterDelayMs / MAX_CLUSTER_DELAY_MS);
   const revealDelayMs = timeline.tileReleaseMs + scaledDelay;
   return {
-    // Exact global time reversal: the cell that finishes last while revealing begins first while covering.
-    coverDelayMs: Math.max(0, timeline.totalMs - revealDelayMs - timeline.cellExitMs),
+    // Exact global time reversal: the cluster that finishes last while revealing begins first while covering.
+    coverDelayMs: Math.max(0, timeline.totalMs - revealDelayMs - timeline.clusterExitMs),
     revealDelayMs,
   };
 };
 
-/** Fraction of cells that join the idle breathing. */
+/** Fraction of clusters that join the idle breathing. */
 const BREATHE_SHARE = 0.1;
 const BREATHE_SPREAD_MS = 2200;
 
@@ -337,59 +350,59 @@ const splashExitScaleExpression = (): string => {
   return `(function(w,h){var e=${edges};var oy=h*${GROUND_ORIGIN_Y_PCT / 100};var p=[[-w/2,-oy],[w/2,-oy],[w/2,h-oy],[-w/2,h-oy]];var s=1;for(var i=0;i<e.length;i++){for(var j=0;j<p.length;j++){s=Math.max(s,(e[i].normalX*p[j][0]+e[i].normalY*p[j][1])/e[i].support)}}return Math.ceil(s*${FLAT_GROUND_OVERSCAN}*1000)/1000})(innerWidth,innerHeight)`;
 };
 
-export interface SplashCell {
+export interface SplashTileCluster {
   readonly key: string;
   readonly delayMs: number;
   readonly breatheDelayMs: number | null;
-  /** Floor-space displacement during exit. The camera projects it with the tile, so it stays on-plane. */
+  /** Floor-space displacement during exit. The camera projects it with the cluster, so it stays on-plane. */
   readonly scatterXPx: number;
   readonly scatterYPx: number;
 }
 
 /**
- * Per-cell exit delay.
+ * Per-cluster exit delay.
  *
- * `boot` radiates from the cell the cube stands on, so the floor comes apart outward from its feet.
+ * `boot` radiates from the cluster containing the cube footprint, so the floor comes apart outward from its feet.
  * Measured in floor space, so under perspective the wavefront races away toward the horizon rather than
  * expanding as a flat circle on screen.
  *
  * `switch` sweeps along one floor axis and flips with the direction, so switching back is visibly the
  * reverse of switching forward. A slight cross-axis skew keeps the sweep from landing as one hard edge.
  */
-export const buildSplashCells = (
+export const buildSplashTileClusters = (
   mode: PiariumSplashMode,
   direction: PiariumSplashDirection,
   breathe: boolean,
   random: () => number = Math.random,
-): SplashCell[] => {
-  const { axis, originCell } = GROUND_SHAPE;
-  const cells: SplashCell[] = [];
-  // The cube does not stand in the middle of the grid, so the furthest cell from it is whichever corner
+): SplashTileCluster[] => {
+  const originCluster = Math.floor(GROUND_SHAPE.originCell / GROUND_CLUSTER_EDGE_CELLS);
+  const clusters: SplashTileCluster[] = [];
+  // The cube does not stand in the middle of the grid, so the furthest cluster from it is whichever corner
   // is furthest — which is the one diagonally behind it.
   const maxRadius = Math.hypot(
-    Math.max(originCell, axis - 1 - originCell),
-    Math.max(originCell, axis - 1 - originCell),
+    Math.max(originCluster, GROUND_CLUSTER_AXIS - 1 - originCluster),
+    Math.max(originCluster, GROUND_CLUSTER_AXIS - 1 - originCluster),
   ) || 1;
   const skew = 0.22;
 
-  for (let row = 0; row < axis; row += 1) {
-    for (let col = 0; col < axis; col += 1) {
+  for (let row = 0; row < GROUND_CLUSTER_AXIS; row += 1) {
+    for (let col = 0; col < GROUND_CLUSTER_AXIS; col += 1) {
       let fraction: number;
       if (mode === 'boot') {
-        fraction = Math.hypot(col - originCell, row - originCell) / maxRadius;
+        fraction = Math.hypot(col - originCluster, row - originCluster) / maxRadius;
       } else {
-        const along = direction === 'forward' ? col : axis - 1 - col;
-        fraction = (along + row * skew) / (axis * (1 + skew));
+        const along = direction === 'forward' ? col : GROUND_CLUSTER_AXIS - 1 - col;
+        fraction = (along + row * skew) / (GROUND_CLUSTER_AXIS * (1 + skew));
       }
-      const dx = col - originCell;
-      const dy = row - originCell;
+      const dx = col - originCluster;
+      const dy = row - originCluster;
       const radius = Math.hypot(dx, dy);
       let scatterXPx: number;
       let scatterYPx: number;
       if (mode === 'boot') {
-        // Nearby tiles move just enough to expose the app; tiles further out travel farther so the floor
-        // opens like a field of diamonds rather than collapsing into a small circular dimple. The motion
-        // is authored in floor space and projected once by the parent camera.
+        // Nearby clusters move just enough to expose the app; clusters further out travel farther so the
+        // floor opens like a field of tiled panels rather than collapsing into a circular dimple. The
+        // motion is authored in floor space and projected once by the parent camera.
         const magnitude = radius === 0
           ? 0
           : CUBE_EDGE_PX * (0.18 + 0.36 * clamp(radius / 6, 0, 1));
@@ -400,9 +413,9 @@ export const buildSplashCells = (
         scatterXPx = Math.round(CUBE_EDGE_PX * 0.28) * (direction === 'forward' ? 1 : -1);
         scatterYPx = 0;
       }
-      cells.push({
+      clusters.push({
         key: `${row}-${col}`,
-        delayMs: Math.round(clamp(fraction, 0, 1) * MAX_CELL_DELAY_MS),
+        delayMs: Math.round(clamp(fraction, 0, 1) * MAX_CLUSTER_DELAY_MS),
         breatheDelayMs: breathe && random() < BREATHE_SHARE
           ? Math.round(random() * BREATHE_SPREAD_MS)
           : null,
@@ -412,7 +425,7 @@ export const buildSplashCells = (
     }
   }
 
-  return cells;
+  return clusters;
 };
 
 /**
@@ -428,8 +441,8 @@ const CAMERA_STYLE = {
 } as const;
 
 const GROUND_STYLE = {
-  gridTemplateColumns: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
-  gridTemplateRows: `repeat(${GROUND_SHAPE.axis}, ${GROUND_SHAPE.cellPx}px)`,
+  gridTemplateColumns: `repeat(${GROUND_CLUSTER_AXIS}, ${GROUND_CLUSTER_EDGE_PX}px)`,
+  gridTemplateRows: `repeat(${GROUND_CLUSTER_AXIS}, ${GROUND_CLUSTER_EDGE_PX}px)`,
   transform: `translate(${-GROUND_SHAPE.offsetPx}px, ${-GROUND_SHAPE.offsetPx}px)`,
 } as const;
 
@@ -505,17 +518,17 @@ export const splashPlaneCss = (
         const coverOpenDelay = timeline.totalMs - timeline.tileReleaseMs - timeline.revealMs;
         const coverFadeDelay = timeline.totalMs - revealFadeDelay - timeline.backdropFadeMs;
         const coverContactDelay = timeline.totalMs - timeline.contactDelayMs - timeline.contactPressMs;
-        const coverContinuationDelay = timeline.totalMs - timeline.tileReleaseMs - timeline.cellExitMs;
+        const coverContinuationDelay = timeline.totalMs - timeline.tileReleaseMs - timeline.clusterExitMs;
         const coverStatusDelay = timeline.totalMs - timeline.statusOutMs;
         const covering = `.pi-splash[data-mode='switch'][data-phase='covering'][data-tempo='${tempo}']`;
         const revealing = `.pi-splash[data-mode='switch'][data-phase='revealing'][data-tempo='${tempo}']`;
         return `
 ${covering} {
-animation: pi-splash-floor-unmask ${timeline.floorDurationMs}ms ${coverFloorDelay}ms cubic-bezier(0.25, 0.7, 0.25, 1) reverse both;
+animation: pi-splash-floor-mask ${timeline.floorDurationMs}ms ${coverFloorDelay}ms steps(1, end) both;
 }
 ${revealing} {
 pointer-events: none;
-animation: pi-splash-floor-unmask ${timeline.floorDurationMs}ms ${timeline.floorDelayMs}ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+animation: pi-splash-floor-unmask ${timeline.floorDurationMs}ms ${timeline.floorDelayMs}ms steps(1, end) both;
 }
 ${covering} .pi-splash-phase-clock,
 ${revealing} .pi-splash-phase-clock {
@@ -542,18 +555,18 @@ ${revealing} .pi-splash-camera {
 animation: pi-splash-camera-flatten ${timeline.floorDurationMs}ms ${timeline.floorDelayMs}ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 ${covering} .pi-splash-ground::before {
-animation: pi-splash-continuation-out ${timeline.cellExitMs}ms ${coverContinuationDelay}ms ease reverse both;
+animation: pi-splash-continuation-out ${timeline.clusterExitMs}ms ${coverContinuationDelay}ms ease reverse both;
 }
 ${revealing} .pi-splash-ground::before {
-animation: pi-splash-continuation-out ${timeline.cellExitMs}ms ${timeline.tileReleaseMs}ms ease both;
+animation: pi-splash-continuation-out ${timeline.clusterExitMs}ms ${timeline.tileReleaseMs}ms ease both;
 }
-${covering} .pi-splash-cell {
-animation: pi-splash-cell-out ${timeline.cellExitMs}ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
-animation-delay: var(--pi-cell-cover-delay-${tempo});
+${covering} .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out ${timeline.clusterExitMs}ms cubic-bezier(0.32, 0, 0.24, 1) reverse both;
+animation-delay: var(--pi-cluster-cover-delay-${tempo});
 }
-${revealing} .pi-splash-cell {
-animation: pi-splash-cell-out ${timeline.cellExitMs}ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cell-reveal-delay-${tempo});
+${revealing} .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out ${timeline.clusterExitMs}ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cluster-reveal-delay-${tempo});
 }
 ${covering} .pi-splash-mark {
 animation: pi-splash-mark-press ${timeline.markExitMs}ms ${coverMarkDelay}ms cubic-bezier(0.3, 0, 0.2, 1) reverse both;
@@ -587,7 +600,7 @@ animation: pi-splash-status-out ${timeline.statusOutMs}ms ease both;
     ? `
 /* Unlike the old pre-projected SVG, this is a small real cube inside the floor's camera. Only its three
    visible faces participate in preserve-3d; the floor remains one flattened layer, so moving the camera
-   reprojects the logo without promoting the hundreds of cells behind it. */
+   reprojects the logo without promoting the entire tile field behind it. */
 .pi-splash-mark {
 position: absolute;
 left: -${CUBE_EDGE_PX / 2}px;
@@ -733,7 +746,7 @@ to { opacity: 0; transform: translateY(5px); }
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-backdrop,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-camera,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::before,
-.pi-splash[data-mode='switch'][data-phase] .pi-splash-cell,
+.pi-splash[data-mode='switch'][data-phase] .pi-splash-tile-cluster,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-mark,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-cube-face,
 .pi-splash[data-mode='switch'][data-phase] .pi-splash-ground::after,
@@ -807,12 +820,26 @@ inherits: true;
 initial-value: 0px;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] {
-animation: pi-splash-floor-unmask ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms cubic-bezier(0.25, 0.7, 0.25, 1) both;
+animation: pi-splash-floor-unmask ${FLOOR_FLATTEN_MS}ms ${FLOOR_FLATTEN_DELAY_MS}ms steps(1, end) both;
 }
 @keyframes pi-splash-floor-unmask {
+from {
+--pi-splash-floor-mask: ${VISUAL_GROUND_RADIUS_PX}px;
+--pi-splash-horizon-lift: 0px;
+}
 to {
 --pi-splash-floor-mask: 160vmax;
 --pi-splash-horizon-lift: 160vmax;
+}
+}
+@keyframes pi-splash-floor-mask {
+from {
+--pi-splash-floor-mask: 160vmax;
+--pi-splash-horizon-lift: 160vmax;
+}
+to {
+--pi-splash-floor-mask: ${VISUAL_GROUND_RADIUS_PX}px;
+--pi-splash-horizon-lift: 0px;
 }
 }
 /* The floor is a quadrilateral in projection and a window is a rectangle, so the cells cannot cover the
@@ -867,7 +894,7 @@ overflow: hidden;
 mask-image: linear-gradient(to bottom, rgba(0,0,0,0) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_EDGE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)), rgba(0,0,0,1) calc(${GROUND_ORIGIN_Y_PCT}% - ${Math.round(VISUAL_GROUND_FADE_RISE_PX)}px - var(--pi-splash-horizon-lift, 0px)));
 }
 /* One camera owns both the flattened floor layer and the small preserve-3d cube. The floor's descendants
-   remain flat, so this does not turn its hundreds of cells into separate 3D layers. */
+   remain flat, so its visual tiles do not become separate 3D layers. */
 .pi-splash-camera {
 position: absolute;
 left: 50%;
@@ -910,47 +937,55 @@ linear-gradient(to bottom, transparent 0 calc(100% - 1px), ${colors.line} calc(1
 background-size: ${CUBE_EDGE_PX}px ${CUBE_EDGE_PX}px;
 }
 .pi-splash[data-leaving='true'] .pi-splash-ground::before {
-animation: pi-splash-continuation-out ${CELL_EXIT_MS}ms ease both;
+animation: pi-splash-continuation-out ${CLUSTER_EXIT_MS}ms ease both;
 }
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-ground::before {
 animation-delay: ${BOOT_TILE_RELEASE_MS}ms;
 }
 @keyframes pi-splash-continuation-out { to { opacity: 0; } }
-/* Opaque, because these cells are the cover. Two edges each, so neighbours do not stack into a 2px rule. */
-.pi-splash-cell {
-background: ${colors.background};
-box-shadow: inset -1px -1px 0 ${colors.line};
+/* Opaque, contiguous 3×3 tile clusters. The repeated backgrounds preserve the original 96px lattice,
+   while one compact cluster replaces nine independently styled and animated elements. */
+.pi-splash-tile-cluster {
+contain: paint;
+background-color: ${colors.background};
+background-image:
+linear-gradient(to right, transparent 0 calc(100% - 1px), ${colors.line} calc(100% - 1px) 100%),
+linear-gradient(to bottom, transparent 0 calc(100% - 1px), ${colors.line} calc(100% - 1px) 100%);
+background-size: ${CUBE_EDGE_PX}px ${CUBE_EDGE_PX}px;
 transform-origin: center;
+}
+.pi-splash[data-mode='switch'][data-phase='covering'] .pi-splash-tile-cluster,
+.pi-splash[data-mode='switch'][data-phase='revealing'] .pi-splash-tile-cluster {
+will-change: transform, opacity;
 }
 /* Idle breathing starts late on purpose: a fast start never reaches it, so it only ever appears when
    there is genuinely something to wait for. Both ends are opaque colours: a translucent pulse would have
    punched a hole in the cover for half of every cycle. */
-.pi-splash-cell[data-breathe='true'] {
+.pi-splash-tile-cluster[data-breathe='true'] {
 animation: pi-splash-breathe 2.8s ease-in-out infinite;
 animation-delay: calc(1.2s + var(--pi-breathe-delay));
 }
 @keyframes pi-splash-breathe {
-0%, 100% { background: ${colors.background}; }
-50% { background: ${colors.cell}; }
+0%, 100% { background-color: ${colors.background}; }
+50% { background-color: ${colors.cell}; }
 }
 /* Declared after the breathing rule so equal specificity lets the exit win without !important. */
-.pi-splash[data-leaving='true'] .pi-splash-cell {
-animation: pi-splash-cell-out ${CELL_EXIT_MS}ms cubic-bezier(0.32, 0, 0.24, 1) both;
-animation-delay: var(--pi-cell-delay);
+.pi-splash[data-leaving='true'] .pi-splash-tile-cluster {
+animation: pi-splash-tile-cluster-out ${CLUSTER_EXIT_MS}ms cubic-bezier(0.32, 0, 0.24, 1) both;
+animation-delay: var(--pi-cluster-delay);
+will-change: transform, opacity;
 }
-.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-cell {
-animation-delay: calc(var(--pi-cell-delay) + ${BOOT_TILE_RELEASE_MS}ms);
+.pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-tile-cluster {
+animation-delay: calc(var(--pi-cluster-delay) + ${BOOT_TILE_RELEASE_MS}ms);
 }
-/* Each cell moves in the floor's own coordinate system before the parent camera projects it. On screen
-   the squares therefore stay registered as perspective diamonds while the wave pushes them away from the
-   cube's footprint. Opacity holds for the first half so the separation is visible before they dissolve. */
-@keyframes pi-splash-cell-out {
-0% { background: ${colors.background}; }
-32%, 55% { opacity: 1; background: ${colors.cell}; }
+/* Each cluster moves in the floor's own coordinate system before the parent camera projects it. Its nine
+   tiles therefore stay registered as perspective diamonds while the wave pushes the cluster away from the
+   cube's footprint. Only transform and opacity vary per frame, so the cluster can remain compositor-only. */
+@keyframes pi-splash-tile-cluster-out {
+0%, 55% { opacity: 1; }
 to {
 opacity: 0;
-background: ${colors.cell};
-transform: translate(var(--pi-cell-scatter-x, 0px), var(--pi-cell-scatter-y, 0px)) scale(0.56);
+transform: translate(var(--pi-cluster-scatter-x, 0px), var(--pi-cluster-scatter-y, 0px)) scale(0.56);
 }
 }
 ${markRules}
@@ -982,8 +1017,8 @@ ${workbenchPhaseRules}` : ''}
 .pi-splash:not([data-mode='switch'])[data-leaving='true'],
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-camera${reducedWorkbenchSelectors},
 .pi-splash[data-leaving='true'] .pi-splash-ground::before,
-.pi-splash-cell,
-.pi-splash[data-leaving='true'] .pi-splash-cell,
+.pi-splash-tile-cluster,
+.pi-splash[data-leaving='true'] .pi-splash-tile-cluster,
 .pi-splash[data-leaving='true'] .pi-splash-backdrop,
 .pi-splash:not([data-mode='switch'])[data-leaving='true'] .pi-splash-backdrop${reducedMarkRules} {
 animation: none;
@@ -999,7 +1034,7 @@ animation: none;
  *
  * Regenerating the embedded copies has to produce the same bytes or every regeneration would show up as
  * a diff and the verbatim-copy tests would fail for no reason. A plain multiplicative generator is
- * enough: the only thing riding on it is which tenth of the cells breathe.
+ * enough: the only thing riding on it is which tenth of the clusters breathe.
  */
 const stableRandom = (): (() => number) => {
   let state = 0x2f6e2b1;
@@ -1013,20 +1048,20 @@ const stableRandom = (): (() => number) => {
  * The pre-paint script that fills the floor, for hosts that build their document as text.
  *
  * `index.html` and `mini-chat.html` embed this verbatim and the geometry tests assert the copies still
- * match. The cell attributes are baked from `buildSplashCells` rather than recomputed in the emitted
+ * match. The cluster attributes are baked from `buildSplashTileClusters` rather than recomputed in the emitted
  * script: the delay pattern is the one thing that visibly ties the floor's exit to the cube it radiates
  * from, and a second implementation of it in a string is exactly how that drifts.
  *
- * The cells are emitted by a script rather than as markup because five hundred spans of literal HTML in
- * two files is a worse thing to maintain than one generated line, and the script is synchronous in
+ * The clusters are emitted by a script rather than as markup so pre-paint hosts share the exact same
+ * geometry without maintaining a second copy, and the script is synchronous in
  * `body`, so the floor is still there for the first paint.
  */
 export const splashGroundScript = (elementId: string): string => {
-  const cells = buildSplashCells('boot', 'forward', true, stableRandom());
-  const delays = cells.map((cell) => cell.delayMs).join(',');
-  const breathes = cells.map((cell) => cell.breatheDelayMs ?? -1).join(',');
-  const scatterXs = cells.map((cell) => cell.scatterXPx).join(',');
-  const scatterYs = cells.map((cell) => cell.scatterYPx).join(',');
+  const clusters = buildSplashTileClusters('boot', 'forward', true, stableRandom());
+  const delays = clusters.map((cluster) => cluster.delayMs).join(',');
+  const breathes = clusters.map((cluster) => cluster.breatheDelayMs ?? -1).join(',');
+  const scatterXs = clusters.map((cluster) => cluster.scatterXPx).join(',');
+  const scatterYs = clusters.map((cluster) => cluster.scatterYPx).join(',');
 
   return `(function(){
 var ground=document.getElementById('${elementId}');
@@ -1039,9 +1074,9 @@ var scatterXs=[${scatterXs}];
 var scatterYs=[${scatterYs}];
 var buffer='';
 for(var i=0;i<delays.length;i++){
-var style='--pi-cell-delay:'+delays[i]+'ms;--pi-cell-scatter-x:'+scatterXs[i]+'px;--pi-cell-scatter-y:'+scatterYs[i]+'px';
+var style='--pi-cluster-delay:'+delays[i]+'ms;--pi-cluster-scatter-x:'+scatterXs[i]+'px;--pi-cluster-scatter-y:'+scatterYs[i]+'px';
 if(breathes[i]>=0)style+=';--pi-breathe-delay:'+breathes[i]+'ms';
-buffer+='<span class="pi-splash-cell" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
+buffer+='<span class="pi-splash-tile-cluster" data-breathe="'+(breathes[i]>=0?'true':'false')+'" style="'+style+'"></span>';
 }
 ground.innerHTML=buffer;
 })();`;

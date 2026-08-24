@@ -13,7 +13,7 @@
  * Three blocks per host, because they answer to three different generators:
  *   SPLASH-CSS   the shared stylesheet, including the camera transform and the cube's placement
  *   SPLASH-MARK  the shared-camera CSS cube (index.html only; mini-chat draws no cube)
- *   SPLASH-JS    the script that fills the floor, with the per-cell exit delays baked in
+ *   SPLASH-JS    the script that fills the floor, with the tile-cluster exit delays baked in
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
