@@ -87,6 +87,7 @@ type GitViewProps = {
   showDirectorySelector?: boolean;
   sessionDirectory?: string | null;
   isFollowingSessionDirectory?: boolean;
+  followDirectoryLabel?: string;
   onDirectoryChange?: (directory: string) => void;
   onFollowSessionDirectory?: () => void;
   onViewDiff?: (path: string, staged: boolean) => void;
@@ -217,6 +218,7 @@ export const GitView: React.FC<GitViewProps> = ({
   showDirectorySelector = false,
   sessionDirectory,
   isFollowingSessionDirectory = false,
+  followDirectoryLabel,
   onDirectoryChange,
   onFollowSessionDirectory,
   onViewDiff,
@@ -2187,7 +2189,7 @@ export const GitView: React.FC<GitViewProps> = ({
             className="shrink-0"
             onClick={onFollowSessionDirectory}
           >
-            {t('gitView.directorySelector.followSession')}
+            {followDirectoryLabel ?? t('gitView.directorySelector.followSession')}
           </Button>
         ) : null}
         <Button

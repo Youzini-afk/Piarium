@@ -24,6 +24,7 @@ There are multiple store categories in this directory.
 These are the most performance-sensitive.
 
 - `useGitStore.ts`
+- `useGitRepositorySelectionStore.ts`
 - `useGitHubPrStatusStore.ts`
 - `useFilesViewTabsStore.ts`
 
@@ -134,6 +135,15 @@ Important properties:
 - status mutations advance a revision so older refreshes cannot undo optimistic or confirmed index changes
 - branch persistence is versioned, bounded, runtime-scoped, and claims the ambiguous legacy cache once
 - diff data has per-directory and aggregate count/UTF-8-byte limits; oversized single entries are rejected
+
+### `useGitRepositorySelectionStore.ts`
+
+The IDE's selected repository is a workspace-scoped view preference, separate from the product
+workspace and from a Pi session cwd. It stores the resolved Git top-level directory by opaque
+workspace identity, so choosing a nested repository never switches the Explorer, editor, terminal,
+or session workspace. The IDE validates that a restored or newly selected repository remains inside
+the active workspace before using it. Git diff paths are repository-relative and must be rebased
+through that selected repository root before becoming workspace resource IDs.
 
 ### `useGitHubPrStatusStore.ts`
 
