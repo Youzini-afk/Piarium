@@ -42,8 +42,14 @@ import {
   WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
 } from './workbench-registry';
-import { usePiariumExtensionCatalog } from './catalog-store';
-import { useWorkbenchWorkspaceId } from './workbench-workspace';
+import {
+  refreshPiariumExtensionCatalog,
+  usePiariumExtensionCatalog,
+} from './catalog-store';
+import {
+  useWorkbenchWorkspace,
+  useWorkbenchWorkspaceId,
+} from './workbench-workspace';
 import {
   DEFAULT_IDE_WORKBENCH_LAYOUT,
   flushPersistedIdeWorkbenchLayout,
@@ -76,6 +82,7 @@ import {
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then((module) => ({ default: module.SettingsWindow })));
 type SearchMode = 'files' | 'content';
+type IdeSearchDraft = { mode: SearchMode; query: string };
 
 type FileSearchViewState =
   | { status: 'idle' }
@@ -146,13 +153,17 @@ const ACTIVITIES: ReadonlyArray<{ id: IdeWorkbenchActivityId; icon: IconName; la
   { id: 'extensions', icon: 'plug', labelKey: 'workbench.ide.activity.extensions', ariaKey: 'workbench.ide.activity.extensionsAria' },
 ];
 
-const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory }) => {
+const IdeSearchPanel: React.FC<{
+  directory: string | undefined;
+  mode: SearchMode;
+  query: string;
+  onModeChange(mode: SearchMode): void;
+  onQueryChange(query: string): void;
+}> = ({ directory, mode, query, onModeChange, onQueryChange }) => {
   const { t } = useI18n();
   const files = useRuntimeAPIs().files;
   const workspaceSearch = useRuntimeAPIs().workspaceSearch;
   const workspaceId = useWorkbenchWorkspaceId();
-  const [mode, setMode] = React.useState<SearchMode>('files');
-  const [query, setQuery] = React.useState('');
   const [fileState, setFileState] = React.useState<FileSearchViewState>({ status: 'idle' });
   const [contentState, setContentState] = React.useState<ContentSearchViewState>({ status: 'idle' });
 
@@ -163,10 +174,10 @@ const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory
       setFileState({ status: 'idle' });
       return undefined;
     }
+    setFileState({ status: 'searching' });
     let cancelled = false;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
-      setFileState({ status: 'searching' });
       void files.search({ directory, query: normalized }, { signal: controller.signal })
         .then((hits) => {
           if (cancelled || controller.signal.aborted) return;
@@ -194,10 +205,10 @@ const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory
       setContentState({ status: 'idle' });
       return undefined;
     }
+    setContentState({ status: 'searching' });
     let cancelled = false;
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
-      setContentState({ status: 'searching' });
       void workspaceSearch.searchContent(
         { workspaceId, query: normalized },
         {
@@ -259,7 +270,7 @@ const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory
             variant="chip"
             size="xs"
             aria-pressed={mode === 'files'}
-            onClick={() => setMode('files')}
+            onClick={() => onModeChange('files')}
           >
             {t('workbench.ide.search.filesTab')}
           </Button>
@@ -268,14 +279,14 @@ const IdeSearchPanel: React.FC<{ directory: string | undefined }> = ({ directory
             variant="chip"
             size="xs"
             aria-pressed={mode === 'content'}
-            onClick={() => setMode('content')}
+            onClick={() => onModeChange('content')}
           >
             {t('workbench.ide.search.contentTab')}
           </Button>
         </div>
         <Input
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t(mode === 'files' ? 'workbench.ide.search.placeholder' : 'workbench.ide.search.contentPlaceholder')}
           aria-label={t(mode === 'files' ? 'workbench.ide.search.filesAria' : 'workbench.ide.search.contentAria')}
         />
@@ -331,8 +342,26 @@ const IdeExtensionsPanel: React.FC = () => {
           {t('workbench.ide.extensions.openSettings')}
         </Button>
       </div>
+      {catalog.error ? (
+        <div className="flex items-center gap-2 border-b border-status-warning/30 bg-status-warning/10 px-2 py-1 text-status-warning">
+          <Icon name="error-warning" className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate typography-micro" title={catalog.error}>{catalog.error}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() => void refreshPiariumExtensionCatalog().catch(() => undefined)}
+          >
+            {t('startup.initRecovery.retry')}
+          </Button>
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-auto p-2 typography-ui">
-        {extensions.length === 0 ? (
+        {!catalog.snapshot ? (
+          <p className="text-muted-foreground">
+            {catalog.loading || !catalog.error ? t('common.loading') : t('common.unavailable')}
+          </p>
+        ) : extensions.length === 0 ? (
           <p className="text-muted-foreground">{t('workbench.ide.extensions.empty')}</p>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -354,7 +383,8 @@ const SESSION_PICKER_REGION_ID = 'piarium-ide-session-picker';
 export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const { t } = useI18n();
   useUpdatePolling();
-  const workspaceId = useWorkbenchWorkspaceId();
+  const workspace = useWorkbenchWorkspace();
+  const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : undefined;
   const directory = useEffectiveDirectory();
   const projectActionsContext = useProjectActionsContext();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -379,10 +409,22 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(isSettingsDialogOpen);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
   const [sessionPickerOpen, setSessionPickerOpen] = React.useState(false);
+  const [searchDraftByDirectory, setSearchDraftByDirectory] = React.useState<Record<string, IdeSearchDraft>>({});
   const layoutState = useIdeWorkbenchLayout(workspaceId);
   const layoutDocument = layoutState?.document ?? DEFAULT_IDE_WORKBENCH_LAYOUT;
   const layout = React.useMemo(() => projectIdeWorkbenchLayout(layoutDocument), [layoutDocument]);
   const mainAreaRef = React.useRef<HTMLDivElement>(null);
+  const searchDirectoryKey = directory || '__no-workspace__';
+  const searchDraft = searchDraftByDirectory[searchDirectoryKey] ?? { mode: 'files', query: '' };
+
+  const updateSearchDraft = React.useCallback((patch: Partial<IdeSearchDraft>) => {
+    setSearchDraftByDirectory((current) => {
+      const previous = current[searchDirectoryKey] ?? { mode: 'files', query: '' };
+      const next = { ...previous, ...patch };
+      if (next.mode === previous.mode && next.query === previous.query) return current;
+      return { ...current, [searchDirectoryKey]: next };
+    });
+  }, [searchDirectoryKey]);
 
   React.useEffect(() => {
     if (isSettingsDialogOpen) setSettingsWindowMounted(true);
@@ -629,6 +671,16 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
           </div>
         ) : null}
 
+        {workspace.status === 'error' ? (
+          <div className="flex shrink-0 items-center gap-2 border-b border-status-warning/30 bg-status-warning/10 px-3 py-1 typography-meta text-status-warning">
+            <Icon name="error-warning" className="size-3.5" />
+            <span className="min-w-0 truncate" title={workspace.errorMessage}>{workspace.errorMessage}</span>
+            <Button type="button" variant="ghost" size="xs" className="ml-auto" onClick={workspace.retry}>
+              {t('startup.initRecovery.retry')}
+            </Button>
+          </div>
+        ) : null}
+
         <div ref={mainAreaRef} className="flex min-h-0 flex-1 overflow-hidden">
           {layout.activityVisible ? (
           <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border py-2" aria-label={t('workbench.ide.title')}>
@@ -687,7 +739,16 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               >
                 <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.primarySidebarViews} />
                 {layout.activity === 'explorer' ? <SidebarFilesTree openTarget="editor" /> : null}
-                {layout.activity === 'search' ? <IdeSearchPanel directory={directory} /> : null}
+                {layout.activity === 'search' ? (
+                  <IdeSearchPanel
+                    key={searchDirectoryKey}
+                    directory={directory}
+                    mode={searchDraft.mode}
+                    query={searchDraft.query}
+                    onModeChange={(mode) => updateSearchDraft({ mode })}
+                    onQueryChange={(query) => updateSearchDraft({ query })}
+                  />
+                ) : null}
                 {layout.activity === 'git' ? (
                   <React.Suspense fallback={null}>
                     <GitView
@@ -720,7 +781,17 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
             style={{ flex: `${layout.mainWeights[1]} 1 0%` }}
           >
             <main className="relative min-h-0 flex-1 overflow-hidden">
-              <EditorWorkbenchArea />
+              {workspace.status === 'ready' ? (
+                <EditorWorkbenchArea />
+              ) : (
+                <div className="flex h-full items-center justify-center px-4 text-center typography-ui text-muted-foreground">
+                  {workspace.status === 'loading'
+                    ? t('common.loading')
+                    : workspace.status === 'error'
+                      ? t('common.unavailable')
+                      : t('workbench.ide.status.noWorkspace')}
+                </div>
+              )}
               {isMultiRunLauncherOpen ? (
                 <div className="absolute inset-0 z-10 bg-background">
                   <ErrorBoundary>
