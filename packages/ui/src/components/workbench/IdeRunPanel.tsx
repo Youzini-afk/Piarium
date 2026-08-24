@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { toast } from '@/components/ui';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -23,6 +24,7 @@ import type {
   PiariumTestItem,
 } from '@/lib/api/types';
 import { RunServicesError } from '@/lib/api/run-errors';
+import { ideDebugControlAvailability } from '@/lib/workbench/ide-debug-controls';
 
 type TasksState =
   | { status: 'idle' }
@@ -61,6 +63,32 @@ export const IdeRunPanel: React.FC = () => {
   const workspaceIdRef = React.useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
   const uiEpoch = React.useSyncExternalStore(subscribeRunDebugUi, () => peekLastTestFailure(workspaceId ?? '')?.id ?? '', () => '');
+  const debugControls = ideDebugControlAvailability(debugStatus);
+
+  const reportActionFailure = React.useCallback((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : t('common.unavailable'));
+  }, [t]);
+
+  const runAction = React.useCallback((operation: () => Promise<unknown>) => {
+    const ownerWorkspaceId = workspaceId;
+    if (!ownerWorkspaceId) return;
+    void operation().catch((error) => {
+      if (workspaceIdRef.current === ownerWorkspaceId) reportActionFailure(error);
+    });
+  }, [reportActionFailure, workspaceId]);
+
+  const runDebugAction = React.useCallback((operation: () => Promise<PiariumDebugSessionStatus>) => {
+    const ownerWorkspaceId = workspaceId;
+    if (!ownerWorkspaceId) return;
+    void operation().then((snapshot) => {
+      if (workspaceIdRef.current === ownerWorkspaceId && snapshot.workspaceId === ownerWorkspaceId) {
+        setDebugStatus(snapshot);
+        if ((snapshot.status === 'absent' || snapshot.status === 'failed') && snapshot.message) {
+          toast.error(snapshot.message);
+        }
+      }
+    }).catch(reportActionFailure);
+  }, [reportActionFailure, workspaceId]);
 
   React.useEffect(() => {
     if (!workspaceId) return undefined;
@@ -150,8 +178,24 @@ export const IdeRunPanel: React.FC = () => {
     setStack([]);
     setVariables([]);
     setWatch([]);
+    setWatchDraft('');
     setConsoleLines([]);
+    setConsoleDraft('');
+    setProgram('debuggee.js');
+    setWorkbenchContextKey('debugIsActive', false);
+    setWorkbenchContextKey('debugIsPaused', false);
   }, [workspaceId]);
+
+  React.useEffect(() => {
+    const status = debugStatus?.status;
+    setWorkbenchContextKey('debugIsActive', status === 'running' || status === 'paused' || status === 'starting');
+    setWorkbenchContextKey('debugIsPaused', status === 'paused');
+  }, [debugStatus?.status]);
+
+  React.useEffect(() => () => {
+    setWorkbenchContextKey('debugIsActive', false);
+    setWorkbenchContextKey('debugIsPaused', false);
+  }, []);
 
   React.useEffect(() => {
     void refresh();
@@ -169,8 +213,6 @@ export const IdeRunPanel: React.FC = () => {
         if (event.kind === 'output') setConsoleLines((lines) => [...lines, event.text]);
         if (event.kind === 'status') {
           setDebugStatus(event.snapshot);
-          setWorkbenchContextKey('debugIsActive', event.snapshot.status === 'running' || event.snapshot.status === 'paused' || event.snapshot.status === 'starting');
-          setWorkbenchContextKey('debugIsPaused', event.snapshot.status === 'paused');
           if (event.snapshot.status === 'paused' || event.snapshot.status === 'stopped' || event.snapshot.status === 'failed') {
             void refresh();
           }
@@ -225,7 +267,10 @@ export const IdeRunPanel: React.FC = () => {
                   className="h-auto w-full justify-start"
                   onClick={() => {
                     setConsoleLines([]);
-                    void apis.tasks.run({ workspaceId, taskId: item.id });
+                    runAction(async () => {
+                      const result = await apis.tasks.run({ workspaceId, taskId: item.id });
+                      if (result.status === 'failed') throw new Error(result.message || t('common.unavailable'));
+                    });
                   }}
                 >
                   {t('workbench.ide.run.runTask', { label: item.label })}
@@ -241,25 +286,25 @@ export const IdeRunPanel: React.FC = () => {
       <section className="mb-4">
         <div className="mb-2 font-medium text-foreground">{t('workbench.ide.debug.title')}</div>
         <div className="mb-2 flex flex-wrap gap-1">
-          <Button type="button" size="xs" onClick={() => {
+          <Button type="button" size="xs" disabled={!debugControls.canStart} onClick={() => {
             setConsoleLines([]);
-            void apis.debug.start({ workspaceId, program, languageId: 'javascript' });
+            runDebugAction(() => apis.debug.start({ workspaceId, program, languageId: 'javascript' }));
           }}>
             {t('workbench.ide.debug.start')}
           </Button>
-          <Button type="button" size="xs" variant="ghost" onClick={() => void apis.debug.stop({ workspaceId })}>
+          <Button type="button" size="xs" variant="ghost" disabled={!debugControls.canStop} onClick={() => runDebugAction(() => apis.debug.stop({ workspaceId }))}>
             {t('workbench.ide.debug.stop')}
           </Button>
-          <Button type="button" size="xs" variant="ghost" onClick={() => void apis.debug.continue({ workspaceId })}>
+          <Button type="button" size="xs" variant="ghost" disabled={!debugControls.canContinue} onClick={() => runDebugAction(() => apis.debug.continue({ workspaceId }))}>
             {t('workbench.ide.debug.continue')}
           </Button>
-          <Button type="button" size="xs" variant="ghost" onClick={() => void apis.debug.stepOver({ workspaceId })}>
+          <Button type="button" size="xs" variant="ghost" disabled={!debugControls.canStep} onClick={() => runDebugAction(() => apis.debug.stepOver({ workspaceId }))}>
             {t('workbench.ide.debug.stepOver')}
           </Button>
-          <Button type="button" size="xs" variant="ghost" onClick={() => void apis.debug.stepIn({ workspaceId })}>
+          <Button type="button" size="xs" variant="ghost" disabled={!debugControls.canStep} onClick={() => runDebugAction(() => apis.debug.stepIn({ workspaceId }))}>
             {t('workbench.ide.debug.stepInto')}
           </Button>
-          <Button type="button" size="xs" variant="ghost" onClick={() => void apis.debug.stepOut({ workspaceId })}>
+          <Button type="button" size="xs" variant="ghost" disabled={!debugControls.canStep} onClick={() => runDebugAction(() => apis.debug.stepOut({ workspaceId }))}>
             {t('workbench.ide.debug.stepOut')}
           </Button>
         </div>
@@ -337,8 +382,11 @@ export const IdeRunPanel: React.FC = () => {
               event.preventDefault();
               const expression = watchDraft.trim();
               if (!expression) return;
-              void apis.debug.addWatch({ workspaceId, expression }).then((result) => {
-                if (result.status === 'ready' && result.expressions) setWatch(result.expressions);
+              runAction(async () => {
+                const result = await apis.debug.addWatch({ workspaceId, expression });
+                if (workspaceIdRef.current !== workspaceId) return;
+                if (result.status === 'failed') throw new Error(result.message || t('common.unavailable'));
+                if (result.expressions) setWatch(result.expressions);
               });
               setWatchDraft('');
             }}
@@ -350,9 +398,11 @@ export const IdeRunPanel: React.FC = () => {
             {watch.map((expression) => (
               <li key={expression} className="flex items-center justify-between gap-2">
                 <span>{expression}</span>
-                <Button type="button" variant="ghost" size="xs" onClick={() => {
-                  void apis.debug.removeWatch({ workspaceId, expression }).then((result) => setWatch(result.expressions));
-                }}
+                <Button type="button" variant="ghost" size="xs" onClick={() => runAction(async () => {
+                  const result = await apis.debug.removeWatch({ workspaceId, expression });
+                  if (workspaceIdRef.current !== workspaceId) return;
+                  setWatch(result.expressions);
+                })}
                 >
                   {t('workbench.ide.debug.watchRemove')}
                 </Button>
@@ -367,9 +417,14 @@ export const IdeRunPanel: React.FC = () => {
           <span className="font-medium text-foreground">{t('workbench.ide.tests.title')}</span>
           <div className="flex gap-1">
             <Button type="button" size="xs" variant="ghost" onClick={() => void refresh()}>{t('workbench.ide.tests.discover')}</Button>
-            <Button type="button" size="xs" onClick={() => {
+            <Button type="button" size="xs" disabled={tests.status !== 'ready' || tests.tests.length === 0} onClick={() => {
               setConsoleLines([]);
-              void apis.tests.run({ workspaceId });
+              runAction(async () => {
+                const result = await apis.tests.run({ workspaceId });
+                if (result.status === 'failed' || result.status === 'absent' || result.status === 'empty') {
+                  throw new Error(result.message || t('common.unavailable'));
+                }
+              });
             }}>{t('workbench.ide.tests.run')}</Button>
           </div>
         </div>
@@ -389,7 +444,12 @@ export const IdeRunPanel: React.FC = () => {
                   onClick={() => {
                     if (item.resourceId) openWorkbenchEditor(workspaceId, item.resourceId);
                     setConsoleLines([]);
-                    void apis.tests.run({ workspaceId, testIds: [item.id] });
+                    runAction(async () => {
+                      const result = await apis.tests.run({ workspaceId, testIds: [item.id] });
+                      if (result.status === 'failed' || result.status === 'absent' || result.status === 'empty') {
+                        throw new Error(result.message || t('common.unavailable'));
+                      }
+                    });
                   }}
                 >
                   {item.status === 'failed'
@@ -419,8 +479,12 @@ export const IdeRunPanel: React.FC = () => {
             event.preventDefault();
             const expression = consoleDraft.trim();
             if (!expression) return;
-            void apis.debug.evaluate({ workspaceId, expression }).then((result) => {
-              if (result.status === 'ready') setConsoleLines((lines) => [...lines, `${expression} => ${result.value}\n`]);
+            runAction(async () => {
+              const result = await apis.debug.evaluate({ workspaceId, expression });
+              if (workspaceIdRef.current !== workspaceId) return;
+              if (result.status === 'failed') throw new Error(result.message);
+              if (result.status === 'absent') throw new Error(t('common.unavailable'));
+              setConsoleLines((lines) => [...lines, `${expression} => ${result.value}\n`]);
             });
             setConsoleDraft('');
           }}
