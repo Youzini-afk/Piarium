@@ -23,12 +23,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
-import { normalizePath } from '@/lib/pathNormalization';
-import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
+import {
+  openPiSessionFromNavigation,
+  startPiSessionDraftFromNavigation,
+} from '@/lib/pi-runtime/sessionNavigation';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import {
   selectActivePiSessions,
@@ -48,10 +49,12 @@ import {
   collectPiSessionSubtreeIds,
   countPiSessionSubtreeValues,
   filterPiSessionForest,
+  groupPiSessionForestByWorkspace,
   piSessionTitle,
   type PiSessionNode,
 } from './sessionPresentation';
 import { PiSessionActivityDuration } from './PiSessionActivityDuration';
+import { SessionWorkspacePicker } from './SessionWorkspacePicker';
 import {
   renderFirstWorkbenchMatch,
   useWorkbenchMatchRenderers,
@@ -67,72 +70,11 @@ interface PiSessionSidebarProps {
   onRequestClose?: () => void;
 }
 
-interface SessionGroup {
-  forest: PiSessionNode[];
-  id: string;
-  label: string;
-  path: string;
-}
-
 interface ConfirmationState {
   action: 'archive' | 'delete';
   ids: string[];
   title: string;
 }
-
-const isPathWithin = (path: string, root: string): boolean => {
-  if (path === root) return true;
-  const prefix = root === '/' ? '/' : `${root}/`;
-  return path.startsWith(prefix);
-};
-
-const groupSessionForest = (
-  forest: PiSessionNode[],
-  projects: Array<{ id: string; label?: string | null; path: string }>,
-): SessionGroup[] => {
-  const normalizedProjects = projects
-    .map((project) => ({ ...project, normalizedPath: normalizePath(project.path) }))
-    .filter((project): project is typeof project & { normalizedPath: string } => (
-      project.normalizedPath !== null
-    ))
-    .sort((left, right) => right.normalizedPath.length - left.normalizedPath.length);
-  const groups = new Map<string, SessionGroup>();
-
-  for (const node of forest) {
-    const { session } = node;
-    const cwd = normalizePath(session.cwd) ?? session.cwd;
-    const project = normalizedProjects.find((candidate) => (
-      isPathWithin(cwd, candidate.normalizedPath)
-    ));
-    const id = project ? `project:${project.id}` : `directory:${cwd}`;
-    const existing = groups.get(id);
-    if (existing) {
-      existing.forest.push(node);
-      continue;
-    }
-    groups.set(id, {
-      forest: [node],
-      id,
-      label: project?.label?.trim()
-        || formatDirectoryName(project?.normalizedPath ?? cwd, null)
-        || project?.normalizedPath
-        || cwd,
-      path: project?.normalizedPath ?? cwd,
-    });
-  }
-
-  const projectOrder = new Map(projects.map((project, index) => [`project:${project.id}`, index]));
-  return [...groups.values()].sort((left, right) => {
-    const leftOrder = projectOrder.get(left.id);
-    const rightOrder = projectOrder.get(right.id);
-    if (leftOrder !== undefined || rightOrder !== undefined) {
-      if (leftOrder === undefined) return 1;
-      if (rightOrder === undefined) return -1;
-      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-    }
-    return left.label.localeCompare(right.label);
-  });
-};
 
 interface SessionRowProps {
   attentionBySession: Readonly<Record<string, PiSessionAttentionState>>;
@@ -370,7 +312,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const lastError = usePiSessionStore((state) => state.lastError);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
-  const openSession = usePiSessionStore((state) => state.openSession);
   const renameSession = usePiSessionStore((state) => state.renameSession);
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
@@ -385,14 +326,11 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   }, [pendingDialogs]);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
-  const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const togglePinned = useSessionPinnedStore((state) => state.toggle);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const [query, setQuery] = React.useState('');
   const [showArchived, setShowArchived] = React.useState(false);
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(() => new Set());
@@ -413,38 +351,27 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const groups = React.useMemo(() => {
     const source = showArchived ? archivedSessions : activeSessions;
     const forest = buildPiSessionForest(source, isPinned);
-    return groupSessionForest(forest, projects).map((group) => {
+    return groupPiSessionForestByWorkspace(forest, projects, isPinned).map((group) => {
       return {
         ...group,
+        label: group.project?.label?.trim()
+          || (group.path ? formatDirectoryName(group.path, null) || group.path : null)
+          || t('sessions.sidebar.workspacePicker.recent'),
         forest: filterPiSessionForest(group.forest, query, untitled),
       };
     }).filter((group) => group.forest.length > 0);
-  }, [activeSessions, archivedSessions, isPinned, projects, query, showArchived, untitled]);
-
-  const selectProjectForPath = React.useCallback((cwd: string) => {
-    const normalizedCwd = normalizePath(cwd);
-    if (!normalizedCwd) return;
-    const project = projects
-      .map((candidate) => ({ candidate, path: normalizePath(candidate.path) }))
-      .filter((entry): entry is { candidate: typeof projects[number]; path: string } => entry.path !== null)
-      .filter((entry) => isPathWithin(normalizedCwd, entry.path))
-      .sort((left, right) => right.path.length - left.path.length)[0]?.candidate;
-    if (project && project.id !== activeProjectId) setActiveProjectIdOnly(project.id);
-  }, [activeProjectId, projects, setActiveProjectIdOnly]);
+  }, [activeSessions, archivedSessions, isPinned, projects, query, showArchived, t, untitled]);
 
   const handleSelect = React.useCallback(async (session: SessionSummary) => {
     try {
-      selectProjectForPath(session.cwd);
-      setDirectory(session.cwd, { showOverlay: false });
-      await openSession({ sessionId: session.id });
-      setActiveMainTab('chat');
+      await openPiSessionFromNavigation({ directory: session.cwd, sessionId: session.id });
       if (mobileVariant) setSessionSwitcherOpen(false);
       onRequestClose?.();
     } catch (error) {
       console.error('Failed to open Pi session:', error);
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [mobileVariant, onRequestClose, openSession, selectProjectForPath, setActiveMainTab, setDirectory, setSessionSwitcherOpen]);
+  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen]);
 
   const handleCreate = React.useCallback(async () => {
     try {
@@ -578,6 +505,15 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
           </Tooltip>
         </div>
 
+        <div className="shrink-0 px-2.5 pt-2">
+          <SessionWorkspacePicker
+            onSelectionComplete={() => {
+              if (mobileVariant) setSessionSwitcherOpen(false);
+              onRequestClose?.();
+            }}
+          />
+        </div>
+
         <div className="shrink-0 px-2.5 py-2">
           <div className="relative">
             <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -643,7 +579,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
             groups.map((group) => (
               <section key={group.id} className="mb-3">
                 <div className="flex min-w-0 items-center gap-2 px-1.5 py-1.5 text-muted-foreground">
-                  <Icon name={showArchived ? 'archive' : 'folder'} className="size-3.5 shrink-0" />
+                  <Icon
+                    name={showArchived ? 'archive' : group.id === 'recent' ? 'history' : 'folder'}
+                    className="size-3.5 shrink-0"
+                  />
                   <span className="min-w-0 flex-1 truncate typography-micro font-medium uppercase tracking-wide">
                     {group.label}
                   </span>

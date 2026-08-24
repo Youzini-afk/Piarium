@@ -248,7 +248,12 @@ export const useMultiRunStore = create<MultiRunStore>()(
                   }
                 }
 
-                const snapshot = await piSessions.createSession(worktreePath, sessionTitle);
+                const snapshot = await piSessions.createSession(
+                  worktreePath,
+                  sessionTitle,
+                  undefined,
+                  { id: project.id, kind: 'workspace' },
+                );
                 sessionId = snapshot.sessionId;
                 await piSessions.selectModel(sessionId, {
                   id: model.modelID,

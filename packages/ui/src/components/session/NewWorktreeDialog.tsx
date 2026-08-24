@@ -826,7 +826,12 @@ export function NewWorktreeDialog({
             ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
             : t('session.newWorktree.newSessionTitle');
 
-        const session = await usePiSessionStore.getState().createSession(metadata.path, sessionTitle);
+        const session = await usePiSessionStore.getState().createSession(
+          metadata.path,
+          sessionTitle,
+          undefined,
+          { id: projectRef.id, kind: 'workspace' },
+        );
         createdSessionId = session.sessionId;
         onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
         onOpenChange(false);

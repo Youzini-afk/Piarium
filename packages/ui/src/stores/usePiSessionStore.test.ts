@@ -288,6 +288,40 @@ describe('Pi session store', () => {
     ]);
   });
 
+  test('forwards the Piarium workspace binding without changing the required cwd', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.create') return {
+        ...snapshot('session-a', 'D:/worktree/feature'),
+        workspace: { id: 'workspace-a', kind: 'workspace' },
+        workspacePersistence: 'pending',
+      } satisfies SessionSnapshot;
+      if (method === 'session.entries') return branch('session-a');
+      if (method === 'recovery.status') return recoveryStatus;
+      if (method === 'session.list') return [];
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    await store.getState().createSession(
+      'D:/worktree/feature',
+      undefined,
+      undefined,
+      { id: 'workspace-a', kind: 'workspace' },
+    );
+
+    expect(runtime.calls.find((call) => call.method === 'session.create')?.params).toEqual({
+      cwd: 'D:/worktree/feature',
+      workspace: { id: 'workspace-a', kind: 'workspace' },
+    });
+    runtime.event('session.snapshot', snapshot('session-a', 'D:/worktree/feature'), 'session-a');
+    expect(store.getState().records['session-a']?.snapshot?.workspace).toEqual({
+      id: 'workspace-a',
+      kind: 'workspace',
+    });
+    expect(store.getState().records['session-a']?.snapshot?.workspacePersistence).toBe('pending');
+  });
+
   test('keeps derived catalog selector references stable until summaries change', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

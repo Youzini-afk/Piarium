@@ -34,6 +34,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
+import { SessionWorkspacePicker } from '@/components/pi-session/SessionWorkspacePicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -60,7 +61,11 @@ import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
-import { comparePiSessions, piSessionTitle } from '@/components/pi-session/sessionPresentation';
+import {
+  createPiSessionWorkspaceProjectResolver,
+  comparePiSessions,
+  piSessionTitle,
+} from '@/components/pi-session/sessionPresentation';
 
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
 import { MobileSurfaceShell } from './MobileSurfaceShell';
@@ -122,6 +127,10 @@ const getParentId = (session: SessionSummary): string | null => session.parentId
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
 
+const comparablePath = (value: string): string => (
+  /^[A-Za-z]:(?:\/|$)/.test(value) ? value.toLowerCase() : value
+);
+
 const getSessionDirectory = (session: SessionSummary): string => normalizePath(session.cwd);
 
 const getProjectLabel = (path: string): string => {
@@ -152,26 +161,18 @@ const formatRelativeShort = (timestamp: number): string => {
 const pathBelongsToRoot = (path: string, root: string): boolean => {
   const normalizedPath = normalizePath(path);
   const normalizedRoot = normalizePath(root);
+  const comparableTarget = comparablePath(normalizedPath);
+  const comparableRoot = comparablePath(normalizedRoot);
   return Boolean(
     normalizedPath &&
       normalizedRoot &&
-      (normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)),
+      (comparableTarget === comparableRoot || comparableTarget.startsWith(`${comparableRoot}/`)),
   );
 };
 
-const findExactWorktreeMatch = (project: ProjectMeta, normalizedDirectory: string): WorktreeMetadata | null => (
-  project.worktrees.find((worktree) => normalizePath(worktree.path) === normalizedDirectory) ?? null
-);
-
-const projectMatchesExactDirectory = (project: ProjectMeta, normalizedDirectory: string): boolean => (
-  normalizedDirectory === project.path || Boolean(findExactWorktreeMatch(project, normalizedDirectory))
-);
-
-const findExactProjectMatch = (projects: ProjectMeta[], directory: string): ProjectMeta | null => {
-  const normalizedDirectory = normalizePath(directory);
-  if (!normalizedDirectory) return null;
-  return projects.find((project) => projectMatchesExactDirectory(project, normalizedDirectory)) ?? null;
-};
+const findWorktreeMatch = (project: ProjectMeta, directory: string): WorktreeMetadata | null => project.worktrees
+  .filter((worktree) => pathBelongsToRoot(directory, worktree.path))
+  .sort((left, right) => normalizePath(right.path).length - normalizePath(left.path).length)[0] ?? null;
 
 const sessionMatchesQuery = (session: SessionSummary, projectLabel: string, query: string): boolean => {
   if (!query) return true;
@@ -530,7 +531,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const setActiveProject = useProjectsStore((state) => state.setActiveProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
   const removeProject = useProjectsStore((state) => state.removeProject);
@@ -627,6 +627,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       })),
     [gitProjectPaths, projects, worktreeOrderByProject, worktreesByProject],
   );
+  const resolveSessionProject = React.useMemo(
+    () => createPiSessionWorkspaceProjectResolver(projectsMeta),
+    [projectsMeta],
+  );
 
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -664,9 +668,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       const directory = getSessionDirectory(session);
       if (!directory) continue;
       const normalizedDirectory = normalizePath(directory);
-      const node = nodes.find((entry) => projectMatchesExactDirectory(entry.project, normalizedDirectory));
+      const project = resolveSessionProject(session);
+      const node = project ? nodes.find((entry) => entry.project.id === project.id) : undefined;
       if (!node) continue;
-      const matchedWorktree = findExactWorktreeMatch(node.project, normalizedDirectory);
+      const matchedWorktree = findWorktreeMatch(node.project, normalizedDirectory);
       const bucket = matchedWorktree
         ? ensureBucket(node, matchedWorktree.path, matchedWorktree)
         : ensureBucket(node, node.project.path, null);
@@ -687,7 +692,36 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectsMeta, sessions]);
+  }, [activeProjectId, pinnedSessionIds, projectsMeta, resolveSessionProject, sessions]);
+
+  const recentSessions = React.useMemo(() => sessions
+    .filter((session) => resolveSessionProject(session) === null)
+    .sort((left, right) => comparePiSessions(
+      left,
+      right,
+      (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
+    )), [pinnedSessionIds, resolveSessionProject, sessions]);
+
+  const recentBucket = React.useMemo<WorktreeBucket>(() => ({
+    key: '__recent__',
+    label: t('sessions.sidebar.workspacePicker.recent'),
+    path: '',
+    sessions: recentSessions,
+    worktree: null,
+  }), [recentSessions, t]);
+
+  const recentNode = React.useMemo<ProjectNode>(() => ({
+    buckets: [recentBucket],
+    isActive: activeProjectId === null,
+    project: {
+      id: '__recent__',
+      isGitRepo: false,
+      label: recentBucket.label,
+      path: '',
+      worktrees: [],
+    },
+    totalSessions: recentSessions.length,
+  }), [activeProjectId, recentBucket, recentSessions.length]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -818,11 +852,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const handleSelectSession = (session: SessionSummary) => {
     const directory = getSessionDirectory(session) || null;
-    // Switching session switches the working directory (handled by
-    // setCurrentSession) — also move the active project so the rest of the app
-    // and the active highlight follow the selected session, not just the draft.
-    const project = findExactProjectMatch(projectsMeta, directory ?? '');
-    if (project) setActiveProjectIdOnly(project.id);
     void openPiSessionFromNavigation({ directory, sessionId: session.id })
       .then(() => onOpenChange(false))
       .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
@@ -885,18 +914,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const buildSessionContextLabel = React.useCallback(
     (session: SessionSummary): string => {
       const directory = getSessionDirectory(session);
-      const project = findExactProjectMatch(projectsMeta, directory);
-      if (!project) return getProjectLabel(directory) || directory;
-      const matchedWorktree = findExactWorktreeMatch(project, normalizePath(directory));
+      const project = resolveSessionProject(session);
+      if (!project) return t('sessions.sidebar.workspacePicker.recent');
+      const matchedWorktree = findWorktreeMatch(project, directory);
       if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
       return project.label;
     },
-    [projectsMeta],
+    [resolveSessionProject, t],
   );
 
   const handleSelectProject = (project: ProjectMeta) => {
-    setActiveProject(project.id);
-    onOpenChange(false);
+    void startPiSessionDraftFromNavigation({ projectId: project.id })
+      .then(() => onOpenChange(false))
+      .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
 
   const filteredNodes = React.useMemo(() => {
@@ -917,15 +947,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const searchSessionMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as SessionSummary[];
     return sessions.filter((session) => {
-        const directory = getSessionDirectory(session);
-        const project = findExactProjectMatch(projectsMeta, directory);
+        const project = resolveSessionProject(session);
         return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
       }).sort((left, right) => comparePiSessions(
         left,
         right,
         (session) => isSessionPinned(pinnedSessionIds, session.cwd, session.id),
       ));
-  }, [normalizedQuery, pinnedSessionIds, projectsMeta, sessions]);
+  }, [normalizedQuery, pinnedSessionIds, resolveSessionProject, sessions]);
 
   const searchProjectMatches = React.useMemo(() => {
     if (!normalizedQuery) return [] as Array<ProjectMeta & { sessionCount: number }>;
@@ -935,11 +964,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         ...project,
         sessionCount: sessions.filter((session) => {
           if (getParentId(session)) return false;
-          const directory = normalizePath(getSessionDirectory(session));
-          return projectMatchesExactDirectory(project, directory);
+          return resolveSessionProject(session)?.id === project.id;
         }).length,
       }));
-  }, [normalizedQuery, projectsMeta, sessions]);
+  }, [normalizedQuery, projectsMeta, resolveSessionProject, sessions]);
 
   const hasNoMatches =
     normalizedQuery && searchSessionMatches.length === 0 && searchProjectMatches.length === 0;
@@ -960,7 +988,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   ) : null;
 
   const newChatButton =
-    !editingOrder && projectsMeta.length > 0 ? (
+    !editingOrder ? (
       <Button
         type="button"
         variant="default"
@@ -999,6 +1027,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const surfaceContent = (
       <div className="flex h-full flex-col">
+        <div className={cn('shrink-0 px-4 pb-1 pt-2', editingOrder && 'hidden')}>
+          <SessionWorkspacePicker
+            onAddWorkspace={() => setDirectoryDialogOpen(true)}
+            onSelectionComplete={() => onOpenChange(false)}
+          />
+        </div>
         <div className={cn('shrink-0 px-4 pb-2 pt-1', editingOrder && 'hidden')}>
           <div className="relative">
             <RiSearchLine className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1023,18 +1057,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         </div>
 
         <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
-          {projectsMeta.length === 0 ? (
+          {projectsMeta.length === 0 && sessions.length === 0 ? (
             <MobileSessionsEmpty
-              title={t('mobile.sessions.empty.noProjectsTitle')}
-              description={t('mobile.sessions.empty.noProjectsDescription')}
+              title={t('sessions.sidebar.empty.noSessions.title')}
+              description={t('sessions.sidebar.empty.noSessions.description')}
               action={
                 <button
                   type="button"
                   className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 typography-ui-label text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  onClick={() => setDirectoryDialogOpen(true)}
+                  onClick={handleStartNewChat}
                 >
-                  <RiFolderAddLine className="size-4" />
-                  {t('sessions.sidebar.header.actions.addProject')}
+                  <RiAddLine className="size-4" />
+                  {t('mobile.sessions.newChat')}
                 </button>
               }
             />
@@ -1144,6 +1178,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
+              {recentSessions.length > 0 ? (
+                <section className="pb-2">
+                  <div className="flex min-h-12 items-center gap-2 px-3 py-2 text-muted-foreground">
+                    <Icon name="history" className="size-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate typography-ui-label font-semibold text-foreground">
+                      {t('sessions.sidebar.workspacePicker.recent')}
+                    </span>
+                    <span className="shrink-0 typography-micro tabular-nums">{recentSessions.length}</span>
+                  </div>
+                  {renderBucketSessions(recentNode, recentBucket, PROJECT_SESSION_INDENT)}
+                </section>
+              ) : null}
               {orderedNodes.map((node, nodeIndex) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
@@ -1157,7 +1203,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 return (
                   <section
                     key={node.project.id}
-                    className={cn(nodeIndex > 0 && 'border-t border-border/30')}
+                    className={cn((nodeIndex > 0 || recentSessions.length > 0) && 'border-t border-border/30')}
                   >
                     <div className="flex min-h-14 w-full items-center">
                       <button

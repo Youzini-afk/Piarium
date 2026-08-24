@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { resolveDefaultDirectory, resolveRestoredDirectory, resolveRuntimeWorkspaceRoot } from './defaultDirectory';
+import {
+  resolveDefaultDirectory,
+  resolveRestoredDirectory,
+  resolveRuntimeWorkspaceRoot,
+  resolveWorkspaceAwareRestoredDirectory,
+} from './defaultDirectory';
 import { waitForRuntimeSettingsSync } from './directoryPersistence';
 
 describe('resolveDefaultDirectory', () => {
@@ -34,6 +39,16 @@ describe('resolveDefaultDirectory', () => {
       persistedDirectory: null,
       workspaceRoot: '/home/piarium/workspaces',
     })).toBe('/home/piarium/workspaces/project');
+  });
+
+  test('uses home for general chat instead of replaying the last workspace directory', () => {
+    expect(resolveWorkspaceAwareRestoredDirectory({
+      hasSelectedWorkspace: false,
+      homeDirectory: 'C:/Users/example',
+      latestPersistedDirectory: 'D:/projects/previous',
+      persistedDirectory: 'D:/projects/previous',
+      workspaceRoot: 'D:/projects',
+    })).toBe('C:/Users/example');
   });
 
   test('does not use the server workspace root for a local desktop runtime', async () => {

@@ -303,8 +303,17 @@ test("broker owns catalog and per-session Pi workers", async () => {
     );
     assert.deepEqual(await login, { authenticated: true });
 
-    const created = await broker.createSession(workspace, "Broker smoke");
+    const created = await dispatchRuntimeRequest(broker, "session.create", {
+      cwd: workspace,
+      name: "Broker smoke",
+      workspace: { id: "workspace-broker", kind: "workspace" },
+    });
     assert.deepEqual(broker.activeSessionIds, [created.sessionId]);
+    assert.deepEqual(created.workspace, { id: "workspace-broker", kind: "workspace" });
+    assert.deepEqual((await broker.listSessions(workspace))[0]?.workspace, {
+      id: "workspace-broker",
+      kind: "workspace",
+    });
     assert.deepEqual(created.features, {
       pinnedContext: [],
       revision: 0,

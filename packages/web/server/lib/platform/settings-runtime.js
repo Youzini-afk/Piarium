@@ -75,15 +75,17 @@ export const createSettingsRuntime = (deps) => {
       }
 
       if (Array.isArray(next.projects) && next.projects.length > 0) {
-        const activeId = typeof next.activeProjectId === 'string' ? next.activeProjectId : '';
-        const active = next.projects.find((project) => project.id === activeId) || null;
-        if (!active) {
-          console.log(`[persistSettings] Active project ID ${activeId} not found, switching to ${next.projects[0].id}`);
-          next = { ...next, activeProjectId: next.projects[0].id };
+        const activeId = typeof next.activeProjectId === 'string' ? next.activeProjectId : null;
+        const active = activeId
+          ? next.projects.find((project) => project.id === activeId) || null
+          : null;
+        if (activeId && !active) {
+          console.log(`[persistSettings] Active project ID ${activeId} not found, clearing the workspace selection`);
+          next = { ...next, activeProjectId: null };
         }
-      } else if (next.activeProjectId) {
+      } else if (typeof next.activeProjectId === 'string') {
         console.log(`[persistSettings] No projects found, clearing activeProjectId ${next.activeProjectId}`);
-        next = { ...next, activeProjectId: undefined };
+        next = { ...next, activeProjectId: null };
       }
 
       if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')) {

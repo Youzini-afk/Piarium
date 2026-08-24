@@ -672,7 +672,7 @@ export interface SettingsPayload {
   lastDirectory?: string;
   homeDirectory?: string;
   projects?: ProjectEntry[];
-  activeProjectId?: string;
+  activeProjectId?: string | null;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;

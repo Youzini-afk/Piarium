@@ -16,6 +16,7 @@ import type {
   RuntimeSourceKind,
   SessionSnapshot,
   SessionSummary,
+  SessionWorkspaceBinding,
 } from "@piarium/protocol";
 import { PiHostClient, type PiHostExit } from "./host-client.js";
 import { PiRuntimeBrokerError } from "./errors.js";
@@ -113,6 +114,7 @@ export class PiRuntimeBroker {
   readonly #options: PiRuntimeBrokerOptions;
   readonly #sessions = new Map<string, PiHostClient>();
   readonly #knownSummaries = new Map<string, SessionSummary>();
+  readonly #pendingWorkspaceBindings = new Map<string, SessionWorkspaceBinding>();
   readonly #pendingProjectTrust = new Map<string, PendingProjectTrust>();
   #catalog: PiHostClient | undefined;
   #catalogContextCwd: string | undefined;
@@ -240,10 +242,28 @@ export class PiRuntimeBroker {
       else linkedSummary.parentId = parentId;
       return linkedSummary;
     });
-    return (await this.#metadataFor(worker)).enrich(linked);
+    const metadata = await this.#metadataFor(worker);
+    try {
+      await this.#retryPendingWorkspaceBindings(metadata);
+      return (await metadata.enrich(linked)).map((summary) => this.#overlayPendingWorkspace(summary));
+    } catch (error) {
+      this.#emit({
+        kind: "diagnostic",
+        level: "error",
+        message: `Failed to read Piarium session metadata: ${error instanceof Error ? error.message : String(error)}`,
+        role: "catalog",
+        workerId: worker.id,
+      });
+      return linked.map((summary) => this.#overlayPendingWorkspace(summary));
+    }
   }
 
-  async createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
+  async createSession(
+    cwd: string,
+    name?: string,
+    parentSession?: string,
+    workspace?: SessionWorkspaceBinding,
+  ): Promise<SessionSnapshot> {
     const normalizedCwd = resolve(cwd);
     const worker = await this.#spawnWorker(normalizedCwd);
     try {
@@ -253,8 +273,16 @@ export class PiRuntimeBroker {
         ...(parentSession === undefined ? {} : { parentSession }),
       });
       this.#bindSession(worker, snapshot.sessionId);
-      await this.#rememberSummary(worker, snapshot.sessionId);
-      return snapshot;
+      if (workspace !== undefined) {
+        await this.#persistWorkspaceBinding(
+          await this.#metadataFor(worker),
+          snapshot.sessionId,
+          workspace,
+          worker,
+          "Failed to persist session workspace binding",
+        );
+      }
+      return await this.#enrichSnapshot(worker, snapshot);
     } catch (error) {
       await this.#removeWorker(worker);
       throw error;
@@ -268,7 +296,10 @@ export class PiRuntimeBroker {
   }): Promise<SessionSnapshot> {
     if (input.sessionId) {
       const existing = this.#sessions.get(input.sessionId);
-      if (existing) return existing.request("session.snapshot", { sessionId: input.sessionId });
+      if (existing) {
+        const snapshot = await existing.request("session.snapshot", { sessionId: input.sessionId });
+        return this.#enrichSnapshot(existing, snapshot);
+      }
     }
 
     const explicitCwd = input.cwd === undefined ? undefined : resolve(input.cwd);
@@ -316,8 +347,7 @@ export class PiRuntimeBroker {
     const opened = await this.#openUnboundSessionWorker(workerCwd, openInput);
     try {
       this.#bindSession(opened.worker, opened.snapshot.sessionId);
-      await this.#rememberSummary(opened.worker, opened.snapshot.sessionId);
-      return opened.snapshot;
+      return await this.#enrichSnapshot(opened.worker, opened.snapshot);
     } catch (error) {
       await this.#removeWorker(opened.worker);
       throw error;
@@ -390,7 +420,7 @@ export class PiRuntimeBroker {
 
   async forkSession(sessionId: string, entryId: string, position?: "before" | "at") {
     const worker = this.#workerForSession(sessionId);
-    await this.#rememberSummary(worker, sessionId);
+    const sourceSummary = await this.#rememberSummary(worker, sessionId);
     const result = await worker.request("session.fork", {
       entryId,
       ...(position === undefined ? {} : { position }),
@@ -398,8 +428,19 @@ export class PiRuntimeBroker {
     });
     this.#bindSession(worker, result.snapshot.sessionId);
     if (result.snapshot.sessionId !== sessionId) this.#sessions.delete(sessionId);
-    await this.#rememberSummary(worker, result.snapshot.sessionId);
-    return result;
+    if (result.snapshot.sessionId !== sessionId && sourceSummary.workspace !== undefined) {
+      await this.#persistWorkspaceBinding(
+        await this.#metadataFor(worker),
+        result.snapshot.sessionId,
+        sourceSummary.workspace,
+        worker,
+        "Failed to preserve forked session workspace binding",
+      );
+    }
+    return {
+      ...result,
+      snapshot: await this.#enrichSnapshot(worker, result.snapshot),
+    };
   }
 
   async renameSession(sessionId: string, name: string): Promise<{ name?: string; sessionId: string }> {
@@ -442,10 +483,17 @@ export class PiRuntimeBroker {
   async deleteSession(sessionId: string): Promise<{ deleted: boolean; sessionId: string }> {
     const summaries = await this.listSessions();
     const summary = summaries.find((entry) => entry.id === sessionId);
-    if (!summary) return { deleted: false, sessionId };
+    const metadata = await this.#metadataFor();
+    if (!summary) {
+      const hadPendingWorkspace = this.#pendingWorkspaceBindings.delete(sessionId);
+      const removedMetadata = await metadata.remove(sessionId);
+      this.#knownSummaries.delete(sessionId);
+      return { deleted: hadPendingWorkspace || removedMetadata, sessionId };
+    }
     if (this.#sessions.has(sessionId)) await this.closeSession(sessionId);
     await this.#deleteSessionFile(summary.sessionFile);
-    await (await this.#metadataFor()).remove(sessionId);
+    await metadata.remove(sessionId);
+    this.#pendingWorkspaceBindings.delete(sessionId);
     this.#knownSummaries.delete(sessionId);
     return { deleted: true, sessionId };
   }
@@ -495,6 +543,7 @@ export class PiRuntimeBroker {
     this.#configWatches.clear();
     this.#sessions.clear();
     this.#knownSummaries.clear();
+    this.#pendingWorkspaceBindings.clear();
     this.#pendingProjectTrust.clear();
     this.#catalog = undefined;
     this.#catalogContextCwd = undefined;
@@ -540,8 +589,81 @@ export class PiRuntimeBroker {
 
   async #rememberSummary(worker: PiHostClient, sessionId: string): Promise<SessionSummary> {
     const summary = await worker.request("session.summary", { sessionId });
-    this.#knownSummaries.set(summary.id, summary);
-    return summary;
+    const metadata = await this.#metadataFor(worker);
+    let resolved = this.#overlayPendingWorkspace(summary);
+    try {
+      await this.#retryPendingWorkspaceBindings(metadata);
+      const [enriched] = await metadata.enrich([summary]);
+      resolved = this.#overlayPendingWorkspace(enriched ?? summary);
+    } catch (error) {
+      this.#emit({
+        kind: "diagnostic",
+        level: "error",
+        message: `Failed to read Piarium session metadata: ${error instanceof Error ? error.message : String(error)}`,
+        role: "session",
+        workerId: worker.id,
+      });
+    }
+    this.#knownSummaries.set(resolved.id, resolved);
+    return resolved;
+  }
+
+  async #enrichSnapshot(worker: PiHostClient, snapshot: SessionSnapshot): Promise<SessionSnapshot> {
+    const summary = await this.#rememberSummary(worker, snapshot.sessionId);
+    if (summary.workspace === undefined) {
+      const enriched = { ...snapshot };
+      delete enriched.workspace;
+      delete enriched.workspacePersistence;
+      return enriched;
+    }
+    const enriched = { ...snapshot, workspace: summary.workspace };
+    if (summary.workspacePersistence === "pending") enriched.workspacePersistence = "pending";
+    else delete enriched.workspacePersistence;
+    return enriched;
+  }
+
+  async #persistWorkspaceBinding(
+    metadata: SessionMetadataStore,
+    sessionId: string,
+    workspace: SessionWorkspaceBinding,
+    worker: PiHostClient,
+    failureMessage: string,
+  ): Promise<void> {
+    try {
+      await metadata.setWorkspace(sessionId, workspace);
+      this.#pendingWorkspaceBindings.delete(sessionId);
+    } catch (error) {
+      this.#pendingWorkspaceBindings.set(sessionId, workspace);
+      this.#emit({
+        kind: "diagnostic",
+        level: "error",
+        message: `${failureMessage}: ${error instanceof Error ? error.message : String(error)}`,
+        role: "session",
+        workerId: worker.id,
+      });
+    }
+  }
+
+  async #retryPendingWorkspaceBindings(metadata: SessionMetadataStore): Promise<void> {
+    for (const [sessionId, workspace] of this.#pendingWorkspaceBindings) {
+      try {
+        await metadata.setWorkspace(sessionId, workspace);
+        this.#pendingWorkspaceBindings.delete(sessionId);
+      } catch {
+        // Keep the binding authoritative in memory and expose the pending state.
+      }
+    }
+  }
+
+  #overlayPendingWorkspace(summary: SessionSummary): SessionSummary {
+    const workspace = this.#pendingWorkspaceBindings.get(summary.id);
+    if (workspace === undefined) {
+      if (summary.workspacePersistence === undefined) return summary;
+      const resolved = { ...summary };
+      delete resolved.workspacePersistence;
+      return resolved;
+    }
+    return { ...summary, workspace, workspacePersistence: "pending" };
   }
 
   #knownSummaryForOpen(input: {

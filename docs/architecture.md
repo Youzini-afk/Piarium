@@ -2,7 +2,7 @@
 
 Status: Pi-native engine and composable workbench delivered; release hardening continues
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 ## 1. Context
 
@@ -84,7 +84,13 @@ Composer drafts are keyed by Pi runtime and session. Workspace surfaces may seed
 hidden instructions in that draft; if there is no active session they create one in the relevant
 cwd first. A Pi session's snapshot/catalog cwd is authoritative, including for worktrees, so Git,
 terminal, and pull-request views do not maintain a second session-to-directory or
-session-to-worktree map.
+session-to-worktree map. Piarium separately records the product workspace binding selected when it
+creates a session: either one registered workspace ID or an explicit unbound/general-chat marker.
+That metadata controls navigation grouping only and never replaces the Pi cwd. Native Pi sessions
+without Piarium metadata are grouped by their cwd, while an explicitly unbound session remains in
+Recent even when its runtime cwd happens to sit below a registered workspace. The same workspace
+picker, grouping rules, and navigation path are used by Web, Electron, mobile, the IDE shell, and
+the VS Code companion instead of keeping platform-specific workspace state.
 
 VS Code active-editor state is transient Piarium view state, not an OpenCode attachment contract.
 The Pi composer turns an accepted selection into the same session-scoped structured context used by
@@ -291,7 +297,7 @@ accepted. UI disables unavailable actions instead of guessing from runtime versi
 | Pi session tree/messages | Pi SessionManager JSONL | Read and navigate through the SDK; conversation-only rollback stays Pi-native |
 | Models/auth | Pi ModelRuntime/AuthStorage + layered native `models.json` | Never mirror secrets into renderer storage; preserve source provenance |
 | Pi settings/packages | Pi SettingsManager/PackageManager | Scope-aware JSON settings, extension-owned config documents, and native package updates with source/provenance shown |
-| App metadata | Atomic Piarium JSON | Archive state now; recovery preference, pin, tags, and view preferences are application-owned additions |
+| App metadata | Atomic Piarium JSON | Archive state and optional session workspace binding now; recovery preference, pin, tags, and view preferences are application-owned additions |
 | Project workspace preferences | `~/.config/piarium/projects/<path-id>.json` | One Piarium-owned, path-derived authority for worktree setup, notes, todos, plans, draft starters, and project actions; writes preserve unknown fields, reject malformed JSON, and fail on external revision conflicts instead of overwriting them |
 | Workspace checkpoints | `pi-workspace-history` | Access through tree hooks, commands, and recovery bridge v1; never mirror private snapshot state |
 | Prompt repair | `pi-wtf` | Invoke the plugin's registered command capabilities and preserve its configuration |

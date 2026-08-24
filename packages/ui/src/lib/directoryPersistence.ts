@@ -1,8 +1,12 @@
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { isDesktopLocalOriginActive, isVSCodeRuntime } from '@/lib/desktop';
-import { resolveRestoredDirectory, resolveRuntimeWorkspaceRoot } from '@/lib/defaultDirectory';
+import {
+  resolveRuntimeWorkspaceRoot,
+  resolveWorkspaceAwareRestoredDirectory,
+} from '@/lib/defaultDirectory';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 
 const safeStorage = getDeferredSafeStorage();
@@ -48,7 +52,10 @@ export const applyPersistedDirectoryPreferences = async (
   if (getRuntimeKey() !== runtimeKey) return;
 
   const directoryState = useDirectoryStore.getState();
-  const nextDirectory = resolveRestoredDirectory({
+  const hasSelectedWorkspace = useProjectsStore.getState().activeProjectId !== null;
+  const nextDirectory = resolveWorkspaceAwareRestoredDirectory({
+    hasSelectedWorkspace,
+    homeDirectory: directoryState.homeDirectory,
     latestPersistedDirectory: readSavedDirectory(),
     persistedDirectory: savedDirectory,
     workspaceRoot,

@@ -216,8 +216,12 @@ const getVsCodeWorkspaceFolder = (): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
-const initialHomeDirectory = getVsCodeWorkspaceFolder() || getHomeDirectory();
+const initialHomeDirectory = getHomeDirectory();
 const initialCurrentDirectory = (() => {
+  const vscodeWorkspaceFolder = getVsCodeWorkspaceFolder();
+  if (vscodeWorkspaceFolder) {
+    return vscodeWorkspaceFolder;
+  }
   const persisted = getStoredLastDirectory();
   if (persisted && !isVSCodeRuntime()) {
     return resolveDirectoryPath(persisted, initialHomeDirectory);

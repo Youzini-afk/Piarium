@@ -159,10 +159,8 @@ const configuredWorkspaceFolders = (): Array<{ name: string; path: string }> => 
 
 const persistWorkspace = (path: string) => {
   if (!path) return;
-  window.__PIARIUM_HOME__ = path;
   try {
     window.localStorage.setItem('lastDirectory', path);
-    window.localStorage.setItem('homeDirectory', path);
     if (window.localStorage.getItem('directoryTreeShowHidden') === null) {
       window.localStorage.setItem('directoryTreeShowHidden', 'true');
     }
@@ -184,7 +182,7 @@ const syncVSCodeWorkspaceProjects = async (
     import('@/stores/useDirectoryStore'),
   ]);
   const project = useProjectsStore.getState().syncVSCodeWorkspaceFolders(folders, activePath);
-  const path = project?.path || activePath || folders[0]?.path || '';
+  const path = project?.path || activePath || '';
   if (path) {
     useDirectoryStore.getState().setDirectory(path, { showOverlay: false });
     persistWorkspace(path);
@@ -206,14 +204,23 @@ const ensurePiSession = async (options?: { directory?: string; forceNew?: boolea
   if (!options?.forceNew && sessions.currentSessionId) return sessions.currentSessionId;
   const projects = useProjectsStore.getState();
   const activeProject = projects.projects.find((project) => project.id === projects.activeProjectId);
+  const directoryState = useDirectoryStore.getState();
   const cwd = options?.directory?.trim()
     || activeProject?.path
-    || useDirectoryStore.getState().currentDirectory
+    || directoryState.homeDirectory
+    || directoryState.currentDirectory
     || configuredWorkspaceFolders()[0]?.path
     || '';
   if (!cwd) throw new Error('Open a workspace folder before creating a Pi session.');
-  useDirectoryStore.getState().setDirectory(cwd, { showOverlay: false });
-  const snapshot = await sessions.createSession(cwd);
+  directoryState.setDirectory(cwd, { showOverlay: false });
+  const snapshot = await sessions.createSession(
+    cwd,
+    undefined,
+    undefined,
+    activeProject
+      ? { id: activeProject.id, kind: 'workspace' }
+      : { kind: 'unbound' },
+  );
   return snapshot.sessionId;
 };
 

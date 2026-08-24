@@ -261,6 +261,30 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().terminalShell).toBe('fish');
   });
 
+  test('ignores an older save response after a newer save completes on the same runtime', async () => {
+    const firstSave = deferred<SettingsPayload>();
+    const firstSaveStarted = deferred<void>();
+    let saveCount = 0;
+    registerSettingsSave(async (changes) => {
+      saveCount += 1;
+      if (saveCount === 1) {
+        firstSaveStarted.resolve();
+        return firstSave.promise;
+      }
+      return changes as SettingsPayload;
+    });
+
+    const firstUpdate = updateDesktopSettings({ terminalShell: 'zsh' });
+    await firstSaveStarted.promise;
+    const secondUpdate = updateDesktopSettings({ terminalShell: 'fish' });
+    await secondUpdate;
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+
+    firstSave.resolve({ terminalShell: 'zsh' });
+    await firstUpdate;
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+  });
+
   test('does not retry a failed old-runtime save against the new runtime', async () => {
     const previousFetch = globalThis.fetch;
     const fallbackRequests: string[] = [];

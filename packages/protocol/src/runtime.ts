@@ -13,6 +13,7 @@ import {
   type ProtocolVersion,
 } from "./types.js";
 import type { ProviderAuthResponse } from "./auth.js";
+import type { SessionWorkspaceBinding } from "./types.js";
 
 type DirectRuntimeMethod =
   | "agent.abort"
@@ -30,7 +31,6 @@ type DirectRuntimeMethod =
   | "recovery.status"
   | "recovery.undo"
   | "session.close"
-  | "session.create"
   | "session.entry"
   | "session.entries"
   | "session.features.get"
@@ -132,6 +132,12 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
     "session.archive": {
       params: { sessionId: string };
       result: HostMethodMap["session.list"]["result"][number];
+    };
+    "session.create": {
+      params: HostMethodMap["session.create"]["params"] & {
+        workspace?: SessionWorkspaceBinding;
+      };
+      result: HostMethodMap["session.create"]["result"];
     };
     "session.delete": {
       params: { sessionId: string };

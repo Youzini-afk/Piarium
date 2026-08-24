@@ -1,5 +1,6 @@
 import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
+import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { useUIStore } from '@/stores/useUIStore';
 import { isMonoFontOption, isUiFontOption } from '@/lib/fontOptions';
 import {
@@ -66,8 +67,8 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (settings.activeProjectId) {
     localStorage.setItem('activeProjectId', settings.activeProjectId);
-  } else {
-    localStorage.removeItem('activeProjectId');
+  } else if (settings.activeProjectId === null || !getRegisteredRuntimeAPIs()?.runtime.isVSCode) {
+    localStorage.setItem('activeProjectId', NO_ACTIVE_PROJECT_STORAGE_VALUE);
   }
   if (Array.isArray(settings.pinnedDirectories) && settings.pinnedDirectories.length > 0) {
     localStorage.setItem('pinnedDirectories', JSON.stringify(settings.pinnedDirectories));
@@ -942,6 +943,8 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
     result.activeProjectId = candidate.activeProjectId;
+  } else if (candidate.activeProjectId === null) {
+    result.activeProjectId = null;
   }
 
   if (Array.isArray(candidate.securityScopedBookmarks)) {
@@ -1485,6 +1488,7 @@ let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let _settingsFlushWaiters: Array<() => void> = [];
+let _settingsMutationRevision = 0;
 let _settingsLifecycleInitialized = false;
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 const SETTINGS_DEBOUNCE_MS = 200;
@@ -1656,10 +1660,16 @@ async function _flushSettingsUpdate(): Promise<void> {
   const changes = _pendingSettingsChanges;
   const context = _pendingSettingsContext;
   const waiters = _settingsFlushWaiters;
+  const mutationRevision = _settingsMutationRevision;
   _pendingSettingsChanges = null;
   _pendingSettingsContext = null;
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
+  const isCurrentMutation = (): boolean => Boolean(
+    context
+      && isSettingsRuntimeContextCurrent(context)
+      && mutationRevision === _settingsMutationRevision
+  );
   try {
     if (!changes || !context || Object.keys(changes).length === 0 || !isSettingsRuntimeContextCurrent(context)) {
       // Nothing will be written — clear any pending "Saving…" indicator.
@@ -1671,7 +1681,7 @@ async function _flushSettingsUpdate(): Promise<void> {
     if (runtimeSettings) {
       try {
         const updated = await runtimeSettings.save(changes);
-        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!isCurrentMutation()) return;
         if (updated) {
           applyDesktopUiPreferences(updated);
           dispatchSettingsSynced(updated);
@@ -1680,12 +1690,12 @@ async function _flushSettingsUpdate(): Promise<void> {
         dispatchSettingsSaveState(updated ? 'saved' : 'error');
         return;
       } catch (error) {
-        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!isCurrentMutation()) return;
         console.warn('Failed to update settings via runtime settings API:', error);
       }
     }
 
-    if (!isSettingsRuntimeContextCurrent(context)) return;
+    if (!isCurrentMutation()) return;
     try {
       const response = await runtimeFetch('/api/config/settings', {
         method: 'PUT',
@@ -1696,7 +1706,7 @@ async function _flushSettingsUpdate(): Promise<void> {
         body: JSON.stringify(changes),
       });
 
-      if (!isSettingsRuntimeContextCurrent(context)) return;
+      if (!isCurrentMutation()) return;
       if (!response.ok) {
         console.warn('Failed to update shared settings via API:', response.status, response.statusText);
         dispatchSettingsSaveState('error');
@@ -1704,7 +1714,7 @@ async function _flushSettingsUpdate(): Promise<void> {
       }
 
       const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
-      if (!isSettingsRuntimeContextCurrent(context)) return;
+      if (!isCurrentMutation()) return;
       if (updated) {
         applyDesktopUiPreferences(updated);
         dispatchSettingsSynced(updated);
@@ -1715,7 +1725,7 @@ async function _flushSettingsUpdate(): Promise<void> {
         dispatchSettingsSaveState('error');
       }
     } catch (error) {
-      if (isSettingsRuntimeContextCurrent(context)) {
+      if (isCurrentMutation()) {
         console.warn('Failed to update shared settings via API:', error);
         dispatchSettingsSaveState('error');
       }
@@ -1737,6 +1747,7 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     void _flushSettingsUpdate();
   }
 
+  _settingsMutationRevision += 1;
   _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
   _pendingSettingsContext = context;
   dispatchSettingsSaveState('saving');

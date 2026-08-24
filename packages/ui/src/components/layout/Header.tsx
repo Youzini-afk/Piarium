@@ -59,6 +59,7 @@ import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitc
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { SessionWorkspacePicker } from '@/components/pi-session/SessionWorkspacePicker';
 import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
 import { collectPiSessionSubtreeIds, piSessionTitle } from '@/components/pi-session/sessionPresentation';
 import { invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
@@ -1989,10 +1990,12 @@ export const Header: React.FC<HeaderProps> = ({
                     <Icon name="close" className="size-4" />
                   </button>
                 </form>
-              ) : (
+              ) : currentSessionId ? (
                 <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
                   {currentSessionTitle}
                 </span>
+              ) : (
+                <SessionWorkspacePicker className="h-7 w-auto max-w-[min(18rem,45vw)] border-0 bg-transparent px-1.5 py-0 shadow-none hover:bg-interactive-hover" />
               )}
               {(sessionDirectory || (currentSessionId && activeProjectLabel) || currentBranchLabel) ? (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">

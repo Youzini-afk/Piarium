@@ -4,6 +4,8 @@ import { renderMagicPrompt } from './magicPrompts';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { generateStructuredInPiSession } from '@/lib/piStructuredGeneration';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { findPiProjectForCwd } from '@/lib/pi-runtime/sessionNavigation';
 
 export type {
   GitStatus,
@@ -374,7 +376,15 @@ async function resolveGenerationSessionContext(directory: string): Promise<Sessi
   let sessionId = sessions.currentSessionId;
   let snapshot = sessionId ? sessions.records[sessionId]?.snapshot : undefined;
   if (!sessionId || !snapshot) {
-    snapshot = await sessions.createSession(directory, 'Git generation');
+    const project = findPiProjectForCwd(useProjectsStore.getState().projects, directory);
+    snapshot = await sessions.createSession(
+      directory,
+      'Git generation',
+      undefined,
+      project
+        ? { id: project.id, kind: 'workspace' }
+        : { kind: 'unbound' },
+    );
     sessionId = snapshot.sessionId;
   }
   if (!snapshot.model) throw new Error(GENERATION_CONFIG_ERROR);

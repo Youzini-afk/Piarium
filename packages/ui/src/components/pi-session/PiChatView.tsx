@@ -125,6 +125,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
   const recoveryPreference = useUIStore((state) => state.recoveryPreference);
@@ -143,7 +144,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
   ));
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? null;
-  const pendingCwd = currentDirectory || activeProject?.path || '';
+  const pendingCwd = activeProject?.path || homeDirectory || currentDirectory || '';
+  const pendingWorkspace = React.useMemo(() => (
+    activeProject
+      ? { id: activeProject.id, kind: 'workspace' as const }
+      : { kind: 'unbound' as const }
+  ), [activeProject]);
   const pendingDraftOpen = currentSessionId === null && autoOpenDraft && !readOnly && Boolean(pendingCwd);
   const currentDraftKey = currentSessionId === null
     ? pendingDraftOpen && pendingCwd
@@ -182,18 +188,20 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 
   const handleCreate = React.useCallback(async () => {
     const activeProject = projects.find((project) => project.id === activeProjectId);
-    const cwd = activeProject?.path || currentDirectory;
+    const cwd = activeProject?.path || homeDirectory || currentDirectory;
     if (!cwd) return;
     setCreating(true);
     try {
       setDirectory(cwd, { showOverlay: false });
-      await createSession(cwd);
+      await createSession(cwd, undefined, undefined, activeProject
+        ? { id: activeProject.id, kind: 'workspace' }
+        : { kind: 'unbound' });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setCreating(false);
     }
-  }, [activeProjectId, createSession, currentDirectory, projects, setDirectory]);
+  }, [activeProjectId, createSession, currentDirectory, homeDirectory, projects, setDirectory]);
 
   const sendDraft = React.useCallback(async (
     sessionId: string,
@@ -308,7 +316,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     setCreating(true);
     try {
       setDirectory(pendingCwd, { showOverlay: false });
-      const snapshot = await createSession(pendingCwd);
+      const snapshot = await createSession(pendingCwd, undefined, undefined, pendingWorkspace);
       const transferredDraft = transferPendingPiDraft(
         pendingCwd,
         snapshot.sessionId,
@@ -320,7 +328,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     } finally {
       setCreating(false);
     }
-  }, [createSession, creating, pendingCwd, runtimeKey, sendDraft, sending, setDirectory, transferPendingPiDraft]);
+  }, [createSession, creating, pendingCwd, pendingWorkspace, runtimeKey, sendDraft, sending, setDirectory, transferPendingPiDraft]);
 
   const handlePendingDictationSend = React.useCallback(async (transcript: string) => {
     if (!pendingCwd) return;
@@ -402,7 +410,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   if (pendingDraftOpen) {
     const projectLabel = activeProject
       ? activeProject.label?.trim() || formatDirectoryName(activeProject.path, null)
-      : formatDirectoryName(pendingCwd, null);
+      : null;
     const draftTitle = projectLabel
       ? t('chat.emptyState.draftTitleWithProject', { project: DRAFT_PROJECT_MARKER })
       : t('chat.emptyState.draftTitle');

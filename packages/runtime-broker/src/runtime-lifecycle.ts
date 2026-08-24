@@ -6,6 +6,7 @@ import type {
   ProviderAuthResponse,
   SessionSnapshot,
   SessionSummary,
+  SessionWorkspaceBinding,
 } from "@piarium/protocol";
 import { PiRuntimeNotReadyError } from "./errors.js";
 import { resolveBundledPiHostEntry } from "./host-entry.js";
@@ -193,8 +194,13 @@ export class PiRuntimeLifecycle {
       .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  async createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot> {
-    return this.requireBroker().createSession(cwd, name, parentSession);
+  async createSession(
+    cwd: string,
+    name?: string,
+    parentSession?: string,
+    workspace?: SessionWorkspaceBinding,
+  ): Promise<SessionSnapshot> {
+    return this.requireBroker().createSession(cwd, name, parentSession, workspace);
   }
 
   async openSession(input: {

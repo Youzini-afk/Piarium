@@ -121,6 +121,10 @@ export interface RuntimeDescriptor {
   source: RuntimeSourceKind;
 }
 
+export type SessionWorkspaceBinding =
+  | { kind: "unbound" }
+  | { id: string; kind: "workspace" };
+
 export interface SessionSummary {
   allMessagesText: string;
   archivedAt?: string;
@@ -135,6 +139,8 @@ export interface SessionSummary {
   persisted: boolean;
   sessionFile: string;
   updatedAt: string;
+  workspace?: SessionWorkspaceBinding;
+  workspacePersistence?: "pending";
 }
 
 export interface SessionHeader {
@@ -530,6 +536,8 @@ export interface SessionSnapshot extends SessionRuntimeState {
   sessionFile?: string;
   sessionId: string;
   thinkingLevel: ThinkingLevel;
+  workspace?: SessionWorkspaceBinding;
+  workspacePersistence?: "pending";
 }
 
 export interface SessionStats {

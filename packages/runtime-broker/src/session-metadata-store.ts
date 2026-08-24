@@ -9,10 +9,11 @@ import {
   stat,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { SessionSummary } from "@piarium/protocol";
+import type { SessionSummary, SessionWorkspaceBinding } from "@piarium/protocol";
 
 interface SessionMetadata {
   archivedAt?: string;
+  workspace?: SessionWorkspaceBinding;
 }
 
 interface SessionMetadataDocument {
@@ -29,6 +30,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorCode(error: unknown): string | undefined {
   return isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+}
+
+function parseWorkspaceBinding(value: unknown): SessionWorkspaceBinding | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.kind === "unbound") return { kind: "unbound" };
+  if (value.kind === "workspace" && typeof value.id === "string" && value.id.trim()) {
+    return { id: value.id.trim(), kind: "workspace" };
+  }
+  return undefined;
 }
 
 function processIsAlive(pid: number): boolean {
@@ -114,8 +124,10 @@ function parseDocument(content: string, path: string): SessionMetadataDocument {
   const sessions: Record<string, SessionMetadata> = {};
   for (const [sessionId, raw] of Object.entries(value.sessions)) {
     if (!isRecord(raw)) continue;
+    const workspace = parseWorkspaceBinding(raw.workspace);
     sessions[sessionId] = {
       ...(typeof raw.archivedAt === "string" ? { archivedAt: raw.archivedAt } : {}),
+      ...(workspace === undefined ? {} : { workspace }),
     };
   }
   return { sessions, version: 1 };
@@ -160,7 +172,16 @@ export class SessionMetadataStore {
       const enriched = { ...summary };
       if (metadata?.archivedAt) enriched.archivedAt = metadata.archivedAt;
       else delete enriched.archivedAt;
+      if (metadata?.workspace) enriched.workspace = metadata.workspace;
+      else delete enriched.workspace;
       return enriched;
+    });
+  }
+
+  async setWorkspace(sessionId: string, workspace: SessionWorkspaceBinding): Promise<void> {
+    await this.#mutate((document) => {
+      const existing = document.sessions[sessionId] ?? {};
+      document.sessions[sessionId] = { ...existing, workspace };
     });
   }
 
@@ -180,9 +201,11 @@ export class SessionMetadataStore {
     });
   }
 
-  async remove(sessionId: string): Promise<void> {
-    await this.#mutate((document) => {
+  async remove(sessionId: string): Promise<boolean> {
+    return this.#mutate((document) => {
+      const existed = Object.hasOwn(document.sessions, sessionId);
       delete document.sessions[sessionId];
+      return existed;
     });
   }
 

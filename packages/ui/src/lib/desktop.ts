@@ -62,7 +62,7 @@ export type DesktopSettings = {
   desktopMacMenuBarEnabled?: boolean;
   desktopUiPassword?: string;
   projects?: ProjectEntry[];
-  activeProjectId?: string;
+  activeProjectId?: string | null;
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;

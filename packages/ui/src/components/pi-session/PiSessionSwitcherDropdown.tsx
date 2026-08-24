@@ -5,15 +5,17 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { normalizePath } from '@/lib/pathNormalization';
-import { startPiSessionDraftFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
-import { cn } from '@/lib/utils';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import {
+  openPiSessionFromNavigation,
+  startPiSessionDraftFromNavigation,
+} from '@/lib/pi-runtime/sessionNavigation';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import {
   selectActivePiSessions,
   type PiSessionAttentionState,
@@ -21,9 +23,13 @@ import {
 } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore, isSessionPinned } from '@/stores/useSessionPinnedStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
-import { buildPiSessionForest, piSessionTitle, type PiSessionNode } from './sessionPresentation';
+import {
+  buildPiSessionForest,
+  groupPiSessionForestByWorkspace,
+  piSessionTitle,
+  type PiSessionNode,
+} from './sessionPresentation';
 
 interface PiSessionSwitcherDropdownProps {
   align?: 'start' | 'center' | 'end';
@@ -92,18 +98,23 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
   const records = usePiSessionStore((state) => state.records);
-  const openSession = usePiSessionStore((state) => state.openSession);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
-  const setDirectory = useDirectoryStore((state) => state.setDirectory);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const untitled = t('sessions.sidebar.session.untitled');
-  const forest = React.useMemo(() => buildPiSessionForest(
-    sessions,
+  const groups = React.useMemo(() => groupPiSessionForestByWorkspace(
+    buildPiSessionForest(
+      sessions,
+      (session) => isSessionPinned(pinnedIds, session.cwd, session.id),
+    ),
+    projects,
     (session) => isSessionPinned(pinnedIds, session.cwd, session.id),
-  ), [pinnedIds, sessions]);
+  ).map((group) => ({
+    ...group,
+    label: group.project?.label?.trim()
+      || (group.path ? formatDirectoryName(group.path, null) || group.path : null)
+      || t('sessions.sidebar.workspacePicker.recent'),
+  })), [pinnedIds, projects, sessions, t]);
   const busySessionIds = React.useMemo(() => new Set(
     Object.values(records)
       .filter((record) => record.snapshot?.busy)
@@ -112,22 +123,11 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
 
   const select = React.useCallback(async (session: SessionSummary) => {
     try {
-      const cwd = normalizePath(session.cwd);
-      if (cwd) {
-        const project = projects
-          .map((candidate) => ({ candidate, path: normalizePath(candidate.path) }))
-          .filter((entry): entry is { candidate: typeof projects[number]; path: string } => entry.path !== null)
-          .filter((entry) => cwd === entry.path || cwd.startsWith(`${entry.path}/`))
-          .sort((left, right) => right.path.length - left.path.length)[0]?.candidate;
-        if (project && project.id !== activeProjectId) setActiveProjectIdOnly(project.id);
-      }
-      setDirectory(session.cwd, { showOverlay: false });
-      await openSession({ sessionId: session.id });
-      setActiveMainTab('chat');
+      await openPiSessionFromNavigation({ directory: session.cwd, sessionId: session.id });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [activeProjectId, openSession, projects, setActiveMainTab, setActiveProjectIdOnly, setDirectory]);
+  }, []);
 
   const create = React.useCallback(async () => {
     try {
@@ -146,19 +146,27 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
           {t('sessions.sidebar.header.actions.newSession')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        {forest.length === 0 ? (
+        {groups.length === 0 ? (
           <DropdownMenuItem disabled>{t('sessions.sidebar.empty.noSessions.title')}</DropdownMenuItem>
-        ) : forest.map((node) => (
-          <SwitcherNode
-            key={node.session.id}
-            attentionBySession={attentionBySession}
-            busySessionIds={busySessionIds}
-            currentSessionId={currentSessionId}
-            depth={0}
-            node={node}
-            onSelect={(session) => void select(session)}
-            untitled={untitled}
-          />
+        ) : groups.map((group, groupIndex) => (
+          <React.Fragment key={group.id}>
+            {groupIndex > 0 ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuLabel className="truncate typography-micro text-muted-foreground">
+              {group.label}
+            </DropdownMenuLabel>
+            {group.forest.map((node) => (
+              <SwitcherNode
+                key={node.session.id}
+                attentionBySession={attentionBySession}
+                busySessionIds={busySessionIds}
+                currentSessionId={currentSessionId}
+                depth={0}
+                node={node}
+                onSelect={(session) => void select(session)}
+                untitled={untitled}
+              />
+            ))}
+          </React.Fragment>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

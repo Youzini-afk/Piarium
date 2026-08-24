@@ -1,7 +1,12 @@
 import React from 'react';
 import type { SessionSummary } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
-import { piSessionTitle } from '@/components/pi-session/sessionPresentation';
+import {
+  buildPiSessionForest,
+  groupPiSessionForestByWorkspace,
+  piSessionTitle,
+  type PiSessionNode,
+} from '@/components/pi-session/sessionPresentation';
 import { formatSessionDateLabel } from '@/lib/sessionDateLabels';
 import { toast } from '@/components/ui';
 import {
@@ -23,11 +28,13 @@ import {
   usePiSessionStore,
 } from '@/stores/usePiSessionStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 
-type DirectoryBucket = {
-  directory: string;
+type WorkspaceBucket = {
+  id: string;
   label: string;
+  path: string | null;
   sessions: SessionSummary[];
 };
 
@@ -49,19 +56,25 @@ const sessionDirectory = (session: SessionSummary): string => (
   normalizePath(session.cwd) ?? session.cwd
 );
 
+const flattenSessionNodes = (nodes: PiSessionNode[]): SessionSummary[] => nodes.flatMap((node) => [
+  node.session,
+  ...flattenSessionNodes(node.children),
+]);
+
 export function ArchiveView(): React.ReactNode {
   const { t } = useI18n();
   const open = useUIStore((state) => state.isArchivePageOpen);
   const setOpen = useUIStore((state) => state.setArchivePageOpen);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const archivedSessions = usePiSessionStore(selectArchivedPiSessions);
+  const projects = useProjectsStore((state) => state.projects);
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
   const deleteSession = usePiSessionStore((state) => state.deleteSession);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
   const [query, setQuery] = React.useState('');
-  const [selectedDirectory, setSelectedDirectory] = React.useState<string | null>(null);
+  const [selectedWorkspace, setSelectedWorkspace] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
   const [confirmation, setConfirmation] = React.useState<DeleteConfirmation | null>(null);
   const [deletePending, setDeletePending] = React.useState(false);
@@ -78,25 +91,17 @@ export function ArchiveView(): React.ReactNode {
     return [...archivedSessions].sort((left, right) => sessionTimestamp(right) - sessionTimestamp(left));
   }, [archivedSessions, open]);
 
-  const buckets = React.useMemo<DirectoryBucket[]>(() => {
-    const byDirectory = new Map<string, DirectoryBucket>();
-    for (const session of sortedSessions) {
-      const directory = sessionDirectory(session);
-      const existing = byDirectory.get(directory);
-      if (existing) {
-        existing.sessions.push(session);
-        continue;
-      }
-      byDirectory.set(directory, {
-        directory,
-        label: directory
-          ? (formatDirectoryName(directory, homeDirectory) || directory)
-          : t('sessions.archivePage.otherProjects'),
-        sessions: [session],
-      });
-    }
-    return [...byDirectory.values()].sort((left, right) => right.sessions.length - left.sessions.length);
-  }, [homeDirectory, sortedSessions, t]);
+  const buckets = React.useMemo<WorkspaceBucket[]>(() => (
+    groupPiSessionForestByWorkspace(buildPiSessionForest(sortedSessions), projects).map((group) => ({
+      id: group.id,
+      label: group.project?.label?.trim()
+        || (group.path ? formatDirectoryName(group.path, homeDirectory) || group.path : null)
+        || t('sessions.sidebar.workspacePicker.recent'),
+      path: group.path,
+      sessions: flattenSessionNodes(group.forest)
+        .sort((left, right) => sessionTimestamp(right) - sessionTimestamp(left)),
+    }))
+  ), [homeDirectory, projects, sortedSessions, t]);
 
   const filteredSessions = React.useMemo(() => {
     if (normalizedQuery) {
@@ -107,16 +112,16 @@ export function ArchiveView(): React.ReactNode {
         session.allMessagesText,
       ].join('\n').toLocaleLowerCase().includes(normalizedQuery));
     }
-    if (selectedDirectory === null) return sortedSessions;
-    return buckets.find((bucket) => bucket.directory === selectedDirectory)?.sessions ?? [];
-  }, [buckets, normalizedQuery, selectedDirectory, sortedSessions, untitled]);
+    if (selectedWorkspace === null) return sortedSessions;
+    return buckets.find((bucket) => bucket.id === selectedWorkspace)?.sessions ?? [];
+  }, [buckets, normalizedQuery, selectedWorkspace, sortedSessions, untitled]);
 
   const visibleSessions = filteredSessions.slice(0, visibleCount);
   const remainingCount = filteredSessions.length - visibleSessions.length;
   const totalCount = archivedSessions.length;
 
-  const selectDirectory = React.useCallback((directory: string | null) => {
-    setSelectedDirectory(directory);
+  const selectWorkspace = React.useCallback((workspaceId: string | null) => {
+    setSelectedWorkspace(workspaceId);
     setVisibleCount(PAGE_SIZE);
   }, []);
 
@@ -218,18 +223,18 @@ export function ArchiveView(): React.ReactNode {
           <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
             {renderDirectoryItem(
               '__all__',
-              t('sessions.archivePage.allDirectories'),
+              t('sessions.archivePage.allWorkspaces'),
               totalCount,
-              selectedDirectory === null,
-              () => selectDirectory(null),
+              selectedWorkspace === null,
+              () => selectWorkspace(null),
             )}
             {buckets.map((bucket) => renderDirectoryItem(
-              bucket.directory || '__none__',
+              bucket.id,
               bucket.label,
               bucket.sessions.length,
-              selectedDirectory === bucket.directory,
-              () => selectDirectory(bucket.directory),
-              bucket.directory || undefined,
+              selectedWorkspace === bucket.id,
+              () => selectWorkspace(bucket.id),
+              bucket.path || undefined,
               bucket.sessions,
             ))}
           </div>

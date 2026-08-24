@@ -58,6 +58,13 @@ const createTestHelpersWithRealSanitizers = () => {
 };
 
 describe('settings helpers', () => {
+  it('preserves an explicit no-workspace selection', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ activeProjectId: null })).toEqual({ activeProjectId: null });
+    expect(helpers.sanitizeSettingsUpdate({ activeProjectId: 'workspace-a' })).toEqual({ activeProjectId: 'workspace-a' });
+  });
+
   it('accepts only booleans for draft starter visibility', () => {
     const helpers = createTestHelpers();
 

@@ -18,6 +18,7 @@ import type {
   SessionSnapshot,
   SessionStats,
   SessionSummary,
+  SessionWorkspaceBinding,
   ThinkingLevel,
   JsonValue,
 } from '@piarium/protocol';
@@ -90,7 +91,12 @@ export interface PiSessionStoreState {
   closeSession(sessionId: string): Promise<boolean>;
   clearSessionAttention(sessionId: string): void;
   createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryOperationResult>;
-  createSession(cwd: string, name?: string, parentSession?: string): Promise<SessionSnapshot>;
+  createSession(
+    cwd: string,
+    name?: string,
+    parentSession?: string,
+    workspace?: SessionWorkspaceBinding,
+  ): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
   executeCommand(sessionId: string, command: string): Promise<JsonValue>;
   followUp(
@@ -257,6 +263,21 @@ const updateSnapshot = (
   patch: Partial<SessionSnapshot>,
 ): SessionSnapshot | undefined => (
   snapshot === undefined ? undefined : { ...snapshot, ...patch }
+);
+
+const preserveSnapshotWorkspace = (
+  incoming: SessionSnapshot,
+  current: SessionSnapshot | undefined,
+): SessionSnapshot => (
+  incoming.workspace !== undefined || current?.workspace === undefined
+    ? incoming
+    : {
+        ...incoming,
+        workspace: current.workspace,
+        ...(current.workspacePersistence === undefined
+          ? {}
+          : { workspacePersistence: current.workspacePersistence }),
+      }
 );
 
 const settleInterruptedSession = (
@@ -536,7 +557,7 @@ export const createPiSessionStore = (
             records: upsertRecord(state.records, snapshot.sessionId, (current) => ({
               ...current,
               open: true,
-              snapshot,
+              snapshot: preserveSnapshotWorkspace(snapshot, current.snapshot),
             })),
           }));
           return;
@@ -718,7 +739,7 @@ export const createPiSessionStore = (
         records: upsertRecord(state.records, sessionId, (current) => ({
           ...current,
           open: true,
-          snapshot: result.snapshot,
+          snapshot: preserveSnapshotWorkspace(result.snapshot, current.snapshot),
         })),
       }));
       await Promise.all([
@@ -791,13 +812,14 @@ export const createPiSessionStore = (
         }));
       },
 
-      createSession: async (cwd, name, parentSession) => {
+      createSession: async (cwd, name, parentSession, workspace) => {
         const selectionIntent = beginSelectionIntent();
         try {
           const { result, runtimeKey } = await request('session.create', {
             cwd,
             ...(name === undefined ? {} : { name }),
             ...(parentSession === undefined ? {} : { parentSession }),
+            ...(workspace === undefined ? {} : { workspace }),
           });
           set((state) => ({
             attentionBySession: clearAttention(state.attentionBySession, result.sessionId),
@@ -808,7 +830,7 @@ export const createPiSessionStore = (
             records: upsertRecord(state.records, result.sessionId, (current) => ({
               ...current,
               open: true,
-              snapshot: result,
+              snapshot: preserveSnapshotWorkspace(result, current.snapshot),
             })),
           }));
           await Promise.allSettled([
@@ -892,7 +914,10 @@ export const createPiSessionStore = (
               [nextId]: {
                 ...(state.records[nextId] ?? emptySession(nextId)),
                 open: true,
-                snapshot: result.snapshot,
+                snapshot: preserveSnapshotWorkspace(
+                  result.snapshot,
+                  state.records[nextId]?.snapshot ?? state.records[previousId]?.snapshot,
+                ),
               },
             },
           }));
@@ -967,7 +992,7 @@ export const createPiSessionStore = (
               records: upsertRecord(state.records, result.snapshot.sessionId, (current) => ({
                 ...current,
                 open: true,
-                snapshot: result.snapshot,
+                snapshot: preserveSnapshotWorkspace(result.snapshot, current.snapshot),
               })),
             }));
             await get().refreshEntries(result.snapshot.sessionId);
@@ -998,7 +1023,7 @@ export const createPiSessionStore = (
             records: upsertRecord(state.records, result.sessionId, (current) => ({
               ...current,
               open: true,
-              snapshot: result,
+              snapshot: preserveSnapshotWorkspace(result, current.snapshot),
             })),
           }));
           await Promise.all([
@@ -1188,7 +1213,7 @@ export const createPiSessionStore = (
           records: upsertRecord(state.records, sessionId, (current) => ({
             ...current,
             open: true,
-            snapshot: result,
+            snapshot: preserveSnapshotWorkspace(result, current.snapshot),
           })),
         }));
         return result;
@@ -1200,7 +1225,7 @@ export const createPiSessionStore = (
           records: upsertRecord(state.records, sessionId, (current) => ({
             ...current,
             open: true,
-            snapshot: result,
+            snapshot: preserveSnapshotWorkspace(result, current.snapshot),
           })),
         }));
         return result;

@@ -57,4 +57,28 @@ describe('settings runtime', () => {
     }
   });
 
+  it('keeps projects available while the workspace selection is explicitly empty', async () => {
+    const { runtime, cleanup, tempRoot } = await createRuntime();
+    try {
+      const project = { id: 'workspace-a', path: tempRoot };
+      await expect(runtime.persistSettings({
+        activeProjectId: null,
+        projects: [project],
+      })).resolves.toEqual({
+        activeProjectId: null,
+        projects: [project],
+      });
+
+      await expect(runtime.persistSettings({
+        activeProjectId: 'missing',
+        projects: [project],
+      })).resolves.toEqual({
+        activeProjectId: null,
+        projects: [project],
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
 });

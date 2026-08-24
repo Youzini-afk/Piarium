@@ -347,6 +347,7 @@ const createOrReuseReviewSession = async (
     cwd: directory,
     name: getReviewSessionTitle(original, originalSessionId),
     ...(parentSession ? { parentSession } : {}),
+    ...(original?.workspace ? { workspace: original.workspace } : {}),
   });
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
   rememberReviewLink(originalSessionId, review.sessionId, directory);

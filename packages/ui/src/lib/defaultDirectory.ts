@@ -31,6 +31,18 @@ export const resolveRestoredDirectory = (options: {
   );
 };
 
+export const resolveWorkspaceAwareRestoredDirectory = (options: {
+  hasSelectedWorkspace: boolean;
+  homeDirectory?: string | null;
+  latestPersistedDirectory?: string | null;
+  persistedDirectory?: string | null;
+  workspaceRoot?: string | null;
+}): string | null => (
+  options.hasSelectedWorkspace
+    ? resolveRestoredDirectory(options)
+    : resolveDefaultDirectory(null, options.homeDirectory)
+);
+
 export const resolveRuntimeWorkspaceRoot = async (
   apis: RuntimeAPIs,
   options: { desktopLocal?: boolean } = {},

@@ -16,6 +16,7 @@ import {
   type PiConfigWatchTarget,
   type RuntimeMethod,
   type RuntimeMethodResult,
+  type SessionWorkspaceBinding,
 } from "@piarium/protocol";
 import { PiRuntimeBroker, type PiCatalogMethod } from "./runtime-broker.js";
 
@@ -170,6 +171,16 @@ function requireProviderAuthResponse(record: Record<string, unknown>): ProviderA
 
 function optionalName(record: Record<string, unknown>): string | undefined {
   return optionalString(record, "name");
+}
+
+function optionalSessionWorkspaceBinding(
+  record: Record<string, unknown>,
+): SessionWorkspaceBinding | undefined {
+  if (record.workspace === undefined) return undefined;
+  const workspace = requireRecord(record.workspace);
+  const kind = requireEnum(workspace, "kind", ["unbound", "workspace"] as const);
+  if (kind === "unbound") return { kind };
+  return { id: requireString(workspace, "id"), kind };
 }
 
 type RuntimeContextTarget = { cwd: string } | { sessionId: string };
@@ -334,6 +345,7 @@ async function dispatchRuntimeRequestUnchecked(
         requireString(input, "cwd"),
         optionalName(input),
         optionalString(input, "parentSession"),
+        optionalSessionWorkspaceBinding(input),
       );
     }
     case "session.open": {

@@ -215,6 +215,8 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
       result.activeProjectId = candidate.activeProjectId;
+    } else if (candidate.activeProjectId === null) {
+      result.activeProjectId = null;
     }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {

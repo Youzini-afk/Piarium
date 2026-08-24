@@ -13,10 +13,8 @@ export const ProjectContextPanel: React.FC = () => {
   const gitDirectories = useGitStore((state) => state.directories);
 
   const activeProject = React.useMemo(() => {
-    if (activeProjectId) {
-      return projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? null;
-    }
-    return projects[0] ?? null;
+    if (!activeProjectId) return null;
+    return projects.find((project) => project.id === activeProjectId) ?? null;
   }, [activeProjectId, projects]);
 
   const projectRef = React.useMemo(() => {

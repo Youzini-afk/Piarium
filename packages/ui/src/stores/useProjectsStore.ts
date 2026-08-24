@@ -5,6 +5,7 @@ import type { ProjectEntry } from '@/lib/api/types';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { createProjectIdFromPath } from '@/lib/projectId';
+import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -49,8 +50,8 @@ interface ProjectsStore {
 
   addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
   removeProject: (id: string) => void;
-  setActiveProject: (id: string) => void;
-  setActiveProjectIdOnly: (id: string) => void;
+  setActiveProject: (id: string | null) => void;
+  setActiveProjectIdOnly: (id: string | null) => void;
   renameProject: (id: string, label: string) => void;
   updateProjectMeta: (id: string, meta: {
     label?: string;
@@ -326,18 +327,23 @@ const readPersistedManualOrder = (): string[] => {
   }
 };
 
-const readPersistedActiveProjectId = (): string | null => {
+const readPersistedActiveProjectSelection = (): string | null | undefined => {
   try {
     const raw = safeStorage.getItem(getActiveProjectStorageKey())
       || (shouldReadLegacyProjectsCache() ? safeStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) : null);
+    if (raw === NO_ACTIVE_PROJECT_STORAGE_VALUE) return null;
     if (typeof raw === 'string' && raw.trim().length > 0) {
       return raw.trim();
     }
   } catch {
-    return null;
+    return undefined;
   }
-  return null;
+  return undefined;
 };
+
+const readPersistedActiveProjectId = (): string | null => (
+  readPersistedActiveProjectSelection() ?? null
+);
 
 const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null) => {
   try {
@@ -351,7 +357,7 @@ const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null)
     if (activeProjectId) {
       safeStorage.setItem(activeProjectStorageKey, activeProjectId);
     } else {
-      safeStorage.removeItem(activeProjectStorageKey);
+      safeStorage.setItem(activeProjectStorageKey, NO_ACTIVE_PROJECT_STORAGE_VALUE);
     }
   } catch {
     // ignored
@@ -363,7 +369,9 @@ const persistProjects = (projects: ProjectEntry[], activeProjectId: string | nul
   if (manualOrder) {
     persistManualProjectOrder(manualOrder);
   }
-  void updateDesktopSettings({ projects, activeProjectId: activeProjectId ?? undefined });
+  if (!isVSCodeProjectsRuntime) {
+    void updateDesktopSettings({ projects, activeProjectId });
+  }
 };
 
 const persistManualProjectOrder = (manualOrder: string[]) => {
@@ -475,14 +483,16 @@ const createVSCodeWorkspaceProjects = (
 
   const activeProject = normalizedActivePath
     ? projects.find((project) => project.path === normalizedActivePath) ?? null
-    : projects[0] ?? null;
-  const activeProjectId = activeProject?.id ?? projects[0]?.id ?? null;
+    : activePath === null
+      ? null
+      : projects[0] ?? null;
+  const activeProjectId = activeProject?.id ?? null;
 
   if (streamDebugEnabled()) {
     console.log('[Piarium][VSCode][projects] Using workspace projects', projects);
   }
 
-  return { projects, activeProjectId, activeProject: activeProject ?? projects[0] ?? null };
+  return { projects, activeProjectId, activeProject };
 };
 
 const projectIconImagesEqual = (
@@ -520,7 +530,11 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
   if (!folders) {
     return null;
   }
-  const result = createVSCodeWorkspaceProjects(folders, []);
+  const persistedSelection = readPersistedActiveProjectSelection();
+  const activePath = typeof persistedSelection === 'string'
+    ? folders.find((folder) => createProjectIdFromPath(folder.path) === persistedSelection)?.path ?? null
+    : persistedSelection;
+  const result = createVSCodeWorkspaceProjects(folders, [], activePath);
   if (!result) {
     return null;
   }
@@ -537,7 +551,7 @@ const effectiveInitialProjects = vscodeWorkspace?.projects ?? (isVSCodeProjectsR
 const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? (isVSCodeProjectsRuntime ? null : readPersistedActiveProjectId());
 const initialActiveProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)
   ? persistedInitialActiveProjectId
-  : effectiveInitialProjects[0]?.id ?? null;
+  : null;
 
 if (vscodeWorkspace) {
   cacheProjects(effectiveInitialProjects, initialActiveProjectId);
@@ -612,7 +626,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       let nextActiveId = current.activeProjectId;
 
       if (current.activeProjectId === id) {
-        nextActiveId = nextProjects[0]?.id ?? null;
+        nextActiveId = null;
       }
 
       const nextManualOrder = get().manualProjectOrder.filter((oid) => oid !== id);
@@ -629,12 +643,15 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
     },
 
-    setActiveProject: (id: string) => {
-      if (isVSCodeProjectsRuntime) {
-        return;
-      }
+    setActiveProject: (id: string | null) => {
       const { projects, activeProjectId } = get();
       if (activeProjectId === id) {
+        return;
+      }
+      if (id === null) {
+        set({ activeProjectId: null });
+        persistProjects(projects, null, get().manualProjectOrder);
+        void useDirectoryStore.getState().goHome();
         return;
       }
       const target = projects.find((project) => project.id === id);
@@ -653,12 +670,14 @@ export const useProjectsStore = create<ProjectsStore>()(
       useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
     },
 
-    setActiveProjectIdOnly: (id: string) => {
-      if (isVSCodeProjectsRuntime) {
-        return;
-      }
+    setActiveProjectIdOnly: (id: string | null) => {
       const { projects, activeProjectId } = get();
       if (activeProjectId === id) {
+        return;
+      }
+      if (id === null) {
+        set({ activeProjectId: null });
+        persistProjects(projects, null, get().manualProjectOrder);
         return;
       }
       const target = projects.find((project) => project.id === id);
@@ -876,7 +895,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       const activeProjectId = readPersistedActiveProjectId();
       const nextActiveProjectId = projects.some((project) => project.id === activeProjectId)
         ? activeProjectId
-        : projects[0]?.id ?? null;
+        : null;
       set({ projects, activeProjectId: nextActiveProjectId, manualProjectOrder: [] });
     },
 
@@ -885,8 +904,11 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
       const incomingProjects = sanitizeProjects(settings.projects ?? []);
-      const incomingActive = typeof settings.activeProjectId === 'string' && settings.activeProjectId.trim()
+      const requestedActive = typeof settings.activeProjectId === 'string' && settings.activeProjectId.trim()
         ? settings.activeProjectId.trim()
+        : null;
+      const incomingActive = requestedActive && incomingProjects.some((project) => project.id === requestedActive)
+        ? requestedActive
         : null;
 
       const current = get();
@@ -909,6 +931,8 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (activeProject) {
           useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
         }
+      } else if (activeChanged) {
+        void useDirectoryStore.getState().goHome();
       }
     },
 
@@ -921,7 +945,12 @@ export const useProjectsStore = create<ProjectsStore>()(
       const currentActiveProject = current.activeProjectId
         ? current.projects.find((project) => project.id === current.activeProjectId) ?? null
         : null;
-      const targetActivePath = activePath ?? currentActiveProject?.path ?? null;
+      const targetActivePath = activePath === undefined
+        ? currentActiveProject?.path
+          ?? (current.projects.length === 0 && readPersistedActiveProjectSelection() === undefined
+            ? undefined
+            : null)
+        : activePath;
       const result = createVSCodeWorkspaceProjects(folders, current.projects, targetActivePath);
       if (!result) {
         if (folders.length === 0 && !activePath && current.projects.length > 0) {

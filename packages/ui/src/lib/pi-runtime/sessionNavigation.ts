@@ -4,7 +4,11 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiSessionStore, selectActivePiSessions } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { SessionSnapshot, SessionSummary } from '@piarium/protocol';
+import type {
+  SessionSnapshot,
+  SessionSummary,
+  SessionWorkspaceBinding,
+} from '@piarium/protocol';
 
 export interface PiSessionOpenTarget {
   directory?: string | null;
@@ -46,6 +50,7 @@ export const resolvePiSessionCreationCwd = (
   projects: ProjectEntry[],
   activeProjectId: string | null,
   currentDirectory: string,
+  homeDirectory?: string,
 ): string | null => {
   const explicit = target.directory?.trim();
   if (explicit) return explicit;
@@ -53,10 +58,24 @@ export const resolvePiSessionCreationCwd = (
     ? projects.find((project) => project.id === target.projectId)
     : undefined;
   if (requestedProject?.path.trim()) return requestedProject.path;
-  const activeProject = activeProjectId
-    ? projects.find((project) => project.id === activeProjectId)
+  const effectiveActiveProjectId = target.projectId === undefined ? activeProjectId : null;
+  const activeProject = effectiveActiveProjectId
+    ? projects.find((project) => project.id === effectiveActiveProjectId)
     : undefined;
-  return activeProject?.path.trim() || currentDirectory.trim() || null;
+  return activeProject?.path.trim()
+    || homeDirectory?.trim()
+    || currentDirectory.trim()
+    || null;
+};
+
+export const resolvePiSessionWorkspaceBinding = (
+  target: PiSessionCreateTarget,
+  activeProjectId: string | null,
+): SessionWorkspaceBinding => {
+  const projectId = target.projectId === undefined ? activeProjectId : target.projectId;
+  return projectId
+    ? { id: projectId, kind: 'workspace' }
+    : { kind: 'unbound' };
 };
 
 export const resolveRelativePiSession = (
@@ -71,14 +90,27 @@ export const resolveRelativePiSession = (
   return sessions[nextIndex] ?? null;
 };
 
-const applyPiSessionLocation = (cwd: string, preferredProjectId?: string | null): void => {
+const applyPiSessionLocation = (
+  cwd: string,
+  preferredProjectId?: string | null,
+  workspace?: SessionWorkspaceBinding,
+): void => {
   const projectsState = useProjectsStore.getState();
-  const preferredProject = preferredProjectId
-    ? projectsState.projects.find((project) => project.id === preferredProjectId)
+  const boundProject = workspace?.kind === 'workspace'
+    ? projectsState.projects.find((project) => project.id === workspace.id)
     : undefined;
-  const project = preferredProject ?? findPiProjectForCwd(projectsState.projects, cwd);
-  if (project && project.id !== projectsState.activeProjectId) {
-    projectsState.setActiveProjectIdOnly(project.id);
+  const preferredProject = workspace?.kind === 'unbound'
+    ? undefined
+    : preferredProjectId
+      ? projectsState.projects.find((project) => project.id === preferredProjectId)
+      : undefined;
+  const project = workspace?.kind === 'unbound'
+    ? null
+    : workspace?.kind === 'workspace'
+      ? boundProject ?? null
+      : preferredProject ?? findPiProjectForCwd(projectsState.projects, cwd);
+  if ((project?.id ?? null) !== projectsState.activeProjectId) {
+    projectsState.setActiveProjectIdOnly(project?.id ?? null);
   }
 
   const directoryState = useDirectoryStore.getState();
@@ -105,7 +137,7 @@ export const openPiSessionFromNavigation = async (
         ...(cwd ? { cwd } : {}),
         sessionId,
       });
-  applyPiSessionLocation(snapshot.cwd);
+  applyPiSessionLocation(snapshot.cwd, undefined, snapshot.workspace ?? summary?.workspace);
   return snapshot;
 };
 
@@ -113,15 +145,17 @@ export const createPiSessionFromNavigation = async (
   target: PiSessionCreateTarget = {},
 ): Promise<SessionSnapshot> => {
   const projectsState = useProjectsStore.getState();
+  const workspace = resolvePiSessionWorkspaceBinding(target, projectsState.activeProjectId);
   const cwd = resolvePiSessionCreationCwd(
     target,
     projectsState.projects,
     projectsState.activeProjectId,
     useDirectoryStore.getState().currentDirectory,
+    useDirectoryStore.getState().homeDirectory,
   );
   if (!cwd) throw new Error('A working directory is required to create a Pi session');
-  const snapshot = await usePiSessionStore.getState().createSession(cwd);
-  applyPiSessionLocation(snapshot.cwd, target.projectId);
+  const snapshot = await usePiSessionStore.getState().createSession(cwd, undefined, undefined, workspace);
+  applyPiSessionLocation(snapshot.cwd, target.projectId, workspace);
   return snapshot;
 };
 
@@ -135,15 +169,17 @@ export const startPiSessionDraftFromNavigation = async (
   target: PiSessionCreateTarget = {},
 ): Promise<void> => {
   const projectsState = useProjectsStore.getState();
+  const workspace = resolvePiSessionWorkspaceBinding(target, projectsState.activeProjectId);
   const cwd = resolvePiSessionCreationCwd(
     target,
     projectsState.projects,
     projectsState.activeProjectId,
     useDirectoryStore.getState().currentDirectory,
+    useDirectoryStore.getState().homeDirectory,
   );
   if (!cwd) throw new Error('A working directory is required to create a Pi session');
 
-  applyPiSessionLocation(cwd, target.projectId);
+  applyPiSessionLocation(cwd, target.projectId, workspace);
   usePiSessionStore.getState().setCurrentSession(null);
 };
 

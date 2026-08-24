@@ -7,7 +7,9 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import {
   findPiProjectForCwd,
+  openPiSessionFromNavigation,
   resolvePiSessionCreationCwd,
+  resolvePiSessionWorkspaceBinding,
   resolveRelativePiSession,
   startPiSessionDraftFromNavigation,
 } from './sessionNavigation';
@@ -36,13 +38,16 @@ describe('Pi session navigation', () => {
     expect(findPiProjectForCwd(projects, 'D:/unrelated')).toBeNull();
   });
 
-  test('resolves explicit, requested-project, active-project, and current-directory creation targets', () => {
+  test('resolves explicit and workspace creation targets while general chat uses home', () => {
     const projects = [project('one', 'D:/one'), project('two', 'D:/two')];
     expect(resolvePiSessionCreationCwd({ directory: 'D:/explicit', projectId: 'two' }, projects, 'one', 'D:/current')).toBe('D:/explicit');
     expect(resolvePiSessionCreationCwd({ projectId: 'two' }, projects, 'one', 'D:/current')).toBe('D:/two');
     expect(resolvePiSessionCreationCwd({}, projects, 'one', 'D:/current')).toBe('D:/one');
+    expect(resolvePiSessionCreationCwd({}, projects, null, 'D:/current', 'D:/home')).toBe('D:/home');
     expect(resolvePiSessionCreationCwd({}, projects, null, 'D:/current')).toBe('D:/current');
     expect(resolvePiSessionCreationCwd({}, [], null, '')).toBeNull();
+    expect(resolvePiSessionWorkspaceBinding({}, 'one')).toEqual({ id: 'one', kind: 'workspace' });
+    expect(resolvePiSessionWorkspaceBinding({ projectId: null }, 'one')).toEqual({ kind: 'unbound' });
   });
 
   test('navigates the complete active catalog in both directions with wraparound', () => {
@@ -88,6 +93,83 @@ describe('Pi session navigation', () => {
       expect(useProjectsStore.getState().activeProjectId).toBe('draft-project');
       expect(useUIStore.getState().activeMainTab).toBe('chat');
       expect(useUIStore.getState().isSessionSwitcherOpen).toBe(false);
+    } finally {
+      useDirectoryStore.setState(originalDirectory, true);
+      useProjectsStore.setState(originalProjects, true);
+      usePiSessionStore.setState(originalSessions, true);
+      useUIStore.setState(originalUi, true);
+    }
+  });
+
+  test('opens general chat at home without retaining a workspace selection', async () => {
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const originalSessions = usePiSessionStore.getState();
+    const originalUi = useUIStore.getState();
+
+    try {
+      useDirectoryStore.setState({ currentDirectory: 'D:/repo', homeDirectory: 'D:/home' });
+      useProjectsStore.setState({
+        activeProjectId: 'repo',
+        projects: [project('repo', 'D:/repo')],
+      });
+      usePiSessionStore.setState({ currentSessionId: 'existing-session' });
+
+      await startPiSessionDraftFromNavigation({ projectId: null });
+
+      expect(useProjectsStore.getState().activeProjectId).toBeNull();
+      expect(useDirectoryStore.getState().currentDirectory).toBe('D:/home');
+      expect(usePiSessionStore.getState().currentSessionId).toBeNull();
+    } finally {
+      useDirectoryStore.setState(originalDirectory, true);
+      useProjectsStore.setState(originalProjects, true);
+      usePiSessionStore.setState(originalSessions, true);
+      useUIStore.setState(originalUi, true);
+    }
+  });
+
+  test('does not reattach a session when its explicit workspace no longer exists', async () => {
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const originalSessions = usePiSessionStore.getState();
+    const originalUi = useUIStore.getState();
+    const removedWorkspaceSession = session('removed-workspace');
+    removedWorkspaceSession.cwd = 'D:/repo/src';
+    removedWorkspaceSession.workspace = { id: 'removed', kind: 'workspace' };
+
+    try {
+      useDirectoryStore.setState({ currentDirectory: 'D:/repo' });
+      useProjectsStore.setState({
+        activeProjectId: 'repo',
+        projects: [project('repo', 'D:/repo')],
+      });
+      usePiSessionStore.setState({
+        currentSessionId: null,
+        openSession: async () => ({
+          activeTools: [],
+          busy: false,
+          cwd: removedWorkspaceSession.cwd,
+          features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
+          followUp: [],
+          followUpMode: 'one-at-a-time',
+          isCompacting: false,
+          isStreaming: false,
+          leafId: null,
+          pendingMessageCount: 0,
+          retryAttempt: 0,
+          sessionId: removedWorkspaceSession.id,
+          steering: [],
+          steeringMode: 'one-at-a-time',
+          thinkingLevel: 'off',
+          workspace: removedWorkspaceSession.workspace,
+        }),
+        summaries: [removedWorkspaceSession],
+      });
+
+      await openPiSessionFromNavigation({ sessionId: removedWorkspaceSession.id });
+
+      expect(useProjectsStore.getState().activeProjectId).toBeNull();
+      expect(useDirectoryStore.getState().currentDirectory).toBe('D:/repo/src');
     } finally {
       useDirectoryStore.setState(originalDirectory, true);
       useProjectsStore.setState(originalProjects, true);
