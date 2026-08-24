@@ -48,6 +48,7 @@ import {
   splashWorkbenchPhaseDurationMs,
 } from './piarium-splash-lattice';
 import { INITIAL_SPLASH_IDS } from '@/lib/splash';
+import { WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE } from '@/lib/workbench/transition-paint-handoff';
 
 /**
  * What these tests are for.
@@ -385,9 +386,11 @@ describe('the floor is the cover', () => {
     expect(container).not.toContain('background');
   });
 
-  test('the application handoff keeps the splash background through the first committed frame', () => {
+  test('boot and Workbench handoffs keep the splash background through the first committed frame', () => {
     expect(css).toContain(`html:root.desktop-runtime[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] body`);
     expect(css).toContain(`html:root.desktop-runtime[${INITIAL_SPLASH_IDS.handoffAttribute}='true'] #root`);
+    expect(css).toContain(`html:root.desktop-runtime[${WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE}='true'] body`);
+    expect(css).toContain(`html:root.desktop-runtime[${WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE}='true'] #root`);
     expect(css).toContain(`background: ${PIARIUM_SPLASH_COLORS.background} !important;`);
     expect(css).toContain(`background-color: ${PIARIUM_SPLASH_COLORS.background} !important;`);
   });

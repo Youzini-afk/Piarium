@@ -13,6 +13,10 @@ import {
   getWorkbenchProfileTransitionSnapshot,
   subscribeWorkbenchProfileTransition,
 } from '@/lib/workbench/profile-transition';
+import {
+  createWorkbenchTransitionPaintHandoff,
+  type WorkbenchTransitionPaintHandoff,
+} from '@/lib/workbench/transition-paint-handoff';
 
 const CoreTransitionFallback: React.FC<{ onReady(): void }> = ({ onReady }) => {
   React.useEffect(() => {
@@ -33,6 +37,21 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
     getWorkbenchProfileTransitionSnapshot,
     getWorkbenchProfileTransitionSnapshot,
   );
+  const paintHandoffRef = React.useRef<WorkbenchTransitionPaintHandoff | null>(null);
+  React.useLayoutEffect(() => {
+    if (transition.phase === 'idle') {
+      paintHandoffRef.current?.releaseAfterPaint();
+      return;
+    }
+    if (!paintHandoffRef.current && typeof document !== 'undefined') {
+      paintHandoffRef.current = createWorkbenchTransitionPaintHandoff(document.documentElement);
+    }
+    paintHandoffRef.current?.hold();
+  }, [transition.id, transition.phase]);
+  React.useLayoutEffect(() => () => {
+    paintHandoffRef.current?.dispose();
+    paintHandoffRef.current = null;
+  }, []);
   const surface = useSurfaceRegistrySnapshot();
   const controller = React.useMemo(() => transition.id > 0
     ? createWorkbenchTransitionSceneController(transition.id)

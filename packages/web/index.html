@@ -506,14 +506,19 @@
          camera transform are in here rather than applied by script because nothing about them depends on
          the window: the floor is fixed and larger than any window it has to cover. */
       /* SPLASH-CSS-BEGIN */
-/* The splash and the application are sibling paint owners. Keep their shared canvas colour stable for one
-   committed application frame after the splash is removed; otherwise a delayed theme/root paint can expose
-   the browser's white default between the two owners. */
+/* A splash/Transition Scene and the application Shell are sibling paint owners. Keep their shared canvas
+   colour stable for one committed application frame after either visual owner is removed; otherwise a
+   delayed theme/root paint can expose the browser's white default between them. */
 html:root[data-piarium-splash-handoff='true'],
+html:root[data-piarium-workbench-handoff='true'],
 html:root[data-piarium-splash-handoff='true'] body,
+html:root[data-piarium-workbench-handoff='true'] body,
 html:root[data-piarium-splash-handoff='true'] #root,
+html:root[data-piarium-workbench-handoff='true'] #root,
 html:root.desktop-runtime[data-piarium-splash-handoff='true'] body,
-html:root.desktop-runtime[data-piarium-splash-handoff='true'] #root {
+html:root.desktop-runtime[data-piarium-workbench-handoff='true'] body,
+html:root.desktop-runtime[data-piarium-splash-handoff='true'] #root,
+html:root.desktop-runtime[data-piarium-workbench-handoff='true'] #root {
 background: var(--splash-background, var(--color-background, #151313)) !important;
 background-color: var(--splash-background, var(--color-background, #151313)) !important;
 }
