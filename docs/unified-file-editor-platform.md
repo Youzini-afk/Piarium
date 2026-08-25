@@ -1,6 +1,6 @@
 # Piarium 统一文件编辑器平台设计
 
-Status: 产品与架构决策已确定，等待分 Phase 实施
+Status: Phase 1 已完成；Phase 2 待实施
 
 Last updated: 2026-08-25
 
@@ -389,6 +389,12 @@ multi-cursor 和 editor focus group navigation。
 cutover 的退出门槛。未通过时不得切换默认文件 renderer。若现成包依赖 Monaco 私有 API，则由
 独立 editor behavior extension 包装并固定兼容证据，不让它成为 Core 文档权威。
 
+2026-08-25 的 Phase 1 审查结论：不直接采用 `monaco-vim@0.4.4`。其发布源码仍导入私有
+`ShiftCommand`，核心 adapter 使用 `@ts-nocheck` 和旧版数值 option ID，`charCoords` 也没有返回
+真实像素坐标。Phase 2 应以现有 `@replit/codemirror-vim` 状态机和 Monaco 0.56 公开 API 建立
+Piarium-owned adapter，或先修正上述问题并取得可复现的上游版本；不能用 private import 绕过
+cutover gate。
+
 ## 9. Language intelligence
 
 ### 9.1 不直接绕过现有 Host
@@ -542,7 +548,7 @@ editor provider、editor augmentation 属于 Piarium extension。不能因为 Mo
 
 Phase 1 建立以下 performance marks 和诊断计数：
 
-- `editor.runtime.import`、`editor.worker.ready`、`editor.model.ready`、`editor.first.paint`；
+- `editor.runtime.import.start/end`、`editor.worker.created`、`editor.model.ready`、`editor.first.paint`；
 - cold first file open、warm tab switch、Agent ↔ IDE remount；
 - input-to-paint 与长任务；
 - model/view/character/marker/provider/worker 数量；
@@ -591,6 +597,21 @@ work、无 owner leak。真实数据再决定警告、按需关闭昂贵 feature
 注册，构建不产出 TS/JS/JSON/CSS/HTML semantic worker；dev HMR、Web base/PWA/cloud CSP 与 packaged
 Electron `piarium-ui://` worker 矩阵全部通过后才能退出 Phase 1，不能把它们后移到 cutover 之后。
 再跑 UI focused tests/type-check/lint 和 production Web build；无需跑与编辑器无关的全仓 suite。
+
+完成证据（2026-08-25）：
+
+- 普通 `index.html`、`mobile.html` 与 `mini-chat.html` 的静态入口均不引用 Monaco；仅条件 smoke
+  entry 生成 Monaco chunk。该 chunk 为 3,848.70 kB（gzip 995.25 kB），不进入首屏；
+- source-map module graph 包含公开 editor API、find feature 与 editor worker，不含 root
+  `editor.main`、`languages/features/*` 或 TS/JS/JSON/CSS/HTML semantic worker；
+- Vite dev/reload、严格同源 CSP 的 production preview、PWA build 以及 packaged Electron
+  `piarium-ui://` 均完成真实 worker、diff、dispose smoke。Electron 中只创建一个 editor worker，
+  semantic worker 请求为 0；
+- 50,000 行、1,627,779 字符的诊断样本没有成为产品限制。一次 Windows packaged Electron 基线中，
+  CodeMirror 的 model/首绘/编辑到绘制分别为 4.9/19.9/10.9 ms，Monaco 为
+  14.6/26.6/8.6 ms。该单次数据只证明样本可用并建立后续比较基线，不作为跨设备性能阈值；
+- Vim 候选审查结论见 §8：不采用依赖 Monaco 私有 API 的 `monaco-vim@0.4.4`，Phase 2 在切换
+  默认 renderer 前交付 Piarium-owned adapter。
 
 ### Phase 2 — Model Registry 与 desktop/web cutover
 

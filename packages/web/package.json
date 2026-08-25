@@ -20,6 +20,7 @@
     "dev:server": "bun run prepare:pi-runtime && bun server/index.js",
     "dev:server:watch": "bun run prepare:pi-runtime && nodemon --watch server --ext js --exec \"bun server/index.js\"",
     "build": "bun run --cwd ../extension-builtins build && vite build",
+    "build:monaco-smoke": "cross-env PIARIUM_MONACO_SMOKE=1 PIARIUM_MONACO_BUNDLE_AUDIT=1 bun run build && node scripts/verify-monaco-bundle.mjs",
     "build:watch": "vite build --watch",
     "type-check": "tsc --noEmit",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",

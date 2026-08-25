@@ -22,6 +22,7 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 const DEVTOOLS_REQUEST_TIMEOUT_MS = 20_000;
 const LAYOUT_TOLERANCE_PX = 1;
 const MAX_COMPOSER_FRAME_WIDTH_PX = 48 * 16;
+const MONACO_SMOKE_ENABLED = process.env.PIARIUM_MONACO_SMOKE === '1';
 
 const assertNear = (actual, expected, label) => {
   if (!Number.isFinite(actual) || Math.abs(actual - expected) > LAYOUT_TOLERANCE_PX) {
@@ -132,7 +133,7 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
       pending.clear();
     });
 
-    send('Runtime.enable').then(() => {
+    Promise.all([send('Runtime.enable'), send('Page.enable')]).then(() => {
       resolve({
         close: () => socket.close(),
         consoleMessages,
@@ -142,10 +143,51 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
           returnByValue: true,
         }),
         exceptions,
+        navigate: (url) => send('Page.navigate', { url }),
       });
     }).catch(reject);
   }, { once: true });
 });
+
+const runMonacoSmoke = async (devTools) => {
+  const navigation = await devTools.navigate('piarium-ui://app/monaco-smoke.html');
+  if (navigation?.errorText) {
+    throw describeSmokeFailure(`Unable to navigate to the Monaco smoke entry: ${navigation.errorText}`, {
+      consoleMessages: devTools.consoleMessages,
+      exceptions: devTools.exceptions,
+    });
+  }
+
+  let lastState;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    await delay(250);
+    const evaluation = await devTools.evaluate('window.__piariumMonacoSmoke ?? null');
+    if (evaluation?.exceptionDetails) continue;
+    lastState = evaluation?.result?.value;
+    if (lastState?.status === 'failed') {
+      throw describeSmokeFailure('Packaged Monaco fixture failed.', {
+        consoleMessages: devTools.consoleMessages,
+        exceptions: devTools.exceptions,
+        state: lastState,
+      });
+    }
+    if (lastState?.status === 'ready') {
+      if (lastState.disposed !== true || lastState.runtime?.workerCreatedCount < 1) {
+        throw describeSmokeFailure('Packaged Monaco fixture did not dispose cleanly.', {
+          consoleMessages: devTools.consoleMessages,
+          exceptions: devTools.exceptions,
+          state: lastState,
+        });
+      }
+      return lastState;
+    }
+  }
+  throw describeSmokeFailure('Packaged Monaco fixture did not become ready.', {
+    consoleMessages: devTools.consoleMessages,
+    exceptions: devTools.exceptions,
+    state: lastState,
+  });
+};
 
 const waitForRenderer = async (userDataDir) => {
   const activePortPath = path.join(userDataDir, 'DevToolsActivePort');
@@ -234,10 +276,12 @@ const waitForRenderer = async (userDataDir) => {
       if (lastState?.ready === true) {
         const layoutReady = lastState.layout?.closeControl && lastState.layout?.composerShell && lastState.layout?.composerFrame;
         if (layoutReady) {
-          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', state: lastState };
+          const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
+          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', monaco, state: lastState };
         }
         if (lastState.layout?.runtimeSetup === true && lastState.layout?.localRuntimeContinueReady !== true) {
-          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'runtime-setup', state: lastState };
+          const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
+          return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'runtime-setup', monaco, state: lastState };
         }
         if (!continuedFromOnboarding && lastState.layout?.localRuntimeContinueReady === true) {
           const continuation = await devTools.evaluate(`(() => {
@@ -368,6 +412,7 @@ try {
       piVersion: null,
       profile: profileSource ? 'seeded' : 'clean',
       renderer: 'runtime-setup',
+      monaco: renderer.monaco,
       runtimeDiscovery: renderer.state?.diagnostics?.runtimeSnapshot ?? null,
       terminal: 'create-close-ok',
       workspaceView: renderer.state?.diagnostics?.workspaceView ?? null,
@@ -412,6 +457,7 @@ try {
     piVersion,
     profile: profileSource ? 'seeded' : 'clean',
     renderer: renderer.state?.ready === true ? 'app-ready' : 'not-ready',
+    monaco: renderer.monaco,
     terminal: 'create-close-ok',
   }, null, 2));
   }

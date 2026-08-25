@@ -10,6 +10,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const pwaDevEnabled = process.env.PIARIUM_DISABLE_PWA_DEV !== '1';
 const lowMemoryBuild = process.env.PIARIUM_LOW_MEMORY_BUILD === '1';
+const monacoSmokeEnabled = process.env.PIARIUM_MONACO_SMOKE === '1';
+const monacoBundleAuditEnabled = process.env.PIARIUM_MONACO_BUNDLE_AUDIT === '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 const themeDirectory = path.resolve(__dirname, '../ui/src/lib/theme/themes');
@@ -134,6 +136,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, 'dist'),
     emptyOutDir: true,
+    sourcemap: monacoBundleAuditEnabled,
     chunkSizeWarningLimit: 500,
     rollupOptions: {
       maxParallelFileOps: lowMemoryBuild ? 24 : 1000,
@@ -141,6 +144,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         mobile: path.resolve(__dirname, 'mobile.html'),
         miniChat: path.resolve(__dirname, 'mini-chat.html'),
+        ...(monacoSmokeEnabled ? { monacoSmoke: path.resolve(__dirname, 'monaco-smoke.html') } : {}),
       },
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
