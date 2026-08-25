@@ -519,4 +519,99 @@ describe('DocumentRegistry', () => {
     expect(journals.size).toBe(0);
     registry.dispose();
   });
+
+  test('previews and atomically applies a multi-file workspace edit without writing disk', async () => {
+    const { api, files } = createMemoryDocuments();
+    const first = resource('first.ts');
+    const second = resource('second.ts');
+    await api.write({ resource: first, content: 'const first = 1;\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ resource: second, content: 'const second = first;\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const opened = await registry.open(first);
+    let listenerSawAtomicState = false;
+    registry.subscribe(first, () => {
+      listenerSawAtomicState = registry.get(second)?.buffer === 'const second = renamed;\n';
+    });
+
+    const preview = await registry.prepareWorkspaceEdit({
+      workspaceId: first.workspaceId,
+      origin: 'language:rename',
+      textEdits: [
+        {
+          identity: first,
+          version: opened.localEditRevision,
+          edits: [{ range: { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } }, newText: 'renamed' }],
+        },
+        {
+          identity: second,
+          version: null,
+          edits: [{ range: { start: { line: 0, character: 15 }, end: { line: 0, character: 20 } }, newText: 'renamed' }],
+        },
+      ],
+    });
+    expect(preview.status).toBe('ready');
+    if (preview.status !== 'ready') throw new Error('expected workspace edit preview');
+    expect(preview.files.map((file) => file.identity.resourceId)).toEqual(['first.ts', 'second.ts']);
+    expect(registry.get(first)?.buffer).toBe('const first = 1;\n');
+    expect(registry.get(second)).toBeUndefined();
+
+    const applied = await registry.applyWorkspaceEdit(preview.groupId);
+    expect(applied.status).toBe('applied');
+    expect(listenerSawAtomicState).toBe(true);
+    expect(registry.get(first)?.buffer).toBe('const renamed = 1;\n');
+    expect(registry.get(second)?.buffer).toBe('const second = renamed;\n');
+    expect(files.get(documentKey(first))?.content).toBe('const first = 1;\n');
+    expect(files.get(documentKey(second))?.content).toBe('const second = first;\n');
+
+    const undone = registry.undoWorkspaceEdit(preview.groupId);
+    expect(undone.status).toBe('undone');
+    expect(registry.get(first)?.buffer).toBe('const first = 1;\n');
+    expect(registry.get(second)?.buffer).toBe('const second = first;\n');
+    registry.dispose();
+  });
+
+  test('rejects a stale workspace edit without partially updating other files', async () => {
+    const { api } = createMemoryDocuments();
+    const first = resource('first.ts');
+    const second = resource('second.ts');
+    await api.write({ resource: first, content: 'first\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    await api.write({ resource: second, content: 'second\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '2' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const firstRecord = await registry.open(first);
+    await registry.open(second);
+    const preview = await registry.prepareWorkspaceEdit({
+      workspaceId: first.workspaceId,
+      origin: 'language:rename',
+      textEdits: [
+        { identity: first, version: firstRecord.localEditRevision, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, newText: 'changed' }] },
+        { identity: second, version: 0, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } }, newText: 'changed' }] },
+      ],
+    });
+    if (preview.status !== 'ready') throw new Error('expected workspace edit preview');
+    registry.applyTransaction(first, 'user edit\n', { origin: 'editor' });
+    const result = await registry.applyWorkspaceEdit(preview.groupId);
+    expect(result.status).toBe('rejected');
+    expect(registry.get(first)?.buffer).toBe('user edit\n');
+    expect(registry.get(second)?.buffer).toBe('second\n');
+    registry.dispose();
+  });
+
+  test('returns explicit unsupported for resource operations before changing documents', async () => {
+    const { api } = createMemoryDocuments();
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const result = await registry.prepareWorkspaceEdit({
+      workspaceId: resource().workspaceId,
+      origin: 'language:code-action',
+      textEdits: [],
+      resourceOperations: [{ kind: 'create', identity: resource('created.ts') }],
+    });
+    expect(result).toEqual({
+      status: 'rejected',
+      failures: [{
+        reason: 'resource-operation-unsupported',
+        message: 'Workspace resource create, rename, and delete operations require a Host batch mutation contract',
+      }],
+    });
+    registry.dispose();
+  });
 });

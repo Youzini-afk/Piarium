@@ -1,0 +1,62 @@
+import { createRequire } from 'node:module';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+
+const directory = dirname(fileURLToPath(import.meta.url));
+const packageDirectory = resolve(directory, '..');
+const outputRoot = join(packageDirectory, 'dist', 'builtin-packages', 'typescript-language');
+const require = createRequire(import.meta.url);
+const packageRoot = (name) => dirname(require.resolve(`${name}/package.json`));
+const typescriptLanguageServerRoot = packageRoot('typescript-language-server');
+const typescriptRoot = packageRoot('typescript');
+const typescriptLanguageServerPackage = JSON.parse(await readFile(
+  join(typescriptLanguageServerRoot, 'package.json'),
+  'utf8',
+));
+const typescriptPackage = JSON.parse(await readFile(join(typescriptRoot, 'package.json'), 'utf8'));
+
+await rm(outputRoot, { force: true, recursive: true });
+await mkdir(join(outputRoot, 'runtime'), { recursive: true });
+await build({
+  absWorkingDir: packageDirectory,
+  bundle: true,
+  entryPoints: [join(packageDirectory, 'src', 'host', 'typescript-language-extension.ts')],
+  format: 'cjs',
+  outfile: join(outputRoot, 'host.cjs'),
+  platform: 'node',
+  sourcemap: false,
+  target: ['node22'],
+});
+await cp(
+  join(typescriptLanguageServerRoot, 'lib', 'cli.mjs'),
+  join(outputRoot, 'runtime', 'typescript-language-server.mjs'),
+);
+await cp(join(typescriptRoot, 'lib'), join(outputRoot, 'runtime', 'typescript', 'lib'), { recursive: true });
+await cp(join(typescriptLanguageServerRoot, 'LICENSE'), join(outputRoot, 'LICENSE.typescript-language-server'));
+await cp(join(typescriptRoot, 'LICENSE.txt'), join(outputRoot, 'LICENSE.typescript'));
+await cp(join(typescriptRoot, 'ThirdPartyNoticeText.txt'), join(outputRoot, 'THIRD_PARTY_NOTICES.typescript'));
+await writeFile(join(outputRoot, 'package.json'), `${JSON.stringify({
+  name: 'piarium-builtin-typescript-language',
+  private: true,
+  type: 'module',
+  version: typescriptLanguageServerPackage.version,
+}, null, 2)}\n`, 'utf8');
+
+const { PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION } = await import('../dist/index.js');
+const expectedVersion = `${typescriptLanguageServerPackage.version}+typescript.${typescriptPackage.version}`;
+if (PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION.manifest.version !== expectedVersion) {
+  throw new Error(`TypeScript language extension version must be ${expectedVersion}`);
+}
+await writeFile(
+  join(outputRoot, 'piarium.extension.json'),
+  `${JSON.stringify(PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION.manifest, null, 2)}\n`,
+  'utf8',
+);
+
+// Fail the build if the copied server accidentally stops being a self-contained ESM entrypoint.
+const serverSource = await readFile(join(outputRoot, 'runtime', 'typescript-language-server.mjs'), 'utf8');
+if (!serverSource.startsWith('#!/usr/bin/env node') || !serverSource.includes("from 'node:")) {
+  throw new Error('typescript-language-server runtime asset is no longer the expected self-contained Node entrypoint');
+}

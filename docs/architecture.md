@@ -250,6 +250,11 @@ formatting and semantic presentation without exposing the language-server proces
 Monaco registrations and markers are owned by provider generation; a provider restart clears the old
 projection and resynchronizes every open document from the current in-memory buffer. Internal language
 links route through the Workbench resource opener and external links through Piarium's HTTP(S) opener.
+Rename and code actions prepare an all-or-nothing Document Registry transaction, review cross-file or
+annotated changes, and retain one grouped undo action without writing disk. The bundled TypeScript/
+JavaScript service is an ordinary disableable brokered Piarium extension: its immutable server asset is
+materialized and registered lazily by the Application Host, and the server process exits when its last
+document closes.
 The complete model, language, worker,
 extension, and migration contract is
 [unified-file-editor-platform.md](unified-file-editor-platform.md).

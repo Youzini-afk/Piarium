@@ -18,9 +18,11 @@ factory only when `loadMonacoRuntime()` is called.
 - `model-registry.ts` projects one Document Registry record into one Monaco model. Workbench tabs own
   models; React views only own layout/listeners. The model URI contains a runtime key and internal
   document instance ID, never a workspace path.
-- `language-bridge.ts` keeps the existing Host language service authoritative. It projects accepted
-  diagnostics into markers and registers baseline completion/hover providers without enabling Monaco's
-  built-in semantic workers.
+- `language-bridge.ts` keeps the existing Host language service authoritative. It projects generation-
+  scoped diagnostics and rich language features, including rename and code actions. Cross-file edits go
+  through the Document Registry preview/transaction path, completion additional edits stay in Monaco's
+  single-model transaction, and server commands return to the Host only after document sync. Monaco's
+  built-in semantic workers remain disabled.
 - `view-state.ts` owns the v2 Monaco payload and a framework-neutral cursor/selection summary.
 - `vim-adapter.ts` consumes the persisted Vim setting through Monaco 0.56 public APIs. It deliberately
   does not import `monaco-vim` private `vs/*` modules; mode cursors, counted motions/edits, search,

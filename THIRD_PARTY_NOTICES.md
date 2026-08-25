@@ -33,6 +33,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## TypeScript language service
+
+Piarium's first-party TypeScript/JavaScript language extension distributes
+`typescript-language-server` 5.3.0 and TypeScript 5.9.3 as immutable runtime assets. Their complete
+MIT/Apache-2.0 licenses and TypeScript third-party notice are stored alongside those assets in every
+distribution artifact.
+
 ## Monaco Editor
 
 Piarium's desktop/Web file-editor runtime incorporates Monaco Editor.

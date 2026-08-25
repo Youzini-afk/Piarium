@@ -9,6 +9,11 @@ external registry, not in Zustand or Local Storage.
   use it for stable model identity without publishing workspace paths
 - `applyEdits` accepts one captured local revision plus non-overlapping offset edits, advances the local
   revision once, and returns typed stale/invalid/unsupported results
+- `prepareWorkspaceEdit` loads every target without committing, validates document versions/ranges and
+  produces a reviewable before/after plan. `applyWorkspaceEdit` revalidates that plan and publishes all
+  buffers before notifying any listener; disk writes remain explicit saves. Multi-file changes have one
+  lifecycle-bound undo group. Resource create/rename/delete remains explicitly unsupported until the
+  Host owns an atomic batch-mutation contract.
 - Three-way conflict stores ancestor, buffer, and disk candidate; writes still use expected revision
 - `session.ts` — one registry per bound `DocumentsAPI`
 - `hooks.ts` — per-document React subscriptions

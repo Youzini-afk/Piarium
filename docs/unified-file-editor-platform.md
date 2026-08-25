@@ -2,7 +2,7 @@
 
 Status: Phase 4 已完成；Phase 5 待实施
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 本文规定 Piarium 文件编辑能力的产品目标、权威边界、桌面/Web 与移动端分工、Monaco
 集成方式、语言智能契约、扩展边界、性能约束和实施顺序。它取代
@@ -744,6 +744,25 @@ Web/UI type-check/lint。只有协议或构建入口改变时跑对应 productio
 验收：真实 TypeScript 项目 smoke 覆盖 completion、auto-import、hover、definition、references、
 rename、format、diagnostics、quick fix；扩展 pack/install/enable/disable；Web remote Host 与 Electron
 各一次，不重复跑无关插件矩阵。
+
+完成证据（2026-08-26）：
+
+- `DocumentRegistry` 的 prepare/apply/discard/undo transaction 会先加载并验证所有目标，再一次性
+  发布所有 buffer；任一目标陈旧、冲突、保存中、越界或不受支持时整体拒绝。未打开文件会进入
+  dirty/recovery/watch 生命周期，磁盘仍等用户保存；resource operation 在 Host batch mutation 落地前
+  明确返回 unsupported；
+- Monaco rename 与 code action 只返回 Piarium 内部命令，跨文件或带确认注解的变更进入全局预览，
+  单文件 quick fix 直接走同一事务。completion additional edits 保持 Monaco 单 model 原子编辑；语言
+  命令等待最新 document sync，再由 Host 校验 provider/generation、document version 和服务器声明的
+  `executeCommandProvider` 后执行；
+- 第一方 `piarium.builtin.typescript-language` 是可停用的 brokered Host extension。分发构建将
+  `typescript-language-server@5.3.0` 与 `typescript@5.9.3` fallback、许可证和 notices 放进 immutable
+  artifact；首次 workspace language 请求才 materialize/activate，最后一个文档关闭即停止 server；
+- 真实 TypeScript 项目 smoke 覆盖 completion resolve + auto-import、hover、definition、references、
+  跨文件 rename、format、diagnostics 和 quick fix；扩展 artifact/activate/disable/unregister、Host rich
+  fixture、WorkspaceEdit stale/atomic/undo、Web request fidelity 与 Monaco conversion 聚焦测试通过。
+  Production Web/PWA、含 immutable language assets 的 cloud runtime、Windows x64 package 与 unpacked
+  Electron health/terminal smoke 均通过；没有重复运行无关的 Pi 插件或 Docker 矩阵。
 
 ### Phase 6 — Diff、debug、test、Git 与 Agent 协作
 

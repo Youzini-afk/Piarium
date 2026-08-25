@@ -27,6 +27,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## TypeScript language service
+
+The first-party TypeScript/JavaScript language extension distributes `typescript-language-server`
+5.3.0 and TypeScript 5.9.3. Complete license and third-party notice files are stored beside the
+immutable language-service assets included by this package.
+
 ## Monaco Editor
 
 The desktop/Web file-editor runtime incorporates Monaco Editor.

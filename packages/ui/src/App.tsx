@@ -41,6 +41,7 @@ import { WorkbenchTransitionOverlay } from '@/components/ui/WorkbenchTransitionO
 import { dismissInitialSplash, setInitialSplashStatus } from '@/lib/splash';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { PiariumDiagnosticsDialog } from '@/components/ui/PiariumDiagnosticsDialog';
+import { WorkspaceEditReviewDialog } from '@/components/workbench/WorkspaceEditReviewDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { subscribeDefaultDirectoryToRuntimeChanges } from '@/lib/directoryPersistence';
@@ -747,6 +748,7 @@ function App({ apis }: AppProps) {
               <WorkbenchProfileBridge />
               <WorkbenchShellHost />
               <Toaster />
+              <WorkspaceEditReviewDialog />
               {!isBootShell && (
                 <>
                   <WorkbenchTransitionOverlay />

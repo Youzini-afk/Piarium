@@ -63,6 +63,12 @@
       "dependencies": {
         "@piarium/extension-contract": "workspace:*",
       },
+      "devDependencies": {
+        "@piarium/extension-sdk": "workspace:*",
+        "esbuild": "^0.28.1",
+        "typescript": "~5.9.3",
+        "typescript-language-server": "^5.3.0",
+      },
     },
     "packages/extension-cli": {
       "name": "@piarium/extension-cli",
@@ -361,6 +367,7 @@
         "yazl": "^3.3.1",
       },
       "devDependencies": {
+        "@piarium/extension-builtins": "workspace:*",
         "@piarium/ui": "workspace:*",
         "@types/node": "^24.3.1",
         "@types/react": "^19.1.10",

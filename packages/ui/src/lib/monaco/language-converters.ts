@@ -44,6 +44,8 @@ export type PiariumResolvableContext = {
   resource: PiariumResourceReference;
   languageId: string;
   documentVersion: number;
+  providerId: string;
+  generation: number;
 };
 
 const SEMANTIC_TOKEN_TYPES = [
@@ -187,6 +189,9 @@ export const toMonacoCompletionItem = (
     ...(item.commitCharacters?.length ? { commitCharacters: item.commitCharacters } : {}),
     ...(item.insertTextFormat === 'snippet'
       ? { insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet }
+      : {}),
+    ...(item.additionalTextEdits?.length
+      ? { additionalTextEdits: item.additionalTextEdits.map(toMonacoTextEdit) }
       : {}),
     ...(item.resolveToken ? { __piariumResolveToken: item.resolveToken } : {}),
   };

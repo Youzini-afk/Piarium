@@ -112,6 +112,14 @@ export class ApplicationExtensionCatalog {
     return this.#publicSnapshot(identity.hostId, read);
   }
 
+  async selectBuiltinArtifact(candidate: PiariumExtensionPreparedArtifact): Promise<PiariumExtensionCatalogSnapshot> {
+    const [identity, read] = await Promise.all([
+      this.store.getHostIdentity(),
+      this.store.selectBuiltinArtifact(candidate),
+    ]);
+    return this.#publicSnapshot(identity.hostId, read);
+  }
+
   async reviewCandidateCapabilities(
     request: PiariumExtensionCandidateCapabilityReviewRequest,
   ): Promise<PiariumExtensionCatalogSnapshot> {

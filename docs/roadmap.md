@@ -513,10 +513,10 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
    host state. Existing profile documents are migrated in place to gain the IDE profile and its
    distribution shell layers.
 7. **Search and language services.** Streaming workspace content search and a host-owned language
-   service supervisor (JSON-RPC transport, server registry, TypeScript server and service, capability
-   gating, fixture server) landed in the application host, with a renderer-side registry that binds
-   diagnostics into the Problems panel and into the then-current CodeMirror adapter. The unified
-   editor plan replaces that desktop/Web consumer and enriches the currently thin DTO. Failures are typed and distinguishable —
+   service supervisor (JSON-RPC transport, provider registry, capability gating, fixture server) landed
+   in the application host. Desktop/Web now project its rich DTO through Monaco, while the first-party
+   TypeScript/JavaScript server is a lazy, disableable brokered Piarium extension with immutable assets
+   rather than a supervisor hardcode. Failures are typed and distinguishable —
    `failed`, `untrusted`, `stale-completion`, `unsupported` — stale diagnostic versions are dropped,
    and hidden views start no language servers.
 8. **Agent and editor transactions.** Agent file changes and open editors are reconciled explicitly

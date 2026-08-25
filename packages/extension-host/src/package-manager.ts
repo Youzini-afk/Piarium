@@ -18,6 +18,10 @@ import {
   type PiariumExtensionPackageSource,
 } from "@piarium/extension-contract";
 import { ApplicationExtensionCatalog } from "./application-catalog.js";
+import {
+  PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS,
+} from "@piarium/extension-builtins/host";
+import type { PiariumBuiltinExtensionDefinition } from "@piarium/extension-builtins";
 import { ExtensionArtifactStore } from "./artifact-store.js";
 import type { BrokeredHostEntrypointArtifact } from "./artifact-store.js";
 import { ExtensionCatalogRevisionConflictError } from "./errors.js";
@@ -39,6 +43,7 @@ export class ExtensionPackageManager {
     this.piariumVersion = options.piariumVersion;
     assertPiariumApplicationVersion(this.piariumVersion);
     this.artifacts = options.artifacts ?? new ExtensionArtifactStore({
+      builtinRoots: PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS,
       dataDir: options.dataDir,
       piariumVersion: options.piariumVersion,
     });
@@ -80,6 +85,29 @@ export class ExtensionPackageManager {
       updatedAt: now,
     };
     return this.catalog.upsert(record, expectedRevision);
+  }
+
+  async reconcileBuiltinArtifacts(
+    definitions: readonly PiariumBuiltinExtensionDefinition[],
+    snapshot: PiariumExtensionCatalogSnapshot,
+  ): Promise<PiariumExtensionCatalogSnapshot> {
+    let current = snapshot;
+    for (const definition of definitions) {
+      if (!definition.manifest.entrypoints?.host) continue;
+      const existing = current.extensions.find((entry) => entry.manifest.id === definition.manifest.id);
+      if (
+        existing?.source.kind === "builtin"
+        && existing.integrity
+        && existing.selectedVersion === definition.manifest.version
+      ) continue;
+      const prepared = await this.artifacts.prepare({
+        display: "Piarium",
+        kind: "builtin",
+        specifier: definition.manifest.id,
+      });
+      current = await this.catalog.selectBuiltinArtifact(prepared);
+    }
+    return current;
   }
 
   async reloadLocalSource(

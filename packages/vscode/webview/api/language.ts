@@ -31,6 +31,7 @@ export const createVSCodeLanguageServicesAPI = (): LanguageServicesAPI => ({
   rename: absentFeature,
   codeActions: absentFeature,
   codeActionResolve: absentFeature,
+  executeCommand: absentFeature,
   documentFormatting: absentFeature,
   documentRangeFormatting: absentFeature,
   onTypeFormatting: absentFeature,

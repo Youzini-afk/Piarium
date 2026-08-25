@@ -41,8 +41,12 @@ const CODE_ACTION_KINDS = [
 
 const capabilityValue = (record, key) => record.serverCapabilities?.[key];
 
-const supportsMethod = (record, method) => {
+const supportsMethod = (record, method, request) => {
   const capability = record.serverCapabilities ?? {};
+  if (method === 'workspace/executeCommand') {
+    const commands = capability.executeCommandProvider?.commands;
+    return typeof request?.command === 'string' && Array.isArray(commands) && commands.includes(request.command);
+  }
   if (method === 'completionItem/resolve') {
     return capability.completionProvider?.resolveProvider === true;
   }
@@ -118,6 +122,7 @@ const lspSeverity = (value) => {
 };
 
 export const createLanguageSupervisor = ({
+  activateProviders = async () => {},
   documents,
   spawn,
   pathModule = path,
@@ -270,7 +275,37 @@ export const createLanguageSupervisor = ({
     if (existing && (existing.status === 'ready' || existing.status === 'degraded')) {
       return existing;
     }
-    const provider = findProvider(workspaceId, languageId);
+    let provider = findProvider(workspaceId, languageId);
+    if (!provider) {
+      try {
+        await activateProviders({ workspaceId, languageId });
+      } catch (error) {
+        const failed = {
+          workspaceId,
+          languageId,
+          providerId: 'piarium.workspace-match',
+          providerOwnerKey: 'piarium.host\0activation',
+          generation: nextGeneration(key, existing),
+          status: 'failed',
+          message: error instanceof Error ? error.message : 'Language extension activation failed',
+          failureReason: 'provider-failed',
+          documents: new Map(),
+          child: null,
+          rpc: null,
+          root: '',
+          serverCapabilities: {},
+          completionResolveItems: new Map(),
+          codeActionResolveItems: new Map(),
+          inlayHintResolveItems: new Map(),
+          documentLinkResolveItems: new Map(),
+          resolveCounter: 0,
+        };
+        sessions.set(key, failed);
+        emit(workspaceId, { kind: 'status', snapshot: snapshotFor(failed) });
+        return failed;
+      }
+      provider = findProvider(workspaceId, languageId);
+    }
     if (!provider) return null;
     if (existing) disposeRecord(existing);
     const run = startSession(workspaceId, languageId, provider, existing);
@@ -487,9 +522,11 @@ export const createLanguageSupervisor = ({
           workspace: {
             symbol: { resolveSupport: { properties: ['location.range'] }, tagSupport: { valueSet: [1] } },
             workspaceEdit: { documentChanges: true, changeAnnotationSupport: { groupsOnLabel: true } },
+            executeCommand: { dynamicRegistration: false },
           },
         },
         workspaceFolders: [{ uri: toFileUri(workspace.root), name: pathModule.basename(workspace.root) }],
+        ...(provider.initializationOptions ? { initializationOptions: provider.initializationOptions } : {}),
       });
       record.serverCapabilities = initialized?.capabilities && typeof initialized.capabilities === 'object'
         ? initialized.capabilities
@@ -553,15 +590,28 @@ export const createLanguageSupervisor = ({
       if (desired.size === 0) desiredDocuments.delete(key);
       const record = sessions.get(key);
       const open = record?.documents.get(resourceId);
-      if (!record || !record.rpc || !open) return { status: 'absent' };
+      if (!record || !record.rpc || !open) {
+        if (record && desired.size === 0) {
+          disposeRecord(record, 'Last language document closed');
+          sessions.delete(key);
+          inflight.delete(key);
+        }
+        return { status: 'absent' };
+      }
       record.documents.delete(resourceId);
       record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolutePath) } });
-      return {
+      const result = {
         status: 'synced',
         documentVersion: request.documentVersion,
         providerId: record.providerId,
         generation: record.generation,
       };
+      if (desired.size === 0) {
+        disposeRecord(record, 'Last language document closed');
+        sessions.delete(key);
+        inflight.delete(key);
+      }
+      return result;
     }
     if (previousDesired && request.documentVersion < previousDesired.documentVersion) {
       return { status: 'stale', documentVersion: previousDesired.documentVersion };
@@ -691,6 +741,12 @@ export const createLanguageSupervisor = ({
     if (method === 'textDocument/colorPresentation') {
       return { textDocument: { uri }, color: request.color, range: request.range };
     }
+    if (method === 'workspace/executeCommand') {
+      return {
+        command: request.command,
+        ...(Array.isArray(request.arguments) ? { arguments: request.arguments } : {}),
+      };
+    }
     return {
       ...(uri ? { textDocument: { uri } } : {}),
       ...(request.position ? { position: request.position } : {}),
@@ -713,16 +769,28 @@ export const createLanguageSupervisor = ({
     const resourceId = request.resource?.resourceId;
     if (!workspaceId || !languageId) return { status: 'absent', ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
     const record = await ensureSession(workspaceId, languageId);
-    if (!record || !findProvider(workspaceId, languageId)) {
-      if (!findProvider(workspaceId, languageId)) return { status: 'absent', workspaceId, languageId };
+    if (!record) return { status: 'absent', workspaceId, languageId };
+    if (!findProvider(workspaceId, languageId) && record.status !== 'failed') {
+      return { status: 'absent', workspaceId, languageId };
     }
     if (!record || record.status === 'failed' || !record.rpc) {
       return featureFailure(record, record?.message || 'Language server is unavailable', record?.failureReason ?? 'provider-failed');
     }
-    if (!supportsMethod(record, method)) {
+    const open = resourceId ? record.documents.get(resourceId) : null;
+    if (
+      (typeof request.providerId === 'string' && request.providerId !== record.providerId)
+      || (Number.isFinite(request.generation) && request.generation !== record.generation)
+    ) {
+      return {
+        status: 'stale',
+        documentVersion: open?.documentVersion ?? request.documentVersion ?? 0,
+        providerId: record.providerId,
+        generation: record.generation,
+      };
+    }
+    if (!supportsMethod(record, method, request)) {
       return featureFailure(record, `Language provider does not support ${method}`, 'unsupported');
     }
-    const open = resourceId ? record.documents.get(resourceId) : null;
     if (open && Number.isFinite(request.documentVersion) && request.documentVersion !== open.documentVersion) {
       return { status: 'stale', documentVersion: open.documentVersion, providerId: record.providerId, generation: record.generation };
     }
@@ -828,6 +896,9 @@ export const createLanguageSupervisor = ({
         next.workspaceId = descriptor.workspaceId;
       }
       if (descriptor.env && typeof descriptor.env === 'object') next.env = descriptor.env;
+      if (descriptor.initializationOptions && typeof descriptor.initializationOptions === 'object' && !Array.isArray(descriptor.initializationOptions)) {
+        next.initializationOptions = structuredClone(descriptor.initializationOptions);
+      }
       const existingIndex = providers.findIndex((provider) => provider.providerId === next.providerId);
       const existing = existingIndex >= 0 ? providers[existingIndex] : null;
       if (existing && existing.ownerScopeKey !== next.ownerScopeKey) {
@@ -923,6 +994,11 @@ export const createLanguageSupervisor = ({
       request,
       'codeActionResolveItems',
       (raw, record) => mapCodeAction(raw, codeActionMappingContext(record, request), request.resolveToken),
+    ),
+    executeCommand: (request) => requestFeature(
+      'workspace/executeCommand',
+      request,
+      (raw) => raw ?? null,
     ),
     documentFormatting: (request) => requestFeature('textDocument/formatting', request, mapTextEdits),
     documentRangeFormatting: (request) => requestFeature('textDocument/rangeFormatting', request, mapTextEdits),

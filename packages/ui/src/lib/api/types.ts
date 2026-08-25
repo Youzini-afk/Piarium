@@ -2058,6 +2058,16 @@ export type PiariumLanguageFeatureResult<T> =
       generation?: number;
     };
 
+export interface PiariumLanguageCommandRequest {
+  resource: PiariumResourceReference;
+  languageId: string;
+  documentVersion: number;
+  providerId: string;
+  generation: number;
+  command: string;
+  arguments?: JsonValue[];
+}
+
 export interface PiariumLanguageDocumentSyncRequest {
   resource: PiariumResourceReference;
   languageId: string;
@@ -2142,6 +2152,7 @@ export interface LanguageServicesAPI {
   rename(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageWorkspaceEdit | null>>;
   codeActions(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCodeAction[]>>;
   codeActionResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCodeAction>>;
+  executeCommand(request: PiariumLanguageCommandRequest): Promise<PiariumLanguageFeatureResult<JsonValue | null>>;
   documentFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
   documentRangeFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
   onTypeFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;

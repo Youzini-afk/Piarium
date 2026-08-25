@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LanguageServicesError } from '@piarium/ui/lib/api/language-errors';
 import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
 
@@ -9,6 +9,8 @@ vi.mock('@piarium/ui/lib/runtime-fetch', () => ({
 }));
 
 describe('createWebLanguageServicesAPI', () => {
+  beforeEach(() => runtimeFetchMock.mockReset());
+
   it('rejects stale completions after an application-host endpoint switch', async () => {
     const { createWebLanguageServicesAPI } = await import('./language');
     const api = createWebLanguageServicesAPI();
@@ -26,5 +28,36 @@ describe('createWebLanguageServicesAPI', () => {
     resolveResponse?.(Response.json({ status: 'ready', documentVersion: 1, value: 'hover' }));
     await expect(pending).rejects.toBeInstanceOf(LanguageServicesError);
     await expect(pending).rejects.toMatchObject({ reason: 'stale-completion' });
+  });
+
+  it('sends generation-bound language commands through the authenticated Host route', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      status: 'ready',
+      documentVersion: 3,
+      providerId: 'typescript',
+      generation: 7,
+      value: null,
+    }));
+    const { createWebLanguageServicesAPI } = await import('./language');
+    await createWebLanguageServicesAPI().executeCommand({
+      resource: { workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', resourceId: 'note.ts' },
+      languageId: 'typescript',
+      documentVersion: 3,
+      providerId: 'typescript',
+      generation: 7,
+      command: 'typescript.applyRefactoring',
+      arguments: [{ kind: 'fixture' }],
+    });
+    const [path, options] = runtimeFetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/api/language/feature');
+    expect(JSON.parse(String(options.body))).toMatchObject({
+      method: 'executeCommand',
+      request: {
+        providerId: 'typescript',
+        generation: 7,
+        command: 'typescript.applyRefactoring',
+        arguments: [{ kind: 'fixture' }],
+      },
+    });
   });
 });

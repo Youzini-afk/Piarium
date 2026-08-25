@@ -217,6 +217,15 @@ export const notifyLanguageDocumentSave = (identity: DocumentIdentity): void => 
   enqueueDocumentSync(identity, open.languageId, 'save');
 };
 
+export const flushLanguageDocumentSync = async (identity: DocumentIdentity): Promise<void> => {
+  const key = editorKey(identity);
+  for (;;) {
+    const pending = documentSyncQueues.get(key);
+    if (!pending) return;
+    await pending;
+  }
+};
+
 export const releaseLanguageDocument = (identity: DocumentIdentity): void => {
   const key = editorKey(identity);
   const existing = openEditors.get(key);

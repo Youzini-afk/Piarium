@@ -25,6 +25,7 @@ const FEATURES = new Set([
   'rename',
   'codeActions',
   'codeActionResolve',
+  'executeCommand',
   'documentFormatting',
   'documentRangeFormatting',
   'onTypeFormatting',

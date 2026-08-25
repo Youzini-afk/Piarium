@@ -34,7 +34,9 @@ returns file bodies in watch events, and it cannot escape the workspace the appl
 `callWorkspaceSearch` / `callWorkspaceLanguage` and `createWorkspaceLanguageClient` reach the
 host-owned search and language services. `defineLanguageProvider` registers a Host language server.
 Language servers are spawned only in the application host; untrusted workspaces cannot execute
-project-provided server commands. Search failures are distinct from zero matches.
+project-provided server commands. A provider may supply JSON `initializationOptions`; packaged tools
+should resolve executables and fallback runtimes through `context.assets.path(...)` so enable, disable,
+update, and rollback remain generation-scoped. Search failures are distinct from zero matches.
 
 `callWorkspaceDebug` / `createWorkspaceDebugClient` / `defineDebugAdapter` and
 `callWorkspaceTest` / `createWorkspaceTestClient` / `defineTestProvider` register Host-side

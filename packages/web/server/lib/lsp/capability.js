@@ -21,6 +21,7 @@ const LANGUAGE_METHODS = new Set([
   'rename',
   'codeActions',
   'codeActionResolve',
+  'executeCommand',
   'documentFormatting',
   'documentRangeFormatting',
   'onTypeFormatting',

@@ -159,6 +159,28 @@ function manifestCapabilities(manifest: PiariumExtensionManifest): PiariumExtens
   ));
 }
 
+function builtinCapabilityGrants(
+  manifest: PiariumExtensionManifest,
+  updatedAt: string,
+): PiariumExtensionCapabilityGrant[] {
+  return manifestCapabilities(manifest).map((reference) => ({
+    ...reference,
+    granted: true,
+    manifestVersion: manifest.version,
+    updatedAt,
+  }));
+}
+
+function sameCapabilityGrants(
+  left: readonly PiariumExtensionCapabilityGrant[],
+  right: readonly PiariumExtensionCapabilityGrant[],
+): boolean {
+  const project = (values: readonly PiariumExtensionCapabilityGrant[]) => values
+    .map(({ capability, granted, manifestVersion, realm }) => ({ capability, granted, manifestVersion, realm }))
+    .sort((first, second) => capabilityKey(first).localeCompare(capabilityKey(second)));
+  return JSON.stringify(project(left)) === JSON.stringify(project(right));
+}
+
 function capabilitiesReviewed(record: PiariumExtensionInstallationRecord): boolean {
   if (record.source.kind === "builtin") return true;
   const decided = new Set(record.capabilityGrants
@@ -303,7 +325,7 @@ export class ExtensionCatalogStore {
         const existing = document.extensions[manifest.id];
         if (!existing) {
           document.extensions[manifest.id] = {
-            capabilityGrants: [],
+            capabilityGrants: builtinCapabilityGrants(manifest, now),
             desired: { enabled: definition.enabledByDefault, revision: 1, updatedAt: now },
             installedAt: now,
             manifest: structuredClone(manifest),
@@ -319,30 +341,59 @@ export class ExtensionCatalogStore {
           throw new Error(`Piarium built-in extension ID is already owned by another source: ${manifest.id}`);
         }
         const nextManifest = JSON.stringify(manifest);
+        const desiredGrants = builtinCapabilityGrants(manifest, now);
         if (
           JSON.stringify(existing.manifest) === nextManifest
           && existing.resolvedVersion === manifest.version
           && existing.selectedVersion === manifest.version
           && existing.source.display === "Piarium"
           && existing.candidate === undefined
-          && existing.integrity === undefined
-          && existing.resolvedPath === undefined
+          && sameCapabilityGrants(existing.capabilityGrants, desiredGrants)
         ) continue;
+        const artifactVersionChanged = existing.resolvedVersion !== manifest.version
+          || existing.selectedVersion !== manifest.version;
+        const manifestChanged = JSON.stringify(existing.manifest) !== nextManifest;
         existing.manifest = structuredClone(manifest);
         existing.resolvedVersion = manifest.version;
         existing.selectedVersion = manifest.version;
         existing.source = { display: "Piarium", kind: "builtin", specifier: manifest.id };
-        existing.capabilityGrants = existing.capabilityGrants.filter((grant) => (
-          grant.manifestVersion === manifest.version
-          && (manifest.capabilities?.[grant.realm] ?? []).includes(grant.capability)
-        ));
+        existing.capabilityGrants = desiredGrants;
         delete existing.candidate;
-        delete existing.integrity;
-        delete existing.resolvedPath;
+        if (manifestChanged || artifactVersionChanged) {
+          delete existing.integrity;
+          delete existing.resolvedPath;
+        }
         existing.updatedAt = now;
         changed = true;
       }
       return changed;
+    });
+  }
+
+  selectBuiltinArtifact(candidate: PiariumExtensionPreparedArtifact): Promise<CatalogReadState> {
+    return this.#mutateCurrent((document, now) => {
+      const record = document.extensions[candidate.manifest.id];
+      if (!record || record.source.kind !== "builtin" || record.source.specifier !== candidate.manifest.id) {
+        throw new Error(`Piarium built-in extension is not reconciled: ${candidate.manifest.id}`);
+      }
+      if (candidate.source.kind !== "builtin" || candidate.source.specifier !== candidate.manifest.id) {
+        throw new Error(`Piarium built-in artifact source is invalid: ${candidate.manifest.id}`);
+      }
+      if (JSON.stringify(record.manifest) !== JSON.stringify(candidate.manifest)) {
+        throw new Error(`Piarium built-in artifact manifest does not match the distribution: ${candidate.manifest.id}`);
+      }
+      if (
+        record.integrity === candidate.integrity
+        && record.resolvedPath === candidate.resolvedPath
+        && record.resolvedVersion === candidate.resolvedVersion
+        && record.selectedVersion === candidate.resolvedVersion
+      ) return false;
+      record.integrity = candidate.integrity;
+      record.resolvedPath = candidate.resolvedPath;
+      record.resolvedVersion = candidate.resolvedVersion;
+      record.selectedVersion = candidate.resolvedVersion;
+      record.updatedAt = now;
+      return true;
     });
   }
 

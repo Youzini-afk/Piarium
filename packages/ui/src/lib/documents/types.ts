@@ -75,6 +75,94 @@ export type DocumentEditResult =
   | { status: 'invalid'; reason: DocumentEditFailureReason; record: DocumentRecord }
   | { status: 'unsupported'; record: DocumentRecord };
 
+export type DocumentTextPosition = {
+  line: number;
+  character: number;
+};
+
+export type DocumentTextRange = {
+  start: DocumentTextPosition;
+  end: DocumentTextPosition;
+};
+
+export type DocumentWorkspaceTextEdit = {
+  range: DocumentTextRange;
+  newText: string;
+  annotationId?: string;
+};
+
+export type DocumentWorkspaceTextDocumentEdit = {
+  identity: DocumentIdentity;
+  version: number | null;
+  edits: DocumentWorkspaceTextEdit[];
+};
+
+export type DocumentWorkspaceResourceOperation =
+  | { kind: 'create'; identity: DocumentIdentity }
+  | { kind: 'rename'; from: DocumentIdentity; to: DocumentIdentity }
+  | { kind: 'delete'; identity: DocumentIdentity };
+
+export type DocumentWorkspaceEditInput = {
+  workspaceId: string;
+  origin: string;
+  textEdits: DocumentWorkspaceTextDocumentEdit[];
+  resourceOperations?: DocumentWorkspaceResourceOperation[];
+  changeAnnotations?: Record<string, {
+    label: string;
+    description?: string;
+    needsConfirmation?: boolean;
+  }>;
+};
+
+export type DocumentWorkspaceEditFailureReason =
+  | 'workspace-mismatch'
+  | 'resource-operation-unsupported'
+  | 'missing'
+  | 'binary'
+  | 'unsupported-encoding'
+  | 'conflict'
+  | 'saving'
+  | 'not-ready'
+  | 'stale-version'
+  | 'invalid-range'
+  | 'overlapping-ranges'
+  | 'stale-plan';
+
+export type DocumentWorkspaceEditFailure = {
+  identity?: DocumentIdentity;
+  reason: DocumentWorkspaceEditFailureReason;
+  message: string;
+};
+
+export type DocumentWorkspaceEditPreviewFile = {
+  identity: DocumentIdentity;
+  beforeContent: string;
+  afterContent: string;
+  editCount: number;
+};
+
+export type DocumentWorkspaceEditPreview = {
+  status: 'ready';
+  groupId: string;
+  workspaceId: string;
+  origin: string;
+  files: DocumentWorkspaceEditPreviewFile[];
+  requiresConfirmation: boolean;
+};
+
+export type DocumentWorkspaceEditPrepareResult =
+  | DocumentWorkspaceEditPreview
+  | { status: 'rejected'; failures: DocumentWorkspaceEditFailure[] };
+
+export type DocumentWorkspaceEditApplyResult =
+  | { status: 'applied'; groupId: string; records: DocumentRecord[] }
+  | { status: 'rejected'; failures: DocumentWorkspaceEditFailure[] };
+
+export type DocumentWorkspaceEditUndoResult =
+  | { status: 'undone'; groupId: string; records: DocumentRecord[] }
+  | { status: 'unavailable'; groupId: string }
+  | { status: 'rejected'; groupId: string; failures: DocumentWorkspaceEditFailure[] };
+
 export type DocumentMeta = {
   identity: DocumentIdentity;
   status: DocumentLoadStatus;

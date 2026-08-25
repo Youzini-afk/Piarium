@@ -808,6 +808,7 @@ async function main(options = {}) {
   });
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));
   const languageSupervisor = createLanguageSupervisor({
+    activateProviders: () => extensionRuntime.activateForEvent('workspace-match'),
     documents: documentsAuthority,
     spawn,
     pathModule: path,

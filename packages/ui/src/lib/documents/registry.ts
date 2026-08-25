@@ -18,6 +18,14 @@ import {
   type DocumentIdentity,
   type DocumentMeta,
   type DocumentRecord,
+  type DocumentTextPosition,
+  type DocumentWorkspaceEditApplyResult,
+  type DocumentWorkspaceEditFailure,
+  type DocumentWorkspaceEditInput,
+  type DocumentWorkspaceEditPrepareResult,
+  type DocumentWorkspaceEditPreview,
+  type DocumentWorkspaceEditUndoResult,
+  type DocumentWorkspaceTextEdit,
 } from './types';
 
 export type DocumentListener = (record: DocumentRecord) => void;
@@ -41,6 +49,76 @@ const replacementBetween = (previous: string, next: string): DocumentChange | nu
   }
   return { from, to: previousEnd, insert: next.slice(from, nextEnd) };
 };
+
+type PreparedWorkspaceDocument = {
+  before: DocumentRecord;
+  afterBuffer: string;
+  changes: DocumentChange[];
+  editCount: number;
+  wasOpen: boolean;
+};
+
+type PreparedWorkspaceEdit = {
+  generation: number;
+  preview: DocumentWorkspaceEditPreview;
+  documents: PreparedWorkspaceDocument[];
+};
+
+type WorkspaceEditUndoGroup = {
+  groupId: string;
+  documents: Array<{
+    identity: DocumentIdentity;
+    beforeBuffer: string;
+    appliedBuffer: string;
+    appliedRevision: number;
+  }>;
+};
+
+const offsetAtPosition = (buffer: string, position: DocumentTextPosition): number | null => {
+  if (!Number.isSafeInteger(position.line) || !Number.isSafeInteger(position.character)
+    || position.line < 0 || position.character < 0) return null;
+  let line = 0;
+  let lineStart = 0;
+  while (line < position.line) {
+    const newline = buffer.indexOf('\n', lineStart);
+    if (newline < 0) return null;
+    lineStart = newline + 1;
+    line += 1;
+  }
+  const newline = buffer.indexOf('\n', lineStart);
+  const lineEnd = newline < 0 ? buffer.length : newline;
+  if (position.character > lineEnd - lineStart) return null;
+  return lineStart + position.character;
+};
+
+const prepareTextChanges = (
+  buffer: string,
+  edits: readonly DocumentWorkspaceTextEdit[],
+): { status: 'ready'; buffer: string; changes: DocumentChange[] } | { status: 'invalid-range' | 'overlapping-ranges' } => {
+  const changes: Array<DocumentChange & { index: number }> = [];
+  for (const [index, edit] of edits.entries()) {
+    const from = offsetAtPosition(buffer, edit.range.start);
+    const to = offsetAtPosition(buffer, edit.range.end);
+    if (from === null || to === null || to < from) return { status: 'invalid-range' };
+    changes.push({ from, to, insert: edit.newText, index });
+  }
+  const ascending = [...changes].sort((left, right) => (
+    left.from - right.from || left.to - right.to || left.index - right.index
+  ));
+  for (let index = 1; index < ascending.length; index += 1) {
+    if (ascending[index - 1].to > ascending[index].from) return { status: 'overlapping-ranges' };
+  }
+  const descending = [...changes]
+    .sort((left, right) => right.from - left.from || right.to - left.to || right.index - left.index)
+    .map(({ from, to, insert }) => ({ from, to, insert }));
+  let next = buffer;
+  for (const edit of descending) next = `${next.slice(0, edit.from)}${edit.insert}${next.slice(edit.to)}`;
+  return { status: 'ready', buffer: next, changes: descending };
+};
+
+const sameResourceSet = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => (
+  left.size === right.size && [...left].every((value) => right.has(value))
+);
 
 type RegistryOptions = {
   documents: DocumentsAPI;
@@ -208,6 +286,8 @@ export class DocumentRegistry {
   private readonly watches = new Map<string, Subscription>();
   private readonly journalTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly journalOperations = new Map<string, Promise<void>>();
+  private readonly preparedWorkspaceEdits = new Map<string, PreparedWorkspaceEdit>();
+  private readonly workspaceEditUndoGroups = new Map<string, WorkspaceEditUndoGroup>();
   private disposed = false;
 
   constructor(options: RegistryOptions) {
@@ -429,6 +509,288 @@ export class DocumentRegistry {
     }
     const next = this.applyTransaction(identity, buffer, { origin: input.origin, changes });
     return { status: 'applied', record: next };
+  }
+
+  async prepareWorkspaceEdit(input: DocumentWorkspaceEditInput): Promise<DocumentWorkspaceEditPrepareResult> {
+    this.assertActive();
+    const generation = this.getGeneration();
+    const failures: DocumentWorkspaceEditFailure[] = [];
+    if (input.resourceOperations && input.resourceOperations.length > 0) {
+      failures.push({
+        reason: 'resource-operation-unsupported',
+        message: 'Workspace resource create, rename, and delete operations require a Host batch mutation contract',
+      });
+    }
+    const grouped = new Map<string, {
+      identity: DocumentIdentity;
+      edits: DocumentWorkspaceTextEdit[];
+      versions: Set<number>;
+    }>();
+    for (const change of input.textEdits) {
+      if (change.identity.workspaceId !== input.workspaceId) {
+        failures.push({
+          identity: change.identity,
+          reason: 'workspace-mismatch',
+          message: 'Workspace edit targets another workspace',
+        });
+        continue;
+      }
+      const key = documentKey(change.identity);
+      const item = grouped.get(key) ?? { identity: change.identity, edits: [], versions: new Set<number>() };
+      item.edits.push(...change.edits);
+      if (change.version !== null) item.versions.add(change.version);
+      grouped.set(key, item);
+    }
+    for (const item of grouped.values()) {
+      if (item.versions.size > 1) {
+        failures.push({
+          identity: item.identity,
+          reason: 'stale-version',
+          message: 'Workspace edit contains conflicting document versions',
+        });
+      }
+    }
+    if (failures.length > 0) return { status: 'rejected', failures };
+
+    const loaded = await Promise.all([...grouped.values()].map(async (item) => {
+      const existing = this.records.get(documentKey(item.identity));
+      if (existing) return { item, record: existing, wasOpen: true };
+      try {
+        const result = await this.documents.read(item.identity);
+        const record = applyRead(
+          emptyRecord(item.identity, generation, this.createDocumentInstanceId()),
+          result,
+        );
+        return { item, record, wasOpen: false };
+      } catch (error) {
+        failures.push({
+          identity: item.identity,
+          reason: 'not-ready',
+          message: error instanceof Error ? error.message : 'Document could not be loaded',
+        });
+        return null;
+      }
+    }));
+    if (this.disposed || generation !== this.getGeneration()) {
+      return {
+        status: 'rejected',
+        failures: [{ reason: 'stale-plan', message: 'Application Host changed while preparing the workspace edit' }],
+      };
+    }
+    const documents: PreparedWorkspaceDocument[] = [];
+    for (const loadedItem of loaded) {
+      if (!loadedItem) continue;
+      const { item, record, wasOpen } = loadedItem;
+      if (record.saving) {
+        failures.push({ identity: item.identity, reason: 'saving', message: 'Document is currently being saved' });
+        continue;
+      }
+      if (record.status === 'binary') {
+        failures.push({ identity: item.identity, reason: 'binary', message: 'Binary documents cannot receive text edits' });
+        continue;
+      }
+      if (record.status === 'unsupported-encoding') {
+        failures.push({ identity: item.identity, reason: 'unsupported-encoding', message: 'Document encoding is not editable' });
+        continue;
+      }
+      if (record.status === 'conflict') {
+        failures.push({ identity: item.identity, reason: 'conflict', message: 'Document already has an unresolved disk conflict' });
+        continue;
+      }
+      if (record.status === 'missing' || record.status === 'deleted') {
+        failures.push({ identity: item.identity, reason: 'missing', message: 'Document does not exist' });
+        continue;
+      }
+      if (record.status !== 'ready') {
+        failures.push({ identity: item.identity, reason: 'not-ready', message: 'Document is not ready for editing' });
+        continue;
+      }
+      const expectedVersion = item.versions.values().next().value as number | undefined;
+      if (expectedVersion !== undefined && expectedVersion !== record.localEditRevision) {
+        failures.push({
+          identity: item.identity,
+          reason: 'stale-version',
+          message: `Document version changed from ${expectedVersion} to ${record.localEditRevision}`,
+        });
+        continue;
+      }
+      const prepared = prepareTextChanges(record.buffer, item.edits);
+      if (prepared.status !== 'ready') {
+        failures.push({
+          identity: item.identity,
+          reason: prepared.status,
+          message: prepared.status === 'invalid-range'
+            ? 'Workspace edit contains a range outside the current document'
+            : 'Workspace edit contains overlapping ranges',
+        });
+        continue;
+      }
+      if (prepared.buffer === record.buffer) continue;
+      documents.push({
+        before: structuredClone(record),
+        afterBuffer: prepared.buffer,
+        changes: prepared.changes,
+        editCount: item.edits.length,
+        wasOpen,
+      });
+    }
+    if (failures.length > 0) return { status: 'rejected', failures };
+    const groupId = crypto.randomUUID();
+    const annotationIds = new Set(input.textEdits.flatMap((change) => (
+      change.edits.map((edit) => edit.annotationId).filter((value): value is string => Boolean(value))
+    )));
+    const requiresConfirmation = [...annotationIds].some((annotationId) => (
+      input.changeAnnotations?.[annotationId]?.needsConfirmation === true
+    ));
+    const preview: DocumentWorkspaceEditPreview = {
+      status: 'ready',
+      groupId,
+      workspaceId: input.workspaceId,
+      origin: input.origin,
+      files: documents.map((document) => ({
+        identity: document.before.identity,
+        beforeContent: document.before.buffer,
+        afterContent: document.afterBuffer,
+        editCount: document.editCount,
+      })),
+      requiresConfirmation,
+    };
+    this.preparedWorkspaceEdits.set(groupId, { generation, preview, documents });
+    return preview;
+  }
+
+  async applyWorkspaceEdit(groupId: string): Promise<DocumentWorkspaceEditApplyResult> {
+    this.assertActive();
+    const prepared = this.preparedWorkspaceEdits.get(groupId);
+    if (!prepared) {
+      return {
+        status: 'rejected',
+        failures: [{ reason: 'stale-plan', message: 'Workspace edit preview is no longer available' }],
+      };
+    }
+    const failures: DocumentWorkspaceEditFailure[] = [];
+    if (prepared.generation !== this.getGeneration()) {
+      failures.push({ reason: 'stale-plan', message: 'Application Host changed after the workspace edit was previewed' });
+    }
+    const diskSnapshots = new Map<string, DocumentRecord>();
+    await Promise.all(prepared.documents.filter((document) => !document.wasOpen).map(async (document) => {
+      try {
+        const read = await this.documents.read(document.before.identity);
+        diskSnapshots.set(
+          documentKey(document.before.identity),
+          applyRead(
+            emptyRecord(document.before.identity, prepared.generation, document.before.documentInstanceId),
+            read,
+          ),
+        );
+      } catch (error) {
+        failures.push({
+          identity: document.before.identity,
+          reason: 'not-ready',
+          message: error instanceof Error ? error.message : 'Document could not be revalidated',
+        });
+      }
+    }));
+    for (const document of prepared.documents) {
+      const current = this.records.get(documentKey(document.before.identity))
+        ?? diskSnapshots.get(documentKey(document.before.identity));
+      if (!current
+        || current.localEditRevision !== document.before.localEditRevision
+        || current.buffer !== document.before.buffer
+        || current.status !== document.before.status
+        || current.saving) {
+        failures.push({
+          identity: document.before.identity,
+          reason: 'stale-plan',
+          message: 'Document changed after the workspace edit was previewed',
+        });
+        continue;
+      }
+      if (!document.wasOpen && current.baseRevision !== document.before.baseRevision) {
+        failures.push({
+          identity: document.before.identity,
+          reason: 'stale-plan',
+          message: 'Document changed on disk after the workspace edit was previewed',
+        });
+      }
+    }
+    if (failures.length > 0) {
+      this.preparedWorkspaceEdits.delete(groupId);
+      return { status: 'rejected', failures };
+    }
+
+    const records = prepared.documents.map((document) => {
+      const current = this.records.get(documentKey(document.before.identity)) ?? document.before;
+      return {
+        ...current,
+        buffer: document.afterBuffer,
+        dirty: document.afterBuffer !== current.baseContent,
+        localEditRevision: current.localEditRevision + 1,
+        status: 'ready' as const,
+        lastOrigin: prepared.preview.origin,
+        lastChanges: document.changes,
+        errorMessage: null,
+      };
+    });
+    this.preparedWorkspaceEdits.delete(groupId);
+    this.invalidateWorkspaceEditUndoGroups(records.map((record) => record.identity));
+    this.commitAtomic(records, prepared.preview.workspaceId);
+    this.workspaceEditUndoGroups.set(groupId, {
+      groupId,
+      documents: records.map((record, index) => ({
+        identity: record.identity,
+        beforeBuffer: prepared.documents[index].before.buffer,
+        appliedBuffer: record.buffer,
+        appliedRevision: record.localEditRevision,
+      })),
+    });
+    return { status: 'applied', groupId, records };
+  }
+
+  discardWorkspaceEdit(groupId: string): void {
+    this.preparedWorkspaceEdits.delete(groupId);
+  }
+
+  undoWorkspaceEdit(groupId: string): DocumentWorkspaceEditUndoResult {
+    this.assertActive();
+    const group = this.workspaceEditUndoGroups.get(groupId);
+    if (!group) return { status: 'unavailable', groupId };
+    const failures: DocumentWorkspaceEditFailure[] = [];
+    for (const document of group.documents) {
+      const current = this.records.get(documentKey(document.identity));
+      if (!current
+        || current.localEditRevision !== document.appliedRevision
+        || current.buffer !== document.appliedBuffer
+        || current.saving
+        || current.status === 'conflict') {
+        failures.push({
+          identity: document.identity,
+          reason: 'stale-plan',
+          message: 'Document changed after the workspace edit was applied',
+        });
+      }
+    }
+    if (failures.length > 0) {
+      this.workspaceEditUndoGroups.delete(groupId);
+      return { status: 'rejected', groupId, failures };
+    }
+    this.workspaceEditUndoGroups.delete(groupId);
+    const records = group.documents.map((document) => {
+      const current = this.records.get(documentKey(document.identity))!;
+      const change = replacementBetween(current.buffer, document.beforeBuffer);
+      return {
+        ...current,
+        buffer: document.beforeBuffer,
+        dirty: document.beforeBuffer !== current.baseContent,
+        localEditRevision: current.localEditRevision + 1,
+        status: 'ready' as const,
+        lastOrigin: `workspace-edit-undo:${groupId}`,
+        lastChanges: change ? [change] : [],
+        errorMessage: null,
+      };
+    });
+    this.commitAtomic(records, records[0]?.identity.workspaceId ?? '');
+    return { status: 'undone', groupId, records };
   }
 
   async save(
@@ -660,11 +1022,21 @@ export class DocumentRegistry {
     this.openOperations.clear();
     this.dirtyIdsByWorkspace.clear();
     this.workspaceVersions.clear();
+    this.preparedWorkspaceEdits.clear();
+    this.workspaceEditUndoGroups.clear();
   }
 
   private commit(record: DocumentRecord): void {
     const key = documentKey(record.identity);
     const previous = this.records.get(key);
+    if (previous && (
+      previous.buffer !== record.buffer
+      || previous.localEditRevision !== record.localEditRevision
+      || previous.status !== record.status
+      || previous.conflict !== record.conflict
+    )) {
+      this.invalidateWorkspaceEditUndoGroups([record.identity]);
+    }
     this.records.set(key, record);
     if (previous?.dirty !== record.dirty) {
       this.updateDirtyIndex(record.identity, record.dirty);
@@ -690,6 +1062,7 @@ export class DocumentRegistry {
   }
 
   private removeRecord(record: DocumentRecord): void {
+    this.invalidateWorkspaceEditUndoGroups([record.identity]);
     this.records.delete(documentKey(record.identity));
     if (record.dirty) this.updateDirtyIndex(record.identity, false);
     this.notifyWorkspace(record.identity.workspaceId);
@@ -705,6 +1078,41 @@ export class DocumentRegistry {
     const listeners = this.dirtyListenersByWorkspace.get(identity.workspaceId);
     if (listeners) {
       for (const listener of listeners) listener();
+    }
+  }
+
+  private commitAtomic(records: DocumentRecord[], workspaceId: string): void {
+    if (records.length === 0) return;
+    this.ensureWatch(workspaceId);
+    const previousDirty = this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
+    const nextDirty = new Set(previousDirty);
+    for (const record of records) {
+      this.records.set(documentKey(record.identity), record);
+      if (record.dirty) nextDirty.add(record.identity.resourceId);
+      else nextDirty.delete(record.identity.resourceId);
+    }
+    this.dirtyIdsByWorkspace.set(workspaceId, nextDirty);
+    this.workspaceVersions.set(workspaceId, (this.workspaceVersions.get(workspaceId) ?? 0) + 1);
+    this.ensureWatch(workspaceId);
+    for (const record of records) {
+      const listeners = this.listeners.get(documentKey(record.identity));
+      if (listeners) for (const listener of listeners) listener(record);
+    }
+    if (!sameResourceSet(previousDirty, nextDirty)) {
+      const listeners = this.dirtyListenersByWorkspace.get(workspaceId);
+      if (listeners) for (const listener of listeners) listener();
+    }
+    const workspaceListeners = this.workspaceListeners.get(workspaceId);
+    if (workspaceListeners) for (const listener of workspaceListeners) listener();
+    for (const record of records) this.scheduleJournal(record);
+  }
+
+  private invalidateWorkspaceEditUndoGroups(identities: readonly DocumentIdentity[]): void {
+    const keys = new Set(identities.map(documentKey));
+    for (const [groupId, group] of this.workspaceEditUndoGroups) {
+      if (group.documents.some((document) => keys.has(documentKey(document.identity)))) {
+        this.workspaceEditUndoGroups.delete(groupId);
+      }
     }
   }
 

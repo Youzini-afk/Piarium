@@ -65,6 +65,7 @@ export interface BrokeredHostEntrypointArtifact {
 }
 
 export interface ExtensionArtifactStoreOptions {
+  builtinRoots?: ReadonlyMap<string, string> | Record<string, string>;
   buildModule?: ExtensionModuleBuilder;
   dataDir: string;
   packageSources?: PiariumExtensionPackageSourceRegistry;
@@ -304,7 +305,10 @@ export class ExtensionArtifactStore {
     assertPiariumApplicationVersion(this.piariumVersion);
     this.#build = options.buildModule ?? buildModuleWithEsbuild;
     this.#run = options.run ?? runExtensionSourceCommand;
-    this.#packageSources = options.packageSources ?? createDefaultExtensionPackageSourceRegistry({ run: this.#run });
+    this.#packageSources = options.packageSources ?? createDefaultExtensionPackageSourceRegistry({
+      ...(options.builtinRoots ? { builtinRoots: options.builtinRoots } : {}),
+      run: this.#run,
+    });
   }
 
   async prepare(source: PiariumExtensionPackageSource, signal?: AbortSignal): Promise<PiariumExtensionPreparedArtifact> {

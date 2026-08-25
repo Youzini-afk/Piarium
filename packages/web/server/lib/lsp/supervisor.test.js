@@ -119,6 +119,33 @@ describe('language supervisor', () => {
         status: 'ready',
         value: [{ title: 'Fixture action', isPreferred: true, edit: { documentChanges: [{ kind: 'text' }] } }],
       });
+      const resolvedAction = await language.codeActionResolve({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        resolveToken: actions.value[0].resolveToken,
+      });
+      expect(resolvedAction).toMatchObject({
+        status: 'ready',
+        value: { command: { command: 'fixture.finish', arguments: ['done'] } },
+      });
+      expect(await language.executeCommand({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        providerId: 'fixture',
+        generation: 1,
+        command: 'fixture.finish',
+        arguments: ['done'],
+      })).toMatchObject({ status: 'ready', value: { finished: 'done' } });
+      expect(await language.executeCommand({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        providerId: 'fixture',
+        generation: 1,
+        command: 'fixture.not-declared',
+      })).toMatchObject({ status: 'failed', reason: 'unsupported' });
     } finally {
       await language.dispose();
       await harness.cleanup();
@@ -154,6 +181,71 @@ describe('language supervisor', () => {
         position: { line: 0, character: 0 },
       });
       expect(stale).toMatchObject({ status: 'stale', documentVersion: 4, providerId: 'fixture', generation: 1 });
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
+  it('activates workspace language extensions on demand and stops after the last document closes', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    let activations = 0;
+    let language;
+    language = createLanguageSupervisor({
+      activateProviders: async () => {
+        activations += 1;
+        language.registerProvider(fixtureProvider());
+      },
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      const resource = harness.resource('lazy.ts');
+      expect(await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'const lazy = true;\n',
+      })).toMatchObject({ status: 'synced', generation: 1 });
+      expect(activations).toBe(1);
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript').status).toBe('ready');
+      expect(await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'close',
+      })).toMatchObject({ status: 'synced', generation: 1 });
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript').status).toBe('absent');
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
+  it('keeps an activation failure distinct from an absent provider', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      activateProviders: async () => { throw new Error('extension activation failed'); },
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      expect(await language.syncDocument({
+        resource: harness.resource('failed.ts'),
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'const failed = true;\n',
+      })).toMatchObject({ status: 'failed', message: 'extension activation failed' });
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript')).toMatchObject({
+        status: 'failed',
+        message: 'extension activation failed',
+      });
     } finally {
       await language.dispose();
       await harness.cleanup();

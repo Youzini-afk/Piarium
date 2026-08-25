@@ -8,6 +8,7 @@ import { bindDocumentRegistry, resetDocumentRegistry } from '@/lib/documents/ses
 import {
   acquireLanguageDocument,
   bindLanguageServices,
+  flushLanguageDocumentSync,
   notifyLanguageDocumentChange,
   notifyLanguageDocumentSave,
   resetLanguageServices,
@@ -106,7 +107,8 @@ describe('language document synchronization', () => {
     notifyLanguageDocumentSave(identity);
 
     releaseOpen?.();
-    await waitUntil(() => requests.length === 4);
+    await flushLanguageDocumentSync(identity);
+    expect(requests).toHaveLength(4);
 
     expect(maxActiveRequests).toBe(1);
     expect(requests.map((request) => request.documentVersion)).toEqual([0, 1, 2, 2]);

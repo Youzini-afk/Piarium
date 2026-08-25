@@ -363,6 +363,7 @@ export const createWorkspaceDocumentsClient = (
 export type PiariumLanguageProviderDescriptor = {
   args?: readonly string[];
   command: string;
+  initializationOptions?: JsonObject;
   languageIds: readonly string[];
   providerId: string;
   source?: string;
@@ -387,6 +388,7 @@ const languageProviderParams = (descriptor: PiariumLanguageProviderDescriptor): 
     providerId: descriptor.providerId,
   };
   if (descriptor.args) params.args = [...descriptor.args];
+  if (descriptor.initializationOptions) params.initializationOptions = structuredClone(descriptor.initializationOptions);
   if (descriptor.source) params.source = descriptor.source;
   if (descriptor.workspaceId) params.workspaceId = descriptor.workspaceId;
   return params;

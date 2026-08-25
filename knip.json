@@ -90,6 +90,18 @@
         "test/**/*.{ts,mjs}"
       ]
     },
+    "packages/extension-builtins": {
+      "entry": [
+        "src/index.ts",
+        "src/host.ts",
+        "src/host/typescript-language-extension.ts",
+        "scripts/**/*.mjs"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.mjs"
+      ]
+    },
     "packages/mobile": {
       "entry": [
         "scripts/**/*.mjs"

@@ -14,17 +14,27 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./host": {
+      "types": "./dist/host.d.ts",
+      "import": "./dist/host.js"
     }
   },
   "scripts": {
-    "build:dependencies": "bun run --cwd ../extension-contract build",
-    "build": "bun run build:dependencies && tsc -p tsconfig.build.json",
+    "build:dependencies": "bun run --cwd ../extension-contract build && bun run --cwd ../extension-sdk build",
+    "build": "bun run build:dependencies && tsc -p tsconfig.build.json && node scripts/build-host-builtins.mjs",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@piarium/extension-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@piarium/extension-sdk": "workspace:*",
+    "esbuild": "^0.28.1",
+    "typescript": "~5.9.3",
+    "typescript-language-server": "^5.3.0"
   },
   "engines": {
     "node": ">=22.19.0"

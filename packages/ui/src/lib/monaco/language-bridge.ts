@@ -1,12 +1,16 @@
-import type { editor, IPosition, IRange } from 'monaco-editor/editor';
+import type { editor, IPosition, IRange, languages } from 'monaco-editor/editor';
+import { toast } from 'sonner';
 
 import type {
   LanguageServicesAPI,
+  PiariumLanguageCodeAction,
+  PiariumLanguageCommand,
   PiariumLanguageDiagnostic,
   PiariumLanguageFeatureRequest,
   PiariumResourceReference,
 } from '@/lib/api/types';
 import { getDocumentRegistry } from '@/lib/documents/session';
+import type { DocumentRegistry } from '@/lib/documents/registry';
 import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
 import {
   getLanguageDiagnosticsForResource,
@@ -19,11 +23,14 @@ import {
 } from '@/lib/language-services/provider-status-registry';
 import {
   acquireLanguageDocument,
+  flushLanguageDocumentSync,
   getBoundLanguageServices,
   notifyLanguageDocumentChange,
   notifyLanguageDocumentSave,
   releaseLanguageDocument,
 } from '@/lib/language-services/session';
+import { applyLanguageWorkspaceEdit } from '@/lib/language-services/workspace-edit-application';
+import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import {
@@ -80,6 +87,7 @@ type MonacoLanguageBridgeOptions = {
   acquireDocument?: (identity: DocumentIdentity, languageId?: string) => void;
   diagnosticsFor?: (identity: DocumentIdentity) => readonly PiariumLanguageDiagnostic[];
   getLanguage?: () => LanguageServicesAPI | null;
+  getDocumentRegistry?: () => DocumentRegistry;
   modelRegistry: FileEditorModelRegistry;
   monaco: MonacoRuntime;
   notifyDocumentChange?: (identity: DocumentIdentity) => void;
@@ -96,6 +104,28 @@ type FeatureContext = {
   record: DocumentRecord;
   version: number;
 };
+
+type LanguageCommandInvocation = {
+  context: PiariumResolvableContext;
+  kind: 'command';
+  command: PiariumLanguageCommand;
+  model: editor.ITextModel;
+};
+
+type LanguageCodeActionInvocation = {
+  action: PiariumLanguageCodeAction;
+  context: PiariumResolvableContext;
+  kind: 'code-action';
+  model: editor.ITextModel;
+};
+
+type LanguageInvocation = LanguageCommandInvocation | LanguageCodeActionInvocation;
+
+const PIARIUM_LANGUAGE_COMMAND_ID = 'piarium.language.execute';
+
+const t = (key: I18nKey, params?: I18nParams): string => (
+  formatMessage(useI18nStore.getState().dictionary, key, params)
+);
 
 const identityKey = (identity: DocumentIdentity): string => `${identity.workspaceId}\0${identity.resourceId}`;
 
@@ -118,6 +148,7 @@ export class MonacoLanguageBridge {
   private readonly acquireDocument: (identity: DocumentIdentity, languageId?: string) => void;
   private readonly diagnosticsFor: (identity: DocumentIdentity) => readonly PiariumLanguageDiagnostic[];
   private readonly getLanguage: () => LanguageServicesAPI | null;
+  private readonly documentRegistry: () => DocumentRegistry;
   private readonly modelRegistry: FileEditorModelRegistry;
   private readonly monaco: MonacoRuntime;
   private readonly notifyDocumentChange: (identity: DocumentIdentity) => void;
@@ -127,6 +158,8 @@ export class MonacoLanguageBridge {
   private readonly entriesByModel = new Map<editor.ITextModel, LanguageEntry>();
   private readonly owners = new Map<string, LanguageEntry>();
   private readonly providers = new Map<string, ProviderEntry>();
+  private readonly invocations = new Map<string, LanguageInvocation>();
+  private readonly invocationIdsByModel = new Map<editor.ITextModel, Set<string>>();
   private readonly globalDisposables: Array<{ dispose(): void }>;
   private readonly unsubscribeDiagnostics: () => void;
   private readonly unsubscribeProviderStatus: () => void;
@@ -140,11 +173,12 @@ export class MonacoLanguageBridge {
     this.notifyDocumentChange = options.notifyDocumentChange ?? notifyLanguageDocumentChange;
     this.notifyDocumentSave = options.notifyDocumentSave ?? notifyLanguageDocumentSave;
     this.getLanguage = options.getLanguage ?? getBoundLanguageServices;
+    this.documentRegistry = options.getDocumentRegistry ?? getDocumentRegistry;
     this.diagnosticsFor = options.diagnosticsFor ?? ((identity) => (
       getLanguageDiagnosticsForResource(identity.workspaceId, identity.resourceId)
     ));
     this.subscribeDocument = options.subscribeDocument ?? ((identity, listener) => (
-      getDocumentRegistry().subscribe(identity, listener)
+      this.documentRegistry().subscribe(identity, listener)
     ));
     this.unsubscribeDiagnostics = (options.subscribeDiagnostics ?? subscribeLanguageDiagnostics)(
       () => this.refreshAllMarkers(),
@@ -173,6 +207,10 @@ export class MonacoLanguageBridge {
           if (uri.scheme !== 'http' && uri.scheme !== 'https') return false;
           return openExternalUrl(uri.toString());
         },
+      }),
+      this.monaco.editor.registerCommand(PIARIUM_LANGUAGE_COMMAND_ID, (_accessor, invocationId) => {
+        if (typeof invocationId !== 'string') return;
+        void this.executeInvocation(invocationId);
       }),
     ];
   }
@@ -231,6 +269,7 @@ export class MonacoLanguageBridge {
     entry.owners.delete(ownerId);
     if (entry.owners.size > 0) return;
     this.entriesByModel.delete(entry.model);
+    this.clearInvocations(entry.model);
     entry.unsubscribeDocument();
     this.clearMarkers(entry);
     if (entry.languageId !== 'plaintext') {
@@ -250,6 +289,8 @@ export class MonacoLanguageBridge {
     }
     for (const disposable of this.globalDisposables) disposable.dispose();
     this.providers.clear();
+    this.invocations.clear();
+    this.invocationIdsByModel.clear();
   }
 
   private contextFor(model: editor.ITextModel, token: { isCancellationRequested: boolean }): FeatureContext | null {
@@ -367,12 +408,19 @@ export class MonacoLanguageBridge {
           resource: context.entry.identity,
           languageId: context.entry.languageId,
           documentVersion: context.version,
+          providerId: result.providerId,
+          generation: result.generation,
         };
+        this.clearInvocations(model);
         return {
-          suggestions: result.value.map((item) => ({
-            ...toMonacoCompletionItem(this.monaco, item, fallbackRange),
-            __piariumContext: resolvableContext,
-          })),
+          suggestions: result.value.map((item) => {
+            const suggestion: MonacoResolvableCompletionItem = {
+              ...toMonacoCompletionItem(this.monaco, item, fallbackRange),
+              __piariumContext: resolvableContext,
+            };
+            if (item.command) suggestion.command = this.captureCommand(model, resolvableContext, item.command);
+            return suggestion;
+          }),
         };
       },
       resolveCompletionItem: async (item: MonacoResolvableCompletionItem, token) => {
@@ -384,10 +432,14 @@ export class MonacoLanguageBridge {
         }));
         if (result.status !== 'ready' || !this.accepts(context, token, result.documentVersion)) return item;
         const fallbackRange = 'insert' in item.range ? item.range.replace : item.range;
-        return {
+        const resolved: MonacoResolvableCompletionItem = {
           ...toMonacoCompletionItem(this.monaco, result.value, fallbackRange),
           __piariumContext: item.__piariumContext,
         };
+        if (result.value.command && item.__piariumContext) {
+          resolved.command = this.captureCommand(context.entry.model, item.__piariumContext, result.value.command);
+        }
+        return resolved;
       },
     });
     const hover = this.monaco.languages.registerHoverProvider(monacoLanguageId, {
@@ -440,6 +492,86 @@ export class MonacoLanguageBridge {
           ? result.value.map((value) => toMonacoLocation(this.monaco, value))
           : [];
       },
+    });
+    const rename = this.monaco.languages.registerRenameProvider(monacoLanguageId, {
+      provideRenameEdits: async (model, position, newName, token) => {
+        const context = this.contextFor(model, token);
+        if (!context) return { edits: [], rejectReason: t('filesView.workspaceEdit.unavailable') };
+        const result = await context.language.rename(this.request(context, {
+          position: fromMonacoPosition(position),
+          newName,
+        }));
+        if (result.status !== 'ready' || !this.accepts(context, token, result.documentVersion)) {
+          return { edits: [], rejectReason: t('filesView.workspaceEdit.stale') };
+        }
+        if (!result.value) return { edits: [], rejectReason: t('filesView.workspaceEdit.unavailable') };
+        const registry = this.documentRegistry();
+        const applied = await applyLanguageWorkspaceEdit({
+          edit: result.value,
+          kind: 'rename',
+          isCancelled: () => token.isCancellationRequested,
+          label: t('filesView.workspaceEdit.renameDescription', { name: newName }),
+          origin: `language:rename:${result.providerId}:${result.generation}`,
+          registry,
+          workspaceId: context.entry.identity.workspaceId,
+        });
+        if (applied.status === 'cancelled') {
+          return { edits: [], rejectReason: t('filesView.workspaceEdit.cancelled') };
+        }
+        if (applied.status === 'rejected') return { edits: [], rejectReason: applied.message };
+        this.reportWorkspaceEditApplied(registry, applied.groupId, applied.changedFiles);
+        return { edits: [] };
+      },
+    });
+    const codeActions = this.monaco.languages.registerCodeActionProvider(monacoLanguageId, {
+      provideCodeActions: async (model, range, actionContext, token) => {
+        const context = this.contextFor(model, token);
+        if (!context) return { actions: [], dispose() {} };
+        const diagnostics = this.diagnosticsFor(context.entry.identity).filter((diagnostic) => (
+          diagnostic.documentVersion === context.version
+        ));
+        const result = await context.language.codeActions(this.request(context, {
+          range: fromMonacoRange(range),
+          diagnostics: [...diagnostics],
+        }));
+        if (result.status !== 'ready' || !this.accepts(context, token, result.documentVersion)) {
+          return { actions: [], dispose() {} };
+        }
+        const invocationContext: PiariumResolvableContext = {
+          resource: context.entry.identity,
+          languageId: context.entry.languageId,
+          documentVersion: context.version,
+          providerId: result.providerId,
+          generation: result.generation,
+        };
+        this.clearInvocations(model);
+        return {
+          actions: result.value
+            .filter((action) => !actionContext.only || action.kind?.startsWith(actionContext.only))
+            .map((action) => ({
+              title: action.title,
+              ...(action.kind ? { kind: action.kind } : {}),
+              ...(action.isPreferred ? { isPreferred: true } : {}),
+              ...(action.disabledReason ? { disabled: action.disabledReason } : {}),
+              ...(action.diagnostics?.length ? { diagnostics: [...actionContext.markers] } : {}),
+              ...(!action.disabledReason ? {
+                command: {
+                  id: PIARIUM_LANGUAGE_COMMAND_ID,
+                  title: action.title,
+                  arguments: [this.captureInvocation(model, {
+                    action,
+                    context: invocationContext,
+                    kind: 'code-action',
+                    model,
+                  })],
+                },
+              } : {}),
+            })),
+          dispose() {},
+        };
+      },
+    }, {
+      providedCodeActionKinds: ['quickfix', 'refactor', 'source'],
     });
     const symbols = this.monaco.languages.registerDocumentSymbolProvider(monacoLanguageId, {
       displayName: 'Piarium',
@@ -553,6 +685,8 @@ export class MonacoLanguageBridge {
           resource: context.entry.identity,
           languageId: context.entry.languageId,
           documentVersion: context.version,
+          providerId: result.providerId,
+          generation: result.generation,
         };
         return {
           hints: result.value.map((value) => ({
@@ -584,6 +718,8 @@ export class MonacoLanguageBridge {
           resource: context.entry.identity,
           languageId: context.entry.languageId,
           documentVersion: context.version,
+          providerId: result.providerId,
+          generation: result.generation,
         };
         return {
           links: result.value.map((value) => ({
@@ -631,6 +767,8 @@ export class MonacoLanguageBridge {
       signature,
       definition,
       references,
+      rename,
+      codeActions,
       symbols,
       highlights,
       formatting,
@@ -643,6 +781,133 @@ export class MonacoLanguageBridge {
       links,
       colors,
     ];
+  }
+
+  private captureInvocation(model: editor.ITextModel, invocation: LanguageInvocation): string {
+    const id = crypto.randomUUID();
+    this.invocations.set(id, invocation);
+    const ids = this.invocationIdsByModel.get(model) ?? new Set<string>();
+    ids.add(id);
+    this.invocationIdsByModel.set(model, ids);
+    return id;
+  }
+
+  private captureCommand(
+    model: editor.ITextModel,
+    context: PiariumResolvableContext,
+    command: PiariumLanguageCommand,
+  ): languages.Command {
+    return {
+      id: PIARIUM_LANGUAGE_COMMAND_ID,
+      title: command.title,
+      arguments: [this.captureInvocation(model, { command, context, kind: 'command', model })],
+    };
+  }
+
+  private clearInvocations(model: editor.ITextModel): void {
+    const ids = this.invocationIdsByModel.get(model);
+    if (!ids) return;
+    for (const id of ids) this.invocations.delete(id);
+    this.invocationIdsByModel.delete(model);
+  }
+
+  private consumeInvocation(id: string): LanguageInvocation | null {
+    const invocation = this.invocations.get(id) ?? null;
+    if (!invocation) return null;
+    this.invocations.delete(id);
+    const ids = this.invocationIdsByModel.get(invocation.model);
+    ids?.delete(id);
+    if (ids?.size === 0) this.invocationIdsByModel.delete(invocation.model);
+    return invocation;
+  }
+
+  private async executeInvocation(id: string): Promise<void> {
+    const invocation = this.consumeInvocation(id);
+    if (!invocation) {
+      toast.error(t('filesView.workspaceEdit.unavailable'));
+      return;
+    }
+    try {
+      const language = this.getLanguage();
+      if (!language) throw new Error(t('filesView.workspaceEdit.unavailable'));
+      let command = invocation.kind === 'command' ? invocation.command : invocation.action.command;
+      if (invocation.kind === 'code-action') {
+        let action = invocation.action;
+        if (action.resolveToken) {
+          const resolved = await language.codeActionResolve({
+            resource: invocation.context.resource,
+            languageId: invocation.context.languageId,
+            documentVersion: invocation.context.documentVersion,
+            resolveToken: action.resolveToken,
+          });
+          if (resolved.status !== 'ready'
+            || resolved.providerId !== invocation.context.providerId
+            || resolved.generation !== invocation.context.generation) {
+            throw new Error(resolved.status === 'failed' ? resolved.message : t('filesView.workspaceEdit.stale'));
+          }
+          action = resolved.value;
+          command = action.command;
+        }
+        if (action.edit) {
+          const registry = this.documentRegistry();
+          const applied = await applyLanguageWorkspaceEdit({
+            edit: action.edit,
+            kind: 'code-action',
+            label: action.title,
+            origin: `language:code-action:${invocation.context.providerId}:${invocation.context.generation}`,
+            registry,
+            workspaceId: invocation.context.resource.workspaceId,
+          });
+          if (applied.status === 'cancelled') return;
+          if (applied.status === 'rejected') throw new Error(applied.message);
+          this.reportWorkspaceEditApplied(registry, applied.groupId, applied.changedFiles);
+        }
+      }
+      if (!command) return;
+      await flushLanguageDocumentSync(invocation.context.resource);
+      const record = this.documentRegistry().get(invocation.context.resource);
+      if (!record) throw new Error(t('filesView.workspaceEdit.stale'));
+      const result = await language.executeCommand({
+        resource: invocation.context.resource,
+        languageId: invocation.context.languageId,
+        documentVersion: record.localEditRevision,
+        providerId: invocation.context.providerId,
+        generation: invocation.context.generation,
+        command: command.command,
+        ...(command.arguments ? { arguments: command.arguments } : {}),
+      });
+      if (result.status !== 'ready') {
+        throw new Error(result.status === 'failed' ? result.message : t('filesView.workspaceEdit.stale'));
+      }
+    } catch (error) {
+      toast.error(t('filesView.workspaceEdit.failed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private reportWorkspaceEditApplied(
+    registry: ReturnType<typeof getDocumentRegistry>,
+    groupId: string,
+    changedFiles: number,
+  ): void {
+    if (changedFiles === 0) return;
+    toast.success(changedFiles === 1
+      ? t('filesView.workspaceEdit.appliedSingle', { count: changedFiles })
+      : t('filesView.workspaceEdit.appliedMany', { count: changedFiles }), {
+      action: {
+        label: t('filesView.workspaceEdit.undo'),
+        onClick: () => {
+          try {
+            const result = registry.undoWorkspaceEdit(groupId);
+            if (result.status === 'undone') toast.success(t('filesView.workspaceEdit.undone'));
+            else toast.error(t('filesView.workspaceEdit.undoUnavailable'));
+          } catch {
+            toast.error(t('filesView.workspaceEdit.undoUnavailable'));
+          }
+        },
+      },
+    });
   }
 
   private releaseProviders(languageId: string): void {

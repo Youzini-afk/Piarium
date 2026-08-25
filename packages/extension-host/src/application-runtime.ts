@@ -13,6 +13,7 @@ import {
   parsePiariumWorkbenchProfileApplyRequest,
   resolvePiariumExtensionServiceRouting,
   type JsonValue,
+  type PiariumExtensionActivationEvent,
   type PiariumExtensionActualState,
   type PiariumExtensionCandidateCapabilityReviewRequest,
   type PiariumExtensionCandidateSelectionRequest,
@@ -279,7 +280,21 @@ export class ApplicationExtensionRuntime {
 
   activateExtension(extensionId: string): Promise<void> {
     return this.#mutate(async () => {
+      await this.#ensureBuiltinArtifact(extensionId);
       await this.supervisor.activateExtension(extensionId);
+      this.#publish();
+    });
+  }
+
+  activateForEvent(event: PiariumExtensionActivationEvent): Promise<void> {
+    return this.#mutate(async () => {
+      const snapshot = await this.catalog.snapshot();
+      if (!snapshot.authoritative) throw new Error("Cannot activate extensions from a stale catalog");
+      for (const entry of snapshot.extensions) {
+        if (!entry.desired.enabled || !entry.manifest.entrypoints?.host?.activation?.includes(event)) continue;
+        await this.#ensureBuiltinArtifact(entry.manifest.id);
+        await this.supervisor.activateExtension(entry.manifest.id);
+      }
       this.#publish();
     });
   }
@@ -514,6 +529,15 @@ export class ApplicationExtensionRuntime {
       throw new Error(detail || `Host service provider is unavailable or ambiguous: ${key}`);
     }
     return this.services.invoke({ ...parsed, providerId: resolution.providerId }, signal);
+  }
+
+  async #ensureBuiltinArtifact(extensionId: string): Promise<void> {
+    const definition = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.find((candidate) => (
+      candidate.manifest.id === extensionId && candidate.manifest.entrypoints?.host
+    ));
+    if (!definition) return;
+    const snapshot = await this.catalog.snapshot();
+    await this.packages.reconcileBuiltinArtifacts([definition], snapshot);
   }
 
   #mutate<T>(operation: () => Promise<T>): Promise<T> {

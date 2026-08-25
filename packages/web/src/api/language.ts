@@ -1,6 +1,7 @@
 import type {
   LanguageServicesAPI,
   PiariumLanguageCodeAction,
+  PiariumLanguageCommandRequest,
   PiariumLanguageColorInformation,
   PiariumLanguageColorPresentation,
   PiariumLanguageCompletionItem,
@@ -25,6 +26,7 @@ import type {
   PiariumLanguageWorkspaceEdit,
   Subscription,
 } from '@piarium/ui/lib/api/types';
+import type { JsonValue } from '@piarium/extension-contract';
 import { LanguageServicesError, parseLanguageServicesFailureReason } from '@piarium/ui/lib/api/language-errors';
 import { runtimeFetch } from '@piarium/ui/lib/runtime-fetch';
 import {
@@ -88,6 +90,10 @@ const feature = <T>(method: string, request: PiariumLanguageFeatureRequest) => (
   postJson('/api/language/feature', { method, request }) as Promise<PiariumLanguageFeatureResult<T>>
 );
 
+const command = <T>(method: string, request: PiariumLanguageCommandRequest) => (
+  postJson('/api/language/feature', { method, request }) as Promise<PiariumLanguageFeatureResult<T>>
+);
+
 export const createWebLanguageServicesAPI = (): LanguageServicesAPI => ({
   getStatus: (workspaceId, languageId) => (
     postJson('/api/language/status', { workspaceId, languageId }) as Promise<PiariumLanguageProviderStatus>
@@ -143,6 +149,7 @@ export const createWebLanguageServicesAPI = (): LanguageServicesAPI => ({
   rename: (request) => feature<PiariumLanguageWorkspaceEdit | null>('rename', request),
   codeActions: (request) => feature<PiariumLanguageCodeAction[]>('codeActions', request),
   codeActionResolve: (request) => feature<PiariumLanguageCodeAction>('codeActionResolve', request),
+  executeCommand: (request) => command<JsonValue | null>('executeCommand', request),
   documentFormatting: (request) => feature<PiariumLanguageTextEdit[]>('documentFormatting', request),
   documentRangeFormatting: (request) => feature<PiariumLanguageTextEdit[]>('documentRangeFormatting', request),
   onTypeFormatting: (request) => feature<PiariumLanguageTextEdit[]>('onTypeFormatting', request),

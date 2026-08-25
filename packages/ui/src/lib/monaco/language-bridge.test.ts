@@ -56,6 +56,7 @@ describe('MonacoLanguageBridge', () => {
       MarkerSeverity: { Error: 8, Warning: 4, Info: 2, Hint: 1 },
       Uri: { from: (value: Record<string, string>) => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) },
       editor: {
+        registerCommand: () => ({ dispose: providerDispose }),
         registerEditorOpener: () => ({ dispose: providerDispose }),
         registerLinkOpener: () => ({ dispose: providerDispose }),
         setModelLanguage: vi.fn(),
@@ -85,6 +86,8 @@ describe('MonacoLanguageBridge', () => {
         registerSignatureHelpProvider: () => ({ dispose: providerDispose }),
         registerDefinitionProvider: () => ({ dispose: providerDispose }),
         registerReferenceProvider: () => ({ dispose: providerDispose }),
+        registerRenameProvider: () => ({ dispose: providerDispose }),
+        registerCodeActionProvider: () => ({ dispose: providerDispose }),
         registerDocumentSymbolProvider: () => ({ dispose: providerDispose }),
         registerDocumentHighlightProvider: () => ({ dispose: providerDispose }),
         registerDocumentFormattingEditProvider: () => ({ dispose: providerDispose }),
@@ -116,7 +119,15 @@ describe('MonacoLanguageBridge', () => {
       documentVersion: 3,
       providerId: 'fixture',
       generation: 2,
-      value: [{ label: 'document', insertText: 'document', detail: 'global' }],
+      value: [{
+        label: 'document',
+        insertText: 'document',
+        detail: 'global',
+        additionalTextEdits: [{
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+          newText: 'import "document";\n',
+        }],
+      }],
     }));
     const hover = vi.fn(async () => ({
       status: 'ready' as const,
@@ -176,6 +187,7 @@ describe('MonacoLanguageBridge', () => {
       label: 'document',
       insertText: 'document',
       range: { startColumn: 1, endColumn: 4 },
+      additionalTextEdits: [{ text: 'import "document";\n' }],
     });
     expect(await hoverProvider.provideHover(model, { lineNumber: 1, column: 2 } as never, token)).toMatchObject({
       contents: [{ value: '`Document`' }],

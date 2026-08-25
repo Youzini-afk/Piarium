@@ -69,6 +69,7 @@ const server = createJsonRpcServer({
           workspaceSymbolProvider: true,
           renameProvider: true,
           codeActionProvider: { resolveProvider: true },
+          executeCommandProvider: { commands: ['fixture.finish'] },
           documentFormattingProvider: true,
           documentRangeFormattingProvider: true,
           documentOnTypeFormattingProvider: { firstTriggerCharacter: '}', moreTriggerCharacter: [';'] },
@@ -177,6 +178,10 @@ const server = createJsonRpcServer({
     }
     if (method === 'codeAction/resolve') {
       return { ...params, command: { title: 'Finish fixture action', command: 'fixture.finish', arguments: ['done'] } };
+    }
+    if (method === 'workspace/executeCommand') {
+      if (params?.command !== 'fixture.finish') throw new Error('unsupported fixture command');
+      return { finished: params?.arguments?.[0] ?? null };
     }
     if (
       method === 'textDocument/formatting'

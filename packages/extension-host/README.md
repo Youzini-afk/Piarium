@@ -17,3 +17,8 @@ responses never expose source specifiers or resolved filesystem paths, and asset
 credentials in module or resource URLs. Brokered and explicitly trusted-native Host entrypoints use
 generation-scoped lifecycle ownership, versioned services, revisioned storage, candidate rollback,
 and persisted multi-scope service routing.
+
+Distribution-owned Host extensions use the same immutable artifact and broker lifecycle as installed
+extensions. Their requested Host capabilities are granted only while reconciling the distribution
+definition; executable artifacts are materialized lazily when their activation event is first requested,
+so declarative built-ins do not add startup I/O.
