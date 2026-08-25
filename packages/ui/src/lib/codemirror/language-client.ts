@@ -3,6 +3,7 @@ import { autocompletion } from '@codemirror/autocomplete';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import type { Extension } from '@codemirror/state';
 import { hoverTooltip } from '@codemirror/view';
+import type { PiariumLanguageDiagnostic } from '@/lib/api/types';
 import { getBoundLanguageServices } from '@/lib/language-services/session';
 import {
   getLanguageDiagnosticsForResource,
@@ -11,6 +12,8 @@ import {
 import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import type { DocumentIdentity } from '@/lib/documents/types';
+
+const EMPTY_DIAGNOSTICS: readonly PiariumLanguageDiagnostic[] = [];
 
 const positionToOffset = (text: string, line: number, character: number): number => {
   const lines = text.split('\n');
@@ -26,8 +29,10 @@ export const useDocumentLanguageExtensions = (identity: DocumentIdentity | undef
   const language = getBoundLanguageServices();
   const diagnostics = React.useSyncExternalStore(
     subscribeLanguageDiagnostics,
-    () => (identity ? getLanguageDiagnosticsForResource(identity.workspaceId, identity.resourceId) : []),
-    () => [],
+    () => (identity
+      ? getLanguageDiagnosticsForResource(identity.workspaceId, identity.resourceId)
+      : EMPTY_DIAGNOSTICS),
+    () => EMPTY_DIAGNOSTICS,
   );
 
   return React.useMemo(() => {

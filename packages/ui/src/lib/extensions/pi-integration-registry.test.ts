@@ -1,5 +1,9 @@
 import { expect, mock, test } from 'bun:test';
-import { PIARIUM_BUILTIN_FLEET_EXTENSION, PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS } from '@piarium/extension-builtins';
+import {
+  PIARIUM_BUILTIN_FLEET_EXTENSION,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION,
+  PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS,
+} from '@piarium/extension-builtins';
 import { SurfaceExtensionRuntime } from '@piarium/extension-surface';
 import type { PackageDescriptor } from '@piarium/protocol';
 
@@ -10,6 +14,24 @@ mock.module('@/hooks/useProviderLogo', () => ({
 
 const { activateBuiltinPiIntegration } = await import('./builtin-pi-integrations');
 const { pluginSettingsAdapterForPackage, pluginSettingsAdaptersFromSnapshot } = await import('./pi-integration-registry');
+
+test('built-in activation skips contributions unsupported by the current Surface', async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: 'mobile' });
+  await runtime.activate({
+    owner: {
+      desiredRevision: 1,
+      entrypointId: 'main',
+      extensionId: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION.manifest.id,
+      extensionVersion: PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION.manifest.version,
+      generation: 1,
+      hostId: '72694a4f-093a-4f79-8763-3ca9f06b7078',
+      realmId: 'mobile-ide-filter-test',
+    },
+  }, activateBuiltinPiIntegration(PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION, 'mobile'));
+
+  expect(runtime.getSnapshot().actual[0]?.status).toBe('active');
+  expect(runtime.getSnapshot().contributions).toEqual([]);
+});
 
 test('a Piarium adapter contribution can be withdrawn without changing the Pi package', async () => {
   const definition = PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS.find((candidate) => (

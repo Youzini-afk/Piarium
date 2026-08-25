@@ -105,10 +105,11 @@ const renderImplementation = <TProps extends object>(
 interface ContributionRenderBoundaryProps {
   children: React.ReactNode;
   contribution: SurfaceContribution;
-  fallback: React.ReactNode;
+  fallback: React.ReactNode | ((error: unknown, retry: () => void) => React.ReactNode);
 }
 
 interface ContributionRenderBoundaryState {
+  error?: unknown;
   failed: boolean;
 }
 
@@ -118,9 +119,13 @@ class ContributionRenderBoundary extends React.Component<
 > {
   state: ContributionRenderBoundaryState = { failed: false };
 
-  static getDerivedStateFromError(): ContributionRenderBoundaryState {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown): ContributionRenderBoundaryState {
+    return { error, failed: true };
   }
+
+  retry = (): void => {
+    this.setState({ error: undefined, failed: false });
+  };
 
   componentDidCatch(error: unknown, errorInfo: React.ErrorInfo): void {
     const { descriptor, owner } = this.props.contribution;
@@ -132,7 +137,10 @@ class ContributionRenderBoundary extends React.Component<
   }
 
   render(): React.ReactNode {
-    return this.state.failed ? this.props.fallback : this.props.children;
+    if (!this.state.failed) return this.props.children;
+    return typeof this.props.fallback === 'function'
+      ? this.props.fallback(this.state.error, this.retry)
+      : this.props.fallback;
   }
 }
 
@@ -151,6 +159,7 @@ const WorkbenchRenderImplementation = <TProps extends object>({
 
 interface MountFailure {
   contributionKey: string;
+  error: unknown;
   implementation: unknown;
   props: object;
 }
@@ -165,7 +174,7 @@ const WorkbenchMountHost = <TProps extends object>({
 }: {
   className?: string;
   contribution: SurfaceContribution;
-  fallback: React.ReactNode;
+  fallback: React.ReactNode | ((error: unknown, retry: () => void) => React.ReactNode);
   implementation: MountImplementation<TProps>;
   onMountReady?: () => void;
   props: TProps;
@@ -195,7 +204,7 @@ const WorkbenchMountHost = <TProps extends object>({
         );
         if (!active || phase === 'dispose') return;
         mountFailed = true;
-        setFailure({ contributionKey, implementation, props });
+        setFailure({ contributionKey, error, implementation, props });
         void session.dispose(error);
       },
     });
@@ -208,7 +217,11 @@ const WorkbenchMountHost = <TProps extends object>({
     };
   }, [contribution, contributionKey, implementation, onMountReady, props]);
 
-  if (failed) return fallback;
+  if (failed && failure) {
+    return typeof fallback === 'function'
+      ? fallback(failure.error, () => setFailure(null))
+      : fallback;
+  }
   return (
     <div
       ref={containerRef}
@@ -365,7 +378,7 @@ const selectedReplacement = (
 ));
 
 export const WorkbenchReplacement: React.FC<{
-  errorFallback?: React.ReactNode;
+  errorFallback?: React.ReactNode | ((error: unknown, retry: () => void) => React.ReactNode);
   expectedContributionId?: string;
   fallback: React.ReactNode;
   onMountReady?(contributionId: string, contributionInstanceKey: string): void;
@@ -387,16 +400,23 @@ export const WorkbenchReplacement: React.FC<{
   const contributionKey = workbenchContributionInstanceKey(contribution);
   const failureFallback = (
     <ContributionReadySignal onReady={signalReady}>
-      {errorFallback ?? fallback}
+      {typeof errorFallback === 'function' ? fallback : (errorFallback ?? fallback)}
     </ContributionReadySignal>
   );
+  const renderFailureFallback = typeof errorFallback === 'function'
+    ? (error: unknown, retry: () => void) => (
+        <ContributionReadySignal onReady={signalReady}>
+          {errorFallback(error, retry)}
+        </ContributionReadySignal>
+      )
+    : failureFallback;
   if (isMountImplementation<MountReplacementProps>(contribution.implementation)) {
     return (
       <WorkbenchMountHost
         key={contributionKey}
         className="h-full min-h-0 w-full min-w-0"
         contribution={contribution}
-        fallback={failureFallback}
+        fallback={renderFailureFallback}
         implementation={contribution.implementation}
         onMountReady={signalReady}
         props={mountProps}
@@ -404,7 +424,7 @@ export const WorkbenchReplacement: React.FC<{
     );
   }
   return (
-    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={failureFallback}>
+    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={renderFailureFallback}>
       <ContributionReadySignal onReady={signalReady}>
         <WorkbenchRenderImplementation
           fallbackOnEmpty={fallback}

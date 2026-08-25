@@ -21,6 +21,21 @@ import { resolveWorkbenchShellView } from './workbench-shell-view';
 
 const LOADING_SHELL = <div className="h-full min-h-0 w-full bg-background" />;
 
+const WorkbenchShellRenderFailure: React.FC<{ retry(): void }> = ({ retry }) => {
+  const { t } = useI18n();
+  return (
+    <div className="flex h-full items-center justify-center bg-background px-6 text-foreground">
+      <div className="flex max-w-md flex-col items-center gap-4 text-center">
+        <div className="flex flex-col gap-2">
+          <h1 className="typography-title text-foreground">{t('errorBoundary.title')}</h1>
+          <p className="typography-body text-muted-foreground">{t('errorBoundary.description')}</p>
+        </div>
+        <Button type="button" onClick={retry}>{t('errorBoundary.actions.tryAgain')}</Button>
+      </div>
+    </div>
+  );
+};
+
 const WorkspaceResolutionFailure: React.FC<{ errorMessage: string; retry(): void }> = ({ errorMessage, retry }) => {
   const { t } = useI18n();
   return (
@@ -71,6 +86,9 @@ export const WorkbenchShellHost: React.FC<{
   ) => {
     setMountedShell({ contributionId, contributionInstanceKey });
   }, []);
+  const renderShellFailure = React.useCallback((_error: unknown, retry: () => void) => (
+    <WorkbenchShellRenderFailure retry={retry} />
+  ), []);
 
   React.useEffect(() => {
     if (transition.phase !== 'covered') return;
@@ -124,13 +142,12 @@ export const WorkbenchShellHost: React.FC<{
   else if (view === 'recovery') {
     content = <WorkbenchRecoveryShell resolved={resolved} workspaceId={workspaceId} />;
   } else {
-    const recovery = <WorkbenchRecoveryShell resolved={resolved} workspaceId={workspaceId} />;
     content = (
       <WorkbenchReplacement
         expectedContributionId={resolved.shellContributionId}
         target={WORKBENCH_REPLACEMENT_TARGETS.shell}
         fallback={fallback}
-        errorFallback={recovery}
+        errorFallback={renderShellFailure}
         onMountReady={handleShellMountReady}
       />
     );

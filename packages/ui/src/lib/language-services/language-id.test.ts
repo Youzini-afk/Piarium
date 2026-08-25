@@ -61,4 +61,23 @@ describe('language diagnostics registry', () => {
     replaceLanguageDiagnostics('ws', 'typescript', 'a.ts', [], () => true);
     expect(getLanguageDiagnosticsForResource('ws', 'a.ts')).toEqual([]);
   });
+
+  test('keeps each unchanged resource snapshot referentially stable for React subscribers', () => {
+    const firstEmpty = getLanguageDiagnosticsForResource('ws', 'a.ts');
+    expect(getLanguageDiagnosticsForResource('ws', 'a.ts')).toBe(firstEmpty);
+
+    replaceLanguageDiagnostics('ws', 'typescript', 'a.ts', [{
+      resource: { workspaceId: 'ws', resourceId: 'a.ts' },
+      documentVersion: 1,
+      severity: 'warning',
+      message: 'stable',
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+    }], () => true);
+    const populated = getLanguageDiagnosticsForResource('ws', 'a.ts');
+    expect(populated).not.toBe(firstEmpty);
+    expect(getLanguageDiagnosticsForResource('ws', 'a.ts')).toBe(populated);
+
+    replaceLanguageDiagnostics('ws', 'typescript', 'a.ts', [], () => true);
+    expect(getLanguageDiagnosticsForResource('ws', 'a.ts')).toBe(firstEmpty);
+  });
 });

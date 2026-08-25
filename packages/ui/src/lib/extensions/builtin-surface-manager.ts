@@ -116,7 +116,10 @@ const reconcileEntry = async (entry: PiariumExtensionCatalogEntry): Promise<void
   controller.owner = owner;
   try {
     if (entry.desired.enabled) {
-      await piariumSurfaceRuntime.activate({ owner }, activateBuiltinPiIntegration(definition));
+      await piariumSurfaceRuntime.activate(
+        { owner },
+        activateBuiltinPiIntegration(definition, piariumSurfaceRuntime.surface),
+      );
       controller.active = true;
     } else {
       await piariumSurfaceRuntime.deactivate(owner);

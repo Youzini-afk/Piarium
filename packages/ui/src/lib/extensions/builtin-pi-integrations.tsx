@@ -9,7 +9,10 @@ import {
   PIARIUM_BUILTIN_RECOVERY_EXTENSION,
   type PiariumBuiltinExtensionDefinition,
 } from '@piarium/extension-builtins';
-import { PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID } from '@piarium/extension-contract';
+import {
+  PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  type PiariumApplicationSurface,
+} from '@piarium/extension-contract';
 import type { SurfaceActivation, SurfaceActivationContext } from '@piarium/extension-surface';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
@@ -179,8 +182,10 @@ const contributionImplementation = (
 
 export const activateBuiltinPiIntegration = (
   definition: PiariumBuiltinExtensionDefinition,
+  surface?: PiariumApplicationSurface,
 ): SurfaceActivation => (context: SurfaceActivationContext) => {
   for (const contribution of definition.manifest.contributions ?? []) {
+    if (surface && !contribution.supports.includes(surface)) continue;
     context.contribute(
       contribution,
       contributionImplementation(definition, contribution.id),
