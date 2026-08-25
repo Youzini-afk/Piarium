@@ -444,9 +444,12 @@ of it:
 
 Neither is a hard-coded mode. Both are ordinary first-party Piarium extensions selected through a
 Workbench Profile. There is no global `ideMode`/`agentMode` branch, no second application, and no
-fork of Code OSS. CodeMirror 6 remains the single editor engine; Monaco is not maintained in
-parallel. Pi Packages and Pi Plugin Settings keep their independent lifecycle and native authority
-and are not folded into the Piarium extension lifecycle.
+fork of Code OSS. The next editor-platform phase replaces the desktop/Web built-in file renderer
+with one shared Monaco path for Agent and IDE, while mobile and embedded editors keep a lightweight
+CodeMirror adapter; the Document Registry and Host authorities delivered here stay unchanged. See
+[unified-file-editor-platform.md](unified-file-editor-platform.md). Pi Packages and Pi Plugin Settings
+keep their independent lifecycle and native authority and are not folded into the Piarium extension
+lifecycle.
 
 Stable identities established by this phase:
 
@@ -512,7 +515,8 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
 7. **Search and language services.** Streaming workspace content search and a host-owned language
    service supervisor (JSON-RPC transport, server registry, TypeScript server and service, capability
    gating, fixture server) landed in the application host, with a renderer-side registry that binds
-   diagnostics into the Problems panel and into CodeMirror. Failures are typed and distinguishable —
+   diagnostics into the Problems panel and into the then-current CodeMirror adapter. The unified
+   editor plan replaces that desktop/Web consumer and enriches the currently thin DTO. Failures are typed and distinguishable —
    `failed`, `untrusted`, `stale-completion`, `unsupported` — stale diagnostic versions are dropped,
    and hidden views start no language servers.
 8. **Agent and editor transactions.** Agent file changes and open editors are reconciled explicitly
@@ -570,6 +574,11 @@ scene is an enabled-by-default built-in Piarium extension selected through `work
 while a complete external scene can replace it without importing Piarium's product React tree. The
 remaining Motion work is the pre-React bootstrap projection and the optional generic service for
 Shell-owned local motion; neither introduces fixed page-element names.
+
+The next file-editing convergence is specified in
+[unified-file-editor-platform.md](unified-file-editor-platform.md): desktop/Web Agent and IDE share
+one Monaco model and language bridge, mobile keeps the document-bound lightweight adapter, and no
+editor engine receives document, filesystem, process, or extension-lifecycle authority.
 
 Not yet recorded: the plan's final convergence verification run (full workspace type-check/lint,
 public package build/pack/conformance, production Web build, Electron bundled and Windows

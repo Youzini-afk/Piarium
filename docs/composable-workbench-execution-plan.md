@@ -1,8 +1,8 @@
 # Piarium 可组合工作台与 IDE 约定
 
-Status: 十一个切片已交付；本文是工作台的目标架构与归属约定
+Status: 十一个切片已交付；本文是工作台的基础架构与归属约定
 
-Last updated: 2026-08-23
+Last updated: 2026-08-25
 
 这份文档规定 Piarium 工作台的目标架构、已固定的产品决策,以及文档、编辑器、Profile、语言服务和
 调试各自的归属边界。它按十一个切片组织,因为实现是按这个顺序落地的;交付进度见
@@ -11,6 +11,10 @@ Last updated: 2026-08-23
 正文为中文。英文读者可先看 [architecture.md](architecture.md) 第 4 节的工作台概述。
 跨 Shell 动画、首帧启动投影和不规定页面元素的 Motion 边界见
 [piarium-motion-platform.md](piarium-motion-platform.md)。
+desktop/web 官方文件编辑器的新目标、Monaco 与移动 CodeMirror 的分工以及语言智能实施顺序见
+[unified-file-editor-platform.md](unified-file-editor-platform.md)。该文档取代本文原先的
+CodeMirror-only 引擎决定，但不改变已经交付的 Document Registry、Editor Workbench Kernel、
+Profile 或 Host ownership。
 
 ## 1. 目标
 
@@ -39,7 +43,7 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 | 官方形态 | Agent Workspace 和 IDE Workbench 都是第一方 Piarium 扩展 |
 | 默认形态 | 现有 `default` Profile 成为 Agent Profile 的稳定 ID，用户可按工作区选择其他 Profile |
 | IDE Profile ID | `piarium.ide` |
-| 编辑器引擎 | 保留并深化 CodeMirror 6；不并行维护 Monaco，不 fork Code OSS |
+| 编辑器引擎 | desktop/web 官方文件编辑统一使用 Monaco；mobile/embedded 使用 CodeMirror adapter；不 fork Code OSS，不维护 Agent/IDE 两套文件能力 |
 | 核心状态 | 文档、会话、终端、Git、Profile、Runtime 身份由共享内核拥有，Shell 只负责表现和布局 |
 | 扩展自由度 | 完整 Shell 可自绘 DOM、Canvas、WebGL、WebAssembly 或使用任意框架；不强制 Piarium 组件库 |
 | Profile 与启停 | 选择 Profile 不暗中启停扩展；“应用扩展集”和“选择布局”保持可观察、可分别失败的明确动作 |
@@ -410,7 +414,7 @@ Record 至少包含：
 - attached editor views 与 language-service subscriptions；
 - recovery journal revision。
 
-高频正文不能放进会让整个 React 树或 broad Zustand selector 每个按键重跑的普通对象图。实现一个外部 `DocumentRegistry`，提供 per-document subscription；Zustand 只保存低频导航/布局元数据。CodeMirror transaction 进入 document model，再只通知该文档的 views 与服务。
+高频正文不能放进会让整个 React 树或 broad Zustand selector 每个按键重跑的普通对象图。实现一个外部 `DocumentRegistry`，提供 per-document subscription；Zustand 只保存低频导航/布局元数据。编辑器 transaction 进入 document model，再只通知该文档的 views 与服务。
 
 ### 8.2 并发不变量
 
@@ -484,13 +488,18 @@ Record 至少包含：
 - PDF；
 - Drawio/HTML preview 沿用现有安全边界。
 
-### 9.4 CodeMirror 迁移
+### 9.4 统一文件编辑器层
 
-- 不替换 CodeMirror 6；
-- 新建 document-bound CodeMirror adapter，不再每次 props 变化替换完整 document；
-- editor view dispatch transaction 到 Document Registry；
-- language、diagnostics、completion 和 decorations 作为 compartments/extensions 动态重配；
-- current `MAX_OPEN_FILE_LINES=5000` 不是新 IDE 的永久产品边界。先测量现有文件规模与 CodeMirror 行为，再决定警告、只读降级、分块或虚拟化；不得直接提高或复制一个猜测数字。
+原 Phase 3 先交付了 document-bound CodeMirror adapter，用来证明 Document Registry 与 editor view
+分离。新的产品决定在不改变文档权威的前提下继续收敛：
+
+- desktop/web 的 Agent 与 IDE 官方文件编辑共用 Monaco model/runtime；
+- mobile Agent 与 embedded editors 保留用途明确的 CodeMirror adapter；
+- editor transaction 进入 Document Registry，任何引擎都不能成为 dirty/save/conflict 权威；
+- language、diagnostics、completion 和 decorations 通过同一 typed LanguageServicesAPI 接入；
+- current `MAX_OPEN_FILE_LINES=5000` 不是永久产品边界。先测量真实行为，再做 feature 分级或自适应治理，不复制猜测数字；
+- 具体 identity、同步、worker、扩展和迁移约定见
+  [unified-file-editor-platform.md](unified-file-editor-platform.md)。
 
 ### 9.5 官方 Shell layout document
 
@@ -735,7 +744,7 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 ### 19.2 写入边界
 
 - 新增 Document Registry、document hooks、recovery client 和 focused model tests；
-- 新增 document-bound CodeMirror adapter；
+- 新增当时的 document-bound CodeMirror adapter；该 desktop/web renderer 后续按统一文件编辑器计划替换，Document Registry 不变；
 - 迁移 `FilesView`、preview、inline editor、Workspace file editor 和 open-file helpers；
 - 删除重复 `FilesAPI` / `WorkspaceAPI` text read/write shape 及所有 runtime 实现；
 - `useFilesViewTabsStore` 暂时只保留 tree/tab navigation，正文不进入该 store。
@@ -860,7 +869,7 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 - Document incremental sync；
 - completion、hover、definition、references、symbols、rename、code actions；
 - language provider routing、workspace trust、restart/diagnostics；
-- CodeMirror language/client adapter；
+- 当时的 CodeMirror language/client adapter；后续由 Monaco bridge 接管 desktop/web，mobile 消费同一 typed DTO；
 - 一个受控 fixture server 契约测试和至少一个真实 TypeScript LSP smoke；
 - Python/Rust 等通过相同 provider contract 接入，不硬编码到 Core。
 

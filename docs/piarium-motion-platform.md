@@ -426,7 +426,7 @@ disabled、withdrawn 或 render failure 使用 Core 的不透明即时交接。
 
 - 不在普通页面里新增固定的会话/MCP/设置动画槽位；
 - 不改变 Pi plugin 或 Pi Package 生命周期；
-- 不引入 Cordis、Monaco、Code OSS 或第二个 contribution registry；
+- 不在 Motion Phase 内引入 Cordis、编辑器引擎改造、Code OSS 或第二个 contribution registry；Monaco 文件编辑器属于独立的 [统一文件编辑器计划](unified-file-editor-platform.md)；
 - 不把当前动画配置塞入 Profile document 的新私有字段；
 - 不让 Profile 选择暗中启停扩展；
 - 不让 renderer 获得新的文件、进程或凭据权限；

@@ -236,6 +236,16 @@ context keys, and the panel container live in a shared Editor Workbench Kernel t
 high-frequency cursor and scroll state stays in memory rather than in broad shared state or
 per-keystroke persistence.
 
+The planned standard desktop/Web text renderer is one shared Monaco path for both Agent and IDE;
+mobile and embedded editors retain a lightweight CodeMirror adapter because Monaco does not support
+mobile browsers. Monaco models are high-frequency projections of Document Registry records, never a
+second content, dirty, conflict, or save authority. A stable internal document-instance identity lets
+multiple views share one model across shell changes and resource moves, while runtime/workspace
+generation still bounds every model and asynchronous result. Full custom `editor` contributions stay
+engine-neutral and may replace the official renderer. The complete model, language, worker,
+extension, and migration contract is
+[unified-file-editor-platform.md](unified-file-editor-platform.md).
+
 Search, language, task, debug, and test capability is host-owned. The application host runs the LSP
 supervisor and a standard Debug Adapter Protocol implementation with its adapters, test providers,
 and task processes under workspace trust and owner generations; renderers send typed requests and
