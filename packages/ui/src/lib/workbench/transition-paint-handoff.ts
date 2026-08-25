@@ -21,10 +21,29 @@ interface PaintHandoffScheduler {
   scheduleTask(callback: () => void): number;
 }
 
+interface WorkbenchTransitionSceneAnimation {
+  cancel(): void;
+  readonly finished: Promise<unknown>;
+}
+
+interface WorkbenchTransitionSceneLayer {
+  animate?: (
+    keyframes: Keyframe[] | PropertyIndexedKeyframes | null,
+    options?: number | KeyframeAnimationOptions,
+  ) => WorkbenchTransitionSceneAnimation;
+  readonly style: Pick<CSSStyleDeclaration, 'opacity'>;
+}
+
+export const WORKBENCH_TRANSITION_RETIRE_FADE_MS = 96;
+
 export interface WorkbenchTransitionPaintHandoff {
   dispose(): void;
   hold(): void;
-  retireSceneAfterPaint(onRetired: () => void): void;
+  retireScene(
+    scene: WorkbenchTransitionSceneLayer,
+    options: { reducedMotion: boolean },
+    onRetired: () => void,
+  ): void;
   releaseAfterPaint(): void;
 }
 
@@ -44,9 +63,10 @@ export const createWorkbenchTransitionPaintHandoff = (
   let firstFrame: number | null = null;
   let secondFrame: number | null = null;
   let fallbackTask: number | null = null;
-  let retirementFirstFrame: number | null = null;
-  let retirementSecondFrame: number | null = null;
   let retirementFallbackTask: number | null = null;
+  let retirementAnimation: WorkbenchTransitionSceneAnimation | null = null;
+  let retirementScene: WorkbenchTransitionSceneLayer | null = null;
+  let retirementSceneOpacity = '';
   let generation = 0;
   let owned = false;
 
@@ -55,15 +75,18 @@ export const createWorkbenchTransitionPaintHandoff = (
     if (firstFrame !== null) scheduler.cancelFrame(firstFrame);
     if (secondFrame !== null) scheduler.cancelFrame(secondFrame);
     if (fallbackTask !== null) scheduler.cancelTask(fallbackTask);
-    if (retirementFirstFrame !== null) scheduler.cancelFrame(retirementFirstFrame);
-    if (retirementSecondFrame !== null) scheduler.cancelFrame(retirementSecondFrame);
     if (retirementFallbackTask !== null) scheduler.cancelTask(retirementFallbackTask);
+    retirementAnimation?.cancel();
+    if (retirementScene && retirementFallbackTask !== null) {
+      retirementScene.style.opacity = retirementSceneOpacity;
+    }
     firstFrame = null;
     secondFrame = null;
     fallbackTask = null;
-    retirementFirstFrame = null;
-    retirementSecondFrame = null;
     retirementFallbackTask = null;
+    retirementAnimation = null;
+    retirementScene = null;
+    retirementSceneOpacity = '';
   };
 
   const release = (capturedGeneration: number): void => {
@@ -85,35 +108,52 @@ export const createWorkbenchTransitionPaintHandoff = (
 
   return {
     hold: takeOwnership,
-    retireSceneAfterPaint: (onRetired) => {
-      // Retirement is the step that hands the scene's pixels back, so it cannot be conditional on a hold
-      // having been observed first. A host that mounts straight into a retiring transaction still has to
-      // reach detachment, and refusing here left the scene on screen with nothing scheduled to remove it.
+    retireScene: (scene, options, onRetired) => {
+      // The scene's own terminal frame should already be transparent. The Core-owned wrapper still fades
+      // as a compositor guard: if a browser retained one stale Canvas/Logo frame, that frame reaches zero
+      // opacity before React is allowed to run any child cleanup. This is a visual animation with a native
+      // completion signal, not a guessed delay standing in for a paint acknowledgement.
       if (!owned) takeOwnership();
       if (
-        retirementFirstFrame !== null
-        || retirementSecondFrame !== null
+        retirementAnimation !== null
         || retirementFallbackTask !== null
       ) return;
       const capturedGeneration = generation;
-      const retire = () => {
+      const retire = (animation: WorkbenchTransitionSceneAnimation | null) => {
         if (!owned || generation !== capturedGeneration) return;
-        retirementFirstFrame = null;
-        retirementSecondFrame = null;
+        if (animation && retirementAnimation !== animation) return;
+        retirementAnimation = null;
         retirementFallbackTask = null;
+        retirementScene = null;
+        retirementSceneOpacity = '';
         onRetired();
       };
-      retirementFirstFrame = scheduler.requestFrame(() => {
-        retirementFirstFrame = null;
-        if (generation !== capturedGeneration) return;
-        retirementSecondFrame = scheduler.requestFrame(retire);
-        if (retirementSecondFrame === null) {
-          retirementFallbackTask = scheduler.scheduleTask(retire);
+
+      if (typeof scene.animate === 'function') {
+        try {
+          const animation = scene.animate(
+            [{ opacity: 1 }, { opacity: 0 }],
+            {
+              duration: options.reducedMotion ? 0 : WORKBENCH_TRANSITION_RETIRE_FADE_MS,
+              easing: 'linear',
+              fill: 'forwards',
+            },
+          );
+          retirementAnimation = animation;
+          void animation.finished.then(
+            () => retire(animation),
+            () => undefined,
+          );
+          return;
+        } catch {
+          // Older embedders without a usable Web Animations implementation use the hidden-layer fallback.
         }
-      });
-      if (retirementFirstFrame === null) {
-        retirementFallbackTask = scheduler.scheduleTask(retire);
       }
+
+      retirementScene = scene;
+      retirementSceneOpacity = scene.style.opacity;
+      scene.style.opacity = '0';
+      retirementFallbackTask = scheduler.scheduleTask(() => retire(null));
     },
     releaseAfterPaint: () => {
       if (!owned || firstFrame !== null || secondFrame !== null || fallbackTask !== null) return;

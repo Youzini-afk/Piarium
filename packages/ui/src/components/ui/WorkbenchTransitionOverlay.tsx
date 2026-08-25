@@ -40,6 +40,7 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
     getWorkbenchProfileTransitionSnapshot,
   );
   const paintHandoffRef = React.useRef<WorkbenchTransitionPaintHandoff | null>(null);
+  const sceneLayerRef = React.useRef<HTMLDivElement | null>(null);
   const renderedTransitionRef = React.useRef<{
     contribution: ReturnType<typeof holdWorkbenchTransitionSceneContribution>;
     controller: ReturnType<typeof createWorkbenchTransitionSceneController>;
@@ -65,9 +66,9 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
    * Three steps, in this order, and none of them overlapping.
    *
    * While the transaction runs, the root keeps the scene's palette. When the revealing timeline reports
-   * finished, Core marks itself retiring and the scene's terminal frame is the only thing on screen: cross
-   * a real paint boundary so that frame is committed, then take the scene out in one move. Core reaches
-   * idle only afterwards, and the root palette is released a frame later still.
+   * finished, Core marks itself retiring and the scene's terminal frame is the only thing on screen. The
+   * Core-owned wrapper then reaches compositor opacity zero before React is allowed to detach anything
+   * inside it. Core reaches idle only afterwards, and the root palette is released later still.
    */
   React.useLayoutEffect(() => {
     if (
@@ -83,12 +84,29 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
       handoff.releaseAfterPaint();
       return;
     }
-    if (!transition.retiring || !renderedTransition || sceneDetached) {
+    if (sceneDetached) return;
+    if (!transition.retiring || !renderedTransition) {
       handoff.hold();
       return;
     }
-    handoff.retireSceneAfterPaint(() => setDetachedTransitionId(renderedTransition.id));
-  }, [renderedTransition, sceneDetached, transition.id, transition.phase, transition.retiring]);
+    const sceneLayer = sceneLayerRef.current;
+    if (!sceneLayer) {
+      handoff.hold();
+      return;
+    }
+    handoff.retireScene(
+      sceneLayer,
+      { reducedMotion: transition.reducedMotion },
+      () => setDetachedTransitionId(renderedTransition.id),
+    );
+  }, [
+    renderedTransition,
+    sceneDetached,
+    transition.id,
+    transition.phase,
+    transition.reducedMotion,
+    transition.retiring,
+  ]);
 
   /**
    * Runs in the same commit that removed the scene's nodes, after every mutation in it. The scene is gone,
@@ -152,11 +170,13 @@ export const WorkbenchTransitionOverlay: React.FC = () => {
 
   return (
     <div
+      ref={sceneLayerRef}
       className={`fixed inset-0 z-[9998] overflow-hidden ${frame.phase === 'revealing' ? 'pointer-events-none' : 'pointer-events-auto'}`}
       role="status"
       aria-live="polite"
       aria-label={t('splash.aria.switching')}
       data-piarium-transition-scene={contribution?.descriptor.id ?? 'core-fallback'}
+      style={{ isolation: 'isolate', opacity: 1, willChange: 'opacity' }}
     >
       {contribution ? (
         <WorkbenchSurfaceContributionHost

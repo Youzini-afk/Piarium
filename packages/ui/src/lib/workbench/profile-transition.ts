@@ -315,8 +315,9 @@ export const registerWorkbenchProfileTransitionSceneHost = (): (() => void) => {
  * Called by the scene (or its declared-duration clock) after the authoritative shell is exposed.
  *
  * With a host mounted this ends the animation, not the transaction. The scene's terminal frame is still the
- * only thing on screen, so Core holds `revealing` and marks itself retiring; the host crosses a real paint
- * boundary, detaches the scene in one move, and calls `finalizeWorkbenchProfileTransition` once it is gone.
+ * only thing on screen, so Core holds `revealing` and marks itself retiring; the host makes its Core-owned
+ * wrapper compositor-transparent, detaches the scene in one move, and calls
+ * `finalizeWorkbenchProfileTransition` once it is gone.
  */
 export const completeWorkbenchProfileTransition = (id: number): void => {
   if (state.id !== id || state.phase !== 'revealing' || !phaseArmed || state.retiring) return;
