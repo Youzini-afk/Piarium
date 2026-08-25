@@ -255,6 +255,10 @@ annotated changes, and retain one grouped undo action without writing disk. The 
 JavaScript service is an ordinary disableable brokered Piarium extension: its immutable server asset is
 materialized and registered lazily by the Application Host, and the server process exits when its last
 document closes.
+File diffs use Monaco on desktop/Web without creating another content authority: original and staged
+models are immutable, reference-counted snapshots, while a working diff binds its modified side to the
+live Document Registry model. A nested Git repository is stored as a workspace-relative view identity,
+not as another workspace. Chat/PR patch renderers remain specialized read-only surfaces.
 The complete model, language, worker,
 extension, and migration contract is
 [unified-file-editor-platform.md](unified-file-editor-platform.md).
@@ -269,6 +273,10 @@ are runtime- and session-scoped, unsaved buffers become explicit prompt text rat
 context, and patch accept/reject uses expected-revision writes so an agent edit cannot silently
 overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never
 confers process, debug, or test-runner capability.
+Breakpoint mutations are conditional on the observed debug owner, stack/test decorations are scoped to
+workspace plus session/run generation, and delayed results from a retired owner are discarded. The
+visible editor view is also the sole active Agent context owner; file, selection, diff, inline-comment,
+and patch-review paths therefore follow one document identity instead of competing projections.
 
 Surface parity is explicit rather than assumed. Agent Workspace declares web, desktop, and mobile;
 the official IDE Workbench declares web and desktop only. VS Code is a companion that opens Piarium,

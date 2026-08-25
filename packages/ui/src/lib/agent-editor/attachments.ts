@@ -3,10 +3,14 @@ import type { EditorContextAttachment } from './types';
 
 const listeners = new Set<() => void>();
 let attachments: EditorContextAttachment[] = [];
+let revision = 0;
 
 const emit = (): void => {
+  revision += 1;
   for (const listener of listeners) listener();
 };
+
+export const getEditorContextAttachmentsRevision = (): number => revision;
 
 export const subscribeEditorContextAttachments = (listener: () => void): (() => void) => {
   listeners.add(listener);
@@ -18,8 +22,13 @@ export const subscribeEditorContextAttachments = (listener: () => void): (() => 
 export const listEditorContextAttachments = (
   runtimeKey: string,
   sessionId: string,
+  workspaceId?: string,
 ): EditorContextAttachment[] => (
-  attachments.filter((item) => item.runtimeKey === runtimeKey && item.sessionId === sessionId)
+  attachments.filter((item) => (
+    item.runtimeKey === runtimeKey
+    && item.sessionId === sessionId
+    && (!workspaceId || item.workspaceId === workspaceId)
+  ))
 );
 
 export const addEditorContextAttachment = (
@@ -31,6 +40,7 @@ export const addEditorContextAttachment = (
     && item.sessionId === attachment.sessionId
     && item.kind === attachment.kind
     && item.resourceId === attachment.resourceId
+    && item.documentInstanceId === attachment.documentInstanceId
     && item.source === attachment.source
     && item.range?.startLine === attachment.range?.startLine
     && item.range?.startColumn === attachment.range?.startColumn
@@ -69,10 +79,12 @@ export const removeEditorContextAttachment = (id: string, runtimeKey: string, se
 export const consumeEditorContextAttachments = (
   runtimeKey: string,
   sessionId: string,
+  workspaceId?: string,
 ): EditorContextAttachment[] => {
-  const taken = listEditorContextAttachments(runtimeKey, sessionId);
+  const taken = listEditorContextAttachments(runtimeKey, sessionId, workspaceId);
   if (taken.length === 0) return [];
-  attachments = attachments.filter((item) => item.runtimeKey !== runtimeKey || item.sessionId !== sessionId);
+  const takenIds = new Set(taken.map((item) => item.id));
+  attachments = attachments.filter((item) => !takenIds.has(item.id));
   emit();
   return taken;
 };

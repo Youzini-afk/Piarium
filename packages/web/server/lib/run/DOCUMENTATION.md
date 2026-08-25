@@ -24,6 +24,11 @@ Project-provided (`source: 'workspace'`) commands run only when `isTrusted(root)
 Production Web sets `isTrusted` to false. There is no HTTP route that registers adapters
 or providers.
 
+Breakpoint mutation always sends the observed owner as `expectedSessionId` plus `expectedGeneration`,
+or sends both as `null` when it authoritatively observed no active session and is preconfiguring. The
+supervisor applies a mutation only to that owner state; `ready` and `stale` both return the current owner
+identity (when active) and authoritative breakpoint list.
+
 ## Routes
 
 - `POST /api/tasks/list|run|cancel|dispose-workspace`

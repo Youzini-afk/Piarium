@@ -1,6 +1,10 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
+import type { editor as MonacoEditor } from 'monaco-editor/editor';
 
 import { Button } from '@/components/ui/button';
+import { InlineCommentInput } from '@/components/comments/InlineCommentInput';
+import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { useDocumentRecord } from '@/lib/documents/hooks';
@@ -8,8 +12,21 @@ import type { DocumentIdentity } from '@/lib/documents/types';
 import { cn } from '@/lib/utils';
 import type { EditorViewState } from '@/lib/workbench/editors/types';
 import { patchEditorViewState } from '@/lib/workbench/editors/session';
-import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
+import {
+  activatePiEditorContextOwner,
+  publishPiEditorContext,
+  releasePiEditorContextOwner,
+} from '@/stores/usePiEditorContextStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import {
+  EMPTY_INLINE_COMMENT_DRAFTS,
+  getInlineCommentDraftKey,
+  useInlineCommentDraftStore,
+} from '@/stores/useInlineCommentDraftStore';
+import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
+import { createRunDebugEditorAdapter } from '@/lib/monaco/run-debug-editor-adapter';
 import { getMonacoLanguageBridge } from '@/lib/monaco/language-bridge-session';
 import { getFileEditorModelRegistry } from '@/lib/monaco/model-session';
 import { markMonacoPerformance } from '@/lib/monaco/performance';
@@ -35,6 +52,13 @@ type DocumentMonacoEditorProps = {
   viewState: EditorViewState;
 };
 
+type PendingInlineComment = {
+  code: string;
+  endLine: number;
+  node: HTMLDivElement;
+  startLine: number;
+};
+
 export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   className,
   identity,
@@ -49,9 +73,20 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const fileEditorSettings = useUIStore((state) => state.fileEditorSettings);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
   const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
+  const sessionId = usePiSessionStore((state) => state.currentSessionId);
+  const sessionDirectory = usePiSessionStore((state) => (
+    state.currentSessionId ? state.records[state.currentSessionId]?.snapshot?.cwd ?? null : null
+  ));
+  const inlineDraftKey = sessionId && sessionDirectory
+    ? getInlineCommentDraftKey(getRuntimeKey(), sessionDirectory, sessionId)
+    : null;
+  const inlineDrafts = useInlineCommentDraftStore((state) => (
+    inlineDraftKey ? state.drafts[inlineDraftKey] ?? EMPTY_INLINE_COMMENT_DRAFTS : EMPTY_INLINE_COMMENT_DRAFTS
+  ));
   const profileId = useWorkbenchProfileId();
   const [monaco, setMonaco] = React.useState<MonacoRuntime | null>(null);
   const [editorInstance, setEditorInstance] = React.useState<import('monaco-editor/editor').editor.IStandaloneCodeEditor | null>(null);
+  const [pendingInlineComment, setPendingInlineComment] = React.useState<PendingInlineComment | null>(null);
   const hostLanguageId = React.useMemo(() => (
     monaco
       ? languageIdsFromResourceId(identity.resourceId, monaco.languages.getLanguages()).hostLanguageId
@@ -69,12 +104,17 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const viewStateRef = React.useRef(viewState);
   const onViewStateChangeRef = React.useRef(onViewStateChange);
   const recordRef = React.useRef(record);
+  const tRef = React.useRef(t);
+  const captureContextRef = React.useRef<(() => void) | null>(null);
+  const closeInlineCommentRef = React.useRef<(() => void) | null>(null);
+  const inlineCommentDecorationIdsRef = React.useRef<string[]>([]);
   const models = getFileEditorModelRegistry();
   const ownerId = `view:${viewId}`;
 
   viewStateRef.current = viewState;
   onViewStateChangeRef.current = onViewStateChange;
   recordRef.current = record;
+  tRef.current = t;
 
   React.useEffect(() => {
     models.acquire(identity, ownerId);
@@ -138,6 +178,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     const bridge = getMonacoLanguageBridge(monaco, models);
     const languageOwnerId = `language:${viewId}`;
     bridge.acquire(modelSnapshot.model, identity, languageOwnerId);
+    const runDebugAdapter = createRunDebugEditorAdapter({ editor: editorInstance, identity, monaco });
 
     let captureFrame: number | null = null;
     const capture = (): void => {
@@ -148,11 +189,14 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       const selection = editorInstance.getSelection();
       const open = recordRef.current;
       const hasSelection = Boolean(selection && !selection.isEmpty());
-      usePiEditorContextStore.getState().setActiveEditorFile({
+      if (!open?.documentInstanceId) return;
+      publishPiEditorContext(ownerId, {
+        documentInstanceId: open.documentInstanceId,
         fileName: identity.resourceId.split('/').pop() || identity.resourceId,
         filePath: path,
         fileSize: open?.byteLength ?? null,
         relativePath: identity.resourceId,
+        runtimeKey: getRuntimeKey(),
         selection: hasSelection && selection
           ? {
               startLine: selection.startLineNumber,
@@ -163,16 +207,69 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
             }
           : null,
         dirty: open?.dirty === true,
+        viewId,
+        workspaceId: identity.workspaceId,
       });
     };
+    captureContextRef.current = capture;
     const scheduleCapture = (): void => {
       if (captureFrame !== null) return;
       captureFrame = requestAnimationFrame(capture);
+    };
+    const closeInlineComment = (): void => {
+      closeInlineCommentRef.current?.();
+    };
+    const openInlineComment = (): void => {
+      closeInlineComment();
+      const selection = editorInstance.getSelection();
+      const model = editorInstance.getModel();
+      if (!selection || !model) return;
+      const startLine = selection.startLineNumber;
+      const endLine = !selection.isEmpty() && selection.endColumn === 1 && selection.endLineNumber > startLine
+        ? selection.endLineNumber - 1
+        : selection.endLineNumber;
+      const code = selection.isEmpty()
+        ? model.getLineContent(startLine)
+        : model.getValueInRange(selection);
+      const node = document.createElement('div');
+      node.className = 'w-[min(30rem,calc(100vw-4rem))] py-1';
+      const widgetId = `piarium.inline-comment.${viewId}`;
+      const widget: MonacoEditor.IContentWidget = {
+        allowEditorOverflow: true,
+        getDomNode: () => node,
+        getId: () => widgetId,
+        getPosition: () => ({
+          position: { lineNumber: endLine, column: model.getLineMaxColumn(endLine) },
+          preference: [
+            monaco.editor.ContentWidgetPositionPreference.BELOW,
+            monaco.editor.ContentWidgetPositionPreference.ABOVE,
+          ],
+        }),
+      };
+      editorInstance.addContentWidget(widget);
+      closeInlineCommentRef.current = () => {
+        editorInstance.removeContentWidget(widget);
+        node.remove();
+        closeInlineCommentRef.current = null;
+        setPendingInlineComment((current) => current?.node === node ? null : current);
+      };
+      setPendingInlineComment({ code, endLine, node, startLine });
     };
     const disposables = [
       editorInstance.onDidChangeCursorSelection(scheduleCapture),
       editorInstance.onDidScrollChange(scheduleCapture),
       editorInstance.onDidChangeHiddenAreas(scheduleCapture),
+      editorInstance.onDidFocusEditorWidget(() => {
+        activatePiEditorContextOwner(ownerId);
+        scheduleCapture();
+      }),
+      editorInstance.addAction({
+        id: 'piarium.editor.addInlineComment',
+        label: tRef.current('inlineComment.actions.comment'),
+        contextMenuGroupId: 'navigation',
+        contextMenuOrder: 20,
+        run: openInlineComment,
+      }),
     ];
     const resizeObserver = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => editorInstance.layout())
@@ -180,12 +277,17 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     resizeObserver?.observe(host);
     const handleWindowResize = (): void => editorInstance.layout();
     if (!resizeObserver) window.addEventListener('resize', handleWindowResize);
+    capture();
     void Promise.resolve(editorInstance.renderAsync()).then(() => markMonacoPerformance('editor.first.paint'));
 
     return () => {
       if (captureFrame !== null) cancelAnimationFrame(captureFrame);
       capture();
+      captureContextRef.current = null;
+      releasePiEditorContextOwner(ownerId);
+      closeInlineCommentRef.current?.();
       bridge.release(languageOwnerId);
+      runDebugAdapter.dispose();
       for (const disposable of disposables) disposable.dispose();
       resizeObserver?.disconnect();
       if (!resizeObserver) window.removeEventListener('resize', handleWindowResize);
@@ -196,6 +298,44 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     // Theme, profile presentation and settings update the live editor separately; none may recreate the view/model.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, viewId]);
+
+  React.useEffect(() => {
+    captureContextRef.current?.();
+  }, [record?.byteLength, record?.dirty, record?.documentInstanceId, record?.localEditRevision]);
+
+  React.useEffect(() => {
+    if (!editorInstance) return undefined;
+    const relevant = inlineDrafts.filter((draft) => (
+      draft.source === 'editor-selection'
+      && draft.fileLabel.replace(/\\/g, '/') === identity.resourceId.replace(/\\/g, '/')
+    ));
+    inlineCommentDecorationIdsRef.current = editorInstance.deltaDecorations(
+      inlineCommentDecorationIdsRef.current,
+      relevant.map((draft) => ({
+        range: {
+          startLineNumber: Math.min(draft.startLine, editorInstance.getModel()?.getLineCount() ?? draft.startLine),
+          startColumn: 1,
+          endLineNumber: Math.min(draft.endLine, editorInstance.getModel()?.getLineCount() ?? draft.endLine),
+          endColumn: 1,
+        },
+        options: {
+          isWholeLine: true,
+          className: 'piarium-editor-inline-comment-line',
+          glyphMarginClassName: 'piarium-editor-inline-comment-glyph',
+        },
+      })),
+    );
+    return () => {
+      if (editorInstance.getModel()) {
+        inlineCommentDecorationIdsRef.current = editorInstance.deltaDecorations(
+          inlineCommentDecorationIdsRef.current,
+          [],
+        );
+      } else {
+        inlineCommentDecorationIdsRef.current = [];
+      }
+    };
+  }, [editorInstance, identity.resourceId, inlineDrafts]);
 
   React.useEffect(() => {
     if (!monaco || !editorInstance) return undefined;
@@ -266,6 +406,38 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
         </div>
       ) : null}
       <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden" />
+      {pendingInlineComment ? createPortal(
+        <InlineCommentInput
+          fileLabel={identity.resourceId}
+          lineRange={{ start: pendingInlineComment.startLine, end: pendingInlineComment.endLine }}
+          onCancel={() => closeInlineCommentRef.current?.()}
+          onSave={(text) => {
+            if (!sessionId || !sessionDirectory) {
+              toast.error(t('inlineComment.toast.selectSessionToSave'));
+              return;
+            }
+            const sessionResourceId = resourceIdFromWorkspacePath(sessionDirectory, path);
+            if (sessionResourceId === null) {
+              toast.error(t('inlineComment.toast.selectSessionToSave'));
+              return;
+            }
+            const accepted = useInlineCommentDraftStore.getState().addDraft(
+              { directory: sessionDirectory, sessionKey: sessionId },
+              {
+                source: 'editor-selection',
+                fileLabel: sessionResourceId,
+                startLine: pendingInlineComment.startLine,
+                endLine: pendingInlineComment.endLine,
+                language: hostLanguageId,
+                code: pendingInlineComment.code,
+                text,
+              },
+            );
+            if (accepted) closeInlineCommentRef.current?.();
+          }}
+        />,
+        pendingInlineComment.node,
+      ) : null}
       <div
         ref={vimStatusRef}
         className={cn(

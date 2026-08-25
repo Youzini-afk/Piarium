@@ -8,13 +8,13 @@ import { cn } from '@/lib/utils';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import {
   acquireRunDebugView,
+  peekLastStackFrame,
   peekLastTestFailure,
   rememberStackFrame,
   releaseRunDebugView,
   subscribeRunDebugUi,
 } from '@/lib/run-debug/session';
-import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
-import { setWorkbenchContextKey } from '@/lib/workbench/editors/context-keys';
+import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import type {
   PiariumBreakpoint,
   PiariumDebugSessionStatus,
@@ -25,6 +25,9 @@ import type {
 } from '@/lib/api/types';
 import { RunServicesError } from '@/lib/api/run-errors';
 import { ideDebugControlAvailability } from '@/lib/workbench/ide-debug-controls';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
+import { languageIdFromResourceId } from '@/lib/language-services/language-id';
 
 type TasksState =
   | { status: 'idle' }
@@ -47,6 +50,8 @@ const ignoreStale = (error: unknown): boolean => (
 export const IdeRunPanel: React.FC = () => {
   const { t } = useI18n();
   const workspaceId = useWorkbenchWorkspaceId();
+  const directory = useDirectoryStore((state) => state.currentDirectory);
+  const activeEditorFile = usePiEditorContextStore((state) => state.activeEditorFile);
   const apis = useRuntimeAPIs();
   const [tasks, setTasks] = React.useState<TasksState>({ status: 'idle' });
   const [tests, setTests] = React.useState<TestsState>({ status: 'idle' });
@@ -58,12 +63,16 @@ export const IdeRunPanel: React.FC = () => {
   const [watchDraft, setWatchDraft] = React.useState('');
   const [consoleLines, setConsoleLines] = React.useState<string[]>([]);
   const [consoleDraft, setConsoleDraft] = React.useState('');
-  const [program, setProgram] = React.useState('debuggee.js');
+  const [program, setProgram] = React.useState('');
   const refreshGenerationRef = React.useRef(0);
   const workspaceIdRef = React.useRef(workspaceId);
+  const testOwnerRef = React.useRef<{ runId: string; generation: number } | null>(null);
   workspaceIdRef.current = workspaceId;
   const uiEpoch = React.useSyncExternalStore(subscribeRunDebugUi, () => peekLastTestFailure(workspaceId ?? '')?.id ?? '', () => '');
   const debugControls = ideDebugControlAvailability(debugStatus);
+  const activeEditorResourceId = activeEditorFile && activeEditorFile.workspaceId === workspaceId
+    ? activeEditorFile.relativePath
+    : null;
 
   const reportActionFailure = React.useCallback((error: unknown) => {
     toast.error(error instanceof Error ? error.message : t('common.unavailable'));
@@ -123,6 +132,11 @@ export const IdeRunPanel: React.FC = () => {
       if (discovered.status === 'failure') setTests({ status: 'failure', message: discovered.message });
       else if (discovered.status === 'empty' || discovered.tests.length === 0) setTests({ status: 'empty' });
       else setTests({ status: 'ready', tests: discovered.tests });
+      const status = await apis.tests.getStatus(workspaceId);
+      if (!isCurrent()) return;
+      testOwnerRef.current = status.runId && typeof status.generation === 'number'
+        ? { runId: status.runId, generation: status.generation }
+        : null;
     } catch (error) {
       if (isCurrent() && !ignoreStale(error)) {
         setTests({ status: 'failure', message: error instanceof Error ? error.message : 'failed' });
@@ -139,22 +153,43 @@ export const IdeRunPanel: React.FC = () => {
       if (!isCurrent()) return;
       setWatch(listedWatch.expressions);
       if (status.status === 'paused') {
-        const frames = await apis.debug.getStack({ workspaceId, threadId: 1 });
+        const threads = await apis.debug.getThreads({ workspaceId });
         if (!isCurrent()) return;
-        if (frames.status === 'ready') {
+        if (
+          threads.status !== 'ready'
+          || threads.sessionId !== status.sessionId
+          || threads.generation !== status.generation
+          || !threads.value[0]
+        ) return;
+        const frames = await apis.debug.getStack({ workspaceId, threadId: threads.value[0].id });
+        if (!isCurrent()) return;
+        if (
+          frames.status === 'ready'
+          && frames.sessionId === status.sessionId
+          && frames.generation === status.generation
+        ) {
           setStack(frames.value);
           const top = frames.value[0];
           if (top) rememberStackFrame(workspaceId, top);
           if (top) {
             const scopes = await apis.debug.getScopes({ workspaceId, frameId: top.id });
             if (!isCurrent()) return;
-            if (scopes.status === 'ready' && scopes.value[0]) {
+            if (
+              scopes.status === 'ready'
+              && scopes.sessionId === status.sessionId
+              && scopes.generation === status.generation
+              && scopes.value[0]
+            ) {
               const vars = await apis.debug.getVariables({
                 workspaceId,
                 variablesReference: scopes.value[0].variablesReference,
               });
               if (!isCurrent()) return;
-              if (vars.status === 'ready') setVariables(vars.value);
+              if (
+                vars.status === 'ready'
+                && vars.sessionId === status.sessionId
+                && vars.generation === status.generation
+              ) setVariables(vars.value);
             }
           }
         }
@@ -181,21 +216,13 @@ export const IdeRunPanel: React.FC = () => {
     setWatchDraft('');
     setConsoleLines([]);
     setConsoleDraft('');
-    setProgram('debuggee.js');
-    setWorkbenchContextKey('debugIsActive', false);
-    setWorkbenchContextKey('debugIsPaused', false);
+    setProgram('');
+    testOwnerRef.current = null;
   }, [workspaceId]);
 
   React.useEffect(() => {
-    const status = debugStatus?.status;
-    setWorkbenchContextKey('debugIsActive', status === 'running' || status === 'paused' || status === 'starting');
-    setWorkbenchContextKey('debugIsPaused', status === 'paused');
-  }, [debugStatus?.status]);
-
-  React.useEffect(() => () => {
-    setWorkbenchContextKey('debugIsActive', false);
-    setWorkbenchContextKey('debugIsPaused', false);
-  }, []);
+    if (activeEditorResourceId) setProgram(activeEditorResourceId);
+  }, [activeEditorResourceId]);
 
   React.useEffect(() => {
     void refresh();
@@ -220,6 +247,14 @@ export const IdeRunPanel: React.FC = () => {
       }),
       apis.tests.subscribe(workspaceId, (event) => {
         if (workspaceIdRef.current !== workspaceId) return;
+        if (event.kind === 'status') {
+          testOwnerRef.current = event.snapshot.runId && typeof event.snapshot.generation === 'number'
+            ? { runId: event.snapshot.runId, generation: event.snapshot.generation }
+            : null;
+          return;
+        }
+        const owner = testOwnerRef.current;
+        if (!owner || event.runId !== owner.runId || event.generation !== owner.generation) return;
         if (event.kind === 'output') setConsoleLines((lines) => [...lines, event.text]);
         if (event.kind === 'test' && event.test.status) {
           setTests((current) => {
@@ -236,6 +271,49 @@ export const IdeRunPanel: React.FC = () => {
       for (const subscription of close) subscription.close();
     };
   }, [apis.debug, apis.tasks, apis.tests, refresh, workspaceId]);
+
+  const selectStackFrame = React.useCallback((frame: PiariumDebugStackFrame): void => {
+    if (!workspaceId) return;
+    rememberStackFrame(workspaceId, frame);
+    if (frame.resourceId) {
+      revealResourceInEditor({
+        workspaceId,
+        workspaceRoot: directory,
+        resourceId: frame.resourceId,
+        line: frame.line,
+        column: frame.column,
+      });
+    }
+    const ownerSessionId = debugStatus && 'sessionId' in debugStatus ? debugStatus.sessionId : undefined;
+    const ownerGeneration = debugStatus && 'generation' in debugStatus ? debugStatus.generation : undefined;
+    if (
+      debugStatus?.status !== 'paused'
+      || !ownerSessionId
+      || typeof ownerGeneration !== 'number'
+    ) return;
+    runAction(async () => {
+      const scopes = await apis.debug.getScopes({ workspaceId, frameId: frame.id });
+      if (
+        scopes.status !== 'ready'
+        || scopes.sessionId !== ownerSessionId
+        || scopes.generation !== ownerGeneration
+      ) return;
+      const scope = scopes.value[0];
+      if (!scope) {
+        setVariables([]);
+        return;
+      }
+      const nextVariables = await apis.debug.getVariables({
+        workspaceId,
+        variablesReference: scope.variablesReference,
+      });
+      if (
+        nextVariables.status === 'ready'
+        && nextVariables.sessionId === ownerSessionId
+        && nextVariables.generation === ownerGeneration
+      ) setVariables(nextVariables.value);
+    });
+  }, [apis.debug, debugStatus, directory, runAction, workspaceId]);
 
   if (!workspaceId) {
     return (
@@ -288,7 +366,10 @@ export const IdeRunPanel: React.FC = () => {
         <div className="mb-2 flex flex-wrap gap-1">
           <Button type="button" size="xs" disabled={!debugControls.canStart} onClick={() => {
             setConsoleLines([]);
-            runDebugAction(() => apis.debug.start({ workspaceId, program, languageId: 'javascript' }));
+            runDebugAction(() => apis.debug.start({
+              workspaceId,
+              ...(program ? { program, languageId: languageIdFromResourceId(program) } : {}),
+            }));
           }}>
             {t('workbench.ide.debug.start')}
           </Button>
@@ -336,7 +417,12 @@ export const IdeRunPanel: React.FC = () => {
                     variant="ghost"
                     size="sm"
                     className="h-auto w-full justify-start"
-                    onClick={() => openWorkbenchEditor(workspaceId, item.resourceId)}
+                    onClick={() => revealResourceInEditor({
+                      workspaceId,
+                      workspaceRoot: directory,
+                      resourceId: item.resourceId,
+                      line: item.line,
+                    })}
                   >
                     {item.resourceId}:{item.line}
                   </Button>
@@ -355,10 +441,7 @@ export const IdeRunPanel: React.FC = () => {
                   variant="ghost"
                   size="sm"
                   className={cn('h-auto w-full justify-start')}
-                  onClick={() => {
-                    rememberStackFrame(workspaceId, frame);
-                    if (frame.resourceId) openWorkbenchEditor(workspaceId, frame.resourceId);
-                  }}
+                  onClick={() => selectStackFrame(frame)}
                 >
                   {frame.name}:{frame.line}
                 </Button>
@@ -442,7 +525,15 @@ export const IdeRunPanel: React.FC = () => {
                   size="sm"
                   className="h-auto w-full justify-start"
                   onClick={() => {
-                    if (item.resourceId) openWorkbenchEditor(workspaceId, item.resourceId);
+                    if (item.resourceId) {
+                      revealResourceInEditor({
+                        workspaceId,
+                        workspaceRoot: directory,
+                        resourceId: item.resourceId,
+                        ...(typeof item.line === 'number' ? { line: item.line } : {}),
+                      });
+                    }
+                    if (item.status === 'failed') return;
                     setConsoleLines([]);
                     runAction(async () => {
                       const result = await apis.tests.run({ workspaceId, testIds: [item.id] });
@@ -480,7 +571,12 @@ export const IdeRunPanel: React.FC = () => {
             const expression = consoleDraft.trim();
             if (!expression) return;
             runAction(async () => {
-              const result = await apis.debug.evaluate({ workspaceId, expression });
+              const frame = peekLastStackFrame(workspaceId);
+              const result = await apis.debug.evaluate({
+                workspaceId,
+                expression,
+                ...(frame ? { frameId: frame.id } : {}),
+              });
               if (workspaceIdRef.current !== workspaceId) return;
               if (result.status === 'failed') throw new Error(result.message);
               if (result.status === 'absent') throw new Error(t('common.unavailable'));

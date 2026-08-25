@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunServicesError } from '@piarium/ui/lib/api/run-errors';
 import { getRuntimeEndpointGeneration, switchRuntimeEndpoint } from '@piarium/ui/lib/runtime-switch';
 
@@ -9,6 +9,39 @@ vi.mock('@piarium/ui/lib/runtime-fetch', () => ({
 }));
 
 describe('createWebWorkspaceDebugAPI', () => {
+  beforeEach(() => {
+    runtimeFetchMock.mockReset();
+  });
+
+  it('forwards the expected debug owner with breakpoint mutations', async () => {
+    const { createWebWorkspaceDebugAPI } = await import('./debug');
+    const api = createWebWorkspaceDebugAPI();
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      status: 'stale',
+      workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      sessionId: 'debug-2',
+      generation: 2,
+      breakpoints: [{ resourceId: 'src/file.ts', line: 3 }],
+    }));
+    await expect(api.setBreakpoints({
+      workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      resourceId: 'src/file.ts',
+      lines: [7],
+      expectedSessionId: 'debug-1',
+      expectedGeneration: 1,
+    })).resolves.toMatchObject({ status: 'stale', sessionId: 'debug-2', generation: 2 });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/debug/breakpoints', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        resourceId: 'src/file.ts',
+        lines: [7],
+        expectedSessionId: 'debug-1',
+        expectedGeneration: 1,
+      }),
+    }));
+  });
+
   it('rejects stale completions after an application-host endpoint switch', async () => {
     const { createWebWorkspaceDebugAPI } = await import('./debug');
     const api = createWebWorkspaceDebugAPI();

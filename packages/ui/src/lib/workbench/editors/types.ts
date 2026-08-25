@@ -9,6 +9,8 @@ export type EditorProviderViewState = {
 export type EditorViewState = {
   /** Which Git revision the diff viewer compares against, for diff-provider tabs. */
   diffScope?: 'working' | 'staged';
+  /** Repository root relative to the workspace, so nested Git repositories remain addressable. */
+  diffRepositoryResourceId?: string;
   previewMode?: 'preview' | 'edit' | 'tree' | 'text';
   providerState?: EditorProviderViewState;
 };

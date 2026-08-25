@@ -15,6 +15,7 @@ type ActiveEditorFilePayload = {
   relativePath: string;
   fileSize: number | null;
   dirty: boolean;
+  documentVersion: number;
   selection: { startLine: number; endLine: number; text: string } | null;
 };
 
@@ -26,6 +27,7 @@ const isSameActiveEditorFilePayload = (a: ActiveEditorFilePayload | null, b: Act
     && a.relativePath === b.relativePath
     && a.fileSize === b.fileSize
     && a.dirty === b.dirty
+    && a.documentVersion === b.documentVersion
     && a.selection?.startLine === b.selection?.startLine
     && a.selection?.endLine === b.selection?.endLine
     && a.selection?.text === b.selection?.text;
@@ -509,6 +511,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       relativePath,
       fileSize,
       dirty: editor.document.isDirty,
+      documentVersion: editor.document.version,
       selection,
     };
     if (isSameActiveEditorFilePayload(this._lastActiveEditorFilePayload, payload)) {

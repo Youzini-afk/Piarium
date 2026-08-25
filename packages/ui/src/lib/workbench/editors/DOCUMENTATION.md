@@ -33,7 +33,10 @@ an authoritative unavailable state rather than a silent substitution.
 
 `piarium.builtin.git-diff` renders the working-tree or staged diff for a tracked file and is the
 IDE's target for Git diff requests. It declares no languages and no fallback, so resolution never
-selects it. Its `viewState.diffScope` carries `working` or `staged` and persists with the tab.
+selects it. Its `viewState.diffScope` carries `working` or `staged`; `diffRepositoryResourceId` keeps
+the selected nested Git root relative to the outer workspace, and both persist with the tab. The
+working side is the live document buffer, while the staged side and original side are immutable
+snapshots. Stage, unstage, and discard refuse to race a dirty editor buffer.
 
 The IDE Workbench's secondary sidebar hosts the Agent session only. Notes and todos stay with the
 Agent profile, and Git diffs open here in the editor area, so the retired `context` secondary view
@@ -69,4 +72,6 @@ text; they never grant process, debug, or test-runner capability.
 
 Agent/editor coordination lives in `lib/agent-editor`: attachments are runtime+session scoped,
 unsaved snapshots are explicit prompt text, tool path hints never override DocumentsAPI watches,
-and patch accept/reject writes use expected revision.
+and patch accept/reject uses a revision-checked Document Registry transaction. Active-editor context
+is selected by visible view ownership; a disposed or hidden integration cannot become an arbitrary
+fallback command/context target.

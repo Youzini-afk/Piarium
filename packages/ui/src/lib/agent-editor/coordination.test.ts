@@ -22,6 +22,7 @@ const attachment = (overrides: Partial<EditorContextAttachment> = {}): EditorCon
   workspaceId: 'ws-1',
   resourceId: 'src/a.ts',
   label: 'a.ts',
+  documentInstanceId: 'document-a',
   documentRevision: 'rev-1',
   localEditRevision: 3,
   source: 'saved',
@@ -40,6 +41,18 @@ describe('editor context attachments', () => {
     expect(listEditorContextAttachments(runtimeKey, 'session-b')).toHaveLength(1);
     restoreEditorContextAttachments(taken);
     expect(listEditorContextAttachments(runtimeKey, 'session-a')).toHaveLength(1);
+  });
+
+  test('workspace-scoped consumers cannot take another workspace attachment from the same session', () => {
+    addEditorContextAttachment(attachment());
+    addEditorContextAttachment(attachment({
+      id: 'att-2',
+      workspaceId: 'ws-2',
+      resourceId: 'src/b.ts',
+      documentInstanceId: 'document-b',
+    }));
+    expect(consumeEditorContextAttachments(runtimeKey, 'session-a', 'ws-1')).toHaveLength(1);
+    expect(listEditorContextAttachments(runtimeKey, 'session-a', 'ws-2')).toHaveLength(1);
   });
 
   test('rejects attachments captured for another runtime', () => {

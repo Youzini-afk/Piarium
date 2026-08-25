@@ -1,9 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { useDocumentRecord } from '@/lib/documents/hooks';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
-import { sliceDocumentRange } from '@/lib/agent-editor/range';
 import { recordHintsFromToolCall } from '@/lib/agent-editor/hints';
 import { attachActiveEditorContext, attachEditorContext } from '@/lib/agent-editor/attach';
 import { peekEditorSessionLink } from '@/lib/agent-editor/navigation';
@@ -15,10 +13,12 @@ import {
   peekEditorWorkbench,
   subscribeEditorWorkbench,
 } from '@/lib/workbench/editors/session';
-import { textEditorSummaryFromViewState } from '@/lib/workbench/editors/view-state-core';
 import { getWorkbenchProblems, showWorkbenchPanel } from '@/lib/workbench/editors/panels';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
+import {
+  activatePiEditorContextOwner,
+  usePiEditorContextStore,
+} from '@/stores/usePiEditorContextStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 const ATTACH_ERROR_KEYS = {
@@ -30,8 +30,6 @@ const ATTACH_ERROR_KEYS = {
 } as const satisfies Record<string, I18nKey>;
 
 const OWNER = 'piarium.builtin.workbench';
-
-const fileNameOf = (resourceId: string): string => resourceId.split('/').pop() || resourceId;
 
 export const AgentEditorCoordinator: React.FC = () => {
   const { t } = useI18n();
@@ -48,41 +46,28 @@ export const AgentEditorCoordinator: React.FC = () => {
     () => undefined,
   );
   const tab = workbench ? activeEditorTab(workbench) : undefined;
-  const identity = workspaceId && tab
-    ? { workspaceId, resourceId: tab.resourceId }
-    : undefined;
-  const record = useDocumentRecord(identity);
+  const tabRef = React.useRef(tab);
+  tabRef.current = tab;
+  const activeEditorFile = usePiEditorContextStore((state) => state.activeEditorFile);
+  const activeOwnerId = tab ? `view:${tab.viewId}` : null;
 
   React.useEffect(() => {
-    if (!tab || !workspaceId || !directory || !record) return;
-    const summary = textEditorSummaryFromViewState(tab.viewState);
-    const range = summary?.selection;
-    const selection = range
-      ? {
-        startLine: range.start.line,
-        startColumn: range.start.column,
-        endLine: range.end.line,
-        endColumn: range.end.column,
-        text: sliceDocumentRange(record.buffer, {
-          startLine: range.start.line,
-          startColumn: range.start.column,
-          endLine: range.end.line,
-          endColumn: range.end.column,
-        }),
-      }
-      : null;
-    usePiEditorContextStore.getState().setActiveEditorFile({
-      fileName: fileNameOf(tab.resourceId),
-      filePath: `${directory.replace(/\\/g, '/').replace(/\/$/, '')}/${tab.resourceId}`,
-      fileSize: record.byteLength,
-      relativePath: tab.resourceId,
-      selection,
-      dirty: record.dirty,
-    });
-    setWorkbenchContextKey('editorIsOpen', true);
-    setWorkbenchContextKey('editorIsDirty', record.dirty);
-    setWorkbenchContextKey('editorHasSelection', selection !== null);
-  }, [directory, record, tab, workspaceId]);
+    activatePiEditorContextOwner(activeOwnerId);
+    return () => activatePiEditorContextOwner(null);
+  }, [activeOwnerId]);
+
+  React.useEffect(() => {
+    const current = activeEditorFile?.workspaceId === workspaceId ? activeEditorFile : null;
+    setWorkbenchContextKey('editorIsOpen', current !== null);
+    setWorkbenchContextKey('editorIsDirty', current?.dirty === true);
+    setWorkbenchContextKey('editorHasSelection', current?.selection !== null && current?.selection !== undefined);
+  }, [activeEditorFile, workspaceId]);
+
+  React.useEffect(() => () => {
+    setWorkbenchContextKey('editorIsOpen', false);
+    setWorkbenchContextKey('editorIsDirty', false);
+    setWorkbenchContextKey('editorHasSelection', false);
+  }, []);
 
   React.useEffect(() => {
     if (!sessionId || !workspaceId || !directory || !toolExecutions) return;
@@ -150,8 +135,9 @@ export const AgentEditorCoordinator: React.FC = () => {
         if ('status' in result) notify(result.status);
       }),
       registerWorkbenchCommand('piarium.editor.revealInSession', OWNER, () => {
-        if (!workspaceId || !tab) return;
-        const link = peekEditorSessionLink({ workspaceId, resourceId: tab.resourceId });
+        const currentTab = tabRef.current;
+        if (!workspaceId || !currentTab) return;
+        const link = peekEditorSessionLink({ workspaceId, resourceId: currentTab.resourceId });
         if (!link?.entryId) return;
         void usePiSessionStore.getState().navigateSession(link.sessionId, link.entryId);
       }),
@@ -169,7 +155,7 @@ export const AgentEditorCoordinator: React.FC = () => {
     return () => {
       for (const close of dispose) close();
     };
-  }, [directory, sessionId, t, tab, workspaceId]);
+  }, [directory, sessionId, t, workspaceId]);
 
   return null;
 };

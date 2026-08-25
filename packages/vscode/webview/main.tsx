@@ -342,8 +342,29 @@ onCommand('settingsSynced', () => {
 });
 
 onCommand('activeEditorFile', (payload) => {
-  void import('@/stores/usePiEditorContextStore').then(({ normalizePiActiveEditorFile, usePiEditorContextStore }) => {
-    usePiEditorContextStore.getState().setActiveEditorFile(normalizePiActiveEditorFile(payload));
+  void Promise.all([
+    import('@/stores/usePiEditorContextStore'),
+    import('@/lib/runtime-switch'),
+  ]).then(([context, runtime]) => {
+    const ownerId = 'vscode:active-editor';
+    if (!payload || typeof payload !== 'object') {
+      context.releasePiEditorContextOwner(ownerId);
+      return;
+    }
+    const record = payload as Record<string, unknown>;
+    const normalized = context.normalizePiActiveEditorFile({
+      ...record,
+      documentInstanceId: `vscode:${String(record.filePath ?? '')}:${String(record.documentVersion ?? '')}`,
+      runtimeKey: runtime.getRuntimeKey(),
+      viewId: ownerId,
+      workspaceId: null,
+    });
+    if (!normalized) {
+      context.releasePiEditorContextOwner(ownerId);
+      return;
+    }
+    context.publishPiEditorContext(ownerId, normalized);
+    context.activatePiEditorContextOwner(ownerId);
   });
 });
 

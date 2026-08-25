@@ -56,6 +56,7 @@ import {
   WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
+import { getResolvedWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 
 const LazyPiModelSelectorDialog = React.lazy(async () => {
   const module = await import('./PiModelSelectorDialog');
@@ -234,7 +235,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       }
       inlineDrafts = inlineDraftStore.consumeDrafts(inlineDraftTarget);
       promptText = appendInlineComments(promptText, inlineDrafts);
-      editorAttachments = consumeEditorContextAttachments(draftRuntimeKey, sessionId);
+      editorAttachments = consumeEditorContextAttachments(
+        draftRuntimeKey,
+        sessionId,
+        getResolvedWorkbenchWorkspaceId(snapshot.cwd),
+      );
       promptText = projectEditorContextAttachments(promptText, editorAttachments);
       if (!promptText.trim() && currentDraft.images.length === 0) {
         inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);

@@ -147,9 +147,44 @@ export const createDebugSupervisor = ({
     breakpoints.get(workspaceIdOf(request)) ?? []
   );
 
+  const activeSession = (workspaceId) => {
+    const record = sessions.get(workspaceId);
+    return record && (record.status === 'starting' || record.status === 'running' || record.status === 'paused')
+      ? record
+      : null;
+  };
+
+  const breakpointResult = (workspaceId, status = 'ready') => {
+    const record = activeSession(workspaceId);
+    return {
+      status,
+      workspaceId,
+      ...(record ? { sessionId: record.sessionId, generation: record.generation } : {}),
+      breakpoints: listBreakpoints(workspaceId).map((item) => ({ ...item })),
+    };
+  };
+
   const setBreakpoints = (request) => {
     const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
     const resourceId = typeof request?.resourceId === 'string' ? request.resourceId : '';
+    const record = activeSession(workspaceId);
+    const expectsNoSession = request?.expectedSessionId === null
+      && request?.expectedGeneration === null;
+    const expectsSession = typeof request?.expectedSessionId === 'string'
+      && request.expectedSessionId.length > 0
+      && Number.isSafeInteger(request?.expectedGeneration)
+      && request.expectedGeneration >= 1;
+    if (!expectsNoSession && !expectsSession) {
+      throw new Error('Breakpoint mutation requires an observed debug owner');
+    }
+    const ownerChanged = expectsNoSession
+      ? Boolean(record)
+      : (
+        !record
+        || request.expectedSessionId !== record.sessionId
+        || request.expectedGeneration !== record.generation
+      );
+    if (ownerChanged) return breakpointResult(workspaceId, 'stale');
     const lines = Array.isArray(request?.lines)
       ? [...new Set(request.lines.map((line) => Number(line)).filter((line) => Number.isFinite(line) && line >= 1))].sort((a, b) => a - b)
       : [];
@@ -158,7 +193,6 @@ export const createDebugSupervisor = ({
     for (const line of lines) next.push({ resourceId, line });
     next.sort((left, right) => left.resourceId.localeCompare(right.resourceId) || left.line - right.line);
     breakpoints.set(workspaceId, next);
-    const record = sessions.get(workspaceId);
     if (record?.rpc && (record.status === 'running' || record.status === 'paused')) {
       const program = pathModule.join(record.root, resourceId);
       void record.rpc.request('setBreakpoints', {
@@ -166,7 +200,9 @@ export const createDebugSupervisor = ({
         breakpoints: lines.map((line) => ({ line })),
       }).catch(() => {});
     }
-    return { status: 'ready', workspaceId, breakpoints: next };
+    const result = breakpointResult(workspaceId);
+    emit(workspaceId, { kind: 'breakpoints', snapshot: result });
+    return result;
   };
 
   const start = async (request) => {
@@ -424,11 +460,7 @@ export const createDebugSupervisor = ({
       return { status: 'unregistered', adapterId };
     },
     getStatus,
-    listBreakpoints: (workspaceId) => ({
-      status: 'ready',
-      workspaceId,
-      breakpoints: listBreakpoints(workspaceId),
-    }),
+    listBreakpoints: (request) => breakpointResult(workspaceIdOf(request)),
     setBreakpoints,
     start,
     async stop(request) {

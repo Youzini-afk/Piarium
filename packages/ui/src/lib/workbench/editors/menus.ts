@@ -6,7 +6,7 @@ const menus = new Map<string, WorkbenchMenuItem>();
 export const registerWorkbenchMenuItem = (item: WorkbenchMenuItem): (() => void) => {
   menus.set(item.id, item);
   return () => {
-    menus.delete(item.id);
+    if (menus.get(item.id) === item) menus.delete(item.id);
   };
 };
 

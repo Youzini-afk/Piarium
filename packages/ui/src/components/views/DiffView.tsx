@@ -44,6 +44,12 @@ import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import type { FileDiffMetadata } from '@pierre/diffs';
+import { MonacoFileDiffEditor } from '@/components/workbench/MonacoFileDiffEditor';
+import { useWorkbenchWorkspace } from '@/lib/extensions/workbench-workspace';
+import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
+import { monacoDiffContentRevision } from '@/lib/monaco/diff-model-registry';
+import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
+import { useDocumentRecord } from '@/lib/documents/hooks';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -381,22 +387,30 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
 });
 
 interface InlineDiffViewerProps {
+  directory: string;
   filePath: string;
   diff: DiffData;
   renderSideBySide: boolean;
+  staged: boolean;
+  useMonaco: boolean;
   wrapLines: boolean;
 }
 
 const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
+  directory,
   filePath,
   diff,
   renderSideBySide,
+  staged,
+  useMonaco,
   wrapLines,
 }) => {
   const language = React.useMemo(
     () => getLanguageFromExtension(filePath) || 'text',
     [filePath]
   );
+  const workspace = useWorkbenchWorkspace();
+  const diffViewId = React.useId();
 
   if (diff.isBinary) {
     return <BinaryDiffPlaceholder />;
@@ -409,6 +423,35 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
                 diff={diff}
                 renderSideBySide={renderSideBySide}
             />
+    );
+  }
+
+  const absolutePath = toAbsolutePath(directory, filePath);
+  const resourceId = workspace.status === 'ready'
+    ? resourceIdFromWorkspacePath(workspace.directory, absolutePath)
+    : null;
+  if (useMonaco && workspace.status === 'ready' && resourceId !== null) {
+    return (
+      <div className="h-[min(70vh,48rem)] min-h-80 w-full" style={{ contain: 'layout' }}>
+        <MonacoFileDiffEditor
+          identity={{ workspaceId: workspace.workspaceId, resourceId }}
+          originalContent={diff.original}
+          originalRevision={`git:${staged ? 'staged' : 'working'}:original:${monacoDiffContentRevision(diff.original)}`}
+          {...(staged
+            ? {
+                modifiedContent: diff.modified,
+                modifiedRevision: `git:staged:modified:${monacoDiffContentRevision(diff.modified)}`,
+              }
+            : {})}
+          path={absolutePath}
+          providerId={BUILTIN_EDITOR_PROVIDER_IDS.gitDiff}
+          readOnly={staged}
+          renderSideBySide={renderSideBySide}
+          viewId={`context-diff:${diffViewId}`}
+          viewState={{}}
+          wrapLines={wrapLines}
+        />
+      </div>
     );
   }
 
@@ -560,6 +603,18 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
+    const { isMobile } = useDeviceInfo();
+    const useMonacoFileDiff = !isMobile && !isVSCodeRuntime();
+    const workspace = useWorkbenchWorkspace();
+    const absoluteFilePath = toAbsolutePath(directory, file.path);
+    const documentResourceId = workspace.status === 'ready'
+        ? resourceIdFromWorkspacePath(workspace.directory, absoluteFilePath)
+        : null;
+    const documentRecord = useDocumentRecord(
+        workspace.status === 'ready' && documentResourceId !== null
+            ? { workspaceId: workspace.workspaceId, resourceId: documentResourceId }
+            : undefined,
+    );
     const cachedDiff = useGitStore(
         React.useCallback((state) => {
             return state.directories.get(directory)?.diffCache.get(file.path) ?? null;
@@ -581,7 +636,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 
     const descriptor = React.useMemo(() => describeChange(file), [file]);
     const renderSideBySide = layout === 'side-by-side';
-    const desiredContextMode: DiffContextMode = loadFullFiles ? 'full' : 'patch';
+    const desiredContextMode: DiffContextMode = useMonacoFileDiff || loadFullFiles ? 'full' : 'patch';
     const fileStatusKey = `${file.index}:${file.working_dir}:${file.insertions}:${file.deletions}`;
 
     const diffData = React.useMemo<DiffData | null>(() => {
@@ -637,15 +692,19 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         let cancelled = false;
         const runtimeKey = getRuntimeKey();
         const contextLines = loadFullFiles ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
-        const fetchPromise = isImageFile(file.path)
+        const fetchPromise = useMonacoFileDiff || isImageFile(file.path)
             ? git.getGitFileDiff(directory, { path: file.path, staged })
             : git.getGitDiff(directory, { path: file.path, staged, contextLines });
-        const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-        });
+        const responsePromise = useMonacoFileDiff
+            ? fetchPromise
+            : Promise.race([
+                fetchPromise,
+                new Promise<never>((_, reject) => {
+                    setTimeout(() => reject(new Error(`Timed out after ${DIFF_REQUEST_TIMEOUT_MS}ms`)), DIFF_REQUEST_TIMEOUT_MS);
+                }),
+            ]);
 
-        void Promise.race([fetchPromise, timeoutPromise])
+        void responsePromise
             .then((response) => {
                 if (cancelled) return;
 
@@ -684,7 +743,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                 lastDiffRequestRef.current = null;
             }
         };
-    }, [desiredContextMode, diffData, diffDataMatchesContextMode, diffRetryNonce, directory, file.path, fileStatusKey, git, initialDiffData, isExpanded, isMounted, loadFullFiles, setDiff, staged]);
+    }, [desiredContextMode, diffData, diffDataMatchesContextMode, diffRetryNonce, directory, file.path, fileStatusKey, git, initialDiffData, isExpanded, isMounted, loadFullFiles, setDiff, staged, useMonacoFileDiff]);
 
     const handleToggle = React.useCallback(() => {
         handleOpenChange(!isExpanded);
@@ -693,6 +752,10 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 
     const handleFileAction = React.useCallback(async (action: FileDiffAction) => {
         if (!directory || fileAction !== null) {
+            return;
+        }
+        if (documentRecord?.dirty) {
+            toast.error(t('workbench.patch.conflict'));
             return;
         }
 
@@ -717,7 +780,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         } finally {
             setFileAction((current) => (current === action ? null : current));
         }
-    }, [directory, fetchStatus, file.path, fileAction, git, t]);
+    }, [directory, documentRecord?.dirty, fetchStatus, file.path, fileAction, git, t]);
 
     return (
         <div ref={setSectionRef} className="scroll-mt-9 border-b border-[var(--interactive-border)]/40 last:border-b-0">
@@ -859,7 +922,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             {t('diffView.state.loadingDiff')}
                         </div>
                     ) : null}
-                    {isMounted && diffData && !forceRenderLarge && (file.insertions + file.deletions) > LARGE_DIFF_CHANGED_LINES ? (
+                    {isMounted && diffData && !useMonacoFileDiff && !forceRenderLarge && (file.insertions + file.deletions) > LARGE_DIFF_CHANGED_LINES ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
                                 {t('diffView.state.largeDiff', { count: file.insertions + file.deletions })}
@@ -876,12 +939,15 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             </button>
                         </div>
                     ) : null}
-                    {isMounted && diffData && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
+                    {isMounted && diffData && (useMonacoFileDiff || forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
                         <>
                             <InlineDiffViewer
+                                directory={directory}
                                 filePath={file.path}
                                 diff={diffData}
                                 renderSideBySide={renderSideBySide}
+                                staged={staged}
+                                useMonaco={useMonacoFileDiff}
                                 wrapLines={wrapLines}
                             />
                             <div className="pointer-events-none absolute bottom-3 right-3 z-20">
@@ -890,7 +956,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                         filePath={file.path}
                                         staged={staged}
                                         busyAction={fileAction}
-                                        disabled={fileAction !== null}
+                                        disabled={fileAction !== null || documentRecord?.dirty === true}
                                         onAction={handleFileAction}
                                     />
                                 </div>
@@ -913,6 +979,8 @@ interface DiffViewProps {
     targetFilePath?: string | null;
     /** Render diff content flush with the container edges (no outer padding). */
     flushContent?: boolean;
+    /** False when a retained tab is hidden; expensive file renderers release their visible owners. */
+    visible?: boolean;
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({
@@ -924,6 +992,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     onDiffScopeChange,
     targetFilePath = null,
     flushContent = false,
+    visible = true,
 }) => {
     const { t } = useI18n();
     const { git, documents } = useRuntimeAPIs();
@@ -931,6 +1000,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const openContextSurface = useUIStore((state) => state.openContextSurface);
     const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
     const { screenWidth, isMobile } = useDeviceInfo();
+    const useMonacoFileDiff = !isMobile && !isVSCodeRuntime();
 
     const isGitRepo = useIsGitRepo(effectiveDirectory ?? null);
     const status = useGitStatus(effectiveDirectory ?? null);
@@ -1118,6 +1188,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     }, [syncVisibleStackedFiles]);
 
     React.useEffect(() => {
+        if (!visible) return;
         const scrollRoot = diffScrollRef.current;
         if (!scrollRoot) return;
 
@@ -1133,7 +1204,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 visibleSyncFrameRef.current = null;
             }
         };
-    }, [changedFiles, expandedFiles, queueVisibleStackedFilesSync]);
+    }, [changedFiles, expandedFiles, queueVisibleStackedFilesSync, visible]);
 
     const getLayoutForFile = React.useCallback((file: FileEntry): 'inline' | 'side-by-side' => {
         const override = diffFileLayout[file.path];
@@ -1164,14 +1235,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     // Ensure git status on mount
     React.useEffect(() => {
-        if (effectiveDirectory) {
+        if (visible && effectiveDirectory) {
             setActiveDirectory(effectiveDirectory);
             void ensureStatus(effectiveDirectory, git);
         }
-    }, [effectiveDirectory, setActiveDirectory, ensureStatus, git]);
+    }, [effectiveDirectory, setActiveDirectory, ensureStatus, git, visible]);
 
     React.useEffect(() => {
-        if (!effectiveDirectory) {
+        if (!visible || !effectiveDirectory) {
             return;
         }
 
@@ -1181,7 +1252,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             }
             void fetchStatus(effectiveDirectory, git);
         });
-    }, [effectiveDirectory, fetchStatus, git]);
+    }, [effectiveDirectory, fetchStatus, git, visible]);
 
     // Handle pending diff file from external navigation
     React.useEffect(() => {
@@ -1526,7 +1597,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                     wrapLines={diffWrapLines}
                                     isSelected={false}
                                     isExpanded={expandedFiles.has(file.path)}
-                                    isMounted={mountedStackedFiles.has(file.path) || file.path === pinnedStackedTarget}
+                                    isMounted={visible && (mountedStackedFiles.has(file.path) || file.path === pinnedStackedTarget)}
                                     onSelect={handleSelectFile}
                                     onExpandedChange={handleStackedEntryExpandedChange}
                                     registerSectionRef={registerSectionRef}
@@ -1672,7 +1743,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </span>
                     </Button>
                 )}
-                {changedFiles.length > 0 && (
+                {changedFiles.length > 0 && !useMonacoFileDiff && (
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button

@@ -777,6 +777,26 @@ rename、format、diagnostics、quick fix；扩展 pack/install/enable/disable�
 聊天/PR 只读 diff renderer 不因本 Phase 被强行替换。验收聚焦各 authority 的 dispatch、stale
 session、dirty patch conflict 和 visible-owner lifecycle。
 
+完成证据（2026-08-26）：
+
+- desktop/Web 文件与 Git diff 使用 Monaco：working modified side 复用 Document Registry model，
+  original/staged side 使用按内容 revision、visible owner 引用计数的 immutable snapshot；嵌套 Git
+  repository root 以 workspace-relative view state 持久化。聊天、PR、历史提交与 mobile/VS Code
+  仍保留各自适用的轻量只读 renderer；
+- breakpoint 设置携带期望 debug session/generation，Host 在 owner 已变化时返回 authoritative
+  `stale`；paused frame 通过 threads/stack 的同 owner 结果投影到 Monaco。test/output/finished 事件
+  同样携带 run generation，旧运行的延迟事件不会覆盖新运行；隐藏或最后一个 consumer 释放后
+  subscriptions、decorations 与 snapshot models 均清理；
+- Problems、breakpoints、stack frames 与 failed tests 统一按精确 resource/line/column 打开；debug
+  program 和 language 从当前 editor resource 推导，不再硬编码 JavaScript；
+- active editor context 由 visible view owner 选择，并携带 runtime/workspace/document-instance/view
+  identity。file/selection/diff attachment、Monaco inline comment 与 patch review 共用该身份；patch
+  review 通过 Document Registry WorkspaceEdit 原子进入 dirty buffer，dirty/conflict/saving/stale 时
+  拒绝，不再绕过 registry 直接写盘；
+- Git stage/unstage/discard 在 live buffer dirty 时拒绝，防止磁盘与编辑器分叉。聚焦 ownership、
+  stale session、snapshot lifecycle、nested repository、attachment 与 patch transaction 测试通过；
+  UI/Web/VS Code type-check、i18n parity、Web run supervisor 测试与 production Web build 通过。
+
 ### Phase 7 — Mobile、公共 editor contract 与扩展增强
 
 写入边界：

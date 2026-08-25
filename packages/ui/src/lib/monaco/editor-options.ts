@@ -71,6 +71,7 @@ export const createMonacoEditorOptions = (input: {
     fontSize: input.fontSize,
     formatOnType: settings.formatOnType,
     guides: { bracketPairs: true, bracketPairsHorizontal: true, highlightActiveBracketPair: true, indentation: true },
+    glyphMargin: true,
     lineHeight: settings.lineHeight,
     lineNumbers,
     links: true,

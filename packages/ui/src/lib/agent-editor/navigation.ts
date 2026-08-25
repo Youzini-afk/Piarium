@@ -32,16 +32,6 @@ export const revealResourceInEditor = (input: {
   toolCallId?: string;
   editor?: EditorAPI;
 }): void => {
-  openWorkbenchEditor(input.workspaceId, input.resourceId);
-  const tab = peekEditorWorkbench(input.workspaceId);
-  const active = tab ? activeEditorTab(tab) : undefined;
-  if (active && input.line) {
-    const viewState = createLegacyTextEditorViewState({
-      cursorLine: input.line,
-      ...(input.column ? { cursorColumn: input.column } : {}),
-    });
-    patchEditorViewState(input.workspaceId, active.viewId, viewState);
-  }
   const identity = { workspaceId: input.workspaceId, resourceId: input.resourceId };
   if (input.sessionId) {
     const link: EditorSessionLink = { identity, sessionId: input.sessionId };
@@ -50,12 +40,21 @@ export const revealResourceInEditor = (input: {
     rememberEditorSessionLink(link);
   }
   const path = workspacePathFromResourceId(input.workspaceRoot, input.resourceId);
-  openFileInMainEditor(input.workspaceRoot, path, {
+  const openedInMain = openFileInMainEditor(input.workspaceRoot, path, {
     ...(typeof input.line === 'number' ? { line: input.line } : {}),
     ...(typeof input.column === 'number' ? { column: input.column } : {}),
     focus: true,
   });
-  if (input.editor) {
+  if (!openedInMain) openWorkbenchEditor(input.workspaceId, input.resourceId);
+  const workbench = peekEditorWorkbench(input.workspaceId);
+  const active = workbench ? activeEditorTab(workbench) : undefined;
+  if (active?.resourceId === input.resourceId && input.line) {
+    patchEditorViewState(input.workspaceId, active.viewId, createLegacyTextEditorViewState({
+      cursorLine: input.line,
+      ...(input.column ? { cursorColumn: input.column } : {}),
+    }));
+  }
+  if (input.editor && !openedInMain) {
     void input.editor.openFile(path, input.line, input.column);
   }
 };

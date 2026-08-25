@@ -7,6 +7,7 @@ import {
   openEditor,
   pinEditorTab,
   splitEditorGroup,
+  updateEditorViewState,
 } from './groups';
 import { selectEditorProvider, resetEditorProvidersForTests, setEditorProviderEnabled } from './providers';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from './types';
@@ -114,16 +115,24 @@ describe('editor groups', () => {
 
   test('a pinned tab survives a snapshot round trip', () => {
     seq = 0;
-    const state = openEditor(createEmptyEditorWorkbench('ws-1', ids), {
+    let state = openEditor(createEmptyEditorWorkbench('ws-1', ids), {
       resourceId: 'a.ts',
       providerId: BUILTIN_EDITOR_PROVIDER_IDS.gitDiff,
       providerPinned: true,
     }, ids);
+    const opened = listEditorGroups(state.tree)[0]?.tabs[0];
+    if (!opened) throw new Error('expected a Git diff tab');
+    state = updateEditorViewState(state, opened.viewId, {
+      diffScope: 'staged',
+      diffRepositoryResourceId: 'packages/app',
+    });
     const restored = restoreEditorWorkbenchSnapshot(serializeEditorWorkbenchSnapshot(state), 'ws-1');
     if (restored.status !== 'ready') throw new Error('expected a ready snapshot');
     const tab = listEditorGroups(restored.state.tree)[0]?.tabs[0];
     expect(tab?.providerId).toBe(BUILTIN_EDITOR_PROVIDER_IDS.gitDiff);
     expect(tab?.providerPinned).toBe(true);
+    expect(tab?.viewState.diffScope).toBe('staged');
+    expect(tab?.viewState.diffRepositoryResourceId).toBe('packages/app');
   });
 });
 

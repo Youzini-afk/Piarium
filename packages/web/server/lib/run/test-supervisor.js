@@ -102,6 +102,12 @@ export const createTestSupervisor = ({
     return snapshot;
   };
 
+  const emitRunEvent = (record, event) => emit(record.workspaceId, {
+    ...event,
+    runId: record.runId,
+    generation: record.generation,
+  });
+
   const findProvider = (workspaceId, providerId) => {
     if (providerId) return providers.find((item) => item.providerId === providerId) ?? null;
     return providers.find((item) => (
@@ -277,7 +283,7 @@ export const createTestSupervisor = ({
     const results = [];
     for (const item of selected) {
       if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
-      emit(record.workspaceId, { kind: 'test', test: { ...item, status: 'running' } });
+      emitRunEvent(record, { kind: 'test', test: { ...item, status: 'running' } });
       const filePath = pathModule.join(workspace.root, item.resourceId);
       const chunks = [];
       const child = spawn(execPath, ['--test', '--test-reporter=tap', filePath], {
@@ -289,10 +295,10 @@ export const createTestSupervisor = ({
       record.child = child;
       child.stdout?.on('data', (chunk) => {
         chunks.push(chunk.toString('utf8'));
-        emit(record.workspaceId, { kind: 'output', channel: 'test', runId: record.runId, text: chunk.toString('utf8') });
+        emitRunEvent(record, { kind: 'output', channel: 'test', text: chunk.toString('utf8') });
       });
       child.stderr?.on('data', (chunk) => {
-        emit(record.workspaceId, { kind: 'output', channel: 'test', runId: record.runId, text: chunk.toString('utf8') });
+        emitRunEvent(record, { kind: 'output', channel: 'test', text: chunk.toString('utf8') });
       });
       const code = await new Promise((resolve) => {
         child.once('exit', (exitCode) => resolve(exitCode ?? 1));
@@ -307,18 +313,18 @@ export const createTestSupervisor = ({
           ...(code === 0 ? {} : { message: `Test process exited with code ${code}` }),
         };
         results.push(fallback);
-        emit(record.workspaceId, { kind: 'test', test: fallback });
+        emitRunEvent(record, { kind: 'test', test: fallback });
       } else {
         for (const result of parsed) {
           results.push(result);
-          emit(record.workspaceId, { kind: 'test', test: result });
+          emitRunEvent(record, { kind: 'test', test: result });
         }
       }
     }
     if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
     record.status = results.some((item) => item.status === 'failed') ? 'failed' : 'stopped';
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
-    emit(record.workspaceId, { kind: 'finished', results });
+    emitRunEvent(record, { kind: 'finished', results });
     return snapshotFor(record);
   };
 
@@ -350,10 +356,10 @@ export const createTestSupervisor = ({
         || record.rpc !== processPair.rpc
       ) return;
       if (method === 'test/started' && params?.id) {
-        emit(record.workspaceId, { kind: 'test', test: { id: params.id, label: params.label ?? params.id, status: 'running' } });
+        emitRunEvent(record, { kind: 'test', test: { id: params.id, label: params.label ?? params.id, status: 'running' } });
       }
       if (method === 'test/passed' && params?.id) {
-        emit(record.workspaceId, { kind: 'test', test: { id: params.id, label: params.label ?? params.id, status: 'passed' } });
+        emitRunEvent(record, { kind: 'test', test: { id: params.id, label: params.label ?? params.id, status: 'passed' } });
       }
       if (method === 'test/failed' && params?.id) {
         const test = {
@@ -365,12 +371,12 @@ export const createTestSupervisor = ({
         if (Number.isFinite(params.line)) test.line = params.line;
         if (typeof params.message === 'string') test.message = params.message;
         if (typeof params.stack === 'string') test.stack = params.stack;
-        emit(record.workspaceId, { kind: 'test', test });
+        emitRunEvent(record, { kind: 'test', test });
       }
       if (method === 'test/finished') {
         record.status = params?.status === 'failed' ? 'failed' : 'stopped';
         emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
-        emit(record.workspaceId, { kind: 'finished' });
+        emitRunEvent(record, { kind: 'finished' });
       }
     });
     await processPair.rpc.request('run', { testIds });

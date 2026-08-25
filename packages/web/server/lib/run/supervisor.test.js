@@ -66,11 +66,19 @@ describe('debug supervisor', () => {
     try {
       debug.registerAdapter(fixtureAdapter());
       await fs.promises.writeFile(path.join(harness.workspaceRoot, 'app.js'), 'const value = 1;\n');
-      debug.setBreakpoints({
+      const preconfigured = debug.setBreakpoints({
         workspaceId: harness.identity.workspaceId,
         resourceId: 'app.js',
         lines: [1],
+        expectedSessionId: null,
+        expectedGeneration: null,
       });
+      expect(preconfigured).toMatchObject({
+        status: 'ready',
+        workspaceId: harness.identity.workspaceId,
+        breakpoints: [{ resourceId: 'app.js', line: 1 }],
+      });
+      expect(preconfigured).not.toHaveProperty('sessionId');
       const started = await debug.start({
         workspaceId: harness.identity.workspaceId,
         program: 'app.js',
@@ -82,11 +90,64 @@ describe('debug supervisor', () => {
         return status.status === 'paused' ? status : null;
       });
       expect(paused.generation).toBeGreaterThan(0);
+      const staleBreakpoints = debug.setBreakpoints({
+        workspaceId: harness.identity.workspaceId,
+        resourceId: 'app.js',
+        lines: [2],
+        expectedSessionId: 'replaced-session',
+        expectedGeneration: paused.generation,
+      });
+      expect(staleBreakpoints).toEqual({
+        status: 'stale',
+        workspaceId: harness.identity.workspaceId,
+        sessionId: paused.sessionId,
+        generation: paused.generation,
+        breakpoints: [{ resourceId: 'app.js', line: 1 }],
+      });
+      expect(debug.setBreakpoints({
+        workspaceId: harness.identity.workspaceId,
+        resourceId: 'app.js',
+        lines: [3],
+        expectedSessionId: paused.sessionId,
+        expectedGeneration: paused.generation + 1,
+      })).toEqual({
+        status: 'stale',
+        workspaceId: harness.identity.workspaceId,
+        sessionId: paused.sessionId,
+        generation: paused.generation,
+        breakpoints: [{ resourceId: 'app.js', line: 1 }],
+      });
+      expect(debug.setBreakpoints({
+        workspaceId: harness.identity.workspaceId,
+        resourceId: 'app.js',
+        lines: [4],
+        expectedSessionId: null,
+        expectedGeneration: null,
+      })).toEqual({
+        status: 'stale',
+        workspaceId: harness.identity.workspaceId,
+        sessionId: paused.sessionId,
+        generation: paused.generation,
+        breakpoints: [{ resourceId: 'app.js', line: 1 }],
+      });
+      const acceptedBreakpoints = debug.setBreakpoints({
+        workspaceId: harness.identity.workspaceId,
+        resourceId: 'app.js',
+        lines: [2],
+        expectedSessionId: paused.sessionId,
+        expectedGeneration: paused.generation,
+      });
+      expect(acceptedBreakpoints).toMatchObject({
+        status: 'ready',
+        sessionId: paused.sessionId,
+        generation: paused.generation,
+        breakpoints: [{ resourceId: 'app.js', line: 2 }],
+      });
       const threads = await debug.getThreads({ workspaceId: harness.identity.workspaceId });
       expect(threads).toMatchObject({ status: 'ready', value: [{ id: 1, name: 'fixture' }] });
       const stack = await debug.getStack({ workspaceId: harness.identity.workspaceId, threadId: 1 });
       expect(stack.status).toBe('ready');
-      expect(stack.value[0]).toMatchObject({ name: 'fixtureMain', line: 1 });
+      expect(stack.value[0]).toMatchObject({ name: 'fixtureMain', line: 2 });
       const scopes = await debug.getScopes({ workspaceId: harness.identity.workspaceId, frameId: 1 });
       expect(scopes.value[0].variablesReference).toBeGreaterThan(0);
       const variables = await debug.getVariables({
@@ -267,6 +328,9 @@ describe('task runner and tests', () => {
       await waitUntil(() => events.some((event) => (
         event.kind === 'test' && event.test.status === 'passed'
       )));
+      const owner = events.find((event) => event.kind === 'status' && event.snapshot.status === 'running')?.snapshot;
+      const passed = events.find((event) => event.kind === 'test' && event.test.status === 'passed');
+      expect(passed).toMatchObject({ runId: owner.runId, generation: owner.generation });
       tests.registerProvider(fixtureTests({
         providerId: 'crash',
         env: { PIARIUM_TEST_FIXTURE_CRASH: '1' },
@@ -331,6 +395,8 @@ describe('task runner and tests', () => {
         workspaceId: harness.identity.workspaceId,
         resourceId: 'debuggee.js',
         lines: [3],
+        expectedSessionId: null,
+        expectedGeneration: null,
       });
       const started = await runtime.debug.start({
         workspaceId: harness.identity.workspaceId,
@@ -373,6 +439,17 @@ describe('workspace run capabilities', () => {
       expect((await debugCall('getStatus', { workspaceId: harness.identity.workspaceId })).status).toBe('absent');
       expect((await taskCall('list', { workspaceId: harness.identity.workspaceId })).status).toBe('ready');
       expect((await testCall('getStatus', { workspaceId: harness.identity.workspaceId })).status).toBe('absent');
+      expect(await debugCall('setBreakpoints', {
+        workspaceId: harness.identity.workspaceId,
+        resourceId: 'src/file.js',
+        lines: [4],
+        expectedSessionId: 'missing',
+        expectedGeneration: 1,
+      })).toEqual({
+        status: 'stale',
+        workspaceId: harness.identity.workspaceId,
+        breakpoints: [],
+      });
       await expect(debugCall('spawn', {})).rejects.toThrow(/does not implement spawn/);
       await expect(taskCall('spawn', {})).rejects.toThrow(/does not implement spawn/);
       await expect(testCall('spawn', {})).rejects.toThrow(/does not implement spawn/);
@@ -397,6 +474,29 @@ describe('workspace run capabilities', () => {
       const app = express();
       app.use(express.json());
       registerRunRoutes(app, runtime);
+      const preconfigured = await request(app).post('/api/debug/breakpoints').send({
+        workspaceId: harness.identity.workspaceId,
+        resourceId: 'src/file.js',
+        lines: [4],
+        expectedSessionId: null,
+        expectedGeneration: null,
+      });
+      expect(preconfigured.body).toMatchObject({
+        status: 'ready',
+        breakpoints: [{ resourceId: 'src/file.js', line: 4 }],
+      });
+      const staleMutation = await request(app).post('/api/debug/breakpoints').send({
+        workspaceId: harness.identity.workspaceId,
+        resourceId: 'src/file.js',
+        lines: [8],
+        expectedSessionId: 'missing',
+        expectedGeneration: 1,
+      });
+      expect(staleMutation.body).toEqual({
+        status: 'stale',
+        workspaceId: harness.identity.workspaceId,
+        breakpoints: [{ resourceId: 'src/file.js', line: 4 }],
+      });
       const missingDebug = await request(app).post('/api/debug/adapters').send({ command: 'evil' });
       const missingTests = await request(app).post('/api/tests/providers').send({ command: 'evil' });
       expect(missingDebug.status).toBeGreaterThanOrEqual(400);

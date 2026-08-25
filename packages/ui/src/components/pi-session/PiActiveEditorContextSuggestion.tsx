@@ -5,6 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { attachActiveEditorContext } from '@/lib/agent-editor/attach';
 import {
+  getEditorContextAttachmentsRevision,
   listEditorContextAttachments,
   subscribeEditorContextAttachments,
 } from '@/lib/agent-editor/attachments';
@@ -16,13 +17,19 @@ export const PiActiveEditorContextSuggestion: React.FC<{ snapshot: SessionSnapsh
   const workspaceId = useWorkbenchWorkspaceId();
   const activeEditorFile = usePiEditorContextStore((state) => state.activeEditorFile);
   const runtimeKey = getRuntimeKey();
-  const attachments = React.useSyncExternalStore(
+  React.useSyncExternalStore(
     subscribeEditorContextAttachments,
-    () => listEditorContextAttachments(runtimeKey, snapshot.sessionId),
-    () => [],
+    getEditorContextAttachmentsRevision,
+    () => 0,
   );
+  const attachments = listEditorContextAttachments(runtimeKey, snapshot.sessionId, workspaceId);
 
-  if (!activeEditorFile || !workspaceId) return null;
+  if (
+    !activeEditorFile
+    || !workspaceId
+    || activeEditorFile.runtimeKey !== runtimeKey
+    || (activeEditorFile.workspaceId !== null && activeEditorFile.workspaceId !== workspaceId)
+  ) return null;
 
   const relativePath = activeEditorFile.relativePath.replace(/\\/g, '/');
   const selectionAttached = attachments.some((item) => (

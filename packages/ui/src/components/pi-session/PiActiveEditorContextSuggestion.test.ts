@@ -2,12 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { createPiEditorContextDraft } from '@/lib/pi-runtime/editorContext';
 
 const file = {
+  documentInstanceId: 'document-agent',
   fileName: 'agent.ts',
   filePath: 'D:/work/src/agent.ts',
   fileSize: 120,
   relativePath: 'src/agent.ts',
+  runtimeKey: 'runtime-a',
   selection: { endLine: 9, startLine: 7, text: 'const agent = createAgent();' },
   dirty: false,
+  viewId: 'view-agent',
+  workspaceId: 'workspace-a',
 };
 
 describe('Pi active editor context', () => {

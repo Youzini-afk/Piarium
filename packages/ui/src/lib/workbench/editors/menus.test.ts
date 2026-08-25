@@ -34,4 +34,21 @@ describe('workbench menus', () => {
     expect(projectWorkbenchMenu('editor/tab').map((item) => item.id)).toEqual(['always', 'split']);
     expect(projectWorkbenchMenu('editor/title').map((item) => item.id)).toEqual(['other']);
   });
+
+  test('an old owner disposer cannot remove a newer item with the same ID', () => {
+    const closeOld = registerWorkbenchMenuItem({
+      id: 'replaceable',
+      commandId: 'old.command',
+      group: 'editor/title',
+      order: 1,
+    });
+    registerWorkbenchMenuItem({
+      id: 'replaceable',
+      commandId: 'new.command',
+      group: 'editor/title',
+      order: 1,
+    });
+    closeOld();
+    expect(projectWorkbenchMenu('editor/title').map((item) => item.commandId)).toEqual(['new.command']);
+  });
 });

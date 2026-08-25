@@ -1778,3 +1778,63 @@ html.desktop-runtime [class*="cursor-pointer"] {
 html.desktop-runtime .markdown-content [data-piarium-file-link="true"] {
   cursor: default;
 }
+
+.piarium-editor-inline-comment-line {
+  background: color-mix(in srgb, var(--status-info) 9%, transparent);
+}
+
+.piarium-editor-inline-comment-glyph {
+  position: relative;
+}
+
+.piarium-editor-inline-comment-glyph::before {
+  position: absolute;
+  inset: 4px;
+  border: 1px solid color-mix(in srgb, var(--status-info) 72%, var(--surface-foreground));
+  border-radius: 45% 45% 45% 12%;
+  background: color-mix(in srgb, var(--status-info) 22%, var(--surface-background));
+  content: '';
+}
+
+.piarium-monaco-breakpoint-glyph,
+.piarium-monaco-current-debug-frame-glyph,
+.piarium-monaco-test-failure-glyph {
+  position: relative;
+}
+
+.piarium-monaco-breakpoint-glyph::before {
+  position: absolute;
+  inset: 5px;
+  border-radius: 999px;
+  background: var(--status-error);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-error) 55%, transparent);
+  content: '';
+}
+
+.piarium-monaco-current-debug-frame-glyph::before {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 0;
+  height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 9px solid var(--status-warning);
+  content: '';
+}
+
+.piarium-monaco-current-debug-frame-line {
+  background: color-mix(in srgb, var(--status-warning) 12%, transparent);
+}
+
+.piarium-monaco-test-failure-glyph::before {
+  position: absolute;
+  inset: 6px;
+  border: 2px solid var(--status-error);
+  transform: rotate(45deg);
+  content: '';
+}
+
+.piarium-monaco-test-failure-line {
+  background: color-mix(in srgb, var(--status-error) 8%, transparent);
+}

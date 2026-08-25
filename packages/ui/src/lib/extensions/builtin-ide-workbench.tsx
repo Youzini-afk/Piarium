@@ -509,7 +509,10 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
     const resourceId = resolveIdeGitResourceId(directory, gitDirectory, gitPath);
     if (!resourceId) return;
     openWorkbenchEditor(workspaceId, resourceId, BUILTIN_EDITOR_PROVIDER_IDS.gitDiff, {
-      viewState: { diffScope: staged ? 'staged' : 'working' },
+      viewState: {
+        diffScope: staged ? 'staged' : 'working',
+        diffRepositoryResourceId: resourceIdFromWorkspacePath(directory, gitDirectory) ?? '',
+      },
     });
   }, [directory, gitDirectory, workspaceId]);
 

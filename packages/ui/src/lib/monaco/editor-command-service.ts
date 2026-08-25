@@ -4,7 +4,13 @@ import type { DocumentIdentity } from '@/lib/documents/types';
 import { getDocumentRegistry } from '@/lib/documents/session';
 import type { FileEditorSettings, FileEditorSettingsPatch } from '@/lib/file-editor-settings';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, type ShortcutCombo } from '@/lib/shortcuts';
-import { listEditorWorkbenches, setActiveWorkbenchEditorView } from '@/lib/workbench/editors/session';
+import {
+  getActiveWorkbenchWorkspaceId,
+  listEditorWorkbenches,
+  peekEditorWorkbench,
+  setActiveWorkbenchEditorView,
+} from '@/lib/workbench/editors/session';
+import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { registerWorkbenchCommand } from '@/lib/workbench/editors/commands';
 import {
   getWorkbenchContextKey,
@@ -64,9 +70,17 @@ export const subscribeFileEditorCommandTargets = (listener: () => void): (() => 
   return () => targetListeners.delete(listener);
 };
 
-const activeTarget = (): FileEditorCommandTarget | null => (
-  (activeOwnerId ? targets.get(activeOwnerId) : undefined) ?? targets.values().next().value ?? null
-);
+const activeTarget = (): FileEditorCommandTarget | null => {
+  const focused = activeOwnerId ? targets.get(activeOwnerId) : undefined;
+  if (focused) return focused;
+  const workspaceId = getActiveWorkbenchWorkspaceId();
+  const workbench = workspaceId ? peekEditorWorkbench(workspaceId) : undefined;
+  const tab = workbench ? activeEditorTab(workbench) : undefined;
+  if (!tab || !workspaceId) return null;
+  return [...targets.values()].find((target) => (
+    target.identity.workspaceId === workspaceId && target.viewId === tab.viewId
+  )) ?? null;
+};
 
 const targetForIdentity = (identity: DocumentIdentity, viewId?: string): FileEditorCommandTarget | null => (
   [...targets.values()].find((target) => (
@@ -285,7 +299,10 @@ export const registerFileEditorCommandTarget = (target: FileEditorCommandTarget)
       refreshContext(true);
     }),
     target.editor.onDidBlurEditorText(() => {
-      if (activeOwnerId === target.ownerId) refreshContext(false);
+      if (activeOwnerId === target.ownerId) {
+        activeOwnerId = null;
+        refreshContext(false);
+      }
     }),
     target.editor.onDidChangeCursorSelection(() => {
       if (activeOwnerId === target.ownerId) refreshContext(true);
@@ -309,9 +326,10 @@ export const registerFileEditorCommandTarget = (target: FileEditorCommandTarget)
 
   return () => {
     for (const disposable of disposables) disposable.dispose();
+    if (targets.get(target.ownerId) !== target) return;
     const removedActiveTarget = activeOwnerId === target.ownerId;
     targets.delete(target.ownerId);
-    if (removedActiveTarget) activeOwnerId = targets.keys().next().value ?? null;
+    if (removedActiveTarget) activeOwnerId = null;
     refreshContext(removedActiveTarget ? false : undefined);
     if (targets.size === 0) uninstallWorkbenchProjection();
     emitTargetChange();

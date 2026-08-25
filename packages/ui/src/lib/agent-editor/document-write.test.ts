@@ -75,7 +75,7 @@ afterEach(() => {
 });
 
 describe('document patch writes', () => {
-  test('revert uses expected revision and does not overwrite a dirty buffer', async () => {
+  test('revert enters the revision-safe editor transaction without writing disk', async () => {
     const { api, files, keyOf } = createMemoryDocuments();
     const identity = resource();
     files.set(keyOf(identity), { content: 'one\nTWO\nthree', revision: 'd1_1' });
@@ -83,20 +83,20 @@ describe('document patch writes', () => {
     await registry.open(identity);
     const patch = ['@@ -1,3 +1,3 @@', ' one', '-two', '+TWO', ' three'].join('\n');
     const reverted = await applyPatchDecisionsToDocument({
-      documents: api,
       identity,
       patch,
       decisions: ['accept'],
       direction: 'revert',
     });
-    expect(reverted).toEqual({ status: 'written', revision: 'd1_1' });
-    expect(files.get(keyOf(identity))?.content.replace(/\r\n/g, '\n')).toBe('one\ntwo\nthree');
+    expect(reverted).toEqual({ status: 'applied', localEditRevision: 1 });
+    expect(registry.get(identity)?.buffer).toBe('one\ntwo\nthree');
+    expect(registry.get(identity)?.dirty).toBe(true);
+    expect(files.get(keyOf(identity))?.content).toBe('one\nTWO\nthree');
 
-    await registry.open(identity, { reload: true });
+    registry.discard(identity);
     registry.applyTransaction(identity, 'dirty', { origin: 'view' });
     files.set(keyOf(identity), { content: 'agent', revision: 'd1_agent' });
     const blocked = await applyPatchDecisionsToDocument({
-      documents: api,
       identity,
       patch,
       decisions: ['accept'],

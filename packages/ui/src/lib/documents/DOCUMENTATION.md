@@ -14,6 +14,9 @@ external registry, not in Zustand or Local Storage.
   buffers before notifying any listener; disk writes remain explicit saves. Multi-file changes have one
   lifecycle-bound undo group. Resource create/rename/delete remains explicitly unsupported until the
   Host owns an atomic batch-mutation contract.
+- Agent patch review uses that same transaction path. A clean accepted patch becomes a dirty editor
+  buffer for review and explicit save; dirty, conflicted, saving, missing, or stale documents are
+  rejected rather than written directly to disk.
 - Three-way conflict stores ancestor, buffer, and disk candidate; writes still use expected revision
 - `session.ts` — one registry per bound `DocumentsAPI`
 - `hooks.ts` — per-document React subscriptions

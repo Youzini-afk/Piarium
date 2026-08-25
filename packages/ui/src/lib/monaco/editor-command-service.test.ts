@@ -70,4 +70,27 @@ describe('file editor command service', () => {
     expect(hasActiveFileEditorCommandTarget()).toBe(false);
     expect(getWorkbenchContextKey('editorIsOpen')).toBe(false);
   });
+
+  test('does not let a stale disposer remove a replacement with the same owner ID', () => {
+    const first = new FakeEditor();
+    const second = new FakeEditor();
+    const createTarget = (editorInstance: FakeEditor) => ({
+      editor: editorInstance as unknown as editor.IStandaloneCodeEditor,
+      getSettings: () => ({ ...DEFAULT_FILE_EDITOR_SETTINGS }),
+      getShortcutOverrides: () => ({}),
+      identity: { workspaceId: 'workspace', resourceId: 'src/main.ts' },
+      ownerId: 'view:one',
+      updateSettings: vi.fn(),
+      viewId: 'one',
+    });
+    const disposeFirst = registerFileEditorCommandTarget(createTarget(first));
+    const disposeSecond = registerFileEditorCommandTarget(createTarget(second));
+
+    disposeFirst();
+    expect(hasActiveFileEditorCommandTarget()).toBe(true);
+    expect(getWorkbenchContextKey('editorLanguageId')).toBe('typescript');
+
+    disposeSecond();
+    expect(hasActiveFileEditorCommandTarget()).toBe(false);
+  });
 });

@@ -12,7 +12,6 @@ import {
   setWorkbenchPanelLayout,
   subscribeWorkbenchPanels,
 } from '@/lib/workbench/editors/panels';
-import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
 import type { WorkbenchPanelId, WorkbenchPanelLayout } from '@/lib/workbench/editors/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { listAgentFileChangeHints, subscribeAgentFileChangeHints } from '@/lib/agent-editor/hints';
@@ -118,7 +117,13 @@ export const WorkbenchPanelArea: React.FC<WorkbenchPanelAreaProps> = ({ workspac
                       size="sm"
                       className="h-auto w-full justify-start whitespace-normal py-1 text-left"
                       aria-label={t('workbench.panel.problemsOpenAria', { resourceId: item.resourceId })}
-                      onClick={() => openWorkbenchEditor(workspaceId, item.resourceId)}
+                      onClick={() => revealResourceInEditor({
+                        workspaceId,
+                        resourceId: item.resourceId,
+                        workspaceRoot: directory,
+                        ...(typeof item.line === 'number' ? { line: item.line } : {}),
+                        ...(typeof item.column === 'number' ? { column: item.column } : {}),
+                      })}
                     >
                       {typeof item.line === 'number'
                         ? t('workbench.panel.problemsItemAtLine', {

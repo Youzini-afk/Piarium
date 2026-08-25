@@ -2,7 +2,6 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { applyPatchDecisionsToDocument } from '@/lib/agent-editor/document-write';
@@ -31,7 +30,6 @@ export const PatchHunkReview: React.FC<PatchHunkReviewProps> = ({
   toolCallId,
 }) => {
   const { t } = useI18n();
-  const documents = useRuntimeAPIs().documents;
   const workspaceId = useWorkbenchWorkspaceId();
   const hunks = React.useMemo(() => parseUnifiedHunks(patch), [patch]);
   const [decisions, setDecisions] = React.useState<HunkDecision[]>(() => hunks.map(() => 'accept'));
@@ -50,13 +48,12 @@ export const PatchHunkReview: React.FC<PatchHunkReviewProps> = ({
   const apply = async (direction: 'apply' | 'revert', next: HunkDecision[]) => {
     if (!identity) return;
     const result = await applyPatchDecisionsToDocument({
-      documents,
       identity,
       patch,
       decisions: next,
       direction,
     });
-    if (result.status === 'written') {
+    if (result.status === 'applied') {
       toast.success(t('workbench.patch.written'));
       return;
     }

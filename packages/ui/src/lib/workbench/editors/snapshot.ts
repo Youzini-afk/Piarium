@@ -76,6 +76,12 @@ const normalizeViewState = (value: unknown, snapshotVersion: number): EditorView
   if (!isObject(value)) return {};
   const viewState: EditorViewState = {};
   if (value.diffScope === 'working' || value.diffScope === 'staged') viewState.diffScope = value.diffScope;
+  if (typeof value.diffRepositoryResourceId === 'string') {
+    const repositoryResourceId = value.diffRepositoryResourceId.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!repositoryResourceId.split('/').includes('..')) {
+      viewState.diffRepositoryResourceId = repositoryResourceId;
+    }
+  }
   if (
     value.previewMode === 'preview'
     || value.previewMode === 'edit'

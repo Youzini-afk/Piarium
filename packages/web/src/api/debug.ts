@@ -1,5 +1,6 @@
 import type {
-  PiariumBreakpoint,
+  PiariumDebugBreakpointListResult,
+  PiariumDebugBreakpointsResult,
   PiariumDebugEvent,
   PiariumDebugFeatureResult,
   PiariumDebugScope,
@@ -17,16 +18,8 @@ const control = <T>(method: string, request: unknown): Promise<T> => (
 
 export const createWebWorkspaceDebugAPI = (): WorkspaceDebugAPI => ({
   getStatus: (workspaceId) => postRunJson('/api/debug/status', { workspaceId }) as Promise<PiariumDebugSessionStatus>,
-  listBreakpoints: (workspaceId) => postRunJson('/api/debug/breakpoints', { workspaceId }) as Promise<{
-    status: 'ready';
-    workspaceId: string;
-    breakpoints: PiariumBreakpoint[];
-  }>,
-  setBreakpoints: (request) => postRunJson('/api/debug/breakpoints', request) as Promise<{
-    status: 'ready';
-    workspaceId: string;
-    breakpoints: PiariumBreakpoint[];
-  }>,
+  listBreakpoints: (workspaceId) => postRunJson('/api/debug/breakpoints', { workspaceId }) as Promise<PiariumDebugBreakpointListResult>,
+  setBreakpoints: (request) => postRunJson('/api/debug/breakpoints', request) as Promise<PiariumDebugBreakpointsResult>,
   start: (request) => postRunJson('/api/debug/start', request) as Promise<PiariumDebugSessionStatus>,
   stop: (request) => postRunJson('/api/debug/stop', request) as Promise<PiariumDebugSessionStatus>,
   continue: (request) => control('continue', request),

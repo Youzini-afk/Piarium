@@ -17,6 +17,7 @@ export type EditorContextAttachment = {
   workspaceId: string;
   resourceId: string;
   label: string;
+  documentInstanceId: string | null;
   documentRevision: string | null;
   localEditRevision: number;
   source: EditorContextAttachmentSource;
@@ -70,7 +71,7 @@ export type PatchApplyTextResult =
   | { status: 'mismatch'; hunkIndex: number };
 
 export type DocumentPatchWriteResult =
-  | { status: 'written'; revision: string }
+  | { status: 'applied'; localEditRevision: number }
   | { status: 'conflict'; currentRevision: string | null; dirty: boolean }
   | { status: 'missing' }
   | { status: 'failure'; errorMessage: string };

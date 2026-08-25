@@ -8,6 +8,8 @@ import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
 import { DocumentMonacoEditor } from '@/components/workbench/DocumentMonacoEditor';
+import { MonacoFileDiffEditor } from '@/components/workbench/MonacoFileDiffEditor';
+import { GitMonacoDiffEditor } from '@/components/workbench/GitMonacoDiffEditor';
 import {
   executeFileEditorCommand,
   FILE_EDITOR_COMMAND_IDS,
@@ -36,7 +38,11 @@ import {
 } from '@/lib/workbench/editors/providers';
 import { patchEditorViewState, setEditorPreviewMode } from '@/lib/workbench/editors/session';
 import { applyEditorViewState, captureEditorViewState } from '@/lib/workbench/editors/view-state';
-import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
+import {
+  activatePiEditorContextOwner,
+  publishPiEditorContext,
+  releasePiEditorContextOwner,
+} from '@/stores/usePiEditorContextStore';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { getModifierLabel } from '@/lib/utils';
@@ -46,10 +52,8 @@ import {
 } from '@/lib/extensions/workbench-registry';
 import type { DocumentRecord } from '@/lib/documents/types';
 import { listEditorProviders } from '@/lib/workbench/editors/providers';
-import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { useDeviceInfo } from '@/lib/device';
-
-const GitDiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((module) => ({ default: module.DiffView })));
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type ResourceEditorHostProps = {
   excludedProviderIds?: readonly string[];
@@ -165,13 +169,17 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       : (isEditorProviderEnabled(tab.providerId) ? tab.providerId : BUILTIN_EDITOR_PROVIDER_IDS.text));
   const surfaceContribution = surfaceContributionById.get(activeProviderId);
   const needsText = TEXT_PROVIDERS.has(activeProviderId) && isEditorProviderEnabled(activeProviderId);
-  const needsDocument = needsText || Boolean(surfaceContribution);
+  const needsGitWorkingDocument = activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff
+    && (tab.viewState.diffScope ?? 'working') === 'working';
+  const needsDocument = needsText || needsGitWorkingDocument || Boolean(surfaceContribution);
   const record = useDocumentRecord(needsDocument ? identity : undefined);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState('');
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
   const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
   const expandedEditorToolbar = useUIStore((state) => state.expandedEditorToolbar);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
+  const editorContextOwnerId = `view:${tab.viewId}`;
+  const codeMirrorViewRef = React.useRef<EditorView | null>(null);
 
   React.useEffect(() => {
     if (!needsDocument) return;
@@ -241,36 +249,56 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     };
   }, [activeProviderId, files, path, runtime.isDesktop]);
 
-  const viewStateExtension = React.useMemo<Extension>(() => (
+  const publishCodeMirrorContext = React.useCallback((view: EditorView): void => {
+    const open = getDocumentRegistry().get(identity);
+    if (!open?.documentInstanceId) return;
+    const range = view.state.selection.main;
+    const hasText = range.from !== range.to;
+    const fromLine = view.state.doc.lineAt(range.from);
+    const toLine = view.state.doc.lineAt(range.to);
+    publishPiEditorContext(editorContextOwnerId, {
+      documentInstanceId: open.documentInstanceId,
+      fileName: tab.resourceId.split('/').pop() || tab.resourceId,
+      filePath: path,
+      fileSize: open.byteLength,
+      relativePath: tab.resourceId,
+      runtimeKey: getRuntimeKey(),
+      selection: hasText
+        ? {
+            startLine: fromLine.number,
+            startColumn: range.from - fromLine.from + 1,
+            endLine: toLine.number,
+            endColumn: range.to - toLine.from + 1,
+            text: view.state.sliceDoc(range.from, range.to),
+          }
+        : null,
+      dirty: open.dirty,
+      viewId: tab.viewId,
+      workspaceId,
+    });
+  }, [editorContextOwnerId, identity, path, tab.resourceId, tab.viewId, workspaceId]);
+
+  const viewStateExtension = React.useMemo<Extension>(() => ([
     EditorView.updateListener.of((update) => {
       if (!update.selectionSet && !update.viewportChanged) return;
       const viewState = captureEditorViewState(update.view);
       if (onViewStateChange) onViewStateChange(viewState);
       else patchEditorViewState(workspaceId, tab.viewId, viewState);
-      if (!update.selectionSet) return;
-      const open = getDocumentRegistry().get(identity);
-      const range = update.state.selection.main;
-      const hasText = range.from !== range.to;
-      const fromLine = update.state.doc.lineAt(range.from);
-      const toLine = update.state.doc.lineAt(range.to);
-      usePiEditorContextStore.getState().setActiveEditorFile({
-        fileName: tab.resourceId.split('/').pop() || tab.resourceId,
-        filePath: path,
-        fileSize: open?.byteLength ?? null,
-        relativePath: tab.resourceId,
-        selection: hasText
-          ? {
-            startLine: fromLine.number,
-            startColumn: range.from - fromLine.from + 1,
-            endLine: toLine.number,
-            endColumn: range.to - toLine.from + 1,
-            text: update.state.sliceDoc(range.from, range.to),
-          }
-          : null,
-        dirty: open?.dirty === true,
-      });
-    })
-  ), [identity, onViewStateChange, path, tab.resourceId, tab.viewId, workspaceId]);
+      if (update.selectionSet) publishCodeMirrorContext(update.view);
+    }),
+    EditorView.domEventHandlers({
+      focus: (_event, view) => {
+        activatePiEditorContextOwner(editorContextOwnerId);
+        publishCodeMirrorContext(view);
+        return false;
+      },
+    }),
+  ]), [editorContextOwnerId, onViewStateChange, publishCodeMirrorContext, tab.viewId, workspaceId]);
+
+  React.useEffect(() => {
+    if (!codeMirrorViewRef.current) return;
+    publishCodeMirrorContext(codeMirrorViewRef.current);
+  }, [publishCodeMirrorContext, record?.byteLength, record?.dirty, record?.documentInstanceId, record?.localEditRevision]);
 
   if (selection.status === 'none' && !isEditorProviderEnabled(BUILTIN_EDITOR_PROVIDER_IDS.text)) {
     return (
@@ -327,7 +355,46 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     }
     return null;
   })();
-  const toolbar = needsText ? (
+  const toolbar = activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff ? (
+    <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        aria-pressed={(tab.viewState.diffScope ?? 'working') === 'working'}
+        onClick={() => setDiffScope('working')}
+      >
+        {t('diffView.scope.changed')}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        aria-pressed={tab.viewState.diffScope === 'staged'}
+        onClick={() => setDiffScope('staged')}
+      >
+        {t('diffView.scope.staged')}
+      </Button>
+      {(tab.viewState.diffScope ?? 'working') === 'working' ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="ml-auto size-7 p-0"
+          disabled={!record?.dirty || record.saving}
+          title={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
+          aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
+          onClick={() => {
+            void saveFileEditorDocument(identity).catch((error) => {
+              toast.error(error instanceof Error ? error.message : String(error));
+            });
+          }}
+        >
+          <Icon name={record?.saving ? 'loader-4' : 'save-3'} className={record?.saving ? 'size-4 animate-spin' : 'size-4'} />
+        </Button>
+      ) : null}
+    </div>
+  ) : needsText ? (
     <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">
       {modeToggle}
       {expandedEditorToolbar && !isMobile && !runtime.isVSCode ? (
@@ -523,18 +590,17 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff) {
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
-        <React.Suspense fallback={null}>
-          <GitDiffView
-            flushContent
-            hideStackedFileSidebar
-            showOpenInEditorAction
-            diffScope={tab.viewState.diffScope ?? 'working'}
-            onDiffScopeChange={setDiffScope}
-            // Git keys its file list by repository-relative path, which is the resource ID when the
-            // workspace root is the repository root. The absolute path would match nothing.
-            targetFilePath={tab.resourceId}
-          />
-        </React.Suspense>
+        <GitMonacoDiffEditor
+          identity={identity}
+          path={path}
+          providerId={activeProviderId}
+          repositoryResourceId={tab.viewState.diffRepositoryResourceId ?? ''}
+          scope={tab.viewState.diffScope ?? 'working'}
+          viewId={tab.viewId}
+          viewState={tab.viewState}
+          workspaceRoot={workspaceRoot}
+          {...(onViewStateChange ? { onViewStateChange } : {})}
+        />
       </HostFrame>
     );
   }
@@ -542,14 +608,28 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.diff) {
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
-        <div className="flex h-full min-h-0 flex-col overflow-hidden">
-          <div className="border-b border-border/40 px-3 py-1.5 typography-meta text-muted-foreground">
-            {t('filesView.editor.diffAgainstDisk')}
+        {isMobile || runtime.isVSCode ? (
+          <div className="flex h-full min-h-0 flex-col overflow-hidden">
+            <div className="border-b border-border/40 px-3 py-1.5 typography-meta text-muted-foreground">
+              {t('filesView.editor.diffAgainstDisk')}
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-3 typography-meta whitespace-pre-wrap">
+              {record?.baseContent ?? ''}
+            </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto p-3 typography-meta whitespace-pre-wrap">
-            {record?.baseContent ?? ''}
-          </div>
-        </div>
+        ) : (
+          <MonacoFileDiffEditor
+            identity={identity}
+            originalContent={record?.baseContent ?? ''}
+            originalRevision={`document:${record?.baseRevision ?? 'missing'}`}
+            path={path}
+            providerId={activeProviderId}
+            readOnly={false}
+            viewId={tab.viewId}
+            viewState={tab.viewState}
+            {...(onViewStateChange ? { onViewStateChange } : {})}
+          />
+        )}
       </HostFrame>
     );
   }
@@ -574,7 +654,15 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
               identity={identity}
               className="h-full"
               extensions={[viewStateExtension]}
-              onViewReady={(view) => applyEditorViewState(view, tab.viewState)}
+              onViewReady={(view) => {
+                codeMirrorViewRef.current = view;
+                applyEditorViewState(view, tab.viewState);
+                publishCodeMirrorContext(view);
+              }}
+              onViewDestroy={() => {
+                codeMirrorViewRef.current = null;
+                releasePiEditorContextOwner(editorContextOwnerId);
+              }}
               vimMode={fileEditorKeymap === 'vim'}
             />
           ) : (

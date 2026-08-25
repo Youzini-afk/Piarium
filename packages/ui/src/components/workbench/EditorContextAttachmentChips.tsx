@@ -3,11 +3,13 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
+  getEditorContextAttachmentsRevision,
   listEditorContextAttachments,
   removeEditorContextAttachment,
   subscribeEditorContextAttachments,
 } from '@/lib/agent-editor/attachments';
 import type { EditorContextAttachment } from '@/lib/agent-editor/types';
+import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 
 type EditorContextAttachmentChipsProps = {
   sessionId: string | null | undefined;
@@ -25,11 +27,13 @@ const labelFor = (attachment: EditorContextAttachment): I18nKey => {
 export const EditorContextAttachmentChips: React.FC<EditorContextAttachmentChipsProps> = ({ sessionId }) => {
   const { t } = useI18n();
   const runtimeKey = getRuntimeKey();
-  const items = React.useSyncExternalStore(
+  const workspaceId = useWorkbenchWorkspaceId();
+  React.useSyncExternalStore(
     subscribeEditorContextAttachments,
-    () => (sessionId ? listEditorContextAttachments(runtimeKey, sessionId) : []),
-    () => [],
+    getEditorContextAttachmentsRevision,
+    () => 0,
   );
+  const items = sessionId ? listEditorContextAttachments(runtimeKey, sessionId, workspaceId) : [];
   if (!sessionId || items.length === 0) return null;
   return (
     <div className="mb-2 flex flex-wrap gap-1.5">

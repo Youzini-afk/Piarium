@@ -1,87 +1,32 @@
 import { getDocumentRegistry } from '@/lib/documents/session';
-import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from '@/lib/documents/line-ending';
 import type { DocumentIdentity } from '@/lib/documents/types';
-import type { DocumentsAPI } from '@/lib/api/types';
 import { applyHunkDecisions, parseUnifiedHunks } from './patch';
 import type { DocumentPatchWriteResult, HunkDecision } from './types';
 
-const revisionFromConflictCurrent = (current: { revision?: string }): string | null => (
-  typeof current.revision === 'string' ? current.revision : null
-);
-
-const writeDocumentIfClean = async (
-  documents: DocumentsAPI,
-  identity: DocumentIdentity,
-  content: string,
-  expectedRevision: string | null,
-): Promise<DocumentPatchWriteResult> => {
-  const registry = getDocumentRegistry();
-  const open = registry.get(identity);
-  if (open?.dirty) {
-    return { status: 'conflict', currentRevision: open.baseRevision, dirty: true };
-  }
-  try {
-    const result = await documents.write({
-      resource: identity,
-      content,
-      encoding: open?.encoding ?? 'utf-8',
-      bom: open?.bom ?? false,
-      expectedRevision,
-      operationId: crypto.randomUUID(),
-    });
-    if (result.status === 'conflict') {
-      return {
-        status: 'conflict',
-        currentRevision: revisionFromConflictCurrent(result.current as { revision?: string }),
-        dirty: false,
-      };
-    }
-    if (open) await registry.reload(identity);
-    return { status: 'written', revision: result.revision };
-  } catch (error) {
-    return { status: 'failure', errorMessage: error instanceof Error ? error.message : String(error) };
-  }
+const endPosition = (content: string): { line: number; character: number } => {
+  const lines = content.split('\n');
+  return { line: lines.length - 1, character: lines[lines.length - 1]?.length ?? 0 };
 };
 
 export const applyPatchDecisionsToDocument = async (input: {
-  documents: DocumentsAPI;
   identity: DocumentIdentity;
   patch: string;
   decisions: readonly HunkDecision[];
   direction: 'apply' | 'revert';
 }): Promise<DocumentPatchWriteResult> => {
   const registry = getDocumentRegistry();
-  const open = registry.get(input.identity);
-  if (open?.dirty) {
-    return { status: 'conflict', currentRevision: open.baseRevision, dirty: true };
+  const open = registry.get(input.identity) ?? await registry.open(input.identity);
+  if (open.status === 'missing' || open.status === 'deleted') return { status: 'missing' };
+  if (open.dirty || open.status === 'conflict' || open.saving) {
+    return { status: 'conflict', currentRevision: open.baseRevision, dirty: open.dirty };
   }
-  const read = open
-    ? {
-      status: 'ready' as const,
-      content: open.baseContent,
-      revision: open.baseRevision,
-      lineEnding: open.lineEnding,
-    }
-    : await input.documents.read(input.identity).then((result) => (
-      result.status === 'ready'
-        ? {
-          status: 'ready' as const,
-          content: result.content,
-          revision: result.revision,
-          lineEnding: detectLineEnding(result.content),
-        }
-        : result
-    ));
-  if (read.status === 'missing') return { status: 'missing' };
-  if (read.status !== 'ready') {
-    return { status: 'failure', errorMessage: read.status };
-  }
+  if (open.status !== 'ready') return { status: 'failure', errorMessage: open.status };
   const hunks = parseUnifiedHunks(input.patch);
   if (hunks.length === 0) {
     return { status: 'failure', errorMessage: 'empty-patch' };
   }
   const applied = applyHunkDecisions(
-    normalizeEditorLineEndings(read.content),
+    open.buffer,
     hunks,
     input.decisions,
     input.direction,
@@ -89,10 +34,42 @@ export const applyPatchDecisionsToDocument = async (input: {
   if (applied.status === 'mismatch') {
     return { status: 'failure', errorMessage: `hunk-mismatch:${applied.hunkIndex}` };
   }
-  return writeDocumentIfClean(
-    input.documents,
-    input.identity,
-    serializeEditorContent(applied.content, read.lineEnding),
-    read.revision,
-  );
+  const prepared = await registry.prepareWorkspaceEdit({
+    workspaceId: input.identity.workspaceId,
+    origin: 'agent-patch-review',
+    textEdits: [{
+      identity: input.identity,
+      version: open.localEditRevision,
+      edits: [{
+        range: { start: { line: 0, character: 0 }, end: endPosition(open.buffer) },
+        newText: applied.content,
+      }],
+    }],
+  });
+  if (prepared.status === 'rejected') {
+    const failure = prepared.failures[0];
+    if (failure?.reason === 'missing') return { status: 'missing' };
+    if (failure?.reason === 'conflict' || failure?.reason === 'saving' || failure?.reason === 'stale-version') {
+      const current = registry.get(input.identity);
+      return {
+        status: 'conflict',
+        currentRevision: current?.baseRevision ?? open.baseRevision,
+        dirty: current?.dirty ?? false,
+      };
+    }
+    return { status: 'failure', errorMessage: failure?.message ?? 'patch-prepare-rejected' };
+  }
+  const committed = await registry.applyWorkspaceEdit(prepared.groupId);
+  if (committed.status !== 'applied') {
+    const current = registry.get(input.identity);
+    return {
+      status: 'conflict',
+      currentRevision: current?.baseRevision ?? open.baseRevision,
+      dirty: current?.dirty ?? false,
+    };
+  }
+  const record = committed.records[0];
+  return record
+    ? { status: 'applied', localEditRevision: record.localEditRevision }
+    : { status: 'failure', errorMessage: 'patch-commit-missing-record' };
 };

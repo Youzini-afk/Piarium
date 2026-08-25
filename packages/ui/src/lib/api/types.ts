@@ -2221,6 +2221,27 @@ export type PiariumBreakpoint = {
   line: number;
 };
 
+export type PiariumDebugBreakpointMutationRequest = {
+  workspaceId: string;
+  resourceId: string;
+  lines: number[];
+} & (
+  | { expectedSessionId: string; expectedGeneration: number }
+  | { expectedSessionId: null; expectedGeneration: null }
+);
+
+export type PiariumDebugBreakpointsResult = {
+  status: 'ready' | 'stale';
+  workspaceId: string;
+  sessionId?: string;
+  generation?: number;
+  breakpoints: PiariumBreakpoint[];
+};
+
+export type PiariumDebugBreakpointListResult = PiariumDebugBreakpointsResult & {
+  status: 'ready';
+};
+
 export type PiariumDebugThread = {
   id: number;
   name: string;
@@ -2253,16 +2274,13 @@ export type PiariumDebugFeatureResult<T> =
 
 export type PiariumDebugEvent =
   | { kind: 'status'; snapshot: PiariumDebugSessionStatus }
+  | { kind: 'breakpoints'; snapshot: PiariumDebugBreakpointListResult }
   | { kind: 'output'; sessionId: string; channel: string; text: string };
 
 export interface WorkspaceDebugAPI {
   getStatus(workspaceId: string): Promise<PiariumDebugSessionStatus>;
-  listBreakpoints(workspaceId: string): Promise<{ status: 'ready'; workspaceId: string; breakpoints: PiariumBreakpoint[] }>;
-  setBreakpoints(request: { workspaceId: string; resourceId: string; lines: number[] }): Promise<{
-    status: 'ready';
-    workspaceId: string;
-    breakpoints: PiariumBreakpoint[];
-  }>;
+  listBreakpoints(workspaceId: string): Promise<PiariumDebugBreakpointListResult>;
+  setBreakpoints(request: PiariumDebugBreakpointMutationRequest): Promise<PiariumDebugBreakpointsResult>;
   start(request: { workspaceId: string; program?: string; languageId?: string; adapterId?: string }): Promise<PiariumDebugSessionStatus>;
   stop(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
   continue(request: { workspaceId: string }): Promise<PiariumDebugSessionStatus>;
@@ -2305,9 +2323,9 @@ export type PiariumTestRunStatus =
 
 export type PiariumTestEvent =
   | { kind: 'status'; snapshot: PiariumTestRunStatus }
-  | { kind: 'test'; test: PiariumTestItem }
-  | { kind: 'output'; channel: string; runId?: string; text: string }
-  | { kind: 'finished'; results?: PiariumTestItem[] };
+  | { kind: 'test'; runId: string; generation: number; test: PiariumTestItem }
+  | { kind: 'output'; channel: string; runId: string; generation: number; text: string }
+  | { kind: 'finished'; runId: string; generation: number; results?: PiariumTestItem[] };
 
 export interface WorkspaceTestAPI {
   discover(request: { workspaceId: string; providerId?: string }): Promise<PiariumTestDiscoverResult>;

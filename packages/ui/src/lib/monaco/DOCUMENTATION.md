@@ -18,11 +18,18 @@ factory only when `loadMonacoRuntime()` is called.
 - `model-registry.ts` projects one Document Registry record into one Monaco model. Workbench tabs own
   models; React views only own layout/listeners. The model URI contains a runtime key and internal
   document instance ID, never a workspace path.
+- `diff-model-registry.ts` owns reference-counted immutable snapshot models. File diffs keep the
+  original/staged side immutable, while a working side reuses the live Document Registry model so
+  unsaved edits, language features, editor commands, Agent context, and debug decorations stay aligned.
 - `language-bridge.ts` keeps the existing Host language service authoritative. It projects generation-
   scoped diagnostics and rich language features, including rename and code actions. Cross-file edits go
   through the Document Registry preview/transaction path, completion additional edits stay in Monaco's
   single-model transaction, and server commands return to the Host only after document sync. Monaco's
   built-in semantic workers remain disabled.
+- `run-debug-editor-adapter.ts` projects workspace-scoped breakpoint, current-frame, and latest-test-
+  failure state into glyph and line decorations. Gutter clicks send the clicked line through the typed
+  debug authority with the current session owner; debug and test projections reject stale owner
+  generations, and disposing the view removes its listener and decorations.
 - `view-state.ts` owns the v2 Monaco payload and a framework-neutral cursor/selection summary.
 - `vim-adapter.ts` consumes the persisted Vim setting through Monaco 0.56 public APIs. It deliberately
   does not import `monaco-vim` private `vs/*` modules; mode cursors, counted motions/edits, search,
@@ -36,3 +43,8 @@ factory only when `loadMonacoRuntime()` is called.
 Do not import the `monaco-editor` root entrypoint, `editor.main`, or
 `monaco-editor/languages/features/*`. Language definitions used for tokenization are distinct from
 language features; semantic language capability remains behind `RuntimeAPIs.language`.
+
+Agent collaboration consumes the same visible view owner as editor commands. Selection/file/diff
+attachments carry runtime, workspace, document-instance, and session identity; inline comments remain
+session drafts; patch review applies an atomic Document Registry workspace edit and leaves a dirty
+buffer for explicit save. No collaboration path writes around the registry or exposes a Monaco handle.

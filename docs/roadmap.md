@@ -542,6 +542,11 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
     product UI. Run, debug, and test remain truthfully `absent`/`unsupported` there, and the official
     IDE chrome is not loaded into the VS Code webview. The migration contract, including deep links
     and the keep/migrate/refuse disposition, is [vscode-companion.md](vscode-companion.md).
+12. **Unified desktop/Web editor through collaboration workflows.** Agent and IDE now share Monaco
+    models, rich Host language features, atomic workspace edits, file/Git diffs, breakpoint/current-
+    frame/test-failure decorations, exact panel navigation, inline comments, and session-scoped Agent
+    attachments. Working diffs bind the live dirty buffer; staged/original snapshots stay immutable;
+    nested Git roots and debug/test owner generations survive without becoming new authorities.
 
 ### Hardening after the slices
 
@@ -575,10 +580,12 @@ while a complete external scene can replace it without importing Piarium's produ
 remaining Motion work is the pre-React bootstrap projection and the optional generic service for
 Shell-owned local motion; neither introduces fixed page-element names.
 
-The next file-editing convergence is specified in
-[unified-file-editor-platform.md](unified-file-editor-platform.md): desktop/Web Agent and IDE share
-one Monaco model and language bridge, mobile keeps the document-bound lightweight adapter, and no
-editor engine receives document, filesystem, process, or extension-lifecycle authority.
+The remaining file-editor convergence is tracked in
+[unified-file-editor-platform.md](unified-file-editor-platform.md). Desktop/Web Agent and IDE already
+share one Monaco model, language bridge, diff/debug/test projection, and Agent collaboration path;
+the remaining phases align mobile and the public editor contract, then remove retired code and record
+the final performance/release evidence. No editor engine receives document, filesystem, process, or
+extension-lifecycle authority.
 
 Not yet recorded: the plan's final convergence verification run (full workspace type-check/lint,
 public package build/pack/conformance, production Web build, Electron bundled and Windows

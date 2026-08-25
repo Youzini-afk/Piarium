@@ -43,6 +43,7 @@ export const attachEditorContext = (input: {
     workspaceId: input.workspaceId,
     resourceId: input.resourceId,
     label: input.label ?? fileNameOf(input.resourceId),
+    documentInstanceId: record?.documentInstanceId ?? null,
     documentRevision: record?.baseRevision ?? null,
     localEditRevision: record?.localEditRevision ?? 0,
     source,
@@ -64,8 +65,18 @@ export const attachActiveEditorContext = (input: {
   kind: 'editor' | 'selection';
 }): EditorContextAttachment | { status: 'wrong-runtime' | 'missing-editor' | 'missing-selection' | 'missing-document' } => {
   const file = usePiEditorContextStore.getState().activeEditorFile;
-  if (!file) return { status: 'missing-editor' };
+  if (
+    !file
+    || file.runtimeKey !== getRuntimeKey()
+    || (file.workspaceId !== null && file.workspaceId !== input.workspaceId)
+  ) {
+    return { status: 'missing-editor' };
+  }
   const resourceId = resourceIdFor(input.workspaceRoot, file.filePath, file.relativePath);
+  const current = getDocumentRegistry().get({ workspaceId: input.workspaceId, resourceId });
+  if (file.workspaceId !== null && current && current.documentInstanceId !== file.documentInstanceId) {
+    return { status: 'missing-document' };
+  }
   if (input.kind === 'selection') {
     if (!file.selection) return { status: 'missing-selection' };
     const fromRegistry = attachEditorContext({
@@ -91,6 +102,7 @@ export const attachActiveEditorContext = (input: {
       workspaceId: input.workspaceId,
       resourceId,
       label: file.relativePath,
+      documentInstanceId: file.documentInstanceId,
       documentRevision: null,
       localEditRevision: 0,
       source: 'unsaved-buffer',
@@ -121,6 +133,7 @@ export const attachActiveEditorContext = (input: {
     workspaceId: input.workspaceId,
     resourceId,
     label: file.relativePath,
+    documentInstanceId: file.documentInstanceId,
     documentRevision: null,
     localEditRevision: 0,
     source: 'saved',

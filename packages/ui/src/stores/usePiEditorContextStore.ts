@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+
 export interface PiEditorSelection {
   endColumn?: number;
   endLine: number;
@@ -9,18 +11,24 @@ export interface PiEditorSelection {
 }
 
 export interface PiActiveEditorFile {
+  documentInstanceId: string;
   fileName: string;
   filePath: string;
   fileSize: number | null;
   relativePath: string;
+  runtimeKey: string;
   selection: PiEditorSelection | null;
   dirty: boolean;
+  viewId: string;
+  workspaceId: string | null;
 }
 
 interface PiEditorContextStoreState {
   activeEditorFile: PiActiveEditorFile | null;
-  setActiveEditorFile(file: PiActiveEditorFile | null): void;
 }
+
+const filesByOwner = new Map<string, PiActiveEditorFile>();
+let activeOwnerId: string | null = null;
 
 const normalizedString = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
@@ -60,7 +68,22 @@ export const normalizePiActiveEditorFile = (value: unknown): PiActiveEditorFile 
   const fileName = normalizedString(record.fileName);
   const filePath = normalizedString(record.filePath);
   const relativePath = normalizedString(record.relativePath);
-  if (!fileName || !filePath || !relativePath) return null;
+  const runtimeKey = normalizedString(record.runtimeKey);
+  const workspaceIdIsNull = record.workspaceId === null;
+  const workspaceId = workspaceIdIsNull ? null : normalizedString(record.workspaceId);
+  const documentInstanceId = normalizedString(record.documentInstanceId);
+  const viewId = normalizedString(record.viewId);
+  if (
+    !fileName
+    || !filePath
+    || !relativePath
+    || !runtimeKey
+    || (!workspaceIdIsNull && !workspaceId)
+    || !documentInstanceId
+    || !viewId
+  ) {
+    return null;
+  }
   const fileSize = record.fileSize === null
     ? null
     : typeof record.fileSize === 'number' && Number.isFinite(record.fileSize) && record.fileSize >= 0
@@ -71,8 +94,12 @@ export const normalizePiActiveEditorFile = (value: unknown): PiActiveEditorFile 
     filePath,
     fileSize,
     relativePath,
+    runtimeKey,
     selection: normalizeSelection(record.selection),
     dirty: record.dirty === true,
+    documentInstanceId,
+    viewId,
+    workspaceId,
   };
 };
 
@@ -95,14 +122,47 @@ const sameActiveEditorFile = (left: PiActiveEditorFile | null, right: PiActiveEd
     && left.filePath === right.filePath
     && left.fileSize === right.fileSize
     && left.relativePath === right.relativePath
+    && left.runtimeKey === right.runtimeKey
+    && left.workspaceId === right.workspaceId
+    && left.documentInstanceId === right.documentInstanceId
+    && left.viewId === right.viewId
     && left.dirty === right.dirty
     && sameSelection(left.selection, right.selection))
 );
 
-export const usePiEditorContextStore = create<PiEditorContextStoreState>((set, get) => ({
+export const usePiEditorContextStore = create<PiEditorContextStoreState>(() => ({
   activeEditorFile: null,
-  setActiveEditorFile: (file) => {
-    if (sameActiveEditorFile(get().activeEditorFile, file)) return;
-    set({ activeEditorFile: file });
-  },
 }));
+
+const publishActive = (file: PiActiveEditorFile | null): void => {
+  const current = usePiEditorContextStore.getState().activeEditorFile;
+  if (sameActiveEditorFile(current, file)) return;
+  usePiEditorContextStore.setState({ activeEditorFile: file });
+};
+
+export const publishPiEditorContext = (ownerId: string, value: PiActiveEditorFile): void => {
+  const file = normalizePiActiveEditorFile(value);
+  if (!ownerId || !file || file.runtimeKey !== getRuntimeKey()) return;
+  filesByOwner.set(ownerId, file);
+  if (activeOwnerId === ownerId) publishActive(file);
+};
+
+export const activatePiEditorContextOwner = (ownerId: string | null): void => {
+  activeOwnerId = ownerId;
+  publishActive(ownerId ? filesByOwner.get(ownerId) ?? null : null);
+};
+
+export const releasePiEditorContextOwner = (ownerId: string): void => {
+  filesByOwner.delete(ownerId);
+  if (activeOwnerId !== ownerId) return;
+  activeOwnerId = null;
+  publishActive(null);
+};
+
+export const resetPiEditorContext = (): void => {
+  filesByOwner.clear();
+  activeOwnerId = null;
+  publishActive(null);
+};
+
+subscribeRuntimeEndpointWillChange(resetPiEditorContext);
