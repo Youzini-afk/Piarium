@@ -61,7 +61,7 @@ const ensureWorkspaceSubscription = (workspaceId: string): void => {
   workspaceSubscriptions.set(workspaceId, bound.subscribe(workspaceId, handleEvent));
 };
 
-const enqueueDocumentSync = (identity: DocumentIdentity, languageId: string, reason: 'open' | 'change' | 'close'): void => {
+const enqueueDocumentSync = (identity: DocumentIdentity, languageId: string, reason: 'open' | 'change' | 'save' | 'close'): void => {
   const language = bound;
   if (!language) return;
   let record;
@@ -152,6 +152,12 @@ export const notifyLanguageDocumentChange = (identity: DocumentIdentity): void =
   const open = openEditors.get(editorKey(identity));
   if (!open) return;
   enqueueDocumentSync(identity, open.languageId, 'change');
+};
+
+export const notifyLanguageDocumentSave = (identity: DocumentIdentity): void => {
+  const open = openEditors.get(editorKey(identity));
+  if (!open) return;
+  enqueueDocumentSync(identity, open.languageId, 'save');
 };
 
 export const releaseLanguageDocument = (identity: DocumentIdentity): void => {

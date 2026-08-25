@@ -1777,6 +1777,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.splitHorizontal': 'Podziel edytor w dół',
   'filesView.editor.providerAmbiguous': 'Wybierz edytor',
   'filesView.editor.providerUnavailable': 'Brak włączonego edytora dostępnego dla tego pliku.',
+  'filesView.editor.syncRecovered': 'Dane wejściowe zachowano po konflikcie synchronizacji edytora. Sprawdź zawartość przed zapisaniem.',
   'filesView.editor.useProvider': 'Użyj {provider}',
   'filesView.editor.diffAgainstDisk': 'Kopia robocza względem ostatnio zapisanej zawartości',
   'workbench.panel.terminal': 'Terminal',

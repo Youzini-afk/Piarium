@@ -3,7 +3,12 @@
 Per-document editing state for Piarium workspace text files. High-frequency buffers live in this
 external registry, not in Zustand or Local Storage.
 
-- `registry.ts` — load/save/watch, dirty/conflict, in-flight save, recovery journals, Agent/disk source hints
+- `registry.ts` — load/save/watch, dirty/conflict, in-flight save, recovery journals, Agent/disk source hints;
+  concurrent first-open calls share one Host read
+- `documentInstanceId` is internal and survives move/rename within one registry generation; editor engines
+  use it for stable model identity without publishing workspace paths
+- `applyEdits` accepts one captured local revision plus non-overlapping offset edits, advances the local
+  revision once, and returns typed stale/invalid/unsupported results
 - Three-way conflict stores ancestor, buffer, and disk candidate; writes still use expected revision
 - `session.ts` — one registry per bound `DocumentsAPI`
 - `hooks.ts` — per-document React subscriptions

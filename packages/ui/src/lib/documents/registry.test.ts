@@ -185,6 +185,31 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
+  test('coalesces concurrent first-open reads for the same document', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    let reads = 0;
+    const counted: DocumentsAPI = {
+      ...api,
+      read: async (ref) => {
+        reads += 1;
+        await Promise.resolve();
+        return api.read(ref);
+      },
+    };
+    const registry = new DocumentRegistry({ documents: counted, getGeneration: () => 1, recoverySessionId: 'session' });
+    const [first, second, third] = await Promise.all([
+      registry.open(identity),
+      registry.open(identity),
+      registry.open(identity),
+    ]);
+    expect(reads).toBe(1);
+    expect(first).toBe(second);
+    expect(second).toBe(third);
+    registry.dispose();
+  });
+
   test('two views share one buffer and keep independent origins', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource();
@@ -201,16 +226,109 @@ describe('DocumentRegistry', () => {
     registry.dispose();
   });
 
+  test('applies incremental edits against one captured revision and advances it once', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ resource: identity, content: 'alpha beta gamma', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const opened = await registry.open(identity);
+
+    const result = registry.applyEdits(identity, {
+      expectedLocalEditRevision: opened.localEditRevision,
+      edits: [
+        { from: 0, to: 5, insert: 'A' },
+        { from: 11, to: 16, insert: 'G' },
+      ],
+      origin: 'monaco:view-a',
+    });
+
+    expect(result.status).toBe('applied');
+    if (result.status === 'applied') {
+      expect(result.record.buffer).toBe('A beta G');
+      expect(result.record.localEditRevision).toBe(opened.localEditRevision + 1);
+      expect(result.record.lastChanges).toEqual([
+        { from: 11, to: 16, insert: 'G' },
+        { from: 0, to: 5, insert: 'A' },
+      ]);
+    }
+    registry.dispose();
+  });
+
+  test('rejects stale and invalid incremental edits without mutating the buffer', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource();
+    await api.write({ resource: identity, content: 'abcdef', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
+    const opened = await registry.open(identity);
+    registry.applyTransaction(identity, 'abcdef!', { origin: 'other-view' });
+
+    const stale = registry.applyEdits(identity, {
+      expectedLocalEditRevision: opened.localEditRevision,
+      edits: [{ from: 0, to: 1, insert: 'A' }],
+      origin: 'monaco:view-a',
+    });
+    expect(stale.status).toBe('stale');
+    if (stale.status === 'stale') {
+      expect(stale.actualLocalEditRevision).toBe(opened.localEditRevision + 1);
+    }
+    const current = registry.get(identity);
+    if (!current) throw new Error('expected current document');
+    const invalidRange = registry.applyEdits(identity, {
+      expectedLocalEditRevision: current.localEditRevision,
+      edits: [{ from: 2, to: 99, insert: '' }],
+      origin: 'monaco:view-a',
+    });
+    expect(invalidRange.status).toBe('invalid');
+    if (invalidRange.status === 'invalid') expect(invalidRange.reason).toBe('invalid-range');
+    const overlapping = registry.applyEdits(identity, {
+      expectedLocalEditRevision: current.localEditRevision,
+      edits: [
+        { from: 1, to: 4, insert: '' },
+        { from: 3, to: 5, insert: '' },
+      ],
+      origin: 'monaco:view-a',
+    });
+    expect(overlapping.status).toBe('invalid');
+    if (overlapping.status === 'invalid') expect(overlapping.reason).toBe('overlapping-ranges');
+    expect(registry.get(identity)?.buffer).toBe('abcdef!');
+    expect(registry.get(identity)?.localEditRevision).toBe(current.localEditRevision);
+    registry.dispose();
+  });
+
+  test('keeps document instance identity across reload and move within a registry', async () => {
+    const { api } = createMemoryDocuments();
+    const identity = resource('before.txt');
+    const moved = resource('after.txt');
+    await api.write({ resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
+    let sequence = 0;
+    const registry = new DocumentRegistry({
+      documents: api,
+      getGeneration: () => 1,
+      recoverySessionId: 'session',
+      createDocumentInstanceId: () => `document-${++sequence}`,
+    });
+    const opened = await registry.open(identity);
+    const reloaded = await registry.reload(identity);
+    expect(reloaded.documentInstanceId).toBe(opened.documentInstanceId);
+
+    registry.handleWatchEvent({ kind: 'moved', sequence: 1, from: identity, resource: moved });
+    expect(registry.get(moved)?.documentInstanceId).toBe(opened.documentInstanceId);
+    registry.dispose();
+  });
+
   test('reloads clean documents and conflicts when dirty content differs', async () => {
     const { api, files } = createMemoryDocuments();
     const identity = resource();
     await api.write({ resource: identity, content: 'one', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     await registry.open(identity);
+    const initialVersion = registry.get(identity)?.localEditRevision;
     files.set(documentKey(identity), { content: 'two', revision: 'd1_external' });
     await registry.reload(identity);
     expect(registry.get(identity)?.buffer).toBe('two');
     expect(registry.get(identity)?.dirty).toBe(false);
+    expect(registry.get(identity)?.localEditRevision).toBe((initialVersion ?? 0) + 1);
+    expect(registry.get(identity)?.lastChanges).toEqual([{ from: 0, to: 3, insert: 'two' }]);
     registry.applyTransaction(identity, 'local', { origin: 'view' });
     files.set(documentKey(identity), { content: 'disk', revision: 'd1_later' });
     await registry.reload(identity);

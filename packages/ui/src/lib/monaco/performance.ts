@@ -1,4 +1,4 @@
-export type MonacoPerformanceMark =
+type MonacoPerformanceMark =
   | 'editor.runtime.import.start'
   | 'editor.runtime.import.end'
   | 'editor.worker.created'
@@ -9,4 +9,3 @@ export const markMonacoPerformance = (name: MonacoPerformanceMark): void => {
   if (typeof performance === 'undefined' || typeof performance.mark !== 'function') return;
   performance.mark(`piarium.${name}`);
 };
-

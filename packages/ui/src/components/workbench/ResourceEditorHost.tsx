@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
+import { DocumentMonacoEditor } from '@/components/workbench/DocumentMonacoEditor';
 import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -41,6 +42,7 @@ import {
 import type { DocumentRecord } from '@/lib/documents/types';
 import { listEditorProviders } from '@/lib/workbench/editors/providers';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { useDeviceInfo } from '@/lib/device';
 
 const GitDiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((module) => ({ default: module.DiffView })));
 
@@ -120,6 +122,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
 }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
+  const { isMobile } = useDeviceInfo();
   const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
   const identity = React.useMemo<DocumentIdentity>(
     () => ({ workspaceId, resourceId: tab.resourceId }),
@@ -162,6 +165,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const [desktopImageSrc, setDesktopImageSrc] = React.useState('');
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
   const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
+  const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
 
   React.useEffect(() => {
     if (!needsDocument) return;
@@ -521,12 +525,24 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       <div className="flex h-full min-h-0 flex-col">
         <DocumentConflictBanner identity={identity} />
         <div className="min-h-0 flex-1 overflow-hidden">
-          <DocumentCodeMirror
-            identity={identity}
-            className="h-full"
-            extensions={[viewStateExtension]}
-            onViewReady={(view) => applyEditorViewState(view, tab.viewState)}
-          />
+          {isMobile || runtime.isVSCode ? (
+            <DocumentCodeMirror
+              identity={identity}
+              className="h-full"
+              extensions={[viewStateExtension]}
+              onViewReady={(view) => applyEditorViewState(view, tab.viewState)}
+              vimMode={fileEditorKeymap === 'vim'}
+            />
+          ) : (
+            <DocumentMonacoEditor
+              identity={identity}
+              path={path}
+              viewId={tab.viewId}
+              viewState={tab.viewState}
+              className="h-full"
+              {...(onViewStateChange ? { onViewStateChange } : {})}
+            />
+          )}
         </div>
       </div>
     </HostFrame>

@@ -1275,6 +1275,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.splitHorizontal': '아래쪽으로 편집기 분할',
   'filesView.editor.providerAmbiguous': '편집기 선택',
   'filesView.editor.providerUnavailable': '이 파일에 사용할 수 있는 사용 설정된 편집기가 없습니다.',
+  'filesView.editor.syncRecovered': '편집기 동기화 충돌 후 입력을 복구했습니다. 저장하기 전에 내용을 확인하세요.',
   'filesView.editor.useProvider': '{provider} 사용',
   'filesView.editor.diffAgainstDisk': '작업 복사본과 마지막으로 저장한 내용 비교',
   'workbench.panel.terminal': '터미널',

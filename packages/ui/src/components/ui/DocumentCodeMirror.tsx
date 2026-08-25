@@ -6,6 +6,7 @@ import { useDocumentLanguageExtensions } from '@/lib/codemirror/language-client'
 import {
   acquireLanguageDocument,
   notifyLanguageDocumentChange,
+  notifyLanguageDocumentSave,
   releaseLanguageDocument,
 } from '@/lib/language-services/session';
 import type { DocumentIdentity } from '@/lib/documents/types';
@@ -21,6 +22,9 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
 }) => {
   const origin = React.useId();
   const record = useDocumentRecord(identity);
+  const previousBaseRevisionRef = React.useRef<string | null | undefined>(record?.baseRevision);
+  const previousSavingRef = React.useRef(record?.saving ?? false);
+  const previousIdentityRef = React.useRef(identity ? `${identity.workspaceId}\0${identity.resourceId}` : '');
   const buffer = record?.buffer ?? '';
   const languageExtensions = useDocumentLanguageExtensions(identity);
 
@@ -29,6 +33,22 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
     acquireLanguageDocument(identity);
     return () => releaseLanguageDocument(identity);
   }, [identity]);
+
+  React.useEffect(() => {
+    const identityKey = identity ? `${identity.workspaceId}\0${identity.resourceId}` : '';
+    if (identityKey !== previousIdentityRef.current) {
+      previousIdentityRef.current = identityKey;
+      previousBaseRevisionRef.current = record?.baseRevision;
+      previousSavingRef.current = record?.saving ?? false;
+      return;
+    }
+    const previous = previousBaseRevisionRef.current;
+    const wasSaving = previousSavingRef.current;
+    previousBaseRevisionRef.current = record?.baseRevision;
+    previousSavingRef.current = record?.saving ?? false;
+    if (!identity || !wasSaving || record?.saving || previous === undefined || previous === record?.baseRevision) return;
+    notifyLanguageDocumentSave(identity);
+  }, [identity, record?.baseRevision, record?.saving]);
 
   const handleChange = React.useCallback((value: string, changes?: CodeMirrorTextChange[]) => {
     if (!identity) return;

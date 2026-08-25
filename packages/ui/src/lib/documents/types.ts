@@ -37,6 +37,8 @@ export type DocumentExternalSource = 'agent' | 'disk' | null;
 
 export type DocumentRecord = {
   identity: DocumentIdentity;
+  /** Internal identity for editor-engine projections. It survives move/rename within this registry. */
+  documentInstanceId: string;
   connectionGeneration: number;
   status: DocumentLoadStatus;
   dirty: boolean;
@@ -59,6 +61,19 @@ export type DocumentRecord = {
   lastChanges: DocumentChange[] | null;
   externalSource: DocumentExternalSource;
 };
+
+export type DocumentEditFailureReason = 'invalid-range' | 'overlapping-ranges';
+
+export type DocumentEditResult =
+  | { status: 'applied'; record: DocumentRecord }
+  | {
+      status: 'stale';
+      record: DocumentRecord;
+      expectedLocalEditRevision: number;
+      actualLocalEditRevision: number;
+    }
+  | { status: 'invalid'; reason: DocumentEditFailureReason; record: DocumentRecord }
+  | { status: 'unsupported'; record: DocumentRecord };
 
 export type DocumentMeta = {
   identity: DocumentIdentity;

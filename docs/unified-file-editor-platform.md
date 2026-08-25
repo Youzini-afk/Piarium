@@ -1,6 +1,6 @@
 # Piarium 统一文件编辑器平台设计
 
-Status: Phase 1 已完成；Phase 2 待实施
+Status: Phase 2 已完成；Phase 3 待实施
 
 Last updated: 2026-08-25
 
@@ -633,6 +633,27 @@ Electron `piarium-ui://` worker 矩阵全部通过后才能退出 Phase 1，不�
 Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor markers、completion、hover
 不得低于 cutover 前的 CodeMirror 路径；普通与 Vim keymap 均可输入、搜索、保存并在 disable/re-enable
 后清理 owner。聚焦 model/registry/workbench tests，加 UI type-check/lint 与一次 Web build。
+
+完成证据（2026-08-25）：
+
+- Document record 增加不公开的 `documentInstanceId`；`applyEdits` 按 captured local revision 校验
+  range/overlap，一组增量只推进一次 revision。并发首次 `open()` 合并为一次 Host read；
+- `FileEditorModelRegistry` 以 runtime key + document instance ID 生成无工作区路径的虚拟 URI。
+  Workbench tab 持有 model，visible view 只持有 editor/listener；同文档双 view 共享 model 与 undo，
+  clean close 释放，dirty close 由 recovery owner 保留，runtime 切换统一 dispose；
+- model ↔ Document Registry 使用增量事件和 origin/version 抑制回声。stale/非法同步不丢用户已经输入
+  的 model 内容，并保留 model/registry 两份 snapshot 供可见告警；clean reload、dirty conflict、move
+  与 save-in-flight 的既有文档语义保持；
+- workbench snapshot 升级为 v2，视图状态由 provider ID + schema version + JSON payload 持有；v1
+  cursor/selection/scroll/fold 字段一次迁移并回写，坏 provider state 只被丢弃，不使工作台快照失效；
+- desktop/Web official text renderer 已切到 Monaco；mobile 与 VS Code companion 继续使用其明确的
+  CodeMirror/宿主路径。baseline bridge 恢复 accepted diagnostics markers、completion、hover、增量
+  `didChange` 与成功保存后的 `didSave`，且 completion 不再产生 `docdocument` 前缀重复；
+- `fileEditorKeymap=vim` 由只使用 Monaco 0.56 公共 API 的 Piarium adapter 消费，覆盖 normal/insert/
+  visual 基础行为、移动、删除/复制/粘贴、undo/redo、find、`:w`、状态栏和 dispose/re-enable；
+- 聚焦文档/model/workbench/language/Vim 测试通过，UI type-check/lint、i18n parity 与 production Web
+  build 通过。三个 HTML 入口仍不静态引用 Monaco，产物只有 editor worker，没有 Monaco semantic
+  worker。
 
 ### Phase 3 — 文件编辑基础体验与设置
 

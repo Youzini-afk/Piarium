@@ -15,6 +15,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.prCommentContextRemove': 'Прибрати контекст коментарів PR',
   'chat.chatInput.prCheckContext': 'Зафейлені чеки PR',
   'chat.chatInput.prCheckContextRemove': 'Прибрати контекст чеків PR',
+  'filesView.editor.syncRecovered': 'Ваше введення збережено після конфлікту синхронізації редактора. Перевірте його перед збереженням.',
   "common.loading": "Завантаження...",
   "common.unavailable": "Недоступно",
   "common.language.english": "англійська",

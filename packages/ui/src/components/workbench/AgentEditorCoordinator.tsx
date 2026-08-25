@@ -15,6 +15,7 @@ import {
   peekEditorWorkbench,
   subscribeEditorWorkbench,
 } from '@/lib/workbench/editors/session';
+import { textEditorSummaryFromViewState } from '@/lib/workbench/editors/view-state-core';
 import { getWorkbenchProblems, showWorkbenchPanel } from '@/lib/workbench/editors/panels';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiEditorContextStore } from '@/stores/usePiEditorContextStore';
@@ -54,18 +55,19 @@ export const AgentEditorCoordinator: React.FC = () => {
 
   React.useEffect(() => {
     if (!tab || !workspaceId || !directory || !record) return;
-    const hasRange = Boolean(tab.viewState.selectionStartLine && tab.viewState.selectionEndLine);
-    const selection = hasRange
+    const summary = textEditorSummaryFromViewState(tab.viewState);
+    const range = summary?.selection;
+    const selection = range
       ? {
-        startLine: tab.viewState.selectionStartLine as number,
-        startColumn: tab.viewState.selectionStartColumn ?? 1,
-        endLine: tab.viewState.selectionEndLine as number,
-        endColumn: tab.viewState.selectionEndColumn ?? 1,
+        startLine: range.start.line,
+        startColumn: range.start.column,
+        endLine: range.end.line,
+        endColumn: range.end.column,
         text: sliceDocumentRange(record.buffer, {
-          startLine: tab.viewState.selectionStartLine as number,
-          startColumn: tab.viewState.selectionStartColumn ?? 1,
-          endLine: tab.viewState.selectionEndLine as number,
-          endColumn: tab.viewState.selectionEndColumn ?? 1,
+          startLine: range.start.line,
+          startColumn: range.start.column,
+          endLine: range.end.line,
+          endColumn: range.end.column,
         }),
       }
       : null;

@@ -14,6 +14,7 @@ import {
   documentKey,
   toDocumentMeta,
   type DocumentChange,
+  type DocumentEditResult,
   type DocumentIdentity,
   type DocumentMeta,
   type DocumentRecord,
@@ -23,16 +24,40 @@ export type DocumentListener = (record: DocumentRecord) => void;
 
 const EMPTY_RESOURCE_IDS: ReadonlySet<string> = new Set();
 
+const replacementBetween = (previous: string, next: string): DocumentChange | null => {
+  if (previous === next) return null;
+  let from = 0;
+  const sharedLength = Math.min(previous.length, next.length);
+  while (from < sharedLength && previous.charCodeAt(from) === next.charCodeAt(from)) from += 1;
+  let previousEnd = previous.length;
+  let nextEnd = next.length;
+  while (
+    previousEnd > from
+    && nextEnd > from
+    && previous.charCodeAt(previousEnd - 1) === next.charCodeAt(nextEnd - 1)
+  ) {
+    previousEnd -= 1;
+    nextEnd -= 1;
+  }
+  return { from, to: previousEnd, insert: next.slice(from, nextEnd) };
+};
+
 type RegistryOptions = {
   documents: DocumentsAPI;
   getGeneration?: () => number;
   recoverySessionId?: string;
   journalDebounceMs?: number;
   now?: () => number;
+  createDocumentInstanceId?: () => string;
 };
 
-const emptyRecord = (identity: DocumentIdentity, generation: number): DocumentRecord => ({
+const emptyRecord = (
+  identity: DocumentIdentity,
+  generation: number,
+  documentInstanceId: string,
+): DocumentRecord => ({
   identity,
+  documentInstanceId,
   connectionGeneration: generation,
   status: 'unloaded',
   dirty: false,
@@ -145,12 +170,16 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
       errorMessage: null,
     };
   }
+  const externalChange = record.baseRevision !== null
+    ? replacementBetween(record.buffer, normalized)
+    : null;
   return {
     ...record,
     status: 'ready',
     dirty: false,
     baseContent: normalized,
     buffer: normalized,
+    localEditRevision: record.localEditRevision + (externalChange ? 1 : 0),
     baseRevision: result.revision,
     encoding: result.encoding,
     bom: result.bom,
@@ -158,6 +187,8 @@ const applyRead = (record: DocumentRecord, result: PiariumDocumentReadResult): D
     byteLength: result.byteLength,
     conflict: null,
     errorMessage: null,
+    lastOrigin: externalChange ? 'disk' : record.lastOrigin,
+    lastChanges: externalChange ? [externalChange] : record.lastChanges,
   };
 };
 
@@ -166,7 +197,9 @@ export class DocumentRegistry {
   private readonly documents: DocumentsAPI;
   private readonly getGeneration: () => number;
   private readonly journalDebounceMs: number;
+  private readonly createDocumentInstanceId: () => string;
   private readonly records = new Map<string, DocumentRecord>();
+  private readonly openOperations = new Map<string, Promise<DocumentRecord>>();
   private readonly listeners = new Map<string, Set<DocumentListener>>();
   private readonly dirtyIdsByWorkspace = new Map<string, Set<string>>();
   private readonly dirtyListenersByWorkspace = new Map<string, Set<() => void>>();
@@ -182,6 +215,7 @@ export class DocumentRegistry {
     this.getGeneration = options.getGeneration ?? getRuntimeEndpointGeneration;
     this.recoverySessionId = options.recoverySessionId ?? getDocumentRecoverySessionId();
     this.journalDebounceMs = options.journalDebounceMs ?? 750;
+    this.createDocumentInstanceId = options.createDocumentInstanceId ?? (() => crypto.randomUUID());
   }
 
   get(identity: DocumentIdentity): DocumentRecord | undefined {
@@ -235,7 +269,22 @@ export class DocumentRegistry {
     return this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
   }
 
-  async open(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
+  open(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
+    const key = documentKey(identity);
+    if (!options?.reload) {
+      const pending = this.openOperations.get(key);
+      if (pending) return pending;
+    }
+    const operation = this.performOpen(identity, options);
+    if (options?.reload) return operation;
+    this.openOperations.set(key, operation);
+    void operation.finally(() => {
+      if (this.openOperations.get(key) === operation) this.openOperations.delete(key);
+    }).catch(() => undefined);
+    return operation;
+  }
+
+  private async performOpen(identity: DocumentIdentity, options?: { reload?: boolean }): Promise<DocumentRecord> {
     this.assertActive();
     const key = documentKey(identity);
     const generation = this.getGeneration();
@@ -252,7 +301,7 @@ export class DocumentRegistry {
     }
     const capturedEdit = existing?.localEditRevision ?? 0;
     const loading: DocumentRecord = {
-      ...(existing ?? emptyRecord(identity, generation)),
+      ...(existing ?? emptyRecord(identity, generation, this.createDocumentInstanceId())),
       identity,
       connectionGeneration: generation,
       status: 'loading',
@@ -303,7 +352,8 @@ export class DocumentRegistry {
     options: { origin: string; changes?: DocumentChange[] } ,
   ): DocumentRecord {
     this.assertActive();
-    const current = this.records.get(documentKey(identity)) ?? emptyRecord(identity, this.getGeneration());
+    const current = this.records.get(documentKey(identity))
+      ?? emptyRecord(identity, this.getGeneration(), this.createDocumentInstanceId());
     if (current.status === 'binary' || current.status === 'unsupported-encoding') return current;
     const dirty = buffer !== current.baseContent;
     const next: DocumentRecord = {
@@ -323,6 +373,62 @@ export class DocumentRegistry {
     this.commit(next);
     this.scheduleJournal(next);
     return next;
+  }
+
+  applyEdits(
+    identity: DocumentIdentity,
+    input: {
+      expectedLocalEditRevision: number;
+      edits: DocumentChange[];
+      origin: string;
+    },
+  ): DocumentEditResult {
+    this.assertActive();
+    const current = this.records.get(documentKey(identity))
+      ?? emptyRecord(identity, this.getGeneration(), this.createDocumentInstanceId());
+    if (current.status === 'binary' || current.status === 'unsupported-encoding') {
+      return { status: 'unsupported', record: current };
+    }
+    if (input.expectedLocalEditRevision !== current.localEditRevision) {
+      return {
+        status: 'stale',
+        record: current,
+        expectedLocalEditRevision: input.expectedLocalEditRevision,
+        actualLocalEditRevision: current.localEditRevision,
+      };
+    }
+
+    const indexed = input.edits.map((edit, index) => ({ ...edit, index }));
+    if (indexed.some((edit) => (
+      !Number.isSafeInteger(edit.from)
+      || !Number.isSafeInteger(edit.to)
+      || edit.from < 0
+      || edit.to < edit.from
+      || edit.to > current.buffer.length
+    ))) {
+      return { status: 'invalid', reason: 'invalid-range', record: current };
+    }
+    const ascending = [...indexed].sort((left, right) => (
+      left.from - right.from || left.to - right.to || left.index - right.index
+    ));
+    for (let index = 1; index < ascending.length; index += 1) {
+      const previous = ascending[index - 1];
+      const candidate = ascending[index];
+      if (previous.to > candidate.from) {
+        return { status: 'invalid', reason: 'overlapping-ranges', record: current };
+      }
+    }
+    if (indexed.length === 0) return { status: 'applied', record: current };
+
+    const changes = [...indexed]
+      .sort((left, right) => right.from - left.from || right.to - left.to || right.index - left.index)
+      .map(({ from, to, insert }) => ({ from, to, insert }));
+    let buffer = current.buffer;
+    for (const edit of changes) {
+      buffer = `${buffer.slice(0, edit.from)}${edit.insert}${buffer.slice(edit.to)}`;
+    }
+    const next = this.applyTransaction(identity, buffer, { origin: input.origin, changes });
+    return { status: 'applied', record: next };
   }
 
   async save(
@@ -432,7 +538,7 @@ export class DocumentRegistry {
       return this.open(identity);
     }
     if (this.disposed || generation !== this.getGeneration()) {
-      return emptyRecord(identity, generation);
+      return emptyRecord(identity, generation, this.createDocumentInstanceId());
     }
     return this.open(identity);
   }
@@ -551,6 +657,7 @@ export class DocumentRegistry {
         .catch((error) => this.reportJournalFailure(error));
     }
     this.records.clear();
+    this.openOperations.clear();
     this.dirtyIdsByWorkspace.clear();
     this.workspaceVersions.clear();
   }

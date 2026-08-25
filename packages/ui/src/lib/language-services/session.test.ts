@@ -9,6 +9,7 @@ import {
   acquireLanguageDocument,
   bindLanguageServices,
   notifyLanguageDocumentChange,
+  notifyLanguageDocumentSave,
   resetLanguageServices,
 } from './session';
 
@@ -92,12 +93,13 @@ describe('language document synchronization', () => {
       changes: [{ from: 6, to: 6, insert: 'Z' }],
     });
     notifyLanguageDocumentChange(identity);
+    notifyLanguageDocumentSave(identity);
 
     releaseOpen?.();
-    await waitUntil(() => requests.length === 3);
+    await waitUntil(() => requests.length === 4);
 
     expect(maxActiveRequests).toBe(1);
-    expect(requests.map((request) => request.documentVersion)).toEqual([0, 1, 2]);
+    expect(requests.map((request) => request.documentVersion)).toEqual([0, 1, 2, 2]);
     expect({ reason: requests[0]?.reason, content: requests[0]?.content }).toEqual({
       reason: 'open',
       content: 'abcdef',
@@ -113,6 +115,10 @@ describe('language document synchronization', () => {
     expect({ reason: requests[2]?.reason, changes: requests[2]?.changes }).toEqual({
       reason: 'change',
       changes: [{ from: 6, to: 6, insert: 'Z' }],
+    });
+    expect({ reason: requests[3]?.reason, content: requests[3]?.content }).toEqual({
+      reason: 'save',
+      content: 'XbcdeYZ',
     });
   });
 });

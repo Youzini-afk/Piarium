@@ -1268,6 +1268,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.splitHorizontal': 'エディターを下に分割',
   'filesView.editor.providerAmbiguous': 'エディターを選択',
   'filesView.editor.providerUnavailable': 'このファイルに使用できる有効なエディターはありません。',
+  'filesView.editor.syncRecovered': 'エディターの同期競合後も入力は保持されています。保存前に内容を確認してください。',
   'filesView.editor.useProvider': '{provider} を使用',
   'filesView.editor.diffAgainstDisk': '作業コピーと最後に保存した内容の差分',
   'workbench.panel.terminal': 'ターミナル',

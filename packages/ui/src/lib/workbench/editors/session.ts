@@ -57,6 +57,10 @@ export const peekEditorWorkbench = (workspaceId: string | undefined): EditorWork
   workspaceId ? session.byWorkspace.get(workspaceId) : undefined
 );
 
+export const listEditorWorkbenches = (): readonly EditorWorkbenchState[] => (
+  [...session.byWorkspace.values()]
+);
+
 const persistStructural = (state: EditorWorkbenchState): EditorWorkbenchState => {
   rememberLastGoodEditorWorkbench(state);
   schedulePersistedEditorWorkbench(state.workspaceId);
@@ -85,6 +89,7 @@ export const ensureEditorWorkbench = (
   if (persisted.status === 'ready') {
     session.byWorkspace.set(workspaceId, persisted.state);
     rememberLastGoodEditorWorkbench(persisted.state);
+    if (persisted.migrated) schedulePersistedEditorWorkbench(workspaceId);
     emit();
     return persisted.state;
   }

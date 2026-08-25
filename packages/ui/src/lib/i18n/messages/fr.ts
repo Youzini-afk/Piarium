@@ -1099,6 +1099,7 @@ export const dict = {
   'filesView.editor.splitHorizontal': 'Fractionner l\'éditeur vers le bas',
   'filesView.editor.providerAmbiguous': 'Choisir un éditeur',
   'filesView.editor.providerUnavailable': 'Aucun éditeur activé n\'est disponible pour ce fichier.',
+  'filesView.editor.syncRecovered': 'Votre saisie a été conservée après un conflit de synchronisation. Vérifiez le contenu avant d’enregistrer.',
   'filesView.editor.useProvider': 'Utiliser {provider}',
   'filesView.editor.diffAgainstDisk': 'Copie de travail par rapport au dernier contenu enregistré',
   'workbench.panel.terminal': 'Terminal',

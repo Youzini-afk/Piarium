@@ -1,0 +1,86 @@
+import type { JsonObject, JsonValue } from '@piarium/extension-contract';
+import type { editor } from 'monaco-editor/editor';
+
+import type { EditorViewState } from '@/lib/workbench/editors/types';
+import {
+  isJsonObject,
+  legacyTextValueFromViewState,
+  MONACO_TEXT_EDITOR_VIEW_STATE_SCHEMA_VERSION,
+  TEXT_EDITOR_VIEW_STATE_PROVIDER_ID,
+} from '@/lib/workbench/editors/view-state-core';
+
+const jsonClone = (value: unknown): JsonValue | undefined => {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? undefined : JSON.parse(serialized) as JsonValue;
+  } catch {
+    return undefined;
+  }
+};
+
+export const captureMonacoEditorViewState = (
+  editorInstance: editor.IStandaloneCodeEditor,
+): EditorViewState => {
+  const position = editorInstance.getPosition();
+  const selection = editorInstance.getSelection();
+  const summary: JsonObject = {
+    cursor: {
+      line: position?.lineNumber ?? 1,
+      column: position?.column ?? 1,
+    },
+  };
+  if (selection && !selection.isEmpty()) {
+    summary.selection = {
+      start: { line: selection.startLineNumber, column: selection.startColumn },
+      end: { line: selection.endLineNumber, column: selection.endColumn },
+    };
+  }
+  const value: JsonObject = { summary };
+  const state = jsonClone(editorInstance.saveViewState());
+  if (state !== undefined) value.state = state;
+  return {
+    providerState: {
+      providerId: TEXT_EDITOR_VIEW_STATE_PROVIDER_ID,
+      schemaVersion: MONACO_TEXT_EDITOR_VIEW_STATE_SCHEMA_VERSION,
+      value,
+    },
+  };
+};
+
+export const applyMonacoEditorViewState = (
+  editorInstance: editor.IStandaloneCodeEditor,
+  viewState: EditorViewState,
+): void => {
+  const provider = viewState.providerState;
+  if (!provider || provider.providerId !== TEXT_EDITOR_VIEW_STATE_PROVIDER_ID) return;
+  if (provider.schemaVersion === MONACO_TEXT_EDITOR_VIEW_STATE_SCHEMA_VERSION) {
+    if (!isJsonObject(provider.value) || !isJsonObject(provider.value.state)) return;
+    editorInstance.restoreViewState(provider.value.state as unknown as editor.ICodeEditorViewState);
+    return;
+  }
+  const legacy = legacyTextValueFromViewState(viewState);
+  if (!legacy) return;
+  if (
+    legacy.selectionStartLine
+    && legacy.selectionStartColumn
+    && legacy.selectionEndLine
+    && legacy.selectionEndColumn
+  ) {
+    editorInstance.setSelection({
+      startLineNumber: legacy.selectionStartLine,
+      startColumn: legacy.selectionStartColumn,
+      endLineNumber: legacy.selectionEndLine,
+      endColumn: legacy.selectionEndColumn,
+    });
+  } else if (legacy.cursorLine) {
+    editorInstance.setPosition({
+      lineNumber: legacy.cursorLine,
+      column: legacy.cursorColumn ?? 1,
+    });
+  }
+  editorInstance.setScrollPosition({
+    ...(typeof legacy.scrollTop === 'number' ? { scrollTop: legacy.scrollTop } : {}),
+    ...(typeof legacy.scrollLeft === 'number' ? { scrollLeft: legacy.scrollLeft } : {}),
+  });
+};
+

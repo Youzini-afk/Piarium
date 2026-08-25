@@ -12,6 +12,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.prCommentContextRemove': 'Remover contexto de comentários do PR',
   'chat.chatInput.prCheckContext': 'Verificações do PR com falha',
   'chat.chatInput.prCheckContextRemove': 'Remover contexto de verificações do PR',
+  'filesView.editor.syncRecovered': 'Sua entrada foi preservada após um conflito de sincronização do editor. Revise-a antes de salvar.',
   "common.loading": "Carregando...",
   "common.unavailable": "Indisponível",
   "common.language.english": "Inglês",

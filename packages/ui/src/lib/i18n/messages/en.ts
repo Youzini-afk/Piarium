@@ -1271,6 +1271,7 @@ export const dict = {
   'filesView.editor.splitHorizontal': 'Split editor down',
   'filesView.editor.providerAmbiguous': 'Choose an editor',
   'filesView.editor.providerUnavailable': 'No enabled editor is available for this file.',
+  'filesView.editor.syncRecovered': 'Your input was preserved after an editor synchronization conflict. Review it before saving.',
   'filesView.editor.useProvider': 'Use {provider}',
   'filesView.editor.diffAgainstDisk': 'Working copy versus last saved contents',
   'workbench.panel.terminal': 'Terminal',

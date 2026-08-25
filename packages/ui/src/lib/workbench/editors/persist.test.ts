@@ -15,6 +15,7 @@ import {
 } from './session';
 import { restoreEditorWorkbenchSnapshot } from './snapshot';
 import { activeEditorTab } from './groups';
+import { createLegacyTextEditorViewState, textEditorSummaryFromViewState } from './view-state-core';
 
 const memoryStore = (): { store: Map<string, string>; writes: string[]; backend: {
   getItem(key: string): string | null;
@@ -58,7 +59,7 @@ describe('editor workbench persist', () => {
     const before = store.get(editorWorkbenchPersistKey(workspaceId));
     const tab = activeEditorTab(ensureEditorWorkbench(workspaceId));
     if (!tab) throw new Error('expected tab');
-    patchEditorViewState(workspaceId, tab.viewId, { cursorLine: 12, cursorColumn: 4 });
+    patchEditorViewState(workspaceId, tab.viewId, createLegacyTextEditorViewState({ cursorLine: 12, cursorColumn: 4 }));
     expect(store.get(editorWorkbenchPersistKey(workspaceId))).toBe(before);
     flushPersistedEditorWorkbench(workspaceId);
     const after = store.get(editorWorkbenchPersistKey(workspaceId));
@@ -66,7 +67,8 @@ describe('editor workbench persist', () => {
     const restored = restoreEditorWorkbenchSnapshot(after, workspaceId);
     expect(restored.status).toBe('ready');
     if (restored.status === 'ready') {
-      expect(activeEditorTab(restored.state)?.viewState.cursorLine).toBe(12);
+      const active = activeEditorTab(restored.state);
+      expect(active ? textEditorSummaryFromViewState(active.viewState)?.cursor.line : undefined).toBe(12);
     }
   });
 
@@ -126,5 +128,38 @@ describe('editor workbench persist', () => {
     openWorkbenchEditor('ws-switch', 'a.ts');
     resetEditorWorkbenchForRuntimeSwitch('runtime-b');
     expect(peekEditorWorkbench('ws-switch')).toBeUndefined();
+  });
+
+  test('writes a migrated v1 view-state snapshot back as v2', () => {
+    const { store, backend } = memoryStore();
+    setEditorWorkbenchPersistBackendForTests(backend);
+    const workspaceId = 'ws-migrate';
+    const key = editorWorkbenchPersistKey(workspaceId);
+    store.set(key, JSON.stringify({
+      version: 1,
+      workspaceId,
+      state: {
+        workspaceId,
+        activeGroupId: 'group',
+        tree: {
+          type: 'group',
+          groupId: 'group',
+          activeTabId: 'tab',
+          tabs: [{
+            tabId: 'tab',
+            viewId: 'view',
+            resourceId: 'file.ts',
+            preview: false,
+            pinned: true,
+            providerId: 'piarium.builtin.text',
+            viewState: { cursorLine: 4, cursorColumn: 2 },
+          }],
+        },
+      },
+    }));
+
+    ensureEditorWorkbench(workspaceId);
+    flushPersistedEditorWorkbench(workspaceId);
+    expect((JSON.parse(store.get(key) ?? '{}') as { version?: number }).version).toBe(2);
   });
 });

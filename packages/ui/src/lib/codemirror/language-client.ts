@@ -64,9 +64,10 @@ export const useDocumentLanguageExtensions = (identity: DocumentIdentity | undef
               character: context.pos - line.from,
             },
           });
-          if (result.status !== 'ready') return null;
+          if (result.status !== 'ready' || result.documentVersion !== documentVersion) return null;
+          const word = context.matchBefore(/[\w$]*/);
           return {
-            from: context.pos,
+            from: word?.from ?? context.pos,
             options: result.value.map((item) => {
               const option: { label: string; apply: string; detail?: string } = {
                 label: item.label,
@@ -90,7 +91,7 @@ export const useDocumentLanguageExtensions = (identity: DocumentIdentity | undef
           character: pos - line.from,
         },
       });
-      if (result.status !== 'ready' || !result.value) return null;
+      if (result.status !== 'ready' || result.documentVersion !== documentVersion || !result.value) return null;
       return {
         pos,
         create() {

@@ -13,6 +13,7 @@ import { BUILTIN_EDITOR_PROVIDER_IDS } from './types';
 import { restoreEditorWorkbenchSnapshot, serializeEditorWorkbenchSnapshot } from './snapshot';
 import { executeWorkbenchCommand, registerWorkbenchCommand, resetWorkbenchCommands } from './commands';
 import { setWorkbenchContextKey, whenWorkbenchContext, clearWorkbenchContextKeys, subscribeWorkbenchContextKey } from './context-keys';
+import { textEditorSummaryFromViewState } from './view-state-core';
 
 let seq = 0;
 const ids = () => `id-${++seq}`;
@@ -136,6 +137,47 @@ describe('editor snapshot restore', () => {
     const state = openEditor(createEmptyEditorWorkbench('ws-1', ids), { resourceId: 'a.ts', providerId: 'text' }, ids);
     const restored = restoreEditorWorkbenchSnapshot(serializeEditorWorkbenchSnapshot(state), 'ws-1');
     expect(restored.status).toBe('ready');
+  });
+
+  test('migrates legacy cursor fields once and drops only malformed provider state', () => {
+    seq = 0;
+    const state = openEditor(createEmptyEditorWorkbench('ws-1', ids), { resourceId: 'a.ts', providerId: 'text' }, ids);
+    const legacy = structuredClone(serializeEditorWorkbenchSnapshot(state)) as unknown as {
+      version: number;
+      state: { tree: { tabs: Array<{ viewState: Record<string, unknown> }> } };
+    };
+    legacy.version = 1;
+    legacy.state.tree.tabs[0].viewState = {
+      cursorLine: 12,
+      cursorColumn: 4,
+      selectionStartLine: 12,
+      selectionStartColumn: 4,
+      selectionEndLine: 13,
+      selectionEndColumn: 2,
+    };
+    const migrated = restoreEditorWorkbenchSnapshot(legacy, 'ws-1');
+    if (migrated.status !== 'ready') throw new Error('expected migrated snapshot');
+    expect(migrated.migrated).toBe(true);
+    const migratedTab = listEditorGroups(migrated.state.tree)[0]?.tabs[0];
+    expect(migratedTab ? textEditorSummaryFromViewState(migratedTab.viewState) : undefined).toEqual({
+      cursor: { line: 12, column: 4 },
+      selection: {
+        start: { line: 12, column: 4 },
+        end: { line: 13, column: 2 },
+      },
+    });
+
+    const malformed = structuredClone(serializeEditorWorkbenchSnapshot(state)) as unknown as {
+      state: { tree: { tabs: Array<{ viewState: Record<string, unknown> }> } };
+    };
+    malformed.state.tree.tabs[0].viewState = {
+      previewMode: 'edit',
+      providerState: { providerId: 'text', schemaVersion: 2, value: { broken: undefined } },
+    };
+    const restored = restoreEditorWorkbenchSnapshot(malformed, 'ws-1');
+    if (restored.status !== 'ready') throw new Error('expected ready snapshot');
+    const restoredViewState = listEditorGroups(restored.state.tree)[0]?.tabs[0]?.viewState;
+    expect(restoredViewState).toEqual({ previewMode: 'edit' });
   });
 });
 

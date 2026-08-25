@@ -29,6 +29,7 @@
         "src/main.tsx",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
+        "src/monaco-smoke.ts",
         "src/sw.ts",
         "server/**/*.{test,spec}.{js,cjs,mjs}",
         "src/**/*.{test,spec}.{ts,tsx}"

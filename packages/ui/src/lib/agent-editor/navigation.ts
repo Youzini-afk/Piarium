@@ -5,7 +5,7 @@ import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { openWorkbenchEditor, patchEditorViewState, peekEditorWorkbench } from '@/lib/workbench/editors/session';
-import type { EditorViewState } from '@/lib/workbench/editors/types';
+import { createLegacyTextEditorViewState } from '@/lib/workbench/editors/view-state-core';
 import type { EditorSessionLink } from './types';
 
 const byResource = new Map<string, EditorSessionLink>();
@@ -36,8 +36,10 @@ export const revealResourceInEditor = (input: {
   const tab = peekEditorWorkbench(input.workspaceId);
   const active = tab ? activeEditorTab(tab) : undefined;
   if (active && input.line) {
-    const viewState: EditorViewState = { cursorLine: input.line };
-    if (input.column) viewState.cursorColumn = input.column;
+    const viewState = createLegacyTextEditorViewState({
+      cursorLine: input.line,
+      ...(input.column ? { cursorColumn: input.column } : {}),
+    });
     patchEditorViewState(input.workspaceId, active.viewId, viewState);
   }
   const identity = { workspaceId: input.workspaceId, resourceId: input.resourceId };

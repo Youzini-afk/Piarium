@@ -8,6 +8,7 @@ import { peekLastStackFrame, peekLastTestFailure } from '@/lib/run-debug/session
 import { registerWorkbenchCommand } from '@/lib/workbench/editors/commands';
 import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { peekEditorWorkbench, subscribeEditorWorkbench } from '@/lib/workbench/editors/session';
+import { textEditorSummaryFromViewState } from '@/lib/workbench/editors/view-state-core';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 const OWNER = 'piarium.builtin.workbench';
@@ -78,11 +79,13 @@ export const RunDebugCoordinator: React.FC = () => {
       }),
       registerWorkbenchCommand('editor.debug.toggleBreakpoint', OWNER, () => {
         if (!workspaceId || !tab) return;
-        const line = tab.viewState.cursorLine ?? 1;
+        const currentWorkbench = peekEditorWorkbench(workspaceId);
+        const currentTab = (currentWorkbench ? activeEditorTab(currentWorkbench) : undefined) ?? tab;
+        const line = textEditorSummaryFromViewState(currentTab.viewState)?.cursor.line ?? 1;
         void apis.debug.listBreakpoints(workspaceId).then((listed) => {
-          const existing = listed.breakpoints.filter((item) => item.resourceId === tab.resourceId).map((item) => item.line);
+          const existing = listed.breakpoints.filter((item) => item.resourceId === currentTab.resourceId).map((item) => item.line);
           const next = existing.includes(line) ? existing.filter((item) => item !== line) : [...existing, line];
-          return apis.debug.setBreakpoints({ workspaceId, resourceId: tab.resourceId, lines: next });
+          return apis.debug.setBreakpoints({ workspaceId, resourceId: currentTab.resourceId, lines: next });
         });
       }),
       registerWorkbenchCommand('piarium.editor.attachTestFailure', OWNER, () => {

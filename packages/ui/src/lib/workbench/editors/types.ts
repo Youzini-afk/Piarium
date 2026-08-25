@@ -1,16 +1,16 @@
+import type { JsonValue } from '@piarium/extension-contract';
+
+export type EditorProviderViewState = {
+  providerId: string;
+  schemaVersion: number;
+  value: JsonValue;
+};
+
 export type EditorViewState = {
   /** Which Git revision the diff viewer compares against, for diff-provider tabs. */
   diffScope?: 'working' | 'staged';
-  cursorLine?: number;
-  cursorColumn?: number;
-  scrollTop?: number;
-  scrollLeft?: number;
-  selectionStartLine?: number;
-  selectionStartColumn?: number;
-  selectionEndLine?: number;
-  selectionEndColumn?: number;
-  foldedLines?: number[];
   previewMode?: 'preview' | 'edit' | 'tree' | 'text';
+  providerState?: EditorProviderViewState;
 };
 
 export type EditorTab = {
@@ -58,7 +58,7 @@ export type SnapshotRestoreResult =
   | { status: 'empty' }
   | { status: 'malformed' }
   | { status: 'failure'; errorMessage: string }
-  | { status: 'ready'; state: EditorWorkbenchState };
+  | { status: 'ready'; state: EditorWorkbenchState; migrated?: boolean };
 
 export type EditorProviderContribution = {
   id: string;
@@ -129,4 +129,4 @@ export type EditorProviderSelection =
   | { status: 'selected'; providerId: string }
   | { status: 'ambiguous'; providerIds: string[] };
 
-export const EDITOR_WORKBENCH_SNAPSHOT_VERSION = 1 as const;
+export const EDITOR_WORKBENCH_SNAPSHOT_VERSION = 2 as const;

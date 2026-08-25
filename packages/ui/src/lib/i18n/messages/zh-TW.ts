@@ -1249,6 +1249,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.editor.splitHorizontal': '向下分割編輯器',
   'filesView.editor.providerAmbiguous': '選擇編輯器',
   'filesView.editor.providerUnavailable': '沒有可用於此檔案的已啟用編輯器。',
+  'filesView.editor.syncRecovered': '編輯器同步衝突後已保留你的輸入。請在儲存前檢查內容。',
   'filesView.editor.useProvider': '使用 {provider}',
   'filesView.editor.diffAgainstDisk': '工作複本與上次儲存內容的對照',
   'workbench.panel.terminal': '終端機',
