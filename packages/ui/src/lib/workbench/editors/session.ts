@@ -6,6 +6,7 @@ import {
   closeEditorTab,
   closeEditorTabsByResourcePrefix,
   createEmptyEditorWorkbench,
+  listEditorGroups,
   listOpenResourceIds,
   moveEditorTab,
   openEditor,
@@ -206,6 +207,18 @@ export const setActiveWorkbenchEditor = (
 ): EditorWorkbenchState => (
   replaceEditorWorkbench(setActiveEditor(ensureEditorWorkbench(workspaceId), groupId, tabId))
 );
+
+export const setActiveWorkbenchEditorView = (
+  workspaceId: string,
+  viewId: string,
+): EditorWorkbenchState => {
+  const state = ensureEditorWorkbench(workspaceId);
+  for (const group of listEditorGroups(state.tree)) {
+    const tab = group.tabs.find((candidate) => candidate.viewId === viewId);
+    if (tab) return replaceEditorWorkbench(setActiveEditor(state, group.groupId, tab.tabId));
+  }
+  return state;
+};
 
 export const splitActiveEditor = (
   workspaceId: string,

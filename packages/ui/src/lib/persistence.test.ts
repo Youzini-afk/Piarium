@@ -590,6 +590,24 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().autoSaveEnabled).toBe(false);
   });
 
+  test('merges valid file editor settings while retaining the last valid value for malformed fields', async () => {
+    getWindow();
+    invalidateSettingsCache();
+    useUIStore.getState().updateFileEditorSettings({ tabSize: 7, wordWrap: 'off', minimap: 'profile' });
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: {
+        fileEditorSettings: { tabSize: 0, wordWrap: 'sometimes', minimap: 'on' },
+      } as unknown as SettingsPayload,
+      source: 'web',
+    }));
+
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().fileEditorSettings.tabSize).toBe(7);
+    expect(useUIStore.getState().fileEditorSettings.wordWrap).toBe('off');
+    expect(useUIStore.getState().fileEditorSettings.minimap).toBe('on');
+  });
+
   test('autosaves autoSaveEnabled changes to shared settings', async () => {
     getWindow();
     useUIStore.getState().setAutoSaveEnabled(true);

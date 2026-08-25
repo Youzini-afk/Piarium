@@ -3,6 +3,7 @@ import type { RecoveryPreference } from '@piarium/protocol';
 import { getInjectedBootOutcome } from '@/lib/desktopBoot';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import type { FileEditorSettingsPatch } from '@/lib/file-editor-settings';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
@@ -171,6 +172,7 @@ export type DesktopSettings = {
   terminalShell?: TerminalShell;
   terminalLoginShells?: TerminalShell[];
   editorFontSize?: number;
+  fileEditorSettings?: FileEditorSettingsPatch;
   uiFont?: string;
   monoFont?: string;
   padding?: number;

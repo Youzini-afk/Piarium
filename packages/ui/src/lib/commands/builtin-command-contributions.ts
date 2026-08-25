@@ -13,6 +13,12 @@ import {
   splitActiveEditor,
 } from '@/lib/workbench/editors/session';
 import type { WorkbenchCommandImplementation, WorkbenchCommandMeta } from './surface-command-types';
+import {
+  executeActiveFileEditorCommand,
+  FILE_EDITOR_COMMAND_IDS,
+  hasActiveFileEditorCommandTarget,
+  type FileEditorCommandId,
+} from '@/lib/monaco/editor-command-service';
 
 export const BUILTIN_COMMANDS_EXTENSION_ID = 'piarium.builtin.commands';
 
@@ -25,6 +31,16 @@ const command = (
   meta: WorkbenchCommandMeta,
   execute: WorkbenchCommandImplementation['execute'],
 ): BuiltinCommandDefinition => ({ meta, implementation: { execute } });
+
+const editorCommand = (meta: WorkbenchCommandMeta, commandId: FileEditorCommandId): BuiltinCommandDefinition => ({
+  meta,
+  implementation: {
+    execute: async () => {
+      await executeActiveFileEditorCommand(commandId);
+    },
+    isAvailable: () => hasActiveFileEditorCommandTarget(),
+  },
+});
 
 const reportFailure = (title: string, error: unknown): void => {
   toast.error(title, { description: error instanceof Error ? error.message : String(error) });
@@ -76,7 +92,8 @@ const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
     const tab = activeEditorTab(ensureEditorWorkbench(workspaceId));
     if (tab) closeWorkbenchEditor(workspaceId, tab.tabId);
   }),
-  command({ commandId: 'save-active-file', titleKey: 'commandPalette.item.saveActiveFile', icon: 'save-3', keywords: ['save', 'file', 'editor'], order: 10 }, () => {
+  command({ commandId: 'save-active-file', titleKey: 'commandPalette.item.saveActiveFile', icon: 'save-3', shortcutId: 'editor_save', keywords: ['save', 'file', 'editor'], order: 10 }, async () => {
+    if (await executeActiveFileEditorCommand(FILE_EDITOR_COMMAND_IDS.save)) return;
     const workspaceId = getActiveWorkbenchWorkspaceId();
     if (!workspaceId) return;
     const tab = activeEditorTab(ensureEditorWorkbench(workspaceId));
@@ -89,6 +106,24 @@ const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
       reportFailure('Failed to save file', error);
     }
   }),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.saveAll, titleKey: 'commandPalette.item.saveAllFiles', icon: 'save-3', keywords: ['save', 'all', 'files'], order: 11 }, FILE_EDITOR_COMMAND_IDS.saveAll),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.find, titleKey: 'commandPalette.item.findInFile', icon: 'search', shortcutId: 'editor_find', keywords: ['find', 'search', 'file'], order: 12 }, FILE_EDITOR_COMMAND_IDS.find),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.replace, titleKey: 'commandPalette.item.replaceInFile', icon: 'edit', shortcutId: 'editor_replace', keywords: ['replace', 'find', 'file'], order: 13 }, FILE_EDITOR_COMMAND_IDS.replace),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.goToLine, titleKey: 'commandPalette.item.goToLine', icon: 'file-text', shortcutId: 'open_go_to_line', keywords: ['go', 'line', 'editor'], order: 14 }, FILE_EDITOR_COMMAND_IDS.goToLine),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.goToSymbol, titleKey: 'commandPalette.item.goToSymbol', icon: 'list-unordered', keywords: ['go', 'symbol', 'outline'], order: 15 }, FILE_EDITOR_COMMAND_IDS.goToSymbol),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.format, titleKey: 'commandPalette.item.formatDocument', icon: 'code', keywords: ['format', 'document', 'editor'], order: 16 }, FILE_EDITOR_COMMAND_IDS.format),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.rename, titleKey: 'commandPalette.item.renameSymbol', icon: 'edit-2', shortcutId: 'editor_rename', keywords: ['rename', 'symbol', 'refactor'], order: 17 }, FILE_EDITOR_COMMAND_IDS.rename),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.quickFix, titleKey: 'commandPalette.item.quickFix', icon: 'code-ai', shortcutId: 'editor_quick_fix', keywords: ['quick', 'fix', 'code action'], order: 18 }, FILE_EDITOR_COMMAND_IDS.quickFix),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.definition, titleKey: 'commandPalette.item.goToDefinition', icon: 'file-search', keywords: ['definition', 'go', 'symbol'], order: 19 }, FILE_EDITOR_COMMAND_IDS.definition),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.references, titleKey: 'commandPalette.item.findReferences', icon: 'menu-search', keywords: ['references', 'find', 'symbol'], order: 20 }, FILE_EDITOR_COMMAND_IDS.references),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.fold, titleKey: 'commandPalette.item.foldRegion', icon: 'menu-fold-2', keywords: ['fold', 'collapse', 'code'], order: 21 }, FILE_EDITOR_COMMAND_IDS.fold),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.unfold, titleKey: 'commandPalette.item.unfoldRegion', icon: 'menu-fold-2', keywords: ['unfold', 'expand', 'code'], order: 22 }, FILE_EDITOR_COMMAND_IDS.unfold),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.toggleWrap, titleKey: 'commandPalette.item.toggleEditorWrap', icon: 'text-wrap', keywords: ['wrap', 'line', 'editor'], order: 23 }, FILE_EDITOR_COMMAND_IDS.toggleWrap),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.toggleMinimap, titleKey: 'commandPalette.item.toggleEditorMinimap', icon: 'file-list-2', keywords: ['minimap', 'editor', 'toggle'], order: 24 }, FILE_EDITOR_COMMAND_IDS.toggleMinimap),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.cursorAbove, titleKey: 'commandPalette.item.addCursorAbove', icon: 'cursor', shortcutId: 'editor_cursor_above', keywords: ['cursor', 'above', 'multi cursor'], order: 25 }, FILE_EDITOR_COMMAND_IDS.cursorAbove),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.cursorBelow, titleKey: 'commandPalette.item.addCursorBelow', icon: 'cursor', shortcutId: 'editor_cursor_below', keywords: ['cursor', 'below', 'multi cursor'], order: 26 }, FILE_EDITOR_COMMAND_IDS.cursorBelow),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.focusPreviousGroup, titleKey: 'commandPalette.item.focusPreviousEditorGroup', icon: 'arrow-left', keywords: ['focus', 'previous', 'editor group'], order: 27 }, FILE_EDITOR_COMMAND_IDS.focusPreviousGroup),
+  editorCommand({ commandId: FILE_EDITOR_COMMAND_IDS.focusNextGroup, titleKey: 'commandPalette.item.focusNextEditorGroup', icon: 'arrow-right', keywords: ['focus', 'next', 'editor group'], order: 28 }, FILE_EDITOR_COMMAND_IDS.focusNextGroup),
 ];
 
 export const registerBuiltinWorkbenchCommands = (context: SurfaceActivationContext): void => {

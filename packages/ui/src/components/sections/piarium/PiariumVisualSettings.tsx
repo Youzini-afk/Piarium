@@ -66,6 +66,7 @@ import type { TerminalShellOption } from '@/lib/api/types';
 import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { Icon } from '@/components/icon/Icon';
+import { FileEditorPreferencesSettings } from './FileEditorPreferencesSettings';
 
 interface Option<T extends string> {
     id: T;
@@ -300,6 +301,7 @@ type VisibleSetting =
     | 'followUpBehavior'
     | 'terminalQuickKeys'
     | 'fileEditorKeymap'
+    | 'fileEditorPreferences'
     | 'persistDraft'
     | 'inputSpellcheck'
     | 'reportUsage'
@@ -1505,6 +1507,8 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
                         ) : null}
                     </SettingsSection>
                 )}
+
+                {shouldShow('fileEditorPreferences') && !isMobile && !isVSCode ? <FileEditorPreferencesSettings /> : null}
 
                 {/* --- Navigation --- */}
                 {hasNavigationSettings && (

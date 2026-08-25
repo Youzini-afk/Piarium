@@ -1,6 +1,7 @@
 import type { PiRuntimeSnapshot } from '@piarium/protocol';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { FileEditorSettingsPatch } from '@/lib/file-editor-settings';
 import type {
   PiariumExtensionActualState,
   PiariumExtensionAssetPayload,
@@ -703,6 +704,7 @@ export interface SettingsPayload {
   terminalShell?: TerminalShell;
   terminalLoginShells?: TerminalShell[];
   editorFontSize?: number;
+  fileEditorSettings?: FileEditorSettingsPatch;
   uiFont?: string;
   monoFont?: string;
   padding?: number;

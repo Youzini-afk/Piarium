@@ -18,6 +18,7 @@ import {
 import { WorkbenchShellStagingHost } from './workbench-shell-staging';
 import { useWorkbenchWorkspace } from './workbench-workspace';
 import { resolveWorkbenchShellView } from './workbench-shell-view';
+import { WorkbenchProfileProvider } from '@/lib/workbench/profile-provider';
 
 const LOADING_SHELL = <div className="h-full min-h-0 w-full bg-background" />;
 
@@ -156,7 +157,7 @@ export const WorkbenchShellHost: React.FC<{
   return (
     <>
       <WorkbenchShellStagingHost />
-      {content}
+      <WorkbenchProfileProvider profileId={resolvedProfileId}>{content}</WorkbenchProfileProvider>
     </>
   );
 };

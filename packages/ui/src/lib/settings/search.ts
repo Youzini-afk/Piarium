@@ -169,6 +169,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['editor', 'vim', 'keymap'],
   },
   {
+    id: 'appearance.file-editor',
+    page: 'general',
+    titleKey: 'settings.piarium.editor.section.title',
+    descriptionKey: 'settings.piarium.editor.section.description',
+    keywords: ['editor', 'minimap', 'wrap', 'whitespace', 'indentation', 'format'],
+  },
+  {
     id: 'appearance.terminal-quick-keys',
     page: 'general',
     titleKey: 'settings.piarium.visual.field.terminalQuickKeys',

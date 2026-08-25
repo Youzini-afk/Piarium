@@ -151,6 +151,7 @@ const GeneralSectionContent: React.FC = () => {
             {showPasskeySettings && <PasskeySettings />}
             <PiariumVisualSettings visibleSettings={[
                 'fileEditorKeymap',
+                'fileEditorPreferences',
                 'autoSaveEnabled',
                 'expandedEditorToolbar',
                 ...(!isVSCode ? ['terminalQuickKeys' as const] : []),

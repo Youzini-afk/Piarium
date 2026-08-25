@@ -5,6 +5,7 @@ import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
 import { isApplyingAuthoritativeSettings } from '@/lib/settingsApplication';
+import type { FileEditorSettings } from '@/lib/file-editor-settings';
 
 type AppearanceSlice = {
   showReasoningTraces: boolean;
@@ -40,6 +41,7 @@ type AppearanceSlice = {
   terminalShell: TerminalShell;
   terminalLoginShells: TerminalShell[];
   editorFontSize: number;
+  fileEditorSettings: FileEditorSettings;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -88,6 +90,7 @@ export const startAppearanceAutoSave = (): void => {
     terminalShell: useUIStore.getState().terminalShell,
     terminalLoginShells: useUIStore.getState().terminalLoginShells,
     editorFontSize: useUIStore.getState().editorFontSize,
+    fileEditorSettings: useUIStore.getState().fileEditorSettings,
     uiFont: useUIStore.getState().uiFont,
     monoFont: useUIStore.getState().monoFont,
     padding: useUIStore.getState().padding,
@@ -128,6 +131,7 @@ export const startAppearanceAutoSave = (): void => {
       terminalShell: state.terminalShell,
       terminalLoginShells: state.terminalLoginShells,
       editorFontSize: state.editorFontSize,
+      fileEditorSettings: state.fileEditorSettings,
       uiFont: state.uiFont,
       monoFont: state.monoFont,
       padding: state.padding,
@@ -228,6 +232,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.editorFontSize !== previous.editorFontSize) {
       diff.editorFontSize = current.editorFontSize;
+    }
+    if (current.fileEditorSettings !== previous.fileEditorSettings) {
+      diff.fileEditorSettings = current.fileEditorSettings;
     }
     if (current.uiFont !== previous.uiFont) {
       diff.uiFont = current.uiFont;

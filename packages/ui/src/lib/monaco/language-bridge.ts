@@ -10,7 +10,9 @@ import {
   getLanguageDiagnosticsForResource,
   subscribeLanguageDiagnostics,
 } from '@/lib/language-services/diagnostics-registry';
-import { languageIdFromResourceId } from '@/lib/language-services/language-id';
+import {
+  languageIdsFromResourceId,
+} from '@/lib/language-services/language-id';
 import {
   acquireLanguageDocument,
   getBoundLanguageServices,
@@ -24,6 +26,7 @@ import type { MonacoRuntime } from './runtime';
 type LanguageEntry = {
   identity: DocumentIdentity;
   languageId: string;
+  monacoLanguageId: string;
   lastDocumentVersion: number;
   lastBaseRevision: string | null;
   model: editor.ITextModel;
@@ -95,11 +98,15 @@ export class MonacoLanguageBridge {
 
     let entry = this.entriesByModel.get(model);
     if (!entry) {
-      const languageId = languageIdFromResourceId(identity.resourceId);
+      const { hostLanguageId: languageId, monacoLanguageId } = languageIdsFromResourceId(
+        identity.resourceId,
+        this.monaco.languages.getLanguages(),
+      );
       const record = this.modelRegistry.getRecordForModel(model);
       const created: LanguageEntry = {
         identity,
         languageId,
+        monacoLanguageId,
         lastDocumentVersion: record?.localEditRevision ?? 0,
         lastBaseRevision: record?.baseRevision ?? null,
         model,
@@ -119,8 +126,8 @@ export class MonacoLanguageBridge {
       entry = created;
       this.entriesByModel.set(model, entry);
       if (languageId !== 'plaintext') {
-        this.ensureProviders(languageId);
-        this.monaco.editor.setModelLanguage(model, languageId);
+        this.ensureProviders(monacoLanguageId);
+        this.monaco.editor.setModelLanguage(model, monacoLanguageId);
         this.acquireDocument(identity);
       }
       this.refreshMarkers(entry);
@@ -140,7 +147,7 @@ export class MonacoLanguageBridge {
     this.monaco.editor.setModelMarkers(entry.model, 'piarium-language', []);
     if (entry.languageId !== 'plaintext') {
       this.releaseDocument(entry.identity);
-      this.releaseProviders(entry.languageId);
+      this.releaseProviders(entry.monacoLanguageId);
     }
   }
 
@@ -155,16 +162,13 @@ export class MonacoLanguageBridge {
     this.providers.clear();
   }
 
-  private ensureProviders(languageId: string): void {
-    const existing = this.providers.get(languageId);
+  private ensureProviders(monacoLanguageId: string): void {
+    const existing = this.providers.get(monacoLanguageId);
     if (existing) {
       existing.count += 1;
       return;
     }
-    const languageRegistration = this.monaco.languages.getLanguages().some((language) => language.id === languageId)
-      ? null
-      : this.monaco.languages.register({ id: languageId });
-    const completion = this.monaco.languages.registerCompletionItemProvider(languageId, {
+    const completion = this.monaco.languages.registerCompletionItemProvider(monacoLanguageId, {
       provideCompletionItems: async (model, position, _context, token) => {
         const entry = this.entriesByModel.get(model);
         const language = this.getLanguage();
@@ -202,7 +206,7 @@ export class MonacoLanguageBridge {
         };
       },
     });
-    const hover = this.monaco.languages.registerHoverProvider(languageId, {
+    const hover = this.monaco.languages.registerHoverProvider(monacoLanguageId, {
       provideHover: async (model, position, token) => {
         const entry = this.entriesByModel.get(model);
         const language = this.getLanguage();
@@ -226,9 +230,9 @@ export class MonacoLanguageBridge {
         return { contents: [{ value: result.value }] };
       },
     });
-    this.providers.set(languageId, {
+    this.providers.set(monacoLanguageId, {
       count: 1,
-      disposables: [...(languageRegistration ? [languageRegistration] : []), completion, hover],
+      disposables: [completion, hover],
     });
   }
 

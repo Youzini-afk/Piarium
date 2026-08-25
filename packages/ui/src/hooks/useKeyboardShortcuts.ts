@@ -213,7 +213,7 @@ export const useKeyboardShortcuts = () => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || isTerminalEventTarget(e.target)) {
+      if (e.defaultPrevented || e.key === 'Escape' || isTerminalEventTarget(e.target)) {
         return;
       }
 

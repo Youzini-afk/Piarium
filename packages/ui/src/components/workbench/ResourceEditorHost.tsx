@@ -8,6 +8,11 @@ import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
 import { DocumentMonacoEditor } from '@/components/workbench/DocumentMonacoEditor';
+import {
+  executeFileEditorCommand,
+  FILE_EDITOR_COMMAND_IDS,
+  saveFileEditorDocument,
+} from '@/lib/monaco/editor-command-service';
 import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -165,6 +170,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const [desktopImageSrc, setDesktopImageSrc] = React.useState('');
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
   const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
+  const expandedEditorToolbar = useUIStore((state) => state.expandedEditorToolbar);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
 
   React.useEffect(() => {
@@ -190,7 +196,8 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       if (current.localEditRevision !== expectedDocumentVersion) {
         return { status: 'conflict' as const, snapshot: publicDocumentSnapshot(current) };
       }
-      const next = await registry.save(identity);
+      await saveFileEditorDocument(identity);
+      const next = registry.get(identity) ?? current;
       return {
         status: next.status === 'conflict' ? 'conflict' as const : 'updated' as const,
         snapshot: publicDocumentSnapshot(next),
@@ -212,7 +219,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   React.useEffect(() => {
     if (!autoSaveEnabled || !record?.dirty || record.saving || record.status !== 'ready') return;
     const timer = setTimeout(() => {
-      void getDocumentRegistry().save(identity).catch((error) => {
+      void saveFileEditorDocument(identity).catch((error) => {
         console.error('[Editor] Auto-save failed:', error);
       });
     }, 1_500);
@@ -323,6 +330,43 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const toolbar = needsText ? (
     <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">
       {modeToggle}
+      {expandedEditorToolbar && !isMobile && !runtime.isVSCode ? (
+        <>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="size-7 p-0"
+            title={t('filesView.editor.findInFile')}
+            aria-label={t('filesView.editor.findInFile')}
+            onClick={() => void executeFileEditorCommand(identity, FILE_EDITOR_COMMAND_IDS.find, tab.viewId)}
+          >
+            <Icon name="search" className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="size-7 p-0"
+            title={t('filesView.editor.goToLine')}
+            aria-label={t('filesView.editor.goToLine')}
+            onClick={() => void executeFileEditorCommand(identity, FILE_EDITOR_COMMAND_IDS.goToLine, tab.viewId)}
+          >
+            <Icon name="file-text" className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="size-7 p-0"
+            title={t('commandPalette.item.toggleEditorWrap')}
+            aria-label={t('commandPalette.item.toggleEditorWrap')}
+            onClick={() => void executeFileEditorCommand(identity, FILE_EDITOR_COMMAND_IDS.toggleWrap, tab.viewId)}
+          >
+            <Icon name="text-wrap" className="size-4" />
+          </Button>
+        </>
+      ) : null}
       <Button
         type="button"
         variant="ghost"
@@ -332,7 +376,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         title={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
         aria-label={t('filesView.editor.saveAria', { shortcut: `${getModifierLabel()}+S` })}
         onClick={() => {
-          void getDocumentRegistry().save(identity).catch((error) => {
+          void saveFileEditorDocument(identity).catch((error) => {
             toast.error(error instanceof Error ? error.message : String(error));
           });
         }}

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { languageIdFromResourceId } from './language-id';
+import {
+  languageIdFromResourceId,
+  languageIdsFromResourceId,
+  monacoLanguageIdForHostLanguage,
+  monacoLanguageIdFromResourceId,
+} from './language-id';
 import {
   getLanguageDiagnosticsForResource,
   replaceLanguageDiagnostics,
@@ -10,6 +15,27 @@ import { resetWorkbenchPanelsForRuntimeSwitch } from '@/lib/workbench/editors/pa
 afterEach(() => {
   resetLanguageDiagnostics();
   resetWorkbenchPanelsForRuntimeSwitch();
+});
+
+test('Monaco tokenization aliases JSX host language identifiers without changing Host IDs', () => {
+  expect(monacoLanguageIdForHostLanguage('typescriptreact')).toBe('typescript');
+  expect(monacoLanguageIdForHostLanguage('javascriptreact')).toBe('javascript');
+  expect(monacoLanguageIdForHostLanguage('rust')).toBe('rust');
+});
+
+test('Monaco tokenization resolves registered filenames, patterns, and longest extensions', () => {
+  const definitions = [
+    { id: 'dockerfile', filenames: ['Dockerfile'] },
+    { id: 'typescript', extensions: ['.ts', '.d.ts'] },
+    { id: 'yaml', filenamePatterns: ['*.config.yml'] },
+  ];
+  expect(monacoLanguageIdFromResourceId('infra/Dockerfile', definitions)).toBe('dockerfile');
+  expect(monacoLanguageIdFromResourceId('src/types.d.ts', definitions)).toBe('typescript');
+  expect(monacoLanguageIdFromResourceId('build/app.config.yml', definitions)).toBe('yaml');
+  expect(languageIdsFromResourceId('src/component.tsx', [{ id: 'typescript', extensions: ['.tsx'] }])).toEqual({
+    hostLanguageId: 'typescriptreact',
+    monacoLanguageId: 'typescript',
+  });
 });
 
 describe('language id', () => {

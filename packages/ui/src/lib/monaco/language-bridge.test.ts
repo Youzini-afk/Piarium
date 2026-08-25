@@ -173,7 +173,7 @@ describe('MonacoLanguageBridge', () => {
     bridge.release('view:one');
     expect(releaseDocument).toHaveBeenCalledWith(identity);
     expect(markers.at(-1)).toEqual([]);
-    expect(providerDispose).toHaveBeenCalledTimes(3);
+    expect(providerDispose).toHaveBeenCalledTimes(2);
     bridge.dispose();
   });
 });

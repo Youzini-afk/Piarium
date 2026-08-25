@@ -98,10 +98,13 @@ class FakeEditor {
   private cursor = new FakePosition(1, 1);
   private selection = new FakeSelection(1, 1, 1, 1);
   private readonly keyListeners = new Set<(event: IKeyboardEvent) => void>();
+  readonly options: Record<string, unknown> = { cursorBlinking: 'blink', cursorStyle: 'line' };
 
   getModel(): editor.ITextModel { return this.model as unknown as editor.ITextModel; }
   getPosition(): import('monaco-editor/editor').Position { return this.cursor as unknown as import('monaco-editor/editor').Position; }
   getSelection(): import('monaco-editor/editor').Selection { return this.selection as unknown as import('monaco-editor/editor').Selection; }
+  getRawOptions(): editor.IEditorOptions { return this.options as editor.IEditorOptions; }
+  updateOptions(options: editor.IEditorOptions): void { Object.assign(this.options, options); }
   setPosition(position: FakePosition): void {
     this.cursor = position;
     this.selection = new FakeSelection(position.lineNumber, position.column, position.lineNumber, position.column);
@@ -179,6 +182,7 @@ describe('Piarium Monaco Vim adapter', () => {
     });
 
     expect(adapter.mode()).toBe('normal');
+    expect(editorInstance.options.cursorStyle).toBe('block');
     editorInstance.simulate('i');
     expect(adapter.mode()).toBe('insert');
     editorInstance.simulate('Escape');
@@ -191,6 +195,19 @@ describe('Piarium Monaco Vim adapter', () => {
     editorInstance.simulate('d');
     editorInstance.simulate('d');
     expect(editorInstance.model.value).toBe('two');
+
+    editorInstance.model.value = 'one\ntwo\nthree\nfour';
+    editorInstance.setPosition(new FakePosition(1, 1));
+    editorInstance.simulate('3');
+    editorInstance.simulate('j');
+    expect(editorInstance.getPosition().lineNumber).toBe(4);
+    editorInstance.simulate('2');
+    editorInstance.simulate('d');
+    editorInstance.simulate('d');
+    expect(editorInstance.model.value).toBe('one\ntwo\nthree');
+
+    editorInstance.simulate('i', { isComposing: true });
+    expect(adapter.mode()).toBe('normal');
 
     editorInstance.simulate('/');
     expect(editorInstance.find).toHaveBeenCalledTimes(1);
@@ -205,6 +222,7 @@ describe('Piarium Monaco Vim adapter', () => {
     expect(save).toHaveBeenCalledTimes(1);
 
     adapter.dispose();
+    expect(editorInstance.options.cursorStyle).toBe('line');
     expect(statusNode.children).toEqual([]);
     editorInstance.simulate('i');
     expect(adapter.mode()).toBe('normal');

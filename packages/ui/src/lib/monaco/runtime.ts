@@ -1,4 +1,5 @@
 import { markMonacoPerformance } from './performance';
+import { registerPiariumTokenizationLanguages } from './local-language-definitions';
 
 export type MonacoRuntime = typeof import('monaco-editor/editor');
 
@@ -40,6 +41,7 @@ type MonacoRuntimeDependencies = {
   environmentHost: MonacoEnvironmentHost;
   loadEditor(): Promise<MonacoRuntime>;
   loadEditorFeatures(): Promise<void>;
+  loadLanguageDefinitions(): Promise<void>;
   loadEditorWorkerUrl(): Promise<string>;
 };
 
@@ -129,6 +131,7 @@ export const createMonacoRuntimeController = (
       const [loaded] = await Promise.all([
         dependencies.loadEditor(),
         dependencies.loadEditorFeatures(),
+        dependencies.loadLanguageDefinitions(),
       ]);
       runtime = loaded;
       publish({
@@ -174,6 +177,13 @@ const defaultController = createMonacoRuntimeController({
   environmentHost: globalThis as unknown as MonacoEnvironmentHost,
   loadEditor: () => import('monaco-editor/editor'),
   loadEditorFeatures: () => import('monaco-editor/features/register.all').then(() => undefined),
+  loadLanguageDefinitions: async () => {
+    const [monaco] = await Promise.all([
+      import('monaco-editor/editor'),
+      import('monaco-editor/basic-languages/monaco.contribution'),
+    ]);
+    registerPiariumTokenizationLanguages(monaco);
+  },
   loadEditorWorkerUrl: () => import('monaco-editor/editor/editor.worker?worker&url')
     .then(({ default: workerUrl }) => workerUrl),
 });

@@ -1,6 +1,6 @@
 # Piarium 统一文件编辑器平台设计
 
-Status: Phase 2 已完成；Phase 3 待实施
+Status: Phase 3 已完成；Phase 4 待实施
 
 Last updated: 2026-08-25
 
@@ -669,6 +669,27 @@ Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor 
 
 验收使用真实用户 journey 与 targeted interaction tests；不因新增若干 commands 重跑 Docker 或
 桌面安装矩阵。
+
+完成证据（2026-08-25）：
+
+- lazy Monaco runtime 同时装载公开 editor features 与 basic language definitions；TSX/JSX 只在
+  Monaco tokenization 侧映射为 `typescript`/`javascript`，Host 请求仍保留原始 language ID。构建
+  继续拒绝 `editor.main`、`languages/features/*` 与 TS/JS/JSON/CSS/HTML semantic worker；
+- `default` 与 `piarium.ide` 分别投影 `agent-compact`、`ide-full` 呈现预设。word wrap、minimap、
+  sticky scroll、line numbers、whitespace、indentation、folding、auto closing、ligatures、smooth
+  scrolling、format-on-type/save 与 accessibility 由同一设置对象覆盖，切换 Profile 只更新 editor
+  options，不重建 model 或清空 undo；
+- 文件编辑设置通过现有 Settings authority 在 Web/Electron 间同步。malformed 字段只被丢弃并保留
+  上次有效字段；缺失字段使用产品默认。Agent/mobile/VS Code 不显示无消费者的 Monaco 设置；
+- active editor target 被投影到 Piarium command catalog、legacy workbench menu/context adapter 与
+  用户 shortcut override。save/save all、find/replace、line/symbol、format、rename、quick fix、
+  definition/references、fold、wrap/minimap、多光标和 editor-group focus 不维护第二套命令元数据；
+- expanded editor toolbar 成为真实消费者，提供 find、go-to-line 与 wrap；所有可见保存入口（手动、
+  自动、Vim、extension document save）共用 format-on-save 后再写 Document Registry 的路径；
+- Monaco theme 支持 Piarium `high-contrast` tag；编辑器启用 ARIA、bracket/indent guides、IME-safe
+  Vim handling。Vim 增加 mode cursor、counted motion/edit/paste、相对行号兼容与 clean restore；
+- 聚焦 settings/persistence/options/command/language/theme/Vim 测试通过，UI type-check 与 i18n parity
+  通过；production Web build 和 Monaco module-graph assertion 继续只产出 editor worker。
 
 ### Phase 4 — Rich LanguageServicesAPI 与 Monaco bridge
 

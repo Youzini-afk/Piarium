@@ -42,6 +42,7 @@ const requiredSourcePatterns = [
   /monaco-editor\/esm\/vs\/editor\/editor\.api\.js$/,
   /monaco-editor\/esm\/vs\/editor\/contrib\/find\//,
   /monaco-editor\/esm\/vs\/editor\/editor\.worker\.js$/,
+  /monaco-editor\/esm\/vs\/languages\/definitions\/typescript\/register\.js$/,
 ];
 for (const pattern of requiredSourcePatterns) {
   if (!allSources.some((source) => pattern.test(source))) {

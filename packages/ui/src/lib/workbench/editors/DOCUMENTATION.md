@@ -15,7 +15,8 @@ this kernel; they do not own document buffers, disk revisions, or layout schema.
   background work. A provider that declares no languages, filenames, or fallback is never selected
   by resolution and is reachable only through an explicit request.
 - `commands.ts` / `context-keys.ts` / `menus.ts` — owner-scoped commands, per-key context subscribe,
-  `when` menu projection
+  `when` menu projection. The Monaco command service adapts the focused editor into these contracts;
+  the user-facing command catalog remains the Piarium surface-command registry.
 - `panels.ts` — terminal/problems/output container; empty is distinct from failure
 - `view-state-core.ts` — framework-neutral provider ID/schema/JSON state and selection summary
 - `view-state.ts` — mobile/embedded CodeMirror capture and restore; desktop/Web Monaco owns its payload
@@ -47,6 +48,10 @@ Desktop/Web official text tabs project the Document Registry into a shared Monac
 survive Shell/Profile remounts; visible views own only Monaco editor DOM, layout, language subscriptions,
 and decorations. Mobile keeps the document-bound CodeMirror adapter, and VS Code companion keeps the
 host editor rather than loading another Monaco instance.
+
+Workbench Profile context supplies presentation defaults only. Agent uses a compact editor surface and
+IDE enables the full minimap/sticky-scroll presentation, while validated user settings override both.
+Profile changes update live options and never create a second buffer, dirty flag, save path, or undo stack.
 
 The official IDE layout is a versioned split/stack/editor-area document stored by the
 `piarium.workbench.layout` v1 Host service in profile/workspace-scoped extension storage. Missing

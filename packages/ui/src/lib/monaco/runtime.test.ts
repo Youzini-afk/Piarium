@@ -14,6 +14,7 @@ describe('Monaco runtime controller', () => {
     const environmentHost = { Worker: class {} };
     const loadEditor = vi.fn(async () => fakeRuntime);
     const loadEditorFeatures = vi.fn(async () => undefined);
+    const loadLanguageDefinitions = vi.fn(async () => undefined);
     const loadEditorWorkerUrl = vi.fn(async () => '/assets/editor.worker.js');
     const createWorker = vi.fn(() => fakeWorker());
     const controller = createMonacoRuntimeController({
@@ -21,6 +22,7 @@ describe('Monaco runtime controller', () => {
       environmentHost,
       loadEditor,
       loadEditorFeatures,
+      loadLanguageDefinitions,
       loadEditorWorkerUrl,
     });
 
@@ -29,6 +31,7 @@ describe('Monaco runtime controller', () => {
     expect(second).toBe(fakeRuntime);
     expect(loadEditor).toHaveBeenCalledTimes(1);
     expect(loadEditorFeatures).toHaveBeenCalledTimes(1);
+    expect(loadLanguageDefinitions).toHaveBeenCalledTimes(1);
     expect(loadEditorWorkerUrl).toHaveBeenCalledTimes(1);
     expect(controller.getSnapshot().status).toBe('ready');
 
@@ -47,6 +50,7 @@ describe('Monaco runtime controller', () => {
       environmentHost,
       loadEditor: async () => fakeRuntime,
       loadEditorFeatures: async () => undefined,
+      loadLanguageDefinitions: async () => undefined,
       loadEditorWorkerUrl: async () => '/assets/editor.worker.js',
     });
     await controller.load();
@@ -69,6 +73,7 @@ describe('Monaco runtime controller', () => {
       environmentHost,
       loadEditor: async () => fakeRuntime,
       loadEditorFeatures: async () => undefined,
+      loadLanguageDefinitions: async () => undefined,
       loadEditorWorkerUrl: async () => '/assets/editor.worker.js',
     });
 
@@ -86,6 +91,7 @@ describe('Monaco runtime controller', () => {
       environmentHost: {},
       loadEditor: async () => fakeRuntime,
       loadEditorFeatures: async () => undefined,
+      loadLanguageDefinitions: async () => undefined,
       loadEditorWorkerUrl: async () => '/assets/editor.worker.js',
     });
 

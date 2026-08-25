@@ -3,7 +3,6 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
-import { getDocumentRegistry } from '@/lib/documents/session';
 import { useDocumentRecord } from '@/lib/documents/hooks';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { cn } from '@/lib/utils';
@@ -18,6 +17,9 @@ import { loadMonacoRuntime, type MonacoRuntime } from '@/lib/monaco/runtime';
 import { registerPiariumMonacoTheme } from '@/lib/monaco/theme';
 import { applyMonacoEditorViewState, captureMonacoEditorViewState } from '@/lib/monaco/view-state';
 import { createPiariumMonacoVimAdapter } from '@/lib/monaco/vim-adapter';
+import { applyMonacoModelSettings, createMonacoEditorOptions } from '@/lib/monaco/editor-options';
+import { registerFileEditorCommandTarget, saveFileEditorDocument } from '@/lib/monaco/editor-command-service';
+import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 
 type DocumentMonacoEditorProps = {
   className?: string;
@@ -39,7 +41,10 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const editorFontSize = useUIStore((state) => state.editorFontSize);
+  const fileEditorSettings = useUIStore((state) => state.fileEditorSettings);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
+  const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
+  const profileId = useWorkbenchProfileId();
   const record = useDocumentRecord(identity);
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const vimStatusRef = React.useRef<HTMLDivElement | null>(null);
@@ -84,17 +89,29 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   }, [currentTheme, monaco]);
 
   React.useEffect(() => {
-    editorRef.current?.updateOptions({ fontSize: editorFontSize });
-  }, [editorFontSize]);
+    const editorInstance = editorRef.current;
+    if (!editorInstance) return;
+    applyMonacoModelSettings(editorInstance.getModel()!, fileEditorSettings);
+    editorInstance.updateOptions(createMonacoEditorOptions({
+      ariaLabel: path,
+      fontSize: editorFontSize,
+      profileId,
+      settings: fileEditorSettings,
+    }));
+  }, [editorFontSize, fileEditorSettings, path, profileId]);
 
   React.useEffect(() => {
     const host = hostRef.current;
     if (!host || !monaco || modelSnapshot.status !== 'ready') return undefined;
     const themeName = registerPiariumMonacoTheme(monaco, currentTheme);
+    applyMonacoModelSettings(modelSnapshot.model, fileEditorSettings);
     const editorInstance = monaco.editor.create(host, {
-      automaticLayout: false,
-      fontFamily: 'var(--font-mono)',
-      fontSize: editorFontSize,
+      ...createMonacoEditorOptions({
+        ariaLabel: path,
+        fontSize: editorFontSize,
+        profileId,
+        settings: fileEditorSettings,
+      }),
       model: modelSnapshot.model,
       theme: themeName,
     });
@@ -142,12 +159,6 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       editorInstance.onDidScrollChange(scheduleCapture),
       editorInstance.onDidChangeHiddenAreas(scheduleCapture),
     ];
-    editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      void getDocumentRegistry().save(identity).catch((error) => {
-        console.error('[Editor] Save failed:', error);
-      });
-    });
-
     const resizeObserver = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => editorInstance.layout())
       : null;
@@ -167,9 +178,29 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       setEditorInstance(null);
       editorInstance.dispose();
     };
-    // Theme and font changes update the live editor separately; neither may recreate the view/model.
+    // Theme, profile presentation and settings update the live editor separately; none may recreate the view/model.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, viewId]);
+
+  React.useEffect(() => {
+    if (!monaco || !editorInstance) return undefined;
+    return registerFileEditorCommandTarget({
+      editor: editorInstance,
+      identity,
+      ownerId,
+      getSettings: () => useUIStore.getState().fileEditorSettings,
+      getShortcutOverrides: () => useUIStore.getState().shortcutOverrides,
+      updateSettings: updateFileEditorSettings,
+      viewId,
+    });
+  }, [
+    editorInstance,
+    identity,
+    monaco,
+    ownerId,
+    updateFileEditorSettings,
+    viewId,
+  ]);
 
   React.useEffect(() => {
     const statusNode = vimStatusRef.current;
@@ -179,7 +210,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       editor: editorInstance,
       monaco,
       onSave: () => {
-        void getDocumentRegistry().save(identity).catch((error) => {
+        void saveFileEditorDocument(identity).catch((error) => {
           console.error('[Editor] Save failed:', error);
         });
       },

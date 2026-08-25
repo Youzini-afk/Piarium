@@ -105,10 +105,59 @@ export function keyToShortcutToken(key: string): string {
 
 const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
+    id: 'editor_save',
+    defaultCombo: 'mod+s',
+    label: 'Save active file',
+    description: 'Save the active file editor',
+    customizable: true,
+  },
+  {
+    id: 'editor_find',
+    defaultCombo: 'mod+f',
+    label: 'Find in active file',
+    description: 'Open find in the active file editor',
+    customizable: true,
+  },
+  {
+    id: 'editor_replace',
+    defaultCombo: 'mod+h',
+    label: 'Replace in active file',
+    description: 'Open find and replace in the active file editor',
+    customizable: true,
+  },
+  {
     id: 'open_go_to_line',
     defaultCombo: 'alt+g',
     label: 'Go to line (files editor)',
     description: 'Open go to line in the files editor',
+    customizable: true,
+  },
+  {
+    id: 'editor_rename',
+    defaultCombo: 'f2',
+    label: 'Rename symbol',
+    description: 'Rename the symbol at the active editor cursor',
+    customizable: true,
+  },
+  {
+    id: 'editor_quick_fix',
+    defaultCombo: 'mod+period',
+    label: 'Quick fix',
+    description: 'Show code actions for the active editor selection',
+    customizable: true,
+  },
+  {
+    id: 'editor_cursor_above',
+    defaultCombo: 'mod+alt+arrowup',
+    label: 'Add cursor above',
+    description: 'Add another cursor above the active cursor',
+    customizable: true,
+  },
+  {
+    id: 'editor_cursor_below',
+    defaultCombo: 'mod+alt+arrowdown',
+    label: 'Add cursor below',
+    description: 'Add another cursor below the active cursor',
     customizable: true,
   },
   {

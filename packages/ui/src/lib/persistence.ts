@@ -20,6 +20,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpoin
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 import { applyAuthoritativeSettings } from '@/lib/settingsApplication';
+import { sanitizeFileEditorSettingsPatch } from '@/lib/file-editor-settings';
 import {
   usePreferencesStore,
   type PreferencesState,
@@ -502,6 +503,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     terminalShell: defaults.terminalShell,
     terminalLoginShells: defaults.terminalLoginShells,
     editorFontSize: defaults.editorFontSize,
+    fileEditorSettings: defaults.fileEditorSettings,
     uiFont: defaults.uiFont,
     monoFont: defaults.monoFont,
     padding: defaults.padding,
@@ -753,6 +755,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => applyAuthoritat
   }
   if (typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize) && settings.editorFontSize !== store.editorFontSize) {
     store.setEditorFontSize(settings.editorFontSize);
+  }
+  if (settings.fileEditorSettings) {
+    const next = { ...store.fileEditorSettings, ...settings.fileEditorSettings };
+    if (JSON.stringify(next) !== JSON.stringify(store.fileEditorSettings)) {
+      store.updateFileEditorSettings(settings.fileEditorSettings);
+    }
   }
   if (isUiFontOption(settings.uiFont) && settings.uiFont !== store.uiFont) {
     store.setUiFont(settings.uiFont);
@@ -1342,6 +1350,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
     result.editorFontSize = candidate.editorFontSize;
+  }
+  const fileEditorSettings = sanitizeFileEditorSettingsPatch(candidate.fileEditorSettings);
+  if (fileEditorSettings) {
+    result.fileEditorSettings = fileEditorSettings;
   }
   if (isUiFontOption(candidate.uiFont)) {
     result.uiFont = candidate.uiFont;

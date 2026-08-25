@@ -13,9 +13,12 @@ export const createPiariumMonacoTheme = (theme: Theme): editor.IStandaloneThemeD
   const tokens = theme.colors.syntax.tokens ?? {};
   const highlights = theme.colors.syntax.highlights ?? {};
   const { interactive, status, surface } = theme.colors;
+  const highContrast = theme.metadata.tags.some((tag) => tag.toLowerCase() === 'high-contrast');
 
   return {
-    base: theme.metadata.variant === 'dark' ? 'vs-dark' : 'vs',
+    base: highContrast
+      ? (theme.metadata.variant === 'dark' ? 'hc-black' : 'hc-light')
+      : (theme.metadata.variant === 'dark' ? 'vs-dark' : 'vs'),
     inherit: true,
     rules: [
       { token: '', foreground: tokenColor(base.foreground) },
@@ -69,6 +72,9 @@ export const createPiariumMonacoTheme = (theme: Theme): editor.IStandaloneThemeD
       'editorWidget.background': surface.elevated,
       'editorWidget.foreground': surface.elevatedForeground,
       'editorWidget.border': interactive.border,
+      'editorStickyScroll.background': surface.background,
+      'editorStickyScroll.border': interactive.border,
+      'editorStickyScrollHover.background': surface.overlay,
       'editorError.foreground': status.error,
       'editorWarning.foreground': status.warning,
       'editorInfo.foreground': status.info,
@@ -77,6 +83,12 @@ export const createPiariumMonacoTheme = (theme: Theme): editor.IStandaloneThemeD
       'diffEditor.insertedLineBackground': highlights.diffAddedBackground ?? status.successBackground,
       'diffEditor.removedLineBackground': highlights.diffRemovedBackground ?? status.errorBackground,
       'minimap.background': surface.background,
+      'minimap.selectionHighlight': interactive.selection,
+      'minimap.findMatchHighlight': interactive.active,
+      'editorOverviewRuler.border': interactive.border,
+      'editorOverviewRuler.errorForeground': status.error,
+      'editorOverviewRuler.warningForeground': status.warning,
+      'editorOverviewRuler.infoForeground': status.info,
       'scrollbarSlider.background': interactive.hover,
       'scrollbarSlider.hoverBackground': interactive.active,
       'scrollbarSlider.activeBackground': interactive.selection,
@@ -93,4 +105,3 @@ export const registerPiariumMonacoTheme = (
   monaco.editor.defineTheme(name, createPiariumMonacoTheme(theme));
   return name;
 };
-

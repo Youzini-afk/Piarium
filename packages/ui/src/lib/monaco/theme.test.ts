@@ -31,5 +31,12 @@ describe('Piarium Monaco theme projection', () => {
     createPiariumMonacoTheme(theme);
     expect(theme).toEqual(original);
   });
-});
 
+  test('uses Monaco high-contrast primitives only when the Piarium theme declares that contract', () => {
+    const theme = getDefaultTheme(true);
+    expect(createPiariumMonacoTheme({
+      ...theme,
+      metadata: { ...theme.metadata, tags: [...theme.metadata.tags, 'high-contrast'] },
+    }).base).toBe('hc-black');
+  });
+});

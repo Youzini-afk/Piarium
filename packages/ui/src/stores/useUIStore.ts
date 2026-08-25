@@ -10,6 +10,12 @@ import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobi
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { TerminalShell } from '@/lib/api/types';
 import type { RecoveryPreference } from '@piarium/protocol';
+import {
+  DEFAULT_FILE_EDITOR_SETTINGS,
+  normalizeFileEditorSettings,
+  type FileEditorSettings,
+  type FileEditorSettingsPatch,
+} from '@/lib/file-editor-settings';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
@@ -544,6 +550,7 @@ interface UIStore {
   terminalShell: TerminalShell;
   terminalLoginShells: TerminalShell[];
   editorFontSize: number;
+  fileEditorSettings: FileEditorSettings;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -706,6 +713,8 @@ interface UIStore {
   setTerminalShell: (shell: TerminalShell) => void;
   setTerminalLoginShells: (shells: TerminalShell[]) => void;
   setEditorFontSize: (size: number) => void;
+  updateFileEditorSettings: (patch: FileEditorSettingsPatch) => void;
+  resetFileEditorSettings: () => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
   setPadding: (size: number) => void;
@@ -864,6 +873,7 @@ export const useUIStore = create<UIStore>()(
         terminalShell: 'auto',
         terminalLoginShells: [],
         editorFontSize: 13,
+        fileEditorSettings: { ...DEFAULT_FILE_EDITOR_SETTINGS },
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
         padding: 100,
@@ -1704,6 +1714,16 @@ export const useUIStore = create<UIStore>()(
           set({ editorFontSize: clamped });
         },
 
+        updateFileEditorSettings: (patch) => {
+          set((state) => ({
+            fileEditorSettings: normalizeFileEditorSettings(patch, state.fileEditorSettings),
+          }));
+        },
+
+        resetFileEditorSettings: () => {
+          set({ fileEditorSettings: { ...DEFAULT_FILE_EDITOR_SETTINGS } });
+        },
+
         setUiFont: (font) => {
           set({ uiFont: font });
         },
@@ -2224,6 +2244,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'piarium.ui.v1',
         storage: createDeferredSafeJSONStorage(),
+        merge: (persisted, current) => {
+          const saved = persisted && typeof persisted === 'object'
+            ? persisted as Partial<UIStore>
+            : {};
+          return {
+            ...current,
+            ...saved,
+            fileEditorSettings: normalizeFileEditorSettings(
+              saved.fileEditorSettings,
+              current.fileEditorSettings,
+            ),
+          };
+        },
         partialize: (state) => ({
           theme: state.theme,
           isSidebarOpen: state.isSidebarOpen,
@@ -2267,6 +2300,7 @@ export const useUIStore = create<UIStore>()(
           terminalShell: state.terminalShell,
           terminalLoginShells: state.terminalLoginShells,
           editorFontSize: state.editorFontSize,
+          fileEditorSettings: state.fileEditorSettings,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
           padding: state.padding,

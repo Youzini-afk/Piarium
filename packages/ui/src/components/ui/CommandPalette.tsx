@@ -34,6 +34,10 @@ import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { getSettingsNavIcon, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { useSettingsPageRegistrations } from '@/lib/settings/surface-registry';
 import { useWorkbenchCommandRegistrations } from '@/lib/commands/surface-command-registry';
+import {
+  getFileEditorCommandTargetRevision,
+  subscribeFileEditorCommandTargets,
+} from '@/lib/monaco/editor-command-service';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
 import { scoreByFuzzyQuery } from '@/lib/search/fuzzySearch';
@@ -92,6 +96,11 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const workspaceId = useWorkbenchWorkspaceId();
+  const fileEditorCommandTargetRevision = React.useSyncExternalStore(
+    subscribeFileEditorCommandTargets,
+    getFileEditorCommandTargetRevision,
+    getFileEditorCommandTargetRevision,
+  );
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
 
   const sessionSummaries = usePiSessionStore(React.useCallback(
@@ -185,6 +194,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   // Commands
   // ---------------------------------------------------------------------------
   const commands = React.useMemo<CommandEntry[]>(() => {
+    void fileEditorCommandTargetRevision;
     const executionContext = { currentDirectory, isMobile };
     return workbenchCommandRegistrations
       .filter((registration) => registration.implementation.isAvailable?.(executionContext) ?? true)
@@ -205,6 +215,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   }, [
     currentDirectory,
     isMobile,
+    fileEditorCommandTargetRevision,
     run,
     t,
     workbenchCommandRegistrations,

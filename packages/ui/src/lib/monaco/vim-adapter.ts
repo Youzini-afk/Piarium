@@ -31,9 +31,14 @@ export const createPiariumMonacoVimAdapter = (
   statusNode.replaceChildren(modeNode, keyNode);
   let mode: VimMode = 'normal';
   let pending = '';
+  let count = 0;
+  let pendingCount = 1;
   let register = '';
   let registerLinewise = false;
   let visualAnchor: import('monaco-editor/editor').Position | null = null;
+  const originalOptions = editorInstance.getRawOptions();
+  const originalCursorBlinking = originalOptions.cursorBlinking;
+  const originalCursorStyle = originalOptions.cursorStyle;
 
   const model = (): editor.ITextModel | null => editorInstance.getModel();
   const position = (): import('monaco-editor/editor').Position | null => editorInstance.getPosition();
@@ -50,12 +55,17 @@ export const createPiariumMonacoVimAdapter = (
         : mode === 'visual-line'
           ? '-- VISUAL LINE --'
           : '-- VISUAL --';
-    keyNode.textContent = pending;
+    keyNode.textContent = `${count > 0 ? count : ''}${pending}`;
   };
   const setMode = (next: VimMode): void => {
     mode = next;
     pending = '';
+    count = 0;
     if (next !== 'visual' && next !== 'visual-line') visualAnchor = null;
+    editorInstance.updateOptions({
+      cursorBlinking: next === 'insert' ? (originalCursorBlinking ?? 'blink') : 'solid',
+      cursorStyle: next === 'insert' ? (originalCursorStyle ?? 'line') : 'block',
+    });
     updateStatus();
   };
   const moveTo = (lineNumber: number, column: number, reveal = true): void => {
@@ -99,19 +109,20 @@ export const createPiariumMonacoVimAdapter = (
     editorInstance.executeEdits('piarium.vim', [{ range, text, forceMoveMarkers: true }]);
     editorInstance.pushUndoStop();
   };
-  const currentLineRange = (): import('monaco-editor/editor').Range | null => {
+  const currentLineRange = (lineCount = 1): import('monaco-editor/editor').Range | null => {
     const current = model();
     const cursor = position();
     if (!current || !cursor) return null;
-    if (cursor.lineNumber < current.getLineCount()) {
-      return new monaco.Range(cursor.lineNumber, 1, cursor.lineNumber + 1, 1);
+    const lastLine = Math.min(current.getLineCount(), cursor.lineNumber + lineCount - 1);
+    if (lastLine < current.getLineCount()) {
+      return new monaco.Range(cursor.lineNumber, 1, lastLine + 1, 1);
     }
     if (cursor.lineNumber > 1) {
       return new monaco.Range(
         cursor.lineNumber - 1,
         current.getLineMaxColumn(cursor.lineNumber - 1),
-        cursor.lineNumber,
-        current.getLineMaxColumn(cursor.lineNumber),
+        lastLine,
+        current.getLineMaxColumn(lastLine),
       );
     }
     return new monaco.Range(1, 1, 1, current.getLineMaxColumn(1));
@@ -169,11 +180,26 @@ export const createPiariumMonacoVimAdapter = (
       : 'editor.action.nextMatchFindAction');
     void action?.run();
   };
+  const moveByWords = (direction: 'next' | 'previous', repetitions: number): void => {
+    const current = model();
+    const start = position();
+    if (!current || !start) return;
+    let nextPosition: import('monaco-editor/editor').Position = start;
+    for (let index = 0; index < repetitions; index += 1) {
+      const match: editor.FindMatch | null = direction === 'next'
+        ? current.findNextMatch('\\w+', new monaco.Position(nextPosition.lineNumber, nextPosition.column + 1), true, true, null, false)
+        : current.findPreviousMatch('\\w+', nextPosition, true, true, null, false);
+      if (!match) break;
+      nextPosition = match.range.getStartPosition();
+    }
+    moveTo(nextPosition.lineNumber, nextPosition.column);
+  };
 
   const keySubscription = editorInstance.onKeyDown((event) => {
     const browserEvent = event.browserEvent;
     if (browserEvent.isComposing || browserEvent.defaultPrevented) return;
     const key = browserEvent.key;
+    if (key === 'Process' || key === 'Unidentified') return;
 
     if (mode === 'insert') {
       if (key !== 'Escape') return;
@@ -193,6 +219,12 @@ export const createPiariumMonacoVimAdapter = (
     const cursor = position();
     if (!current || !cursor) return;
 
+    if (/^[0-9]$/.test(key) && (key !== '0' || count > 0)) {
+      count = (count * 10) + Number(key);
+      updateStatus();
+      return;
+    }
+
     if (mode === 'visual' || mode === 'visual-line') {
       if (key === 'Escape') {
         setMode('normal');
@@ -211,14 +243,15 @@ export const createPiariumMonacoVimAdapter = (
 
     if (pending === 'g') {
       pending = '';
-      if (key === 'g') moveTo(1, 1);
+      if (key === 'g') moveTo(pendingCount > 1 ? pendingCount : 1, 1);
+      pendingCount = 1;
       updateStatus();
       return;
     }
     if (pending === 'd') {
       pending = '';
       if (key === 'd') {
-        const range = currentLineRange();
+        const range = currentLineRange(pendingCount);
         if (range) {
           register = current.getValueInRange(range);
           registerLinewise = true;
@@ -235,18 +268,25 @@ export const createPiariumMonacoVimAdapter = (
         registerLinewise = false;
         executeEdit(range, '');
       }
+      pendingCount = 1;
       updateStatus();
       return;
     }
     if (pending === 'y') {
       pending = '';
       if (key === 'y') {
-        register = `${current.getLineContent(cursor.lineNumber)}\n`;
+        const range = currentLineRange(pendingCount);
+        register = range ? current.getValueInRange(range) : '';
         registerLinewise = true;
       }
+      pendingCount = 1;
       updateStatus();
       return;
     }
+
+    const hadCount = count > 0;
+    const repeat = count || 1;
+    count = 0;
 
     switch (key) {
       case 'i':
@@ -269,19 +309,19 @@ export const createPiariumMonacoVimAdapter = (
         break;
       case 'h':
       case 'ArrowLeft':
-        moveTo(cursor.lineNumber, cursor.column - 1);
+        moveTo(cursor.lineNumber, cursor.column - repeat);
         break;
       case 'l':
       case 'ArrowRight':
-        moveTo(cursor.lineNumber, cursor.column + 1);
+        moveTo(cursor.lineNumber, cursor.column + repeat);
         break;
       case 'j':
       case 'ArrowDown':
-        moveTo(cursor.lineNumber + 1, cursor.column);
+        moveTo(cursor.lineNumber + repeat, cursor.column);
         break;
       case 'k':
       case 'ArrowUp':
-        moveTo(cursor.lineNumber - 1, cursor.column);
+        moveTo(cursor.lineNumber - repeat, cursor.column);
         break;
       case '0':
         moveTo(cursor.lineNumber, 1);
@@ -289,31 +329,31 @@ export const createPiariumMonacoVimAdapter = (
       case '$':
         moveTo(cursor.lineNumber, normalMaxColumn(cursor.lineNumber));
         break;
-      case 'w': {
-        const match = current.findNextMatch('\\w+', new monaco.Position(cursor.lineNumber, cursor.column + 1), true, true, null, false);
-        if (match) moveTo(match.range.startLineNumber, match.range.startColumn);
+      case '^':
+        moveTo(cursor.lineNumber, current.getLineFirstNonWhitespaceColumn(cursor.lineNumber) || 1);
         break;
-      }
-      case 'b': {
-        const match = current.findPreviousMatch('\\w+', cursor, true, true, null, false);
-        if (match) moveTo(match.range.startLineNumber, match.range.startColumn);
+      case 'w':
+        moveByWords('next', repeat);
         break;
-      }
+      case 'b':
+        moveByWords('previous', repeat);
+        break;
       case 'g':
       case 'd':
       case 'y':
         pending = key;
+        pendingCount = repeat;
         updateStatus();
         break;
       case 'G':
-        moveTo(current.getLineCount(), 1);
+        moveTo(hadCount ? repeat : current.getLineCount(), 1);
         break;
       case 'x': {
         const range = new monaco.Range(
           cursor.lineNumber,
           cursor.column,
           cursor.lineNumber,
-          Math.min(cursor.column + 1, current.getLineMaxColumn(cursor.lineNumber)),
+          Math.min(cursor.column + repeat, current.getLineMaxColumn(cursor.lineNumber)),
         );
         register = current.getValueInRange(range);
         registerLinewise = false;
@@ -335,17 +375,19 @@ export const createPiariumMonacoVimAdapter = (
       case 'p':
       case 'P':
         if (!register) break;
-        if (registerLinewise) {
-          const targetLine = key === 'p' ? Math.min(cursor.lineNumber + 1, current.getLineCount() + 1) : cursor.lineNumber;
-          const target = targetLine > current.getLineCount()
-            ? current.getValueLength()
-            : current.getOffsetAt({ lineNumber: targetLine, column: 1 });
-          const insert = target === current.getValueLength() && target > 0 ? `\n${register.replace(/\n$/, '')}` : register;
-          const point = current.getPositionAt(target);
-          executeEdit(new monaco.Range(point.lineNumber, point.column, point.lineNumber, point.column), insert);
-        } else {
-          const column = key === 'p' ? Math.min(cursor.column + 1, current.getLineMaxColumn(cursor.lineNumber)) : cursor.column;
-          executeEdit(new monaco.Range(cursor.lineNumber, column, cursor.lineNumber, column), register);
+        for (let index = 0; index < repeat; index += 1) {
+          if (registerLinewise) {
+            const targetLine = key === 'p' ? Math.min(cursor.lineNumber + 1, current.getLineCount() + 1) : cursor.lineNumber;
+            const target = targetLine > current.getLineCount()
+              ? current.getValueLength()
+              : current.getOffsetAt({ lineNumber: targetLine, column: 1 });
+            const insert = target === current.getValueLength() && target > 0 ? `\n${register.replace(/\n$/, '')}` : register;
+            const point = current.getPositionAt(target);
+            executeEdit(new monaco.Range(point.lineNumber, point.column, point.lineNumber, point.column), insert);
+          } else {
+            const column = key === 'p' ? Math.min(cursor.column + 1, current.getLineMaxColumn(cursor.lineNumber)) : cursor.column;
+            executeEdit(new monaco.Range(cursor.lineNumber, column, cursor.lineNumber, column), register);
+          }
         }
         break;
       case 'u':
@@ -376,12 +418,16 @@ export const createPiariumMonacoVimAdapter = (
     }
   });
 
-  updateStatus();
+  setMode('normal');
   editorInstance.focus();
 
   return {
     dispose() {
       keySubscription.dispose();
+      editorInstance.updateOptions({
+        cursorBlinking: originalCursorBlinking,
+        cursorStyle: originalCursorStyle,
+      });
       statusNode.replaceChildren();
     },
     mode: () => mode,
