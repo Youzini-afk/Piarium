@@ -49,23 +49,65 @@ const server = createJsonRpcServer({
   output: process.stdout,
   async onRequest(method, params) {
     if (method === 'initialize') {
+      if (process.env.PIARIUM_LSP_FIXTURE_MINIMAL === '1') {
+        return {
+          capabilities: {
+            textDocumentSync: 2,
+            completionProvider: {},
+          },
+        };
+      }
       return {
         capabilities: {
           textDocumentSync: 2,
-          completionProvider: {},
+          completionProvider: { resolveProvider: true, triggerCharacters: ['.'] },
           hoverProvider: true,
+          signatureHelpProvider: { triggerCharacters: ['(', ','] },
           definitionProvider: true,
           referencesProvider: true,
           documentSymbolProvider: true,
           workspaceSymbolProvider: true,
           renameProvider: true,
-          codeActionProvider: true,
+          codeActionProvider: { resolveProvider: true },
+          documentFormattingProvider: true,
+          documentRangeFormattingProvider: true,
+          documentOnTypeFormattingProvider: { firstTriggerCharacter: '}', moreTriggerCharacter: [';'] },
+          semanticTokensProvider: {
+            legend: { tokenTypes: ['variable'], tokenModifiers: ['readonly'] },
+            full: true,
+            range: true,
+          },
+          inlayHintProvider: { resolveProvider: true },
+          documentHighlightProvider: true,
+          foldingRangeProvider: true,
+          selectionRangeProvider: true,
+          documentLinkProvider: { resolveProvider: true },
+          colorProvider: true,
         },
       };
     }
     if (method === 'shutdown') return null;
     if (method === 'textDocument/completion') {
-      return { items: [{ label: 'fixtureItem', detail: 'fixture', insertText: 'fixtureItem' }] };
+      return { items: [{
+        label: 'fixtureItem',
+        kind: 3,
+        detail: 'fixture',
+        documentation: { kind: 'markdown', value: '**fixture completion**' },
+        insertText: 'fixtureItem(${1:value})',
+        insertTextFormat: 2,
+        textEdit: {
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+          newText: 'fixtureItem(${1:value})',
+        },
+        additionalTextEdits: [{
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+          newText: 'import { fixtureItem } from "fixture";\n',
+        }],
+        data: { fixture: 'completion' },
+      }] };
+    }
+    if (method === 'completionItem/resolve') {
+      return { ...params, detail: 'resolved fixture', documentation: { kind: 'markdown', value: '**resolved**' } };
     }
     if (method === 'textDocument/hover') {
       const uri = params?.textDocument?.uri;
@@ -75,12 +117,44 @@ const server = createJsonRpcServer({
       }
       return { contents: { kind: 'markdown', value: 'fixture-hover' } };
     }
-    if (method === 'textDocument/definition' || method === 'textDocument/references') {
+    if (method === 'textDocument/signatureHelp') {
+      return {
+        signatures: [{
+          label: 'fixtureItem(value: string): void',
+          documentation: { kind: 'markdown', value: 'Fixture signature' },
+          parameters: [{ label: [12, 25], documentation: 'Fixture value' }],
+        }],
+        activeSignature: 0,
+        activeParameter: 0,
+      };
+    }
+    if (method === 'textDocument/definition') {
+      const uri = params?.textDocument?.uri;
+      return uri ? [{
+        targetUri: uri,
+        targetRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+        targetSelectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } },
+        originSelectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+      }] : [];
+    }
+    if (method === 'textDocument/references') {
       const uri = params?.textDocument?.uri;
       return uri ? [{ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } }] : [];
     }
     if (method === 'textDocument/documentSymbol') {
-      return [{ name: 'fixtureSymbol', kind: 13, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } } }];
+      return [{
+        name: 'fixtureSymbol',
+        detail: 'fixture container',
+        kind: 13,
+        range: { start: { line: 0, character: 0 }, end: { line: 2, character: 0 } },
+        selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+        children: [{
+          name: 'fixtureChild',
+          kind: 12,
+          range: { start: { line: 1, character: 0 }, end: { line: 1, character: 8 } },
+          selectionRange: { start: { line: 1, character: 0 }, end: { line: 1, character: 8 } },
+        }],
+      }];
     }
     if (method === 'workspace/symbol') {
       const uri = [...files.keys()][0];
@@ -92,7 +166,67 @@ const server = createJsonRpcServer({
       return uri ? { changes: { [uri]: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } }, newText: params?.newName ?? 'renamed' }] } } : { changes: {} };
     }
     if (method === 'textDocument/codeAction') {
-      return [{ title: 'Fixture action', kind: 'quickfix' }];
+      const uri = params?.textDocument?.uri;
+      return [{
+        title: 'Fixture action',
+        kind: 'quickfix',
+        isPreferred: true,
+        edit: uri ? { changes: { [uri]: [{ range: params.range, newText: 'fixed' }] } } : undefined,
+        data: { fixture: 'action' },
+      }];
+    }
+    if (method === 'codeAction/resolve') {
+      return { ...params, command: { title: 'Finish fixture action', command: 'fixture.finish', arguments: ['done'] } };
+    }
+    if (
+      method === 'textDocument/formatting'
+      || method === 'textDocument/rangeFormatting'
+      || method === 'textDocument/onTypeFormatting'
+    ) {
+      return [{
+        range: params?.range ?? { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        newText: 'formatted',
+      }];
+    }
+    if (method === 'textDocument/semanticTokens/full' || method === 'textDocument/semanticTokens/range') {
+      return { resultId: 'fixture-semantic-1', data: [0, 0, 7, 0, 1] };
+    }
+    if (method === 'textDocument/inlayHint') {
+      return [{ position: { line: 0, character: 7 }, label: ': string', kind: 1, data: { fixture: 'hint' } }];
+    }
+    if (method === 'inlayHint/resolve') {
+      return { ...params, tooltip: { kind: 'markdown', value: 'Resolved fixture hint' }, paddingLeft: true };
+    }
+    if (method === 'textDocument/documentHighlight') {
+      return [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } }, kind: 2 }];
+    }
+    if (method === 'textDocument/foldingRange') {
+      return [{ startLine: 0, endLine: 2, kind: 'region' }];
+    }
+    if (method === 'textDocument/selectionRange') {
+      return (params?.positions ?? []).map((position) => ({
+        range: { start: position, end: { line: position.line, character: position.character + 1 } },
+        parent: { range: { start: { line: position.line, character: 0 }, end: { line: position.line, character: 8 } } },
+      }));
+    }
+    if (method === 'textDocument/documentLink') {
+      return [{
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } },
+        tooltip: 'Fixture link',
+        data: { fixture: 'link' },
+      }];
+    }
+    if (method === 'documentLink/resolve') {
+      return { ...params, target: params?.data?.uri ?? params?.target ?? 'https://example.com/fixture' };
+    }
+    if (method === 'textDocument/documentColor') {
+      return [{
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } },
+        color: { red: 1, green: 0.5, blue: 0, alpha: 1 },
+      }];
+    }
+    if (method === 'textDocument/colorPresentation') {
+      return [{ label: '#ff8000', textEdit: { range: params.range, newText: '#ff8000' } }];
     }
     return null;
   },

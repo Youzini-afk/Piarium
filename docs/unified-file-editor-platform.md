@@ -1,6 +1,6 @@
 # Piarium 统一文件编辑器平台设计
 
-Status: Phase 3 已完成；Phase 4 待实施
+Status: Phase 4 已完成；Phase 5 待实施
 
 Last updated: 2026-08-25
 
@@ -708,6 +708,27 @@ language client 只保留 mobile/embedded 的适用子集并消费同一 DTO。
 
 验收：Host fixture LSP contract、stale/provider-disable/runtime-switch、Monaco provider conversion、
 Web/UI type-check/lint。只有协议或构建入口改变时跑对应 production build。
+
+完成证据（2026-08-25）：
+
+- `LanguageServicesAPI` 保留 completion text/insert-replace edit、snippet、untrusted Markdown、resolve
+  token、LocationLink、递归 symbols、完整 WorkspaceEdit/code action、formatting、semantic tokens、
+  inlay hints、highlight/folding/selection range、document link 与 color DTO；每个 feature result 携带
+  provider ID、generation 和 document version，unsupported 不再把 provider 错标为 degraded；
+- Host 初始化能力与请求参数按 LSP capability 对齐，未声明能力返回 typed `unsupported`。WorkspaceEdit
+  只要包含无法纳入当前 workspace authority 的目标，就整体失败，不再静默丢掉一部分编辑；
+- 同一个 Monaco bridge owner 注册 completion/resolve、hover、signature、definition、references、
+  quick outline、format、semantic、inlay、highlight、folding、selection、link 和 color provider。Markdown
+  保持不可信，内部资源使用 `piarium-resource` URI 交给 Workbench opener，外部链接只经过 Piarium
+  HTTP(S) opener；VS Code companion 仍保持宿主编辑器权威且不加载 Monaco；
+- diagnostics markers 按 provider/generation 分组。provider disable、restart、runtime switch 会清除旧
+  markers/status；新 generation 就绪时，所有已打开文档以当前内存 buffer 精确补发一次 `didOpen`，
+  不退回旧磁盘内容，也不重复打开初始 generation；
+- Host rich fixture/mapping/lifecycle、Monaco DTO/provider/view-state、CodeMirror compatibility subset、
+  provider status 与 i18n parity 聚焦测试通过；UI/Web/VS Code type-check 和改动文件 lint 通过。此
+  Phase 改变了共享语言协议，因此 production Web/PWA build 与 Monaco bundle audit 通过；普通入口
+  仍不 eager-load Monaco，审计产物的 semantic worker 为 0。未重复运行无关的 Electron/Docker
+  构建。
 
 ### Phase 5 — WorkspaceEdit、rename、code actions 与第一方 TS/JS
 

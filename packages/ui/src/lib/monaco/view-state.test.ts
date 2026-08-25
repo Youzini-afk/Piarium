@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import type { editor } from 'monaco-editor/editor';
 
 import { createLegacyTextEditorViewState, textEditorSummaryFromViewState } from '@/lib/workbench/editors/view-state-core';
-import { applyMonacoEditorViewState, captureMonacoEditorViewState } from './view-state';
+import { applyMonacoEditorViewState, captureMonacoEditorViewState, createMonacoNavigationViewState } from './view-state';
 
 const editorStub = (overrides: Partial<editor.IStandaloneCodeEditor> = {}): editor.IStandaloneCodeEditor => ({
   getPosition: () => ({ lineNumber: 4, column: 7 }),
@@ -18,6 +18,8 @@ const editorStub = (overrides: Partial<editor.IStandaloneCodeEditor> = {}): edit
     isEmpty: () => false,
   }) as editor.IStandaloneCodeEditor['getSelection'] extends () => infer T ? T : never,
   restoreViewState: vi.fn(),
+  revealPositionInCenter: vi.fn(),
+  revealRangeInCenter: vi.fn(),
   saveViewState: () => ({ cursorState: [], viewState: { scrollTop: 42 }, contributionsState: {} }),
   setPosition: vi.fn(),
   setScrollPosition: vi.fn(),
@@ -54,6 +56,19 @@ describe('Monaco provider view state', () => {
     }));
     expect(setPosition).toHaveBeenCalledWith({ lineNumber: 8, column: 3 });
     expect(setScrollPosition).toHaveBeenCalledWith({ scrollTop: 120 });
+
+    const navigation = createMonacoNavigationViewState({
+      startLineNumber: 12,
+      startColumn: 4,
+      endLineNumber: 12,
+      endColumn: 9,
+    });
+    applyMonacoEditorViewState(editorInstance, navigation);
+    expect(editorInstance.setSelection).toHaveBeenLastCalledWith({
+      startLineNumber: 12,
+      startColumn: 4,
+      endLineNumber: 12,
+      endColumn: 9,
+    });
   });
 });
-

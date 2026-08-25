@@ -1,8 +1,8 @@
 import React from 'react';
-import { autocompletion } from '@codemirror/autocomplete';
+import { autocompletion, type Completion } from '@codemirror/autocomplete';
 import { linter, type Diagnostic } from '@codemirror/lint';
 import type { Extension } from '@codemirror/state';
-import { hoverTooltip } from '@codemirror/view';
+import { hoverTooltip, type EditorView } from '@codemirror/view';
 import type { PiariumLanguageDiagnostic } from '@/lib/api/types';
 import { getBoundLanguageServices } from '@/lib/language-services/session';
 import {
@@ -23,6 +23,11 @@ const positionToOffset = (text: string, line: number, character: number): number
   }
   return Math.min(text.length, offset + Math.max(0, character));
 };
+
+const plainSnippet = (value: string): string => value
+  .replace(/\$\{\d+:([^}]*)\}/g, '$1')
+  .replace(/\$\{\d+\}/g, '')
+  .replace(/\$\d+/g, '');
 
 export const useDocumentLanguageExtensions = (identity: DocumentIdentity | undefined): Extension[] => {
   const record = useDocumentRecord(identity);
@@ -69,9 +74,22 @@ export const useDocumentLanguageExtensions = (identity: DocumentIdentity | undef
           return {
             from: word?.from ?? context.pos,
             options: result.value.map((item) => {
-              const option: { label: string; apply: string; detail?: string } = {
+              const inserted = item.textEdit?.newText ?? item.insertText ?? item.label;
+              const applied = item.insertTextFormat === 'snippet' ? plainSnippet(inserted) : inserted;
+              const editRange = item.textEdit
+                ? ('range' in item.textEdit ? item.textEdit.range : item.textEdit.replace)
+                : null;
+              const option: Completion = {
                 label: item.label,
-                apply: item.insertText ?? item.label,
+                apply: editRange
+                  ? (view: EditorView) => view.dispatch({
+                      changes: {
+                        from: positionToOffset(buffer, editRange.start.line, editRange.start.character),
+                        to: positionToOffset(buffer, editRange.end.line, editRange.end.character),
+                        insert: applied,
+                      },
+                    })
+                  : applied,
               };
               if (item.detail) option.detail = item.detail;
               return option;
@@ -92,12 +110,14 @@ export const useDocumentLanguageExtensions = (identity: DocumentIdentity | undef
         },
       });
       if (result.status !== 'ready' || result.documentVersion !== documentVersion || !result.value) return null;
+      const content = result.value.contents.map((item) => item.value).join('\n\n');
+      if (!content) return null;
       return {
         pos,
         create() {
           const dom = document.createElement('div');
           dom.className = 'cm-tooltip-hover px-2 py-1 typography-ui';
-          dom.textContent = result.value;
+          dom.textContent = content;
           return { dom };
         },
       };

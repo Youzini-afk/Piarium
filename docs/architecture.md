@@ -245,7 +245,12 @@ generation still bounds every model and asynchronous result. Full custom `editor
 engine-neutral and may replace the official renderer. Agent/IDE presentation presets only change live
 editor options; user settings override them without changing model identity. Monaco basic language
 definitions provide syntax tokenization, while semantic language features remain Host-owned. The
-complete model, language, worker,
+shared language contract preserves rich edits, snippets, untrusted Markdown, navigation, symbols,
+formatting and semantic presentation without exposing the language-server process to the renderer.
+Monaco registrations and markers are owned by provider generation; a provider restart clears the old
+projection and resynchronizes every open document from the current in-memory buffer. Internal language
+links route through the Workbench resource opener and external links through Piarium's HTTP(S) opener.
+The complete model, language, worker,
 extension, and migration contract is
 [unified-file-editor-platform.md](unified-file-editor-platform.md).
 

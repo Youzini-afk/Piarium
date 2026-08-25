@@ -62,6 +62,11 @@ describe('language document synchronization', () => {
     let activeRequests = 0;
     let maxActiveRequests = 0;
     const language = {
+      getStatus: async () => ({
+        status: 'absent' as const,
+        workspaceId: identity.workspaceId,
+        languageId: 'typescript',
+      }),
       subscribe: () => ({ close() {} }),
       syncDocument: async (request: PiariumLanguageDocumentSyncRequest) => {
         activeRequests += 1;
@@ -69,7 +74,12 @@ describe('language document synchronization', () => {
         requests.push(request);
         if (request.reason === 'open') await openGate;
         activeRequests -= 1;
-        return { status: 'synced' as const, documentVersion: request.documentVersion };
+        return {
+          status: 'synced' as const,
+          documentVersion: request.documentVersion,
+          providerId: 'fixture',
+          generation: 1,
+        };
       },
       disposeWorkspace: async () => undefined,
     } as unknown as LanguageServicesAPI;
@@ -119,6 +129,75 @@ describe('language document synchronization', () => {
     expect({ reason: requests[3]?.reason, content: requests[3]?.content }).toEqual({
       reason: 'save',
       content: 'XbcdeYZ',
+    });
+  });
+
+  test('reopens the current dirty buffer exactly once when the provider generation changes', async () => {
+    const requests: PiariumLanguageDocumentSyncRequest[] = [];
+    let listener: Parameters<LanguageServicesAPI['subscribe']>[1] | undefined;
+    let generation = 1;
+    const language = {
+      getStatus: async () => ({
+        status: 'absent' as const,
+        workspaceId: identity.workspaceId,
+        languageId: 'typescript',
+      }),
+      subscribe: (_workspaceId: string, next: Parameters<LanguageServicesAPI['subscribe']>[1]) => {
+        listener = next;
+        return { close() {} };
+      },
+      syncDocument: async (request: PiariumLanguageDocumentSyncRequest) => {
+        requests.push(request);
+        return {
+          status: 'synced' as const,
+          documentVersion: request.documentVersion,
+          providerId: 'fixture',
+          generation,
+        };
+      },
+      disposeWorkspace: async () => undefined,
+    } as unknown as LanguageServicesAPI;
+
+    const registry = bindDocumentRegistry(createDocuments());
+    await registry.open(identity);
+    bindLanguageServices(language);
+    acquireLanguageDocument(identity);
+    await waitUntil(() => requests.length === 1);
+
+    listener?.({
+      kind: 'status',
+      snapshot: {
+        status: 'ready',
+        workspaceId: identity.workspaceId,
+        languageId: 'typescript',
+        providerId: 'fixture',
+        generation: 1,
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(requests).toHaveLength(1);
+
+    registry.applyTransaction(identity, 'dirty buffer', { origin: 'editor' });
+    generation = 2;
+    listener?.({
+      kind: 'status',
+      snapshot: {
+        status: 'ready',
+        workspaceId: identity.workspaceId,
+        languageId: 'typescript',
+        providerId: 'fixture',
+        generation: 2,
+      },
+    });
+    await waitUntil(() => requests.length === 2);
+    expect({
+      reason: requests[1]?.reason,
+      documentVersion: requests[1]?.documentVersion,
+      content: requests[1]?.content,
+    }).toEqual({
+      reason: 'open',
+      documentVersion: 1,
+      content: 'dirty buffer',
     });
   });
 });

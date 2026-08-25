@@ -15,13 +15,29 @@ const readBody = (req) => (req.body && typeof req.body === 'object' ? req.body :
 
 const FEATURES = new Set([
   'completion',
+  'completionResolve',
   'hover',
+  'signatureHelp',
   'definition',
   'references',
   'documentSymbols',
   'workspaceSymbols',
   'rename',
   'codeActions',
+  'codeActionResolve',
+  'documentFormatting',
+  'documentRangeFormatting',
+  'onTypeFormatting',
+  'semanticTokens',
+  'inlayHints',
+  'inlayHintResolve',
+  'documentHighlights',
+  'foldingRanges',
+  'selectionRanges',
+  'documentLinks',
+  'documentLinkResolve',
+  'documentColors',
+  'colorPresentations',
 ]);
 
 export const registerLanguageRoutes = (app, {

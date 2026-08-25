@@ -52,28 +52,73 @@ describe('language supervisor', () => {
         content: 'const value = 1;\n',
       });
       expect(synced.status).toBe('synced');
-      expect(language.getStatus(harness.identity.workspaceId, 'typescript').status).toBe('ready');
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript')).toMatchObject({
+        status: 'ready',
+        features: {
+          completionTriggerCharacters: ['.'],
+          signatureHelpTriggerCharacters: ['(', ','],
+          onTypeFormattingTriggerCharacters: ['}', ';'],
+        },
+      });
       const completion = await language.completion({
         resource,
         languageId: 'typescript',
         documentVersion: 1,
         position: { line: 0, character: 0 },
       });
-      expect(completion).toMatchObject({ status: 'ready', value: [{ label: 'fixtureItem' }] });
+      expect(completion).toMatchObject({
+        status: 'ready',
+        providerId: 'fixture',
+        generation: 1,
+        value: [{
+          label: 'fixtureItem',
+          insertTextFormat: 'snippet',
+          detail: 'fixture',
+          documentation: { kind: 'markdown', value: '**fixture completion**' },
+          textEdit: { newText: 'fixtureItem(${1:value})' },
+          additionalTextEdits: [{ newText: 'import { fixtureItem } from "fixture";\n' }],
+        }],
+      });
+      const resolvedCompletion = await language.completionResolve({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        resolveToken: completion.value[0].resolveToken,
+      });
+      expect(resolvedCompletion).toMatchObject({
+        status: 'ready',
+        value: { detail: 'resolved fixture', documentation: { kind: 'markdown', value: '**resolved**' } },
+      });
       const hover = await language.hover({
         resource,
         languageId: 'typescript',
         documentVersion: 1,
         position: { line: 0, character: 0 },
       });
-      expect(hover).toMatchObject({ status: 'ready', value: 'fixture-hover' });
+      expect(hover).toMatchObject({
+        status: 'ready',
+        value: { contents: [{ kind: 'markdown', value: 'fixture-hover' }] },
+      });
+      const signature = await language.signatureHelp({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 0, character: 1 },
+      });
+      expect(signature).toMatchObject({
+        status: 'ready',
+        value: { signatures: [{ label: 'fixtureItem(value: string): void' }] },
+      });
       const actions = await language.codeActions({
         resource,
         languageId: 'typescript',
         documentVersion: 1,
         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
       });
-      expect(actions).toMatchObject({ status: 'ready', value: [{ title: 'Fixture action' }] });
+      expect(actions).toMatchObject({
+        status: 'ready',
+        value: [{ title: 'Fixture action', isPreferred: true, edit: { documentChanges: [{ kind: 'text' }] } }],
+      });
     } finally {
       await language.dispose();
       await harness.cleanup();
@@ -108,7 +153,134 @@ describe('language supervisor', () => {
         documentVersion: 9,
         position: { line: 0, character: 0 },
       });
-      expect(stale).toEqual({ status: 'stale', documentVersion: 4 });
+      expect(stale).toMatchObject({ status: 'stale', documentVersion: 4, providerId: 'fixture', generation: 1 });
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
+  it('maps navigation, symbols, formatting, semantic, inlay, link, and color contracts', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      language.registerProvider(fixtureProvider());
+      const resource = harness.resource('rich.ts');
+      await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        reason: 'open',
+        content: 'fixture\nchild\nend\n',
+      });
+      const point = { line: 0, character: 1 };
+      const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } };
+
+      expect(await language.definition({ resource, languageId: 'typescript', documentVersion: 2, position: point })).toMatchObject({
+        status: 'ready',
+        value: [{ resource, targetRange: { end: { character: 8 } }, targetSelectionRange: { end: { character: 7 } }, originSelectionRange: { end: { character: 3 } } }],
+      });
+      expect(await language.references({ resource, languageId: 'typescript', documentVersion: 2, position: point })).toMatchObject({
+        status: 'ready', value: [{ resource }],
+      });
+      expect(await language.documentSymbols({ resource, languageId: 'typescript', documentVersion: 2 })).toMatchObject({
+        status: 'ready', value: [{ name: 'fixtureSymbol', children: [{ name: 'fixtureChild' }] }],
+      });
+      expect(await language.rename({ resource, languageId: 'typescript', documentVersion: 2, position: point, newName: 'renamed' })).toMatchObject({
+        status: 'ready', value: { documentChanges: [{ kind: 'text', resource, edits: [{ newText: 'renamed' }] }] },
+      });
+      expect(await language.documentFormatting({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        formatting: { tabSize: 2, insertSpaces: true },
+      })).toMatchObject({ status: 'ready', value: [{ newText: 'formatted' }] });
+      expect(await language.semanticTokens({ resource, languageId: 'typescript', documentVersion: 2 })).toMatchObject({
+        status: 'ready',
+        value: {
+          data: [0, 0, 7, 0, 1],
+          resultId: 'fixture-semantic-1',
+          legend: { tokenTypes: ['variable'], tokenModifiers: ['readonly'] },
+        },
+      });
+      const hints = await language.inlayHints({ resource, languageId: 'typescript', documentVersion: 2, range });
+      expect(hints).toMatchObject({ status: 'ready', value: [{ label: ': string', kind: 'type' }] });
+      const resolvedHint = await language.inlayHintResolve({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        resolveToken: hints.value[0].resolveToken,
+      });
+      expect(resolvedHint).toMatchObject({ status: 'ready', value: { paddingLeft: true, tooltip: { value: 'Resolved fixture hint' } } });
+      expect(await language.documentHighlights({ resource, languageId: 'typescript', documentVersion: 2, position: point })).toMatchObject({
+        status: 'ready', value: [{ kind: 'read' }],
+      });
+      expect(await language.foldingRanges({ resource, languageId: 'typescript', documentVersion: 2 })).toMatchObject({
+        status: 'ready', value: [{ startLine: 0, endLine: 2, kind: 'region' }],
+      });
+      expect(await language.selectionRanges({ resource, languageId: 'typescript', documentVersion: 2, positions: [point] })).toMatchObject({
+        status: 'ready', value: [{ parent: { range: { end: { character: 8 } } } }],
+      });
+      const links = await language.documentLinks({ resource, languageId: 'typescript', documentVersion: 2 });
+      expect(links).toMatchObject({ status: 'ready', value: [{ tooltip: 'Fixture link' }] });
+      expect(await language.documentLinkResolve({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        resolveToken: links.value[0].resolveToken,
+      })).toMatchObject({ status: 'ready', value: { target: { kind: 'uri', uri: 'https://example.com/fixture' } } });
+      expect(await language.documentColors({ resource, languageId: 'typescript', documentVersion: 2 })).toMatchObject({
+        status: 'ready', value: [{ color: { red: 1, green: 0.5, blue: 0, alpha: 1 } }],
+      });
+      expect(await language.colorPresentations({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        range,
+        color: { red: 1, green: 0.5, blue: 0, alpha: 1 },
+      })).toMatchObject({ status: 'ready', value: [{ label: '#ff8000', textEdit: { newText: '#ff8000' } }] });
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
+  it('returns typed unsupported without degrading a provider that omitted a capability', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      language.registerProvider(fixtureProvider({ env: { PIARIUM_LSP_FIXTURE_MINIMAL: '1' } }));
+      const resource = harness.resource('unsupported.ts');
+      await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'fixture\n',
+      });
+      const hover = await language.hover({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 0, character: 0 },
+      });
+      expect(hover).toMatchObject({
+        status: 'failed',
+        reason: 'unsupported',
+        providerId: 'fixture',
+        generation: 1,
+      });
+      expect(language.getStatus(harness.identity.workspaceId, 'typescript')).toMatchObject({ status: 'ready' });
     } finally {
       await language.dispose();
       await harness.cleanup();
@@ -276,6 +448,8 @@ describe('language supervisor', () => {
     });
     try {
       language.registerProvider(fixtureProvider());
+      const events = [];
+      language.subscribe(harness.identity.workspaceId, (event) => events.push(event));
       await language.syncDocument({
         resource: harness.resource('note.ts'),
         languageId: 'typescript',
@@ -285,8 +459,26 @@ describe('language supervisor', () => {
       });
       const first = language.getStatus(harness.identity.workspaceId, 'typescript');
       expect(first.status).toBe('ready');
+      events.length = 0;
       await language.disposeWorkspace(harness.identity.workspaceId);
       expect(language.getStatus(harness.identity.workspaceId, 'typescript').status).toBe('absent');
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'diagnostics',
+          resourceId: 'note.ts',
+          providerId: 'fixture',
+          generation: first.generation,
+          items: [],
+        }),
+        expect.objectContaining({
+          kind: 'status',
+          snapshot: expect.objectContaining({
+            status: 'absent',
+            providerId: 'fixture',
+            generation: first.generation,
+          }),
+        }),
+      ]));
       await language.syncDocument({
         resource: harness.resource('note.ts'),
         languageId: 'typescript',
@@ -297,6 +489,56 @@ describe('language supervisor', () => {
       const second = language.getStatus(harness.identity.workspaceId, 'typescript');
       expect(second.status).toBe('ready');
       expect(second.generation).toBeGreaterThan(first.generation);
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
+  it('reopens the current in-memory buffer before serving a replacement provider generation', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      language.registerProvider(fixtureProvider());
+      const events = [];
+      language.subscribe(harness.identity.workspaceId, (event) => events.push(event));
+      const resource = harness.resource('generation.ts');
+      await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'const clean = true;\n',
+      });
+      await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        reason: 'change',
+        content: 'FIXTURE_ERROR\n',
+      });
+      const first = language.getStatus(harness.identity.workspaceId, 'typescript');
+      language.registerProvider(fixtureProvider());
+      events.length = 0;
+
+      const hover = await language.hover({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 2,
+        position: { line: 0, character: 0 },
+      });
+      expect(hover).toMatchObject({ status: 'ready', generation: first.generation + 1 });
+      await waitUntil(() => events.some((event) => (
+        event.kind === 'diagnostics'
+        && event.resourceId === 'generation.ts'
+        && event.generation === first.generation + 1
+        && event.items.some((item) => item.message === 'fixture error' && item.documentVersion === 2)
+      )));
     } finally {
       await language.dispose();
       await harness.cleanup();

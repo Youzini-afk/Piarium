@@ -13,11 +13,18 @@ import {
   resetLanguageDiagnostics,
 } from './diagnostics-registry';
 import { languageIdFromResourceId } from './language-id';
+import {
+  clearLanguageProviderStatusForWorkspace,
+  replaceLanguageProviderStatus,
+  resetLanguageProviderStatus,
+} from './provider-status-registry';
 
 type OpenEditor = {
   identity: DocumentIdentity;
   languageId: string;
   count: number;
+  requestedGeneration?: number;
+  syncedGeneration?: number;
 };
 
 let bound: LanguageServicesAPI | null = null;
@@ -45,14 +52,50 @@ const acceptedVersion = (workspaceId: string, resourceId: string, documentVersio
   }
 };
 
+const handleProviderStatus = (snapshot: Extract<PiariumLanguageServiceEvent, { kind: 'status' }>['snapshot']): void => {
+  replaceLanguageProviderStatus(snapshot);
+  if (snapshot.status === 'absent') {
+    if (snapshot.generation === undefined) return;
+    for (const open of openEditors.values()) {
+      if (open.identity.workspaceId !== snapshot.workspaceId || open.languageId !== snapshot.languageId) continue;
+      if (open.syncedGeneration === snapshot.generation) {
+        open.syncedGeneration = undefined;
+        open.requestedGeneration = undefined;
+      }
+    }
+    return;
+  }
+  if (snapshot.status !== 'ready' && snapshot.status !== 'degraded') return;
+  for (const open of openEditors.values()) {
+    if (open.identity.workspaceId !== snapshot.workspaceId || open.languageId !== snapshot.languageId) continue;
+    if (open.syncedGeneration === snapshot.generation || open.requestedGeneration === snapshot.generation) continue;
+    open.requestedGeneration = snapshot.generation;
+    const key = editorKey(open.identity);
+    const pending = documentSyncQueues.get(key) ?? Promise.resolve();
+    void pending.catch(() => undefined).then(() => {
+      const current = openEditors.get(key);
+      if (!current || current !== open || current.syncedGeneration === snapshot.generation) return;
+      enqueueDocumentSync(current.identity, current.languageId, 'open');
+    });
+  }
+};
+
 const handleEvent = (event: PiariumLanguageServiceEvent): void => {
-  if (event.kind !== 'diagnostics') return;
+  if (event.kind === 'status') {
+    handleProviderStatus(event.snapshot);
+    return;
+  }
   replaceLanguageDiagnostics(
     event.workspaceId,
     event.languageId,
     event.resourceId,
-    event.items,
+    event.items.map((item) => ({
+      ...item,
+      providerId: event.providerId,
+      generation: event.generation,
+    })),
     (resourceId, documentVersion) => acceptedVersion(event.workspaceId, resourceId, documentVersion),
+    { providerId: event.providerId, generation: event.generation },
   );
 };
 
@@ -89,7 +132,14 @@ const enqueueDocumentSync = (identity: DocumentIdentity, languageId: string, rea
     .then(async () => {
       if (bound !== language || syncEpoch !== epoch) return;
       try {
-        await language.syncDocument(payload);
+        const result = await language.syncDocument(payload);
+        if (result.status === 'synced') {
+          const open = openEditors.get(key);
+          if (open && open.languageId === languageId) {
+            open.syncedGeneration = result.generation;
+            open.requestedGeneration = result.generation;
+          }
+        }
       } catch (error) {
         if (error instanceof LanguageServicesError && error.reason === 'stale-completion') return;
       }
@@ -111,8 +161,10 @@ const resetLocalLanguageState = (): void => {
   openEditors.clear();
   for (const workspaceId of workspaceIds) {
     clearLanguageDiagnosticsForWorkspace(workspaceId);
+    clearLanguageProviderStatusForWorkspace(workspaceId);
   }
   resetLanguageDiagnostics();
+  resetLanguageProviderStatus();
 };
 
 export const bindLanguageServices = (language: LanguageServicesAPI): void => {
@@ -133,9 +185,9 @@ export const bindLanguageServices = (language: LanguageServicesAPI): void => {
   });
 };
 
-export const acquireLanguageDocument = (identity: DocumentIdentity): void => {
+export const acquireLanguageDocument = (identity: DocumentIdentity, requestedLanguageId?: string): void => {
   if (!bound) return;
-  const languageId = languageIdFromResourceId(identity.resourceId);
+  const languageId = requestedLanguageId ?? languageIdFromResourceId(identity.resourceId);
   if (languageId === 'plaintext') return;
   const key = editorKey(identity);
   const existing = openEditors.get(key);
@@ -145,6 +197,11 @@ export const acquireLanguageDocument = (identity: DocumentIdentity): void => {
   }
   openEditors.set(key, { identity, languageId, count: 1 });
   ensureWorkspaceSubscription(identity.workspaceId);
+  const language = bound;
+  const epoch = syncEpoch;
+  void language.getStatus(identity.workspaceId, languageId).then((status) => {
+    if (bound === language && syncEpoch === epoch) handleProviderStatus(status);
+  }).catch(() => undefined);
   enqueueDocumentSync(identity, languageId, 'open');
 };
 

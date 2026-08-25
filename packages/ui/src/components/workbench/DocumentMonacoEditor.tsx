@@ -20,6 +20,11 @@ import { createPiariumMonacoVimAdapter } from '@/lib/monaco/vim-adapter';
 import { applyMonacoModelSettings, createMonacoEditorOptions } from '@/lib/monaco/editor-options';
 import { registerFileEditorCommandTarget, saveFileEditorDocument } from '@/lib/monaco/editor-command-service';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { languageIdsFromResourceId, languageIdFromResourceId } from '@/lib/language-services/language-id';
+import {
+  peekLanguageProviderStatus,
+  subscribeLanguageProviderStatus,
+} from '@/lib/language-services/provider-status-registry';
 
 type DocumentMonacoEditorProps = {
   className?: string;
@@ -45,6 +50,18 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
   const updateFileEditorSettings = useUIStore((state) => state.updateFileEditorSettings);
   const profileId = useWorkbenchProfileId();
+  const [monaco, setMonaco] = React.useState<MonacoRuntime | null>(null);
+  const [editorInstance, setEditorInstance] = React.useState<import('monaco-editor/editor').editor.IStandaloneCodeEditor | null>(null);
+  const hostLanguageId = React.useMemo(() => (
+    monaco
+      ? languageIdsFromResourceId(identity.resourceId, monaco.languages.getLanguages()).hostLanguageId
+      : languageIdFromResourceId(identity.resourceId)
+  ), [identity.resourceId, monaco]);
+  const languageStatus = React.useSyncExternalStore(
+    subscribeLanguageProviderStatus,
+    () => peekLanguageProviderStatus(identity.workspaceId, hostLanguageId),
+    () => undefined,
+  );
   const record = useDocumentRecord(identity);
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const vimStatusRef = React.useRef<HTMLDivElement | null>(null);
@@ -52,8 +69,6 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   const viewStateRef = React.useRef(viewState);
   const onViewStateChangeRef = React.useRef(onViewStateChange);
   const recordRef = React.useRef(record);
-  const [monaco, setMonaco] = React.useState<MonacoRuntime | null>(null);
-  const [editorInstance, setEditorInstance] = React.useState<import('monaco-editor/editor').editor.IStandaloneCodeEditor | null>(null);
   const models = getFileEditorModelRegistry();
   const ownerId = `view:${viewId}`;
 
@@ -235,6 +250,19 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       {modelSnapshot.status === 'ready' && modelSnapshot.syncFailure ? (
         <div className="shrink-0 border-b border-status-warning/40 bg-status-warning/10 px-3 py-1.5 typography-meta text-status-warning">
           {t('filesView.editor.syncRecovered')}
+        </div>
+      ) : null}
+      {languageStatus?.status === 'starting' ? (
+        <div className="shrink-0 border-b border-border/50 bg-muted/20 px-3 py-1 typography-meta text-muted-foreground">
+          {t('filesView.editor.languageStarting')}
+        </div>
+      ) : languageStatus?.status === 'degraded' ? (
+        <div className="shrink-0 border-b border-status-warning/40 bg-status-warning/10 px-3 py-1 typography-meta text-status-warning">
+          {t('filesView.editor.languageDegraded', { message: languageStatus.message })}
+        </div>
+      ) : languageStatus?.status === 'failed' ? (
+        <div className="shrink-0 border-b border-status-error/40 bg-status-error/10 px-3 py-1 typography-meta text-status-error">
+          {t('filesView.editor.languageFailed', { message: languageStatus.message })}
         </div>
       ) : null}
       <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden" />

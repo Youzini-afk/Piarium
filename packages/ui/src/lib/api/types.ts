@@ -1836,11 +1836,18 @@ export interface WorkspaceSearchAPI {
   ): Promise<WorkspaceContentSearchResult>;
 }
 
+export type PiariumLanguageProviderFeatures = {
+  completionTriggerCharacters?: string[];
+  signatureHelpTriggerCharacters?: string[];
+  signatureHelpRetriggerCharacters?: string[];
+  onTypeFormattingTriggerCharacters?: string[];
+};
+
 export type PiariumLanguageProviderStatus =
-  | { status: 'absent'; workspaceId: string; languageId: string }
+  | { status: 'absent'; workspaceId: string; languageId: string; providerId?: string; generation?: number }
   | { status: 'starting'; workspaceId: string; languageId: string; providerId: string; generation: number }
-  | { status: 'ready'; workspaceId: string; languageId: string; providerId: string; generation: number }
-  | { status: 'degraded'; workspaceId: string; languageId: string; providerId: string; generation: number; message: string }
+  | { status: 'ready'; workspaceId: string; languageId: string; providerId: string; generation: number; features?: PiariumLanguageProviderFeatures }
+  | { status: 'degraded'; workspaceId: string; languageId: string; providerId: string; generation: number; message: string; features?: PiariumLanguageProviderFeatures }
   | { status: 'failed'; workspaceId: string; languageId: string; providerId: string; generation: number; message: string };
 
 export type PiariumLanguagePosition = {
@@ -1855,8 +1862,21 @@ export type PiariumLanguageRange = {
 
 export type PiariumLanguageCompletionItem = {
   label: string;
+  kind?: number;
   detail?: string;
   insertText?: string;
+  insertTextFormat?: 'plain' | 'snippet';
+  documentation?: PiariumLanguageMarkupContent;
+  sortText?: string;
+  filterText?: string;
+  preselect?: boolean;
+  deprecated?: boolean;
+  commitCharacters?: string[];
+  tags?: number[];
+  textEdit?: PiariumLanguageTextEdit | PiariumLanguageInsertReplaceEdit;
+  additionalTextEdits?: PiariumLanguageTextEdit[];
+  command?: PiariumLanguageCommand;
+  resolveToken?: string;
 };
 
 export type PiariumLanguageLocation = {
@@ -1864,24 +1884,179 @@ export type PiariumLanguageLocation = {
   range: PiariumLanguageRange;
 };
 
+export type PiariumLanguageLocationLink = {
+  resource: PiariumResourceReference;
+  targetRange: PiariumLanguageRange;
+  targetSelectionRange: PiariumLanguageRange;
+  originSelectionRange?: PiariumLanguageRange;
+};
+
+export type PiariumLanguageMarkupContent = {
+  kind: 'plaintext' | 'markdown';
+  value: string;
+};
+
+export type PiariumLanguageCommand = {
+  title: string;
+  command: string;
+  arguments?: JsonValue[];
+};
+
+export type PiariumLanguageTextEdit = {
+  range: PiariumLanguageRange;
+  newText: string;
+  annotationId?: string;
+};
+
+export type PiariumLanguageInsertReplaceEdit = {
+  insert: PiariumLanguageRange;
+  replace: PiariumLanguageRange;
+  newText: string;
+};
+
+export type PiariumLanguageHover = {
+  contents: PiariumLanguageMarkupContent[];
+  range?: PiariumLanguageRange;
+};
+
+export type PiariumLanguageSignatureParameter = {
+  label: string | [number, number];
+  documentation?: PiariumLanguageMarkupContent;
+};
+
+export type PiariumLanguageSignatureInformation = {
+  label: string;
+  documentation?: PiariumLanguageMarkupContent;
+  parameters: PiariumLanguageSignatureParameter[];
+  activeParameter?: number;
+};
+
+export type PiariumLanguageSignatureHelp = {
+  signatures: PiariumLanguageSignatureInformation[];
+  activeSignature: number;
+  activeParameter: number;
+};
+
 export type PiariumLanguageSymbol = {
   name: string;
-  kind: string;
+  kind: number;
   range: PiariumLanguageRange;
   selectionRange?: PiariumLanguageRange;
+  detail?: string;
+  containerName?: string;
+  tags?: number[];
+  resource?: PiariumResourceReference;
+  children?: PiariumLanguageSymbol[];
+};
+
+export type PiariumLanguageWorkspaceDocumentEdit = {
+  kind: 'text';
+  resource: PiariumResourceReference;
+  version: number | null;
+  edits: PiariumLanguageTextEdit[];
+};
+
+export type PiariumLanguageWorkspaceResourceOperation =
+  | { kind: 'create'; resource: PiariumResourceReference; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
+  | { kind: 'rename'; from: PiariumResourceReference; to: PiariumResourceReference; annotationId?: string; overwrite?: boolean; ignoreIfExists?: boolean }
+  | { kind: 'delete'; resource: PiariumResourceReference; annotationId?: string; recursive?: boolean; ignoreIfNotExists?: boolean };
+
+export type PiariumLanguageWorkspaceEdit = {
+  documentChanges: Array<PiariumLanguageWorkspaceDocumentEdit | PiariumLanguageWorkspaceResourceOperation>;
+  changeAnnotations?: Record<string, { label: string; description?: string; needsConfirmation?: boolean }>;
 };
 
 export type PiariumLanguageCodeAction = {
   title: string;
   kind?: string;
   isPreferred?: boolean;
+  diagnostics?: PiariumLanguageDiagnostic[];
+  disabledReason?: string;
+  edit?: PiariumLanguageWorkspaceEdit;
+  command?: PiariumLanguageCommand;
+  resolveToken?: string;
+};
+
+export type PiariumLanguageSemanticTokens = {
+  data: number[];
+  resultId?: string;
+  legend: {
+    tokenTypes: string[];
+    tokenModifiers: string[];
+  };
+};
+
+export type PiariumLanguageInlayHintLabelPart = {
+  value: string;
+  tooltip?: PiariumLanguageMarkupContent;
+  location?: PiariumLanguageLocation;
+  command?: PiariumLanguageCommand;
+};
+
+export type PiariumLanguageInlayHint = {
+  position: PiariumLanguagePosition;
+  label: string | PiariumLanguageInlayHintLabelPart[];
+  kind?: 'type' | 'parameter';
+  tooltip?: PiariumLanguageMarkupContent;
+  textEdits?: PiariumLanguageTextEdit[];
+  paddingLeft?: boolean;
+  paddingRight?: boolean;
+  resolveToken?: string;
+};
+
+export type PiariumLanguageDocumentHighlight = {
+  range: PiariumLanguageRange;
+  kind?: 'text' | 'read' | 'write';
+};
+
+export type PiariumLanguageFoldingRange = {
+  startLine: number;
+  endLine: number;
+  startCharacter?: number;
+  endCharacter?: number;
+  kind?: 'comment' | 'imports' | 'region';
+};
+
+export type PiariumLanguageSelectionRange = {
+  range: PiariumLanguageRange;
+  parent?: PiariumLanguageSelectionRange;
+};
+
+export type PiariumLanguageDocumentLinkTarget =
+  | { kind: 'resource'; resource: PiariumResourceReference; range?: PiariumLanguageRange }
+  | { kind: 'uri'; uri: string };
+
+export type PiariumLanguageDocumentLink = {
+  range: PiariumLanguageRange;
+  target?: PiariumLanguageDocumentLinkTarget;
+  tooltip?: string;
+  resolveToken?: string;
+};
+
+export type PiariumLanguageColor = { red: number; green: number; blue: number; alpha: number };
+
+export type PiariumLanguageColorInformation = {
+  range: PiariumLanguageRange;
+  color: PiariumLanguageColor;
+};
+
+export type PiariumLanguageColorPresentation = {
+  label: string;
+  textEdit?: PiariumLanguageTextEdit;
+  additionalTextEdits?: PiariumLanguageTextEdit[];
 };
 
 export type PiariumLanguageFeatureResult<T> =
-  | { status: 'ready'; documentVersion: number; value: T }
-  | { status: 'stale'; documentVersion: number }
-  | { status: 'absent' }
-  | { status: 'failed'; message: string };
+  | { status: 'ready'; documentVersion: number; providerId: string; generation: number; value: T }
+  | { status: 'stale'; documentVersion: number; providerId?: string; generation?: number }
+  | { status: 'absent'; workspaceId?: string; languageId?: string }
+  | {
+      status: 'failed';
+      message: string;
+      reason?: 'provider-failed' | 'request-failed' | 'unsupported' | 'untrusted';
+      providerId?: string;
+      generation?: number;
+    };
 
 export interface PiariumLanguageDocumentSyncRequest {
   resource: PiariumResourceReference;
@@ -1893,7 +2068,7 @@ export interface PiariumLanguageDocumentSyncRequest {
 }
 
 export type PiariumLanguageDocumentSyncResult =
-  | { status: 'synced'; documentVersion: number }
+  | { status: 'synced'; documentVersion: number; providerId: string; generation: number }
   | { status: 'absent' }
   | { status: 'stale'; documentVersion: number }
   | { status: 'failed'; message: string };
@@ -1904,6 +2079,12 @@ export type PiariumLanguageDiagnostic = {
   severity: 'error' | 'warning' | 'info' | 'hint';
   message: string;
   range: PiariumLanguageRange;
+  code?: string | number;
+  source?: string;
+  tags?: number[];
+  relatedInformation?: Array<{ location: PiariumLanguageLocation; message: string }>;
+  providerId?: string;
+  generation?: number;
 };
 
 export type PiariumLanguageServiceEvent =
@@ -1926,6 +2107,20 @@ export interface PiariumLanguageFeatureRequest {
   range?: PiariumLanguageRange;
   newName?: string;
   query?: string;
+  triggerCharacter?: string;
+  triggerKind?: 'invoked' | 'triggerCharacter' | 'incomplete';
+  resolveToken?: string;
+  positions?: PiariumLanguagePosition[];
+  previousResultId?: string;
+  color?: PiariumLanguageColor;
+  diagnostics?: PiariumLanguageDiagnostic[];
+  formatting?: {
+    tabSize: number;
+    insertSpaces: boolean;
+    trimTrailingWhitespace?: boolean;
+    insertFinalNewline?: boolean;
+    trimFinalNewlines?: boolean;
+  };
 }
 
 export interface LanguageServicesAPI {
@@ -1937,13 +2132,29 @@ export interface LanguageServicesAPI {
   ): Subscription;
   syncDocument(request: PiariumLanguageDocumentSyncRequest): Promise<PiariumLanguageDocumentSyncResult>;
   completion(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCompletionItem[]>>;
-  hover(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<string>>;
-  definition(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageLocation[]>>;
+  completionResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCompletionItem>>;
+  hover(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageHover | null>>;
+  signatureHelp(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSignatureHelp | null>>;
+  definition(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageLocationLink[]>>;
   references(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageLocation[]>>;
   documentSymbols(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSymbol[]>>;
   workspaceSymbols(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSymbol[]>>;
-  rename(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageLocation[]>>;
+  rename(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageWorkspaceEdit | null>>;
   codeActions(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCodeAction[]>>;
+  codeActionResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageCodeAction>>;
+  documentFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
+  documentRangeFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
+  onTypeFormatting(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageTextEdit[]>>;
+  semanticTokens(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSemanticTokens | null>>;
+  inlayHints(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageInlayHint[]>>;
+  inlayHintResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageInlayHint>>;
+  documentHighlights(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageDocumentHighlight[]>>;
+  foldingRanges(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageFoldingRange[]>>;
+  selectionRanges(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageSelectionRange[]>>;
+  documentLinks(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageDocumentLink[]>>;
+  documentLinkResolve(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageDocumentLink>>;
+  documentColors(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageColorInformation[]>>;
+  colorPresentations(request: PiariumLanguageFeatureRequest): Promise<PiariumLanguageFeatureResult<PiariumLanguageColorPresentation[]>>;
   restart(workspaceId: string, languageId: string): Promise<PiariumLanguageProviderStatus>;
   disposeWorkspace(workspaceId: string): Promise<void>;
 }

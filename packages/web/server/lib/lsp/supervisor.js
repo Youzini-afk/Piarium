@@ -1,8 +1,93 @@
 import path from 'node:path';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { createJsonRpcClient } from './jsonrpc.js';
+import {
+  LanguageMappingError,
+  mapCodeAction,
+  mapColorPresentation,
+  mapColorInformation,
+  mapCompletionItem,
+  mapDiagnostic,
+  mapDocumentLink,
+  mapDocumentHighlight,
+  mapFoldingRange,
+  mapHover,
+  mapInlayHint,
+  mapLocation,
+  mapLocationLink,
+  mapSelectionRange,
+  mapSignatureHelp,
+  mapSymbols,
+  mapTextEdits,
+  mapWorkspaceEdit,
+  resourceFromUri,
+} from './mapping.js';
 
 const sessionKey = (workspaceId, languageId) => `${workspaceId}\0${languageId}`;
+
+const SEMANTIC_TOKEN_TYPES = [
+  'namespace', 'type', 'class', 'enum', 'interface', 'struct', 'typeParameter', 'parameter',
+  'variable', 'property', 'enumMember', 'event', 'function', 'method', 'macro', 'label',
+  'comment', 'string', 'keyword', 'number', 'regexp', 'operator', 'decorator',
+];
+const SEMANTIC_TOKEN_MODIFIERS = [
+  'declaration', 'definition', 'readonly', 'static', 'deprecated', 'abstract', 'async',
+  'modification', 'documentation', 'defaultLibrary',
+];
+const CODE_ACTION_KINDS = [
+  '', 'quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.move',
+  'refactor.rewrite', 'source', 'source.organizeImports', 'source.fixAll',
+];
+
+const capabilityValue = (record, key) => record.serverCapabilities?.[key];
+
+const supportsMethod = (record, method) => {
+  const capability = record.serverCapabilities ?? {};
+  if (method === 'completionItem/resolve') {
+    return capability.completionProvider?.resolveProvider === true;
+  }
+  if (method === 'codeAction/resolve') {
+    return capability.codeActionProvider?.resolveProvider === true;
+  }
+  if (method === 'inlayHint/resolve') {
+    return capability.inlayHintProvider?.resolveProvider === true;
+  }
+  if (method === 'documentLink/resolve') {
+    return capability.documentLinkProvider?.resolveProvider === true;
+  }
+  if (method === 'textDocument/semanticTokens/full') {
+    const provider = capability.semanticTokensProvider;
+    return provider === true || provider?.full === true || typeof provider?.full === 'object';
+  }
+  if (method === 'textDocument/semanticTokens/range') {
+    const provider = capability.semanticTokensProvider;
+    return provider === true || provider?.range === true || typeof provider?.range === 'object';
+  }
+  const key = ({
+    'textDocument/completion': 'completionProvider',
+    'textDocument/hover': 'hoverProvider',
+    'textDocument/signatureHelp': 'signatureHelpProvider',
+    'textDocument/definition': 'definitionProvider',
+    'textDocument/references': 'referencesProvider',
+    'textDocument/documentSymbol': 'documentSymbolProvider',
+    'workspace/symbol': 'workspaceSymbolProvider',
+    'textDocument/rename': 'renameProvider',
+    'textDocument/codeAction': 'codeActionProvider',
+    'textDocument/formatting': 'documentFormattingProvider',
+    'textDocument/rangeFormatting': 'documentRangeFormattingProvider',
+    'textDocument/onTypeFormatting': 'documentOnTypeFormattingProvider',
+    'textDocument/inlayHint': 'inlayHintProvider',
+    'textDocument/documentHighlight': 'documentHighlightProvider',
+    'textDocument/foldingRange': 'foldingRangeProvider',
+    'textDocument/selectionRange': 'selectionRangeProvider',
+    'textDocument/documentLink': 'documentLinkProvider',
+    'textDocument/documentColor': 'colorProvider',
+    'textDocument/colorPresentation': 'colorProvider',
+  })[method];
+  if (!key) return true;
+  const value = capabilityValue(record, key);
+  return value === true || typeof value === 'object';
+};
 
 const ownerScopeKey = (owner) => owner
   ? `${owner.extensionId}\0${owner.entrypointId}`
@@ -32,35 +117,6 @@ const lspSeverity = (value) => {
   return 'info';
 };
 
-const locationFromLsp = (value, workspaceId, root, pathModule) => {
-  const uri = typeof value?.uri === 'string' ? value.uri : typeof value?.targetUri === 'string' ? value.targetUri : '';
-  const range = value?.range ?? value?.targetRange ?? value?.targetSelectionRange;
-  if (!uri || !range) return null;
-  let absolutePath;
-  try {
-    absolutePath = fileURLToPath(uri);
-  } catch {
-    return null;
-  }
-  const relative = pathModule.relative(root, absolutePath);
-  if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return null;
-  return {
-    resource: { workspaceId, resourceId: relative.split(pathModule.sep).join('/') },
-    range,
-  };
-};
-
-const symbolKindName = (kind) => {
-  switch (kind) {
-    case 5: return 'class';
-    case 6: return 'method';
-    case 12: return 'function';
-    case 13: return 'variable';
-    case 14: return 'constant';
-    default: return 'symbol';
-  }
-};
-
 export const createLanguageSupervisor = ({
   documents,
   spawn,
@@ -70,6 +126,7 @@ export const createLanguageSupervisor = ({
 }) => {
   const providers = [];
   const sessions = new Map();
+  const desiredDocuments = new Map();
   const generations = new Map();
   const workspaceListeners = new Map();
   const nextGeneration = (key, existing) => {
@@ -103,6 +160,25 @@ export const createLanguageSupervisor = ({
     if (record.providerId) snapshot.providerId = record.providerId;
     if (typeof record.generation === 'number') snapshot.generation = record.generation;
     if (record.message) snapshot.message = record.message;
+    if (record.status === 'ready' || record.status === 'degraded') {
+      const completion = record.serverCapabilities?.completionProvider;
+      const signature = record.serverCapabilities?.signatureHelpProvider;
+      const onType = record.serverCapabilities?.documentOnTypeFormattingProvider;
+      const features = {};
+      if (Array.isArray(completion?.triggerCharacters)) {
+        features.completionTriggerCharacters = completion.triggerCharacters.filter((value) => typeof value === 'string');
+      }
+      if (Array.isArray(signature?.triggerCharacters)) {
+        features.signatureHelpTriggerCharacters = signature.triggerCharacters.filter((value) => typeof value === 'string');
+      }
+      if (Array.isArray(signature?.retriggerCharacters)) {
+        features.signatureHelpRetriggerCharacters = signature.retriggerCharacters.filter((value) => typeof value === 'string');
+      }
+      const onTypeCharacters = [onType?.firstTriggerCharacter, ...(Array.isArray(onType?.moreTriggerCharacter) ? onType.moreTriggerCharacter : [])]
+        .filter((value) => typeof value === 'string');
+      if (onTypeCharacters.length > 0) features.onTypeFormattingTriggerCharacters = onTypeCharacters;
+      if (Object.keys(features).length > 0) snapshot.features = features;
+    }
     return snapshot;
   };
 
@@ -131,8 +207,33 @@ export const createLanguageSupervisor = ({
 
   const pendingExits = new Set();
 
+  const clearRecordDiagnostics = (record) => {
+    for (const [resourceId] of record.documents) {
+      emit(record.workspaceId, {
+        kind: 'diagnostics',
+        workspaceId: record.workspaceId,
+        languageId: record.languageId,
+        resourceId,
+        providerId: record.providerId,
+        generation: record.generation,
+        items: [],
+      });
+    }
+  };
+
   const disposeRecord = (record, reason = 'Language server stopped') => {
     if (!record) return;
+    clearRecordDiagnostics(record);
+    emit(record.workspaceId, {
+      kind: 'status',
+      snapshot: {
+        status: 'absent',
+        workspaceId: record.workspaceId,
+        languageId: record.languageId,
+        providerId: record.providerId,
+        generation: record.generation,
+      },
+    });
     record.rpc?.rejectAll(new Error(reason));
     record.rpc?.dispose();
     record.rpc = null;
@@ -148,11 +249,17 @@ export const createLanguageSupervisor = ({
     }
     record.child = null;
     record.documents.clear();
+    record.completionResolveItems?.clear();
+    record.codeActionResolveItems?.clear();
+    record.inlayHintResolveItems?.clear();
+    record.documentLinkResolveItems?.clear();
   };
 
   const setFailed = (record, message) => {
     record.status = 'failed';
     record.message = message;
+    record.failureReason = record.failureReason ?? 'provider-failed';
+    clearRecordDiagnostics(record);
     emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
   };
 
@@ -190,10 +297,17 @@ export const createLanguageSupervisor = ({
         generation: nextGeneration(key, existing),
         status: 'failed',
         message: error instanceof Error ? error.message : 'Workspace is unavailable',
+        failureReason: 'provider-failed',
         documents: new Map(),
         child: null,
         rpc: null,
         root: '',
+        serverCapabilities: {},
+        completionResolveItems: new Map(),
+        codeActionResolveItems: new Map(),
+        inlayHintResolveItems: new Map(),
+        documentLinkResolveItems: new Map(),
+        resolveCounter: 0,
       };
       sessions.set(key, failed);
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(failed) });
@@ -209,10 +323,17 @@ export const createLanguageSupervisor = ({
         generation: nextGeneration(key, existing),
         status: 'failed',
         message: 'Untrusted workspace cannot execute project-provided language server commands',
+        failureReason: 'untrusted',
         documents: new Map(),
         child: null,
         rpc: null,
         root: workspace.root,
+        serverCapabilities: {},
+        completionResolveItems: new Map(),
+        codeActionResolveItems: new Map(),
+        inlayHintResolveItems: new Map(),
+        documentLinkResolveItems: new Map(),
+        resolveCounter: 0,
       };
       sessions.set(key, failed);
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(failed) });
@@ -227,10 +348,17 @@ export const createLanguageSupervisor = ({
       generation: nextGeneration(key, existing),
       status: 'starting',
       message: '',
+      failureReason: null,
       documents: new Map(),
       child: null,
       rpc: null,
       root: workspace.root,
+      serverCapabilities: {},
+      completionResolveItems: new Map(),
+      codeActionResolveItems: new Map(),
+      inlayHintResolveItems: new Map(),
+      documentLinkResolveItems: new Map(),
+      resolveCounter: 0,
     };
     sessions.set(key, record);
     emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
@@ -254,28 +382,22 @@ export const createLanguageSupervisor = ({
       if (sessions.get(key) !== record || record.rpc !== rpc) return;
       if (method !== 'textDocument/publishDiagnostics') return;
       const uri = typeof params?.uri === 'string' ? params.uri : '';
-      let absolutePath;
-      try {
-        absolutePath = fileURLToPath(uri);
-      } catch {
-        return;
-      }
-      const relative = pathModule.relative(record.root, absolutePath);
-      if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return;
-      const resourceId = relative.split(pathModule.sep).join('/');
+      const resource = resourceFromUri(uri, workspaceId, record.root, pathModule);
+      if (!resource) return;
+      const resourceId = resource.resourceId;
       const open = record.documents.get(resourceId);
       const documentVersion = Number.isFinite(params?.version) ? params.version : open?.documentVersion;
       if (open && Number.isFinite(documentVersion) && documentVersion !== open.documentVersion) return;
-      const items = Array.isArray(params?.diagnostics) ? params.diagnostics.map((diagnostic) => {
-        const item = {
-          resource: { workspaceId, resourceId },
-          documentVersion: Number.isFinite(documentVersion) ? documentVersion : (open?.documentVersion ?? 0),
-          severity: lspSeverity(diagnostic.severity),
-          message: typeof diagnostic.message === 'string' ? diagnostic.message : 'Diagnostic',
-          range: diagnostic.range ?? { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-        };
-        return item;
-      }) : [];
+      const items = Array.isArray(params?.diagnostics) ? params.diagnostics.map((diagnostic) => mapDiagnostic(diagnostic, {
+        workspaceId,
+        root: record.root,
+        pathModule,
+        resource,
+        documentVersion: Number.isFinite(documentVersion) ? documentVersion : (open?.documentVersion ?? 0),
+        severity: lspSeverity,
+        providerId: record.providerId,
+        generation: record.generation,
+      })) : [];
       emit(workspaceId, {
         kind: 'diagnostics',
         workspaceId,
@@ -300,30 +422,98 @@ export const createLanguageSupervisor = ({
     });
 
     try {
-      await rpc.request('initialize', {
+      const initialized = await rpc.request('initialize', {
         processId: null,
         rootUri: toFileUri(workspace.root),
         capabilities: {
           textDocument: {
             synchronization: { dynamicRegistration: false },
-            completion: { completionItem: { snippetSupport: false } },
-            hover: {},
+            completion: {
+              completionItem: {
+                snippetSupport: true,
+                commitCharactersSupport: true,
+                deprecatedSupport: true,
+                preselectSupport: true,
+                documentationFormat: ['markdown', 'plaintext'],
+                insertReplaceSupport: true,
+                resolveSupport: {
+                  properties: ['documentation', 'detail', 'additionalTextEdits', 'command'],
+                },
+                tagSupport: { valueSet: [1] },
+              },
+              contextSupport: true,
+            },
+            hover: { contentFormat: ['markdown', 'plaintext'] },
+            signatureHelp: {
+              signatureInformation: {
+                documentationFormat: ['markdown', 'plaintext'],
+                parameterInformation: { labelOffsetSupport: true },
+                activeParameterSupport: true,
+              },
+              contextSupport: true,
+            },
             definition: {},
             references: {},
             rename: {},
-            codeAction: {},
-            documentSymbol: {},
-            publishDiagnostics: { relatedInformation: false },
+            codeAction: {
+              codeActionLiteralSupport: {
+                codeActionKind: { valueSet: CODE_ACTION_KINDS },
+              },
+              dataSupport: true,
+              disabledSupport: true,
+              isPreferredSupport: true,
+              resolveSupport: { properties: ['edit', 'command'] },
+            },
+            documentSymbol: { hierarchicalDocumentSymbolSupport: true, tagSupport: { valueSet: [1] } },
+            formatting: {},
+            rangeFormatting: {},
+            onTypeFormatting: {},
+            semanticTokens: {
+              requests: { range: true, full: true },
+              tokenTypes: SEMANTIC_TOKEN_TYPES,
+              tokenModifiers: SEMANTIC_TOKEN_MODIFIERS,
+              formats: ['relative'],
+              overlappingTokenSupport: false,
+              multilineTokenSupport: true,
+            },
+            inlayHint: { dynamicRegistration: false, resolveSupport: { properties: ['tooltip', 'textEdits', 'label.tooltip', 'label.location', 'label.command'] } },
+            documentHighlight: {},
+            foldingRange: { lineFoldingOnly: false },
+            selectionRange: {},
+            documentLink: { tooltipSupport: true },
+            colorProvider: {},
+            publishDiagnostics: { relatedInformation: true, tagSupport: { valueSet: [1, 2] } },
           },
-          workspace: { symbol: {} },
+          workspace: {
+            symbol: { resolveSupport: { properties: ['location.range'] }, tagSupport: { valueSet: [1] } },
+            workspaceEdit: { documentChanges: true, changeAnnotationSupport: { groupsOnLabel: true } },
+          },
         },
         workspaceFolders: [{ uri: toFileUri(workspace.root), name: pathModule.basename(workspace.root) }],
       });
+      record.serverCapabilities = initialized?.capabilities && typeof initialized.capabilities === 'object'
+        ? initialized.capabilities
+        : {};
       rpc.notify('initialized', {});
       if (sessions.get(key) !== record || !providers.includes(provider)) {
         disposeRecord(record, 'Language provider changed during startup');
         if (sessions.get(key) === record) sessions.delete(key);
         return record;
+      }
+      const desired = desiredDocuments.get(key);
+      if (desired) {
+        for (const [resourceId, document] of desired) {
+          const uri = toFileUri(pathModule.resolve(record.root, resourceId));
+          record.documents.set(resourceId, { ...document });
+          rpc.notify('textDocument/didOpen', {
+            textDocument: {
+              uri,
+              languageId,
+              version: document.documentVersion,
+              text: document.content,
+            },
+          });
+        }
       }
       record.status = 'ready';
       record.message = '';
@@ -341,14 +531,6 @@ export const createLanguageSupervisor = ({
     if (!workspaceId || !resourceId || !languageId) {
       return { status: 'failed', message: 'Document identity is required' };
     }
-    const record = await ensureSession(workspaceId, languageId);
-    if (!record || record.status === 'absent') return { status: 'absent' };
-    if (record.status === 'failed' || !record.rpc) {
-      return { status: 'failed', message: record.message || 'Language server is unavailable' };
-    }
-    if (record.status === 'starting') {
-      return { status: 'failed', message: 'Language server is still starting' };
-    }
     let absolutePath;
     try {
       const inspected = await documents.inspectWorkspace(workspaceId);
@@ -361,104 +543,265 @@ export const createLanguageSupervisor = ({
     } catch (error) {
       return { status: 'failed', message: error instanceof Error ? error.message : 'Workspace is unavailable' };
     }
-    const uri = toFileUri(absolutePath);
-    const open = record.documents.get(resourceId);
+
+    const key = sessionKey(workspaceId, languageId);
+    const desired = desiredDocuments.get(key) ?? new Map();
+    desiredDocuments.set(key, desired);
+    const previousDesired = desired.get(resourceId);
     if (request.reason === 'close') {
+      desired.delete(resourceId);
+      if (desired.size === 0) desiredDocuments.delete(key);
+      const record = sessions.get(key);
+      const open = record?.documents.get(resourceId);
+      if (!record || !record.rpc || !open) return { status: 'absent' };
       record.documents.delete(resourceId);
-      record.rpc.notify('textDocument/didClose', { textDocument: { uri } });
-      return { status: 'synced', documentVersion: request.documentVersion };
-    }
-    if (open && request.documentVersion < open.documentVersion) {
-      return { status: 'stale', documentVersion: open.documentVersion };
-    }
-    if (!open || request.reason === 'open') {
-      record.documents.set(resourceId, {
+      record.rpc.notify('textDocument/didClose', { textDocument: { uri: toFileUri(absolutePath) } });
+      return {
+        status: 'synced',
         documentVersion: request.documentVersion,
-        content: request.content ?? open?.content ?? '',
-      });
-      record.rpc.notify('textDocument/didOpen', {
-        textDocument: {
-          uri,
-          languageId,
-          version: request.documentVersion,
-          text: request.content ?? '',
-        },
-      });
-      return { status: 'synced', documentVersion: request.documentVersion };
+        providerId: record.providerId,
+        generation: record.generation,
+      };
+    }
+    if (previousDesired && request.documentVersion < previousDesired.documentVersion) {
+      return { status: 'stale', documentVersion: previousDesired.documentVersion };
     }
     const incrementalChanges = Array.isArray(request.changes)
       ? [...request.changes].sort((left, right) => right.from - left.from || right.to - left.to)
       : [];
     const nextContent = request.content
-      ?? (incrementalChanges.length > 0 && open.content !== undefined
-        ? incrementalChanges.reduce((text, change) => `${text.slice(0, change.from)}${change.insert}${text.slice(change.to)}`, open.content)
-        : open.content);
-    record.documents.set(resourceId, { documentVersion: request.documentVersion, content: nextContent ?? '' });
+      ?? (incrementalChanges.length > 0 && previousDesired?.content !== undefined
+        ? incrementalChanges.reduce(
+            (text, change) => `${text.slice(0, change.from)}${change.insert}${text.slice(change.to)}`,
+            previousDesired.content,
+          )
+        : previousDesired?.content ?? '');
+    const nextDesired = { documentVersion: request.documentVersion, content: nextContent };
+    desired.set(resourceId, nextDesired);
+
+    const record = await ensureSession(workspaceId, languageId);
+    if (!record) return { status: 'absent' };
+    if (record.status === 'failed' || !record.rpc) {
+      return { status: 'failed', message: record.message || 'Language server is unavailable' };
+    }
+    if (record.status === 'starting') {
+      return { status: 'failed', message: 'Language server is still starting' };
+    }
+    const uri = toFileUri(absolutePath);
+    const open = record.documents.get(resourceId);
+    if (open && request.documentVersion < open.documentVersion) {
+      return { status: 'stale', documentVersion: open.documentVersion };
+    }
+    if (!open) {
+      record.documents.set(resourceId, nextDesired);
+      record.rpc.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId, version: request.documentVersion, text: nextContent },
+      });
+    } else if (open.documentVersion !== request.documentVersion || open.content !== nextContent) {
+      const canUseIncremental = request.reason === 'change'
+        && incrementalChanges.length > 0
+        && previousDesired?.content === open.content;
+      const contentChanges = canUseIncremental
+        ? incrementalChanges.map((change) => ({
+            range: rangeFromOffsets(open.content, change.from, change.to),
+            text: change.insert,
+          }))
+        : [{ text: nextContent }];
+      record.documents.set(resourceId, nextDesired);
+      record.rpc.notify('textDocument/didChange', {
+        textDocument: { uri, version: request.documentVersion },
+        contentChanges,
+      });
+    }
     if (request.reason === 'save') {
       record.rpc.notify('textDocument/didSave', { textDocument: { uri } });
-      return { status: 'synced', documentVersion: request.documentVersion };
     }
-    const contentChanges = incrementalChanges.length > 0 && open.content !== undefined
-      ? incrementalChanges.map((change) => ({
-          range: rangeFromOffsets(open.content, change.from, change.to),
-          text: change.insert,
-        }))
-      : [{ text: nextContent ?? '' }];
-    record.rpc.notify('textDocument/didChange', {
-      textDocument: { uri, version: request.documentVersion },
-      contentChanges,
-    });
-    return { status: 'synced', documentVersion: request.documentVersion };
+    return {
+      status: 'synced',
+      documentVersion: request.documentVersion,
+      providerId: record.providerId,
+      generation: record.generation,
+    };
   };
 
-  const requestFeature = async (method, request, mapResult) => {
+  const completionTriggerKind = (value) => {
+    if (value === 'triggerCharacter') return 2;
+    if (value === 'incomplete') return 3;
+    return 1;
+  };
+
+  const featureParams = (method, request, uri) => {
+    if (method === 'workspace/symbol') return { query: request.query ?? '' };
+    if (method === 'textDocument/completion') {
+      return {
+        textDocument: { uri },
+        position: request.position,
+        context: {
+          triggerKind: completionTriggerKind(request.triggerKind),
+          ...(typeof request.triggerCharacter === 'string' ? { triggerCharacter: request.triggerCharacter } : {}),
+        },
+      };
+    }
+    if (method === 'textDocument/signatureHelp') {
+      return {
+        textDocument: { uri },
+        position: request.position,
+        context: {
+          triggerKind: completionTriggerKind(request.triggerKind),
+          isRetrigger: request.triggerKind === 'incomplete',
+          ...(typeof request.triggerCharacter === 'string' ? { triggerCharacter: request.triggerCharacter } : {}),
+        },
+      };
+    }
+    if (method === 'textDocument/references') {
+      return { textDocument: { uri }, position: request.position, context: { includeDeclaration: true } };
+    }
+    if (method === 'textDocument/codeAction') {
+      return {
+        textDocument: { uri },
+        range: request.range,
+        context: {
+          diagnostics: Array.isArray(request.diagnostics) ? request.diagnostics.map((diagnostic) => ({
+            range: diagnostic.range,
+            message: diagnostic.message,
+            ...(diagnostic.code !== undefined ? { code: diagnostic.code } : {}),
+            ...(diagnostic.source ? { source: diagnostic.source } : {}),
+          })) : [],
+        },
+      };
+    }
+    if (method === 'textDocument/formatting') {
+      return { textDocument: { uri }, options: request.formatting ?? { tabSize: 2, insertSpaces: true } };
+    }
+    if (method === 'textDocument/rangeFormatting') {
+      return { textDocument: { uri }, range: request.range, options: request.formatting ?? { tabSize: 2, insertSpaces: true } };
+    }
+    if (method === 'textDocument/onTypeFormatting') {
+      return {
+        textDocument: { uri },
+        position: request.position,
+        ch: request.triggerCharacter ?? '',
+        options: request.formatting ?? { tabSize: 2, insertSpaces: true },
+      };
+    }
+    if (method === 'textDocument/semanticTokens/full') return { textDocument: { uri } };
+    if (method === 'textDocument/semanticTokens/range') return { textDocument: { uri }, range: request.range };
+    if (method === 'textDocument/inlayHint') return { textDocument: { uri }, range: request.range };
+    if (method === 'textDocument/selectionRange') return { textDocument: { uri }, positions: request.positions ?? [] };
+    if (method === 'textDocument/colorPresentation') {
+      return { textDocument: { uri }, color: request.color, range: request.range };
+    }
+    return {
+      ...(uri ? { textDocument: { uri } } : {}),
+      ...(request.position ? { position: request.position } : {}),
+      ...(request.range ? { range: request.range } : {}),
+      ...(request.newName ? { newName: request.newName } : {}),
+    };
+  };
+
+  const featureFailure = (record, message, reason = 'request-failed') => ({
+    status: 'failed',
+    message,
+    reason,
+    ...(record?.providerId ? { providerId: record.providerId } : {}),
+    ...(Number.isFinite(record?.generation) ? { generation: record.generation } : {}),
+  });
+
+  const requestFeature = async (method, request, mapResult, options = {}) => {
     const languageId = request.languageId;
     const workspaceId = request.resource?.workspaceId;
     const resourceId = request.resource?.resourceId;
-    if (!workspaceId || !languageId) return { status: 'absent' };
+    if (!workspaceId || !languageId) return { status: 'absent', ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
     const record = await ensureSession(workspaceId, languageId);
     if (!record || !findProvider(workspaceId, languageId)) {
-      if (!findProvider(workspaceId, languageId)) return { status: 'absent' };
+      if (!findProvider(workspaceId, languageId)) return { status: 'absent', workspaceId, languageId };
     }
     if (!record || record.status === 'failed' || !record.rpc) {
-      return { status: 'failed', message: record?.message || 'Language server is unavailable' };
+      return featureFailure(record, record?.message || 'Language server is unavailable', record?.failureReason ?? 'provider-failed');
+    }
+    if (!supportsMethod(record, method)) {
+      return featureFailure(record, `Language provider does not support ${method}`, 'unsupported');
     }
     const open = resourceId ? record.documents.get(resourceId) : null;
     if (open && Number.isFinite(request.documentVersion) && request.documentVersion !== open.documentVersion) {
-      return { status: 'stale', documentVersion: open.documentVersion };
+      return { status: 'stale', documentVersion: open.documentVersion, providerId: record.providerId, generation: record.generation };
     }
     let uri;
     if (resourceId) {
       const inspected = await documents.inspectWorkspace(workspaceId);
-      uri = toFileUri(pathModule.resolve(inspected.root, resourceId));
+      const resolved = pathModule.resolve(inspected.root, resourceId);
+      const relative = pathModule.relative(inspected.root, resolved);
+      if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
+        return featureFailure(record, 'Path is outside workspace', 'unsupported');
+      }
+      uri = toFileUri(resolved);
     }
-    const params = method === 'workspace/symbol'
-      ? { query: request.query ?? '' }
-      : {
-          ...(uri ? { textDocument: { uri } } : {}),
-          ...(request.position ? { position: request.position } : {}),
-          ...(request.range ? { range: request.range } : {}),
-          ...(method === 'textDocument/references' ? { context: { includeDeclaration: true } } : {}),
-          ...(request.newName ? { newName: request.newName } : {}),
-        };
+    const params = options.params ?? featureParams(method, request, uri);
     try {
       const raw = await record.rpc.request(method, params);
       if (sessions.get(sessionKey(workspaceId, languageId)) !== record) {
-        return { status: 'stale', documentVersion: open?.documentVersion ?? request.documentVersion ?? 0 };
+        return { status: 'stale', documentVersion: open?.documentVersion ?? request.documentVersion ?? 0, providerId: record.providerId, generation: record.generation };
       }
       if (open && request.documentVersion !== open.documentVersion) {
-        return { status: 'stale', documentVersion: open.documentVersion };
+        return { status: 'stale', documentVersion: open.documentVersion, providerId: record.providerId, generation: record.generation };
       }
-      return { status: 'ready', documentVersion: request.documentVersion ?? open?.documentVersion ?? 0, value: mapResult(raw, record) };
+      return {
+        status: 'ready',
+        documentVersion: request.documentVersion ?? open?.documentVersion ?? 0,
+        providerId: record.providerId,
+        generation: record.generation,
+        value: mapResult(raw, record),
+      };
     } catch (error) {
+      if (error instanceof LanguageMappingError) {
+        return featureFailure(record, error.message, error.reason);
+      }
       if (record.rpc && (record.status === 'ready' || record.status === 'degraded')) {
         record.status = 'degraded';
         record.message = error instanceof Error ? error.message : 'Language request failed';
         emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       }
-      return { status: 'failed', message: error instanceof Error ? error.message : 'Language request failed' };
+      return featureFailure(record, error instanceof Error ? error.message : 'Language request failed');
     }
   };
+
+  const storeResolveItem = (record, collection, raw) => {
+    record.resolveCounter += 1;
+    const token = `${record.generation}:${record.resolveCounter}`;
+    collection.set(token, raw);
+    return token;
+  };
+
+  const resolveFeature = async (method, request, collectionName, mapResult) => {
+    const languageId = request.languageId;
+    const workspaceId = request.resource?.workspaceId;
+    const record = workspaceId && languageId ? sessions.get(sessionKey(workspaceId, languageId)) : null;
+    const raw = record?.[collectionName]?.get(request.resolveToken);
+    if (!record || !record.rpc || !raw) {
+      return record
+        ? featureFailure(record, 'Language resolve item is stale', 'unsupported')
+        : { status: 'absent', ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
+    }
+    return requestFeature(method, request, mapResult, { params: raw });
+  };
+
+  const mappingContext = (record) => ({
+    workspaceId: record.workspaceId,
+    root: record.root,
+    pathModule,
+  });
+
+  const codeActionMappingContext = (record, request) => ({
+    ...mappingContext(record),
+    diagnosticContext: {
+      ...mappingContext(record),
+      resource: request.resource,
+      documentVersion: request.documentVersion ?? 0,
+      severity: lspSeverity,
+      providerId: record.providerId,
+      generation: record.generation,
+    },
+  });
 
   return {
     registerProvider(descriptor, owner) {
@@ -531,75 +874,123 @@ export const createLanguageSupervisor = ({
       };
     },
     syncDocument,
-    completion: (request) => requestFeature('textDocument/completion', request, (raw) => {
+    completion: (request) => requestFeature('textDocument/completion', request, (raw, record) => {
       const items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
-      return items.map((item) => {
-        const mapped = { label: typeof item.label === 'string' ? item.label : '' };
-        if (typeof item.detail === 'string') mapped.detail = item.detail;
-        if (typeof item.insertText === 'string') mapped.insertText = item.insertText;
-        return mapped;
-      }).filter((item) => item.label);
+      record.completionResolveItems.clear();
+      const canResolve = record.serverCapabilities?.completionProvider?.resolveProvider === true;
+      return items.map((item) => mapCompletionItem(
+        item,
+        canResolve ? storeResolveItem(record, record.completionResolveItems, item) : undefined,
+      )).filter(Boolean);
     }),
-    hover: (request) => requestFeature('textDocument/hover', request, (raw) => {
-      if (typeof raw?.contents === 'string') return raw.contents;
-      if (typeof raw?.contents?.value === 'string') return raw.contents.value;
-      if (Array.isArray(raw?.contents)) {
-        return raw.contents.map((part) => (typeof part === 'string' ? part : part?.value)).filter(Boolean).join('\n');
-      }
-      return '';
-    }),
+    completionResolve: (request) => resolveFeature(
+      'completionItem/resolve',
+      request,
+      'completionResolveItems',
+      (raw) => mapCompletionItem(raw, request.resolveToken),
+    ),
+    hover: (request) => requestFeature('textDocument/hover', request, mapHover),
+    signatureHelp: (request) => requestFeature('textDocument/signatureHelp', request, mapSignatureHelp),
     definition: (request) => requestFeature('textDocument/definition', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
-      return values.map((value) => locationFromLsp(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
+      return values.map((value) => mapLocationLink(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
     }),
     references: (request) => requestFeature('textDocument/references', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
-      return values.map((value) => locationFromLsp(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
+      return values.map((value) => mapLocation(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
     }),
-    documentSymbols: (request) => requestFeature('textDocument/documentSymbol', request, (raw) => {
+    documentSymbols: (request) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
+      mapSymbols(raw, mappingContext(record))
+    )),
+    workspaceSymbols: (request) => requestFeature('workspace/symbol', request, (raw, record) => (
+      mapSymbols(raw, mappingContext(record))
+    )),
+    rename: (request) => requestFeature('textDocument/rename', request, (raw, record) => (
+      mapWorkspaceEdit(raw, mappingContext(record))
+    )),
+    codeActions: (request) => requestFeature('textDocument/codeAction', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
-      return values.map((value) => {
-        const mapped = {
-          name: typeof value.name === 'string' ? value.name : '',
-          kind: symbolKindName(value.kind),
-          range: value.range ?? value.location?.range ?? { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-        };
-        if (value.selectionRange) mapped.selectionRange = value.selectionRange;
-        return mapped;
-      }).filter((item) => item.name);
+      record.codeActionResolveItems.clear();
+      const canResolve = record.serverCapabilities?.codeActionProvider?.resolveProvider === true;
+      return values.map((value) => mapCodeAction(
+        value,
+        codeActionMappingContext(record, request),
+        canResolve ? storeResolveItem(record, record.codeActionResolveItems, value) : undefined,
+      )).filter(Boolean);
     }),
-    workspaceSymbols: (request) => requestFeature('workspace/symbol', request, (raw, record) => {
-      const values = Array.isArray(raw) ? raw : [];
-      return values.map((value) => {
-        const location = locationFromLsp(value.location, record.workspaceId, record.root, pathModule);
-        if (!location) return null;
+    codeActionResolve: (request) => resolveFeature(
+      'codeAction/resolve',
+      request,
+      'codeActionResolveItems',
+      (raw, record) => mapCodeAction(raw, codeActionMappingContext(record, request), request.resolveToken),
+    ),
+    documentFormatting: (request) => requestFeature('textDocument/formatting', request, mapTextEdits),
+    documentRangeFormatting: (request) => requestFeature('textDocument/rangeFormatting', request, mapTextEdits),
+    onTypeFormatting: (request) => requestFeature('textDocument/onTypeFormatting', request, mapTextEdits),
+    semanticTokens: (request) => requestFeature(
+      request.range ? 'textDocument/semanticTokens/range' : 'textDocument/semanticTokens/full',
+      request,
+      (raw, record) => {
+        if (!raw || !Array.isArray(raw.data)) return null;
+        const provider = record.serverCapabilities?.semanticTokensProvider;
+        const legend = provider?.legend;
         return {
-          name: typeof value.name === 'string' ? value.name : '',
-          kind: symbolKindName(value.kind),
-          range: location.range,
+          data: raw.data.filter((value) => Number.isInteger(value) && value >= 0),
+          ...(typeof raw.resultId === 'string' ? { resultId: raw.resultId } : {}),
+          legend: {
+            tokenTypes: Array.isArray(legend?.tokenTypes) ? legend.tokenTypes.filter((value) => typeof value === 'string') : [],
+            tokenModifiers: Array.isArray(legend?.tokenModifiers) ? legend.tokenModifiers.filter((value) => typeof value === 'string') : [],
+          },
         };
-      }).filter((item) => item?.name);
-    }),
-    rename: (request) => requestFeature('textDocument/rename', request, (raw, record) => {
-      const changes = raw?.changes && typeof raw.changes === 'object' ? raw.changes : {};
-      const locations = [];
-      for (const [uri, edits] of Object.entries(changes)) {
-        for (const edit of Array.isArray(edits) ? edits : []) {
-          const location = locationFromLsp({ uri, range: edit.range }, record.workspaceId, record.root, pathModule);
-          if (location) locations.push(location);
-        }
-      }
-      return locations;
-    }),
-    codeActions: (request) => requestFeature('textDocument/codeAction', request, (raw) => {
+      },
+    ),
+    inlayHints: (request) => requestFeature('textDocument/inlayHint', request, (raw, record) => {
       const values = Array.isArray(raw) ? raw : [];
-      return values.map((value) => {
-        const mapped = { title: typeof value.title === 'string' ? value.title : '' };
-        if (typeof value.kind === 'string') mapped.kind = value.kind;
-        if (value.isPreferred === true) mapped.isPreferred = true;
-        return mapped;
-      }).filter((item) => item.title);
+      record.inlayHintResolveItems.clear();
+      const canResolve = record.serverCapabilities?.inlayHintProvider?.resolveProvider === true;
+      return values.map((value) => mapInlayHint(
+        value,
+        mappingContext(record),
+        canResolve ? storeResolveItem(record, record.inlayHintResolveItems, value) : undefined,
+      )).filter(Boolean);
     }),
+    inlayHintResolve: (request) => resolveFeature(
+      'inlayHint/resolve',
+      request,
+      'inlayHintResolveItems',
+      (raw, record) => mapInlayHint(raw, mappingContext(record), request.resolveToken),
+    ),
+    documentHighlights: (request) => requestFeature('textDocument/documentHighlight', request, (raw) => (
+      (Array.isArray(raw) ? raw : []).map(mapDocumentHighlight).filter(Boolean)
+    )),
+    foldingRanges: (request) => requestFeature('textDocument/foldingRange', request, (raw) => (
+      (Array.isArray(raw) ? raw : []).map(mapFoldingRange).filter(Boolean)
+    )),
+    selectionRanges: (request) => requestFeature('textDocument/selectionRange', request, (raw) => (
+      (Array.isArray(raw) ? raw : []).map(mapSelectionRange).filter(Boolean)
+    )),
+    documentLinks: (request) => requestFeature('textDocument/documentLink', request, (raw, record) => {
+      const values = Array.isArray(raw) ? raw : [];
+      record.documentLinkResolveItems.clear();
+      const canResolve = record.serverCapabilities?.documentLinkProvider?.resolveProvider === true;
+      return values.map((value) => mapDocumentLink(
+        value,
+        mappingContext(record),
+        canResolve ? storeResolveItem(record, record.documentLinkResolveItems, value) : undefined,
+      )).filter(Boolean);
+    }),
+    documentLinkResolve: (request) => resolveFeature(
+      'documentLink/resolve',
+      request,
+      'documentLinkResolveItems',
+      (raw, record) => mapDocumentLink(raw, mappingContext(record), request.resolveToken),
+    ),
+    documentColors: (request) => requestFeature('textDocument/documentColor', request, (raw) => (
+      (Array.isArray(raw) ? raw : []).map(mapColorInformation).filter(Boolean)
+    )),
+    colorPresentations: (request) => requestFeature('textDocument/colorPresentation', request, (raw) => (
+      (Array.isArray(raw) ? raw : []).map(mapColorPresentation).filter(Boolean)
+    )),
     async restart(workspaceId, languageId) {
       const key = sessionKey(workspaceId, languageId);
       const existing = sessions.get(key);
@@ -618,12 +1009,18 @@ export const createLanguageSupervisor = ({
         sessions.delete(key);
         inflight.delete(key);
       }
-      if (!ownerKey) workspaceListeners.delete(workspaceId);
+      if (!ownerKey) {
+        workspaceListeners.delete(workspaceId);
+        for (const key of desiredDocuments.keys()) {
+          if (key.startsWith(`${workspaceId}\0`)) desiredDocuments.delete(key);
+        }
+      }
       await Promise.all([...pendingExits]);
     },
     async dispose() {
       for (const record of sessions.values()) disposeRecord(record, 'Language supervisor disposed');
       sessions.clear();
+      desiredDocuments.clear();
       inflight.clear();
       workspaceListeners.clear();
       providers.length = 0;

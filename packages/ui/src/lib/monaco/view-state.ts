@@ -54,8 +54,32 @@ export const applyMonacoEditorViewState = (
   const provider = viewState.providerState;
   if (!provider || provider.providerId !== TEXT_EDITOR_VIEW_STATE_PROVIDER_ID) return;
   if (provider.schemaVersion === MONACO_TEXT_EDITOR_VIEW_STATE_SCHEMA_VERSION) {
-    if (!isJsonObject(provider.value) || !isJsonObject(provider.value.state)) return;
-    editorInstance.restoreViewState(provider.value.state as unknown as editor.ICodeEditorViewState);
+    if (!isJsonObject(provider.value)) return;
+    if (isJsonObject(provider.value.state)) {
+      editorInstance.restoreViewState(provider.value.state as unknown as editor.ICodeEditorViewState);
+    }
+    const summary = provider.value.summary;
+    if (!isJsonObject(summary)) return;
+    const selection = summary.selection;
+    const cursor = summary.cursor;
+    if (isJsonObject(selection) && isJsonObject(selection.start) && isJsonObject(selection.end)) {
+      const range = {
+        startLineNumber: Number(selection.start.line),
+        startColumn: Number(selection.start.column),
+        endLineNumber: Number(selection.end.line),
+        endColumn: Number(selection.end.column),
+      };
+      if (Object.values(range).every((value) => Number.isInteger(value) && value > 0)) {
+        editorInstance.setSelection(range);
+        editorInstance.revealRangeInCenter(range);
+      }
+    } else if (isJsonObject(cursor)) {
+      const position = { lineNumber: Number(cursor.line), column: Number(cursor.column) };
+      if (Number.isInteger(position.lineNumber) && position.lineNumber > 0 && Number.isInteger(position.column) && position.column > 0) {
+        editorInstance.setPosition(position);
+        editorInstance.revealPositionInCenter(position);
+      }
+    }
     return;
   }
   const legacy = legacyTextValueFromViewState(viewState);
@@ -84,3 +108,23 @@ export const applyMonacoEditorViewState = (
   });
 };
 
+export const createMonacoNavigationViewState = (range: {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+}): EditorViewState => ({
+  providerState: {
+    providerId: TEXT_EDITOR_VIEW_STATE_PROVIDER_ID,
+    schemaVersion: MONACO_TEXT_EDITOR_VIEW_STATE_SCHEMA_VERSION,
+    value: {
+      summary: {
+        cursor: { line: range.startLineNumber, column: range.startColumn },
+        selection: {
+          start: { line: range.startLineNumber, column: range.startColumn },
+          end: { line: range.endLineNumber, column: range.endColumn },
+        },
+      },
+    },
+  },
+});

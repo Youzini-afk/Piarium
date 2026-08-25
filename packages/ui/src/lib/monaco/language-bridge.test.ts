@@ -45,28 +45,33 @@ describe('MonacoLanguageBridge', () => {
     let hoverProvider: languages.HoverProvider | undefined;
     let documentListener: ((record: DocumentRecord) => void) | undefined;
     let diagnosticsListener: (() => void) | undefined;
-    const markers: editor.IMarkerData[][] = [];
+    const markers: Array<{ owner: string; items: editor.IMarkerData[] }> = [];
     const providerDispose = vi.fn();
     const model = {
       getWordUntilPosition: () => ({ word: 'doc', startColumn: 1, endColumn: 4 }),
       validateRange: (range: unknown) => range,
     } as unknown as editor.ITextModel;
     const monaco = {
+      MarkerTag: { Unnecessary: 1, Deprecated: 2 },
       MarkerSeverity: { Error: 8, Warning: 4, Info: 2, Hint: 1 },
-      Range: class {
-        constructor(
-          readonly startLineNumber: number,
-          readonly startColumn: number,
-          readonly endLineNumber: number,
-          readonly endColumn: number,
-        ) {}
-      },
+      Uri: { from: (value: Record<string, string>) => ({ ...value, toString: () => `${value.scheme}://${value.authority}${value.path}` }) },
       editor: {
+        registerEditorOpener: () => ({ dispose: providerDispose }),
+        registerLinkOpener: () => ({ dispose: providerDispose }),
         setModelLanguage: vi.fn(),
-        setModelMarkers: (_model: editor.ITextModel, _owner: string, next: editor.IMarkerData[]) => markers.push(next),
+        setModelMarkers: (_model: editor.ITextModel, owner: string, items: editor.IMarkerData[]) => markers.push({ owner, items }),
       },
       languages: {
-        CompletionItemKind: { Text: 18 },
+        CompletionItemInsertTextRule: { InsertAsSnippet: 4 },
+        CompletionItemKind: new Proxy({ Text: 18 }, { get: (target, key) => Reflect.get(target, key) ?? 18 }),
+        CompletionItemTag: { Deprecated: 1 },
+        CompletionTriggerKind: { Invoke: 0, TriggerCharacter: 1, TriggerForIncompleteCompletions: 2 },
+        DocumentHighlightKind: { Text: 0, Read: 1, Write: 2 },
+        FoldingRangeKind: { Comment: { value: 'comment' }, Imports: { value: 'imports' }, Region: { value: 'region' } },
+        InlayHintKind: { Type: 1, Parameter: 2 },
+        SignatureHelpTriggerKind: { Invoke: 1, TriggerCharacter: 2, ContentChange: 3 },
+        SymbolKind: new Proxy({ Variable: 12 }, { get: (target, key) => Reflect.get(target, key) ?? 12 }),
+        SymbolTag: { Deprecated: 1 },
         getLanguages: () => [],
         register: () => ({ dispose: providerDispose }),
         registerCompletionItemProvider: (_languageId: string, provider: languages.CompletionItemProvider) => {
@@ -77,6 +82,20 @@ describe('MonacoLanguageBridge', () => {
           hoverProvider = provider;
           return { dispose: providerDispose };
         },
+        registerSignatureHelpProvider: () => ({ dispose: providerDispose }),
+        registerDefinitionProvider: () => ({ dispose: providerDispose }),
+        registerReferenceProvider: () => ({ dispose: providerDispose }),
+        registerDocumentSymbolProvider: () => ({ dispose: providerDispose }),
+        registerDocumentHighlightProvider: () => ({ dispose: providerDispose }),
+        registerDocumentFormattingEditProvider: () => ({ dispose: providerDispose }),
+        registerDocumentRangeFormattingEditProvider: () => ({ dispose: providerDispose }),
+        registerOnTypeFormattingEditProvider: () => ({ dispose: providerDispose }),
+        registerFoldingRangeProvider: () => ({ dispose: providerDispose }),
+        registerSelectionRangeProvider: () => ({ dispose: providerDispose }),
+        registerDocumentSemanticTokensProvider: () => ({ dispose: providerDispose }),
+        registerInlayHintsProvider: () => ({ dispose: providerDispose }),
+        registerLinkProvider: () => ({ dispose: providerDispose }),
+        registerColorProvider: () => ({ dispose: providerDispose }),
       },
     } as unknown as MonacoRuntime;
     const diagnostic: PiariumLanguageDiagnostic = {
@@ -84,20 +103,27 @@ describe('MonacoLanguageBridge', () => {
       documentVersion: 3,
       severity: 'warning',
       message: 'Check this value',
+      providerId: 'fixture',
+      generation: 2,
       range: {
         start: { line: 0, character: 0 },
         end: { line: 0, character: 3 },
       },
     };
+    let diagnostics = [diagnostic];
     const completion = vi.fn(async () => ({
       status: 'ready' as const,
       documentVersion: 3,
+      providerId: 'fixture',
+      generation: 2,
       value: [{ label: 'document', insertText: 'document', detail: 'global' }],
     }));
     const hover = vi.fn(async () => ({
       status: 'ready' as const,
       documentVersion: 3,
-      value: '`Document`',
+      providerId: 'fixture',
+      generation: 2,
+      value: { contents: [{ kind: 'markdown' as const, value: '`Document`' }] },
     }));
     const language = { completion, hover } as unknown as LanguageServicesAPI;
     const acquireDocument = vi.fn();
@@ -114,11 +140,12 @@ describe('MonacoLanguageBridge', () => {
       notifyDocumentChange,
       notifyDocumentSave,
       getLanguage: () => language,
-      diagnosticsFor: () => [diagnostic],
+      diagnosticsFor: () => diagnostics,
       subscribeDiagnostics: (listener) => {
         diagnosticsListener = listener;
         return () => { diagnosticsListener = undefined; };
       },
+      subscribeProviderStatus: () => () => undefined,
       subscribeDocument: (_resource, listener) => {
         documentListener = listener;
         return () => { documentListener = undefined; };
@@ -126,8 +153,8 @@ describe('MonacoLanguageBridge', () => {
     });
 
     bridge.acquire(model, identity, 'view:one');
-    expect(acquireDocument).toHaveBeenCalledWith(identity);
-    expect(markers.at(-1)?.[0]).toMatchObject({
+    expect(acquireDocument).toHaveBeenCalledWith(identity, 'typescript');
+    expect(markers.at(-1)?.items[0]).toMatchObject({
       message: 'Check this value',
       severity: 4,
       startLineNumber: 1,
@@ -150,7 +177,7 @@ describe('MonacoLanguageBridge', () => {
       insertText: 'document',
       range: { startColumn: 1, endColumn: 4 },
     });
-    expect(await hoverProvider.provideHover(model, { lineNumber: 1, column: 2 } as never, token)).toEqual({
+    expect(await hoverProvider.provideHover(model, { lineNumber: 1, column: 2 } as never, token)).toMatchObject({
       contents: [{ value: '`Document`' }],
     });
 
@@ -168,12 +195,20 @@ describe('MonacoLanguageBridge', () => {
     current = { ...current, saving: false, baseRevision: 'disk-two' };
     documentListener?.(current);
     expect(notifyDocumentSave).toHaveBeenCalledWith(identity);
+    diagnostics = [{ ...diagnostic, generation: 3, message: 'New generation' }];
     diagnosticsListener?.();
+    expect(markers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ owner: 'piarium-language:fixture:2', items: [] }),
+      expect.objectContaining({
+        owner: 'piarium-language:fixture:3',
+        items: [expect.objectContaining({ message: 'New generation' })],
+      }),
+    ]));
 
     bridge.release('view:one');
     expect(releaseDocument).toHaveBeenCalledWith(identity);
-    expect(markers.at(-1)).toEqual([]);
-    expect(providerDispose).toHaveBeenCalledTimes(2);
+    expect(markers.at(-1)).toMatchObject({ owner: 'piarium-language:fixture:3', items: [] });
+    expect(providerDispose).toHaveBeenCalled();
     bridge.dispose();
   });
 });

@@ -1,8 +1,14 @@
 import type { PiariumLanguageDiagnostic } from '@/lib/api/types';
 import { setWorkbenchProblems } from '@/lib/workbench/editors/panels';
 
-const recordKey = (workspaceId: string, resourceId: string, languageId: string): string => (
-  `${workspaceId}\0${resourceId}\0${languageId}`
+const recordKey = (
+  workspaceId: string,
+  resourceId: string,
+  languageId: string,
+  providerId: string,
+  generation: number,
+): string => (
+  `${workspaceId}\0${resourceId}\0${languageId}\0${providerId}\0${generation}`
 );
 
 const listeners = new Set<() => void>();
@@ -80,8 +86,11 @@ export const replaceLanguageDiagnostics = (
   resourceId: string,
   items: PiariumLanguageDiagnostic[],
   acceptedVersion: (resourceId: string, documentVersion: number) => boolean,
+  owner?: { providerId: string; generation: number },
 ): void => {
-  const key = recordKey(workspaceId, resourceId, languageId);
+  const providerId = owner?.providerId ?? items[0]?.providerId ?? 'legacy';
+  const generation = owner?.generation ?? items[0]?.generation ?? 0;
+  const key = recordKey(workspaceId, resourceId, languageId, providerId, generation);
   const accepted = items.filter((item) => acceptedVersion(item.resource.resourceId, item.documentVersion));
   if (items.length > 0 && accepted.length === 0) {
     return;
