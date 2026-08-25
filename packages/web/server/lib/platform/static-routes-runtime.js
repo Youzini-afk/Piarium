@@ -1,5 +1,17 @@
 import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
 
+const IMMUTABLE_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+const REVALIDATE_DOCUMENT_CACHE_CONTROL = 'no-cache';
+
+const isFingerprintAsset = (filePath, path) => {
+  if (typeof filePath !== 'string') return false;
+  const segments = filePath.split(path.sep);
+  const assetsIndex = segments.lastIndexOf('assets');
+  if (assetsIndex < 0 || assetsIndex === segments.length - 1) return false;
+  const fileName = segments.at(-1) || '';
+  return /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+(?:\.map)?$/.test(fileName);
+};
+
 export const createStaticRoutesRuntime = (dependencies) => {
   const {
     fs,
@@ -31,6 +43,17 @@ export const createStaticRoutesRuntime = (dependencies) => {
           // Service workers should never be long-cached; iOS is especially sensitive.
           if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
             res.setHeader('Cache-Control', 'no-store');
+            return;
+          }
+          // Vite fingerprints emitted assets by content, so these URLs are immutable and a new build gets
+          // a new URL. HTML and unversioned public files keep revalidating instead of becoming stale entry
+          // points that reference assets from another deployment.
+          if (isFingerprintAsset(filePath, path)) {
+            res.setHeader('Cache-Control', IMMUTABLE_ASSET_CACHE_CONTROL);
+            return;
+          }
+          if (typeof filePath === 'string' && filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', REVALIDATE_DOCUMENT_CACHE_CONTROL);
           }
         },
       }));
@@ -44,6 +67,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
       });
 
       app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
+        res.setHeader('Cache-Control', REVALIDATE_DOCUMENT_CACHE_CONTROL);
         res.sendFile(path.join(distPath, 'index.html'));
       });
       return;
