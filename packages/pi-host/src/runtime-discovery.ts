@@ -192,13 +192,35 @@ async function inspectSystemPi(
       source: "system",
     };
   }
-  const [executable, args] = buildVersionInvocation(command, platform);
-  const result = await runner(executable, args);
-  const version = parseVersion(`${result.stdout}\n${result.stderr}`);
   const resolved = existsSync(command) ? resolvePiCommandLayout(command) : { commandPath: command };
-  const available = result.exitCode === 0 && version !== undefined;
+  let version: string | undefined;
+  if (resolved.packageRoot) {
+    try {
+      const manifest = JSON.parse(
+        await readFile(join(resolved.packageRoot, "package.json"), "utf8"),
+      ) as { name?: unknown; version?: unknown };
+      if (
+        manifest.name === "@earendil-works/pi-coding-agent"
+        && typeof manifest.version === "string"
+      ) {
+        version = parseVersion(manifest.version);
+      }
+    } catch {
+      // Fall through to the command probe for non-standard or unreadable layouts.
+    }
+  }
+  let versionIssue: string | undefined;
+  if (!version) {
+    const [executable, args] = buildVersionInvocation(command, platform);
+    const result = await runner(executable, args);
+    version = parseVersion(`${result.stdout}\n${result.stderr}`);
+    if (result.exitCode !== 0 || !version) {
+      versionIssue = result.stderr.trim() || "Pi version could not be detected";
+    }
+  }
+  const available = version !== undefined;
   const issues = [
-    result.exitCode === 0 && version ? undefined : result.stderr.trim() || "Pi version could not be detected",
+    versionIssue,
     resolved.issue,
   ].filter((issue): issue is string => issue !== undefined);
   const source = resolved.packageRoot && isStandalonePiLayout(resolved.packageRoot, env)

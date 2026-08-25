@@ -106,12 +106,14 @@ describe("discoverPiRuntimes", () => {
           "",
         ].join("\r\n"),
       );
+      let versionProbeCount = 0;
       const candidates = await discoverPiRuntimes({
         commandRunner: async (invoked) => {
           if (invoked === "where.exe") {
             return { exitCode: 0, stderr: "", stdout: `${command}\r\n` };
           }
-          return { exitCode: 0, stderr: "", stdout: "0.84.1\n" };
+          versionProbeCount += 1;
+          return { exitCode: 1, stderr: "command probe should not be needed", stdout: "" };
         },
         env: {},
         includeBundled: false,
@@ -122,6 +124,7 @@ describe("discoverPiRuntimes", () => {
       assert.equal(candidates[0]?.nodePath, nodePath);
       assert.equal(candidates[0]?.packageRoot, codingAgent);
       assert.equal(candidates[0]?.version, "0.84.1");
+      assert.equal(versionProbeCount, 0);
       const installation = toRuntimeInstallation(candidates[0]!);
       assert.equal(installation.commandPath, command);
       assert.equal(installation.nodePath, nodePath);
