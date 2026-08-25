@@ -497,7 +497,7 @@ Record 至少包含：
 - mobile Agent 与 embedded editors 保留用途明确的 CodeMirror adapter；
 - editor transaction 进入 Document Registry，任何引擎都不能成为 dirty/save/conflict 权威；
 - language、diagnostics、completion 和 decorations 通过同一 typed LanguageServicesAPI 接入；
-- current `MAX_OPEN_FILE_LINES=5000` 不是永久产品边界。先测量真实行为，再做 feature 分级或自适应治理，不复制猜测数字；
+- 历史 `MAX_OPEN_FILE_LINES=5000` 产品边界已经退休并由 focused test 防止复活；统一编辑器 Phase 1 继续测量代表性大文件，再做 feature 分级或自适应治理，不复制猜测数字；
 - 具体 identity、同步、worker、扩展和迁移约定见
   [unified-file-editor-platform.md](unified-file-editor-platform.md)。
 

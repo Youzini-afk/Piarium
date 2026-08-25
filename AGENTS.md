@@ -55,7 +55,11 @@ See [docs/composable-workbench-execution-plan.md](docs/composable-workbench-exec
   never start a process. Hidden views must do no background work.
 - Agent file writes go through expected-revision document writes and must never silently overwrite a
   dirty buffer.
-- CodeMirror 6 is the only editor engine. Do not add Monaco or fork Code OSS.
+- The approved editor migration gives desktop/Web Agent and IDE one shared Monaco file path, while
+  mobile and embedded editors keep purpose-specific CodeMirror adapters. Implement it phase by
+  phase; until the cutover, preserve the current path without creating a long-lived dual engine.
+  Do not add a second Agent/IDE document or editing authority, do not load the IDE workbench into the
+  VS Code companion, and do not fork Code OSS. Follow `docs/unified-file-editor-platform.md`.
 
 ## Required project guidance
 

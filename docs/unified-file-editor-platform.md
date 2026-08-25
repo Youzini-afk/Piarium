@@ -21,6 +21,9 @@ Piarium 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。�
 - 官方 mobile Agent 使用轻量 CodeMirror adapter。Monaco 官方明确不支持移动浏览器，因此移动
   端不伪装成 Monaco parity，但仍共用 Document Registry、DocumentsAPI、保存/冲突语义、命令
   ID 和语言服务 DTO；
+- VS Code companion 不挂载 `ResourceEditorHost` 或官方 IDE Workbench。文件继续由宿主 VS Code
+  editor 显示，companion 只桥接当前文件/选区和共享 Runtime DTO，因此它既不加载第二份 Monaco，
+  也不需要 CodeMirror 文件 adapter；
 - 聊天 composer、设置 JSON/JSONC、Prompt 等嵌入式小编辑器继续使用 textarea 或
   CodeMirror。它们不是文件工作台，不建设第二套文件 IDE 能力；
 - 桌面/Web 文件 diff 使用 Monaco diff editor；聊天消息、PR 展示等非文件型只读 diff 可以继续
@@ -314,7 +317,12 @@ ResourceEditorHost
 - `monaco-editor/editor`；
 - 官方 editor features 的公开 `register` entrypoints；
 - language definitions 的公开 `register` entrypoints；
-- 不依赖未版本化的内部实现模块。
+- 不依赖未版本化的内部实现模块；
+- 不 import 会顺带注册全部语言能力的 `monaco-editor` root entrypoint，也不 import
+  `editor.main`；
+- 初始实现不注册 TypeScript/JavaScript、JSON、CSS、HTML 的 Monaco language *features*。这些
+  semantic capability 由 Host-owned `LanguageServicesAPI` 提供；language *definitions* 只负责
+  tokenization，不成为第二个 diagnostics/completion authority。
 
 编辑器交互功能不能为了追求一个小数字被随意裁掉。language definition 可以按实际 language ID
 动态加载，未知语言诚实回退 plaintext；支持范围来自一个可扩展 registry，而不是硬编码一个很小
@@ -323,8 +331,9 @@ ResourceEditorHost
 
 ### 7.3 Worker
 
-`MonacoEnvironment.getWorker` 由一个模块统一注册，使用 Vite module-worker URL；worker 至少区分
-editor 与实际启用的 built-in language feature。必须验证：
+`MonacoEnvironment.getWorker` 由一个模块统一注册，使用 Vite module-worker URL。初始实现只注册
+editor worker；不得产出或启动 `ts.worker`、`json.worker`、`css.worker`、`html.worker` 等 Monaco
+built-in semantic worker。必须验证：
 
 - dev HMR；
 - production Web 相对/绝对 base；
@@ -374,10 +383,11 @@ multi-cursor 和 editor focus group navigation。
 用户 shortcut override 高于官方默认；同一按键冲突必须可见。Monaco 自带默认按键作为 editor
 上下文内的基础层，不能覆盖用户在 Piarium 中显式配置的命令。
 
-当前已持久化的 Vim 设置不能在迁移后变成假开关。Phase 3 在切换默认文件 editor 之前必须证明一个
-Monaco Vim adapter 在目标 Monaco 版本、IME、search/replace、Piarium commands 和 dispose/re-enable
-上可用。具体依赖需经过源码与打包审查；若现成包依赖 Monaco 私有 API，则由独立 editor behavior
-extension 包装并固定兼容证据，不让它成为 Core 文档权威。
+当前已持久化的 Vim 设置实际上还没有文件 editor 消费者；迁移不能把这个既有缺口继续带进新的
+默认 editor。Phase 1 完成候选 adapter 的源码、依赖与打包审查，Phase 2 把 Vim 在目标 Monaco
+版本、IME、search/replace、Piarium commands 和 dispose/re-enable 上真实可用列为 desktop/web
+cutover 的退出门槛。未通过时不得切换默认文件 renderer。若现成包依赖 Monaco 私有 API，则由
+独立 editor behavior extension 包装并固定兼容证据，不让它成为 Core 文档权威。
 
 ## 9. Language intelligence
 
@@ -457,7 +467,7 @@ path 注册 Host-side server，不在 Web renderer 中 spawn，也不写死进 s
   变化；
 - 隐藏的 debug/test/Git/Agent editor integration 不保留 rAF、DOM observer 或无消费者 subscription。
 
-## 11. 移动端与嵌入式编辑器
+## 11. 移动端、VS Code companion 与嵌入式编辑器
 
 移动端不是降级成另一套产品状态：
 
@@ -466,6 +476,15 @@ path 注册 Host-side server，不在 Web renderer 中 spawn，也不写死进 s
 - 移动 adapter 只实现适合触屏的呈现和交互，不承诺 minimap、多列布局或 desktop Vim parity；
 - mobile 不下载 Monaco runtime、features、language definitions 或 workers；
 - 官方 IDE Profile 继续不声明 mobile 支持；第三方 mobile editor provider 仍可完整替换官方 adapter。
+
+VS Code companion 是另一条明确边界：
+
+- 它不渲染官方文件 workbench，不创建 Piarium file model，也不加载 Monaco/CodeMirror 文件 adapter；
+- 文件正文、光标、选区和编辑快捷键继续由宿主 VS Code editor 拥有；
+- companion 把宿主当前文件/选区投影成 Piarium Agent context，并保留 documents/search/language 的
+  extension-host bridge 以满足共享 RuntimeAPI contract；
+- Phase 4 更新其 DTO/contract fixtures 只是在保持 Runtime parity，不代表给 webview 增加文件编辑器；
+- 继续拒绝把 `piarium.ide` 或第二套 Settings/Agent Manager/session editor 放回 webview。
 
 聊天 composer、设置 JSON/JSONC、Prompt、命令参数等嵌入式编辑器继续使用适合其交互的轻量
 组件。它们可以复用 theme/keybinding 基础，但不注册为 workspace document，不启动 LSP，不进入
@@ -560,13 +579,18 @@ work、无 owner leak。真实数据再决定警告、按需关闭昂贵 feature
 - lazy runtime loader、公开 feature/language entrypoints、worker factory；
 - Piarium theme projection 与基础 host component；
 - Web/Electron/PWA asset 与 CSP 适配；
-- bundle manifest assertion 和 performance marks。
+- bundle/module-graph assertion 和 performance marks；
+- Vim candidate adapter 的源码、依赖、私有 Monaco API 与打包审查；
+- 已退休的 5,000 行打开限制不再出现，并记录代表性大文件在现有 CodeMirror 与 Monaco fixture
+  中的 model、首绘、输入和 feature 成本。
 
 暂不接 Document Registry，不改默认文件 provider。用 fixture model 验证 editor、diff、theme、worker
 和 dispose。
 
-验收：UI focused tests/type-check/lint，production Web build，packaged Electron worker smoke。无需跑
-与编辑器无关的全仓 suite。
+验收：主 entry/preload graph 不含 Monaco；Monaco chunk 不含 `monaco-editor/languages/features/*`
+注册，构建不产出 TS/JS/JSON/CSS/HTML semantic worker；dev HMR、Web base/PWA/cloud CSP 与 packaged
+Electron `piarium-ui://` worker 矩阵全部通过后才能退出 Phase 1，不能把它们后移到 cutover 之后。
+再跑 UI focused tests/type-check/lint 和 production Web build；无需跑与编辑器无关的全仓 suite。
 
 ### Phase 2 — Model Registry 与 desktop/web cutover
 
@@ -577,12 +601,17 @@ work、无 owner leak。真实数据再决定警告、按需关闭昂贵 feature
 - model ↔ Registry binding、origin/revision/stale 协议；
 - provider-owned view state v2 和一次迁移；
 - Agent/IDE 的 `piarium.builtin.text` desktop/web renderer 改为 Monaco；
+- 使用现有 `LanguageServicesAPI` DTO 的 baseline Monaco bridge：diagnostics registry → model markers、
+  当前 completion 和 hover。Phase 4 在同一 bridge owner 上扩展 rich DTO，不等到 Phase 4 才恢复
+  现有能力；
+- 已持久化 `fileEditorKeymap=vim` 的真实 Monaco adapter 与状态栏/命令接线；
 - save/didSave、conflict、recovery、move、multi-view 与 runtime switch；
 - 删除 desktop/web `DocumentCodeMirror` 调用路径；mobile/embedded CodeMirror 不动。
 
 验收重点：同文档双 view、多个 dirty 文件、save in flight 输入、clean reload、dirty conflict、move、
-Profile 切换、runtime endpoint 切换、worker failure。聚焦 model/registry/workbench tests，加 UI
-type-check/lint 与一次 Web build。
+Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor markers、completion、hover
+不得低于 cutover 前的 CodeMirror 路径；普通与 Vim keymap 均可输入、搜索、保存并在 disable/re-enable
+后清理 owner。聚焦 model/registry/workbench tests，加 UI type-check/lint 与一次 Web build。
 
 ### Phase 3 — 文件编辑基础体验与设置
 
@@ -593,7 +622,7 @@ type-check/lint 与一次 Web build。
 - Piarium command/shortcut/menu/context-key bridge；
 - editor settings projection 与 Agent/IDE presentation presets；
 - accessibility、IME、high contrast；
-- Vim adapter 审查与真实接线；
+- Vim 的扩展配置与高级行为；基础可用性已经是 Phase 2 cutover gate；
 - current fake/dead editor settings 要么成为真实消费者，要么删除并迁移，不留无效开关。
 
 验收使用真实用户 journey 与 targeted interaction tests；不因新增若干 commands 重跑 Docker 或
@@ -603,14 +632,16 @@ type-check/lint 与一次 Web build。
 
 写入边界：
 
-- 扩展 UI/Web/VS Code companion 的 shared DTO 与 contract fixtures；
+- 扩展 UI/Web 与 VS Code extension-host bridge 的 shared DTO/contract fixtures；VS Code companion
+  webview 不注册 Monaco provider；
 - Host LSP capabilities、result mapper、resolve、format、signature、semantic/inlay 等路由；
 - Monaco providers、markers、owner/generation cleanup；
 - rich hover、completion textEdit/snippet/additional edits；
 - definition/references/symbol/outline/breadcrumbs；
 - typed absent/stale/failure 在 UI 中可见。
 
-旧 CodeMirror language client 在 desktop/web 删除；mobile adapter 消费同一 DTO 的适用子集。
+Phase 2 的 baseline Monaco bridge 在原 owner 上扩展，不重新注册第二套 provider。CodeMirror
+language client 只保留 mobile/embedded 的适用子集并消费同一 DTO。
 
 验收：Host fixture LSP contract、stale/provider-disable/runtime-switch、Monaco provider conversion、
 Web/UI type-check/lint。只有协议或构建入口改变时跑对应 production build。
@@ -696,4 +727,3 @@ mobile smoke 和 dead-code。前面各 Phase 不机械重复这套收敛矩阵�
 - 不用固定 5,000 行、固定 model 数或猜测性的文件大小限制替代测量与分级 feature 降级；
 - 不在本计划中把所有聊天、设置和资源小编辑器强行改成 Monaco；
 - 不把 Pi package 生命周期并入 Piarium editor extension。
-
