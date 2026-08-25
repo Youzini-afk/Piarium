@@ -45,9 +45,9 @@ OpenCode 兼容层。
 - **可重组的工作台：** 选择 Agent 或 IDE Profile，也可以自建。既能替换整个外壳，也能只替换导航、
   编辑器、面板、Composer、Timeline 或状态栏，并混用官方与社区贡献。切换是实时的，不刷新文档、
   不重启 Pi 运行时、不丢失共享的工作区状态。
-- **编辑器级基础设施：** 一套带版本的文档权威和真实的冲突处理、基于 CodeMirror 6 的共享编辑器组、
-  工作区搜索、宿主侧语言服务器，以及符合标准的调试适配器。智能体的修改会与你未保存的缓冲区协调，
-  而不是直接覆盖。
+- **编辑器级基础设施：** 一套带版本的文档权威和真实的冲突处理；桌面/Web 的 Agent 与 IDE 共用
+  Monaco model、编辑器组、工作区搜索、宿主侧语言服务器和标准调试适配器，移动/嵌入式编辑器通过
+  轻量 CodeMirror adapter 接入同一文档权威。智能体的修改会与你未保存的缓冲区协调，而不是直接覆盖。
 - **多个产品端：** Electron、Web 和 Capacitor 移动端外壳共享一套 React UI，并通过明确的运行时
   能力与宿主通信；VS Code 是把编辑器上下文送进 Piarium 的伴侧扩展，而不是第二套工作台。
 - **云端与远程运行：** 支持带认证的 WebSocket、Relay/隧道、多架构容器，以及经过健康检查和
@@ -261,6 +261,7 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 - [架构](docs/architecture.md)
 - [路线图](docs/roadmap.md)
 - [可组合工作台与 IDE 约定](docs/composable-workbench-execution-plan.md)
+- [统一文件编辑器平台](docs/unified-file-editor-platform.md)
 - [Piarium 扩展平台](docs/piarium-extension-platform.md)
 - [VS Code 伴侧迁移](docs/vscode-companion.md)
 - [从 OpenChamber 迁移到 Pi 的约定](docs/openchamber-pi-migration.md)

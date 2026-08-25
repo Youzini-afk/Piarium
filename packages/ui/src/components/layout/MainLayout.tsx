@@ -39,8 +39,8 @@ import { ChatView } from '@/components/views/ChatView';
 
 // Keep TerminalView eager: the bottom dock reserves its height immediately, so
 // suspending here leaves a large blank panel on slower machines.
-// Other heavy views stay on-demand: Diff/Files bring CodeMirror and the diff
-// renderer into the graph, while Git/Plan are irrelevant until selected.
+// Other heavy views stay on-demand: Files can load Monaco and Diff loads its
+// renderer; Plan's embedded CodeMirror is also irrelevant until selected.
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then(m => ({ default: m.PlanView })));
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then(m => ({ default: m.GitView })));
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));

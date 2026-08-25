@@ -190,6 +190,3 @@ const defaultController = createMonacoRuntimeController({
 
 export const getMonacoRuntimeSnapshot = (): MonacoRuntimeSnapshot => defaultController.getSnapshot();
 export const loadMonacoRuntime = (): Promise<MonacoRuntime> => defaultController.load();
-export const subscribeMonacoRuntime = (listener: () => void): (() => void) => (
-  defaultController.subscribe(listener)
-);

@@ -36,7 +36,7 @@ type OwnedDecorations = {
 
 type MonacoExtensionServiceFailure = PiariumEditorMonacoFailureResultV1;
 
-export type MonacoExtensionInspectorSnapshot = {
+type MonacoExtensionInspectorSnapshot = {
   activeViewId: string | null;
   owners: Array<{
     entrypointId: string;

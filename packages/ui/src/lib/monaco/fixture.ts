@@ -1,7 +1,3 @@
-import { history } from '@codemirror/commands';
-import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
-
 import type { Theme } from '@/types/theme';
 import { markMonacoPerformance } from './performance';
 import { loadMonacoRuntime } from './runtime';
@@ -13,29 +9,28 @@ export type MonacoSmokeFixture = {
   whenDiffReady: Promise<void>;
 };
 
-export type EditorLargeFileBaseline = {
+export type MonacoEditorPerformanceEvidence = {
   characters: number;
-  codeMirror: EditorLargeFileEngineMetrics;
+  cold: {
+    editToPaintMs: number;
+    firstPaintMs: number;
+    modelReadyMs: number;
+    runtimeReadyMs: number;
+  };
+  invariants: {
+    createdModelCount: number;
+    disposedModelCount: number;
+    remainingFixtureModelCount: number;
+    reusedModelForWarmView: boolean;
+  };
   lines: number;
-  monaco: EditorLargeFileEngineMetrics;
-};
-
-type EditorLargeFileEngineMetrics = {
-  editToPaintMs: number;
-  firstPaintMs: number;
-  modelReadyMs: number;
+  warm: {
+    editToPaintMs: number;
+    firstPaintMs: number;
+  };
 };
 
 const REPRESENTATIVE_LARGE_FILE_LINES = 50_000;
-
-const waitForCodeMirrorMeasure = (view: EditorView): Promise<void> => (
-  new Promise((resolve) => {
-    view.requestMeasure({
-      read: () => undefined,
-      write: () => resolve(),
-    });
-  })
-);
 
 const createRepresentativeLargeFile = (): string => (
   Array.from(
@@ -50,138 +45,175 @@ export const mountMonacoSmokeFixture = async (
 ): Promise<MonacoSmokeFixture> => {
   const monaco = await loadMonacoRuntime();
   const themeName = registerPiariumMonacoTheme(monaco, theme);
-  const original = monaco.editor.createModel(
-    'export const value = 1;\n',
-    'plaintext',
-    monaco.Uri.parse('piarium-fixture://phase-1/original'),
-  );
-  const modified = monaco.editor.createModel(
-    'export const value = 2;\n',
-    'plaintext',
-    monaco.Uri.parse('piarium-fixture://phase-1/modified'),
-  );
-  const editor = monaco.editor.createDiffEditor(container, {
-    automaticLayout: true,
-    minimap: { enabled: false },
-    readOnly: true,
-    renderSideBySide: true,
-    theme: themeName,
-  });
-  editor.setModel({ original, modified });
-  markMonacoPerformance('editor.model.ready');
-
-  let ready = editor.getLineChanges() !== null;
-  let resolveReady: (() => void) | undefined;
-  const whenDiffReady = ready
-    ? Promise.resolve()
-    : new Promise<void>((resolve) => {
-        resolveReady = resolve;
-      });
-  const diffSubscription = editor.onDidUpdateDiff(() => {
-    if (ready) return;
-    ready = true;
-    resolveReady?.();
-  });
-
+  const resources: Array<{ dispose(): void }> = [];
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    const failures: unknown[] = [];
+    for (const resource of [...resources].reverse()) {
+      try {
+        resource.dispose();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    container.replaceChildren();
+    if (failures.length > 0) throw new AggregateError(failures, 'Failed to dispose Monaco smoke resources');
+  };
   try {
+    const original = monaco.editor.createModel(
+      'export const value = 1;\n',
+      'plaintext',
+      monaco.Uri.parse('piarium-fixture://phase-8/original'),
+    );
+    resources.push(original);
+    const modified = monaco.editor.createModel(
+      'export const value = 2;\n',
+      'plaintext',
+      monaco.Uri.parse('piarium-fixture://phase-8/modified'),
+    );
+    resources.push(modified);
+    const diffEditor = monaco.editor.createDiffEditor(container, {
+      automaticLayout: true,
+      minimap: { enabled: false },
+      readOnly: true,
+      renderSideBySide: true,
+      theme: themeName,
+    });
+    resources.push(diffEditor);
+    diffEditor.setModel({ original, modified });
+    markMonacoPerformance('editor.model.ready');
+
+    let ready = diffEditor.getLineChanges() !== null;
+    let resolveReady: (() => void) | undefined;
+    const whenDiffReady = ready
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        });
+    const diffSubscription = diffEditor.onDidUpdateDiff(() => {
+      if (ready) return;
+      ready = true;
+      resolveReady?.();
+    });
+    resources.push(diffSubscription);
     await Promise.all([
-      editor.getOriginalEditor().renderAsync(),
-      editor.getModifiedEditor().renderAsync(),
+      diffEditor.getOriginalEditor().renderAsync(),
+      diffEditor.getModifiedEditor().renderAsync(),
     ]);
+    markMonacoPerformance('editor.first.paint');
+    return {
+      dispose,
+      getLineChangeCount: () => diffEditor.getLineChanges()?.length ?? null,
+      whenDiffReady,
+    };
   } catch (error) {
-    diffSubscription.dispose();
-    editor.dispose();
-    original.dispose();
-    modified.dispose();
+    try {
+      dispose();
+    } catch (disposeError) {
+      throw new AggregateError([error, disposeError], 'Monaco smoke setup and cleanup both failed');
+    }
     throw error;
   }
-  markMonacoPerformance('editor.first.paint');
-
-  return {
-    dispose() {
-      diffSubscription.dispose();
-      editor.dispose();
-      original.dispose();
-      modified.dispose();
-    },
-    getLineChangeCount: () => editor.getLineChanges()?.length ?? null,
-    whenDiffReady,
-  };
 };
 
-export const measureEditorLargeFileBaseline = async (
+export const measureMonacoEditorPerformance = async (
   container: HTMLElement,
   theme: Theme,
-): Promise<EditorLargeFileBaseline> => {
+): Promise<MonacoEditorPerformanceEvidence> => {
   const source = createRepresentativeLargeFile();
-
-  const codeMirrorModelStartedAt = performance.now();
-  const codeMirrorState = EditorState.create({
-    doc: source,
-    extensions: [history()],
-  });
-  const codeMirrorModelReadyMs = performance.now() - codeMirrorModelStartedAt;
-  const codeMirrorPaintStartedAt = performance.now();
-  const codeMirrorView = new EditorView({ state: codeMirrorState, parent: container });
-  let codeMirrorFirstPaintMs: number;
-  let codeMirrorEditToPaintMs: number;
-  try {
-    await waitForCodeMirrorMeasure(codeMirrorView);
-    codeMirrorFirstPaintMs = performance.now() - codeMirrorPaintStartedAt;
-    const codeMirrorEditStartedAt = performance.now();
-    codeMirrorView.dispatch({ changes: { from: 0, insert: '// edited\n' } });
-    await waitForCodeMirrorMeasure(codeMirrorView);
-    codeMirrorEditToPaintMs = performance.now() - codeMirrorEditStartedAt;
-  } finally {
-    codeMirrorView.destroy();
-    container.replaceChildren();
-  }
-
+  const runtimeStartedAt = performance.now();
   const monaco = await loadMonacoRuntime();
+  const runtimeReadyMs = performance.now() - runtimeStartedAt;
   const themeName = registerPiariumMonacoTheme(monaco, theme);
-  const monacoModelStartedAt = performance.now();
+  const baselineModels = new Set(monaco.editor.getModels());
+  const modelUri = monaco.Uri.parse('piarium-fixture://phase-8/large-file');
+  let disposedModelCount = 0;
+  let remainingFixtureModelCount = 0;
+  const modelStartedAt = performance.now();
   const model = monaco.editor.createModel(
     source,
     'plaintext',
-    monaco.Uri.parse('piarium-fixture://phase-1/large-file'),
+    modelUri,
   );
-  const monacoModelReadyMs = performance.now() - monacoModelStartedAt;
-  const monacoPaintStartedAt = performance.now();
-  const editor = monaco.editor.create(container, {
-    automaticLayout: true,
-    minimap: { enabled: false },
-    model,
-    theme: themeName,
-  });
-  let monacoFirstPaintMs: number;
-  let monacoEditToPaintMs: number;
+  const createdModelCount = monaco.editor.getModels().filter((candidate) => !baselineModels.has(candidate)).length;
+  const modelReadyMs = performance.now() - modelStartedAt;
+  let coldFirstPaintMs = Number.NaN;
+  let coldEditToPaintMs = Number.NaN;
+  let warmFirstPaintMs = Number.NaN;
+  let warmEditToPaintMs = Number.NaN;
+  let reusedModelForWarmView = false;
   try {
-    await editor.renderAsync();
-    monacoFirstPaintMs = performance.now() - monacoPaintStartedAt;
-    const monacoEditStartedAt = performance.now();
-    editor.executeEdits('piarium.phase-1.large-file', [{
-      range: new monaco.Range(1, 1, 1, 1),
-      text: '// edited\n',
-    }]);
-    await editor.renderAsync();
-    monacoEditToPaintMs = performance.now() - monacoEditStartedAt;
+    const coldPaintStartedAt = performance.now();
+    const coldEditor = monaco.editor.create(container, {
+      automaticLayout: true,
+      minimap: { enabled: false },
+      model,
+      theme: themeName,
+    });
+    try {
+      await coldEditor.renderAsync();
+      coldFirstPaintMs = performance.now() - coldPaintStartedAt;
+      const coldEditStartedAt = performance.now();
+      coldEditor.executeEdits('piarium.phase-8.large-file.cold', [{
+        range: new monaco.Range(1, 1, 1, 1),
+        text: '// cold edit\n',
+      }]);
+      await coldEditor.renderAsync();
+      coldEditToPaintMs = performance.now() - coldEditStartedAt;
+    } finally {
+      coldEditor.dispose();
+      container.replaceChildren();
+    }
+
+    const warmPaintStartedAt = performance.now();
+    const warmEditor = monaco.editor.create(container, {
+      automaticLayout: true,
+      minimap: { enabled: false },
+      model,
+      theme: themeName,
+    });
+    reusedModelForWarmView = warmEditor.getModel() === model;
+    try {
+      await warmEditor.renderAsync();
+      warmFirstPaintMs = performance.now() - warmPaintStartedAt;
+      const warmEditStartedAt = performance.now();
+      warmEditor.executeEdits('piarium.phase-8.large-file.warm', [{
+        range: new monaco.Range(1, 1, 1, 1),
+        text: '// warm edit\n',
+      }]);
+      await warmEditor.renderAsync();
+      warmEditToPaintMs = performance.now() - warmEditStartedAt;
+    } finally {
+      warmEditor.dispose();
+      container.replaceChildren();
+    }
   } finally {
-    editor.dispose();
     model.dispose();
+    remainingFixtureModelCount = monaco.editor.getModels().filter((candidate) => !baselineModels.has(candidate)).length;
+    disposedModelCount = model.isDisposed() && monaco.editor.getModel(modelUri) === null ? 1 : 0;
+    container.replaceChildren();
   }
 
   return {
     characters: source.length,
-    codeMirror: {
-      editToPaintMs: codeMirrorEditToPaintMs,
-      firstPaintMs: codeMirrorFirstPaintMs,
-      modelReadyMs: codeMirrorModelReadyMs,
+    cold: {
+      editToPaintMs: coldEditToPaintMs,
+      firstPaintMs: coldFirstPaintMs,
+      modelReadyMs,
+      runtimeReadyMs,
+    },
+    invariants: {
+      createdModelCount,
+      disposedModelCount,
+      remainingFixtureModelCount,
+      reusedModelForWarmView,
     },
     lines: REPRESENTATIVE_LARGE_FILE_LINES,
-    monaco: {
-      editToPaintMs: monacoEditToPaintMs,
-      firstPaintMs: monacoFirstPaintMs,
-      modelReadyMs: monacoModelReadyMs,
+    warm: {
+      editToPaintMs: warmEditToPaintMs,
+      firstPaintMs: warmFirstPaintMs,
     },
   };
 };

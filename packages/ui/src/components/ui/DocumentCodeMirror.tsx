@@ -11,13 +11,17 @@ import {
 } from '@/lib/language-services/session';
 import { documentKey, type DocumentEditResult, type DocumentIdentity, type DocumentRecord } from '@/lib/documents/types';
 
+/**
+ * Document-bound CodeMirror projection for mobile and embedded workspace editors.
+ * Desktop/Web Workbench file tabs use Monaco; VS Code keeps its host editor.
+ */
 type DocumentCodeMirrorProps = Omit<React.ComponentProps<typeof CodeMirrorEditor>, 'value' | 'onChange'> & {
   identity: DocumentIdentity | undefined;
 };
 
 type DocumentCodeMirrorRegistry = Pick<ReturnType<typeof getDocumentRegistry>, 'get' | 'applyEdits'>;
 
-export type DocumentCodeMirrorAdapterResult = DocumentEditResult | {
+type DocumentCodeMirrorAdapterResult = DocumentEditResult | {
   status: 'unsupported';
   reason: 'document-not-open' | 'missing-changes';
   record?: DocumentRecord;

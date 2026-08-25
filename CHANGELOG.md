@@ -3,6 +3,17 @@
 All notable changes to Piarium are recorded here. The project is pre-1.0; the
 private runtime protocol and product surfaces still move together.
 
+## Unreleased
+
+- Use one Monaco-backed file editing platform across desktop/Web Agent and IDE Workbench while keeping
+  mobile and embedded CodeMirror views on the same revisioned document authority
+- Complete rich Host-owned language features, atomic multi-file edits, file/Git diffs, debug/test
+  projections, Agent attachments, conflict recovery, and Profile-safe model reuse
+- Publish the framework-neutral editor controller and optional owner-scoped Monaco augmentation service
+  through the Piarium extension tooling contract
+- Keep Monaco lazy from ordinary Web, mobile, and mini-chat entrypoints and verify cold/warm editor,
+  worker, bundle, and owner cleanup behavior in production artifacts
+
 ## 0.8.0
 
 Piarium 0.8.0 focuses on making the existing desktop, Web, IDE, and extension experience more

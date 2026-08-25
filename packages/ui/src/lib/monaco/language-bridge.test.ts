@@ -2,7 +2,8 @@ import { describe, expect, test, vi } from 'vitest';
 import type { editor, languages } from 'monaco-editor/editor';
 
 import type { LanguageServicesAPI, PiariumLanguageDiagnostic } from '@/lib/api/types';
-import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
+import type { DocumentRegistry } from '@/lib/documents/registry';
+import type { DocumentIdentity, DocumentRecord, DocumentWorkspaceEditInput } from '@/lib/documents/types';
 import { MonacoLanguageBridge } from './language-bridge';
 import type { FileEditorModelRegistry } from './model-registry';
 import type { MonacoRuntime } from './runtime';
@@ -43,6 +44,7 @@ describe('MonacoLanguageBridge', () => {
     let current = record();
     let completionProvider: languages.CompletionItemProvider | undefined;
     let hoverProvider: languages.HoverProvider | undefined;
+    let renameProvider: languages.RenameProvider | undefined;
     let documentListener: ((record: DocumentRecord) => void) | undefined;
     let diagnosticsListener: (() => void) | undefined;
     const markers: Array<{ owner: string; items: editor.IMarkerData[] }> = [];
@@ -86,7 +88,10 @@ describe('MonacoLanguageBridge', () => {
         registerSignatureHelpProvider: () => ({ dispose: providerDispose }),
         registerDefinitionProvider: () => ({ dispose: providerDispose }),
         registerReferenceProvider: () => ({ dispose: providerDispose }),
-        registerRenameProvider: () => ({ dispose: providerDispose }),
+        registerRenameProvider: (_languageId: string, provider: languages.RenameProvider) => {
+          renameProvider = provider;
+          return { dispose: providerDispose };
+        },
         registerCodeActionProvider: () => ({ dispose: providerDispose }),
         registerDocumentSymbolProvider: () => ({ dispose: providerDispose }),
         registerDocumentHighlightProvider: () => ({ dispose: providerDispose }),
@@ -136,7 +141,43 @@ describe('MonacoLanguageBridge', () => {
       generation: 2,
       value: { contents: [{ kind: 'markdown' as const, value: '`Document`' }] },
     }));
-    const language = { completion, hover } as unknown as LanguageServicesAPI;
+    const rename = vi.fn(async () => ({
+      status: 'ready' as const,
+      documentVersion: 3,
+      providerId: 'fixture',
+      generation: 2,
+      value: {
+        documentChanges: [{
+          kind: 'text' as const,
+          resource: identity,
+          version: 3,
+          edits: [{
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+            newText: 'document',
+          }],
+        }],
+      },
+    }));
+    const language = { completion, hover, rename } as unknown as LanguageServicesAPI;
+    const prepareWorkspaceEdit = vi.fn(async (input: DocumentWorkspaceEditInput) => ({
+      status: 'ready' as const,
+      groupId: 'rename-group',
+      workspaceId: identity.workspaceId,
+      origin: input.origin,
+      files: [{ identity, beforeContent: 'doc', afterContent: 'document', editCount: 1 }],
+      requiresConfirmation: false,
+    }));
+    const applyWorkspaceEdit = vi.fn(async () => ({
+      status: 'applied' as const,
+      groupId: 'rename-group',
+      records: [current],
+    }));
+    const documentRegistry = {
+      prepareWorkspaceEdit,
+      applyWorkspaceEdit,
+      discardWorkspaceEdit: vi.fn(),
+      undoWorkspaceEdit: vi.fn(),
+    } as unknown as DocumentRegistry;
     const acquireDocument = vi.fn();
     const releaseDocument = vi.fn();
     const notifyDocumentChange = vi.fn();
@@ -151,6 +192,7 @@ describe('MonacoLanguageBridge', () => {
       notifyDocumentChange,
       notifyDocumentSave,
       getLanguage: () => language,
+      getDocumentRegistry: () => documentRegistry,
       diagnosticsFor: () => diagnostics,
       subscribeDiagnostics: (listener) => {
         diagnosticsListener = listener;
@@ -173,7 +215,7 @@ describe('MonacoLanguageBridge', () => {
       endLineNumber: 1,
       endColumn: 4,
     });
-    if (!completionProvider?.provideCompletionItems || !hoverProvider?.provideHover) {
+    if (!completionProvider?.provideCompletionItems || !hoverProvider?.provideHover || !renameProvider?.provideRenameEdits) {
       throw new Error('expected Monaco providers');
     }
     const token = { isCancellationRequested: false } as never;
@@ -192,6 +234,23 @@ describe('MonacoLanguageBridge', () => {
     expect(await hoverProvider.provideHover(model, { lineNumber: 1, column: 2 } as never, token)).toMatchObject({
       contents: [{ value: '`Document`' }],
     });
+    expect(await renameProvider.provideRenameEdits(
+      model,
+      { lineNumber: 1, column: 2 } as never,
+      'document',
+      token,
+    )).toEqual({ edits: [] });
+    expect(rename).toHaveBeenCalledWith(expect.objectContaining({
+      resource: identity,
+      documentVersion: 3,
+      position: { line: 0, character: 1 },
+      newName: 'document',
+    }));
+    expect(prepareWorkspaceEdit).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: identity.workspaceId,
+      origin: 'language:rename:fixture:2',
+    }));
+    expect(applyWorkspaceEdit).toHaveBeenCalledWith('rename-group');
 
     current = { ...current, localEditRevision: 4 };
     expect((await completionProvider.provideCompletionItems(

@@ -1,8 +1,8 @@
 # Piarium architecture
 
-Status: Pi-native engine and composable workbench delivered; release hardening continues
+Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## 1. Context
 
@@ -262,6 +262,14 @@ not as another workspace. Chat/PR patch renderers remain specialized read-only s
 The complete model, language, worker,
 extension, and migration contract is
 [unified-file-editor-platform.md](unified-file-editor-platform.md).
+
+Mobile and embedded CodeMirror views submit offset edits against the same captured Document Registry
+revision and consume the applicable subset of the shared language DTO. They are separate Surface
+adapters, not a desktop compatibility renderer. The VS Code companion keeps the host editor and does
+not mount Piarium's file editor. Public custom editors use the framework-neutral document controller;
+extensions that only augment the official desktop/Web editor can request the optional, owner-scoped
+`piarium.editor.monaco` v1 service. That service exposes serialized view state and declarative actions
+or decorations, never a raw model, DOM node, file authority, or process capability.
 
 Search, language, task, debug, and test capability is host-owned. The application host runs the LSP
 supervisor and a standard Debug Adapter Protocol implementation with its adapters, test providers,

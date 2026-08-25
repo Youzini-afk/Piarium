@@ -1,8 +1,8 @@
 # Delivery roadmap
 
-Status: Pi-native engine and composable workbench delivered; Windows release is the open boundary
+Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -22,7 +22,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 7 | Windows release | **In progress** — the only open product boundary |
 | 8 | OpenChamber upstream capability absorption | Complete |
 | 9 | Piarium extension platform | Complete |
-| 10 | Composable workbench and IDE Workbench | Delivered; convergence run unrecorded |
+| 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in
@@ -444,9 +444,9 @@ of it:
 
 Neither is a hard-coded mode. Both are ordinary first-party Piarium extensions selected through a
 Workbench Profile. There is no global `ideMode`/`agentMode` branch, no second application, and no
-fork of Code OSS. The next editor-platform phase replaces the desktop/Web built-in file renderer
-with one shared Monaco path for Agent and IDE, while mobile and embedded editors keep a lightweight
-CodeMirror adapter; the Document Registry and Host authorities delivered here stay unchanged. See
+fork of Code OSS. The unified editor platform now gives desktop/Web Agent and IDE one shared Monaco
+path, while mobile and embedded editors keep a lightweight CodeMirror adapter; the Document Registry
+and Host authorities delivered here stay unchanged. See
 [unified-file-editor-platform.md](unified-file-editor-platform.md). Pi Packages and Pi Plugin Settings
 keep their independent lifecycle and native authority and are not folded into the Piarium extension
 lifecycle.
@@ -580,15 +580,12 @@ while a complete external scene can replace it without importing Piarium's produ
 remaining Motion work is the pre-React bootstrap projection and the optional generic service for
 Shell-owned local motion; neither introduces fixed page-element names.
 
-The remaining file-editor convergence is tracked in
-[unified-file-editor-platform.md](unified-file-editor-platform.md). Desktop/Web Agent and IDE already
-share one Monaco model, language bridge, diff/debug/test projection, and Agent collaboration path;
-the remaining phases align mobile and the public editor contract, then remove retired code and record
-the final performance/release evidence. No editor engine receives document, filesystem, process, or
-extension-lifecycle authority.
-
-Not yet recorded: the plan's final convergence verification run (full workspace type-check/lint,
-public package build/pack/conformance, production Web build, Electron bundled and Windows
-package/smoke, hosted cloud smoke, mobile Agent Profile smoke, VS Code Companion package, and a
-`dead-code` plus docs validation pass) has no evidence in this repository. Treat Phase 10 as
-delivered but not release-verified until that run is recorded here.
+The file-editor convergence in
+[unified-file-editor-platform.md](unified-file-editor-platform.md) is complete. Desktop/Web Agent and
+IDE share one Monaco model, language bridge, diff/debug/test projection, and Agent collaboration path;
+mobile and embedded CodeMirror submit to the same document authority; the public editor contract and
+optional owner-scoped Monaco augmentation service are shipped. Retired desktop/VS Code CodeMirror
+paths and migration-only comparison code were removed. No editor engine receives document,
+filesystem, process, or extension-lifecycle authority. The final verification evidence and any
+environment-specific omissions are recorded in that design document rather than inferred from this
+ledger.

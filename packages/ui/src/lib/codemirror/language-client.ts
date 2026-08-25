@@ -15,6 +15,9 @@ import type { DocumentIdentity } from '@/lib/documents/types';
 
 const EMPTY_DIAGNOSTICS: readonly PiariumLanguageDiagnostic[] = [];
 
+// This deliberately implements the mobile/embedded CodeMirror subset of the
+// shared Host language DTO. Desktop/Web file tabs use MonacoLanguageBridge.
+
 const positionToOffset = (text: string, line: number, character: number): number => {
   const lines = text.split('\n');
   let offset = 0;

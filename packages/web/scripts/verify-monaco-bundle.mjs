@@ -59,17 +59,25 @@ for (const semanticWorker of ['ts.worker', 'json.worker', 'css.worker', 'html.wo
 const entryAssetReferences = (html) => [...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)]
   .map((match) => match[1]);
 
+const entrypointAssets = {};
 for (const htmlName of ['index.html', 'mobile.html', 'mini-chat.html']) {
   const htmlPath = path.join(distDir, htmlName);
   const html = await fs.readFile(htmlPath, 'utf8');
+  const assets = [];
   for (const reference of entryAssetReferences(html)) {
-    if (!reference.endsWith('.js')) continue;
     const absolute = normalize(path.join(distDir, reference.replace(/^\//, '')));
-    const sources = sourceMaps.get(absolute) ?? [];
-    if (sources.some((source) => source.includes('/monaco-editor/'))) {
+    const sources = reference.endsWith('.js') ? (sourceMaps.get(absolute) ?? []) : [];
+    const containsMonaco = sources.some((source) => source.includes('/monaco-editor/'));
+    assets.push({
+      asset: normalize(path.relative(distDir, absolute)),
+      bytes: (await fs.stat(absolute)).size,
+      containsMonaco,
+    });
+    if (containsMonaco) {
       throw new Error(`${htmlName} eagerly references a Monaco chunk: ${reference}`);
     }
   }
+  entrypointAssets[htmlName] = assets;
 }
 
 const smokeHtml = await fs.readFile(path.join(distDir, 'monaco-smoke.html'), 'utf8');
@@ -77,9 +85,26 @@ if (!smokeHtml.includes('assets/') || !files.some((file) => /editor\.worker.*\.j
   throw new Error('Monaco smoke entry or editor worker asset is missing.');
 }
 
+const monacoChunks = await Promise.all([...sourceMaps.entries()]
+  .filter(([, sources]) => sources.some((source) => source.includes('/monaco-editor/')))
+  .map(async ([file, sources]) => ({
+    asset: normalize(path.relative(distDir, file)),
+    bytes: (await fs.stat(file)).size,
+    monacoSourceCount: sources.filter((source) => source.includes('/monaco-editor/')).length,
+  })));
+const workerAssets = await Promise.all(files
+  .filter((file) => /editor\.worker.*\.js$/.test(path.basename(file)))
+  .map(async (file) => ({
+    asset: normalize(path.relative(distDir, file)),
+    bytes: (await fs.stat(file)).size,
+  })));
+
 console.log(JSON.stringify({
-  entrypointsWithoutMonaco: ['index.html', 'mobile.html', 'mini-chat.html'],
+  entrypointAssets,
+  entrypointsWithoutMonaco: Object.keys(entrypointAssets),
+  monacoChunks,
   monacoSourceCount: allSources.filter((source) => source.includes('/monaco-editor/')).length,
   semanticWorkers: 0,
   smokeEntry: 'monaco-smoke.html',
+  workerAssets,
 }, null, 2));

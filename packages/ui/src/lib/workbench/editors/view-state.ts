@@ -8,6 +8,9 @@ import {
   type LegacyTextViewState,
 } from './view-state-core';
 
+// Retained only for mobile/embedded CodeMirror views. Desktop/Web Monaco view
+// state is provider-owned and never passes through these helpers.
+
 const positionFor = (view: EditorView, lineNumber: number, columnNumber: number): number => {
   const line = view.state.doc.line(Math.min(Math.max(1, lineNumber), view.state.doc.lines));
   return Math.min(line.from + Math.max(0, columnNumber - 1), line.to);

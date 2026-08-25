@@ -1,7 +1,8 @@
 import {
-  measureEditorLargeFileBaseline,
+  measureMonacoEditorPerformance,
   mountMonacoSmokeFixture,
-  type EditorLargeFileBaseline,
+  type MonacoEditorPerformanceEvidence,
+  type MonacoSmokeFixture,
 } from '@/lib/monaco/fixture';
 import { getMonacoRuntimeSnapshot } from '@/lib/monaco/runtime';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -9,7 +10,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 type MonacoSmokeState = {
   disposed?: boolean;
   errorMessage?: string;
-  largeFileBaseline?: EditorLargeFileBaseline;
+  performanceEvidence?: MonacoEditorPerformanceEvidence;
   lineChangeCount?: number;
   runtime?: ReturnType<typeof getMonacoRuntimeSnapshot>;
   status: 'loading' | 'ready' | 'failed';
@@ -51,20 +52,33 @@ const withDeadline = async <T>(promise: Promise<T>, milliseconds: number): Promi
 
 void (async () => {
   try {
-    const fixture = await mountMonacoSmokeFixture(root, getDefaultTheme(true));
-    await withDeadline(fixture.whenDiffReady, 20_000);
-    const lineChangeCount = fixture.getLineChangeCount();
-    if (!Number.isFinite(lineChangeCount) || (lineChangeCount ?? 0) < 1) {
-      throw new Error('Monaco diff worker returned no line changes.');
-    }
-    fixture.dispose();
-    const largeFileBaseline = await measureEditorLargeFileBaseline(root, getDefaultTheme(true));
+    const performanceEvidence = await measureMonacoEditorPerformance(root, getDefaultTheme(true));
     const measurements = [
-      ...Object.values(largeFileBaseline.codeMirror),
-      ...Object.values(largeFileBaseline.monaco),
+      ...Object.values(performanceEvidence.cold),
+      ...Object.values(performanceEvidence.warm),
     ];
     if (!measurements.every(Number.isFinite)) {
-      throw new Error(`Large-file fixture returned invalid measurements: ${JSON.stringify(largeFileBaseline)}`);
+      throw new Error(`Editor performance fixture returned invalid measurements: ${JSON.stringify(performanceEvidence)}`);
+    }
+    if (
+      performanceEvidence.invariants.createdModelCount !== 1
+      || performanceEvidence.invariants.disposedModelCount !== 1
+      || performanceEvidence.invariants.remainingFixtureModelCount !== 0
+      || performanceEvidence.invariants.reusedModelForWarmView !== true
+    ) {
+      throw new Error(`Editor performance fixture leaked or recreated its model: ${JSON.stringify(performanceEvidence)}`);
+    }
+    let fixture: MonacoSmokeFixture | null = null;
+    let lineChangeCount: number | null = null;
+    try {
+      fixture = await mountMonacoSmokeFixture(root, getDefaultTheme(true));
+      await withDeadline(fixture.whenDiffReady, 20_000);
+      lineChangeCount = fixture.getLineChangeCount();
+      if (!Number.isFinite(lineChangeCount) || (lineChangeCount ?? 0) < 1) {
+        throw new Error('Monaco diff worker returned no line changes.');
+      }
+    } finally {
+      fixture?.dispose();
     }
     const runtime = getMonacoRuntimeSnapshot();
     if (runtime.workerCreatedCount < 1 || runtime.unexpectedWorkerRequestCount !== 0) {
@@ -72,12 +86,13 @@ void (async () => {
     }
     publish({
       disposed: root.childElementCount === 0,
-      largeFileBaseline,
       lineChangeCount: lineChangeCount ?? 0,
+      performanceEvidence,
       runtime,
       status: 'ready',
     });
   } catch (error) {
+    root.replaceChildren();
     publish({
       errorMessage: error instanceof Error ? error.message : String(error),
       runtime: getMonacoRuntimeSnapshot(),

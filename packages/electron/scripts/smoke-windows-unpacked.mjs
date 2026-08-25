@@ -149,6 +149,71 @@ const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) 
   }, { once: true });
 });
 
+const runPackagedMobileEntrySmoke = async (devTools) => {
+  const exceptionCountBeforeNavigation = devTools.exceptions.length;
+  const navigation = await devTools.navigate('piarium-ui://app/mobile.html');
+  if (navigation?.errorText) {
+    throw describeSmokeFailure(`Unable to navigate to the packaged mobile entry: ${navigation.errorText}`, {
+      consoleMessages: devTools.consoleMessages,
+      exceptions: devTools.exceptions,
+    });
+  }
+
+  let lastState;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    await delay(250);
+    const evaluation = await devTools.evaluate(`(() => {
+      const root = document.querySelector('#root');
+      const bodyText = document.body?.innerText?.slice(0, 4000) ?? '';
+      const resources = performance.getEntriesByType('resource')
+        .map((entry) => entry.name)
+        .filter((name) => typeof name === 'string');
+      return {
+        bodyText,
+        href: window.location.href,
+        layoutKind: document.querySelector('[data-mobile-layout-kind]')?.getAttribute('data-mobile-layout-kind') ?? null,
+        layoutTier: document.querySelector('[data-mobile-layout-tier]')?.getAttribute('data-mobile-layout-tier') ?? null,
+        monacoResources: resources.filter((name) => name.toLowerCase().includes('monaco')),
+        mounted: root instanceof HTMLElement && root.childElementCount > 0,
+        readyState: document.readyState,
+        visualSurface: root instanceof HTMLElement && root.querySelector('main, svg, [data-mobile-layout-tier]') !== null,
+      };
+    })()`);
+    if (evaluation?.exceptionDetails) continue;
+    lastState = evaluation?.result?.value;
+    if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
+      throw describeSmokeFailure('Packaged mobile entry entered its error boundary.', {
+        consoleMessages: devTools.consoleMessages,
+        exceptions: devTools.exceptions,
+        state: lastState,
+      });
+    }
+    if (lastState?.mounted === true && lastState?.readyState === 'complete' && lastState?.visualSurface === true) {
+      const newExceptions = devTools.exceptions.slice(exceptionCountBeforeNavigation);
+      if (newExceptions.length > 0) {
+        throw describeSmokeFailure('Packaged mobile entry raised a renderer exception.', {
+          consoleMessages: devTools.consoleMessages,
+          exceptions: newExceptions,
+          state: lastState,
+        });
+      }
+      if ((lastState.monacoResources?.length ?? 0) > 0) {
+        throw describeSmokeFailure('Packaged mobile entry loaded Monaco resources.', {
+          consoleMessages: devTools.consoleMessages,
+          exceptions: devTools.exceptions,
+          state: lastState,
+        });
+      }
+      return lastState;
+    }
+  }
+  throw describeSmokeFailure('Packaged mobile entry did not mount.', {
+    consoleMessages: devTools.consoleMessages,
+    exceptions: devTools.exceptions,
+    state: lastState,
+  });
+};
+
 const runMonacoSmoke = async (devTools) => {
   const navigation = await devTools.navigate('piarium-ui://app/monaco-smoke.html');
   if (navigation?.errorText) {
@@ -179,7 +244,8 @@ const runMonacoSmoke = async (devTools) => {
           state: lastState,
         });
       }
-      return lastState;
+      const mobile = await runPackagedMobileEntrySmoke(devTools);
+      return { ...lastState, mobile };
     }
   }
   throw describeSmokeFailure('Packaged Monaco fixture did not become ready.', {

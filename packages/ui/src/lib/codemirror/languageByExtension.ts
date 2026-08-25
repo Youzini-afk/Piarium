@@ -1,8 +1,6 @@
 import type { Extension } from '@codemirror/state';
 
-// Static imports for the most common languages only.
-// Less common languages are loaded dynamically via loadLanguageByExtension
-// to keep the initial bundle lean.
+// Static language set used by embedded editors and composer highlighting.
 import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { css } from '@codemirror/lang-css';
@@ -64,14 +62,6 @@ export function codeBlockLanguageResolver(info: string): Language | LanguageDesc
 }
 
 const normalizeFileName = (filePath: string) => filePath.split('/').pop()?.toLowerCase() ?? '';
-
-const matchLanguageDescriptionForFile = (filePath: string): LanguageDescription | null => {
-  const filename = normalizeFileName(filePath);
-  if (!filename) {
-    return null;
-  }
-  return LanguageDescription.matchFilename(languages, filename);
-};
 
 const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([
   { tag: [t.heading1, t.heading2, t.heading3, t.heading4, t.heading5, t.heading6], fontWeight: '600' },
@@ -158,26 +148,9 @@ export function languageByExtension(filePath: string): Extension | null {
     case 'pyi':
       return python();
 
-    // Less common languages: return null so callers fall back to
-    // loadLanguageByExtension which dynamically imports from @codemirror/language-data.
+    // Embedded editors remain plaintext for languages outside this intentionally
+    // small set. Host-owned semantic language services are independent of it.
     default:
       return null;
-  }
-}
-
-export async function loadLanguageByExtension(filePath: string): Promise<Extension | null> {
-  const description = matchLanguageDescriptionForFile(filePath);
-  if (!description) {
-    return null;
-  }
-
-  if (description.support) {
-    return description.support;
-  }
-
-  try {
-    return await description.load();
-  } catch {
-    return null;
   }
 }

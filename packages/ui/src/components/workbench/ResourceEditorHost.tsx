@@ -342,7 +342,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   ) : needsText ? (
     <div className="flex min-h-9 shrink-0 items-center gap-1 border-b border-border/40 px-2">
       {modeToggle}
-      {expandedEditorToolbar && !isMobile && !runtime.isVSCode ? (
+      {expandedEditorToolbar && !isMobile ? (
         <>
           <Button
             type="button"
@@ -509,7 +509,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     );
   }
 
-  if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.html && tab.viewState.previewMode !== 'edit' && !runtime.isVSCode) {
+  if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.html && tab.viewState.previewMode !== 'edit') {
     const encoded = path.split('/').map((segment) => encodeURIComponent(segment)).join('/');
     const src = getRuntimeUrlResolver().authenticatedAsset(`/api/fs/serve${encoded.startsWith('/') ? encoded : `/${encoded}`}`);
     return (
@@ -553,7 +553,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.diff) {
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
-        {isMobile || runtime.isVSCode ? (
+        {isMobile ? (
           <div className="flex h-full min-h-0 flex-col overflow-hidden">
             <div className="border-b border-border/40 px-3 py-1.5 typography-meta text-muted-foreground">
               {t('filesView.editor.diffAgainstDisk')}
@@ -594,7 +594,9 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
       <div className="flex h-full min-h-0 flex-col">
         <DocumentConflictBanner identity={identity} />
         <div className="min-h-0 flex-1 overflow-hidden">
-          {isMobile || runtime.isVSCode ? (
+          {/* Mobile owns the document-bound CodeMirror adapter. Desktop/Web use the
+              shared Monaco model; the VS Code companion never mounts this host. */}
+          {isMobile ? (
             <DocumentCodeMirror
               identity={identity}
               className="h-full"

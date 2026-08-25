@@ -13,10 +13,10 @@
     },
     "packages/ui": {
       "entry": [
-        "src/main.tsx",
         "src/apps/renderMobileApp.tsx",
         "src/apps/renderElectronMiniChatApp.tsx",
         "src/apps/renderVSCodeApp.tsx",
+        "src/lib/monaco/fixture.ts",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
       ],
@@ -56,7 +56,6 @@
     },
     "packages/vscode": {
       "entry": [
-        "src/extension.ts",
         "webview/main.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"

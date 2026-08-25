@@ -1,6 +1,6 @@
 # Piarium 统一文件编辑器平台设计
 
-Status: Phase 7 已完成；Phase 8 待实施
+Status: 全部八个实施 Phase 已完成；本文是统一文件编辑器的现行架构与验收记录
 
 Last updated: 2026-08-26
 
@@ -646,8 +646,9 @@ Profile 切换、runtime endpoint 切换、worker failure；Problems 与 editor 
   与 save-in-flight 的既有文档语义保持；
 - workbench snapshot 升级为 v2，视图状态由 provider ID + schema version + JSON payload 持有；v1
   cursor/selection/scroll/fold 字段一次迁移并回写，坏 provider state 只被丢弃，不使工作台快照失效；
-- desktop/Web official text renderer 已切到 Monaco；mobile 与 VS Code companion 继续使用其明确的
-  CodeMirror/宿主路径。baseline bridge 恢复 accepted diagnostics markers、completion、hover、增量
+- desktop/Web official text renderer 已切到 Monaco；mobile 使用明确的 CodeMirror adapter，VS Code
+  companion 继续由宿主 editor 持有文件正文且不挂载 Piarium 文件 editor。baseline bridge 恢复
+  accepted diagnostics markers、completion、hover、增量
   `didChange` 与成功保存后的 `didSave`，且 completion 不再产生 `docdocument` 前缀重复；
 - `fileEditorKeymap=vim` 由只使用 Monaco 0.56 公共 API 的 Piarium adapter 消费，覆盖 normal/insert/
   visual 基础行为、移动、删除/复制/粘贴、undo/redo、find、`:w`、状态栏和 dispose/re-enable；
@@ -843,6 +844,46 @@ conformance。没有授权不发布 npm。
 
 最后一次做全仓 type-check/lint、公共 package 验证、production Web build、Electron package/smoke、
 mobile smoke 和 dead-code。前面各 Phase 不机械重复这套收敛矩阵。
+
+完成：
+
+- `ResourceEditorHost` 的官方文件路由只剩 mobile CodeMirror 与 desktop/Web Monaco；VS Code
+  companion 的不可达 CodeMirror 分支已删除。Plan、Pi resource、MCP/插件配置等嵌入式消费者保留，
+  并在源码与模块文档中明确其用途；无消费者的 Elixir 声明和动态 language loader 已删除；
+- 迁移期 50,000 行 CodeMirror/Monaco 对照夹具退役。生产 smoke 现在分别记录 Monaco cold runtime、
+  model、first paint、edit-to-paint，以及复用同一 model 的 warm view remount；同时验证 model 创建/
+  回收数量。Web bundle audit 输出普通入口的直接 preload assets、Monaco chunks 与 editor worker
+  尺寸，并继续拒绝 eager Monaco 和 semantic workers；
+- 新增组合式跨 Surface 回归矩阵：journey 使用真实 Profile transition 状态机，同时验证稳定的
+  Workbench tab owner 在 Agent/IDE 间复用同一 Monaco model、增量输入、真实 Agent attachment
+  projection、保存、外部磁盘冲突以及最后一个 owner 释放后的 model dispose；language bridge 测试
+  通过实际注册的 Monaco rename provider 调用 Host rename，并以原子 WorkspaceEdit 提交结果；
+- architecture、roadmap、authoring、模块文档和 changelog 已收敛到同一个 ownership 结论。最终命令
+  与实测数据如下。
+
+最终证据（Windows 11 x64，2026-08-26）：
+
+- 新增/直接相关的 Document adapter、model/runtime、optional service 与跨 Surface journey 共 17 项
+  测试通过；全 workspace type-check 与 lint 通过；docs validation 为 378 pages、42 sidebar links、
+  25 engineering docs、167 local links；
+- 公共 npm tooling 的 release harness 与 contract/Surface/SDK/CLI 共 77 项测试、五个 package build
+  和五个 `npm pack --dry-run` 通过。没有 tag/output 的 `release:npm:package` 按接口拒绝执行；未发布
+  npm；
+- production Monaco audit build 通过。`index.html`、`mobile.html`、`mini-chat.html` 的直接入口 assets
+  均无 Monaco；Monaco chunk 为 4,278,374 bytes，唯一 editor worker 为 272,811 bytes，semantic
+  worker 为 0；
+- packaged Electron Monaco smoke 在 50,000 行、1,627,779 字符样本上记录：cold runtime
+  211.9 ms、model 12.3 ms、first paint 82.3 ms、edit-to-paint 9.2 ms；复用同一 model 的 warm
+  view first paint 28.6 ms、edit-to-paint 2.6 ms。这是单机证据，不是产品硬阈值；created/disposed
+  model 均为 1，editor worker 为 1，unexpected worker request 为 0；NSIS x64 package、health、
+  terminal create/close 与 runtime-setup renderer smoke 通过；
+- packaged `mobile.html` 挂载出可见 Surface，没有 renderer exception，也没有加载 Monaco resource；
+  mobile assets 从同一 production dist 生成，native identity 3 项测试通过。本 Windows 主机无法运行
+  iOS Simulator，且没有 Android SDK/真机，因此两端 native touch journey 仍属于对应平台的 release
+  verification；本次也没有执行 hosted-cloud 手工旅程；
+- 根脚本的 Bun `bunx` 缓存仍缺 `formatly/lib/types.js`。用独立 npm 安装的同版 Knip 5.80.0 完成
+  等价全扫描，并在收敛后确认 unused files 为 0；报告中的大量历史/public/dynamic export 候选未在
+  没有真实消费者证据时批量删除。本 Phase 只删除了核实无消费者的声明、loader 与导出。
 
 ## 15. 迁移与失败处理
 
