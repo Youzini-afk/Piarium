@@ -28,6 +28,7 @@ export interface IsolatedRealmActivationContext {
   callService(serviceId: string, version: number, providerId: string | undefined, method: string, args: JsonValue[]): Promise<JsonValue>;
   contribute(descriptor: PiariumExtensionStaticContribution, implementation: IsolatedContributionImplementation): void;
   grantedCapabilities: readonly string[];
+  hasService(serviceId: string, version: number, providerId?: string): boolean;
   readAsset(path: string): Promise<PiariumExtensionAssetPayload>;
 }
 
@@ -134,6 +135,8 @@ const bootstrapSource = (nonce: string): string => `
         disposers.push(disposer);
       },
       services: {
+        call: (serviceId, version, method, args, providerId) => request('service.invoke', { args, method, providerId, serviceId, version }),
+        has: (serviceId, version, providerId) => request('service.available', { providerId, serviceId, version }),
         use: (serviceId, version, providerId) => new Proxy({}, {
           get: (_target, property) => property === 'then' || typeof property !== 'string'
             ? undefined
@@ -330,6 +333,11 @@ class BrowserIsolatedSurfaceRealm implements IsolatedSurfaceRealm {
         typeof params.providerId === "string" ? params.providerId : undefined,
         String(params.method ?? ""),
         Array.isArray(params.args) ? params.args as JsonValue[] : [],
+      );
+      else if (message.method === "service.available") result = this.#activation.hasService(
+        String(params.serviceId ?? ""),
+        Number(params.version),
+        typeof params.providerId === "string" ? params.providerId : undefined,
       );
       else throw new Error(`Unknown isolated Surface request: ${message.method}`);
       this.#respond({ id: message.id, result, success: true, type: "response" });

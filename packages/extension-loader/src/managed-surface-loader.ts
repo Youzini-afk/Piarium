@@ -25,7 +25,9 @@ import {
   type PiariumExtensionStaticContribution,
   type PiariumExtensionSurfaceEntrypoint,
   type PiariumExtensionServiceInvocationRequest,
+  type PiariumExtensionServiceProvision,
   type PiariumExtensionServiceProviderSnapshot,
+  type PiariumExtensionServiceRequirement,
   type JsonValue,
 } from "@piarium/extension-contract";
 import {
@@ -41,6 +43,8 @@ import {
   type SurfaceActivationContext,
   type SurfaceActivationOptions,
   type SurfaceCapabilityAccessContext,
+  type SurfaceDisposer,
+  type SurfaceExternalService,
   type SurfaceOwnerIdentity,
 } from "@piarium/extension-surface";
 import {
@@ -106,6 +110,7 @@ export interface SurfaceExtensionLoaderOptions {
   accessContext?: () => Omit<SurfaceCapabilityAccessContext, "surface">;
   capabilities?: SurfaceCapabilityRegistry;
   evaluateModule?: ManagedSurfaceModuleEvaluator;
+  externalServiceFactories?: readonly SurfaceLocalExternalServiceFactory[];
   host: SurfaceExtensionHost;
   isolatedRealmFactory?: IsolatedSurfaceRealmFactory;
   realmId?: string;
@@ -114,6 +119,18 @@ export interface SurfaceExtensionLoaderOptions {
   surfaceRuntime: SurfaceExtensionRuntime;
   /** Overrides the transport-retry wait for deterministic conformance tests. */
   watchRetry?: (attempt: number, signal: AbortSignal) => Promise<void>;
+}
+
+/**
+ * Trusted Surface-host factory for a UI-local service. The loader supplies the consumer owner and
+ * owns the returned instance; extension code cannot choose or forge that owner identity.
+ */
+export interface SurfaceLocalExternalServiceFactory {
+  create(
+    owner: Readonly<SurfaceOwnerIdentity>,
+  ): SurfaceExternalService | Promise<SurfaceExternalService>;
+  descriptor: PiariumExtensionServiceProvision;
+  providerId: string;
 }
 
 /**
@@ -446,6 +463,7 @@ export class SurfaceExtensionLoader {
   readonly #capabilities: SurfaceCapabilityRegistry;
   readonly #diagnostics: SurfaceExtensionLoaderDiagnostic[] = [];
   readonly #evaluate: ManagedSurfaceModuleEvaluator;
+  readonly #externalServiceFactories: readonly SurfaceLocalExternalServiceFactory[];
   readonly #failedCandidates = new Set<string>();
   readonly #generations = new Map<string, number>();
   readonly #host: SurfaceExtensionHost;
@@ -476,6 +494,7 @@ export class SurfaceExtensionLoader {
     };
     this.#capabilities = options.capabilities ?? new SurfaceCapabilityRegistry();
     this.#evaluate = options.evaluateModule ?? evaluateManagedSurfaceModule;
+    this.#externalServiceFactories = [...(options.externalServiceFactories ?? [])];
     this.#host = options.host;
     this.#isolatedRealmFactory = options.isolatedRealmFactory ?? browserIsolatedSurfaceRealmFactory;
     this.#realmId = options.realmId ?? defaultRealmId();
@@ -753,7 +772,10 @@ export class SurfaceExtensionLoader {
       if (selected.slot === "candidate" && this.#failedCandidates.has(failedKey)) continue;
       if (executablePlans.some((plan) => plan.mode === "native") && this.#nativeRestartRequired.has(entry.manifest.id)) continue;
       const expectedBindings = selected.slot === "selected"
-        ? this.#serviceBindingSignature(this.#resolveExternalProviders(selected, hostState, null))
+        ? this.#serviceBindingSignature(
+            this.#resolveExternalProviders(selected, hostState, null),
+            this.#matchingLocalServiceFactories(selected.manifest.requires?.services ?? []),
+          )
         : null;
       const accessContext = this.#accessContext();
       const grantedCapabilities = this.#capabilities.resolveGranted(selectionCapabilities(selected), accessContext);
@@ -854,6 +876,7 @@ export class SurfaceExtensionLoader {
     ];
     const resources: ModuleResourceScope[] = [];
     const realms: IsolatedSurfaceRealm[] = [];
+    const localExternalServices: SurfaceExternalService[] = [];
     const nativeOwners: SurfaceOwnerIdentity[] = [];
     const requests: Array<{ activation: SurfaceActivation; options: SurfaceActivationOptions }> = [];
     const activated: ActiveEntrypoint[] = [];
@@ -868,8 +891,9 @@ export class SurfaceExtensionLoader {
       }
       const currentHostState = parsePiariumExtensionHostStateSnapshot(await this.#host.hostState());
       const externalProviders = this.#resolveExternalProviders(selection, currentHostState, prepared);
-      const externalServices = this.#externalServices(externalProviders);
-      const serviceBindings = this.#serviceBindingSignature(externalProviders);
+      const hostExternalServices = this.#externalServices(externalProviders);
+      const matchingLocalFactories = this.#matchingLocalServiceFactories(selection.manifest.requires?.services ?? []);
+      const serviceBindings = this.#serviceBindingSignature(externalProviders, matchingLocalFactories);
       const requestedGrants = selectionCapabilities(selection);
       const accessContext = this.#accessContext();
       const grantedCapabilities = this.#capabilities.resolveGranted(requestedGrants, accessContext);
@@ -892,6 +916,9 @@ export class SurfaceExtensionLoader {
           hostId: snapshot.hostId,
           realmId: this.#realmId,
         };
+        const ownerLocalExternalServices = await this.#createLocalExternalServices(owner, matchingLocalFactories);
+        localExternalServices.push(...ownerLocalExternalServices);
+        const externalServices = [...hostExternalServices, ...ownerLocalExternalServices];
         if (plan.mode === "native") nativeOwners.push(owner);
         let activation: SurfaceActivation;
         const contributeDeclarative = (context: SurfaceActivationContext): void => {
@@ -970,11 +997,16 @@ export class SurfaceExtensionLoader {
                   ),
                   callService: async (serviceId, version, providerId, method, args) => {
                     if (providerId) {
-                      const provider = externalProviders.find((candidate) => candidate.providerId === providerId);
-                      if (!provider || provider.descriptor.id !== serviceId || provider.descriptor.version !== version) {
+                      const service = externalServices.find((candidate) => (
+                        candidate.providerId === providerId
+                        && candidate.descriptor.id === serviceId
+                        && candidate.descriptor.version === version
+                      ));
+                      const handler = (service?.implementation as Record<string, unknown> | undefined)?.[method];
+                      if (typeof handler !== "function") {
                         throw new Error(`Isolated Surface service provider is unavailable: ${providerId}`);
                       }
-                      return this.#host.invokeService({ args, method, providerId, serviceId, version });
+                      return Promise.resolve((handler as (...values: JsonValue[]) => JsonValue | Promise<JsonValue>)(...args));
                     }
                     const implementation = stagingContext.useService<Record<string, (...values: JsonValue[]) => JsonValue | Promise<JsonValue>>>(serviceId, version);
                     const handler = implementation?.[method];
@@ -983,6 +1015,13 @@ export class SurfaceExtensionLoader {
                   },
                   contribute: (descriptor, implementation) => stagingContext.contribute(descriptor, implementation),
                   grantedCapabilities,
+                  hasService: (serviceId, version, providerId) => providerId
+                    ? externalServices.some((service) => (
+                        service.providerId === providerId
+                        && service.descriptor.id === serviceId
+                        && service.descriptor.version === version
+                      ))
+                    : stagingContext.useServices(serviceId, version).length > 0,
                   readAsset: async (path) => {
                     const value = await this.#host.readAsset({
                       extensionId: entry.manifest.id,
@@ -1094,6 +1133,9 @@ export class SurfaceExtensionLoader {
       await this.#reportActual(entry.manifest.id);
       return committedSnapshot;
     } catch (error) {
+      for (const service of [...localExternalServices].reverse()) {
+        await Promise.resolve(service.dispose?.()).catch(() => undefined);
+      }
       for (const resource of resources) resource.dispose();
       for (const realm of realms) realm.dispose(error);
       for (const owner of nativeOwners) {
@@ -1200,6 +1242,49 @@ export class SurfaceExtensionLoader {
     }));
   }
 
+  #matchingLocalServiceFactories(
+    requirements: readonly PiariumExtensionServiceRequirement[],
+  ): SurfaceLocalExternalServiceFactory[] {
+    return this.#externalServiceFactories.filter((factory) => requirements.some((requirement) => (
+      requirement.id === factory.descriptor.id && requirement.version === factory.descriptor.version
+    )));
+  }
+
+  async #createLocalExternalServices(
+    owner: SurfaceOwnerIdentity,
+    factories: readonly SurfaceLocalExternalServiceFactory[],
+  ): Promise<SurfaceExternalService[]> {
+    const services: SurfaceExternalService[] = [];
+    try {
+      for (const factory of factories) {
+        const created = await factory.create({ ...owner });
+        const dispose = created.dispose
+          ? this.#onceDisposer(() => created.dispose?.())
+          : undefined;
+        services.push({
+          descriptor: { ...factory.descriptor },
+          ...(dispose ? { dispose } : {}),
+          implementation: created.implementation,
+          providerId: factory.providerId,
+        });
+      }
+      return services;
+    } catch (error) {
+      for (const service of services.reverse()) await Promise.resolve(service.dispose?.()).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  #onceDisposer(disposer: SurfaceDisposer | undefined): SurfaceDisposer | undefined {
+    if (!disposer) return undefined;
+    let disposed = false;
+    return async () => {
+      if (disposed) return;
+      disposed = true;
+      await disposer();
+    };
+  }
+
   #requirementsSatisfied(selection: ArtifactSelection, state: PiariumExtensionHostStateSnapshot): boolean {
     const external = this.#resolveExternalProviders(selection, state, null);
     return (selection.manifest.requires?.services ?? []).every((requirement) => {
@@ -1207,18 +1292,29 @@ export class SurfaceExtensionLoader {
       const externalCount = external.filter((provider) => (
         provider.descriptor.id === requirement.id && provider.descriptor.version === requirement.version
       )).length;
+      const localExternalCount = this.#externalServiceFactories.filter((factory) => (
+        factory.descriptor.id === requirement.id && factory.descriptor.version === requirement.version
+      )).length;
       const localCount = this.#surfaceRuntime.getServices(requirement.id, requirement.version).length;
-      const count = externalCount + localCount;
+      const count = externalCount + localExternalCount + localCount;
       if ((requirement.binding ?? "single") === "single") return count === 1;
       if (requirement.binding === "selected") {
-        return externalCount > 0 || this.#surfaceRuntime.getService(requirement.id, requirement.version) !== undefined;
+        return externalCount > 0
+          || localExternalCount > 0
+          || this.#surfaceRuntime.getService(requirement.id, requirement.version) !== undefined;
       }
       return count > 0;
     });
   }
 
-  #serviceBindingSignature(providers: PiariumExtensionServiceProviderSnapshot[]): string {
-    return providers.map((provider) => provider.providerId).sort().join("\0");
+  #serviceBindingSignature(
+    providers: PiariumExtensionServiceProviderSnapshot[],
+    localFactories: readonly SurfaceLocalExternalServiceFactory[] = [],
+  ): string {
+    return [
+      ...providers.map((provider) => `host:${provider.providerId}`),
+      ...localFactories.map((factory) => `surface:${factory.providerId}`),
+    ].sort().join("\0");
   }
 
   #capabilityBindingSignature(capabilities: Iterable<string>, context: SurfaceCapabilityAccessContext): string {

@@ -34,6 +34,7 @@ import { createRunDebugEditorAdapter } from '@/lib/monaco/run-debug-editor-adapt
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { attachEditorContext } from '@/lib/agent-editor/attach';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
+import { registerMonacoExtensionView } from '@/lib/monaco/extension-service';
 
 type MonacoFileDiffEditorProps = {
   className?: string;
@@ -246,6 +247,16 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
     const runDebugAdapter = usesLiveDocument
       ? createRunDebugEditorAdapter({ editor: modifiedEditor, identity, monaco })
       : null;
+    const disposeExtensionView = usesLiveDocument
+      ? registerMonacoExtensionView({
+          editor: modifiedEditor,
+          getDocumentVersion: () => models.getRecordForModel(modifiedModel)?.localEditRevision ?? 0,
+          identity,
+          kind: 'diff-modified',
+          providerId,
+          viewId,
+        })
+      : () => undefined;
     const disposeCommandTarget = usesLiveDocument
       ? registerFileEditorCommandTarget({
           editor: modifiedEditor,
@@ -355,6 +366,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       if (captureFrame !== null) cancelAnimationFrame(captureFrame);
       capture();
       releasePiEditorContextOwner(contextOwnerId);
+      disposeExtensionView();
       disposeCommandTarget();
       runDebugAdapter?.dispose();
       if (bridge) bridge.release(languageOwnerId);

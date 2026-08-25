@@ -5,6 +5,18 @@ import type {
 import type {
   JsonObject,
   JsonValue,
+  PiariumEditorDocumentController,
+  PiariumEditorMonacoClearDecorationsRequestV1,
+  PiariumEditorMonacoExecuteActionRequestV1,
+  PiariumEditorMonacoOperationResultV1,
+  PiariumEditorMonacoRevealRequestV1,
+  PiariumEditorMonacoServiceV1,
+  PiariumEditorMonacoSetDecorationsRequestV1,
+  PiariumEditorMonacoSetSelectionRequestV1,
+  PiariumEditorMonacoStateResultV1,
+  PiariumEditorMonacoViewRequestV1,
+  PiariumEditorMonacoViewResultV1,
+  PiariumEditorMonacoWaitForStateRequestV1,
   PiariumExtensionAssetPayload,
   PiariumExtensionServiceProvision,
   PiariumExtensionServiceRoutingContext,
@@ -13,6 +25,10 @@ import type {
   PiariumExtensionStorageSnapshot,
   PiariumTransitionSceneAnimatedPhase,
   PiariumTransitionSceneFrameV1,
+} from "@piarium/extension-contract";
+import {
+  PIARIUM_EDITOR_MONACO_SERVICE_ID,
+  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
 } from "@piarium/extension-contract";
 
 export interface PiariumSurfaceAsset {
@@ -48,27 +64,6 @@ export interface PiariumSurfaceMountContext<TProps extends object = Record<strin
   readonly props: Readonly<TProps>;
   reportError(error: unknown): void;
   readonly signal: AbortSignal;
-}
-
-export interface PiariumEditorDocumentSnapshot {
-  baseRevision: string | null;
-  content: string;
-  dirty: boolean;
-  documentVersion: number;
-  errorMessage?: string;
-  saving: boolean;
-  status: "binary" | "conflict" | "deleted" | "error" | "missing" | "ready" | "unsupported-encoding";
-}
-
-export type PiariumEditorDocumentUpdateResult =
-  | { status: "updated"; snapshot: PiariumEditorDocumentSnapshot }
-  | { status: "conflict"; snapshot: PiariumEditorDocumentSnapshot };
-
-export interface PiariumEditorDocumentController {
-  getSnapshot(): PiariumEditorDocumentSnapshot;
-  replaceContent(content: string, expectedDocumentVersion: number): Promise<PiariumEditorDocumentUpdateResult>;
-  save(expectedDocumentVersion: number): Promise<PiariumEditorDocumentUpdateResult>;
-  subscribe(listener: () => void): () => void;
 }
 
 export interface PiariumEditorMountProps {
@@ -161,6 +156,14 @@ export interface PiariumIsolatedCapabilityClient {
 }
 
 export interface PiariumIsolatedServiceClient {
+  call(
+    id: string,
+    version: number,
+    method: string,
+    args: JsonValue[],
+    providerId?: string,
+  ): Promise<JsonValue>;
+  has(id: string, version: number, providerId?: string): Promise<boolean>;
   use<TImplementation = unknown>(id: string, version: number, providerId?: string): TImplementation;
 }
 
@@ -174,6 +177,80 @@ export interface PiariumIsolatedSurfaceContext {
   readonly services: PiariumIsolatedServiceClient;
   readonly signal: AbortSignal;
 }
+
+export interface PiariumEditorMonacoClientV1 {
+  clearDecorations(request: PiariumEditorMonacoClearDecorationsRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
+  executeAction(request: PiariumEditorMonacoExecuteActionRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
+  focus(request?: PiariumEditorMonacoViewRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
+  getActiveView(): Promise<PiariumEditorMonacoViewResultV1>;
+  getState(): Promise<PiariumEditorMonacoStateResultV1>;
+  getView(request?: PiariumEditorMonacoViewRequestV1): Promise<PiariumEditorMonacoViewResultV1>;
+  reveal(request: PiariumEditorMonacoRevealRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
+  setDecorations(request: PiariumEditorMonacoSetDecorationsRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
+  setSelection(request: PiariumEditorMonacoSetSelectionRequestV1): Promise<PiariumEditorMonacoOperationResultV1>;
+  waitForState(request: PiariumEditorMonacoWaitForStateRequestV1): Promise<PiariumEditorMonacoStateResultV1>;
+}
+
+type PiariumEditorMonacoServiceContext =
+  | Pick<PiariumManagedSurfaceContext, "useService">
+  | Pick<PiariumIsolatedSurfaceContext, "services">;
+
+const monacoServiceAbsent = (): PiariumEditorMonacoOperationResultV1 => ({
+  reason: "provider-inactive",
+  status: "absent",
+});
+
+/**
+ * Resolve the owner-bound optional Monaco service injected by the Surface runtime. The extension does
+ * not provide an owner identity; managed and isolated callers receive the same serialized subset.
+ */
+export const createPiariumEditorMonacoClient = (
+  context: PiariumEditorMonacoServiceContext,
+): PiariumEditorMonacoClientV1 => {
+  const invoke = async <TResult extends PiariumEditorMonacoOperationResultV1 | PiariumEditorMonacoStateResultV1>(
+    method: keyof PiariumEditorMonacoServiceV1,
+    args: JsonValue[],
+  ): Promise<TResult> => {
+    if ("useService" in context) {
+      const service = context.useService<PiariumEditorMonacoServiceV1>(
+        PIARIUM_EDITOR_MONACO_SERVICE_ID,
+        PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+      );
+      if (!service) return monacoServiceAbsent() as TResult;
+      const handler = service[method] as (...values: unknown[]) => unknown;
+      if (typeof handler !== "function") {
+        return { reason: "operation-unavailable", status: "unsupported" } as TResult;
+      }
+      return await Promise.resolve(handler(...args)) as TResult;
+    }
+    const available = await context.services.has(
+      PIARIUM_EDITOR_MONACO_SERVICE_ID,
+      PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+    );
+    if (!available) return monacoServiceAbsent() as TResult;
+    return await context.services.call(
+      PIARIUM_EDITOR_MONACO_SERVICE_ID,
+      PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+      method,
+      args,
+    ) as TResult;
+  };
+  const requestArgs = (request: object | undefined): JsonValue[] => request === undefined
+    ? []
+    : [request as unknown as JsonValue];
+  return {
+    clearDecorations: (request) => invoke("clearDecorations", requestArgs(request)),
+    executeAction: (request) => invoke("executeAction", requestArgs(request)),
+    focus: (request) => invoke("focus", requestArgs(request)),
+    getActiveView: () => invoke<PiariumEditorMonacoViewResultV1>("getActiveView", []),
+    getState: () => invoke<PiariumEditorMonacoStateResultV1>("getState", []),
+    getView: (request) => invoke<PiariumEditorMonacoViewResultV1>("getView", requestArgs(request)),
+    reveal: (request) => invoke("reveal", requestArgs(request)),
+    setDecorations: (request) => invoke("setDecorations", requestArgs(request)),
+    setSelection: (request) => invoke("setSelection", requestArgs(request)),
+    waitForState: (request) => invoke<PiariumEditorMonacoStateResultV1>("waitForState", requestArgs(request)),
+  };
+};
 
 export type PiariumIsolatedSurfaceActivation = (
   context: PiariumIsolatedSurfaceContext,
@@ -289,6 +366,8 @@ export const PIARIUM_WORKSPACE_DEBUG_CAPABILITY = "workspace.debug";
 export const PIARIUM_WORKSPACE_TEST_CAPABILITY = "workspace.test";
 
 export {
+  PIARIUM_EDITOR_MONACO_SERVICE_ID,
+  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
   PIARIUM_TRANSITION_SCENE_CONTRACT_VERSION,
   PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
   PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
@@ -300,6 +379,32 @@ export {
 } from "@piarium/extension-contract";
 
 export type {
+  PiariumEditorDocumentApplyEditsResult,
+  PiariumEditorDocumentController,
+  PiariumEditorDocumentEdit,
+  PiariumEditorDocumentSnapshot,
+  PiariumEditorDocumentUpdateResult,
+  PiariumEditorMonacoAbsentReasonV1,
+  PiariumEditorMonacoClearDecorationsRequestV1,
+  PiariumEditorMonacoDecorationV1,
+  PiariumEditorMonacoExecuteActionRequestV1,
+  PiariumEditorMonacoFailureResultV1,
+  PiariumEditorMonacoOperationResultV1,
+  PiariumEditorMonacoPositionV1,
+  PiariumEditorMonacoRangeV1,
+  PiariumEditorMonacoRevealRequestV1,
+  PiariumEditorMonacoSelectionV1,
+  PiariumEditorMonacoServiceV1,
+  PiariumEditorMonacoSetDecorationsRequestV1,
+  PiariumEditorMonacoSetSelectionRequestV1,
+  PiariumEditorMonacoStateResultV1,
+  PiariumEditorMonacoStateSnapshotV1,
+  PiariumEditorMonacoStaleReasonV1,
+  PiariumEditorMonacoUnsupportedReasonV1,
+  PiariumEditorMonacoViewRequestV1,
+  PiariumEditorMonacoViewResultV1,
+  PiariumEditorMonacoViewSnapshotV1,
+  PiariumEditorMonacoWaitForStateRequestV1,
   PiariumTransitionSceneAnimatedPhase,
   PiariumTransitionSceneContributionDataV1,
   PiariumTransitionSceneDirection,

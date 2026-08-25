@@ -1,5 +1,4 @@
 import React from 'react';
-import { File as PierreFile } from '@pierre/diffs/react';
 import {
   RiArrowLeftLine,
   RiArrowRightSLine,
@@ -15,21 +14,21 @@ import {
 
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { DocumentCodeMirror } from '@/components/ui/DocumentCodeMirror';
+import { DocumentConflictBanner } from '@/components/workbench/DocumentConflictBanner';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import { JsonTreeView } from '@/components/ui/JsonTreeView';
-import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { PIERRE_RUNTIME_BASE_CSS } from '@/components/views/PierreDiffViewer';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
-import { readWorkspaceTextFile } from '@/lib/documents/workspace-text';
-import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
-import { getDefaultTheme } from '@/lib/theme/themes';
-import { getImageMimeType, getLanguageFromExtension, isBinaryFile, isImageFile, isPdfFile, isSvgFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { getDocumentRegistry } from '@/lib/documents/session';
+import { useDocumentRecord } from '@/lib/documents/hooks';
+import { resolveTextDocumentIdentity } from '@/lib/documents/workspace-text';
+import type { DocumentIdentity, DocumentRecord } from '@/lib/documents/types';
+import { isBinaryFile, isImageFile, isPdfFile } from '@/lib/toolHelpers';
 import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
@@ -37,8 +36,6 @@ import { cn } from '@/lib/utils';
 type MobileFilesRoute =
   | { type: 'browser'; directory: string }
   | { type: 'file'; path: string; returnDirectory: string };
-
-const MAX_MOBILE_FILE_CHARS = 250_000;
 
 const normalizePath = (value?: string | null): string => (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
 
@@ -76,9 +73,6 @@ const formatFileSize = (size?: number): string => {
   return '';
 };
 
-const isMarkdownFile = (path: string): boolean => /\.(md|mdx|markdown)$/i.test(path);
-const isJsonFile = (path: string): boolean => /\.(json|jsonc)$/i.test(path);
-
 type MobileFilesSurfaceProps = {
   /** When provided, header gets a close X that calls this; used when the surface is hosted in MobileSurfaceShell. */
   onClose?: () => void;
@@ -95,11 +89,11 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   const [query, setQuery] = React.useState('');
   const [searchResults, setSearchResults] = React.useState<FileSearchResult[]>([]);
   const [isSearching, setIsSearching] = React.useState(false);
-  const [fileContent, setFileContent] = React.useState('');
   const [imageSrc, setImageSrc] = React.useState('');
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
   const [binaryBlocked, setBinaryBlocked] = React.useState(false);
+  const [resolvedFile, setResolvedFile] = React.useState<{ path: string; identity: DocumentIdentity } | null>(null);
   const directoryLoadRequestIdRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -111,6 +105,10 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   }, [root]);
 
   const currentDirectory = route.type === 'browser' ? route.directory : route.returnDirectory;
+  const fileIdentity = route.type === 'file' && resolvedFile?.path === route.path
+    ? resolvedFile.identity
+    : undefined;
+  const fileRecord = useDocumentRecord(fileIdentity);
 
   const loadDirectory = React.useCallback(async (directory: string) => {
     if (!directory) return;
@@ -173,12 +171,12 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
 
   React.useEffect(() => {
     if (route.type !== 'file') return;
-    setFileContent('');
     setImageSrc('');
     setFileError(null);
     setBinaryBlocked(false);
+    setResolvedFile(null);
 
-    if (isImageFile(route.path) && !isSvgFile(route.path)) {
+    if (isImageFile(route.path)) {
       let cancelled = false;
       let objectUrl = '';
       setIsLoadingFile(true);
@@ -206,8 +204,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
       };
     }
 
-    // Never load PDF/office/archives/etc. as UTF-8 text — that path can corrupt originals
-    // if a future write path is added, and it shows gibberish in the viewer.
+    // Never load PDF/office/archives/etc. through the text registry.
     if (isBinaryFile(route.path) || isPdfFile(route.path)) {
       setBinaryBlocked(true);
       setIsLoadingFile(false);
@@ -222,21 +219,11 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
 
     let cancelled = false;
     setIsLoadingFile(true);
-    void readWorkspaceTextFile(documents, root, route.path)
-      .then((content) => {
+    void resolveTextDocumentIdentity(documents, root, route.path)
+      .then((identity) => {
         if (cancelled) return;
-        if (content === null) {
-          setFileError(t('filesView.error.readFileFailed'));
-          return;
-        }
-        if (looksLikeBinaryText(content)) {
-          setBinaryBlocked(true);
-          setFileContent('');
-          return;
-        }
-        setFileContent(content.length > MAX_MOBILE_FILE_CHARS
-          ? `${content.slice(0, MAX_MOBILE_FILE_CHARS)}\n\n${t('mobile.files.file.truncated')}`
-          : content);
+        setResolvedFile({ path: route.path, identity });
+        return getDocumentRegistry().open(identity);
       })
       .catch((error) => {
         if (!cancelled) setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
@@ -266,7 +253,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
   };
 
   const handleCopyContent = async () => {
-    const result = await copyTextToClipboard(fileContent);
+    const result = await copyTextToClipboard(fileRecord?.buffer ?? '');
     if (result.ok) toast.success(t('mobile.files.toast.contentCopied'));
     else toast.error(t('mobile.files.toast.copyFailed'));
   };
@@ -279,11 +266,12 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose 
     return (
       <MobileFileDetail
         path={route.path}
-        content={fileContent}
         imageSrc={imageSrc}
         error={fileError}
         isLoading={isLoadingFile}
         binaryBlocked={binaryBlocked}
+        identity={fileIdentity}
+        record={fileRecord}
         onBack={() => setRoute({ type: 'browser', directory: route.returnDirectory })}
         onCopyPath={() => void handleCopyPath(route.path)}
         onCopyContent={() => void handleCopyContent()}
@@ -430,16 +418,34 @@ const MobileSearchResults: React.FC<{
 
 const MobileFileDetail: React.FC<{
   path: string;
-  content: string;
   imageSrc: string;
   error: string | null;
   isLoading: boolean;
   binaryBlocked: boolean;
+  identity: DocumentIdentity | undefined;
+  record: DocumentRecord | undefined;
   onBack: () => void;
   onCopyPath: () => void;
   onCopyContent: () => void;
-}> = ({ path, content, imageSrc, error, isLoading, binaryBlocked, onBack, onCopyPath, onCopyContent }) => {
+}> = ({ path, imageSrc, error, isLoading, binaryBlocked, identity, record, onBack, onCopyPath, onCopyContent }) => {
   const { t } = useI18n();
+  const isImage = isImageFile(path);
+  const registryBlocked = record?.status === 'binary' || record?.status === 'unsupported-encoding';
+  const loadingDocument = !isImage && !binaryBlocked && !error && (
+    isLoading || !identity || !record || record.status === 'loading' || record.status === 'unloaded'
+  );
+  const documentError = error ?? record?.errorMessage ?? (
+    record?.status === 'error' ? t('filesView.error.previewUnavailable') : null
+  );
+
+  const save = (): void => {
+    if (!identity) return;
+    void getDocumentRegistry().save(identity, record?.status === 'deleted' ? { recreateDeleted: true } : {})
+      .then((next) => {
+        if (next.status !== 'conflict') toast.success(t('filesView.editor.saved'));
+      })
+      .catch((saveError) => toast.error(saveError instanceof Error ? saveError.message : String(saveError)));
+  };
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -455,7 +461,19 @@ const MobileFileDetail: React.FC<{
         <div className="min-w-0 flex-1">
           <h2 className="truncate typography-ui-header text-foreground">{getNameFromPath(path)}</h2>
         </div>
-        {!isImageFile(path) && !binaryBlocked ? (
+        {!isImage && !binaryBlocked && identity && record && !registryBlocked ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={!record.dirty || record.saving || record.status === 'conflict'}
+            onClick={save}
+            aria-label={t('filesView.editor.saveAria', { shortcut: '⌘/Ctrl+S' })}
+          >
+            <Icon name={record.saving ? 'loader-4' : 'save-3'} className={cn('size-4', record.saving && 'animate-spin')} />
+          </Button>
+        ) : null}
+        {!isImage && !binaryBlocked && identity && record && !registryBlocked ? (
           <Button type="button" variant="ghost" size="icon" onClick={onCopyContent} aria-label={t('mobile.files.copyContentAria')}>
             <RiFileCopyLine className="size-4" />
           </Button>
@@ -465,82 +483,34 @@ const MobileFileDetail: React.FC<{
         </Button>
       </header>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {isLoading ? (
+        {loadingDocument ? (
           <MobileFilesState loading message={t('filesView.state.loading')} />
-        ) : error ? (
-          <MobileFilesState message={error} />
-        ) : isImageFile(path) && imageSrc ? (
+        ) : documentError ? (
+          <MobileFilesState message={documentError} />
+        ) : isImage && imageSrc ? (
           <ScrollShadow className="h-full overflow-auto p-4">
             <img src={imageSrc} alt={getNameFromPath(path)} className="mx-auto max-h-full max-w-full rounded-lg object-contain" />
           </ScrollShadow>
-        ) : isImageFile(path) ? (
-          <ScrollShadow className="h-full overflow-auto p-4">
-            <img src={`data:${getImageMimeType(path)};utf8,${encodeURIComponent(content)}`} alt={getNameFromPath(path)} className="mx-auto max-h-full max-w-full rounded-lg object-contain" />
-          </ScrollShadow>
+        ) : isImage ? (
+          <MobileFilesState loading message={t('filesView.state.loading')} />
         ) : binaryBlocked ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
             <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
             <div className="max-w-sm typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
           </div>
+        ) : registryBlocked ? (
+          <MobileFilesState message={t('filesView.error.previewUnavailable')} />
+        ) : identity ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <DocumentConflictBanner identity={identity} />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <DocumentCodeMirror identity={identity} className="h-full" />
+            </div>
+          </div>
         ) : (
-          <MobileTextFile path={path} content={content} />
+          <MobileFilesState message={t('filesView.error.previewUnavailable')} />
         )}
       </div>
-    </div>
-  );
-};
-
-const MobileTextFile: React.FC<{ path: string; content: string }> = ({ path, content }) => {
-  const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
-  const lightTheme = React.useMemo(
-    () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? getDefaultTheme(false),
-    [availableThemes, lightThemeId],
-  );
-  const darkTheme = React.useMemo(
-    () => availableThemes.find((theme) => theme.metadata.id === darkThemeId) ?? getDefaultTheme(true),
-    [availableThemes, darkThemeId],
-  );
-
-  React.useEffect(() => {
-    ensurePierreThemeRegistered(lightTheme);
-    ensurePierreThemeRegistered(darkTheme);
-  }, [darkTheme, lightTheme]);
-
-  const pierreTheme = React.useMemo(
-    () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
-    [darkTheme.metadata.id, lightTheme.metadata.id],
-  );
-
-  if (isMarkdownFile(path)) {
-    return (
-      <ScrollShadow className="h-full overflow-y-auto px-4 py-4">
-        <SimpleMarkdownRenderer content={content} enableFileReferences={false} />
-      </ScrollShadow>
-    );
-  }
-  if (isJsonFile(path)) {
-    return <JsonTreeView jsonString={content} className="h-full overflow-auto" />;
-  }
-  return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <ScrollShadow className="min-h-0 flex-1 overflow-auto bg-[var(--syntax-base-background)]">
-        <PierreFile
-          file={{
-            name: getNameFromPath(path),
-            contents: content,
-            lang: getLanguageFromExtension(path) || undefined,
-          }}
-          options={{
-            disableFileHeader: true,
-            overflow: 'wrap',
-            theme: pierreTheme,
-            themeType: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
-            unsafeCSS: PIERRE_RUNTIME_BASE_CSS,
-          }}
-          className="block min-h-full w-full"
-          style={{ minHeight: '100%' }}
-        />
-      </ScrollShadow>
     </div>
   );
 };

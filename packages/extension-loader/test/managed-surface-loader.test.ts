@@ -1166,6 +1166,7 @@ test("isolated Workers are background-only and reject visual contributions witho
       callService: async () => null,
       contribute: () => { contributions += 1; },
       grantedCapabilities: [],
+      hasService: () => false,
       readAsset: async () => { throw new Error("unexpected asset read"); },
     }), /background-only/);
     assert.equal(contributions, 0);
@@ -1175,6 +1176,206 @@ test("isolated Workers are background-only and reject visual contributions witho
     if (workerDescriptor) Object.defineProperty(globalThis, "Worker", workerDescriptor);
     else delete (globalThis as { Worker?: unknown }).Worker;
   }
+});
+
+test("Surface-local external service factories bind consumer owners and preserve the old generation on failed update", async () => {
+  const v1Integrity = integrityFor("local-service-v1");
+  const failedIntegrity = integrityFor("local-service-failed");
+  const serviceManifest = (version: string): PiariumExtensionManifest => ({
+    ...manifest(version),
+    requires: { services: [{ id: "piarium.editor.monaco", optional: true, version: 1 }] },
+  });
+  let current = snapshot(1, {
+    ...catalogEntry("1.0.0", v1Integrity),
+    manifest: serviceManifest("1.0.0"),
+  });
+  const created: Array<{ generation: number; version: string }> = [];
+  const disposed: Array<{ generation: number; version: string }> = [];
+  let selections = 0;
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    evaluateModule: (source) => ({
+      default: {
+        activate: (context) => {
+          assert.ok(context.useService("piarium.editor.monaco", 1));
+          if (source === "failed") throw new Error("local-service candidate failed");
+          context.contribute({
+            contractVersion: 1,
+            data: { languageIds: ["markdown"] },
+            id: "dev.example.managed.local-service-editor",
+            kind: "editor",
+            supports: ["web"],
+          }, { version: source });
+        },
+      },
+    }),
+    externalServiceFactories: [{
+      create: (owner) => {
+        const identity = { generation: owner.generation, version: owner.extensionVersion };
+        created.push(identity);
+        return {
+          descriptor: { id: "piarium.editor.monaco", version: 1 },
+          dispose: () => { disposed.push(identity); },
+          implementation: { getActiveView: () => ({ reason: "provider-inactive", status: "absent" }) },
+          providerId: "piarium.builtin.text",
+        };
+      },
+      descriptor: { id: "piarium.editor.monaco", version: 1 },
+      providerId: "piarium.builtin.text",
+    }],
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => hostState(current),
+      invokeService: async () => { throw new Error("UI-local service must not use Host RPC"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async (request) => {
+        const entry = current.extensions[0] as PiariumExtensionCatalogEntry;
+        current = snapshot(current.revision + 1, {
+          ...entry,
+          candidate: {
+            ...entry.candidate as NonNullable<PiariumExtensionCatalogEntry["candidate"]>,
+            applyRequested: true,
+          },
+        });
+        assert.equal(request.candidateIntegrity, failedIntegrity);
+        return current;
+      },
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({
+        artifactIntegrity: request.integrity,
+        entrypointId: request.entrypointId,
+        module: asset(request.integrity === failedIntegrity ? "failed" : "v1", request.integrity, "runtime/surface/main/module.cjs"),
+        styles: [],
+      }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => { selections += 1; return current; },
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  await loader.reconcile();
+  assert.deepEqual(runtime.getSnapshot().visibleContributions[0]?.implementation, { version: "v1" });
+  const selectedOwner = runtime.getSnapshot().visibleContributions[0]?.owner;
+  current = snapshot(2, {
+    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    candidate: {
+      applyRequested: false,
+      capabilitiesReviewed: true,
+      capabilityDelta: { added: [], removed: [] },
+      capabilityGrants: [],
+      integrity: failedIntegrity,
+      manifest: serviceManifest("2.0.0"),
+      preparedAt: "2026-08-26T00:00:00.000Z",
+      resolvedVersion: "2.0.0",
+      source: { display: "Test", kind: "local" },
+    },
+  });
+  await assert.rejects(
+    () => loader.applyCandidate("dev.example.managed", failedIntegrity, current.revision),
+    /local-service candidate failed/,
+  );
+  assert.equal(runtime.getSnapshot().visibleContributions[0]?.owner.generation, selectedOwner?.generation);
+  assert.deepEqual(runtime.getSnapshot().visibleContributions[0]?.implementation, { version: "v1" });
+  assert.equal(selections, 0);
+  assert.deepEqual(created.map((item) => item.version), ["1.0.0", "2.0.0"]);
+  assert.deepEqual(disposed.map((item) => item.version), ["2.0.0"]);
+
+  current = snapshot(current.revision + 1, {
+    ...current.extensions[0] as PiariumExtensionCatalogEntry,
+    desired: { enabled: false, revision: 2, updatedAt: "2026-08-26T00:01:00.000Z" },
+  });
+  await loader.reconcile();
+  assert.deepEqual(disposed.map((item) => item.version), ["2.0.0", "1.0.0"]);
+});
+
+test("isolated realms call the serializable Surface-local editor service subset", async () => {
+  const artifactIntegrity = integrityFor("isolated-local-service");
+  const isolatedManifest: PiariumExtensionManifest = {
+    ...manifest("1.0.0"),
+    entrypoints: {
+      surfaces: [{ id: "main", file: "surface.js", isolation: "iframe", mode: "isolated", supports: ["web"] }],
+    },
+    requires: { services: [{ id: "piarium.editor.monaco", optional: true, version: 1 }] },
+  };
+  const current = snapshot(1, { ...catalogEntry("1.0.0", artifactIntegrity), manifest: isolatedManifest });
+  let response: unknown;
+  let available = false;
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const loader = new SurfaceExtensionLoader({
+    externalServiceFactories: [{
+      create: (owner) => ({
+        descriptor: { id: "piarium.editor.monaco", version: 1 },
+        implementation: {
+          getActiveView: () => ({
+            status: "ready",
+            view: {
+              documentVersion: 4,
+              focused: true,
+              generation: owner.generation,
+              kind: "text",
+              languageId: "typescript",
+              providerId: "piarium.builtin.text",
+              resource: { resourceId: "src/main.ts", workspaceId: "workspace" },
+              selection: null,
+              viewId: "view-1",
+            },
+          }),
+        },
+        providerId: "piarium.builtin.text",
+      }),
+      descriptor: { id: "piarium.editor.monaco", version: 1 },
+      providerId: "piarium.builtin.text",
+    }],
+    host: {
+      activateExtension: async () => undefined,
+      catalog: async () => ({ supported: true, status: "ready", snapshot: current }),
+      discardPreparedCandidate: async () => undefined,
+      hostState: async () => hostState(current),
+      invokeService: async () => { throw new Error("UI-local service must not use Host RPC"); },
+      prepareCandidate: async (extensionId, integrity) => ({ extensionId, integrity, providers: [] }),
+      requestCandidateApplication: async () => current,
+      readAsset: async () => { throw new Error("unexpected asset read"); },
+      readManagedEntrypoint: async (request) => ({
+        artifactIntegrity: request.integrity,
+        entrypointId: request.entrypointId,
+        module: asset("isolated", request.integrity, "runtime/surface/main/module.js"),
+        styles: [],
+      }),
+      reportActualState: async () => undefined,
+      selectCandidate: async () => current,
+      waitForHostState: async () => { throw new Error("unexpected host-state wait"); },
+    },
+    isolatedRealmFactory: {
+      create: (_source, _styles, identity) => ({
+        activate: async (context) => {
+          available = context.hasService("piarium.editor.monaco", 1);
+          response = await context.callService("piarium.editor.monaco", 1, undefined, "getActiveView", []);
+          context.contribute({
+            contractVersion: 1,
+            data: {},
+            id: "dev.example.managed.isolated-service-page",
+            kind: "page",
+            supports: ["web"],
+          }, { kind: "isolated-iframe", mount: () => () => undefined, postMessage: () => undefined, realmId: identity.realmId, viewId: "main" });
+        },
+        disposed: false,
+        dispose: () => undefined,
+      }),
+    },
+    realmId,
+    surface: "web",
+    surfaceRuntime: runtime,
+  });
+
+  await loader.reconcile();
+  assert.equal(available, true);
+  assert.equal((response as { status?: string }).status, "ready");
+  assert.equal((response as { view?: { resource?: { resourceId?: string } } }).view?.resource?.resourceId, "src/main.ts");
 });
 
 test("trusted-native Surface activation failure requires a Surface reload and is not retried", async () => {

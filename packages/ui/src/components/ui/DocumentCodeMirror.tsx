@@ -9,22 +9,58 @@ import {
   notifyLanguageDocumentSave,
   releaseLanguageDocument,
 } from '@/lib/language-services/session';
-import type { DocumentIdentity } from '@/lib/documents/types';
+import { documentKey, type DocumentEditResult, type DocumentIdentity, type DocumentRecord } from '@/lib/documents/types';
 
 type DocumentCodeMirrorProps = Omit<React.ComponentProps<typeof CodeMirrorEditor>, 'value' | 'onChange'> & {
   identity: DocumentIdentity | undefined;
 };
 
+type DocumentCodeMirrorRegistry = Pick<ReturnType<typeof getDocumentRegistry>, 'get' | 'applyEdits'>;
+
+export type DocumentCodeMirrorAdapterResult = DocumentEditResult | {
+  status: 'unsupported';
+  reason: 'document-not-open' | 'missing-changes';
+  record?: DocumentRecord;
+};
+
+/** Adapt a CodeMirror transaction into the registry's incremental edit contract. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const applyDocumentCodeMirrorChanges = (
+  registry: DocumentCodeMirrorRegistry,
+  identity: DocumentIdentity,
+  changes: readonly CodeMirrorTextChange[] | undefined,
+  origin: string,
+  expectedLocalEditRevision: number,
+): DocumentCodeMirrorAdapterResult => {
+  const record = registry.get(identity);
+  if (!record) return { status: 'unsupported', reason: 'document-not-open' };
+  if (!changes || changes.length === 0) {
+    return { status: 'unsupported', reason: 'missing-changes', record };
+  }
+  return registry.applyEdits(identity, {
+    expectedLocalEditRevision,
+    edits: changes.map(({ from, to, insert }) => ({ from, to, insert })),
+    origin,
+  });
+};
+
 export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
   identity,
   extensions,
+  onViewDestroy,
+  onViewReady,
   ...editorProps
 }) => {
   const origin = React.useId();
+  const viewRef = React.useRef<import('@codemirror/view').EditorView | null>(null);
   const record = useDocumentRecord(identity);
   const previousBaseRevisionRef = React.useRef<string | null | undefined>(record?.baseRevision);
   const previousSavingRef = React.useRef(record?.saving ?? false);
+  const rejectedChangeRef = React.useRef<{ identityKey: string; attemptedValue: string } | null>(null);
   const previousIdentityRef = React.useRef(identity ? `${identity.workspaceId}\0${identity.resourceId}` : '');
+  const activeIdentityKeyRef = React.useRef(previousIdentityRef.current);
+  const projectedRevisionRef = React.useRef(record?.localEditRevision ?? 0);
+  activeIdentityKeyRef.current = identity ? documentKey(identity) : '';
   const buffer = record?.buffer ?? '';
   const languageExtensions = useDocumentLanguageExtensions(identity);
 
@@ -38,6 +74,8 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
     const identityKey = identity ? `${identity.workspaceId}\0${identity.resourceId}` : '';
     if (identityKey !== previousIdentityRef.current) {
       previousIdentityRef.current = identityKey;
+      rejectedChangeRef.current = null;
+      projectedRevisionRef.current = record?.localEditRevision ?? 0;
       previousBaseRevisionRef.current = record?.baseRevision;
       previousSavingRef.current = record?.saving ?? false;
       return;
@@ -48,12 +86,66 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
     previousSavingRef.current = record?.saving ?? false;
     if (!identity || !wasSaving || record?.saving || previous === undefined || previous === record?.baseRevision) return;
     notifyLanguageDocumentSave(identity);
-  }, [identity, record?.baseRevision, record?.saving]);
+  }, [identity, record?.baseRevision, record?.localEditRevision, record?.saving]);
+
+  React.useEffect(() => {
+    projectedRevisionRef.current = record?.localEditRevision ?? 0;
+  }, [identity, record?.localEditRevision]);
 
   const handleChange = React.useCallback((value: string, changes?: CodeMirrorTextChange[]) => {
     if (!identity) return;
-    getDocumentRegistry().applyTransaction(identity, value, { origin, changes });
-    notifyLanguageDocumentChange(identity);
+    const registry = getDocumentRegistry();
+    const current = registry.get(identity);
+    const identityKey = documentKey(identity);
+    const rejected = rejectedChangeRef.current;
+    // On a rejected edit CodeMirror receives the authoritative value through its
+    // controlled prop. Ignore that one reconciliation transaction so it cannot
+    // become a second edit or advance the revision in a loop.
+    if (rejected && rejected.identityKey === identityKey && current && value === current.buffer) {
+      rejectedChangeRef.current = null;
+      return;
+    }
+
+    const result = applyDocumentCodeMirrorChanges(
+      registry,
+      identity,
+      changes,
+      origin,
+      projectedRevisionRef.current,
+    );
+    switch (result.status) {
+      case 'applied':
+        projectedRevisionRef.current = result.record.localEditRevision;
+        rejectedChangeRef.current = null;
+        notifyLanguageDocumentChange(identity);
+        return;
+      case 'stale':
+      case 'invalid':
+      case 'unsupported':
+        // The registry remains authoritative; CodeMirror will reconcile from the
+        // current buffer. Schedule the dispatch outside CodeMirror's update
+        // listener; nested EditorView updates are not allowed.
+        rejectedChangeRef.current = { identityKey, attemptedValue: value };
+        if (result.record) {
+          queueMicrotask(() => {
+            const view = viewRef.current;
+            const rejectedAttempt = rejectedChangeRef.current;
+            const authoritativeValue = registry.get(identity)?.buffer ?? result.record?.buffer;
+            if (
+              !view
+              || authoritativeValue === undefined
+              || activeIdentityKeyRef.current !== identityKey
+              || rejectedAttempt?.identityKey !== identityKey
+              || rejectedAttempt.attemptedValue !== value
+              || view.state.doc.toString() === authoritativeValue
+            ) return;
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: authoritativeValue },
+            });
+          });
+        }
+        return;
+    }
   }, [identity, origin]);
 
   if (!identity) return null;
@@ -63,6 +155,14 @@ export const DocumentCodeMirror: React.FC<DocumentCodeMirrorProps> = ({
       value={buffer}
       onChange={handleChange}
       extensions={[...languageExtensions, ...(extensions ?? [])]}
+      onViewReady={(view) => {
+        viewRef.current = view;
+        onViewReady?.(view);
+      }}
+      onViewDestroy={() => {
+        viewRef.current = null;
+        onViewDestroy?.();
+      }}
       {...editorProps}
     />
   );

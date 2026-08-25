@@ -4,4 +4,6 @@ export const PIARIUM_TASKS_SERVICE_ID = "piarium.tasks";
 export const PIARIUM_DEBUG_SERVICE_ID = "piarium.debug";
 export const PIARIUM_TEST_SERVICE_ID = "piarium.test";
 export const PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID = "piarium.workbench.layout";
+export const PIARIUM_EDITOR_MONACO_SERVICE_ID = "piarium.editor.monaco";
+export const PIARIUM_EDITOR_MONACO_SERVICE_VERSION = 1 as const;
 export const PIARIUM_CORE_SERVICE_VERSION = 1 as const;

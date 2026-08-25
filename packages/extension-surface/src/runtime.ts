@@ -313,9 +313,13 @@ export class SurfaceExtensionRuntime {
           const requirements = normalizeRequirements(owner, request.options.requirements ?? []);
           const externalServices = [...(request.options.externalServices ?? [])].map((service) => ({
             descriptor: validateService(service.descriptor),
+            ...(service.dispose ? { dispose: service.dispose } : {}),
             implementation: service.implementation,
             providerId: service.providerId,
           }));
+          for (const service of externalServices) {
+            if (service.dispose) scope.onDispose(service.dispose);
+          }
           const context: SurfaceActivationContext = {
             signal: scope.signal,
             contribute: (descriptor, implementation) => {

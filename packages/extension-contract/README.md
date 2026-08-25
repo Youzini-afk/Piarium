@@ -38,4 +38,12 @@ ordinary enabled-by-default built-in contribution rather than a Core rendering r
 Core workbench services use versioned IDs `piarium.workspace.search` and `piarium.language`.
 Those IDs identify Host services; they are not a second plugin manager.
 
+The public `PiariumEditorDocumentController` is framework-neutral. Its offset-based `applyEdits`
+uses zero-based UTF-16 offsets and distinguishes `applied`, `stale`, `conflict`, `invalid-range`,
+`overlapping-ranges`, and `unsupported`; `replaceContent` remains a convenience operation with the
+same version/conflict boundary. The optional Surface-local Monaco service uses
+`PIARIUM_EDITOR_MONACO_SERVICE_ID` (`piarium.editor.monaco`) and version `1`. It exposes only
+serializable view snapshots, ranges, actions, and declarative decorations—never a Monaco editor,
+model, DOM node, or `RuntimeAPIs` capability.
+
 See the complete [authoring guide](https://github.com/Youzini-afk/Piarium/blob/main/docs/piarium-extension-authoring.md).

@@ -27,6 +27,10 @@ protocol adapter under `runtime/`; the Host resolves it through `context.assets.
 local, npm, and immutable artifact installations. The test template uses Piarium's native Node test
 provider and does not generate a redundant adapter process.
 
+The editor template computes a minimal offset edit and calls the public `applyEdits` controller method.
+It handles stale, conflict, invalid-range, overlapping-ranges, and unsupported outcomes explicitly,
+then saves through the same expected-document-version authority.
+
 `check` parses the manifest with `@piarium/extension-contract`, checks that the manifest version and
 `package.json` version agree, and checks every declared Host or executable Surface file. Errors name
 the failing path and the next useful action.

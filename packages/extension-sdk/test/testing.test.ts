@@ -3,6 +3,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { SurfaceExtensionRuntime } from "@piarium/extension-surface";
 import {
+  createPiariumEditorMonacoClient,
+  defineEditorMount,
   defineSurfaceMount,
   resolveHostExtensionModule,
   resolveIsolatedExtensionModule,
@@ -10,6 +12,7 @@ import {
   type PiariumExtensionMigrationInput,
 } from "../src/index.js";
 import {
+  runEditorExtensionConformance,
   runHostExtensionConformance,
   runIsolatedExtensionConformance,
   runSurfaceExtensionConformance,
@@ -83,6 +86,63 @@ test("the author conformance harness exercises isolated contributions and cleanu
   assert.deepEqual(result.contributionIds, ["dev.example.isolated.page"]);
   assert.equal(result.registeredDisposers, 1);
   assert.equal(disposed, true);
+});
+
+test("the typed optional Monaco client uses the same serializable service in managed and isolated realms", async () => {
+  const service = {
+    getActiveView: () => ({
+      status: "ready" as const,
+      view: {
+        documentVersion: 3,
+        focused: true,
+        generation: 2,
+        kind: "text" as const,
+        languageId: "typescript",
+        providerId: "piarium.builtin.text",
+        resource: { resourceId: "src/main.ts", workspaceId: "workspace" },
+        selection: null,
+        viewId: "view-1",
+      },
+    }),
+    getState: () => ({
+      status: "ready" as const,
+      state: { activeViewId: "view-1", revision: 1, views: [] },
+    }),
+    waitForState: () => ({
+      status: "ready" as const,
+      state: { activeViewId: "view-1", revision: 2, views: [] },
+    }),
+  };
+  const managed = createPiariumEditorMonacoClient({
+    useService: () => service as never,
+  });
+  assert.equal((await managed.getActiveView()).status, "ready");
+  const managedState = await managed.waitForState({ afterRevision: 1 });
+  assert.equal(managedState.status, "ready");
+  assert.equal(managedState.status === "ready" ? managedState.state.revision : null, 2);
+  assert.equal((await createPiariumEditorMonacoClient({ useService: () => undefined }).getActiveView()).status, "absent");
+
+  let isolatedStatus = "missing";
+  await runIsolatedExtensionConformance({
+    activation: async (context) => {
+      const client = createPiariumEditorMonacoClient(context);
+      isolatedStatus = (await client.getActiveView()).status;
+      const isolatedState = await client.getState();
+      assert.equal(isolatedState.status === "ready" ? isolatedState.state.revision : null, 1);
+    },
+    services: [{
+      descriptor: { id: "piarium.editor.monaco", version: 1 },
+      implementation: service,
+      providerId: "piarium.builtin.text",
+    }],
+  });
+  assert.equal(isolatedStatus, "ready");
+  await runIsolatedExtensionConformance({
+    activation: async (context) => {
+      isolatedStatus = (await createPiariumEditorMonacoClient(context).getActiveView()).status;
+    },
+  });
+  assert.equal(isolatedStatus, "absent");
 });
 
 test("module resolvers preserve extension-object method ownership", async () => {
@@ -326,4 +386,23 @@ test("workbench conformance covers async mount abort, profile switch, and resour
   assert.equal(profiles.desiredEnabledUnchanged, true);
   assert.equal(profiles.failedCandidateKeepsPrevious, true);
   assert.equal((await runIsolatedDocumentConflictConformance()).status, "conflict");
+});
+
+test("editor conformance exercises incremental typed failures and mount cleanup", async () => {
+  const implementation = defineEditorMount((_container, mount) => {
+    const unsubscribe = mount.props.document.subscribe(() => undefined);
+    return () => unsubscribe();
+  });
+  const result = await runEditorExtensionConformance({ implementation });
+  assert.deepEqual(result, {
+    aborted: true,
+    appliedStatus: "applied",
+    conflictStatus: "conflict",
+    disposed: true,
+    invalidStatus: "invalid-range",
+    overlappingStatus: "overlapping-ranges",
+    staleStatus: "stale",
+    subscriptionsReleased: true,
+    unsupportedStatus: "unsupported",
+  });
 });

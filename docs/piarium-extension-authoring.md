@@ -153,10 +153,36 @@ escape the extension package.
 An `editor` contribution declares at least one `data.languageIds` or `data.filenames` selector and may
 set a finite `data.priority`. It is a resource provider, not a toolbar action, so it does not need a
 Workbench slot. `defineEditorMount` receives a stable `mount.props.document` controller. Subscribe to
-it, read `getSnapshot()`, apply text with the current `documentVersion`, and save with the same
+it, read `getSnapshot()`, apply offset edits with the current `documentVersion`, and save with the same
 expected version. Piarium keeps the buffer, dirty state, conflicts, recovery journal, and disk revision
 authoritative; the custom editor only owns its view. If the contribution is disabled, updated, or
 fails to mount, that editor view falls back locally without dropping the document or layout.
+
+Offsets are zero-based UTF-16 code units, matching JavaScript string indexing. Every edit in one call
+targets the same captured version:
+
+```ts
+const snapshot = mount.props.document.getSnapshot()
+const result = await mount.props.document.applyEdits([
+  { from: 0, to: 4, insert: "Piarium" },
+], snapshot.documentVersion)
+
+switch (result.status) {
+  case "applied":
+    break
+  case "stale":
+  case "conflict":
+  case "invalid-range":
+  case "overlapping-ranges":
+  case "unsupported":
+    // Re-render from result.snapshot and show the actual rejection.
+    break
+}
+```
+
+`replaceContent(content, expectedDocumentVersion)` remains a convenience for simple or low-frequency
+custom editors. It returns `updated`, `stale`, `conflict`, or `unsupported`; it does not bypass the
+same document authority.
 
 An isolated iframe editor receives a `piarium-message` event whose value is a
 `PiariumIsolatedEditorMountMessage`. It then uses its granted `workspace.documents` Surface capability
@@ -331,6 +357,63 @@ Isolated code has no ambient Piarium object graph. Assets, services, and privile
 provided clients. Ambient network entrypoints are unavailable in the standard isolated realm; request
 a concrete capability when network access is part of the extension contract.
 
+## Optional Monaco editor service
+
+An extension that augments the official desktop/Web editor instead of replacing it declares the
+Surface-local service as optional:
+
+```json
+{
+  "requires": {
+    "services": [
+      { "id": "piarium.editor.monaco", "version": 1, "optional": true }
+    ]
+  }
+}
+```
+
+Use the typed SDK helper from either a managed or isolated activation:
+
+```ts
+import { createPiariumEditorMonacoClient, defineSurfaceExtension } from "@piarium/extension-sdk"
+
+export default defineSurfaceExtension(async (context) => {
+  const editor = createPiariumEditorMonacoClient(context)
+  const active = await editor.getActiveView()
+  if (active.status !== "ready") return
+
+  await editor.setDecorations({
+    sourceId: "review",
+    expectedViewGeneration: active.view.generation,
+    expectedDocumentVersion: active.view.documentVersion,
+    decorations: [{
+      range: { start: { line: 1, column: 1 }, end: { line: 1, column: 8 } },
+      isWholeLine: true,
+      className: "dev-example-review-line",
+    }],
+  })
+})
+```
+
+The v1 contract contains only serialized active-view identity/snapshot, selection/range, focus,
+reveal, set-selection, action execution, and declarative decoration set/clear operations. Results are
+`ready`, `absent`, `stale`, or `unsupported`. The service never exposes a raw Monaco editor/model,
+`HTMLElement`, callback registration, file/process authority, or `RuntimeAPIs` entry. Managed and
+isolated extensions get the same subset; a managed extension does not receive an undocumented DOM or
+callback escape hatch.
+
+`getState()` returns the current Surface-local view revision. `waitForState({ afterRevision })` resolves
+when that revision changes, so an extension activated before any file opens can follow later view
+registration, focus, model, and selection changes without polling on a timer. Owner disposal resolves
+an outstanding wait as stale.
+
+Piarium creates the service from the runtime-supplied consumer owner. Extension code cannot forge that
+owner. Decoration `sourceId` values are scoped to it, and failed activation, candidate rollback,
+generation replacement, or disable clears the owner's registrations. The service may be present while
+the official Monaco provider has no active view; that truthful state is `absent`. On Surfaces without
+the service, the optional requirement does not block activation. A retained client from a withdrawn
+owner returns `stale: owner-generation-changed` and cannot keep operating on the current editor.
+
 ## Brokered Host entrypoint
 
 ```ts
@@ -418,6 +501,11 @@ piarium-extension test
 - brokered Host activation, revisioned storage, service registration, abort, and cleanup with no
   privileged capability implementations.
 
+`runEditorExtensionConformance` adds a real mock public document controller. It verifies incremental
+`applied`, `stale`, `conflict`, `invalid-range`, `overlapping-ranges`, and `unsupported` results, then aborts and
+disposes the mounted editor instance. Use it alongside browser interaction tests for an editor
+contribution; it does not emulate a browser layout engine.
+
 Extensions can call the same harnesses directly from `@piarium/extension-sdk/testing` for richer
 fixtures. These are contract tests, not a substitute for browser tests of the extension's own UI.
 
@@ -484,6 +572,7 @@ The Extension Inspector uses public host and Surface state. It shows:
 - the active Shell contribution and whether the inspected extension owns it;
 - document, language, debug, and test service ownership from granted capabilities and live Host providers;
 - live Host and Surface service providers;
+- optional Monaco active-view and owner-scoped decoration registration counts;
 - required services and companion Pi-package metadata;
 - capability decisions and extension-attributed catalog/runtime diagnostics.
 

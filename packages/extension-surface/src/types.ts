@@ -30,6 +30,8 @@ export interface SurfaceService<TImplementation = unknown> {
 
 export interface SurfaceExternalService<TImplementation = unknown> {
   descriptor: PiariumExtensionServiceProvision;
+  /** Cleanup owned by the consumer activation scope, for Surface-local service instances. */
+  dispose?: SurfaceDisposer;
   implementation: TImplementation;
   providerId: string;
 }

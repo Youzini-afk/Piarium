@@ -44,6 +44,8 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import {
+  PIARIUM_EDITOR_MONACO_SERVICE_ID,
+  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
   resolvePiariumExtensionServiceRouting,
   resolvePiariumWorkbenchLayout,
   resolvePiariumWorkbenchProfile,
@@ -68,6 +70,10 @@ import {
   workbenchInspectorOwnsTestCapability,
   workbenchInspectorOwnsRun,
 } from '@/lib/extensions/workbench-inspector';
+import {
+  getMonacoExtensionInspectorSnapshot,
+  subscribeMonacoExtensionInspector,
+} from '@/lib/monaco/extension-service';
 
 const STATUS_KEYS: Readonly<Record<PiariumExtensionActualStatus, I18nKey>> = {
   active: 'settings.piarium.extensions.status.active',
@@ -95,6 +101,48 @@ const actualStatus = (entry: PiariumExtensionCatalogEntry): PiariumExtensionActu
 const capabilityKey = (reference: PiariumExtensionCapabilityReference): string => (
   `${reference.realm}:${reference.capability}`
 );
+
+const MonacoServiceInspectorRows: React.FC<{
+  declared: boolean;
+  extensionId: string;
+  hasOtherServices: boolean;
+}> = ({ declared, extensionId, hasOtherServices }) => {
+  const { t } = useI18n();
+  const snapshot = React.useSyncExternalStore(
+    subscribeMonacoExtensionInspector,
+    getMonacoExtensionInspectorSnapshot,
+    getMonacoExtensionInspectorSnapshot,
+  );
+  const owners = snapshot.owners.filter((owner) => owner.extensionId === extensionId);
+  if (!declared && !hasOtherServices) {
+    return <span className="typography-micro text-muted-foreground">—</span>;
+  }
+  if (!declared) return null;
+  if (owners.length === 0) {
+    return (
+      <div className="break-all typography-micro text-muted-foreground">
+        surface-local · {PIARIUM_EDITOR_MONACO_SERVICE_ID}@{PIARIUM_EDITOR_MONACO_SERVICE_VERSION} · {t('settings.piarium.extensions.status.inactive')}
+      </div>
+    );
+  }
+  return (
+    <>
+      {owners.map((owner) => (
+        <div key={`${owner.realmId}:${owner.entrypointId}:${owner.generation}`} className="break-all typography-micro text-muted-foreground">
+          surface-local · {PIARIUM_EDITOR_MONACO_SERVICE_ID}@{PIARIUM_EDITOR_MONACO_SERVICE_VERSION} · {t('settings.piarium.extensions.status.active')}
+          {` · generation #${owner.generation} · registrations ${owner.registrationCount}`}
+        </div>
+      ))}
+      {snapshot.views.map((view) => (
+        <div key={`${view.viewId}:${view.generation}`} className="break-all typography-micro text-muted-foreground">
+          view · {view.viewId} · {view.workspaceId}/{view.resourceId} · {view.providerId}
+          {` · generation #${view.generation} · document #${view.documentVersion}`}
+          {snapshot.activeViewId === view.viewId ? ' · active' : ''}
+        </div>
+      ))}
+    </>
+  );
+};
 
 const WORKBENCH_TARGET_LABELS: Readonly<Record<string, I18nKey>> = {
   [WORKBENCH_REPLACEMENT_TARGETS.shell]: 'settings.piarium.extensions.workbench.target.shell',
@@ -556,6 +604,10 @@ const ExtensionCard: React.FC<{
   const liveContributions = surface.contributions.filter((item) => item.owner.extensionId === entry.manifest.id);
   const liveSurfaceServices = surface.services.filter((item) => item.owner.extensionId === entry.manifest.id);
   const liveHostServices = hostState?.services.providers.filter((item) => item.extensionId === entry.manifest.id) ?? [];
+  const monacoServiceDeclared = (entry.manifest.requires?.services ?? []).some((service) => (
+    service.id === PIARIUM_EDITOR_MONACO_SERVICE_ID
+    && service.version === PIARIUM_EDITOR_MONACO_SERVICE_VERSION
+  ));
   const catalogDiagnostics = hostState?.catalog.diagnostics.filter((item) => item.extensionId === entry.manifest.id) ?? [];
   const workspaceId = useWorkbenchWorkspaceId();
   const profileResolution = hostState?.workbench.authoritative && hostState.workbench.storageState === 'ready'
@@ -890,7 +942,11 @@ const ExtensionCard: React.FC<{
                       surface · {service.descriptor.id}@{service.descriptor.version} · {t('settings.piarium.extensions.status.active')}
                     </div>
                   ))}
-                  {liveHostServices.length === 0 && liveSurfaceServices.length === 0 ? <span className="typography-micro text-muted-foreground">—</span> : null}
+                  <MonacoServiceInspectorRows
+                    declared={monacoServiceDeclared}
+                    extensionId={entry.manifest.id}
+                    hasOtherServices={liveHostServices.length > 0 || liveSurfaceServices.length > 0}
+                  />
                 </div>
               </div>
               <div>

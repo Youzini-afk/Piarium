@@ -38,6 +38,7 @@ import { applyMonacoModelSettings, createMonacoEditorOptions } from '@/lib/monac
 import { registerFileEditorCommandTarget, saveFileEditorDocument } from '@/lib/monaco/editor-command-service';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { languageIdsFromResourceId, languageIdFromResourceId } from '@/lib/language-services/language-id';
+import { registerMonacoExtensionView } from '@/lib/monaco/extension-service';
 import {
   peekLanguageProviderStatus,
   subscribeLanguageProviderStatus,
@@ -48,6 +49,7 @@ type DocumentMonacoEditorProps = {
   identity: DocumentIdentity;
   onViewStateChange?(viewState: EditorViewState): void;
   path: string;
+  providerId: string;
   viewId: string;
   viewState: EditorViewState;
 };
@@ -64,6 +66,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   identity,
   onViewStateChange,
   path,
+  providerId,
   viewId,
   viewState,
 }) => {
@@ -179,6 +182,14 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     const languageOwnerId = `language:${viewId}`;
     bridge.acquire(modelSnapshot.model, identity, languageOwnerId);
     const runDebugAdapter = createRunDebugEditorAdapter({ editor: editorInstance, identity, monaco });
+    const disposeExtensionView = registerMonacoExtensionView({
+      editor: editorInstance,
+      getDocumentVersion: () => recordRef.current?.localEditRevision ?? 0,
+      identity,
+      kind: 'text',
+      providerId,
+      viewId,
+    });
 
     let captureFrame: number | null = null;
     const capture = (): void => {
@@ -288,6 +299,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       closeInlineCommentRef.current?.();
       bridge.release(languageOwnerId);
       runDebugAdapter.dispose();
+      disposeExtensionView();
       for (const disposable of disposables) disposable.dispose();
       resizeObserver?.disconnect();
       if (!resizeObserver) window.removeEventListener('resize', handleWindowResize);
@@ -297,7 +309,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     };
     // Theme, profile presentation and settings update the live editor separately; none may recreate the view/model.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, viewId]);
+  }, [identity, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, providerId, viewId]);
 
   React.useEffect(() => {
     captureContextRef.current?.();

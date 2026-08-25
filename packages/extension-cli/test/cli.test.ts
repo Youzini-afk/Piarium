@@ -82,7 +82,12 @@ test("init templates cover shell, editor, view, language, debug, and test workbe
     template: "editor",
   });
   const editorSource = await readFile(join(editor.directory, "src/surface.ts"), "utf8");
-  assert.match(editorSource, /mount\.props\.document\.replaceContent/);
+  assert.match(editorSource, /mount\.props\.document\.applyEdits/);
+  assert.match(editorSource, /case "invalid-range"/);
+  assert.match(editorSource, /case "overlapping-ranges"/);
+  assert.match(editorSource, /case "unsupported"/);
+  assert.match(editorSource, /case "stale"/);
+  assert.doesNotMatch(editorSource, /replaceContent/);
   assert.match(editorSource, /mount\.props\.document\.save/);
   assert.match(editorSource, /languageIds:\s*\["markdown"\]/);
   assert.doesNotMatch(editorSource, /workbench\.editor\.actions|@piarium\/ui/);

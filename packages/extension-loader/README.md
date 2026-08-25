@@ -16,3 +16,10 @@ Executable artifacts remain authenticated and content addressed. The loader veri
 byte, evaluates self-contained browser bundles without credential-bearing module URLs, and owns
 styles, object URLs, isolated realms, capability bindings, service requirements, actual state, and
 generation-safe cleanup across disable, host switch, update, and rollback.
+
+Surface hosts can inject `externalServiceFactories`. Each factory declares one service descriptor and
+creates an instance from the loader-supplied consumer `SurfaceOwnerIdentity`; extension code cannot
+submit its own owner. Returned disposers transfer to the activation owner scope. Host service proxies
+keep their existing application-host routing, while managed and isolated entrypoints can call a
+Surface-local service's serializable methods through the same declared requirement. A missing optional
+factory never blocks activation.

@@ -50,10 +50,10 @@ import {
   WorkbenchSurfaceContributionHost,
   useSurfaceRegistrySnapshot,
 } from '@/lib/extensions/workbench-registry';
-import type { DocumentRecord } from '@/lib/documents/types';
 import { listEditorProviders } from '@/lib/workbench/editors/providers';
 import { useDeviceInfo } from '@/lib/device';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { createEditorDocumentController } from '@/lib/extensions/editor-document-controller';
 
 type ResourceEditorHostProps = {
   excludedProviderIds?: readonly string[];
@@ -61,39 +61,6 @@ type ResourceEditorHostProps = {
   workspaceId: string;
   workspaceRoot: string;
   tab: EditorTab;
-};
-
-type PublicDocumentSnapshot = {
-  baseRevision: string | null;
-  content: string;
-  dirty: boolean;
-  documentVersion: number;
-  errorMessage?: string;
-  saving: boolean;
-  status: 'binary' | 'conflict' | 'deleted' | 'error' | 'missing' | 'ready' | 'unsupported-encoding';
-};
-
-const publicDocumentSnapshot = (record: DocumentRecord | undefined): PublicDocumentSnapshot => {
-  const status = record && [
-    'binary',
-    'conflict',
-    'deleted',
-    'error',
-    'missing',
-    'ready',
-    'unsupported-encoding',
-  ].includes(record.status)
-    ? record.status as PublicDocumentSnapshot['status']
-    : 'error';
-  return {
-    baseRevision: record?.baseRevision ?? null,
-    content: record?.buffer ?? '',
-    dirty: record?.dirty ?? false,
-    documentVersion: record?.localEditRevision ?? 0,
-    saving: record?.saving ?? false,
-    status,
-    ...(record?.errorMessage ? { errorMessage: record.errorMessage } : {}),
-  };
 };
 
 const stringArray = (value: unknown): string[] => (
@@ -186,31 +153,9 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     void getDocumentRegistry().open(identity).catch(() => undefined);
   }, [identity, needsDocument]);
 
-  const editorDocument = React.useMemo(() => ({
-    getSnapshot: (): PublicDocumentSnapshot => publicDocumentSnapshot(getDocumentRegistry().get(identity)),
-    subscribe: (listener: () => void) => getDocumentRegistry().subscribe(identity, () => listener()),
-    replaceContent: async (content: string, expectedDocumentVersion: number) => {
-      const registry = getDocumentRegistry();
-      const current = registry.get(identity) ?? await registry.open(identity);
-      if (current.localEditRevision !== expectedDocumentVersion) {
-        return { status: 'conflict' as const, snapshot: publicDocumentSnapshot(current) };
-      }
-      const next = registry.applyTransaction(identity, content, { origin: `editor:${activeProviderId}` });
-      return { status: 'updated' as const, snapshot: publicDocumentSnapshot(next) };
-    },
-    save: async (expectedDocumentVersion: number) => {
-      const registry = getDocumentRegistry();
-      const current = registry.get(identity) ?? await registry.open(identity);
-      if (current.localEditRevision !== expectedDocumentVersion) {
-        return { status: 'conflict' as const, snapshot: publicDocumentSnapshot(current) };
-      }
-      await saveFileEditorDocument(identity);
-      const next = registry.get(identity) ?? current;
-      return {
-        status: next.status === 'conflict' ? 'conflict' as const : 'updated' as const,
-        snapshot: publicDocumentSnapshot(next),
-      };
-    },
+  const editorDocument = React.useMemo(() => createEditorDocumentController({
+    identity,
+    origin: `editor:${activeProviderId}`,
   }), [activeProviderId, identity]);
   const editorMountProps = React.useMemo(() => ({
     document: editorDocument,
@@ -669,6 +614,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
             <DocumentMonacoEditor
               identity={identity}
               path={path}
+              providerId={activeProviderId}
               viewId={tab.viewId}
               viewState={tab.viewState}
               className="h-full"

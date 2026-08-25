@@ -54,3 +54,17 @@ and `defineViewMount` share the generic mount contract. `defineEditorMount` addi
 `mount.props.resource`, `viewId`, and the stable document controller used to subscribe, update with an
 expected `documentVersion`, and save. Editor contributions declare `data.languageIds` or
 `data.filenames`; they are mounted as resource providers rather than in an action slot.
+
+Custom editors can use `document.applyEdits(edits, expectedDocumentVersion)` for incremental writes.
+`replaceContent` remains available for simple or low-frequency editors. Both return typed stale,
+conflict, and unsupported outcomes instead of treating a rejected write as success.
+
+`createPiariumEditorMonacoClient(context)` resolves the optional owner-bound
+`piarium.editor.monaco` v1 service for managed or isolated Surface extensions. The helper exposes the
+same serializable active-view/action/decoration subset in both modes. `getState` plus revisioned
+`waitForState` follows later view registration/focus/selection changes without a timer or callback
+escape hatch, and the client returns `absent` when a
+managed Surface does not inject the optional service. It does not invent managed-only raw Monaco,
+callback, or DOM access. `@piarium/extension-sdk/testing` also exports
+`runEditorExtensionConformance` and a real mock document controller covering incremental failures and
+mount abort/disposal.

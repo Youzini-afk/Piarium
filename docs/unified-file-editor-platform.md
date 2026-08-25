@@ -1,6 +1,6 @@
 # Piarium 统一文件编辑器平台设计
 
-Status: Phase 4 已完成；Phase 5 待实施
+Status: Phase 7 已完成；Phase 8 待实施
 
 Last updated: 2026-08-26
 
@@ -809,6 +809,25 @@ session、dirty patch conflict 和 visible-owner lifecycle。
 
 验收：mobile build/关键触屏 journey、public package build/test/pack、managed/isolated/trusted editor
 conformance。没有授权不发布 npm。
+
+完成证据（2026-08-26）：
+
+- shared Workbench 与 dedicated Mobile Files 的文本入口都以 Document Registry 为正文、dirty、
+  conflict、recovery 和保存 authority；CodeMirror 以捕获的 `localEditRevision` 提交 offset edits，
+  stale/invalid/unsupported 会恢复最新权威 buffer，只在 applied 后通知 language session。移动端不再
+  截断可编辑正文，也不维护第二份 `fileContent`；图片、PDF 和二进制仍走适用的专门预览；
+- public `PiariumEditorDocumentController` 提供 framework-neutral `applyEdits`，并保留同 authority 的
+  `replaceContent`/`save`。SDK editor fixture 与 CLI template 覆盖 applied、stale、conflict、invalid
+  range、overlap 和 unsupported；custom editor 的 managed/isolated/trusted mount、candidate rollback、
+  disable 与 owner cleanup 使用现有 Surface transaction 验证；
+- desktop/Web 注入 owner-bound `piarium.editor.monaco@1` optional service。它只暴露序列化的 view
+  identity、selection、focus/reveal/action 和声明式 decorations；`getState`/`waitForState` 以 revisioned
+  long poll 跟随后续 view 生命周期，不暴露 raw Monaco/DOM/callback。旧 owner 句柄返回
+  `stale: owner-generation-changed`，candidate failure、generation replacement 和 disable 会清理等待者
+  与 registrations；Inspector 显示 consumer generation、registration 和 active view；
+- contract 40、Surface 14、SDK 14、loader 19、CLI 5 项测试及新增 UI adapter/service 聚焦测试通过；
+  涉及公共包 build/type-check/lint 和 npm pack dry-run 通过。production Web + mobile assets build
+  通过，`mobile.html` preload 图不含 Monaco，Monaco 仍是独立 lazy chunk。未发布 npm。
 
 ### Phase 8 — 收敛、性能与发布门槛
 

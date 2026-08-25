@@ -63,6 +63,53 @@ test("failed candidate activation preserves the previous active generation", asy
   assert.equal(runtime.getSnapshot().actual[0]?.diagnostics[0]?.code, "candidate_activation_failed");
 });
 
+test("consumer-owned external services clean up failed, replaced, and disabled owner generations", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  const cleanup: string[] = [];
+  const external = (label: string) => ({
+    descriptor: { id: "piarium.editor.monaco", version: 1 },
+    dispose: () => { cleanup.push(label); },
+    implementation: { getActiveView: () => ({ status: "absent" }) },
+    providerId: "piarium.builtin.text",
+  });
+  await runtime.activate({
+    externalServices: [external("first")],
+    owner: owner("dev.example.alpha", 1, 1),
+    requirements: [{ id: "piarium.editor.monaco", optional: true, version: 1 }],
+  }, (context) => {
+    assert.ok(context.useService("piarium.editor.monaco", 1));
+    context.contribute(page("dev.example.alpha.settings"), { version: 1 });
+  });
+  await assert.rejects(() => runtime.activate({
+    externalServices: [external("failed")],
+    owner: owner("dev.example.alpha", 2, 2),
+    requirements: [{ id: "piarium.editor.monaco", optional: true, version: 1 }],
+  }, () => { throw new Error("failed update"); }), /failed update/);
+  assert.deepEqual(cleanup, ["failed"]);
+  assert.equal((runtime.getSnapshot().visibleContributions[0]?.implementation as { version: number }).version, 1);
+
+  await runtime.activate({
+    externalServices: [external("second")],
+    owner: owner("dev.example.alpha", 3, 3),
+    requirements: [{ id: "piarium.editor.monaco", optional: true, version: 1 }],
+  }, (context) => context.contribute(page("dev.example.alpha.settings"), { version: 3 }));
+  assert.deepEqual(cleanup, ["failed", "first"]);
+  await runtime.deactivate(owner("dev.example.alpha", 4, 4));
+  assert.deepEqual(cleanup, ["failed", "first", "second"]);
+});
+
+test("a missing optional external service does not block activation", async () => {
+  const runtime = new SurfaceExtensionRuntime({ surface: "web" });
+  await runtime.activate({
+    owner: owner("dev.example.alpha", 1, 1),
+    requirements: [{ id: "piarium.editor.monaco", optional: true, version: 1 }],
+  }, (context) => {
+    assert.equal(context.useService("piarium.editor.monaco", 1), undefined);
+    context.contribute(page("dev.example.alpha.settings"), { active: true });
+  });
+  assert.equal(runtime.getSnapshot().visibleContributions.length, 1);
+});
+
 test("a failed persistent candidate commit preserves every previous entrypoint generation", async () => {
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
   const secondary = { ...owner("dev.example.alpha", 1, 1), entrypointId: "secondary" };

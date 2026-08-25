@@ -1,4 +1,8 @@
 import { SurfaceExtensionLoader } from '@piarium/extension-loader';
+import {
+  PIARIUM_EDITOR_MONACO_SERVICE_ID,
+  PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+} from '@piarium/extension-contract';
 import type { RuntimeContextTarget } from '@piarium/protocol';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getPiSettings } from '@/lib/pi-runtime/settings';
@@ -7,6 +11,7 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { piariumSurfaceRuntime } from './surface-runtime';
 import { startBuiltinPiariumExtensions } from './builtin-surface-manager';
 import { surfaceCapabilityRegistry } from './surface-capabilities';
+import { createMonacoExtensionExternalService } from '@/lib/monaco/extension-service';
 
 const runtimeExtensions = () => {
   const extensions = getRegisteredRuntimeAPIs()?.extensions;
@@ -46,6 +51,16 @@ export const surfaceExtensionLoader = new SurfaceExtensionLoader({
     waitForHostState: (request, signal) => runtimeExtensions().waitForHostState(request, signal),
   },
   capabilities: surfaceCapabilityRegistry,
+  externalServiceFactories: piariumSurfaceRuntime.surface === 'desktop' || piariumSurfaceRuntime.surface === 'web'
+    ? [{
+        create: createMonacoExtensionExternalService,
+        descriptor: {
+          id: PIARIUM_EDITOR_MONACO_SERVICE_ID,
+          version: PIARIUM_EDITOR_MONACO_SERVICE_VERSION,
+        },
+        providerId: 'piarium.builtin.text',
+      }]
+    : [],
   surface: piariumSurfaceRuntime.surface,
   surfaceRuntime: piariumSurfaceRuntime,
 });

@@ -6,6 +6,11 @@ import {
 import type {
   JsonObject,
   JsonValue,
+  PiariumEditorDocumentApplyEditsResult,
+  PiariumEditorDocumentController,
+  PiariumEditorDocumentEdit,
+  PiariumEditorDocumentSnapshot,
+  PiariumEditorDocumentUpdateResult,
   PiariumExtensionAssetPayload,
   PiariumExtensionServiceProvision,
   PiariumExtensionStaticContribution,
@@ -23,6 +28,8 @@ import type {
   PiariumBrokeredHostExtension,
   PiariumHostServiceHandler,
   PiariumIsolatedSurfaceExtension,
+  PiariumEditorMountProps,
+  PiariumSurfaceMountImplementation,
 } from "./index.js";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
@@ -79,6 +86,12 @@ export interface HostConformanceResult {
 export interface IsolatedConformanceResult {
   contributionIds: string[];
   registeredDisposers: number;
+}
+
+export interface PiariumIsolatedConformanceService {
+  descriptor: PiariumExtensionServiceProvision;
+  implementation: Record<string, (...args: JsonValue[]) => JsonValue | Promise<JsonValue>>;
+  providerId?: string;
 }
 
 const asRecord = (value: JsonValue | undefined): JsonObject | null => (
@@ -165,11 +178,13 @@ const createConformanceCapabilities = () => {
 export const runIsolatedExtensionConformance = async (options: {
   activation: PiariumIsolatedSurfaceExtension["activate"];
   grantedCapabilities?: readonly string[];
+  services?: readonly PiariumIsolatedConformanceService[];
 }): Promise<IsolatedConformanceResult> => {
   const controller = new AbortController();
   const contributions = new Map<string, PiariumExtensionStaticContribution>();
   const disposers: Array<() => void | Promise<void>> = [];
   const grantedCapabilities = new Set(options.grantedCapabilities ?? []);
+  const services = [...(options.services ?? [])];
   const capabilities = createConformanceCapabilities();
   const emptyIntegrity = `sha256-${"0".repeat(64)}`;
   const returned = await options.activation({
@@ -197,10 +212,38 @@ export const runIsolatedExtensionConformance = async (options: {
     },
     effect: (disposer) => { disposers.push(disposer); },
     services: {
-      use: (id, version) => new Proxy({}, {
+      call: async (id, version, method, args, providerId) => {
+        const service = services.find((candidate) => (
+          candidate.descriptor.id === id
+          && candidate.descriptor.version === version
+          && (!providerId || candidate.providerId === providerId)
+        ));
+        const handler = service?.implementation[method];
+        if (typeof handler !== "function") {
+          throw new Error(`Conformance dependency is not provided: ${id}@${version}.${method}`);
+        }
+        return handler(...args);
+      },
+      has: async (id, version, providerId) => services.some((candidate) => (
+        candidate.descriptor.id === id
+        && candidate.descriptor.version === version
+        && (!providerId || candidate.providerId === providerId)
+      )),
+      use: (id, version, providerId) => new Proxy({}, {
         get: (_target, property) => property === "then" || typeof property !== "string"
           ? undefined
-          : () => { throw new Error(`Conformance dependency is not provided: ${id}@${version}.${property}`); },
+          : (...args: JsonValue[]) => {
+              const service = services.find((candidate) => (
+                candidate.descriptor.id === id
+                && candidate.descriptor.version === version
+                && (!providerId || candidate.providerId === providerId)
+              ));
+              const handler = service?.implementation[property];
+              if (typeof handler !== "function") {
+                throw new Error(`Conformance dependency is not provided: ${id}@${version}.${property}`);
+              }
+              return handler(...args);
+            },
       }) as never,
     },
     signal: controller.signal,
@@ -383,6 +426,191 @@ export const runSurfaceMountConformance = async (): Promise<SurfaceMountConforma
   controller.abort("runtime-switch");
   if (typeof cleanup === "function") await cleanup();
   return { aborted: controller.signal.aborted, disposed, mounted };
+};
+
+export interface PiariumEditorDocumentControllerFixture {
+  readonly controller: PiariumEditorDocumentController;
+  readonly subscriberCount: number;
+  setStatus(status: PiariumEditorDocumentSnapshot["status"]): void;
+}
+
+export const createPiariumEditorDocumentControllerFixture = (
+  initialContent = "alpha",
+): PiariumEditorDocumentControllerFixture => {
+  const listeners = new Set<() => void>();
+  let snapshot: PiariumEditorDocumentSnapshot = {
+    baseRevision: "fixture-0",
+    content: initialContent,
+    dirty: false,
+    documentVersion: 0,
+    saving: false,
+    status: "ready",
+  };
+  const publish = (): void => {
+    for (const listener of listeners) listener();
+  };
+  const mutationUnavailable = (): Extract<
+    PiariumEditorDocumentUpdateResult,
+    { status: "conflict" | "unsupported" }
+  > | null => {
+    if (snapshot.status === "conflict") return { snapshot: structuredClone(snapshot), status: "conflict" };
+    if (snapshot.status !== "ready") return { snapshot: structuredClone(snapshot), status: "unsupported" };
+    return null;
+  };
+  const controller: PiariumEditorDocumentController = {
+    applyEdits: async (edits, expectedDocumentVersion): Promise<PiariumEditorDocumentApplyEditsResult> => {
+      if (expectedDocumentVersion !== snapshot.documentVersion) {
+        return { snapshot: structuredClone(snapshot), status: "stale" };
+      }
+      const unavailable = mutationUnavailable();
+      if (unavailable) return unavailable;
+      const indexed = edits.map((edit, index) => ({ ...edit, index }));
+      if (indexed.some((edit) => (
+        !Number.isSafeInteger(edit.from)
+        || !Number.isSafeInteger(edit.to)
+        || edit.from < 0
+        || edit.to < edit.from
+        || edit.to > snapshot.content.length
+      ))) return { snapshot: structuredClone(snapshot), status: "invalid-range" };
+      const ascending = [...indexed].sort((left, right) => (
+        left.from - right.from || left.to - right.to || left.index - right.index
+      ));
+      for (let index = 1; index < ascending.length; index += 1) {
+        const previous = ascending[index - 1] as PiariumEditorDocumentEdit;
+        const next = ascending[index] as PiariumEditorDocumentEdit;
+        if (previous.to > next.from) {
+          return { snapshot: structuredClone(snapshot), status: "overlapping-ranges" };
+        }
+      }
+      let content = snapshot.content;
+      for (const edit of [...indexed].sort((left, right) => (
+        right.from - left.from || right.to - left.to || right.index - left.index
+      ))) content = `${content.slice(0, edit.from)}${edit.insert}${content.slice(edit.to)}`;
+      if (indexed.length > 0) {
+        snapshot = {
+          ...snapshot,
+          content,
+          dirty: true,
+          documentVersion: snapshot.documentVersion + 1,
+        };
+        publish();
+      }
+      return { snapshot: structuredClone(snapshot), status: "applied" };
+    },
+    getSnapshot: () => structuredClone(snapshot),
+    replaceContent: async (content, expectedDocumentVersion) => {
+      if (expectedDocumentVersion !== snapshot.documentVersion) {
+        return { snapshot: structuredClone(snapshot), status: "stale" };
+      }
+      const unavailable = mutationUnavailable();
+      if (unavailable) return unavailable;
+      if (content !== snapshot.content) {
+        snapshot = {
+          ...snapshot,
+          content,
+          dirty: true,
+          documentVersion: snapshot.documentVersion + 1,
+        };
+        publish();
+      }
+      return { snapshot: structuredClone(snapshot), status: "updated" };
+    },
+    save: async (expectedDocumentVersion) => {
+      if (expectedDocumentVersion !== snapshot.documentVersion) {
+        return { snapshot: structuredClone(snapshot), status: "stale" };
+      }
+      const unavailable = mutationUnavailable();
+      if (unavailable) return unavailable;
+      snapshot = {
+        ...snapshot,
+        baseRevision: `fixture-${snapshot.documentVersion}`,
+        dirty: false,
+      };
+      publish();
+      return { snapshot: structuredClone(snapshot), status: "updated" };
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  return {
+    controller,
+    get subscriberCount() { return listeners.size; },
+    setStatus: (status) => {
+      snapshot = { ...snapshot, status };
+      publish();
+    },
+  };
+};
+
+export interface EditorExtensionConformanceResult {
+  aborted: boolean;
+  appliedStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  conflictStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  disposed: boolean;
+  invalidStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  overlappingStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  staleStatus: PiariumEditorDocumentApplyEditsResult["status"];
+  subscriptionsReleased: boolean;
+  unsupportedStatus: PiariumEditorDocumentApplyEditsResult["status"];
+}
+
+export const runEditorExtensionConformance = async (options: {
+  implementation: PiariumSurfaceMountImplementation<PiariumEditorMountProps>;
+}): Promise<EditorExtensionConformanceResult> => {
+  const fixture = createPiariumEditorDocumentControllerFixture();
+  const controller = new AbortController();
+  const container = { textContent: "" } as HTMLElement;
+  const cleanup = await options.implementation.mount(container, {
+    contributionId: "dev.example.editor.editor",
+    owner: {
+      desiredRevision: 1,
+      entrypointId: "main",
+      extensionId: "dev.example.editor",
+      extensionVersion: "1.0.0",
+      generation: 1,
+      hostId: "72694a4f-093a-4f79-8763-3ca9f06b7078",
+      realmId: "editor-conformance",
+    },
+    props: {
+      document: fixture.controller,
+      providerId: "dev.example.editor.editor",
+      resource: { resourceId: "notes.md", workspaceId: "workspace-fixture" },
+      viewId: "view-fixture",
+    },
+    reportError: (error) => { throw error; },
+    signal: controller.signal,
+  });
+  const applied = await fixture.controller.applyEdits([{ from: 0, insert: "beta", to: 5 }], 0);
+  const stale = await fixture.controller.applyEdits([{ from: 0, insert: "x", to: 0 }], 0);
+  const version = fixture.controller.getSnapshot().documentVersion;
+  const invalid = await fixture.controller.applyEdits([{ from: -1, insert: "x", to: 0 }], version);
+  const overlapping = await fixture.controller.applyEdits([
+    { from: 0, insert: "x", to: 2 },
+    { from: 1, insert: "y", to: 3 },
+  ], version);
+  fixture.setStatus("conflict");
+  const conflict = await fixture.controller.applyEdits([], version);
+  fixture.setStatus("binary");
+  const unsupported = await fixture.controller.applyEdits([], version);
+  controller.abort("Editor extension conformance deactivation");
+  let disposed = false;
+  if (typeof cleanup === "function") {
+    await cleanup();
+    disposed = true;
+  }
+  return {
+    aborted: controller.signal.aborted,
+    appliedStatus: applied.status,
+    conflictStatus: conflict.status,
+    disposed,
+    invalidStatus: invalid.status,
+    overlappingStatus: overlapping.status,
+    staleStatus: stale.status,
+    subscriptionsReleased: fixture.subscriberCount === 0,
+    unsupportedStatus: unsupported.status,
+  };
 };
 
 export interface WorkbenchProfileConformanceResult {
