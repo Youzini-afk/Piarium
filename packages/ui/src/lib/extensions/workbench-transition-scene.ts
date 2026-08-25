@@ -115,6 +115,27 @@ export const findCapturedWorkbenchTransitionScene = (
   : undefined;
 
 /**
+ * Resolve the mounted scene once per transaction, then keep it for the rest of that transaction.
+ *
+ * The surface registry changes underneath a transition precisely during the Profile commit — that is the
+ * event being covered. Re-resolving each render means a single missed match, from a regenerated owner or a
+ * reloaded host, swaps the mounted scene out and back, and remounting a scene restarts every animation in it
+ * from its first frame. Mid-reveal that reads as the finished cover snapping shut and the logo fading in
+ * again, at whatever moment the registry happened to settle.
+ *
+ * Holding a contribution whose owner has since gone is deliberate: the render boundary around it already
+ * degrades to the Core fallback if it actually fails, which is a better outcome for the last frames of a
+ * reveal than tearing the scene down and rebuilding it.
+ */
+export const holdWorkbenchTransitionSceneContribution = (input: {
+  readonly capture: WorkbenchTransitionSceneCapture | null;
+  readonly held: SurfaceContribution | undefined;
+  readonly snapshot: SurfaceRegistrySnapshot;
+}): SurfaceContribution | undefined => (
+  input.held ?? findCapturedWorkbenchTransitionScene(input.snapshot, input.capture)
+);
+
+/**
  * Resolve the target Profile's scene without applying its layout. A lazy executable contribution is
  * activated before capture, and its exact owner generation is frozen for cover through reveal.
  */

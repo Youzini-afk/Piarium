@@ -106,3 +106,37 @@ describe('workbench transition paint handoff', () => {
     expect(attributes.has(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe(false);
   });
 });
+
+describe('retirement ownership', () => {
+  test('a host that arrives mid-retirement still reaches detachment', () => {
+    // Retirement is the step that takes the scene away, so refusing it for want of an earlier hold left
+    // the finished scene on screen with nothing scheduled to remove it.
+    const { attributes, handoff, runFrame } = fixture();
+    let detached = false;
+    handoff.retireSceneAfterPaint(() => { detached = true; });
+    expect(attributes.get(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe('true');
+    runFrame();
+    expect(detached).toBe(false);
+    runFrame();
+    expect(detached).toBe(true);
+    // The root palette outlives the scene: it is released on its own schedule, afterwards.
+    expect(attributes.get(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE)).toBe('true');
+  });
+
+  test('a new transition cancels a retirement the previous one never finished', () => {
+    const { handoff, runFrame } = fixture();
+    let staleDetachments = 0;
+    handoff.hold();
+    handoff.retireSceneAfterPaint(() => { staleDetachments += 1; });
+    runFrame();
+
+    handoff.hold();
+    let freshDetachments = 0;
+    handoff.retireSceneAfterPaint(() => { freshDetachments += 1; });
+    runFrame();
+    runFrame();
+
+    expect(staleDetachments).toBe(0);
+    expect(freshDetachments).toBe(1);
+  });
+});

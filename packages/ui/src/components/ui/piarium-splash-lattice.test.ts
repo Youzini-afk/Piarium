@@ -514,15 +514,60 @@ describe('exit choreography', () => {
     expect(renderer).toContain('frame.opacity =');
   });
 
-  test('WebGL context loss waits until the full-screen Canvas has detached', () => {
+  /**
+   * The scene's terminal frame has to survive until its nodes are gone.
+   *
+   * React runs layout-effect cleanup while the Canvas is still connected and still composited, so every
+   * mutation the controller used to make there was a visible one: the DOM camera returned to its authored
+   * tilt and stood the cube back up, the camera-owner attribute stopped suppressing the CSS fallback
+   * flatten and re-armed it from its own start state, and the renderer attribute stopped suppressing the
+   * Canvas's opaque background across the whole viewport. That is the flash, and it is a lifecycle bug
+   * rather than anything a browser or a machine decides.
+   */
+  test('retiring the Canvas leaves a connected scene untouched', () => {
     const renderer = mountSplashTileCanvas.toString();
-    const disposal = /kind: "webgl2",\s*dispose: \(\) => \{([\s\S]*?)\n\s*\},\s*draw:/
+    const disposal = /dispose: \(\) => \{([\s\S]*?)\n {4}\},\n {4}setPlayback:/.exec(renderer)?.[1] ?? '';
+    expect(disposal).not.toBe('');
+
+    // Every visible mutation sits behind the detachment check, and the check bails out while connected.
+    const guarded = disposal.slice(disposal.indexOf('const releaseDetachedScene'));
+    expect(guarded).toContain('if (canvas.isConnected) return;');
+    for (const mutation of [
+      'style.removeProperty(options.camera.tiltProperty)',
+      'removeAttribute("data-piarium-camera-owner")',
+      'removeAttribute("data-piarium-splash-renderer")',
+      'renderer?.dispose()',
+    ]) {
+      expect(guarded).toContain(mutation);
+      expect(disposal.indexOf(mutation)).toBeGreaterThan(disposal.indexOf('if (canvas.isConnected) return;'));
+    }
+
+    // What runs immediately is only the invisible half: no more frames, no more listeners.
+    const immediate = disposal.slice(0, disposal.indexOf('const releaseDetachedScene'));
+    expect(immediate).toContain('cancelAnimationFrame');
+    expect(immediate).toContain('removeEventListener("resize"');
+    expect(immediate).not.toContain('removeAttribute');
+    expect(immediate).not.toContain('removeProperty');
+    expect(immediate).not.toContain('renderer?.dispose()');
+  });
+
+  test('context loss is the caller\'s decision, taken only after detachment', () => {
+    // A context lost while its Canvas still participates in composition clears a full-screen surface that
+    // is still on screen, so the renderer must not schedule that for itself.
+    const renderer = mountSplashTileCanvas.toString();
+    const disposal = /kind: "webgl2",[\s\S]*?dispose: \(\) => \{([\s\S]*?)\n\s*\},\s*draw:/
       .exec(renderer)?.[1] ?? '';
-    expect(disposal).toContain('if (!canvas.isConnected) contextLoss.loseContext()');
-    expect(disposal).toMatch(
-      /targetView\.requestAnimationFrame\(\(\) => \{\s*targetView\.requestAnimationFrame\(loseIfDetached\)/,
-    );
-    expect(disposal).not.toContain("gl.getExtension(\"WEBGL_lose_context\")?.loseContext()");
+    expect(disposal).toContain('gl.getExtension("WEBGL_lose_context")?.loseContext()');
+    expect(disposal).not.toContain('requestAnimationFrame');
+    expect(disposal).not.toContain('isConnected');
+  });
+
+  test('an animated phase draws its exact terminal frame', () => {
+    // Otherwise the last drawn frame is whichever one the final rAF landed on, and a floor left a step
+    // short of transparent is a floor that reappears when the cover hands over.
+    const renderer = mountSplashTileCanvas.toString();
+    expect(renderer).toContain('const elapsed = animated ? Math.min(running, playback.totalMs) : running;');
+    expect(renderer).toContain('if (shouldContinue(running))');
   });
 
   test('boot presses the cube into its registered footprint before the floor opens', () => {

@@ -4,6 +4,7 @@ import { PIARIUM_WORKBENCH_REPLACEMENT_TARGETS } from '@piarium/extension-contra
 import type { SurfaceContribution, SurfaceRegistrySnapshot } from '@piarium/extension-surface';
 import {
   findCapturedWorkbenchTransitionScene,
+  holdWorkbenchTransitionSceneContribution,
   resolveWorkbenchTransitionScene,
 } from './workbench-transition-scene';
 
@@ -69,3 +70,58 @@ describe('Workbench Transition Scene selection', () => {
   });
 });
 
+
+/**
+ * The mounted scene has to survive the commit it is covering.
+ *
+ * Re-resolving against the live registry on every render meant one missed match swapped the scene for the
+ * Core fallback and back, and remounting a scene restarts every animation in it from its first frame. In the
+ * middle of a reveal that reads as the cover snapping shut again and the logo fading back in, at whatever
+ * moment the registry happened to settle — which is why it only ever showed up sometimes.
+ */
+describe('holding the mounted Transition Scene', () => {
+  test('resolves once from the registry', () => {
+    const mounted = contribution();
+    const resolved = resolveWorkbenchTransitionScene(snapshot([mounted]), {});
+    expect(resolved.status).toBe('ready');
+
+    expect(holdWorkbenchTransitionSceneContribution({
+      capture: resolved.scene,
+      held: undefined,
+      snapshot: snapshot([mounted]),
+    })).toBe(mounted);
+  });
+
+  test('keeps the mounted scene when the owner generation moves on', () => {
+    const mounted = contribution();
+    const resolved = resolveWorkbenchTransitionScene(snapshot([mounted]), {});
+
+    // A regenerated owner no longer matches the capture, which is exactly what the commit produces.
+    const regenerated = snapshot([contribution(4)]);
+    expect(findCapturedWorkbenchTransitionScene(regenerated, resolved.scene)).toBeUndefined();
+    expect(holdWorkbenchTransitionSceneContribution({
+      capture: resolved.scene,
+      held: mounted,
+      snapshot: regenerated,
+    })).toBe(mounted);
+  });
+
+  test('keeps the mounted scene when the registry empties entirely', () => {
+    const mounted = contribution();
+    const resolved = resolveWorkbenchTransitionScene(snapshot([mounted]), {});
+
+    expect(holdWorkbenchTransitionSceneContribution({
+      capture: resolved.scene,
+      held: mounted,
+      snapshot: snapshot([]),
+    })).toBe(mounted);
+  });
+
+  test('a transaction that never resolved one still reports none, so Core can cover instead', () => {
+    expect(holdWorkbenchTransitionSceneContribution({
+      capture: null,
+      held: undefined,
+      snapshot: snapshot([contribution()]),
+    })).toBeUndefined();
+  });
+});

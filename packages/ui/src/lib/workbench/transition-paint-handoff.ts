@@ -77,16 +77,21 @@ export const createWorkbenchTransitionPaintHandoff = (
     fallbackTask = null;
   };
 
+  const takeOwnership = (): void => {
+    cancelPendingRelease();
+    owned = true;
+    root.setAttribute(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE, 'true');
+  };
+
   return {
-    hold: () => {
-      cancelPendingRelease();
-      owned = true;
-      root.setAttribute(WORKBENCH_TRANSITION_HANDOFF_ATTRIBUTE, 'true');
-    },
+    hold: takeOwnership,
     retireSceneAfterPaint: (onRetired) => {
+      // Retirement is the step that hands the scene's pixels back, so it cannot be conditional on a hold
+      // having been observed first. A host that mounts straight into a retiring transaction still has to
+      // reach detachment, and refusing here left the scene on screen with nothing scheduled to remove it.
+      if (!owned) takeOwnership();
       if (
-        !owned
-        || retirementFirstFrame !== null
+        retirementFirstFrame !== null
         || retirementSecondFrame !== null
         || retirementFallbackTask !== null
       ) return;

@@ -537,28 +537,14 @@ void main() {
 
       return {
         kind: 'webgl2',
+        // Only ever reached once the controller has observed this Canvas detached. Losing a context that
+        // is still part of page composition clears a full-screen surface while it is visible, so the
+        // decision about when that is safe belongs to the one place that knows: the controller.
         dispose: () => {
           gl.deleteBuffer(buffer);
           gl.deleteVertexArray(vertexArray);
           gl.deleteProgram(program);
-          const contextLoss = gl.getExtension('WEBGL_lose_context');
-          if (!contextLoss) return;
-          const targetView = canvas.ownerDocument.defaultView;
-          const loseIfDetached = () => {
-            if (!canvas.isConnected) contextLoss.loseContext();
-          };
-          // React runs layout-effect cleanup before deleting the Canvas node. Losing the context there can
-          // clear a full-screen compositor surface while it is still visible. Cross one committed paint
-          // after detachment first; the root handoff remains opaque while the GPU context is then retired.
-          if (typeof targetView?.requestAnimationFrame === 'function') {
-            targetView.requestAnimationFrame(() => {
-              targetView.requestAnimationFrame(loseIfDetached);
-            });
-          } else if (targetView) {
-            targetView.setTimeout(loseIfDetached, 0);
-          } else {
-            loseIfDetached();
-          }
+          gl.getExtension('WEBGL_lose_context')?.loseContext();
         },
         draw: (values, viewport, tiltDeg) => {
           const requiredLength = values.length * 5;
@@ -775,7 +761,13 @@ void main() {
 
   const draw = (now: number): void => {
     if (disposed) return;
-    const elapsed = Math.max(0, now - playbackStartedAt);
+    const running = Math.max(0, now - playbackStartedAt);
+    // Clamped, so the frame that ends an animated phase is the exact terminal frame rather than whichever
+    // 99%-complete frame the last rAF happened to land on. The scene is retired against this frame, and a
+    // floor left one step short of transparent is a floor that flickers back when the cover hands over.
+    const animated = !playback.reducedMotion
+      && (playback.kind === 'covering' || playback.kind === 'revealing');
+    const elapsed = animated ? Math.min(running, playback.totalMs) : running;
     const tiltDeg = cameraTiltAt(elapsed);
     updateFrames(elapsed);
     if (cameraElement && (appliedCameraTiltDeg === null || Math.abs(appliedCameraTiltDeg - tiltDeg) > 1e-4)) {
@@ -783,7 +775,7 @@ void main() {
       appliedCameraTiltDeg = tiltDeg;
     }
     renderer?.draw(frames, viewport, tiltDeg);
-    if (shouldContinue(elapsed)) animationFrame = requestAnimationFrame(draw);
+    if (shouldContinue(running)) animationFrame = requestAnimationFrame(draw);
     else animationFrame = 0;
   };
 
@@ -817,16 +809,45 @@ void main() {
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      // Everything here is invisible: the last drawn frame stays on the Canvas and every ownership claim
+      // stays exactly as it is. React runs layout-effect cleanup while the node is still connected, and
+      // each of the mutations below is a visible one:
+      //   removing the tilt property returns the DOM camera to its authored tilt, standing the cube back up;
+      //   removing the camera-owner attribute re-arms the CSS fallback flatten from its own start state;
+      //   removing the renderer attribute restores the Canvas's opaque background across the whole viewport.
+      // Doing any of that to a scene that can still be composited is a frame of the transition playing
+      // backwards. It waits for detachment instead.
       view?.removeEventListener('resize', rebuildForViewport);
       if (animationFrame) cancelAnimationFrame(animationFrame);
       animationFrame = 0;
-      renderer?.dispose();
-      renderer = null;
-      cameraElement?.style.removeProperty(options.camera.tiltProperty);
-      if (splashElement?.getAttribute('data-piarium-camera-owner') === 'canvas') {
-        splashElement.removeAttribute('data-piarium-camera-owner');
-      }
-      canvas.removeAttribute('data-piarium-splash-renderer');
+
+      const releaseDetachedScene = (): void => {
+        // A connected node means someone still owns these pixels: either the scene is on screen, or a
+        // replacement controller has already re-staked the same claims. Both cases forbid touching them,
+        // and in both cases there is nothing left for this controller to clean up.
+        if (canvas.isConnected) return;
+        renderer?.dispose();
+        renderer = null;
+        cameraElement?.style.removeProperty(options.camera.tiltProperty);
+        if (splashElement?.getAttribute('data-piarium-camera-owner') === 'canvas') {
+          splashElement.removeAttribute('data-piarium-camera-owner');
+        }
+        canvas.removeAttribute('data-piarium-splash-renderer');
+      };
+
+      // React removes host nodes in the same commit as the cleanup that precedes them, so a microtask is
+      // already past the detachment on that path. A frame boundary covers hosts that unmount their
+      // container separately. Neither is a guessed delay, and if the node is still connected after both
+      // then a live owner exists and this controller is finished either way.
+      const retryAtFrame = (): void => {
+        if (canvas.isConnected && typeof view?.requestAnimationFrame === 'function') {
+          view.requestAnimationFrame(releaseDetachedScene);
+          return;
+        }
+        releaseDetachedScene();
+      };
+      if (typeof queueMicrotask === 'function') queueMicrotask(retryAtFrame);
+      else retryAtFrame();
     },
     setPlayback: (next) => {
       if (disposed) return;

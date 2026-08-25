@@ -26,6 +26,17 @@ export interface WorkbenchProfileTransitionState {
   readonly id: number;
   readonly phase: WorkbenchProfileTransitionPhase;
   readonly reducedMotion: boolean;
+  /**
+   * The revealing timeline has finished and the scene still owns every visible pixel of its terminal
+   * frame. Core stays in `revealing` until the host reports the scene detached.
+   *
+   * This is a Core/host signal and deliberately absent from the public Transition Scene frame: a scene
+   * sees `covering`, `covered`, `revealing` and nothing else. The alternative — publishing `idle` and then
+   * keeping a stale revealing scene mounted so it can be torn down afterwards — is what made the last
+   * frame of the transition depend on scheduler ordering, because the teardown then ran against a scene
+   * that was still connected and still being composited.
+   */
+  readonly retiring: boolean;
   readonly scene: WorkbenchTransitionSceneCapture | null;
   readonly tempo: WorkbenchProfileTransitionTempo;
   readonly toProfileId: string | null;
@@ -51,6 +62,7 @@ const IDLE: WorkbenchProfileTransitionState = {
   id: 0,
   phase: 'idle',
   reducedMotion: false,
+  retiring: false,
   scene: null,
   tempo: 'standard',
   toProfileId: null,
@@ -64,6 +76,7 @@ const listeners = new Set<Listener>();
 const coveredWaiters = new Set<CoveredWaiter>();
 const idleWaiters = new Set<() => void>();
 const targetPaintWaiters = new Set<TargetPaintWaiter>();
+const sceneHosts = new Set<symbol>();
 let state: WorkbenchProfileTransitionState = IDLE;
 let nextTransitionId = 1;
 let phaseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +114,16 @@ const resolveTargetPaintWaiters = (painted: boolean): void => {
 const armPhaseCompletion = (durationMs: number, advance: () => void): void => {
   clearPhaseTimer();
   phaseTimer = setTimeout(advance, durationMs);
+};
+
+/** The single place the transaction ends, so every route to idle resets the same bookkeeping. */
+const settleIdle = (): void => {
+  publish(IDLE);
+  operationPreparedBeforeCover = false;
+  coveredAt = 0;
+  targetPainted = false;
+  resolveTargetPaintWaiters(false);
+  resolveIdleWaiters();
 };
 
 const phaseDuration = (
@@ -158,6 +181,7 @@ export const beginWorkbenchProfileTransition = (input: {
     id,
     phase: 'covering',
     reducedMotion,
+    retiring: false,
     scene,
     tempo: 'quick',
     toProfileId: input.toProfileId,
@@ -174,7 +198,9 @@ export const armWorkbenchProfileTransitionPhase = (
   id: number,
   phase: PiariumTransitionSceneAnimatedPhase,
 ): void => {
-  if (state.id !== id || state.phase !== phase || phaseArmed) return;
+  // A retiring transaction is still reported as `revealing`, and its clock has already run. Re-arming it
+  // would start a second timeline over the terminal frame the scene is being retired against.
+  if (state.id !== id || state.phase !== phase || phaseArmed || state.retiring) return;
   phaseArmed = true;
   armPhaseCompletion(state.durationMs, () => {
     if (phase === 'covering') markWorkbenchProfileTransitionCovered(id);
@@ -266,17 +292,57 @@ export const revealWorkbenchProfileTransition = async (id: number): Promise<void
   return waitForWorkbenchProfileTransitionIdle();
 };
 
-/** Called by the scene (or its declared-duration clock) after the authoritative shell is exposed. */
+/**
+ * Registered for as long as something is actually mounting Transition Scenes.
+ *
+ * It decides who ends the transaction, and it removes the need for any timed fallback. With a host
+ * registered, a finished reveal leaves pixels on screen that only that host can take away, so Core waits
+ * for it. With no host — a headless caller, a test, a surface that never mounted the overlay — there is no
+ * scene DOM to retire, so a finished reveal is simply the end. Neither path can hang, and neither path
+ * needs a guess about how long a paint takes.
+ */
+export const registerWorkbenchProfileTransitionSceneHost = (): (() => void) => {
+  const token = Symbol('piarium.workbench.transition.host');
+  sceneHosts.add(token);
+  return () => {
+    sceneHosts.delete(token);
+    // A host that leaves mid-retirement would otherwise strand the transaction it was going to finish.
+    if (sceneHosts.size === 0 && state.retiring) finalizeWorkbenchProfileTransition(state.id);
+  };
+};
+
+/**
+ * Called by the scene (or its declared-duration clock) after the authoritative shell is exposed.
+ *
+ * With a host mounted this ends the animation, not the transaction. The scene's terminal frame is still the
+ * only thing on screen, so Core holds `revealing` and marks itself retiring; the host crosses a real paint
+ * boundary, detaches the scene in one move, and calls `finalizeWorkbenchProfileTransition` once it is gone.
+ */
 export const completeWorkbenchProfileTransition = (id: number): void => {
-  if (state.id !== id || state.phase !== 'revealing' || !phaseArmed) return;
+  if (state.id !== id || state.phase !== 'revealing' || !phaseArmed || state.retiring) return;
   clearPhaseTimer();
   phaseArmed = false;
-  publish(IDLE);
-  operationPreparedBeforeCover = false;
-  coveredAt = 0;
-  targetPainted = false;
-  resolveTargetPaintWaiters(false);
-  resolveIdleWaiters();
+  if (sceneHosts.size === 0) {
+    settleIdle();
+    return;
+  }
+  publish({ ...state, durationMs: 0, retiring: true });
+};
+
+/**
+ * Called by the host once the Transition Scene's DOM has left the document.
+ *
+ * Only now is there nothing left to composite that belongs to this transaction, so only now can the
+ * transaction be idle. Callers awaiting the reveal resolve here, which is what keeps a profile commit from
+ * reporting success while the outgoing scene is still on screen.
+ */
+export const finalizeWorkbenchProfileTransition = (id: number): void => {
+  // Retiring only. A detachment report that arrives for a superseded transaction, or while one is still
+  // covering, must not end it — that is how a stale retirement would tear down a live scene.
+  if (state.id !== id || !state.retiring) return;
+  clearPhaseTimer();
+  phaseArmed = false;
+  settleIdle();
 };
 
 export const subscribeWorkbenchProfileTransition = (listener: Listener): (() => void) => {
@@ -318,11 +384,24 @@ export const createWorkbenchTransitionSceneController = (
   }
   let observedState = state;
   let frame = frameFrom(state);
+  /**
+   * Publishes that leave every frame field alone must not produce a new frame object.
+   *
+   * Entering the retiring step is exactly such a publish: it is Core/host bookkeeping over an unchanged
+   * terminal frame. Handing a fresh object to `useSyncExternalStore` there would re-render the scene at the
+   * one moment nothing about it may be re-evaluated.
+   */
+  const adopt = (next: WorkbenchProfileTransitionState): boolean => {
+    observedState = next;
+    const candidate = frameFrom(next);
+    const unchanged = (Object.keys(candidate) as Array<keyof PiariumTransitionSceneFrameV1>)
+      .every((key) => candidate[key] === frame[key]);
+    if (unchanged) return false;
+    frame = candidate;
+    return true;
+  };
   const readFrame = (): PiariumTransitionSceneFrameV1 => {
-    if (state.id === id && state.phase !== 'idle' && state !== observedState) {
-      observedState = state;
-      frame = frameFrom(state);
-    }
+    if (state.id === id && state.phase !== 'idle' && state !== observedState) adopt(state);
     return frame;
   };
   return {
@@ -334,9 +413,7 @@ export const createWorkbenchTransitionSceneController = (
     getSnapshot: readFrame,
     subscribe: (listener) => subscribeWorkbenchProfileTransition((next) => {
       if (next.id !== id || next.phase === 'idle') return;
-      observedState = next;
-      frame = frameFrom(next);
-      listener();
+      if (adopt(next)) listener();
     }),
   };
 };
@@ -347,6 +424,7 @@ export const resetWorkbenchProfileTransitionForTests = (): void => {
   resolveCoveredWaiters(false);
   resolveIdleWaiters();
   resolveTargetPaintWaiters(false);
+  sceneHosts.clear();
   state = IDLE;
   nextTransitionId = 1;
   operationPreparedBeforeCover = false;

@@ -10,10 +10,12 @@ import {
   beginWorkbenchProfileTransition,
   completeWorkbenchProfileTransition,
   createWorkbenchTransitionSceneController,
+  finalizeWorkbenchProfileTransition,
   getWorkbenchProfileTransitionSnapshot,
   markWorkbenchProfileTransitionCovered,
   markWorkbenchProfileTransitionOperationPrepared,
   markWorkbenchProfileTransitionTargetPainted,
+  registerWorkbenchProfileTransitionSceneHost,
   resetWorkbenchProfileTransitionForTests,
   resolveTransitionDirection,
   revealWorkbenchProfileTransition,
@@ -80,6 +82,7 @@ describe('workbench profile transition state machine', () => {
       id: 0,
       phase: 'idle',
       reducedMotion: false,
+      retiring: false,
       scene: null,
       tempo: 'standard',
       toProfileId: null,
@@ -320,5 +323,180 @@ describe('sweep direction', () => {
     expect(resolveTransitionDirection(profiles, null, 'piarium.ide')).toBe('forward');
     expect(resolveTransitionDirection(profiles, 'gone', 'piarium.ide')).toBe('forward');
     expect(resolveTransitionDirection(profiles, 'default', 'unknown')).toBe('forward');
+  });
+});
+
+/**
+ * Retirement: the step between "the reveal animation stopped" and "the transaction is over".
+ *
+ * The scene's terminal frame is still the only thing on screen when the reveal ends, so publishing idle
+ * there and then keeping the finished scene mounted so it could be torn down afterwards made the last
+ * frame of the transition depend on scheduler ordering. The teardown ran against a scene that was still
+ * connected and still being composited, which is how the cube came back and how the cover flashed.
+ */
+describe('scene retirement', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetWorkbenchProfileTransitionForTests();
+  });
+  afterEach(() => {
+    resetWorkbenchProfileTransitionForTests();
+    vi.useRealTimers();
+  });
+
+  /** Declared cover is quick (800ms); nothing here reaches the commit boundary early, so reveal is standard. */
+  const COVER_MS = 800;
+  const REVEAL_MS = 1_400;
+
+  const reachRevealEnd = (): number => {
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    vi.advanceTimersByTime(COVER_MS);
+    void revealWorkbenchProfileTransition(id);
+    armWorkbenchProfileTransitionPhase(id, 'revealing');
+    vi.advanceTimersByTime(REVEAL_MS);
+    return id;
+  };
+
+  test('a finished reveal holds its frame instead of going idle', () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = reachRevealEnd();
+
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({
+      id,
+      phase: 'revealing',
+      retiring: true,
+    });
+    release();
+  });
+
+  test('idle arrives only once the scene reports itself detached', () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = reachRevealEnd();
+    expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('revealing');
+
+    finalizeWorkbenchProfileTransition(id);
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({ phase: 'idle', retiring: false });
+    release();
+  });
+
+  test('callers awaiting the reveal resolve at detachment, not at the last animation frame', async () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    vi.advanceTimersByTime(COVER_MS);
+
+    let settled = false;
+    const reveal = revealWorkbenchProfileTransition(id).then(() => {
+      settled = true;
+    });
+    armWorkbenchProfileTransitionPhase(id, 'revealing');
+    vi.advanceTimersByTime(REVEAL_MS);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finalizeWorkbenchProfileTransition(id);
+    await reveal;
+    expect(settled).toBe(true);
+    release();
+  });
+
+  test('the retiring publish does not hand the scene a new frame', () => {
+    // The one moment nothing about the scene may be re-evaluated is the moment it is being retired against
+    // its terminal frame. Retirement is Core/host bookkeeping and changes no frame field.
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    const controller = createWorkbenchTransitionSceneController(id);
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    vi.advanceTimersByTime(COVER_MS);
+    void revealWorkbenchProfileTransition(id);
+    armWorkbenchProfileTransitionPhase(id, 'revealing');
+
+    let notifications = 0;
+    controller.subscribe(() => {
+      notifications += 1;
+    });
+    const before = controller.getSnapshot();
+    expect(before.phase).toBe('revealing');
+    // Subscribing publishes the current frame once. What matters is that retirement adds nothing after it.
+    const settled = notifications;
+
+    vi.advanceTimersByTime(REVEAL_MS);
+    expect(getWorkbenchProfileTransitionSnapshot().retiring).toBe(true);
+    expect(notifications).toBe(settled);
+    expect(controller.getSnapshot()).toBe(before);
+    release();
+  });
+
+  test('a scene phase clock cannot restart the reveal it just finished', () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = reachRevealEnd();
+
+    armWorkbenchProfileTransitionPhase(id, 'revealing');
+    vi.advanceTimersByTime(5_000);
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({ id, retiring: true });
+    release();
+  });
+
+  test('a new transition cancels a retirement the previous one never completed', () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const staleId = reachRevealEnd();
+
+    const freshId = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'default' });
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({
+      id: freshId,
+      phase: 'covering',
+      retiring: false,
+    });
+
+    // The stale host reports its detachment late. It must not end the transaction that replaced it.
+    finalizeWorkbenchProfileTransition(staleId);
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({ id: freshId, phase: 'covering' });
+    release();
+  });
+
+  test('a host that leaves mid-retirement does not strand the transaction', () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    reachRevealEnd();
+    expect(getWorkbenchProfileTransitionSnapshot().retiring).toBe(true);
+
+    release();
+    expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+  });
+
+  test('with no host mounted a finished reveal is simply the end', async () => {
+    // Headless callers, tests, and any surface that never mounted the overlay have no scene DOM to retire,
+    // so waiting for a detachment report would be waiting for something that cannot happen.
+    const id = beginWorkbenchProfileTransition({ scene: scene(), toProfileId: 'piarium.ide' });
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    vi.advanceTimersByTime(COVER_MS);
+    const reveal = revealWorkbenchProfileTransition(id);
+    armWorkbenchProfileTransitionPhase(id, 'revealing');
+    vi.advanceTimersByTime(REVEAL_MS);
+
+    await reveal;
+    expect(getWorkbenchProfileTransitionSnapshot()).toMatchObject({ phase: 'idle', retiring: false });
+  });
+
+  test('reduced motion retires through the same steps on a zero-length timeline', async () => {
+    const release = registerWorkbenchProfileTransitionSceneHost();
+    const id = beginWorkbenchProfileTransition({
+      reducedMotion: true,
+      scene: scene(),
+      toProfileId: 'piarium.ide',
+    });
+    armWorkbenchProfileTransitionPhase(id, 'covering');
+    vi.advanceTimersByTime(0);
+    expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('covered');
+
+    const reveal = revealWorkbenchProfileTransition(id);
+    armWorkbenchProfileTransitionPhase(id, 'revealing');
+    vi.advanceTimersByTime(0);
+    expect(getWorkbenchProfileTransitionSnapshot().retiring).toBe(true);
+
+    finalizeWorkbenchProfileTransition(id);
+    await reveal;
+    expect(getWorkbenchProfileTransitionSnapshot().phase).toBe('idle');
+    release();
   });
 });

@@ -1284,21 +1284,7 @@ void main() {
           gl.deleteBuffer(buffer);
           gl.deleteVertexArray(vertexArray);
           gl.deleteProgram(program);
-          const contextLoss = gl.getExtension("WEBGL_lose_context");
-          if (!contextLoss)
-            return;
-          const targetView = canvas.ownerDocument.defaultView, loseIfDetached = () => {
-            if (!canvas.isConnected)
-              contextLoss.loseContext();
-          };
-          if (typeof targetView?.requestAnimationFrame === "function")
-            targetView.requestAnimationFrame(() => {
-              targetView.requestAnimationFrame(loseIfDetached);
-            });
-          else if (targetView)
-            targetView.setTimeout(loseIfDetached, 0);
-          else
-            loseIfDetached();
+          gl.getExtension("WEBGL_lose_context")?.loseContext();
         },
         draw: (values, viewport, tiltDeg) => {
           const requiredLength = values.length * 5;
@@ -1470,14 +1456,14 @@ void main() {
   }, draw = (now) => {
     if (disposed)
       return;
-    const elapsed = Math.max(0, now - playbackStartedAt), tiltDeg = cameraTiltAt(elapsed);
+    const running = Math.max(0, now - playbackStartedAt), elapsed = !playback.reducedMotion && (playback.kind === "covering" || playback.kind === "revealing") ? Math.min(running, playback.totalMs) : running, tiltDeg = cameraTiltAt(elapsed);
     updateFrames(elapsed);
     if (cameraElement && (appliedCameraTiltDeg === null || Math.abs(appliedCameraTiltDeg - tiltDeg) > 0.0001)) {
       cameraElement.style.setProperty(options.camera.tiltProperty, `${tiltDeg}deg`);
       appliedCameraTiltDeg = tiltDeg;
     }
     renderer?.draw(frames, viewport, tiltDeg);
-    if (shouldContinue(elapsed))
+    if (shouldContinue(running))
       animationFrame = requestAnimationFrame(draw);
     else
       animationFrame = 0;
@@ -1515,12 +1501,26 @@ void main() {
       if (animationFrame)
         cancelAnimationFrame(animationFrame);
       animationFrame = 0;
-      renderer?.dispose();
-      renderer = null;
-      cameraElement?.style.removeProperty(options.camera.tiltProperty);
-      if (splashElement?.getAttribute("data-piarium-camera-owner") === "canvas")
-        splashElement.removeAttribute("data-piarium-camera-owner");
-      canvas.removeAttribute("data-piarium-splash-renderer");
+      const releaseDetachedScene = () => {
+        if (canvas.isConnected)
+          return;
+        renderer?.dispose();
+        renderer = null;
+        cameraElement?.style.removeProperty(options.camera.tiltProperty);
+        if (splashElement?.getAttribute("data-piarium-camera-owner") === "canvas")
+          splashElement.removeAttribute("data-piarium-camera-owner");
+        canvas.removeAttribute("data-piarium-splash-renderer");
+      }, retryAtFrame = () => {
+        if (canvas.isConnected && typeof view?.requestAnimationFrame === "function") {
+          view.requestAnimationFrame(releaseDetachedScene);
+          return;
+        }
+        releaseDetachedScene();
+      };
+      if (typeof queueMicrotask === "function")
+        queueMicrotask(retryAtFrame);
+      else
+        retryAtFrame();
     },
     setPlayback: (next) => {
       if (disposed)
