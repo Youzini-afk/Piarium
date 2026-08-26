@@ -11,7 +11,7 @@ import {
 test('withdraws and restores built-in command contributions without a document refresh', async () => {
   await ensureBuiltinWorkbenchCommands();
   const registrations = workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot());
-  expect(registrations.map((registration) => registration.meta.commandId)).toEqual([
+  const expectedCommandIds = [
     'new-session',
     'new-worktree',
     'add-project',
@@ -23,14 +23,36 @@ test('withdraws and restores built-in command contributions without a document r
     'split-editor-orthogonal',
     'close-editor',
     'save-active-file',
-  ]);
+    'editor.saveAll',
+    'editor.find',
+    'editor.replace',
+    'editor.goToLine',
+    'editor.goToSymbol',
+    'editor.formatDocument',
+    'editor.renameSymbol',
+    'editor.quickFix',
+    'editor.goToDefinition',
+    'editor.findReferences',
+    'editor.fold',
+    'editor.unfold',
+    'editor.toggleWordWrap',
+    'editor.toggleMinimap',
+    'editor.addCursorAbove',
+    'editor.addCursorBelow',
+    'editor.focusPreviousGroup',
+    'editor.focusNextGroup',
+  ];
+  expect(registrations.map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
+  expect(registrations.find((registration) => registration.meta.commandId === 'editor.saveAll')?.contributionId)
+    .toBe('piarium.builtin.commands.editor.save-all');
   expect(registrations[3]?.meta.mobileTitleKey).toBe('commandPalette.item.showSessionSwitcher');
 
   await setBuiltinWorkbenchCommandsEnabled(false);
   expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot())).toEqual([]);
 
   await setBuiltinWorkbenchCommandsEnabled(true);
-  expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot()).length).toBe(11);
+  expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot()).length)
+    .toBe(expectedCommandIds.length);
 });
 
 test('a declarative command activates and executes the latest dynamic implementation', async () => {

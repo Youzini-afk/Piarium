@@ -42,6 +42,10 @@ const editorCommand = (meta: WorkbenchCommandMeta, commandId: FileEditorCommandI
   },
 });
 
+const contributionIdForCommand = (commandId: string): string => (
+  `${BUILTIN_COMMANDS_EXTENSION_ID}.${commandId.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()}`
+);
+
 const reportFailure = (title: string, error: unknown): void => {
   toast.error(title, { description: error instanceof Error ? error.message : String(error) });
 };
@@ -129,7 +133,9 @@ const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
 export const registerBuiltinWorkbenchCommands = (context: SurfaceActivationContext): void => {
   for (const definition of BUILTIN_WORKBENCH_COMMANDS) {
     context.contribute({
-      id: `${BUILTIN_COMMANDS_EXTENSION_ID}.${definition.meta.commandId}`,
+      // Command IDs are execution contracts and may use Monaco-style camelCase. Surface
+      // contribution IDs are separate identities whose contract requires lowercase segments.
+      id: contributionIdForCommand(definition.meta.commandId),
       kind: 'command',
       contractVersion: 1,
       supports: ['web', 'desktop', 'mobile', 'vscode'],
