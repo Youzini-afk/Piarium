@@ -587,7 +587,9 @@ Runtime observation remains non-authoritative. A hidden Host adapter folds the t
 channels into `pi-permission-system/status/v1`: whether the plugin announced readiness, active prompts,
 and the last decision. It never reads private logs, never responds to a prompt, and never turns those
 events into a second permission engine. The Composer shield appears only after a live session announces
-the plugin, highlights a pending ask, and opens the installed plugin's settings. The active-settings
+the plugin, highlights a pending ask, and toggles `Ask` / `Auto` directly from the shield by editing the
+plugin-owned `yoloMode`. A trusted bound workspace writes the project scope; an unbound or untrusted session writes
+the global scope. The active-settings
 action still dispatches exactly `/permission-system show`; command output is not parsed into state.
 The plugin's non-TUI select/input flow is the approval authority, so approve once, approve for the
 session, deny, denial reasons, and forwarded-subagent scope choices are returned unchanged to the
@@ -604,6 +606,8 @@ Acceptance:
   effective, while explicit deny decisions still apply;
 - the Composer and runtime status appear only after the installed, enabled plugin announces a live
   session; pending asks clear only on the matching public decision event;
+- Composer `Ask` / `Auto` preserves comments and unrelated policy fields, uses revision-checked writes,
+  and never overwrites an invalid or externally changed native config;
 - `ask` choices are answered through `extension.ui.respond` to the plugin's own select/input request,
   while the active-settings button dispatches exactly `/permission-system show`;
 - Host reload after save and the plugin's next-lifecycle reread are not described as immediate
