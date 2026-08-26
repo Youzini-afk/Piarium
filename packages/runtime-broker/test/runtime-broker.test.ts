@@ -476,6 +476,45 @@ test("broker owns catalog and per-session Pi workers", async () => {
   }
 });
 
+test("session deletion retires a worker when an extension shutdown hook never settles", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-delete-"));
+  const workspace = join(root, "workspace");
+  const agentDir = join(root, "agent");
+  await mkdir(join(workspace, ".pi", "extensions"), { recursive: true });
+  await writeFile(
+    join(workspace, ".pi", "extensions", "stuck-shutdown.ts"),
+    `export default function extension(pi: any) {
+      pi.on("session_shutdown", async () => new Promise(() => {}));
+    }\n`,
+  );
+  const broker = new PiRuntimeBroker({
+    agentDir,
+    client: {
+      clientName: "runtime-delete-test",
+      clientVersion: "0.1.0",
+      mode: "test",
+    },
+    execArgv: ["--import", import.meta.resolve("tsx")],
+    hostEntry: HOST_ENTRY,
+    projectTrustOverride: true,
+    shutdownTimeoutMs: 100,
+  });
+
+  try {
+    const created = await broker.createSession(workspace, "Delete without hanging");
+    const startedAt = Date.now();
+    assert.deepEqual(await broker.deleteSession(created.sessionId), {
+      deleted: true,
+      sessionId: created.sessionId,
+    });
+    assert.ok(Date.now() - startedAt < 2_000);
+    assert.deepEqual(broker.activeSessionIds, []);
+  } finally {
+    await broker.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("surface explicitly resolves project trust without a broker-owned deadline", async () => {
   const root = await mkdtemp(join(tmpdir(), "piarium-runtime-trust-"));
   const workspace = join(root, "workspace");

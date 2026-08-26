@@ -3,6 +3,7 @@ import { PiRuntimeAmbiguousRequestError } from '@piarium/runtime-client';
 import type {
   ModelDescriptor,
   PiSessionMessageEntry,
+  PiUserMessage,
   RecoveryMode,
   ThinkingLevel,
 } from '@piarium/protocol';
@@ -73,7 +74,24 @@ interface PiChatViewProps {
   readOnly?: boolean;
 }
 
+interface PendingPiSubmission {
+  entryIdsAtSubmit: ReadonlySet<string>;
+  message: PiUserMessage;
+  sessionId: string;
+}
+
 const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
+
+const pendingUserMessage = (draft: PiDraftState): PiUserMessage => ({
+  content: draft.images.length === 0
+    ? draft.text
+    : [
+        ...(draft.text ? [{ text: draft.text, type: 'text' as const }] : []),
+        ...draft.images.map((image) => ({ ...image, type: 'image' as const })),
+      ],
+  role: 'user',
+  timestamp: Date.now(),
+});
 
 const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
   if (!projectLabel) return title;
@@ -162,6 +180,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
   const [pinBusyEntryId, setPinBusyEntryId] = React.useState<string | null>(null);
+  const [pendingSubmission, setPendingSubmission] = React.useState<PendingPiSubmission | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
     setPiDraft(sessionId, update, runtimeKey);
@@ -223,6 +242,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       objectiveOverride: null,
     };
     let startedGoalId: string | null = null;
+    let draftCleared = false;
+    let projectedPendingSubmission = false;
     setSending(true);
     try {
       const rendered = await renderPiComposerSubmission(currentDraft.text);
@@ -249,6 +270,20 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         restoreEditorContextAttachments(editorAttachments);
         return;
       }
+      const activity = projectPiSessionActivity(snapshot);
+      if (!activity.isWorking) {
+        setPendingSubmission({
+          entryIdsAtSubmit: new Set(
+            usePiSessionStore.getState().records[sessionId]?.branchEntries?.entries
+              .map((entry) => entry.id) ?? [],
+          ),
+          message: pendingUserMessage(currentDraft),
+          sessionId,
+        });
+        projectedPendingSubmission = true;
+      }
+      clearPiDraft(sessionId, draftRuntimeKey);
+      draftCleared = true;
       consumedGoalArm = useSessionGoalArmStore.getState().consume();
       if (consumedGoalArm.armed) {
         const settings = useUIStore.getState();
@@ -263,7 +298,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         startedGoalId = featureState.goal?.id ?? null;
       }
       let accepted: boolean;
-      if (projectPiSessionActivity(snapshot).isWorking) {
+      if (activity.isWorking) {
         if (followUpBehavior === 'queue') {
           accepted = await followUp(sessionId, promptText, currentDraft.images, instructions, draftRuntimeKey);
         } else {
@@ -273,8 +308,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         accepted = await prompt(sessionId, promptText, currentDraft.images, instructions, draftRuntimeKey);
       }
       if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
-      clearPiDraft(sessionId, draftRuntimeKey);
     } catch (error) {
+      if (draftCleared) setPiDraft(sessionId, currentDraft, draftRuntimeKey);
+      if (projectedPendingSubmission) {
+        setPendingSubmission((current) => current?.sessionId === sessionId ? null : current);
+      }
       if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
       restoreEditorContextAttachments(editorAttachments);
       if (startedGoalId) {
@@ -298,7 +336,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     } finally {
       setSending(false);
     }
-  }, [clearPiDraft, followUp, followUpBehavior, mutateFeatures, prompt, runtimeKey, sending, steer, t]);
+  }, [clearPiDraft, followUp, followUpBehavior, mutateFeatures, prompt, runtimeKey, sending, setPiDraft, steer, t]);
 
   const handleSend = React.useCallback(async () => {
     if (!currentSessionId) return;
@@ -429,6 +467,33 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const pinnedEntryIds = React.useMemo(() => new Set(
     currentRecord?.snapshot?.features.pinnedContext.map((entry) => entry.entryId) ?? [],
   ), [currentRecord?.snapshot?.features.pinnedContext]);
+  const pendingEntryCommitted = Boolean(
+    pendingSubmission
+    && currentSessionId === pendingSubmission.sessionId
+    && currentRecord?.branchEntries?.entries.some((entry) => (
+      !pendingSubmission.entryIdsAtSubmit.has(entry.id)
+      && entry.type === 'message'
+      && entry.message.role === 'user'
+    )),
+  );
+  const transientUser = currentRecord?.liveUser ?? (
+    pendingSubmission
+    && currentSessionId === pendingSubmission.sessionId
+    && !pendingEntryCommitted
+      ? pendingSubmission.message
+      : undefined
+  );
+
+  React.useEffect(() => {
+    if (!pendingSubmission) return;
+    if (
+      currentSessionId !== pendingSubmission.sessionId
+      || currentRecord?.liveUser !== undefined
+      || pendingEntryCommitted
+    ) {
+      setPendingSubmission(null);
+    }
+  }, [currentRecord?.liveUser, currentSessionId, pendingEntryCommitted, pendingSubmission]);
 
   if (pendingDraftOpen) {
     const projectLabel = activeProject
@@ -532,7 +597,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     <TooltipProvider>
       <div className={cn('@container flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className="flex min-w-0 flex-1 flex-col">
-        {entries.length === 0 && !currentRecord.liveAssistant ? (
+        {entries.length === 0 && !currentRecord.liveAssistant && !transientUser ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
             <div className="max-w-md">
               <PiariumLogo width={140} height={140} className="mx-auto size-[140px] opacity-20" />
@@ -555,6 +620,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   entries={entries}
                   hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
                   liveAssistant={currentRecord.liveAssistant}
+                  liveUser={transientUser}
                   onRecover={handleRecover}
                   onTogglePinned={handleTogglePinned}
                   pinBusyEntryId={pinBusyEntryId}

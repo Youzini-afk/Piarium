@@ -21,6 +21,7 @@ import type {
   SessionWorkspaceBinding,
   ThinkingLevel,
   JsonValue,
+  PiUserMessage,
 } from '@piarium/protocol';
 import type { PiRuntimeClient } from '@piarium/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
@@ -45,6 +46,7 @@ export interface PiSessionViewState {
   extensionStates: Record<string, JsonValue>;
   lastAgentEvent?: PiAgentEvent;
   liveAssistant?: PiAssistantMessage;
+  liveUser?: PiUserMessage;
   open: boolean;
   recoveryStatus?: RecoveryStatus;
   sessionId: string;
@@ -303,6 +305,7 @@ const settleInterruptedSession = (
         : execution,
     ])),
   };
+  delete next.liveUser;
   if (current.activityStartedAt !== undefined) {
     next.settledActivityDurationMs = Math.max(0, now - current.activityStartedAt);
     delete next.activityStartedAt;
@@ -379,11 +382,16 @@ export const reducePiAgentEvent = (
         isStreaming: false,
         retryAttempt: 0,
       });
+      delete next.liveUser;
       return next;
     case 'message_start':
     case 'message_update':
     case 'message_end': {
       const message = event.message;
+      if (message.role === 'user') {
+        next.liveUser = message;
+        return next;
+      }
       if (
         message.role === 'assistant'
         && ![current.branchEntries, current.allEntries].some((result) => (
@@ -409,6 +417,13 @@ export const reducePiAgentEvent = (
         && current.liveAssistant.model === event.entry.message.model
       ) {
         delete next.liveAssistant;
+      }
+      if (
+        event.entry.type === 'message'
+        && event.entry.message.role === 'user'
+        && current.liveUser?.timestamp === event.entry.message.timestamp
+      ) {
+        delete next.liveUser;
       }
       return next;
     case 'tool_execution_start':

@@ -7,6 +7,7 @@ import type {
   PiToolCall,
   PiToolResultMessage,
   PiUserContent,
+  PiUserMessage,
 } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -45,6 +46,7 @@ interface PiTimelineProps {
   entries: PiSessionEntry[];
   hiddenThinkingLabel?: string;
   liveAssistant?: PiAssistantMessage;
+  liveUser?: PiUserMessage;
   onRecover(entry: PiSessionMessageEntry): void;
   onTogglePinned(entry: PiSessionMessageEntry, pinned: boolean): void;
   pinBusyEntryId?: string | null;
@@ -521,6 +523,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   entries,
   hiddenThinkingLabel,
   liveAssistant,
+  liveUser,
   onRecover,
   onTogglePinned,
   pinBusyEntryId,
@@ -539,15 +542,15 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const followTailRef = React.useRef(true);
   const projection = React.useMemo(
-    () => projectPiTimeline(entries, liveAssistant),
-    [entries, liveAssistant],
+    () => projectPiTimeline(entries, liveAssistant, liveUser),
+    [entries, liveAssistant, liveUser],
   );
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element || !followTailRef.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [entries, projection.liveAssistant, toolExecutions]);
+  }, [entries, projection.liveAssistant, projection.liveUser, toolExecutions]);
 
   return (
     <div
@@ -822,6 +825,17 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             </MetaEntry>
           );
         })}
+
+        {projection.liveUser && (
+          <article className="ml-auto max-w-[85%]" aria-live="polite">
+            <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
+              <PiUserContentView
+                content={projection.liveUser.content}
+                messageId={`live-user:${projection.liveUser.timestamp}`}
+              />
+            </div>
+          </article>
+        )}
 
         {projection.liveAssistant && (
           <article className="w-full" aria-live="polite">

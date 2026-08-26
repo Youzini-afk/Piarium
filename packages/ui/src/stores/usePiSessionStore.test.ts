@@ -257,6 +257,32 @@ describe('Pi session event state', () => {
     expect(ended.liveAssistant).toBeUndefined();
   });
 
+  test('projects an accepted user message until its session entry is appended', () => {
+    const sessionId = 'session-a';
+    const initial = {
+      branchEntries: branch(sessionId),
+      extensionStates: {},
+      open: true,
+      sessionId,
+      snapshot: snapshot(sessionId),
+      toolExecutions: {},
+    };
+    const message = { content: 'hello', role: 'user' as const, timestamp: 7 };
+    const started = reducePiAgentEvent(initial, { message, type: 'message_start' });
+    expect(started.liveUser).toEqual(message);
+
+    const entry: PiSessionEntry = {
+      id: 'user-entry',
+      message,
+      parentId: null,
+      timestamp: '2026-08-02T00:00:00.000Z',
+      type: 'message',
+    };
+    const persisted = reducePiAgentEvent(started, { entry, type: 'entry_appended' });
+    expect(persisted.liveUser).toBeUndefined();
+    expect(persisted.branchEntries?.entries).toEqual([entry]);
+  });
+
   test('projects queue and lifecycle events into the native snapshot', () => {
     const initial = {
       extensionStates: {},

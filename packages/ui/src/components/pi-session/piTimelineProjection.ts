@@ -2,11 +2,13 @@ import type {
   PiAssistantMessage,
   PiSessionEntry,
   PiToolResultMessage,
+  PiUserMessage,
 } from '@piarium/protocol';
 
 export interface PiTimelineProjection {
   entries: PiTimelineEntry[];
   liveAssistant?: PiAssistantMessage;
+  liveUser?: PiUserMessage;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
 }
 
@@ -26,6 +28,10 @@ const sameAssistantMessage = (
   && left.model === right.model
 );
 
+const sameUserMessage = (left: PiUserMessage, right: PiUserMessage): boolean => (
+  left.timestamp === right.timestamp
+);
+
 const isTimelineControlEntry = (entry: PiSessionEntry): entry is PiTimelineControlEntry => (
   entry.type === 'model_change'
   || entry.type === 'thinking_level_change'
@@ -35,6 +41,7 @@ const isTimelineControlEntry = (entry: PiSessionEntry): entry is PiTimelineContr
 export const projectPiTimeline = (
   entries: PiSessionEntry[],
   liveAssistant?: PiAssistantMessage,
+  liveUser?: PiUserMessage,
 ): PiTimelineProjection => {
   const persistedAssistant = liveAssistant === undefined
     ? false
@@ -44,6 +51,14 @@ export const projectPiTimeline = (
         && sameAssistantMessage(entry.message, liveAssistant)
       ));
   const projectedLiveAssistant = persistedAssistant ? undefined : liveAssistant;
+  const persistedUser = liveUser === undefined
+    ? false
+    : entries.some((entry) => (
+        entry.type === 'message'
+        && entry.message.role === 'user'
+        && sameUserMessage(entry.message, liveUser)
+      ));
+  const projectedLiveUser = persistedUser ? undefined : liveUser;
   const knownToolCallIds = new Set<string>();
   const resultByCallId = new Map<string, PiToolResultMessage>();
 
@@ -79,6 +94,7 @@ export const projectPiTimeline = (
   return {
     entries: projectedEntries,
     ...(projectedLiveAssistant ? { liveAssistant: projectedLiveAssistant } : {}),
+    ...(projectedLiveUser ? { liveUser: projectedLiveUser } : {}),
     resultByCallId,
   };
 };

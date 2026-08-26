@@ -54,4 +54,18 @@ describe('Pi timeline projection', () => {
     expect(projection.entries).toHaveLength(1);
     expect(projection.liveAssistant).toBeUndefined();
   });
+
+  test('keeps a runtime user message visible until its persisted entry arrives', () => {
+    const message = { content: 'hello', role: 'user' as const, timestamp: 9 };
+    expect(projectPiTimeline([], undefined, message).liveUser).toEqual(message);
+
+    const entries: PiSessionEntry[] = [entry({
+      id: 'user',
+      message,
+      parentId: null,
+      timestamp: '9',
+      type: 'message',
+    })];
+    expect(projectPiTimeline(entries, undefined, message).liveUser).toBeUndefined();
+  });
 });

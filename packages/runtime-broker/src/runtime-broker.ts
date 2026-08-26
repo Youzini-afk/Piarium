@@ -69,6 +69,7 @@ export interface PiRuntimeBrokerOptions {
   packageRoot?: string;
   projectTrustOverride?: boolean;
   runtimeSource?: RuntimeSourceKind;
+  shutdownTimeoutMs?: number;
   promptForProjectTrust?(request: ProjectTrustRequest): Promise<ProjectTrustDecision>;
 }
 
@@ -481,8 +482,14 @@ export class PiRuntimeBroker {
   }
 
   async deleteSession(sessionId: string): Promise<{ deleted: boolean; sessionId: string }> {
-    const summaries = await this.listSessions();
-    const summary = summaries.find((entry) => entry.id === sessionId);
+    const worker = this.#sessions.get(sessionId);
+    let summary = this.#knownSummaries.get(sessionId);
+    if (!summary && worker) summary = await this.#rememberSummary(worker, sessionId);
+    if (!summary) {
+      const catalogSummaries = await (await this.#getCatalog()).request("session.list", {});
+      for (const candidate of catalogSummaries) this.#knownSummaries.set(candidate.id, candidate);
+      summary = catalogSummaries.find((entry) => entry.id === sessionId);
+    }
     const metadata = await this.#metadataFor();
     if (!summary) {
       const hadPendingWorkspace = this.#pendingWorkspaceBindings.delete(sessionId);
@@ -490,7 +497,10 @@ export class PiRuntimeBroker {
       this.#knownSummaries.delete(sessionId);
       return { deleted: hadPendingWorkspace || removedMetadata, sessionId };
     }
-    if (this.#sessions.has(sessionId)) await this.closeSession(sessionId);
+    // Deletion must not wait forever for a plugin's session_shutdown hook. The
+    // client disposal path already asks the Host to shut down gracefully, then
+    // retires the process tree after the configured shutdown budget.
+    if (worker) await this.#removeWorker(worker);
     await this.#deleteSessionFile(summary.sessionFile);
     await metadata.remove(sessionId);
     this.#pendingWorkspaceBindings.delete(sessionId);
@@ -770,6 +780,9 @@ export class PiRuntimeBroker {
       ...(this.#options.runtimeSource === undefined
         ? {}
         : { runtimeSource: this.#options.runtimeSource }),
+      ...(this.#options.shutdownTimeoutMs === undefined
+        ? {}
+        : { shutdownTimeoutMs: this.#options.shutdownTimeoutMs }),
       onDiagnostic: (level, message) => {
         this.#emit({ kind: "diagnostic", level, message, role, workerId: client.id });
       },
