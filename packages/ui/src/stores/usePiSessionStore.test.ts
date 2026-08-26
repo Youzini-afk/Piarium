@@ -16,6 +16,7 @@ import {
 } from '@piarium/protocol';
 import {
   createPiSessionStore,
+  isPiSessionWorkerReady,
   reducePiAgentEvent,
   selectActivePiSessions,
   selectArchivedPiSessions,
@@ -190,6 +191,18 @@ class FakeRuntime implements PiSessionStoreRuntime {
 }
 
 describe('Pi session event state', () => {
+  test('requires both an open worker and snapshot before enabling worker actions', () => {
+    const stale = {
+      extensionStates: {},
+      open: false,
+      sessionId: 'session-a',
+      snapshot: snapshot('session-a'),
+      toolExecutions: {},
+    };
+    expect(isPiSessionWorkerReady(stale)).toBe(false);
+    expect(isPiSessionWorkerReady({ ...stale, open: true })).toBe(true);
+  });
+
   test('keeps Pi entries and streaming tool state without OpenCode message IDs', () => {
     const sessionId = 'session-a';
     const initial = {
@@ -872,6 +885,177 @@ describe('Pi session store', () => {
     await opening;
     await flushAsync();
     expect(store.getState().openingSessionId).toBeNull();
+  });
+
+  test('deduplicates cold preview reads without selecting or opening the session', async () => {
+    const runtime = new FakeRuntime();
+    const entries = deferred<SessionEntriesResult>();
+    const previewEntry: PiSessionEntry = {
+      id: 'preview-user',
+      message: { content: 'preview', role: 'user', timestamp: 1 },
+      parentId: null,
+      timestamp: '2026-08-02T00:00:00.000Z',
+      type: 'message',
+    };
+    runtime.handler = (method) => {
+      if (method === 'session.entries.preview') return entries.promise;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const first = store.getState().prefetchSession('session-a', 'D:/work');
+    const second = store.getState().prefetchSession('session-a', 'D:/work');
+    await flushAsync();
+
+    expect(store.getState().currentSessionId).toBeNull();
+    expect(store.getState().records['session-a']?.previewLoading).toBe(true);
+    expect(runtime.calls.filter((call) => call.method === 'session.entries.preview')).toHaveLength(1);
+
+    entries.resolve(branch('session-a', [previewEntry]));
+    await Promise.all([first, second]);
+
+    expect(store.getState().currentSessionId).toBeNull();
+    expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([previewEntry]);
+    expect(store.getState().records['session-a']?.branchEntriesSource).toBe('preview');
+    expect(runtime.calls.some((call) => call.method === 'session.open')).toBe(false);
+  });
+
+  test('lets preview and live hydration race while preserving a completed live branch', async () => {
+    const runtime = new FakeRuntime();
+    const previewEntries = deferred<SessionEntriesResult>();
+    const liveEntries = deferred<SessionEntriesResult>();
+    const previewEntry: PiSessionEntry = {
+      id: 'preview-user',
+      message: { content: 'preview', role: 'user', timestamp: 1 },
+      parentId: null,
+      timestamp: '2026-08-02T00:00:00.000Z',
+      type: 'message',
+    };
+    const liveEntry: PiSessionEntry = {
+      ...previewEntry,
+      id: 'live-user',
+      message: { content: 'live', role: 'user', timestamp: 2 },
+    };
+    runtime.handler = (method) => {
+      if (method === 'session.entries.preview') return previewEntries.promise;
+      if (method === 'session.entries') return liveEntries.promise;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const preview = store.getState().prefetchSession('session-a', 'D:/work');
+    await flushAsync();
+    const live = store.getState().refreshEntries('session-a');
+    previewEntries.resolve(branch('session-a', [previewEntry]));
+    await preview;
+    expect(store.getState().records['session-a']?.branchEntriesSource).toBe('preview');
+
+    liveEntries.resolve(branch('session-a', [liveEntry]));
+    await live;
+    expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([liveEntry]);
+    expect(store.getState().records['session-a']?.branchEntriesSource).toBe('live');
+
+    const latePreview = deferred<SessionEntriesResult>();
+    const newerLive = deferred<SessionEntriesResult>();
+    runtime.handler = (method) => {
+      if (method === 'session.entries.preview') return latePreview.promise;
+      if (method === 'session.entries') return newerLive.promise;
+      throw new Error(`Unexpected ${method}`);
+    };
+    store.setState({ records: {} });
+    const previewSecond = store.getState().prefetchSession('session-b', 'D:/work');
+    await flushAsync();
+    const liveSecond = store.getState().refreshEntries('session-b');
+    newerLive.resolve(branch('session-b', [liveEntry]));
+    await liveSecond;
+    latePreview.reject(new Error('late preview failed'));
+    await expect(previewSecond).rejects.toThrow('late preview failed');
+
+    expect(store.getState().records['session-b']?.branchEntries?.entries).toEqual([liveEntry]);
+    expect(store.getState().records['session-b']?.branchEntriesSource).toBe('live');
+    expect(store.getState().records['session-b']?.previewError).toBeUndefined();
+  });
+
+  test('does not resurrect a deleted session when an older preview completes', async () => {
+    const runtime = new FakeRuntime();
+    const entries = deferred<SessionEntriesResult>();
+    runtime.handler = (method) => {
+      if (method === 'session.entries.preview') return entries.promise;
+      if (method === 'session.delete') return { deleted: true, sessionId: 'session-a' };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    const preview = store.getState().prefetchSession('session-a', 'D:/work');
+    await flushAsync();
+
+    expect(await store.getState().deleteSession('session-a')).toBe(true);
+    entries.resolve(branch('session-a'));
+    await preview;
+
+    expect(store.getState().records['session-a']).toBeUndefined();
+  });
+
+  test('rejects hydration started while a session deletion is in flight', async () => {
+    const runtime = new FakeRuntime();
+    const deletion = deferred<{ deleted: boolean; sessionId: string }>();
+    runtime.handler = (method) => {
+      if (method === 'session.delete') return deletion.promise;
+      if (method === 'session.entries.preview') return branch('session-a');
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const deleting = store.getState().deleteSession('session-a');
+    await expect(
+      store.getState().prefetchSession('session-a', 'D:/work'),
+    ).rejects.toThrow('deleted');
+    expect(runtime.calls.filter((call) => call.method === 'session.entries.preview')).toHaveLength(0);
+
+    deletion.resolve({ deleted: true, sessionId: 'session-a' });
+    expect(await deleting).toBe(true);
+    await expect(
+      store.getState().prefetchSession('session-a', 'D:/work'),
+    ).rejects.toThrow('deleted');
+  });
+
+  test('does not let an older catalog completion undo a successful deletion', async () => {
+    const runtime = new FakeRuntime();
+    const catalog = deferred<SessionSummary[]>();
+    runtime.handler = (method) => {
+      if (method === 'session.list') return catalog.promise;
+      if (method === 'session.delete') return { deleted: true, sessionId: 'session-a' };
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    const loading = store.getState().loadCatalog();
+    await flushAsync();
+
+    expect(await store.getState().deleteSession('session-a')).toBe(true);
+    catalog.resolve([summary('session-a', '2026-08-02T00:00:00.000Z')]);
+    await loading;
+
+    expect(store.getState().summaries).toEqual([]);
+    await expect(
+      store.getState().prefetchSession('session-a', 'D:/work'),
+    ).rejects.toThrow('deleted');
+  });
+
+  test('drops a preview completion from a previous runtime generation', async () => {
+    const runtime = new FakeRuntime();
+    const entries = deferred<SessionEntriesResult>();
+    runtime.handler = (method) => {
+      if (method === 'session.entries.preview') return entries.promise;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    const preview = store.getState().prefetchSession('session-a', 'D:/work');
+    await Promise.resolve();
+
+    runtime.switchTo('runtime-b');
+    entries.resolve(branch('session-a'));
+
+    await expect(preview).rejects.toThrow('runtime changed');
+    expect(store.getState().records).toEqual({});
   });
 
   test('restores the previous selection when the latest open fails', async () => {

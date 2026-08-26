@@ -51,8 +51,8 @@ interface PiTimelineProps {
   liveAssistant?: PiAssistantMessage;
   liveUser?: PiUserMessage;
   liveUserStatus?: PiSessionSubmissionStatus;
-  onRecover(entry: PiSessionMessageEntry): void;
-  onTogglePinned(entry: PiSessionMessageEntry, pinned: boolean): void;
+  onRecover?(entry: PiSessionMessageEntry): void;
+  onTogglePinned?(entry: PiSessionMessageEntry, pinned: boolean): void;
   pinBusyEntryId?: string | null;
   pinnedEntryIds: ReadonlySet<string>;
   recoveryBusyEntryId?: string | null;
@@ -583,7 +583,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                   <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
                     <PiUserContentView content={message.content} messageId={entry.id} />
                   </div>
+                  {onTogglePinned || onRecover ? (
                   <div className="mt-1 flex h-6 items-center justify-end opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+                    {onTogglePinned ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
@@ -607,6 +609,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                         {t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
                       </TooltipContent>
                     </Tooltip>
+                    ) : null}
+                    {onRecover ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
@@ -624,7 +628,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                       </TooltipTrigger>
                       <TooltipContent side="bottom">{t('chat.messageBody.actions.revert')}</TooltipContent>
                     </Tooltip>
+                    ) : null}
                   </div>
+                  ) : null}
                 </article>
               );
             }
@@ -641,6 +647,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                     message={message}
                     resultByCallId={projection.resultByCallId}
                   />
+                  {onTogglePinned ? (
                   <div className="mt-1 flex h-6 items-center opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -666,6 +673,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                       </TooltipContent>
                     </Tooltip>
                   </div>
+                  ) : null}
                 </article>
               );
             }

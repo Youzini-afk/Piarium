@@ -20,6 +20,18 @@ export interface PiSessionCreateTarget {
   projectId?: string | null;
 }
 
+let piSessionNavigationGeneration = 0;
+
+const beginPiSessionNavigation = (): number => {
+  piSessionNavigationGeneration += 1;
+  return piSessionNavigationGeneration;
+};
+
+const isCurrentPiSessionNavigation = (generation: number, sessionId: string): boolean => (
+  generation === piSessionNavigationGeneration
+  && usePiSessionStore.getState().currentSessionId === sessionId
+);
+
 const comparablePath = (path: string): string => (
   /^[A-Za-z]:(?:\/|$)/.test(path) ? path.toLowerCase() : path
 );
@@ -125,6 +137,7 @@ const applyPiSessionLocation = (
 export const openPiSessionFromNavigation = async (
   target: PiSessionOpenTarget,
 ): Promise<SessionSnapshot> => {
+  const navigationGeneration = beginPiSessionNavigation();
   const sessionId = target.sessionId.trim();
   if (!sessionId) throw new Error('A Pi session ID is required');
   const state = usePiSessionStore.getState();
@@ -135,19 +148,29 @@ export const openPiSessionFromNavigation = async (
   if (existing?.open && existing.snapshot && existing.branchEntries) {
     state.setCurrentSession(sessionId);
     snapshot = existing.snapshot;
+    if (isCurrentPiSessionNavigation(navigationGeneration, sessionId)) {
+      applyPiSessionLocation(snapshot.cwd, undefined, snapshot.workspace ?? summary?.workspace);
+    }
   } else {
-    snapshot = await state.openSession({
+    const opening = state.openSession({
       ...(cwd ? { cwd } : {}),
       sessionId,
     });
+    if (cwd && isCurrentPiSessionNavigation(navigationGeneration, sessionId)) {
+      applyPiSessionLocation(cwd, undefined, summary?.workspace);
+    }
+    snapshot = await opening;
+    if (isCurrentPiSessionNavigation(navigationGeneration, sessionId)) {
+      applyPiSessionLocation(snapshot.cwd, undefined, snapshot.workspace ?? summary?.workspace);
+    }
   }
-  applyPiSessionLocation(snapshot.cwd, undefined, snapshot.workspace ?? summary?.workspace);
   return snapshot;
 };
 
 export const createPiSessionFromNavigation = async (
   target: PiSessionCreateTarget = {},
 ): Promise<SessionSnapshot> => {
+  const navigationGeneration = beginPiSessionNavigation();
   const projectsState = useProjectsStore.getState();
   const workspace = resolvePiSessionWorkspaceBinding(target, projectsState.activeProjectId);
   const cwd = resolvePiSessionCreationCwd(
@@ -159,7 +182,9 @@ export const createPiSessionFromNavigation = async (
   );
   if (!cwd) throw new Error('A working directory is required to create a Pi session');
   const snapshot = await usePiSessionStore.getState().createSession(cwd, undefined, undefined, workspace);
-  applyPiSessionLocation(snapshot.cwd, target.projectId, workspace);
+  if (isCurrentPiSessionNavigation(navigationGeneration, snapshot.sessionId)) {
+    applyPiSessionLocation(snapshot.cwd, target.projectId, workspace);
+  }
   return snapshot;
 };
 
@@ -172,6 +197,7 @@ export const createPiSessionFromNavigation = async (
 export const startPiSessionDraftFromNavigation = async (
   target: PiSessionCreateTarget = {},
 ): Promise<void> => {
+  beginPiSessionNavigation();
   const projectsState = useProjectsStore.getState();
   const workspace = resolvePiSessionWorkspaceBinding(target, projectsState.activeProjectId);
   const cwd = resolvePiSessionCreationCwd(

@@ -304,6 +304,7 @@ const SessionRow: React.FC<{
   hasChildren?: boolean;
   expanded?: boolean;
   onToggleChildren?: () => void;
+  onPrefetch?: () => void;
   onSelect: () => void;
   /** When provided, an archive affordance is shown; first tap arms confirm, X cancels. */
   onRequestArchive?: () => void;
@@ -317,6 +318,7 @@ const SessionRow: React.FC<{
   hasChildren = false,
   expanded = false,
   onToggleChildren,
+  onPrefetch,
   onSelect,
   onRequestArchive,
   onConfirmArchive,
@@ -356,6 +358,8 @@ const SessionRow: React.FC<{
         )}
         style={{ paddingLeft: indent, touchAction: 'manipulation' }}
         onClick={onSelect}
+        onFocus={onPrefetch}
+        onPointerEnter={onPrefetch}
         disabled={confirmingArchive}
       >
         <span className="flex min-w-0 flex-1 flex-col">
@@ -550,6 +554,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
+  const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
     (state) => open || variant === 'sidebar' ? state.ids : EMPTY_PINNED_SESSION_IDS,
     [open, variant],
@@ -840,6 +845,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             expanded={expanded}
             onToggleChildren={hasChildren ? () => toggleParent(session.id) : undefined}
             confirmingArchive={confirmingArchiveSessionId === session.id}
+            onPrefetch={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
             onSelect={() => handleSelectSession(session)}
             onRequestArchive={() => handleRequestArchive(session.id)}
             onConfirmArchive={() => void handleConfirmArchive(session)}
@@ -1117,6 +1123,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           active={currentSessionId === session.id}
                           indent={12}
                           contextLabel={buildSessionContextLabel(session)}
+                          onPrefetch={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
                           onSelect={() => handleSelectSession(session)}
                         />
                       </div>

@@ -25,6 +25,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import {
+  isPiSessionWorkerReady,
   usePiSessionStore,
   type PiSessionSubmissionMode,
 } from '@/stores/usePiSessionStore';
@@ -104,6 +105,43 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
   );
 };
 
+const PiTimelineHydrationSkeleton: React.FC<{ label: string }> = ({ label }) => (
+  <div
+    className="flex min-h-0 flex-1 flex-col bg-background"
+    aria-busy="true"
+    aria-label={label}
+    data-pi-conversation-hydrating="true"
+  >
+    <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden px-6 py-10 sm:px-10">
+      <div className="ml-auto h-16 w-[min(72%,34rem)] animate-pulse rounded-2xl rounded-br-md bg-muted/45" />
+      <div className="w-[min(88%,46rem)] space-y-3">
+        <div className="h-3 w-24 animate-pulse rounded bg-muted/45" />
+        <div className="h-3 w-full animate-pulse rounded bg-muted/40" />
+        <div className="h-3 w-4/5 animate-pulse rounded bg-muted/35" />
+        <div className="h-3 w-2/3 animate-pulse rounded bg-muted/30" />
+      </div>
+      <div className="ml-auto h-12 w-[min(58%,28rem)] animate-pulse rounded-2xl rounded-br-md bg-muted/30" />
+    </div>
+  </div>
+);
+
+const PiComposerHydrationSkeleton: React.FC<{ label: string }> = ({ label }) => (
+  <div className="bottom-safe-area shrink-0 bg-background pb-4" aria-busy="true" aria-label={label}>
+    <div className="chat-input-column">
+      <div className="flex h-[7.5rem] animate-pulse flex-col justify-between rounded-2xl border border-border/60 bg-[var(--surface-subtle)]/70 p-3">
+        <div className="h-3 w-1/2 rounded bg-muted/40" />
+        <div className="flex items-center justify-between">
+          <div className="h-7 w-28 rounded-lg bg-muted/35" />
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-24 rounded-lg bg-muted/35" />
+            <div className="size-8 rounded-lg bg-muted/45" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 export const PiChatView: React.FC<PiChatViewProps> = ({
   active = true,
   autoOpenDraft = true,
@@ -113,6 +151,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const currentRecord = usePiSessionStore((state) => (
     state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
+  ));
+  const currentSummary = usePiSessionStore((state) => (
+    state.currentSessionId === null
+      ? undefined
+      : state.summaries.find((summary) => summary.id === state.currentSessionId)
   ));
   const openingSessionId = usePiSessionStore((state) => state.openingSessionId);
   const lastError = usePiSessionStore((state) => state.lastError);
@@ -586,16 +629,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     );
   }
 
-  if (!currentRecord?.snapshot || (sessionOpening && !currentRecord.branchEntries)) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background text-muted-foreground">
-        <Icon name="loader-4" className="mr-2 size-4 animate-spin" />
-        {openingSessionId ? t('sessions.sidebar.group.empty.loadingSessions') : lastError}
-      </div>
-    );
-  }
-
-  if (!currentRecord.branchEntries && lastError) {
+  if (!currentRecord?.branchEntries && lastError && !sessionOpening) {
     return (
       <div className="flex h-full items-center justify-center bg-background px-6">
         <div className="max-w-sm text-center">
@@ -619,39 +653,67 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     );
   }
 
-  const { snapshot } = currentRecord;
-  const entries = currentRecord.branchEntries?.entries ?? [];
+  if (!currentRecord?.branchEntries) {
+    return (
+      <TooltipProvider>
+        <div className="flex h-full min-h-0 flex-col bg-background">
+          <WorkbenchReplacement
+            target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
+            fallback={(
+              <PiTimelineHydrationSkeleton
+                label={t('sessions.sidebar.group.empty.loadingSessions')}
+              />
+            )}
+          />
+          {!readOnly ? (
+            <WorkbenchReplacement
+              target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
+              fallback={(
+                <PiComposerHydrationSkeleton
+                  label={t('sessions.sidebar.group.empty.loadingSessions')}
+                />
+              )}
+            />
+          ) : null}
+        </div>
+      </TooltipProvider>
+    );
+  }
+
+  const snapshot = currentRecord.snapshot;
+  const entries = currentRecord.branchEntries.entries;
+  const previewOnly = !isPiSessionWorkerReady(currentRecord);
+  const sessionCwd = snapshot?.cwd ?? currentSummary?.cwd ?? currentDirectory;
   return (
     <TooltipProvider>
       <div className={cn('@container flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className="flex min-w-0 flex-1 flex-col">
-        {entries.length === 0 && !currentRecord.liveAssistant && !transientUser ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
-            <div className="max-w-md">
-              <PiariumLogo width={140} height={140} className="mx-auto size-[140px] opacity-20" />
-              <p className="mt-4 typography-ui-label text-muted-foreground">
-                {t('chat.emptyState.startNewChat')}
-              </p>
+        <WorkbenchReplacement
+          target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
+          fallback={entries.length === 0 && !currentRecord.liveAssistant && !transientUser ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+              <div className="max-w-md">
+                <PiariumLogo width={140} height={140} className="mx-auto size-[140px] opacity-20" />
+                <p className="mt-4 typography-ui-label text-muted-foreground">
+                  {t('chat.emptyState.startNewChat')}
+                </p>
+              </div>
             </div>
-          </div>
-        ) : (
-          <WorkbenchReplacement
-            target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
-            fallback={(
+          ) : (
               <React.Suspense fallback={(
                 <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
                   <Icon name="loader-4" className="size-4 animate-spin" />
                 </div>
               )}>
                 <LazyPiTimeline
-                  cwd={snapshot.cwd}
+                  cwd={sessionCwd}
                   entries={entries}
                   hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
                   liveAssistant={currentRecord.liveAssistant}
                   liveUser={transientUser}
                   liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
-                  onRecover={handleRecover}
-                  onTogglePinned={handleTogglePinned}
+                  onRecover={previewOnly ? undefined : handleRecover}
+                  onTogglePinned={previewOnly ? undefined : handleTogglePinned}
                   pinBusyEntryId={pinBusyEntryId}
                   pinnedEntryIds={pinnedEntryIds}
                   recoveryBusyEntryId={recoveryBusyEntryId}
@@ -659,25 +721,35 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   toolExecutions={currentRecord.toolExecutions}
                 />
               </React.Suspense>
+          )}
+        />
+
+        {!previewOnly ? <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} /> : null}
+
+        {!previewOnly && snapshot ? (
+          <>
+            <PiAssistBar
+              draftEmpty={draft.text.trim().length === 0 && draft.images.length === 0}
+              entries={entries}
+              onApplySuggestion={(value) => updateDraft(currentSessionId, { text: value })}
+              snapshot={snapshot}
+            />
+            <div className="px-3 sm:px-5">
+              <PiGoalStrip snapshot={snapshot} />
+            </div>
+          </>
+        ) : null}
+
+        {!previewOnly ? <AutoReviewBanner /> : null}
+
+        {!readOnly && previewOnly ? (
+          <WorkbenchReplacement
+            target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
+            fallback={(
+              <PiComposerHydrationSkeleton label={t('sessions.sidebar.group.empty.loadingSessions')} />
             )}
           />
-        )}
-
-        <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} />
-
-        <PiAssistBar
-          draftEmpty={draft.text.trim().length === 0 && draft.images.length === 0}
-          entries={entries}
-          onApplySuggestion={(value) => updateDraft(currentSessionId, { text: value })}
-          snapshot={snapshot}
-        />
-        <div className="px-3 sm:px-5">
-          <PiGoalStrip snapshot={snapshot} />
-        </div>
-
-        <AutoReviewBanner />
-
-        {!readOnly && (
+        ) : !readOnly && snapshot ? (
           <WorkbenchReplacement
             target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
             fallback={(
@@ -709,8 +781,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
               />
             )}
           />
-        )}
-          <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />
+        ) : null}
+          {!previewOnly ? <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} /> : null}
         </div>
       </div>
 

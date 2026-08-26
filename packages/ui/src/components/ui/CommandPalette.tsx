@@ -110,6 +110,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   const catalogCwd = usePiSessionStore((state) => state.catalogCwd);
   const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
   const catalogLoading = usePiSessionStore((state) => state.catalogLoading);
+  const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const pinnedSessionIds = useSessionPinnedStore(React.useCallback(
     (state) => isCommandPaletteOpen ? state.ids : EMPTY_PINNED_SESSION_IDS,
     [isCommandPaletteOpen],
@@ -523,6 +524,8 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
                           key={session.id}
                           value={`session:${session.id}`}
                           onSelect={() => handleOpenSession(session)}
+                          onFocus={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
+                          onPointerEnter={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
                         >
                           <Icon name="chat-ai-3" className="mr-2 h-4 w-4" />
                           <span className="truncate">{title}</span>

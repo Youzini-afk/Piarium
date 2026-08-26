@@ -45,6 +45,14 @@ const snapshot = (id: string, cwd: string): SessionSnapshot => ({
   thinkingLevel: 'off',
 });
 
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+};
+
 describe('Pi session navigation', () => {
   test('selects the most specific project containing a session cwd', () => {
     const projects = [
@@ -163,24 +171,27 @@ describe('Pi session navigation', () => {
       });
       usePiSessionStore.setState({
         currentSessionId: null,
-        openSession: async () => ({
-          activeTools: [],
-          busy: false,
-          cwd: removedWorkspaceSession.cwd,
-          features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
-          followUp: [],
-          followUpMode: 'one-at-a-time',
-          isCompacting: false,
-          isStreaming: false,
-          leafId: null,
-          pendingMessageCount: 0,
-          retryAttempt: 0,
-          sessionId: removedWorkspaceSession.id,
-          steering: [],
-          steeringMode: 'one-at-a-time',
-          thinkingLevel: 'off',
-          workspace: removedWorkspaceSession.workspace,
-        }),
+        openSession: async () => {
+          usePiSessionStore.setState({ currentSessionId: removedWorkspaceSession.id });
+          return {
+            activeTools: [],
+            busy: false,
+            cwd: removedWorkspaceSession.cwd,
+            features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
+            followUp: [],
+            followUpMode: 'one-at-a-time',
+            isCompacting: false,
+            isStreaming: false,
+            leafId: null,
+            pendingMessageCount: 0,
+            retryAttempt: 0,
+            sessionId: removedWorkspaceSession.id,
+            steering: [],
+            steeringMode: 'one-at-a-time',
+            thinkingLevel: 'off',
+            workspace: removedWorkspaceSession.workspace,
+          };
+        },
         summaries: [removedWorkspaceSession],
       });
 
@@ -236,6 +247,86 @@ describe('Pi session navigation', () => {
       expect(openCalls).toBe(0);
       expect(usePiSessionStore.getState().currentSessionId).toBe(hotSession.id);
       expect(useDirectoryStore.getState().currentDirectory).toBe(hotSession.cwd);
+    } finally {
+      useDirectoryStore.setState(originalDirectory, true);
+      useProjectsStore.setState(originalProjects, true);
+      usePiSessionStore.setState(originalSessions, true);
+      useUIStore.setState(originalUi, true);
+    }
+  });
+
+  test('does not let an older open completion move the workspace away from the latest selection', async () => {
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const originalSessions = usePiSessionStore.getState();
+    const originalUi = useUIStore.getState();
+    const sessionA = session('a');
+    const sessionB = session('b');
+    const openA = deferred<SessionSnapshot>();
+    const openB = deferred<SessionSnapshot>();
+
+    try {
+      useDirectoryStore.setState({ currentDirectory: 'D:/previous' });
+      useProjectsStore.setState({ activeProjectId: null, projects: [] });
+      usePiSessionStore.setState({
+        currentSessionId: null,
+        openSession: (params) => {
+          const sessionId = params.sessionId ?? '';
+          usePiSessionStore.setState({ currentSessionId: sessionId });
+          return sessionId === sessionA.id ? openA.promise : openB.promise;
+        },
+        summaries: [sessionA, sessionB],
+      });
+
+      const first = openPiSessionFromNavigation({ sessionId: sessionA.id });
+      const second = openPiSessionFromNavigation({ sessionId: sessionB.id });
+      expect(useDirectoryStore.getState().currentDirectory).toBe(sessionB.cwd);
+
+      openB.resolve(snapshot(sessionB.id, sessionB.cwd));
+      await second;
+      openA.resolve(snapshot(sessionA.id, sessionA.cwd));
+      await first;
+
+      expect(usePiSessionStore.getState().currentSessionId).toBe(sessionB.id);
+      expect(useDirectoryStore.getState().currentDirectory).toBe(sessionB.cwd);
+    } finally {
+      useDirectoryStore.setState(originalDirectory, true);
+      useProjectsStore.setState(originalProjects, true);
+      usePiSessionStore.setState(originalSessions, true);
+      useUIStore.setState(originalUi, true);
+    }
+  });
+
+  test('does not let navigation overwrite a newer direct store selection', async () => {
+    const originalDirectory = useDirectoryStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const originalSessions = usePiSessionStore.getState();
+    const originalUi = useUIStore.getState();
+    const sessionA = session('direct-a');
+    const sessionB = session('direct-b');
+    const opening = deferred<SessionSnapshot>();
+
+    try {
+      useDirectoryStore.setState({ currentDirectory: 'D:/previous' });
+      useProjectsStore.setState({ activeProjectId: null, projects: [] });
+      usePiSessionStore.setState({
+        currentSessionId: null,
+        openSession: () => {
+          usePiSessionStore.setState({ currentSessionId: sessionA.id });
+          return opening.promise;
+        },
+        summaries: [sessionA, sessionB],
+      });
+
+      const first = openPiSessionFromNavigation({ sessionId: sessionA.id });
+      usePiSessionStore.getState().setCurrentSession(sessionB.id);
+      useDirectoryStore.getState().setDirectory(sessionB.cwd, { showOverlay: false });
+
+      opening.resolve(snapshot(sessionA.id, sessionA.cwd));
+      await first;
+
+      expect(usePiSessionStore.getState().currentSessionId).toBe(sessionB.id);
+      expect(useDirectoryStore.getState().currentDirectory).toBe(sessionB.cwd);
     } finally {
       useDirectoryStore.setState(originalDirectory, true);
       useProjectsStore.setState(originalProjects, true);

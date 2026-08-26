@@ -127,6 +127,7 @@ interface SessionRowProps {
   onCopyId(session: SessionSummary): void;
   onDelete(node: PiSessionNode): void;
   onOpenMiniChat(session: SessionSummary): void;
+  onPrefetch(session: SessionSummary): void;
   onSelect(session: SessionSummary): void;
   onToggleExpanded(sessionId: string): void;
   onTogglePinned(session: SessionSummary): void;
@@ -231,6 +232,8 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
           <button
             type="button"
             onClick={() => props.onSelect(session)}
+            onFocus={() => props.onPrefetch(session)}
+            onPointerEnter={() => props.onPrefetch(session)}
             className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
           >
             <span className="min-w-0 flex-1 truncate typography-ui-label font-normal">{title}</span>
@@ -349,6 +352,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const lastError = usePiSessionStore((state) => state.lastError);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const loadCatalog = usePiSessionStore((state) => state.loadCatalog);
+  const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const renameSession = usePiSessionStore((state) => state.renameSession);
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
@@ -428,6 +432,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
       toast.error(error instanceof Error ? error.message : String(error));
     }
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen]);
+
+  const handlePrefetch = React.useCallback((session: SessionSummary) => {
+    void prefetchSession(session.id, session.cwd).catch(() => undefined);
+  }, [prefetchSession]);
 
   const handleCreate = React.useCallback(async (projectId: string | null) => {
     try {
@@ -892,6 +900,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       pinnedIds={pinnedIds}
                       untitled={untitled}
                       onSelect={(session) => void handleSelect(session)}
+                      onPrefetch={handlePrefetch}
                       onToggleExpanded={(sessionId) => setExpandedIds((current) => {
                         const next = new Set(current);
                         if (next.has(sessionId)) next.delete(sessionId);

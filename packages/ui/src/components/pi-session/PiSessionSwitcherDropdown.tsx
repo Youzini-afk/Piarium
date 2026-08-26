@@ -42,9 +42,10 @@ const SwitcherNode: React.FC<{
   currentSessionId: string | null;
   depth: number;
   node: PiSessionNode;
+  onPrefetch(session: SessionSummary): void;
   onSelect(session: SessionSummary): void;
   untitled: string;
-}> = ({ attentionBySession, busySessionIds, currentSessionId, depth, node, onSelect, untitled }) => {
+}> = ({ attentionBySession, busySessionIds, currentSessionId, depth, node, onPrefetch, onSelect, untitled }) => {
   const { session } = node;
   const timestamp = Date.parse(session.updatedAt);
   const attention = attentionBySession[session.id];
@@ -59,6 +60,8 @@ const SwitcherNode: React.FC<{
     <>
       <DropdownMenuItem
         onClick={() => onSelect(session)}
+        onFocus={() => onPrefetch(session)}
+        onPointerEnter={() => onPrefetch(session)}
         className={cn('min-w-0 gap-2', currentSessionId === session.id && 'bg-interactive-active')}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
@@ -81,6 +84,7 @@ const SwitcherNode: React.FC<{
           currentSessionId={currentSessionId}
           depth={depth + 1}
           node={child}
+          onPrefetch={onPrefetch}
           onSelect={onSelect}
           untitled={untitled}
         />
@@ -98,6 +102,7 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
   const records = usePiSessionStore((state) => state.records);
+  const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const projects = useProjectsStore((state) => state.projects);
   const untitled = t('sessions.sidebar.session.untitled');
@@ -136,6 +141,10 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
     }
   }, []);
 
+  const prefetch = React.useCallback((session: SessionSummary) => {
+    void prefetchSession(session.id, session.cwd).catch(() => undefined);
+  }, [prefetchSession]);
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
@@ -161,6 +170,7 @@ export const PiSessionSwitcherDropdown: React.FC<PiSessionSwitcherDropdownProps>
                 currentSessionId={currentSessionId}
                 depth={0}
                 node={node}
+                onPrefetch={prefetch}
                 onSelect={(session) => void select(session)}
                 untitled={untitled}
               />

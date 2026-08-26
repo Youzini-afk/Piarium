@@ -61,11 +61,14 @@ export interface PiSessionViewState {
   activityStartedAt?: number;
   allEntries?: SessionEntriesResult;
   branchEntries?: SessionEntriesResult;
+  branchEntriesSource?: 'live' | 'preview';
   extensionStates: Record<string, JsonValue>;
   lastAgentEvent?: PiAgentEvent;
   liveAssistant?: PiAssistantMessage;
   liveUser?: PiUserMessage;
   open: boolean;
+  previewError?: string;
+  previewLoading?: boolean;
   recoveryStatus?: RecoveryStatus;
   sessionId: string;
   settledActivityDurationMs?: number;
@@ -151,6 +154,7 @@ export interface PiSessionStoreState {
     summarize?: boolean,
   ): Promise<RuntimeMethodResult<'session.navigate'>>;
   openSession(params: RuntimeMethodParams<'session.open'>): Promise<SessionSnapshot>;
+  prefetchSession(sessionId: string, cwd?: string): Promise<SessionEntriesResult>;
   prompt(
     sessionId: string,
     text: string,
@@ -250,6 +254,12 @@ export const selectCurrentPiSession = (
   state: PiSessionStoreState,
 ): PiSessionViewState | undefined => (
   state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
+);
+
+export const isPiSessionWorkerReady = (
+  record: PiSessionViewState | undefined,
+): record is PiSessionViewState & { snapshot: SessionSnapshot } => (
+  record?.open === true && record.snapshot !== undefined
 );
 
 const piAgentEventAttentionKind = (
@@ -380,17 +390,21 @@ const appendEntry = (
 const mergeEntriesArrivingDuringRequest = (
   incoming: SessionEntriesResult,
   current: SessionEntriesResult | undefined,
-  entryIdsAtRequestStart: ReadonlySet<string>,
+  appendedEntryIds: ReadonlySet<string>,
 ): SessionEntriesResult => {
-  if (current === undefined) return incoming;
-  const incomingIds = new Set(incoming.entries.map((entry) => entry.id));
-  const laterEntries = current.entries.filter((entry) => (
-    !entryIdsAtRequestStart.has(entry.id) && !incomingIds.has(entry.id)
-  ));
-  if (laterEntries.length === 0) return incoming;
+  if (current === undefined || appendedEntryIds.size === 0) return incoming;
+  const currentAppended = new Map(current.entries
+    .filter((entry) => appendedEntryIds.has(entry.id))
+    .map((entry) => [entry.id, entry]));
+  if (currentAppended.size === 0) return incoming;
+  const entries = incoming.entries.map((entry) => currentAppended.get(entry.id) ?? entry);
+  const incomingIds = new Set(entries.map((entry) => entry.id));
+  for (const entry of currentAppended.values()) {
+    if (!incomingIds.has(entry.id)) entries.push(entry);
+  }
   return {
     ...incoming,
-    entries: [...incoming.entries, ...laterEntries],
+    entries,
     leafId: current.leafId ?? incoming.leafId,
   };
 };
@@ -599,6 +613,12 @@ export const createPiSessionStore = (
   let catalogGeneration = 0;
   let selectionGeneration = 0;
   const entriesGeneration = new Map<string, number>();
+  const entriesAppendedDuringRequest = new Map<string, Set<string>>();
+  const previewGeneration = new Map<string, number>();
+  const previewAppendedDuringRequest = new Map<string, Set<string>>();
+  const previewRequests = new Map<string, Promise<SessionEntriesResult>>();
+  const deletingSessionIds = new Set<string>();
+  const deletedSessionIds = new Set<string>();
   const recoveryGeneration = new Map<string, number>();
   const statsGeneration = new Map<string, number>();
 
@@ -624,6 +644,14 @@ export const createPiSessionStore = (
     const entriesRequestKey = (sessionId: string, scope: 'branch' | 'all'): string => (
       `${sessionId}\u0000${scope}`
     );
+
+    const invalidateSessionHydration = (sessionId: string): void => {
+      previewGeneration.set(sessionId, (previewGeneration.get(sessionId) ?? 0) + 1);
+      for (const scope of ['branch', 'all'] as const) {
+        const requestKey = entriesRequestKey(sessionId, scope);
+        entriesGeneration.set(requestKey, (entriesGeneration.get(requestKey) ?? 0) + 1);
+      }
+    };
 
     const handleRuntimeEvent = (runtimeKey: string, envelope: RuntimeEventEnvelope): void => {
       if (!contextIsCurrent(runtimeKey)) return;
@@ -674,6 +702,11 @@ export const createPiSessionStore = (
         case 'agent.event': {
           const { sessionId, event } = envelope.data;
           const attentionKind = piAgentEventAttentionKind(event);
+          if (event.type === 'entry_appended') {
+            entriesAppendedDuringRequest.get(entriesRequestKey(sessionId, 'branch'))?.add(event.entry.id);
+            entriesAppendedDuringRequest.get(entriesRequestKey(sessionId, 'all'))?.add(event.entry.id);
+            previewAppendedDuringRequest.get(sessionId)?.add(event.entry.id);
+          }
           set((state) => {
             const records = upsertRecord(state.records, sessionId, (current) => {
               const reduced = reducePiAgentEvent(current, event);
@@ -948,6 +981,7 @@ export const createPiSessionStore = (
             ...(parentSession === undefined ? {} : { parentSession }),
             ...(workspace === undefined ? {} : { workspace }),
           });
+          deletedSessionIds.delete(result.sessionId);
           set((state) => ({
             attentionBySession: clearAttention(state.attentionBySession, result.sessionId),
             currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
@@ -975,14 +1009,22 @@ export const createPiSessionStore = (
       deleteSession: async (sessionId) => {
         const clearsCurrentSelection = get().currentSessionId === sessionId;
         if (clearsCurrentSelection) beginSelectionIntent();
+        catalogGeneration += 1;
+        deletingSessionIds.add(sessionId);
+        invalidateSessionHydration(sessionId);
+        set({ catalogLoading: false });
         try {
           const { result } = await request('session.delete', { sessionId });
           if (!result.deleted) return false;
+          catalogGeneration += 1;
+          deletedSessionIds.add(sessionId);
+          invalidateSessionHydration(sessionId);
           set((state) => {
             const records = { ...state.records };
             delete records[sessionId];
             return {
               attentionBySession: clearAttention(state.attentionBySession, sessionId),
+              catalogLoading: false,
               currentSessionId: state.currentSessionId === sessionId ? null : state.currentSessionId,
               lastError: null,
               records,
@@ -993,6 +1035,8 @@ export const createPiSessionStore = (
         } catch (error) {
           commitError(runtime.currentKey(), error);
           throw error;
+        } finally {
+          deletingSessionIds.delete(sessionId);
         }
       },
 
@@ -1067,6 +1111,7 @@ export const createPiSessionStore = (
           });
           if (generation !== catalogGeneration || !contextIsCurrent(runtimeKey)) return result;
           const summaries = sortSummaries(result);
+          for (const summary of summaries) deletedSessionIds.delete(summary.id);
           set({
             catalogCwd: requestedCwd,
             catalogLoaded: true,
@@ -1140,36 +1185,12 @@ export const createPiSessionStore = (
           openingSessionId,
           lastError: null,
         }));
-        if (openingSessionId && !get().records[openingSessionId]?.branchEntries) {
-          const requestKey = entriesRequestKey(openingSessionId, 'branch');
-          const generation = (entriesGeneration.get(requestKey) ?? 0) + 1;
-          entriesGeneration.set(requestKey, generation);
-          const entryIdsAtRequestStart = new Set(
-            get().records[openingSessionId]?.branchEntries?.entries.map((entry) => entry.id) ?? [],
-          );
-          void request('session.entries.preview', {
-            ...(params.cwd === undefined ? {} : { cwd: params.cwd }),
-            scope: 'branch',
-            sessionId: openingSessionId,
-          }, undefined, false).then(({ result, runtimeKey }) => {
-            if (
-              entriesGeneration.get(requestKey) !== generation
-              || !contextIsCurrent(runtimeKey)
-            ) return;
-            set((state) => ({
-              records: upsertRecord(state.records, openingSessionId, (current) => ({
-                ...current,
-                branchEntries: mergeEntriesArrivingDuringRequest(
-                  result,
-                  current.branchEntries,
-                  entryIdsAtRequestStart,
-                ),
-              })),
-            }));
-          }).catch(() => undefined);
+        if (openingSessionId) {
+          void get().prefetchSession(openingSessionId, params.cwd).catch(() => undefined);
         }
         try {
           const { result, runtimeKey } = await request('session.open', params);
+          deletedSessionIds.delete(result.sessionId);
           set((state) => ({
             attentionBySession: selectionIntentIsCurrent(selectionIntent, runtimeKey)
               ? clearAttention(state.attentionBySession, result.sessionId)
@@ -1219,6 +1240,95 @@ export const createPiSessionStore = (
         return result.accepted;
       },
 
+      prefetchSession: async (sessionId, cwd) => {
+        if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId)) {
+          throw new Error('Pi session is being deleted or was deleted');
+        }
+        const existing = get().records[sessionId]?.branchEntries;
+        if (existing) return existing;
+        const expectedRuntimeKey = runtime.currentKey();
+        const previewKey = `${expectedRuntimeKey}\u0000${sessionId}`;
+        const pending = previewRequests.get(previewKey);
+        if (pending) return pending;
+
+        const generation = (previewGeneration.get(sessionId) ?? 0) + 1;
+        previewGeneration.set(sessionId, generation);
+        const appendedEntryIds = new Set<string>();
+        previewAppendedDuringRequest.set(sessionId, appendedEntryIds);
+        set((state) => ({
+          records: upsertRecord(state.records, sessionId, (current) => {
+            const next = { ...current, previewLoading: true };
+            delete next.previewError;
+            return next;
+          }),
+        }));
+
+        const preview = (async () => {
+          try {
+            const { result, runtimeKey } = await request('session.entries.preview', {
+              ...(cwd === undefined ? {} : { cwd }),
+              scope: 'branch',
+              sessionId,
+            }, expectedRuntimeKey, false);
+            if (
+              previewGeneration.get(sessionId) !== generation
+              || !contextIsCurrent(runtimeKey)
+            ) return result;
+            set((state) => ({
+              records: upsertRecord(state.records, sessionId, (current) => {
+                if (current.branchEntriesSource === 'live') {
+                  const next = { ...current, previewLoading: false };
+                  delete next.previewError;
+                  return next;
+                }
+                const next: PiSessionViewState = {
+                  ...current,
+                  branchEntries: mergeEntriesArrivingDuringRequest(
+                    result,
+                    current.branchEntries,
+                    appendedEntryIds,
+                  ),
+                  branchEntriesSource: 'preview',
+                  previewLoading: false,
+                };
+                delete next.previewError;
+                return next;
+              }),
+            }));
+            return result;
+          } catch (error) {
+            if (
+              previewGeneration.get(sessionId) === generation
+              && contextIsCurrent(expectedRuntimeKey)
+            ) {
+              set((state) => ({
+                records: upsertRecord(state.records, sessionId, (current) => {
+                  if (current.branchEntriesSource === 'live') {
+                    const next = { ...current, previewLoading: false };
+                    delete next.previewError;
+                    return next;
+                  }
+                  return {
+                    ...current,
+                    previewError: errorMessage(error),
+                    previewLoading: false,
+                  };
+                }),
+              }));
+            }
+            throw error;
+          }
+        })();
+        previewRequests.set(previewKey, preview);
+        void preview.finally(() => {
+          if (previewRequests.get(previewKey) === preview) previewRequests.delete(previewKey);
+          if (previewAppendedDuringRequest.get(sessionId) === appendedEntryIds) {
+            previewAppendedDuringRequest.delete(sessionId);
+          }
+        }).catch(() => undefined);
+        return preview;
+      },
+
       createRecoveryCheckpoint: async (sessionId, name) => {
         const { result } = await request('recovery.checkpoint.create', { name, sessionId });
         return applyRecoveryResult(sessionId, result);
@@ -1245,15 +1355,14 @@ export const createPiSessionStore = (
       },
 
       refreshEntries: async (sessionId, scope = 'branch') => {
+        if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId)) {
+          throw new Error('Pi session is being deleted or was deleted');
+        }
         const requestKey = entriesRequestKey(sessionId, scope);
         const generation = (entriesGeneration.get(requestKey) ?? 0) + 1;
         entriesGeneration.set(requestKey, generation);
-        const entryIdsAtRequestStart = new Set(
-          (scope === 'all'
-            ? get().records[sessionId]?.allEntries
-            : get().records[sessionId]?.branchEntries
-          )?.entries.map((entry) => entry.id) ?? [],
-        );
+        const appendedEntryIds = new Set<string>();
+        entriesAppendedDuringRequest.set(requestKey, appendedEntryIds);
         try {
           const { result, runtimeKey } = await request('session.entries', { scope, sessionId });
           if (
@@ -1271,20 +1380,30 @@ export const createPiSessionStore = (
               const merged = mergeEntriesArrivingDuringRequest(
                 result,
                 currentEntries,
-                entryIdsAtRequestStart,
+                appendedEntryIds,
               );
-              return {
+              const next: PiSessionViewState = {
                 ...current,
                 ...(scope === 'all'
                   ? { allEntries: merged }
-                  : { branchEntries: merged }),
+                  : {
+                      branchEntries: merged,
+                      branchEntriesSource: 'live' as const,
+                      previewLoading: false,
+                    }),
               };
+              if (scope === 'branch') delete next.previewError;
+              return next;
             }),
           }));
           return result;
         } catch (error) {
           commitError(runtime.currentKey(), error);
           throw error;
+        } finally {
+          if (entriesAppendedDuringRequest.get(requestKey) === appendedEntryIds) {
+            entriesAppendedDuringRequest.delete(requestKey);
+          }
         }
       },
 
@@ -1366,6 +1485,12 @@ export const createPiSessionStore = (
         catalogGeneration += 1;
         selectionGeneration += 1;
         entriesGeneration.clear();
+        entriesAppendedDuringRequest.clear();
+        previewGeneration.clear();
+        previewAppendedDuringRequest.clear();
+        previewRequests.clear();
+        deletingSessionIds.clear();
+        deletedSessionIds.clear();
         recoveryGeneration.clear();
         statsGeneration.clear();
         unsubscribeEvents?.();

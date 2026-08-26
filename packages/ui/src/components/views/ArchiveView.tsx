@@ -72,6 +72,7 @@ export function ArchiveView(): React.ReactNode {
   const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
   const deleteSession = usePiSessionStore((state) => state.deleteSession);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
+  const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
   const [query, setQuery] = React.useState('');
   const [selectedWorkspace, setSelectedWorkspace] = React.useState<string | null>(null);
@@ -280,6 +281,8 @@ export function ArchiveView(): React.ReactNode {
                     key={session.id}
                     className="group relative flex cursor-pointer items-center gap-3 rounded-md py-1 pl-2 pr-2 transition-[padding] hover:bg-interactive-hover/40 hover:pr-16 focus-within:pr-16"
                     onClick={() => void handleOpenSession(session)}
+                    onFocus={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
+                    onPointerEnter={() => { void prefetchSession(session.id, session.cwd).catch(() => undefined); }}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(event) => {
