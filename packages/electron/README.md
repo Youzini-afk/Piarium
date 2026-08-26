@@ -40,6 +40,8 @@ bun run electron:dev
 ```
 
 `bun run electron:dev` starts the web dev server with HMR, then launches Electron against `packages/electron/main.mjs`.
+It waits until both the HMR UI and API are listening before opening the window, and launches the
+verified installed Electron binary directly rather than passing through `npx` or npm.
 
 The Electron workspace package trusts Electron's install script so `bun install` downloads the platform runtime in fresh checkouts and worktrees.
 

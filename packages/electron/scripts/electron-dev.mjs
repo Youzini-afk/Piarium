@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { platformPath, resolveElectronPackageDir } from './ensure-electron.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +55,11 @@ function ensureElectronInstalled() {
   if (result.status !== 0) {
     throw new Error('[electron:dev] Electron is missing or incomplete; run `bun install` with network access');
   }
+  const packageDir = resolveElectronPackageDir(electronDir);
+  if (!packageDir) {
+    throw new Error('[electron:dev] Electron passed verification but its package directory could not be resolved');
+  }
+  return path.join(packageDir, 'dist', platformPath());
 }
 
 function runProcess(command, args, options = {}) {
@@ -134,6 +140,15 @@ async function findAvailablePort(preferredPort) {
   throw new Error(`No available port found near ${start}`);
 }
 
+async function waitForListeningPort(port, child, label) {
+  while (await isPortAvailable(port)) {
+    if (!child || child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`[electron:dev] ${label} exited before listening on 127.0.0.1:${port}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 function killWindowsProcessTree(pid) {
   if (!pid) return;
   try {
@@ -189,7 +204,7 @@ async function stopChildTree(child) {
 }
 
 async function main() {
-  ensureElectronInstalled();
+  const electronExecutable = ensureElectronInstalled();
   console.log('[electron:dev] building Pi runtime worker and broker...');
   await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
 
@@ -212,9 +227,14 @@ async function main() {
         PIARIUM_DISABLE_PWA_DEV: '1',
       },
     });
+    await Promise.all([
+      waitForListeningPort(Number(hmrUiPort), devServer, 'HMR UI'),
+      waitForListeningPort(Number(hmrApiPort), devServer, 'HMR API'),
+    ]);
+    console.log('[electron:dev] HMR UI and API are ready; launching Electron...');
   }
 
-  const electron = spawnProcess('npx', ['electron', './main.mjs'], {
+  const electron = spawnProcess(electronExecutable, ['./main.mjs'], {
     cwd: electronDir,
     env: {
       ...process.env,
