@@ -423,7 +423,6 @@ test("broker owns catalog and per-session Pi workers", async () => {
           entry.data.agentDir === agentDir,
       ),
     );
-
     const tree = await dispatchRuntimeRequest(broker, "session.tree", {
       sessionId: created.sessionId,
     });
@@ -508,6 +507,59 @@ test("session deletion retires a worker when an extension shutdown hook never se
       sessionId: created.sessionId,
     });
     assert.ok(Date.now() - startedAt < 2_000);
+    assert.deepEqual(broker.activeSessionIds, []);
+  } finally {
+    await broker.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("session preview reads persisted history without activating a session worker", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-runtime-preview-"));
+  const workspace = join(root, "workspace");
+  const agentDir = join(root, "agent");
+  const safePath = `--${resolve(workspace).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  const sessionDir = join(agentDir, "sessions", safePath);
+  const sessionId = "preview-session";
+  const sessionFile = join(sessionDir, "preview.jsonl");
+  await mkdir(workspace, { recursive: true });
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(sessionFile, [
+    JSON.stringify({
+      cwd: workspace,
+      id: sessionId,
+      timestamp: "2026-08-26T00:00:00.000Z",
+      type: "session",
+      version: 3,
+    }),
+    JSON.stringify({
+      id: "preview-user",
+      message: { content: "hello", role: "user", timestamp: 1 },
+      parentId: null,
+      timestamp: "2026-08-26T00:00:01.000Z",
+      type: "message",
+    }),
+    "",
+  ].join("\n"), "utf8");
+  const broker = new PiRuntimeBroker({
+    agentDir,
+    client: {
+      clientName: "runtime-preview-test",
+      clientVersion: "0.1.0",
+      mode: "test",
+    },
+    execArgv: ["--import", import.meta.resolve("tsx")],
+    hostEntry: HOST_ENTRY,
+  });
+
+  try {
+    const preview = await dispatchRuntimeRequest(broker, "session.entries.preview", {
+      cwd: workspace,
+      scope: "branch",
+      sessionId,
+    });
+    assert.equal(preview.sessionId, sessionId);
+    assert.equal(preview.entries[0]?.id, "preview-user");
     assert.deepEqual(broker.activeSessionIds, []);
   } finally {
     await broker.dispose();

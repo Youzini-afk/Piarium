@@ -714,6 +714,38 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([]);
   });
 
+  test('hydrates a read-only history preview while the session worker is still opening', async () => {
+    const runtime = new FakeRuntime();
+    const opened = deferred<SessionSnapshot>();
+    const previewEntry: PiSessionEntry = {
+      id: 'preview-user',
+      message: { content: 'preview', role: 'user', timestamp: 1 },
+      parentId: null,
+      timestamp: '2026-08-02T00:00:00.000Z',
+      type: 'message',
+    };
+    runtime.handler = (method, params) => {
+      const sessionId = (params as { sessionId?: string }).sessionId ?? 'session-a';
+      if (method === 'session.open') return opened.promise;
+      if (method === 'session.entries.preview') return branch(sessionId, [previewEntry]);
+      if (method === 'session.entries') return branch(sessionId, [previewEntry]);
+      if (method === 'recovery.status') return recoveryStatus;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const opening = store.getState().openSession({ cwd: 'D:/work', sessionId: 'session-a' });
+    expect(store.getState().currentSessionId).toBe('session-a');
+    await flushAsync();
+    expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([previewEntry]);
+    expect(store.getState().openingSessionId).toBe('session-a');
+
+    opened.resolve(snapshot('session-a'));
+    await opening;
+    await flushAsync();
+    expect(store.getState().openingSessionId).toBeNull();
+  });
+
   test('restores the previous selection when the latest open fails', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

@@ -650,6 +650,32 @@ export class SessionHost {
     };
   }
 
+  readEntries(
+    sessionId: string,
+    sessionFile: string,
+    cwd: string | undefined,
+    scope: "branch" | "all",
+  ): SessionEntriesResult {
+    if (!existsSync(sessionFile)) {
+      throw new HostError("session_not_found", `Pi session file does not exist: ${sessionFile}`);
+    }
+    const manager = SessionManager.open(sessionFile, undefined, cwd);
+    const header = manager.getHeader();
+    if (!header || header.id !== sessionId) {
+      throw new HostError(
+        "session_mismatch",
+        `Pi session file belongs to ${header?.id ?? "an unknown session"}, not ${sessionId}`,
+      );
+    }
+    const entries = scope === "branch" ? manager.getBranch() : manager.getEntries();
+    return {
+      entries: entries.map(projectSessionEntry),
+      leafId: manager.getLeafId(),
+      scope,
+      sessionId,
+    };
+  }
+
   entry(sessionId: string, entryId: string): PiSessionEntry | null {
     this.assertSession(sessionId);
     const entry = this.session.sessionManager.getEntry(entryId);

@@ -236,6 +236,13 @@ context keys, and the panel container live in a shared Editor Workbench Kernel t
 high-frequency cursor and scroll state stays in memory rather than in broad shared state or
 per-keystroke persistence.
 
+Session navigation likewise separates presentation readiness from execution readiness. A cold open
+asks the already-running catalog Host to read the persisted branch through Pi's `SessionManager` while
+the broker activates the session worker in parallel. The read-only preview can populate the timeline
+but cannot accept prompts, mutate the tree, or become a second session authority; the live worker's
+snapshot and entry stream take over when ready. Already-open sessions switch without another runtime
+request, and failed activation restores the previous selection.
+
 The standard desktop/Web text renderer is one shared Monaco path for both Agent and IDE;
 mobile and embedded editors retain a lightweight CodeMirror adapter because Monaco does not support
 mobile browsers. Monaco models are high-frequency projections of Document Registry records, never a

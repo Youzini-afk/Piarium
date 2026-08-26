@@ -391,6 +391,14 @@ async function dispatchRuntimeRequestUnchecked(
         sessionId,
       });
     }
+    case "session.entries.preview": {
+      const sessionId = requireString(input, "sessionId");
+      const cwd = optionalString(input, "cwd");
+      const scope = input.scope === undefined
+        ? undefined
+        : requireEnum(input, "scope", ["branch", "all"] as const);
+      return broker.previewSessionEntries(sessionId, cwd, scope);
+    }
     case "session.features.get": {
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "session.features.get", { sessionId });

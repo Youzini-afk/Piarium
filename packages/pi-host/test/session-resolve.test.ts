@@ -30,9 +30,10 @@ test("session.resolve reads the selected Pi SDK header without opening or rewrit
     version: 3,
   })}\n${JSON.stringify({
     id: "entry-1",
+    message: { content: "hello", role: "user", timestamp: 1 },
     parentId: null,
     timestamp: "2026-08-19T00:00:01.000Z",
-    type: "custom",
+    type: "message",
   })}\n`;
   const invalidContent = "not json\n";
   const emptyCwdContent = `${JSON.stringify({
@@ -56,6 +57,27 @@ test("session.resolve reads the selected Pi SDK header without opening or rewrit
     assert.deepEqual(valid.result, {
       cwd: resolve(cwd),
       sessionFile: resolve(validFile),
+      sessionId: "session-valid",
+    });
+
+    transport.receive(createRequest("entries", "session.entries.read", {
+      cwd,
+      scope: "branch",
+      sessionFile: validFile,
+      sessionId: "session-valid",
+    }));
+    const entries = await transport.waitFor((entry) => isResponse(entry, "entries"));
+    assert.ok(entries.kind === "response" && entries.ok);
+    assert.deepEqual(entries.result, {
+      entries: [{
+        id: "entry-1",
+        message: { content: "hello", role: "user", timestamp: 1 },
+        parentId: null,
+        timestamp: "2026-08-19T00:00:01.000Z",
+        type: "message",
+      }],
+      leafId: "entry-1",
+      scope: "branch",
       sessionId: "session-valid",
     });
 

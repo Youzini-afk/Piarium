@@ -505,6 +505,19 @@ export class HostController {
           }
           return this.#sessionHost.entries(readString(params, "sessionId"), scope);
         }
+      case "session.entries.read":
+        {
+          const scope = optionalString(params, "scope") ?? "branch";
+          if (scope !== "branch" && scope !== "all") {
+            throw new HostError("invalid_params", "scope must be 'branch' or 'all'");
+          }
+          return this.#sessionHost.readEntries(
+            readString(params, "sessionId"),
+            readString(params, "sessionFile"),
+            optionalString(params, "cwd"),
+            scope,
+          );
+        }
       case "session.features.get":
         return this.#sessionHost.features(readString(params, "sessionId"));
       case "session.features.mutate":

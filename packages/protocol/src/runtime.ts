@@ -143,6 +143,10 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
       params: { sessionId: string };
       result: { deleted: boolean; sessionId: string };
     };
+    "session.entries.preview": {
+      params: { cwd?: string; scope?: "all" | "branch"; sessionId: string };
+      result: HostMethodMap["session.entries.read"]["result"];
+    };
     "session.rename": {
       params: { name: string; sessionId: string };
       result: HostMethodMap["session.rename"]["result"];
@@ -213,6 +217,7 @@ export const RUNTIME_METHODS = [
   "session.delete",
   "session.entry",
   "session.entries",
+  "session.entries.preview",
   "session.features.get",
   "session.features.mutate",
   "session.fork",

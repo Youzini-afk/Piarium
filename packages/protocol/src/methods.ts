@@ -305,6 +305,10 @@ export interface HostMethodMap {
     params: { scope?: "all" | "branch"; sessionId: string };
     result: SessionEntriesResult;
   };
+  "session.entries.read": {
+    params: { cwd?: string; scope?: "all" | "branch"; sessionFile: string; sessionId: string };
+    result: SessionEntriesResult;
+  };
   "session.entry": {
     params: { entryId: string; sessionId: string };
     result: PiSessionEntry | null;

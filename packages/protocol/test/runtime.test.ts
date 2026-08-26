@@ -81,6 +81,7 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("session.archive"), true);
     assert.equal(isRuntimeMethod("session.unarchive"), true);
     assert.equal(isRuntimeMethod("session.delete"), true);
+    assert.equal(isRuntimeMethod("session.entries.preview"), true);
     assert.equal(isRuntimeMethod("thinking.select"), true);
     assert.equal(isRuntimeMethod("project.trust.respond"), true);
     assert.equal(isRuntimeMethod("recovery.status"), true);

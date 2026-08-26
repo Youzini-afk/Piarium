@@ -735,6 +735,7 @@ export const createPiSessionStore = (
       method: M,
       params: RuntimeMethodParams<M>,
       requestedRuntimeKey?: string,
+      reportError = true,
     ): Promise<{ result: RuntimeMethodResult<M>; runtimeKey: string }> => {
       const expectedRuntimeKey = requestedRuntimeKey ?? runtime.currentKey();
       try {
@@ -754,7 +755,7 @@ export const createPiSessionStore = (
         }
         return { result, runtimeKey: connection.runtimeKey };
       } catch (error) {
-        commitError(expectedRuntimeKey, error);
+        if (reportError) commitError(expectedRuntimeKey, error);
         throw error;
       }
     };
@@ -1047,6 +1048,34 @@ export const createPiSessionStore = (
           openingSessionId,
           lastError: null,
         }));
+        if (openingSessionId && !get().records[openingSessionId]?.branchEntries) {
+          const requestKey = entriesRequestKey(openingSessionId, 'branch');
+          const generation = (entriesGeneration.get(requestKey) ?? 0) + 1;
+          entriesGeneration.set(requestKey, generation);
+          const entryIdsAtRequestStart = new Set(
+            get().records[openingSessionId]?.branchEntries?.entries.map((entry) => entry.id) ?? [],
+          );
+          void request('session.entries.preview', {
+            ...(params.cwd === undefined ? {} : { cwd: params.cwd }),
+            scope: 'branch',
+            sessionId: openingSessionId,
+          }, undefined, false).then(({ result, runtimeKey }) => {
+            if (
+              entriesGeneration.get(requestKey) !== generation
+              || !contextIsCurrent(runtimeKey)
+            ) return;
+            set((state) => ({
+              records: upsertRecord(state.records, openingSessionId, (current) => ({
+                ...current,
+                branchEntries: mergeEntriesArrivingDuringRequest(
+                  result,
+                  current.branchEntries,
+                  entryIdsAtRequestStart,
+                ),
+              })),
+            }));
+          }).catch(() => undefined);
+        }
         try {
           const { result, runtimeKey } = await request('session.open', params);
           set((state) => ({

@@ -508,6 +508,29 @@ export class PiRuntimeBroker {
     return { deleted: true, sessionId };
   }
 
+  async previewSessionEntries(
+    sessionId: string,
+    cwd?: string,
+    scope: "branch" | "all" = "branch",
+  ) {
+    const catalog = await this.#getCatalog();
+    let summary = this.#knownSummaries.get(sessionId);
+    if (!summary) {
+      const summaries = await catalog.request("session.list", cwd === undefined ? {} : { cwd });
+      for (const candidate of summaries) this.#knownSummaries.set(candidate.id, candidate);
+      summary = summaries.find((candidate) => candidate.id === sessionId);
+    }
+    if (!summary) {
+      throw new PiRuntimeBrokerError("session_not_found", `Unknown Pi session: ${sessionId}`);
+    }
+    return catalog.request("session.entries.read", {
+      cwd: summary.cwd,
+      scope,
+      sessionFile: summary.sessionFile,
+      sessionId,
+    });
+  }
+
   async respondToExtensionUi(
     sessionId: string,
     response: ExtensionUiResponse,
