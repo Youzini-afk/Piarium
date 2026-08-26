@@ -32,6 +32,38 @@ test("spawns the package manager with discrete arguments and no shell string", a
   }]);
 });
 
+test("executes a Windows command shim whose path contains spaces", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium package manager "));
+  const executable = join(root, "Program Files", "nodejs", "npm.cmd");
+  try {
+    await mkdir(join(root, "Program Files", "nodejs"), { recursive: true });
+    await writeFile(executable, [
+      "@echo off",
+      'if not "%~1"=="install" exit /b 21',
+      'if not "%~2"=="-g" exit /b 22',
+      'if not "%~3"=="@earendil-works/pi-coding-agent@0.84.3" exit /b 23',
+      "echo installed",
+    ].join("\r\n"));
+
+    const result = await executePiInstallPlan({
+      action: "upgrade",
+      args: ["install", "-g", "@earendil-works/pi-coding-agent@0.84.3"],
+      currentVersion: "0.84.2",
+      executable,
+      manager: "npm",
+      reason: "test",
+      targetVersion: "0.84.3",
+    });
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stdout, /installed/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("does not run an install command when the plan keeps a newer Pi", async () => {
   let ran = false;
   const result = await executePiInstallPlan(

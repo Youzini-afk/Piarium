@@ -29,16 +29,38 @@ function formatOutput(result: InstallCommandResult): string {
   return [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
 }
 
-function commandNeedsWindowsShell(executable: string): boolean {
+function isWindowsCommandShim(executable: string): boolean {
   return [".cmd", ".bat"].includes(extname(executable).toLowerCase());
+}
+
+function quoteWindowsCommandArgument(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function windowsCommandInvocation(executable: string, args: string[]): {
+  args: string[];
+  executable: string;
+  windowsVerbatimArguments: boolean;
+} {
+  const commandLine = [executable, ...args]
+    .map(quoteWindowsCommandArgument)
+    .join(" ");
+  return {
+    args: ["/d", "/s", "/c", `"${commandLine}"`],
+    executable: process.env.ComSpec || "cmd.exe",
+    windowsVerbatimArguments: true,
+  };
 }
 
 async function defaultRunCommand(executable: string, args: string[]): Promise<InstallCommandResult> {
   return await new Promise((resolveCommand, rejectCommand) => {
-    const child = spawn(executable, args, {
+    const invocation = process.platform === "win32" && isWindowsCommandShim(executable)
+      ? windowsCommandInvocation(executable, args)
+      : { args, executable, windowsVerbatimArguments: false };
+    const child = spawn(invocation.executable, invocation.args, {
       env: process.env,
-      shell: process.platform === "win32" && commandNeedsWindowsShell(executable),
       stdio: ["ignore", "pipe", "pipe"],
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       windowsHide: true,
     });
     let stdout = "";
