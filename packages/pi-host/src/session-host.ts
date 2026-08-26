@@ -898,6 +898,16 @@ export class SessionHost {
     return wasBusy;
   }
 
+  clearQueue(sessionId: string): { cleared: boolean; followUp: string[]; steering: string[] } {
+    this.assertSession(sessionId);
+    const cleared = this.session.clearQueue();
+    return {
+      cleared: cleared.followUp.length > 0 || cleared.steering.length > 0,
+      followUp: cleared.followUp,
+      steering: cleared.steering,
+    };
+  }
+
   features(sessionId: string): PiSessionFeatureState {
     this.assertSession(sessionId);
     return readSessionFeatures(this.session.sessionManager);

@@ -122,6 +122,10 @@ export interface HostMethodMap {
     params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
   };
+  "agent.queue.clear": {
+    params: { sessionId: string };
+    result: { cleared: boolean; followUp: string[]; steering: string[] };
+  };
   "agent.steer": {
     params: { images?: ImageAttachment[]; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };

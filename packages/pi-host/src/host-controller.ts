@@ -60,6 +60,7 @@ const HOST_CAPABILITIES: HostCapabilities = {
 
 const OUT_OF_BAND_METHODS = new Set([
   "agent.abort",
+  "agent.queue.clear",
   "config.unwatch",
   "extension.ui.respond",
   "provider.auth.respond",
@@ -588,6 +589,8 @@ export class HostController {
         };
       case "agent.abort":
         return { aborted: await this.#sessionHost.abort(readString(params, "sessionId")) };
+      case "agent.queue.clear":
+        return this.#sessionHost.clearQueue(readString(params, "sessionId"));
       case "agentProvider.list":
         return this.#sessionHost.listAgentProviders();
       case "agentProvider.action":

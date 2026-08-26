@@ -67,6 +67,7 @@ interface PiComposerProps {
   followUpBehavior: FollowUpBehavior;
   images: ImageAttachment[];
   onAbort?(): Promise<void> | void;
+  onClearQueue?(): Promise<void> | void;
   onChangeAgent(value: PiComposerAgentSelection | undefined): void;
   onChangeDraft(value: string): void;
   onChangeImages(value: ImageAttachment[]): void;
@@ -127,6 +128,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   followUpBehavior,
   images,
   onAbort,
+  onClearQueue,
   onChangeAgent,
   onChangeDraft,
   onChangeImages,
@@ -152,6 +154,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const [autocomplete, setAutocomplete] = React.useState<PiComposerAutocomplete>(null);
   const [confirmedMentions, setConfirmedMentions] = React.useState<ReadonlySet<string>>(() => new Set());
   const [knownAgentNames, setKnownAgentNames] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [clearingQueue, setClearingQueue] = React.useState(false);
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
@@ -217,7 +220,21 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     }
   }, [images, onChangeImages, t]);
 
-  const queue = snapshot ? [...snapshot.steering, ...snapshot.followUp] : [];
+  const steeringQueue = snapshot?.steering ?? [];
+  const followUpQueue = snapshot?.followUp ?? [];
+  const queuedMessageCount = steeringQueue.length + followUpQueue.length;
+
+  const handleClearQueue = React.useCallback(async () => {
+    if (!onClearQueue || clearingQueue) return;
+    setClearingQueue(true);
+    try {
+      await onClearQueue();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setClearingQueue(false);
+    }
+  }, [clearingQueue, onClearQueue]);
 
   const insertTranscript = React.useCallback((text: string) => {
     const next = [draft.trimEnd(), text.trim()]
@@ -350,19 +367,58 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
     )} data-pi-composer-shell="true">
       <div className={cn('chat-input-column', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>
-        {queue.length > 0 && (
-          <details className="mb-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-            <summary className="cursor-pointer select-none typography-meta text-muted-foreground">
-              {t('chat.queuedMessage.title')} · {queue.length}
-            </summary>
-            <ol className="mt-2 space-y-1 border-t border-border/60 pt-2">
-              {queue.map((message, index) => (
-                <li key={`${index}:${message}`} className="whitespace-pre-wrap break-words typography-meta text-foreground">
-                  {message || t('chat.queuedMessage.empty')}
-                </li>
+        {queuedMessageCount > 0 && (
+          <section
+            className="mb-2 overflow-hidden rounded-xl border border-border/60 bg-muted/15"
+            data-pi-runtime-queue="true"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-border/50 px-3 py-2">
+              <span className="typography-meta font-medium text-foreground">
+                {t('chat.queuedMessage.title')} · {queuedMessageCount}
+              </span>
+              {onClearQueue ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={clearingQueue}
+                      onClick={() => void handleClearQueue()}
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:opacity-40"
+                      aria-label={t('chat.queuedMessage.removeAria')}
+                    >
+                      <Icon
+                        name={clearingQueue ? 'loader-4' : 'close'}
+                        className={cn('size-3.5', clearingQueue && 'animate-spin')}
+                      />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">{t('chat.queuedMessage.removeAria')}</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
+            <div className="divide-y divide-border/40">
+              {steeringQueue.map((message, index) => (
+                <div key={`steer:${index}:${message}`} className="flex items-start gap-2 px-3 py-2">
+                  <span className="mt-0.5 shrink-0 rounded-md bg-primary/10 px-1.5 py-0.5 typography-micro font-medium text-primary">
+                    {t('settings.piarium.visual.option.followUpBehavior.steer.label')}
+                  </span>
+                  <p className="min-w-0 whitespace-pre-wrap break-words typography-meta text-foreground">
+                    {message || t('chat.queuedMessage.empty')}
+                  </p>
+                </div>
               ))}
-            </ol>
-          </details>
+              {followUpQueue.map((message, index) => (
+                <div key={`follow-up:${index}:${message}`} className="flex items-start gap-2 px-3 py-2">
+                  <span className="mt-0.5 shrink-0 rounded-md bg-muted px-1.5 py-0.5 typography-micro font-medium text-muted-foreground">
+                    {t('settings.piarium.visual.option.followUpBehavior.queue.label')}
+                  </span>
+                  <p className="min-w-0 whitespace-pre-wrap break-words typography-meta text-foreground">
+                    {message || t('chat.queuedMessage.empty')}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
 
         {images.length > 0 && (

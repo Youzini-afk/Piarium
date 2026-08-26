@@ -24,7 +24,10 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
-import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import {
+  usePiSessionStore,
+  type PiSessionSubmissionMode,
+} from '@/stores/usePiSessionStore';
 import {
   EMPTY_PI_DRAFT,
   piDraftKey,
@@ -75,12 +78,6 @@ interface PiChatViewProps {
   readOnly?: boolean;
 }
 
-interface PendingPiSubmission {
-  entryIdsAtSubmit: ReadonlySet<string>;
-  message: PiUserMessage;
-  sessionId: string;
-}
-
 const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
 
 const pendingUserMessage = (draft: PiDraftState): PiUserMessage => ({
@@ -121,6 +118,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const lastError = usePiSessionStore((state) => state.lastError);
   const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const createSession = usePiSessionStore((state) => state.createSession);
+  const beginSubmission = usePiSessionStore((state) => state.beginSubmission);
+  const clearQueue = usePiSessionStore((state) => state.clearQueue);
+  const clearSubmission = usePiSessionStore((state) => state.clearSubmission);
   const prompt = usePiSessionStore((state) => state.prompt);
   const steer = usePiSessionStore((state) => state.steer);
   const followUp = usePiSessionStore((state) => state.followUp);
@@ -130,6 +130,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const recoverTo = usePiSessionStore((state) => state.recoverTo);
   const selectModel = usePiSessionStore((state) => state.selectModel);
   const selectThinking = usePiSessionStore((state) => state.selectThinking);
+  const updateSubmission = usePiSessionStore((state) => state.updateSubmission);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -177,13 +178,13 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const setPendingPiDraft = usePiDraftStore((state) => state.setPendingDraft);
   const clearPiDraft = usePiDraftStore((state) => state.clear);
   const transferPendingPiDraft = usePiDraftStore((state) => state.transferPendingDraft);
-  const [sending, setSending] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
   const [pinBusyEntryId, setPinBusyEntryId] = React.useState<string | null>(null);
-  const [pendingSubmission, setPendingSubmission] = React.useState<PendingPiSubmission | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
+  const submission = currentRecord?.submission;
+  const sending = submission?.status === 'preparing' || submission?.status === 'dispatching';
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
     setPiDraft(sessionId, update, runtimeKey);
   }, [runtimeKey, setPiDraft]);
@@ -233,8 +234,22 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     currentDraft: PiDraftState,
     draftRuntimeKey = runtimeKey,
   ) => {
-    const snapshot = usePiSessionStore.getState().records[sessionId]?.snapshot;
-    if (!snapshot || sending) return;
+    const record = usePiSessionStore.getState().records[sessionId];
+    const snapshot = record?.snapshot;
+    if (
+      !snapshot
+      || record.submission?.status === 'preparing'
+      || record.submission?.status === 'dispatching'
+    ) return;
+    const activity = projectPiSessionActivity(snapshot);
+    const submissionMode: PiSessionSubmissionMode = activity.isWorking
+      ? (followUpBehavior === 'queue' ? 'followUp' : 'steer')
+      : 'prompt';
+    const submissionId = beginSubmission(
+      sessionId,
+      pendingUserMessage(currentDraft),
+      submissionMode,
+    );
     const inlineDraftTarget = { directory: snapshot.cwd, sessionKey: sessionId };
     const inlineDraftStore = useInlineCommentDraftStore.getState();
     let inlineDrafts: ReturnType<typeof inlineDraftStore.consumeDrafts> = [];
@@ -245,8 +260,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     };
     let startedGoalId: string | null = null;
     let draftCleared = false;
-    let projectedPendingSubmission = false;
-    setSending(true);
     try {
       const rendered = await renderPiComposerSubmission(currentDraft.text);
       let promptText = rendered.text;
@@ -278,23 +291,16 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       if (!promptText.trim() && currentDraft.images.length === 0) {
         inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
         restoreEditorContextAttachments(editorAttachments);
+        clearSubmission(sessionId, submissionId);
         return;
       }
       if (currentDraft.agent && currentDraft.images.length > 0) {
         throw new Error(t('chat.piComposer.agent.imageUnsupported'));
       }
-      const activity = projectPiSessionActivity(snapshot);
-      if (!activity.isWorking) {
-        setPendingSubmission({
-          entryIdsAtSubmit: new Set(
-            usePiSessionStore.getState().records[sessionId]?.branchEntries?.entries
-              .map((entry) => entry.id) ?? [],
-          ),
-          message: pendingUserMessage(currentDraft),
-          sessionId,
-        });
-        projectedPendingSubmission = true;
-      }
+      updateSubmission(sessionId, submissionId, {
+        dispatchedText: promptText,
+        status: 'dispatching',
+      });
       clearPiDraft(sessionId, draftRuntimeKey);
       draftCleared = true;
       consumedGoalArm = useSessionGoalArmStore.getState().consume();
@@ -321,22 +327,27 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         accepted = await prompt(sessionId, promptText, currentDraft.images, instructions, draftRuntimeKey);
       }
       if (!accepted) throw new Error('The Pi runtime did not accept the prompt');
+      updateSubmission(sessionId, submissionId, { status: 'accepted' });
     } catch (error) {
-      if (draftCleared) setPiDraft(sessionId, currentDraft, draftRuntimeKey);
-      if (projectedPendingSubmission) {
-        setPendingSubmission((current) => current?.sessionId === sessionId ? null : current);
-      }
-      if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
-      restoreEditorContextAttachments(editorAttachments);
-      if (startedGoalId) {
-        await mutateFeatures(
-          sessionId,
-          { goalId: startedGoalId, type: 'goal.clear' },
-          draftRuntimeKey,
-        ).catch(() => undefined);
-      }
-      if (consumedGoalArm.armed) {
-        useSessionGoalArmStore.getState().setArmed(true, consumedGoalArm.objectiveOverride);
+      const ambiguous = error instanceof PiRuntimeAmbiguousRequestError;
+      updateSubmission(sessionId, submissionId, {
+        error: error instanceof Error ? error.message : String(error),
+        status: ambiguous ? 'uncertain' : 'failed',
+      });
+      if (!ambiguous) {
+        if (draftCleared) setPiDraft(sessionId, currentDraft, draftRuntimeKey);
+        if (inlineDrafts.length > 0) inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
+        restoreEditorContextAttachments(editorAttachments);
+        if (startedGoalId) {
+          await mutateFeatures(
+            sessionId,
+            { goalId: startedGoalId, type: 'goal.clear' },
+            draftRuntimeKey,
+          ).catch(() => undefined);
+        }
+        if (consumedGoalArm.armed) {
+          useSessionGoalArmStore.getState().setArmed(true, consumedGoalArm.objectiveOverride);
+        }
       }
       console.error('Failed to send Pi prompt:', error);
       toast.error(
@@ -346,10 +357,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             ? error.message
             : t('chat.chatInput.toast.messageSendFailed'),
       );
-    } finally {
-      setSending(false);
     }
-  }, [clearPiDraft, followUp, followUpBehavior, mutateFeatures, prompt, runtimeKey, sending, setPiDraft, steer, t]);
+  }, [beginSubmission, clearPiDraft, clearSubmission, followUp, followUpBehavior, mutateFeatures, prompt, runtimeKey, setPiDraft, steer, t, updateSubmission]);
 
   const handleSend = React.useCallback(async () => {
     if (!currentSessionId) return;
@@ -480,33 +489,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const pinnedEntryIds = React.useMemo(() => new Set(
     currentRecord?.snapshot?.features.pinnedContext.map((entry) => entry.entryId) ?? [],
   ), [currentRecord?.snapshot?.features.pinnedContext]);
-  const pendingEntryCommitted = Boolean(
-    pendingSubmission
-    && currentSessionId === pendingSubmission.sessionId
-    && currentRecord?.branchEntries?.entries.some((entry) => (
-      !pendingSubmission.entryIdsAtSubmit.has(entry.id)
-      && entry.type === 'message'
-      && entry.message.role === 'user'
-    )),
-  );
   const transientUser = currentRecord?.liveUser ?? (
-    pendingSubmission
-    && currentSessionId === pendingSubmission.sessionId
-    && !pendingEntryCommitted
-      ? pendingSubmission.message
+    submission?.mode === 'prompt'
+      ? submission.message
       : undefined
   );
-
-  React.useEffect(() => {
-    if (!pendingSubmission) return;
-    if (
-      currentSessionId !== pendingSubmission.sessionId
-      || currentRecord?.liveUser !== undefined
-      || pendingEntryCommitted
-    ) {
-      setPendingSubmission(null);
-    }
-  }, [currentRecord?.liveUser, currentSessionId, pendingEntryCommitted, pendingSubmission]);
   const sessionOpening = openingSessionId !== null && openingSessionId === currentSessionId;
 
   if (pendingDraftOpen) {
@@ -662,6 +649,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
                   liveAssistant={currentRecord.liveAssistant}
                   liveUser={transientUser}
+                  liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
                   onRecover={handleRecover}
                   onTogglePinned={handleTogglePinned}
                   pinBusyEntryId={pinBusyEntryId}
@@ -710,6 +698,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 snapshot={snapshot}
                 workspace={snapshot.workspace}
                 onAbort={async () => { await abort(currentSessionId); }}
+                onClearQueue={async () => { await clearQueue(currentSessionId); }}
                 onChangeAgent={(agent) => updateDraft(currentSessionId, { agent })}
                 onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
                 onChangeImages={(images) => updateDraft(currentSessionId, { images })}

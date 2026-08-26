@@ -19,6 +19,7 @@ type DirectRuntimeMethod =
   | "agent.abort"
   | "agent.followUp"
   | "agent.prompt"
+  | "agent.queue.clear"
   | "agent.steer"
   | "command.execute"
   | "config.unwatch"
@@ -165,6 +166,7 @@ export const RUNTIME_METHODS = [
   "agent.abort",
   "agent.followUp",
   "agent.prompt",
+  "agent.queue.clear",
   "agent.steer",
   "agentProvider.action",
   "agentProvider.list",

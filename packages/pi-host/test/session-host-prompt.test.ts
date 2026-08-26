@@ -53,6 +53,11 @@ describe("SessionHost prompt streaming", () => {
     try {
       const snapshot = await host.create(root);
       assert.equal(snapshot.model?.provider, model.provider);
+      assert.deepEqual(host.clearQueue(snapshot.sessionId), {
+        cleared: false,
+        followUp: [],
+        steering: [],
+      });
       assert.deepEqual(
         await host.prompt(
           snapshot.sessionId,

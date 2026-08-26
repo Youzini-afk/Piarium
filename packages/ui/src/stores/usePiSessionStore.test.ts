@@ -308,9 +308,137 @@ describe('Pi session event state', () => {
     expect(settled.activityStartedAt).toBeUndefined();
     expect(settled.settledActivityDurationMs).toBe(4_500);
   });
+
+  test('reconciles an optimistic submission only when Pi projects its user message', () => {
+    const sessionId = 'session-a';
+    const existingEntry: PiSessionEntry = {
+      id: 'existing-user',
+      message: { content: 'older', role: 'user', timestamp: 1 },
+      parentId: null,
+      timestamp: '2026-08-02T00:00:00.000Z',
+      type: 'message',
+    };
+    const initial = {
+      branchEntries: branch(sessionId, [existingEntry]),
+      extensionStates: {},
+      open: true,
+      sessionId,
+      submission: {
+        entryIdsAtSubmit: new Set([existingEntry.id]),
+        id: 'submission-a',
+        message: { content: 'new', role: 'user' as const, timestamp: 2 },
+        mode: 'prompt' as const,
+        status: 'dispatching' as const,
+      },
+      toolExecutions: {},
+    };
+
+    const repeated = reducePiAgentEvent(initial, { entry: existingEntry, type: 'entry_appended' });
+    expect(repeated.submission?.id).toBe('submission-a');
+
+    const appended: PiSessionEntry = {
+      id: 'new-user',
+      message: { content: 'new', role: 'user', timestamp: 3 },
+      parentId: existingEntry.id,
+      timestamp: '2026-08-02T00:00:01.000Z',
+      type: 'message',
+    };
+    const reconciled = reducePiAgentEvent(repeated, { entry: appended, type: 'entry_appended' });
+    expect(reconciled.submission).toBeUndefined();
+  });
 });
 
 describe('Pi session store', () => {
+  test('owns recoverable submission state per Pi session', () => {
+    const store = createPiSessionStore(new FakeRuntime());
+    store.setState({
+      records: {
+        'session-a': {
+          branchEntries: branch('session-a'),
+          extensionStates: {},
+          open: true,
+          sessionId: 'session-a',
+          toolExecutions: {},
+        },
+      },
+    });
+
+    const id = store.getState().beginSubmission(
+      'session-a',
+      { content: 'hello', role: 'user', timestamp: 1 },
+      'prompt',
+    );
+    expect(store.getState().records['session-a']?.submission?.id).toBe(id);
+    expect(store.getState().records['session-a']?.submission?.mode).toBe('prompt');
+    expect(store.getState().records['session-a']?.submission?.status).toBe('preparing');
+
+    store.getState().updateSubmission('session-a', id, {
+      dispatchedText: 'hello',
+      status: 'uncertain',
+    });
+    expect(store.getState().records['session-a']?.submission?.dispatchedText).toBe('hello');
+    expect(store.getState().records['session-a']?.submission?.status).toBe('uncertain');
+
+    const followUpId = store.getState().beginSubmission(
+      'session-a',
+      { content: 'later', role: 'user', timestamp: 2 },
+      'followUp',
+    );
+    store.getState().updateSubmission('session-a', followUpId, { status: 'accepted' });
+    expect(store.getState().records['session-a']?.submission).toBeUndefined();
+  });
+
+  test('ignores a stale submission completion after the runtime record is reset', () => {
+    const store = createPiSessionStore(new FakeRuntime());
+    const id = store.getState().beginSubmission(
+      'session-a',
+      { content: 'hello', role: 'user', timestamp: 1 },
+      'prompt',
+    );
+
+    store.getState().reset();
+    store.getState().updateSubmission('session-a', id, { status: 'failed' });
+    store.getState().clearSubmission('session-a', id);
+
+    expect(store.getState().records).toEqual({});
+  });
+
+  test('clears the Pi-owned queue through the runtime and snapshot', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'agent.queue.clear') {
+        return { cleared: true, followUp: ['later'], steering: ['now'] };
+      }
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({
+      records: {
+        'session-a': {
+          extensionStates: {},
+          open: true,
+          sessionId: 'session-a',
+          snapshot: {
+            ...snapshot('session-a'),
+            followUp: ['later'],
+            pendingMessageCount: 2,
+            steering: ['now'],
+          },
+          toolExecutions: {},
+        },
+      },
+    });
+
+    expect(await store.getState().clearQueue('session-a')).toBe(true);
+    expect(runtime.calls).toEqual([{
+      method: 'agent.queue.clear',
+      params: { sessionId: 'session-a' },
+    }]);
+    expect(store.getState().records['session-a']?.snapshot?.followUp).toEqual([]);
+    expect(store.getState().records['session-a']?.snapshot?.pendingMessageCount).toBe(0);
+    expect(store.getState().records['session-a']?.snapshot?.steering).toEqual([]);
+  });
+
   test('loads, sorts, and splits the native catalog', async () => {
     const runtime = new FakeRuntime();
     runtime.handler = (method) => {

@@ -44,6 +44,9 @@ describe("surface runtime protocol", () => {
       authority: "aft-user",
       cwd: "C:/workspace",
     });
+    const clearQueueRequest = createRuntimeRequest("req-7", "agent.queue.clear", {
+      sessionId: "session-1",
+    });
 
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(request)), request);
     assert.deepEqual(
@@ -63,9 +66,14 @@ describe("surface runtime protocol", () => {
       decodeRuntimeEnvelope(encodeRuntimeEnvelope(authorityRequest)),
       authorityRequest,
     );
+    assert.deepEqual(
+      decodeRuntimeEnvelope(encodeRuntimeEnvelope(clearQueueRequest)),
+      clearQueueRequest,
+    );
     assert.equal(isRuntimeMethod("config.document.get"), true);
     assert.equal(isRuntimeMethod("agentProvider.action"), true);
     assert.equal(isRuntimeMethod("agentProvider.list"), true);
+    assert.equal(isRuntimeMethod("agent.queue.clear"), true);
     assert.equal(isRuntimeMethod("config.document.update"), true);
     assert.equal(isRuntimeMethod("config.text.get"), true);
     assert.equal(isRuntimeMethod("config.text.update"), true);

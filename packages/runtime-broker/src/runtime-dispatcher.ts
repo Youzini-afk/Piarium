@@ -474,6 +474,10 @@ async function dispatchRuntimeRequestUnchecked(
       const sessionId = requireString(input, "sessionId");
       return broker.requestForSession(sessionId, "agent.abort", { sessionId });
     }
+    case "agent.queue.clear": {
+      const sessionId = requireString(input, "sessionId");
+      return broker.requestForSession(sessionId, "agent.queue.clear", { sessionId });
+    }
 
     case "agentProvider.list": {
       return requestForRuntimeContext(

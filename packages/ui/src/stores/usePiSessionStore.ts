@@ -39,6 +39,24 @@ export interface PiToolExecutionState {
   toolCallId: string;
 }
 
+export type PiSessionSubmissionMode = 'followUp' | 'prompt' | 'steer';
+export type PiSessionSubmissionStatus =
+  | 'preparing'
+  | 'dispatching'
+  | 'accepted'
+  | 'uncertain'
+  | 'failed';
+
+export interface PiSessionSubmissionState {
+  dispatchedText?: string;
+  entryIdsAtSubmit: ReadonlySet<string>;
+  error?: string;
+  id: string;
+  message: PiUserMessage;
+  mode: PiSessionSubmissionMode;
+  status: PiSessionSubmissionStatus;
+}
+
 export interface PiSessionViewState {
   activityStartedAt?: number;
   allEntries?: SessionEntriesResult;
@@ -53,6 +71,7 @@ export interface PiSessionViewState {
   settledActivityDurationMs?: number;
   snapshot?: SessionSnapshot;
   stats?: SessionStats;
+  submission?: PiSessionSubmissionState;
   toolExecutions: Record<string, PiToolExecutionState>;
 }
 
@@ -89,8 +108,15 @@ export interface PiSessionStoreState {
   summaries: SessionSummary[];
 
   abort(sessionId: string): Promise<boolean>;
+  beginSubmission(
+    sessionId: string,
+    message: PiUserMessage,
+    mode: PiSessionSubmissionMode,
+  ): string;
   archiveSession(sessionId: string): Promise<SessionSummary>;
   closeSession(sessionId: string): Promise<boolean>;
+  clearQueue(sessionId: string): Promise<boolean>;
+  clearSubmission(sessionId: string, submissionId: string): void;
   clearSessionAttention(sessionId: string): void;
   createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryOperationResult>;
   createSession(
@@ -163,6 +189,12 @@ export interface PiSessionStoreState {
   ): Promise<boolean>;
   undoRecovery(sessionId: string, mode: RecoveryMode): Promise<RecoveryOperationResult>;
   unarchiveSession(sessionId: string): Promise<SessionSummary>;
+  updateSubmission(
+    sessionId: string,
+    submissionId: string,
+    update: Pick<PiSessionSubmissionState, 'status'>
+      & Partial<Pick<PiSessionSubmissionState, 'dispatchedText' | 'error'>>,
+  ): void;
 }
 
 export type PiSessionStore = UseBoundStore<StoreApi<PiSessionStoreState>>;
@@ -259,6 +291,13 @@ const emptySession = (sessionId: string): PiSessionViewState => ({
   sessionId,
   toolExecutions: {},
 });
+
+let submissionSequence = 0;
+
+const nextSubmissionId = (): string => {
+  submissionSequence += 1;
+  return `submission-${Date.now().toString(36)}-${submissionSequence.toString(36)}`;
+};
 
 const updateSnapshot = (
   snapshot: SessionSnapshot | undefined,
@@ -390,6 +429,7 @@ export const reducePiAgentEvent = (
       const message = event.message;
       if (message.role === 'user') {
         next.liveUser = message;
+        delete next.submission;
         return next;
       }
       if (
@@ -424,6 +464,14 @@ export const reducePiAgentEvent = (
         && current.liveUser?.timestamp === event.entry.message.timestamp
       ) {
         delete next.liveUser;
+      }
+      if (
+        event.entry.type === 'message'
+        && event.entry.message.role === 'user'
+        && current.submission
+        && !current.submission.entryIdsAtSubmit.has(event.entry.id)
+      ) {
+        delete next.submission;
       }
       return next;
     case 'tool_execution_start':
@@ -792,6 +840,25 @@ export const createPiSessionStore = (
         return result.aborted;
       },
 
+      beginSubmission: (sessionId, message, mode) => {
+        const id = nextSubmissionId();
+        set((state) => ({
+          records: upsertRecord(state.records, sessionId, (current) => ({
+            ...current,
+            submission: {
+              entryIdsAtSubmit: new Set(
+                current.branchEntries?.entries.map((entry) => entry.id) ?? [],
+              ),
+              id,
+              message,
+              mode,
+              status: 'preparing',
+            },
+          })),
+        }));
+        return id;
+      },
+
       archiveSession: async (sessionId) => {
         const clearsCurrentSelection = get().currentSessionId === sessionId;
         if (clearsCurrentSelection) beginSelectionIntent();
@@ -839,6 +906,31 @@ export const createPiSessionStore = (
           commitError(runtime.currentKey(), error);
           throw error;
         }
+      },
+
+      clearQueue: async (sessionId) => {
+        const { result } = await request('agent.queue.clear', { sessionId });
+        set((state) => ({
+          records: upsertRecord(state.records, sessionId, (current) => ({
+            ...current,
+            snapshot: updateSnapshot(current.snapshot, {
+              followUp: [],
+              pendingMessageCount: 0,
+              steering: [],
+            }),
+          })),
+        }));
+        return result.cleared;
+      },
+
+      clearSubmission: (sessionId, submissionId) => {
+        set((state) => {
+          const current = state.records[sessionId];
+          if (current?.submission?.id !== submissionId) return state;
+          const next = { ...current };
+          delete next.submission;
+          return { records: { ...state.records, [sessionId]: next } };
+        });
       },
 
       clearSessionAttention: (sessionId) => {
@@ -1347,6 +1439,27 @@ export const createPiSessionStore = (
           commitError(runtime.currentKey(), error);
           throw error;
         }
+      },
+
+      updateSubmission: (sessionId, submissionId, update) => {
+        set((state) => {
+          const current = state.records[sessionId];
+          if (current?.submission?.id !== submissionId) return state;
+          if (update.status === 'accepted' && current.submission.mode !== 'prompt') {
+            const next = { ...current };
+            delete next.submission;
+            return { records: { ...state.records, [sessionId]: next } };
+          }
+          return {
+            records: {
+              ...state.records,
+              [sessionId]: {
+                ...current,
+                submission: { ...current.submission, ...update },
+              },
+            },
+          };
+        });
       },
     };
   });

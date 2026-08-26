@@ -92,7 +92,9 @@ queue cap or start background workers merely to prefetch UI.
 - Idle Enter sends a new turn.
 - Busy Enter follows the selected Pi-native Queue or Steer behavior.
 - Stop is a separate action and remains available while a draft can be queued or steered.
-- Pi's authoritative queued/steering messages appear as editable/removable rows above the Composer.
+- Pi's authoritative queued/steering messages appear as typed rows above the Composer. Controls must map
+  to atomic Pi operations: Pi 0.84.3 supports clearing the queue as a whole, so Piarium does not simulate
+  single-row editing or removal by clearing and racing messages back into the runtime.
 - The Composer clears after a local submission transaction is committed, refocuses on desktop, and remains
   available for the next follow-up.
 - Up/Down recalls local sent drafts only when autocomplete is closed and the caret is at the appropriate

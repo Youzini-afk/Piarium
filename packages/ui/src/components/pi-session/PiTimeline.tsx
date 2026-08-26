@@ -24,7 +24,10 @@ import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { PatchHunkReview } from '@/components/workbench/PatchHunkReview';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
-import type { PiToolExecutionState } from '@/stores/usePiSessionStore';
+import type {
+  PiSessionSubmissionStatus,
+  PiToolExecutionState,
+} from '@/stores/usePiSessionStore';
 import { PiExtensionStatusCard } from './PiExtensionStatusCard';
 import {
   renderFirstWorkbenchMatch,
@@ -47,6 +50,7 @@ interface PiTimelineProps {
   hiddenThinkingLabel?: string;
   liveAssistant?: PiAssistantMessage;
   liveUser?: PiUserMessage;
+  liveUserStatus?: PiSessionSubmissionStatus;
   onRecover(entry: PiSessionMessageEntry): void;
   onTogglePinned(entry: PiSessionMessageEntry, pinned: boolean): void;
   pinBusyEntryId?: string | null;
@@ -524,6 +528,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   hiddenThinkingLabel,
   liveAssistant,
   liveUser,
+  liveUserStatus,
   onRecover,
   onTogglePinned,
   pinBusyEntryId,
@@ -834,6 +839,29 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                 messageId={`live-user:${projection.liveUser.timestamp}`}
               />
             </div>
+            {liveUserStatus ? (
+              <div
+                className={cn(
+                  'mt-1 flex items-center justify-end gap-1.5 px-1 typography-micro text-muted-foreground',
+                  liveUserStatus === 'failed' && 'text-[var(--status-error)]',
+                  liveUserStatus === 'uncertain' && 'text-[var(--status-warning)]',
+                )}
+                data-pi-submission-status={liveUserStatus}
+              >
+                <Icon
+                  name={liveUserStatus === 'preparing' || liveUserStatus === 'dispatching'
+                    ? 'loader-4'
+                    : liveUserStatus === 'accepted'
+                      ? 'check'
+                      : 'error-warning'}
+                  className={cn(
+                    'size-3',
+                    (liveUserStatus === 'preparing' || liveUserStatus === 'dispatching') && 'animate-spin',
+                  )}
+                />
+                {t(`chat.piComposer.submission.${liveUserStatus}`)}
+              </div>
+            ) : null}
           </article>
         )}
 
