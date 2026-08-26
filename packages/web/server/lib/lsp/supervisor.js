@@ -402,7 +402,14 @@ export const createLanguageSupervisor = ({
     try {
       child = spawn(provider.command, provider.args ?? [], {
         cwd: workspace.root,
-        env: { ...env, ...provider.env },
+        env: {
+          ...env,
+          ...provider.env,
+          // Electron and VS Code expose their executable as process.execPath.
+          // Language providers are always headless CLI processes; without Node
+          // mode a provider using process.execPath launches another GUI shell.
+          ELECTRON_RUN_AS_NODE: '1',
+        },
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

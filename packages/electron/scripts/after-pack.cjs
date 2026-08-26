@@ -41,15 +41,20 @@ module.exports = (context) => {
     { recursive: true, force: true },
   );
 
-  const requiredPiRuntimeFiles = [
+  const requiredApplicationHostFiles = [
     path.join('node_modules', '@piarium', 'pi-host', 'dist', 'host-bootstrap.js'),
     path.join('node_modules', '@piarium', 'runtime-broker', 'dist', 'index.js'),
     path.join('node_modules', '@piarium', 'extension-host', 'dist', 'index.js'),
+    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'piarium.extension.json'),
+    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'host.cjs'),
+    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript-language-server.mjs'),
+    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'package.json'),
+    path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'lib', 'tsserver.js'),
   ];
-  for (const relativePath of requiredPiRuntimeFiles) {
+  for (const relativePath of requiredApplicationHostFiles) {
     const packagedPath = path.join(resourcesPath, 'app.asar.unpacked', relativePath);
     if (!fs.existsSync(packagedPath)) {
-      throw new Error(`Missing packaged Pi runtime file at ${packagedPath}`);
+      throw new Error(`Missing unpacked application-host runtime file at ${packagedPath}`);
     }
   }
 

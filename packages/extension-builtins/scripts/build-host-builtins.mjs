@@ -34,6 +34,11 @@ await cp(
   join(outputRoot, 'runtime', 'typescript-language-server.mjs'),
 );
 await cp(join(typescriptRoot, 'lib'), join(outputRoot, 'runtime', 'typescript', 'lib'), { recursive: true });
+await writeFile(join(outputRoot, 'runtime', 'typescript', 'package.json'), `${JSON.stringify({
+  name: 'typescript',
+  private: true,
+  version: typescriptPackage.version,
+}, null, 2)}\n`);
 await cp(join(typescriptLanguageServerRoot, 'LICENSE'), join(outputRoot, 'LICENSE.typescript-language-server'));
 await cp(join(typescriptRoot, 'LICENSE.txt'), join(outputRoot, 'LICENSE.typescript'));
 await cp(join(typescriptRoot, 'ThirdPartyNoticeText.txt'), join(outputRoot, 'THIRD_PARTY_NOTICES.typescript'));
@@ -45,7 +50,7 @@ await writeFile(join(outputRoot, 'package.json'), `${JSON.stringify({
 }, null, 2)}\n`, 'utf8');
 
 const { PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION } = await import('../dist/index.js');
-const expectedVersion = `${typescriptLanguageServerPackage.version}+typescript.${typescriptPackage.version}`;
+const expectedVersion = `${typescriptLanguageServerPackage.version}+typescript.${typescriptPackage.version}.piarium.1`;
 if (PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION.manifest.version !== expectedVersion) {
   throw new Error(`TypeScript language extension version must be ${expectedVersion}`);
 }

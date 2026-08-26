@@ -34,15 +34,19 @@ const fixtureProvider = (overrides = {}) => ({
 describe('language supervisor', () => {
   it('initializes a fixture server and serves completion, hover, and code actions', async () => {
     const harness = await createDocumentAuthorityHarness();
+    let spawnedEnvironment;
     const language = createLanguageSupervisor({
       documents: harness.authority,
-      spawn,
+      spawn: (command, args, options) => {
+        spawnedEnvironment = options.env;
+        return spawn(command, args, options);
+      },
       pathModule: path,
       isTrusted: async () => true,
     });
     try {
       expect(language.getStatus(harness.identity.workspaceId, 'typescript').status).toBe('absent');
-      language.registerProvider(fixtureProvider());
+      language.registerProvider(fixtureProvider({ env: { ELECTRON_RUN_AS_NODE: '0' } }));
       const resource = harness.resource('note.ts');
       const synced = await language.syncDocument({
         resource,
@@ -60,6 +64,7 @@ describe('language supervisor', () => {
           onTypeFormattingTriggerCharacters: ['}', ';'],
         },
       });
+      expect(spawnedEnvironment?.ELECTRON_RUN_AS_NODE).toBe('1');
       const completion = await language.completion({
         resource,
         languageId: 'typescript',

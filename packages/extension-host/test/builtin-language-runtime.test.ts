@@ -7,7 +7,24 @@ import test from "node:test";
 import {
   PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
 } from "@piarium/extension-builtins";
+import {
+  resolvePiariumBuiltinPackageRoot,
+} from "@piarium/extension-builtins/host";
 import { ApplicationExtensionRuntime } from "../src/application-runtime.js";
+
+test("built-in package roots use Electron's physical ASAR-unpacked directory on every desktop path style", () => {
+  const windowsVirtual = "D:\\Piarium\\resources\\app.asar\\node_modules\\@piarium\\extension-builtins\\dist\\builtin-packages\\typescript-language";
+  const windowsPhysical = "D:\\Piarium\\resources\\app.asar.unpacked\\node_modules\\@piarium\\extension-builtins\\dist\\builtin-packages\\typescript-language";
+  const posixVirtual = "/opt/Piarium/resources/app.asar/node_modules/@piarium/extension-builtins/dist/builtin-packages/typescript-language";
+  const posixPhysical = "/opt/Piarium/resources/app.asar.unpacked/node_modules/@piarium/extension-builtins/dist/builtin-packages/typescript-language";
+  const existing = new Set([windowsPhysical, posixPhysical]);
+
+  assert.equal(resolvePiariumBuiltinPackageRoot(windowsVirtual, (path) => existing.has(path)), windowsPhysical);
+  assert.equal(resolvePiariumBuiltinPackageRoot(posixVirtual, (path) => existing.has(path)), posixPhysical);
+  assert.equal(resolvePiariumBuiltinPackageRoot(windowsPhysical, () => true), windowsPhysical);
+  assert.equal(resolvePiariumBuiltinPackageRoot("/opt/piarium/builtins/typescript-language", () => true), "/opt/piarium/builtins/typescript-language");
+  assert.equal(resolvePiariumBuiltinPackageRoot(posixVirtual, () => false), posixVirtual);
+});
 
 test("the built-in TypeScript language extension materializes lazily and unregisters when disabled", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "piarium-builtin-language-"));

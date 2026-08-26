@@ -5,6 +5,9 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+- Fix packaged desktop language services by resolving built-in ASAR assets to their physical unpacked
+  directory, launching Electron-backed language processes in Node mode, and shipping self-contained
+  TypeScript runtime metadata
 - Use one Monaco-backed file editing platform across desktop/Web Agent and IDE Workbench while keeping
   mobile and embedded CodeMirror views on the same revisioned document authority
 - Complete rich Host-owned language features, atomic multi-file edits, file/Git diffs, debug/test

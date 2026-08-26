@@ -22,3 +22,8 @@ Distribution-owned Host extensions use the same immutable artifact and broker li
 extensions. Their requested Host capabilities are granted only while reconciling the distribution
 definition; executable artifacts are materialized lazily when their activation event is first requested,
 so declarative built-ins do not add startup I/O.
+
+Registered built-in package roots must identify physical directories that the Host can canonicalize and
+copy. Archive-backed distributions resolve their logical module address to the corresponding unpacked
+directory before constructing the package manager; brokered processes are launched only from the
+resulting immutable artifact, never from an application archive.

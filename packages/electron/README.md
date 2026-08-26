@@ -72,7 +72,9 @@ That runs, in order:
    `node-pty` prebuild under Electron's Node ABI.
 5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the target `better-sqlite3`
    binary, removes its other-platform/build-only files, and removes the duplicate dependency copy of
-   the already staged Web UI.
+   the already staged Web UI. It also verifies that every distribution-owned Host runtime needed after
+   lazy activation, including the TypeScript language package and its `tsserver`, exists in the physical
+   `app.asar.unpacked` tree.
 
 Build output goes to `packages/electron/dist`.
 
@@ -99,9 +101,10 @@ Release ARM64 packages run natively on GitHub's `windows-11-arm` runner. The wor
 and publishes `latest-arm64.yml` beside the architecture-specific installer and blockmap.
 
 After packaging, verify the unpacked application, external-runtime discovery state, health endpoint,
-renderer app-ready signal/error boundary, and a real `node-pty` terminal create/close cycle without
-installing it. The smoke must cover both the no-runtime onboarding state and a selected Pi runtime;
-merely finding the compiled Piarium Host is not proof that the selected Pi installation can load:
+renderer app-ready signal/error boundary, lazy materialization and a real hover request through the
+built-in TypeScript language service, and a real `node-pty` terminal create/close cycle without installing
+it. The smoke must cover both the no-runtime onboarding state and a selected Pi runtime; merely finding
+compiled Host files is not proof that their unpacked assets or the selected Pi installation can execute:
 
 ```bash
 bun run electron:smoke:win

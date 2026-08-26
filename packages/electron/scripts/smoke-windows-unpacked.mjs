@@ -57,6 +57,124 @@ const describeSmokeFailure = (reason, extras = {}) => {
   return new Error(`${reason}\n${JSON.stringify(payload, null, 2)}`);
 };
 
+const postJson = async (baseUrl, route, body, label) => {
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${route}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new Error(`${label} request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+  const text = await response.text();
+  let payload;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+  if (!response.ok) {
+    throw new Error(`${label} failed with HTTP ${response.status}: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}`);
+  }
+  return payload;
+};
+
+const runPackagedBuiltinLanguageSmoke = async (baseUrl, workspaceRoot) => {
+  const workspace = await postJson(
+    baseUrl,
+    '/api/documents/workspace/resolve',
+    { path: workspaceRoot },
+    'Packaged language workspace resolution',
+  );
+  if (typeof workspace?.workspaceId !== 'string' || workspace.workspaceId.length === 0) {
+    throw new Error(`Packaged language workspace returned ${JSON.stringify(workspace)}`);
+  }
+
+  const resource = { workspaceId: workspace.workspaceId, resourceId: 'packaged-language-smoke.ts' };
+  const languageId = 'typescript';
+  let opened = false;
+  let result;
+  let primaryFailure;
+  try {
+    const synced = await postJson(baseUrl, '/api/language/sync', {
+      resource,
+      languageId,
+      documentVersion: 1,
+      reason: 'open',
+      content: 'export const packagedLanguageSmoke: number = 1;\n',
+    }, 'Packaged built-in language sync');
+    if (synced?.status !== 'synced') {
+      throw new Error(`Packaged built-in language sync returned ${JSON.stringify(synced)}`);
+    }
+    opened = true;
+
+    const status = await postJson(
+      baseUrl,
+      '/api/language/status',
+      { workspaceId: workspace.workspaceId, languageId },
+      'Packaged built-in language status',
+    );
+    if (status?.status !== 'ready' || status.providerId !== 'piarium.typescript-language') {
+      throw new Error(`Packaged built-in language provider returned ${JSON.stringify(status)}`);
+    }
+
+    const hover = await postJson(baseUrl, '/api/language/feature', {
+      method: 'hover',
+      request: {
+        resource,
+        languageId,
+        documentVersion: 1,
+        position: { line: 0, character: 13 },
+      },
+    }, 'Packaged built-in language hover');
+    if (hover?.status !== 'ready') {
+      throw new Error(`Packaged built-in language hover returned ${JSON.stringify(hover)}`);
+    }
+    result = {
+      generation: status.generation,
+      providerId: status.providerId,
+      status: status.status,
+    };
+  } catch (error) {
+    primaryFailure = error;
+  }
+
+  const cleanupFailures = [];
+  if (opened) {
+    try {
+      await postJson(baseUrl, '/api/language/sync', {
+        resource,
+        languageId,
+        documentVersion: 1,
+        reason: 'close',
+      }, 'Packaged built-in language close');
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+  }
+  try {
+    await postJson(
+      baseUrl,
+      '/api/language/dispose-workspace',
+      { workspaceId: workspace.workspaceId },
+      'Packaged built-in language workspace disposal',
+    );
+  } catch (error) {
+    cleanupFailures.push(error);
+  }
+  if (primaryFailure && cleanupFailures.length > 0) {
+    throw new AggregateError([primaryFailure, ...cleanupFailures], 'Packaged language smoke and cleanup failed');
+  }
+  if (primaryFailure) throw primaryFailure;
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, 'Packaged language smoke cleanup failed');
+  }
+  return result;
+};
+
 const connectDevTools = (webSocketDebuggerUrl) => new Promise((resolve, reject) => {
   const socket = new WebSocket(webSocketDebuggerUrl);
   const pending = new Map();
@@ -385,9 +503,16 @@ if (profileSourcePath && !existsSync(profileSourcePath)) {
 }
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-win-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
+const smokeWorkspaceRoot = path.join(smokeRoot, 'workspace');
 try {
+  await fsp.mkdir(userDataDir, { recursive: true });
+  await fsp.mkdir(smokeWorkspaceRoot, { recursive: true });
+  await fsp.writeFile(
+    path.join(smokeWorkspaceRoot, 'packaged-language-smoke.ts'),
+    'export const packagedLanguageSmoke: number = 1;\n',
+    'utf8',
+  );
   if (profileSourcePath) {
-    await fsp.mkdir(userDataDir, { recursive: true });
     for (const entry of ['Local State', 'Local Storage', 'Preferences', 'Session Storage', 'settings.json']) {
       const source = path.join(profileSourcePath, entry);
       if (!existsSync(source)) continue;
@@ -409,6 +534,11 @@ const child = spawn(appPath, [
   '--remote-allow-origins=*',
 ], {
   cwd: electronDir,
+  env: {
+    ...process.env,
+    PIARIUM_DATA_DIR: userDataDir,
+    PIARIUM_WORKSPACE_ROOT: smokeWorkspaceRoot,
+  },
   stdio: 'ignore',
   windowsHide: true,
 });
@@ -439,10 +569,12 @@ try {
   const health = await healthResponse.json();
   if (health?.status !== 'ok') throw new Error(`Packaged health check returned ${JSON.stringify(health)}`);
 
+  const builtinLanguage = await runPackagedBuiltinLanguageSmoke(baseUrl, smokeWorkspaceRoot);
+
   const terminalResponse = await fetch(`${baseUrl}/api/terminal/create`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ cols: 80, cwd: electronDir, rows: 24 }),
+    body: JSON.stringify({ cols: 80, cwd: smokeWorkspaceRoot, rows: 24 }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!terminalResponse.ok) {
@@ -473,6 +605,7 @@ try {
     const log = await readLog();
     console.log(JSON.stringify({
       appPath,
+      builtinLanguage,
       health: 'ok',
       layout,
       piVersion: null,
@@ -518,6 +651,7 @@ try {
   const piVersion = log.match(/piVersion: '([^']+)'/)?.[1] ?? 'unknown';
   console.log(JSON.stringify({
     appPath,
+    builtinLanguage,
     health: 'ok',
     layout,
     piVersion,
@@ -531,8 +665,7 @@ try {
   const log = await readLog();
   const suffix = `\n--- main.log ---\n${log.slice(-6_000)}`;
   if (error instanceof Error) {
-    error.message += suffix;
-    throw error;
+    throw new Error(`${error.message}${suffix}`, { cause: error });
   }
   throw new Error(`${String(error)}${suffix}`);
 } finally {
