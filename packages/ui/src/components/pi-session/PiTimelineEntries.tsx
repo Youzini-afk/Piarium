@@ -50,6 +50,7 @@ export interface PiTimelineProps {
   cwd: string;
   entries: PiSessionEntry[];
   hiddenThinkingLabel?: string;
+  leafId?: string | null;
   liveAssistant?: PiAssistantMessage;
   liveUser?: PiUserMessage;
   liveUserStatus?: PiSessionSubmissionStatus;

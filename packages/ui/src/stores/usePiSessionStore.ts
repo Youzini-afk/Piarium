@@ -28,6 +28,22 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getPiRuntimeConnection } from '@/lib/pi-runtime/client';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+  armPiTimelineTurn,
+  cancelPiTimelineAutomation,
+  clearPiTimelineSubmissionAnchor,
+  completePiTimelineReturn,
+  DEFAULT_PI_TIMELINE_VIEW,
+  liveUserTurnId,
+  persistedUserTurnId,
+  preparePiTimelineEnd,
+  preparePiTimelineEntry,
+  remapPiTimelineAnchor,
+  requestPiTimelineReturn,
+  savePiTimelineCheckpoint,
+  type PiTimelineViewportAnchor,
+  type PiTimelineViewState,
+} from '@/lib/pi-runtime/piTimelineScrollState';
 
 export interface PiToolExecutionState {
   args: JsonValue;
@@ -76,6 +92,7 @@ export interface PiSessionViewState {
   stats?: SessionStats;
   submission?: PiSessionSubmissionState;
   toolExecutions: Record<string, PiToolExecutionState>;
+  view?: PiTimelineViewState;
 }
 
 export type PiSessionAttentionKind = 'complete' | 'error';
@@ -120,6 +137,8 @@ export interface PiSessionStoreState {
   closeSession(sessionId: string): Promise<boolean>;
   clearQueue(sessionId: string): Promise<boolean>;
   clearSubmission(sessionId: string, submissionId: string): void;
+  cancelTimelineAutomation(sessionId: string): void;
+  completeTimelineReturn(sessionId: string, token: number): void;
   clearSessionAttention(sessionId: string): void;
   createRecoveryCheckpoint(sessionId: string, name: string): Promise<RecoveryOperationResult>;
   createSession(
@@ -179,10 +198,17 @@ export interface PiSessionStoreState {
   ): Promise<SessionEntriesResult>;
   refreshRecoveryStatus(sessionId: string): Promise<RecoveryStatus>;
   refreshStats(sessionId: string): Promise<SessionStats>;
+  requestTimelineReturn(sessionId: string): number;
   renameSession(sessionId: string, name: string): Promise<void>;
   reset(): void;
   selectModel(sessionId: string, model: Pick<ModelDescriptor, 'id' | 'provider'>): Promise<SessionSnapshot>;
   selectThinking(sessionId: string, level: ThinkingLevel): Promise<SessionSnapshot>;
+  saveTimelineCheckpoint(
+    sessionId: string,
+    entryEpoch: number,
+    observedLeafId: string | null,
+    viewport?: PiTimelineViewportAnchor,
+  ): void;
   setCurrentSession(sessionId: string | null): void;
   steer(
     sessionId: string,
@@ -300,6 +326,7 @@ const emptySession = (sessionId: string): PiSessionViewState => ({
   open: false,
   sessionId,
   toolExecutions: {},
+  view: { ...DEFAULT_PI_TIMELINE_VIEW },
 });
 
 let submissionSequence = 0;
@@ -314,6 +341,13 @@ const updateSnapshot = (
   patch: Partial<SessionSnapshot>,
 ): SessionSnapshot | undefined => (
   snapshot === undefined ? undefined : { ...snapshot, ...patch }
+);
+
+const snapshotIsWorking = (snapshot: SessionSnapshot | undefined): boolean => (
+  snapshot?.busy === true
+  || snapshot?.isStreaming === true
+  || snapshot?.isCompacting === true
+  || (snapshot?.retryAttempt ?? 0) > 0
 );
 
 const preserveSnapshotWorkspace = (
@@ -443,6 +477,9 @@ export const reducePiAgentEvent = (
       const message = event.message;
       if (message.role === 'user') {
         next.liveUser = message;
+        if (current.submission && current.view?.newTurn) {
+          next.view = remapPiTimelineAnchor(current.view, liveUserTurnId(message.timestamp));
+        }
         delete next.submission;
         return next;
       }
@@ -486,6 +523,17 @@ export const reducePiAgentEvent = (
         && !current.submission.entryIdsAtSubmit.has(event.entry.id)
       ) {
         delete next.submission;
+      }
+      if (
+        event.entry.type === 'message'
+        && event.entry.message.role === 'user'
+        && current.view?.newTurn
+        && (
+          current.submission !== undefined
+          || current.liveUser?.timestamp === event.entry.message.timestamp
+        )
+      ) {
+        next.view = remapPiTimelineAnchor(current.view, persistedUserTurnId(event.entry.id));
       }
       return next;
     case 'tool_execution_start':
@@ -653,6 +701,58 @@ export const createPiSessionStore = (
       }
     };
 
+    const prepareSessionTimeline = (
+      state: PiSessionStoreState,
+      sessionId: string,
+    ): Record<string, PiSessionViewState> => upsertRecord(
+      state.records,
+      sessionId,
+      (current) => {
+        const snapshot = current.snapshot;
+        return {
+          ...current,
+          view: preparePiTimelineEntry(current.view, {
+            hasAttention: state.attentionBySession[sessionId] !== undefined,
+            hasLiveOverlay: current.liveAssistant !== undefined
+              || current.liveUser !== undefined
+              || current.submission !== undefined,
+            leafId: current.branchEntries?.leafId ?? snapshot?.leafId ?? null,
+            working: snapshotIsWorking(snapshot),
+          }),
+        };
+      },
+    );
+
+    const reconcileSessionTimelineSnapshot = (
+      current: PiSessionViewState,
+      snapshot: SessionSnapshot,
+      selected: boolean,
+    ): PiTimelineViewState | undefined => {
+      const view = current.view;
+      if (
+        !selected
+        || !view
+        || view.newTurn
+        || view.entry.target.kind !== 'turn'
+        || view.generation !== view.entry.generation
+      ) return view;
+      const authoritativeLeafChanged = view.observedLeafId !== undefined
+        && view.observedLeafId !== snapshot.leafId;
+      const previewLeafChanged = current.branchEntries !== undefined
+        && current.branchEntries.leafId !== snapshot.leafId;
+      if (!snapshotIsWorking(snapshot) && !authoritativeLeafChanged && !previewLeafChanged) {
+        return view;
+      }
+      return preparePiTimelineEntry(view, {
+        hasAttention: false,
+        hasLiveOverlay: current.liveAssistant !== undefined
+          || current.liveUser !== undefined
+          || current.submission !== undefined,
+        leafId: snapshot.leafId,
+        working: snapshotIsWorking(snapshot),
+      });
+    };
+
     const handleRuntimeEvent = (runtimeKey: string, envelope: RuntimeEventEnvelope): void => {
       if (!contextIsCurrent(runtimeKey)) return;
       // Catalog workers open short-lived workspace contexts for provider/model
@@ -664,11 +764,19 @@ export const createPiSessionStore = (
         case 'session.snapshot': {
           const snapshot = envelope.data;
           set((state) => ({
-            records: upsertRecord(state.records, snapshot.sessionId, (current) => ({
-              ...current,
-              open: true,
-              snapshot: preserveSnapshotWorkspace(snapshot, current.snapshot),
-            })),
+            records: upsertRecord(state.records, snapshot.sessionId, (current) => {
+              const view = reconcileSessionTimelineSnapshot(
+                current,
+                snapshot,
+                state.currentSessionId === snapshot.sessionId,
+              );
+              return {
+                ...current,
+                open: true,
+                snapshot: preserveSnapshotWorkspace(snapshot, current.snapshot),
+                ...(view ? { view } : {}),
+              };
+            }),
           }));
           return;
         }
@@ -856,6 +964,9 @@ export const createPiSessionStore = (
           ...current,
           open: true,
           snapshot: preserveSnapshotWorkspace(result.snapshot, current.snapshot),
+          view: state.currentSessionId === sessionId
+            ? preparePiTimelineEnd(current.view)
+            : current.view,
         })),
       }));
       await Promise.all([
@@ -876,18 +987,27 @@ export const createPiSessionStore = (
       beginSubmission: (sessionId, message, mode) => {
         const id = nextSubmissionId();
         set((state) => ({
-          records: upsertRecord(state.records, sessionId, (current) => ({
-            ...current,
-            submission: {
-              entryIdsAtSubmit: new Set(
-                current.branchEntries?.entries.map((entry) => entry.id) ?? [],
-              ),
-              id,
-              message,
-              mode,
-              status: 'preparing',
-            },
-          })),
+          records: upsertRecord(state.records, sessionId, (current) => {
+            const baseView = current.submission
+              && current.view?.newTurn?.submissionId === current.submission.id
+              ? clearPiTimelineSubmissionAnchor(current.view, current.submission.id)
+              : current.view;
+            return {
+              ...current,
+              submission: {
+                entryIdsAtSubmit: new Set(
+                  current.branchEntries?.entries.map((entry) => entry.id) ?? [],
+                ),
+                id,
+                message,
+                mode,
+                status: 'preparing',
+              },
+              ...(mode === 'prompt'
+                ? { view: armPiTimelineTurn(baseView, id, liveUserTurnId(message.timestamp)) }
+                : baseView === current.view ? {} : { view: baseView }),
+            };
+          }),
         }));
         return id;
       },
@@ -961,6 +1081,9 @@ export const createPiSessionStore = (
           const current = state.records[sessionId];
           if (current?.submission?.id !== submissionId) return state;
           const next = { ...current };
+          if (next.view?.newTurn?.submissionId === submissionId) {
+            next.view = clearPiTimelineSubmissionAnchor(next.view, submissionId);
+          }
           delete next.submission;
           return { records: { ...state.records, [sessionId]: next } };
         });
@@ -992,6 +1115,7 @@ export const createPiSessionStore = (
               ...current,
               open: true,
               snapshot: preserveSnapshotWorkspace(result, current.snapshot),
+              view: preparePiTimelineEnd(current.view),
             })),
           }));
           await Promise.allSettled([
@@ -1089,6 +1213,7 @@ export const createPiSessionStore = (
                   result.snapshot,
                   state.records[nextId]?.snapshot ?? state.records[previousId]?.snapshot,
                 ),
+                view: preparePiTimelineEnd(state.records[nextId]?.view),
               },
             },
           }));
@@ -1165,6 +1290,9 @@ export const createPiSessionStore = (
                 ...current,
                 open: true,
                 snapshot: preserveSnapshotWorkspace(result.snapshot, current.snapshot),
+                view: selectionIntentIsCurrent(selectionIntent, runtimeKey)
+                  ? preparePiTimelineEnd(current.view)
+                  : current.view,
               })),
             }));
             await get().refreshEntries(result.snapshot.sessionId);
@@ -1184,6 +1312,9 @@ export const createPiSessionStore = (
           currentSessionId: openingSessionId ?? state.currentSessionId,
           openingSessionId,
           lastError: null,
+          records: openingSessionId === null
+            ? state.records
+            : prepareSessionTimeline(state, openingSessionId),
         }));
         if (openingSessionId) {
           void get().prefetchSession(openingSessionId, params.cwd).catch(() => undefined);
@@ -1191,19 +1322,26 @@ export const createPiSessionStore = (
         try {
           const { result, runtimeKey } = await request('session.open', params);
           deletedSessionIds.delete(result.sessionId);
-          set((state) => ({
-            attentionBySession: selectionIntentIsCurrent(selectionIntent, runtimeKey)
-              ? clearAttention(state.attentionBySession, result.sessionId)
-              : state.attentionBySession,
-            currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
-              ? result.sessionId
-              : state.currentSessionId,
-            records: upsertRecord(state.records, result.sessionId, (current) => ({
-              ...current,
-              open: true,
-              snapshot: preserveSnapshotWorkspace(result, current.snapshot),
-            })),
-          }));
+          set((state) => {
+            const selectionCurrent = selectionIntentIsCurrent(selectionIntent, runtimeKey);
+            return {
+              attentionBySession: selectionCurrent
+                ? clearAttention(state.attentionBySession, result.sessionId)
+                : state.attentionBySession,
+              currentSessionId: selectionCurrent
+                ? result.sessionId
+                : state.currentSessionId,
+              records: upsertRecord(state.records, result.sessionId, (current) => {
+                const view = reconcileSessionTimelineSnapshot(current, result, selectionCurrent);
+                return {
+                  ...current,
+                  open: true,
+                  snapshot: preserveSnapshotWorkspace(result, current.snapshot),
+                  ...(view ? { view } : {}),
+                };
+              }),
+            };
+          });
           void get().refreshEntries(result.sessionId)
             .catch(() => undefined)
             .finally(() => {
@@ -1223,6 +1361,9 @@ export const createPiSessionStore = (
                 ? previousSessionId
                 : state.currentSessionId,
               openingSessionId: null,
+              records: previousSessionId === null
+                ? state.records
+                : prepareSessionTimeline(state, previousSessionId),
             }));
           }
           commitError(runtime.currentKey(), error);
@@ -1528,12 +1669,21 @@ export const createPiSessionStore = (
       },
 
       setCurrentSession: (sessionId) => {
+        if (get().currentSessionId === sessionId) {
+          if (sessionId !== null) {
+            set((state) => ({
+              attentionBySession: clearAttention(state.attentionBySession, sessionId),
+            }));
+          }
+          return;
+        }
         beginSelectionIntent();
         set((state) => ({
           attentionBySession: sessionId === null
             ? state.attentionBySession
             : clearAttention(state.attentionBySession, sessionId),
           currentSessionId: sessionId,
+          records: sessionId === null ? state.records : prepareSessionTimeline(state, sessionId),
         }));
       },
 
@@ -1564,6 +1714,74 @@ export const createPiSessionStore = (
           commitError(runtime.currentKey(), error);
           throw error;
         }
+      },
+
+      cancelTimelineAutomation: (sessionId) => {
+        set((state) => {
+          const current = state.records[sessionId];
+          if (!current) return state;
+          return {
+            records: {
+              ...state.records,
+              [sessionId]: {
+                ...current,
+                view: cancelPiTimelineAutomation(current.view),
+              },
+            },
+          };
+        });
+      },
+
+      completeTimelineReturn: (sessionId, token) => {
+        set((state) => {
+          const current = state.records[sessionId];
+          if (!current) return state;
+          const view = completePiTimelineReturn(current.view, token);
+          if (!view || view === current.view) return state;
+          return {
+            records: {
+              ...state.records,
+              [sessionId]: { ...current, view },
+            },
+          };
+        });
+      },
+
+      requestTimelineReturn: (sessionId) => {
+        let token = 0;
+        set((state) => {
+          const current = state.records[sessionId];
+          if (!current) return state;
+          const requested = requestPiTimelineReturn(current.view);
+          token = requested.token;
+          return {
+            records: {
+              ...state.records,
+              [sessionId]: { ...current, view: requested.view },
+            },
+          };
+        });
+        return token;
+      },
+
+      saveTimelineCheckpoint: (sessionId, entryEpoch, observedLeafId, viewport) => {
+        set((state) => {
+          const current = state.records[sessionId];
+          if (!current) return state;
+          const view = savePiTimelineCheckpoint(
+            current.view,
+            entryEpoch,
+            observedLeafId,
+            viewport,
+          );
+          if (!view || view === current.view) return state;
+          return {
+            records: {
+              ...state.records,
+              [sessionId]: { ...current, view },
+            },
+          };
+        });
       },
 
       updateSubmission: (sessionId, submissionId, update) => {

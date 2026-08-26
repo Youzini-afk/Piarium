@@ -1,8 +1,24 @@
 import React from 'react';
-import { LegendList, type LegendListRef } from '@legendapp/list/react';
+import {
+  LegendList,
+  type LegendListRef,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from '@legendapp/list/react';
 import type { PiAssistantMessage, PiSessionEntry } from '@piarium/protocol';
 import { useShallow } from 'zustand/react/shallow';
+import { Icon } from '@/components/icon/Icon';
+import { useI18n } from '@/lib/i18n';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import {
+  DEFAULT_PI_TIMELINE_VIEW,
+  getPiAnchoredTurnCorrection,
+  isPiTimelineAtEnd,
+  isPiTimelineEntryCurrent,
+  PI_TIMELINE_ANCHOR_OFFSET_PX,
+  type PiTimelineScrollMode,
+  type PiTimelineViewportAnchor,
+} from '@/lib/pi-runtime/piTimelineScrollState';
 import {
   projectPiTimeline,
   type PiTimelineItem,
@@ -141,7 +157,23 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   );
 };
 
+const isInteractiveKeyTarget = (target: EventTarget | null): boolean => (
+  target instanceof HTMLElement
+  && target.closest('input, textarea, select, button, a, [contenteditable="true"]') !== null
+);
+
+const PI_TIMELINE_SCROLL_KEYS = new Set([
+  'ArrowDown',
+  'ArrowUp',
+  'End',
+  'Home',
+  'PageDown',
+  'PageUp',
+  ' ',
+]);
+
 export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
+  const { t } = useI18n();
   const listRef = React.useRef<LegendListRef>(null);
   const projectionRef = React.useRef<PiTimelineProjection | undefined>(undefined);
   const projectionSessionRef = React.useRef(props.sessionId);
@@ -156,6 +188,235 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     projectionRef.current,
   ), [props.entries, props.liveAssistant, props.liveUser]);
   projectionRef.current = projection;
+
+  const timelineView = usePiSessionStore(useShallow((state) => (
+    state.records[props.sessionId]?.view ?? DEFAULT_PI_TIMELINE_VIEW
+  )));
+  const cancelTimelineAutomation = usePiSessionStore((state) => state.cancelTimelineAutomation);
+  const completeTimelineReturn = usePiSessionStore((state) => state.completeTimelineReturn);
+  const requestTimelineReturn = usePiSessionStore((state) => state.requestTimelineReturn);
+  const saveTimelineCheckpoint = usePiSessionStore((state) => state.saveTimelineCheckpoint);
+  const modeRef = React.useRef<PiTimelineScrollMode>(timelineView.scrollMode);
+  const generationRef = React.useRef(timelineView.generation);
+  const entryEpochRef = React.useRef(timelineView.entry.epoch);
+  const newTurnRef = React.useRef(timelineView.newTurn);
+  modeRef.current = timelineView.scrollMode;
+  generationRef.current = timelineView.generation;
+  entryEpochRef.current = timelineView.entry.epoch;
+  newTurnRef.current = timelineView.newTurn;
+
+  const entryTarget = timelineView.entry.target;
+  const entryTargetIndex = entryTarget.kind === 'turn'
+    ? projection.items.findIndex((item) => item.id === entryTarget.itemId)
+    : -1;
+  const initialScrollAtEnd = entryTarget.kind === 'end' || entryTargetIndex < 0;
+  const firstVisibleIndexRef = React.useRef(-1);
+  const viewportRef = React.useRef<PiTimelineViewportAnchor | undefined>(timelineView.viewport);
+  const observedLeafIdRef = React.useRef<string | null | undefined>(timelineView.observedLeafId);
+  const atEndRef = React.useRef(initialScrollAtEnd);
+  const listLoadedRef = React.useRef(false);
+  const appliedEntryEpochRef = React.useRef(-1);
+  const viewportFrameRef = React.useRef<number | null>(null);
+  const anchorCorrectionFrameRef = React.useRef<number | null>(null);
+  const positionedAnchorRef = React.useRef<string | null>(null);
+  const touchYRef = React.useRef<number | null>(null);
+  const manualOwnershipClaimedRef = React.useRef(false);
+  if (timelineView.scrollMode !== 'free-scrolling') {
+    manualOwnershipClaimedRef.current = false;
+  }
+
+  const captureViewport = React.useCallback(() => {
+    const list = listRef.current;
+    const index = firstVisibleIndexRef.current;
+    if (!list || index < 0) return;
+    const state = list.getState();
+    const item = state.data[index] as PiTimelineItem | undefined;
+    if (!item) return;
+    const position = state.positionAtIndex(index);
+    if (!Number.isFinite(position) || !Number.isFinite(state.scroll)) return;
+    viewportRef.current = {
+      itemId: item.id,
+      mode: modeRef.current === 'following-end' ? 'following-end' : 'free-scrolling',
+      offset: position - state.scroll,
+    };
+  }, []);
+
+  const scheduleViewportCapture = React.useCallback(() => {
+    if (viewportFrameRef.current !== null) return;
+    viewportFrameRef.current = requestAnimationFrame(() => {
+      viewportFrameRef.current = null;
+      captureViewport();
+    });
+  }, [captureViewport]);
+
+  React.useEffect(() => {
+    if (atEndRef.current && props.leafId !== undefined) {
+      observedLeafIdRef.current = props.leafId;
+    }
+  }, [props.leafId]);
+
+  React.useEffect(() => () => {
+    if (viewportFrameRef.current !== null) cancelAnimationFrame(viewportFrameRef.current);
+    if (anchorCorrectionFrameRef.current !== null) cancelAnimationFrame(anchorCorrectionFrameRef.current);
+    captureViewport();
+    if (observedLeafIdRef.current !== undefined) {
+      saveTimelineCheckpoint(
+        props.sessionId,
+        entryEpochRef.current,
+        observedLeafIdRef.current,
+        viewportRef.current,
+      );
+    }
+  }, [captureViewport, props.sessionId, saveTimelineCheckpoint]);
+
+  const applyEntryIntent = React.useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const current = usePiSessionStore.getState().records[props.sessionId]?.view;
+    if (
+      !current
+      || current.entry.epoch !== timelineView.entry.epoch
+      || !isPiTimelineEntryCurrent(current)
+    ) return;
+    if (
+      appliedEntryEpochRef.current >= 0
+      && current.scrollMode === 'free-scrolling'
+    ) return;
+    appliedEntryEpochRef.current = current.entry.epoch;
+    const target = current.entry.target;
+    if (target.kind === 'end') {
+      atEndRef.current = true;
+      observedLeafIdRef.current = props.leafId;
+      void list.scrollToEnd({ animated: false });
+      return;
+    }
+    const index = projection.items.findIndex((item) => item.id === target.itemId);
+    if (index < 0) {
+      atEndRef.current = true;
+      observedLeafIdRef.current = props.leafId;
+      const token = requestTimelineReturn(props.sessionId);
+      void Promise.resolve(list.scrollToEnd({ animated: false }))
+        .then(() => completeTimelineReturn(props.sessionId, token));
+      return;
+    }
+    atEndRef.current = false;
+    void list.scrollToIndex({
+      animated: false,
+      index,
+      viewOffset: target.offset,
+      viewPosition: 0,
+    });
+  }, [
+    completeTimelineReturn,
+    projection.items,
+    props.leafId,
+    props.sessionId,
+    requestTimelineReturn,
+    timelineView.entry.epoch,
+  ]);
+
+  React.useEffect(() => {
+    if (listLoadedRef.current) applyEntryIntent();
+  }, [applyEntryIntent, timelineView.entry.epoch]);
+
+  const takeManualOwnership = React.useCallback(() => {
+    const current = usePiSessionStore.getState().records[props.sessionId]?.view;
+    if (
+      manualOwnershipClaimedRef.current
+      &&
+      current?.scrollMode === 'free-scrolling'
+      && current.pendingReturnToken === undefined
+    ) return;
+    manualOwnershipClaimedRef.current = true;
+    modeRef.current = 'free-scrolling';
+    generationRef.current += 1;
+    cancelTimelineAutomation(props.sessionId);
+  }, [cancelTimelineAutomation, props.sessionId]);
+
+  const anchorIndex = timelineView.newTurn
+    ? projection.items.findIndex((item) => item.id === timelineView.newTurn?.turnId)
+    : -1;
+
+  const correctAnchoredTurn = React.useCallback(() => {
+    if (anchorCorrectionFrameRef.current !== null) return;
+    const expectedGeneration = timelineView.generation;
+    const expectedTurnId = timelineView.newTurn?.turnId;
+    anchorCorrectionFrameRef.current = requestAnimationFrame(() => {
+      anchorCorrectionFrameRef.current = null;
+      if (
+        modeRef.current !== 'anchoring-new-turn'
+        || generationRef.current !== expectedGeneration
+        || newTurnRef.current?.turnId !== expectedTurnId
+      ) return;
+      const list = listRef.current;
+      if (!list || anchorIndex < 0) return;
+      const correction = getPiAnchoredTurnCorrection(list.getState(), anchorIndex);
+      if (!correction || correction.delta <= 1) return;
+      void list.scrollToOffset({ animated: true, offset: correction.targetScroll });
+    });
+  }, [anchorIndex, timelineView.generation, timelineView.newTurn?.turnId]);
+
+  const anchoredEndSpace = React.useMemo(() => {
+    const anchor = timelineView.newTurn;
+    if (
+      timelineView.scrollMode !== 'anchoring-new-turn'
+      || !anchor
+      || anchor.generation !== timelineView.generation
+      || anchorIndex < 0
+    ) return undefined;
+    return {
+      anchorIndex,
+      anchorOffset: PI_TIMELINE_ANCHOR_OFFSET_PX,
+      onReady: () => {
+        const current = usePiSessionStore.getState().records[props.sessionId]?.view;
+        if (
+          current?.scrollMode !== 'anchoring-new-turn'
+          || current.generation !== anchor.generation
+          || current.newTurn?.turnId !== anchor.turnId
+        ) return;
+        const positionedKey = `${anchor.generation}:${anchor.turnId}`;
+        if (positionedAnchorRef.current === positionedKey) return;
+        positionedAnchorRef.current = positionedKey;
+        atEndRef.current = true;
+        observedLeafIdRef.current = props.leafId;
+        void listRef.current?.scrollToIndex({
+          animated: false,
+          index: anchorIndex,
+          viewOffset: PI_TIMELINE_ANCHOR_OFFSET_PX,
+          viewPosition: 0,
+        });
+      },
+      onSizeChanged: correctAnchoredTurn,
+    };
+  }, [
+    anchorIndex,
+    correctAnchoredTurn,
+    props.leafId,
+    props.sessionId,
+    timelineView.generation,
+    timelineView.newTurn,
+    timelineView.scrollMode,
+  ]);
+
+  const handleScroll = React.useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    atEndRef.current = isPiTimelineAtEnd(
+      contentSize.height,
+      contentOffset.y,
+      layoutMeasurement.height,
+    );
+    if (atEndRef.current && props.leafId !== undefined) {
+      observedLeafIdRef.current = props.leafId;
+    }
+    scheduleViewportCapture();
+  }, [props.leafId, scheduleViewportCapture]);
+
+  const handleReturnToLatest = React.useCallback(() => {
+    const token = requestTimelineReturn(props.sessionId);
+    if (token <= 0) return;
+    void Promise.resolve(listRef.current?.scrollToEnd({ animated: true }))
+      .then(() => completeTimelineReturn(props.sessionId, token));
+  }, [completeTimelineReturn, props.sessionId, requestTimelineReturn]);
 
   const extraData = React.useMemo(() => ({
     hiddenThinkingLabel: props.hiddenThinkingLabel,
@@ -200,23 +461,78 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   ]);
 
   return (
-    <LegendList
-      ref={listRef}
-      className="min-h-0 flex-1 overscroll-contain"
-      contentContainerClassName="py-5"
-      data={projection.items}
-      dataKey={props.sessionId}
-      extraData={extraData}
-      getItemType={(item) => item.kind}
-      initialScrollAtEnd
-      itemsAreEqual={(previous, item) => previous === item}
-      keyExtractor={(item) => item.id}
-      maintainScrollAtEnd={{ animated: false }}
-      maintainVisibleContentPosition={{ data: true, size: true }}
-      recycleItems={false}
-      renderItem={renderItem}
-      data-pi-timeline="true"
-      tabIndex={-1}
-    />
+    <div className="relative flex min-h-0 flex-1">
+      <LegendList
+        ref={listRef}
+        anchoredEndSpace={anchoredEndSpace}
+        className="min-h-0 flex-1 overscroll-contain"
+        contentContainerClassName="py-5"
+        data={projection.items}
+        dataKey={props.sessionId}
+        extraData={extraData}
+        getItemType={(item) => item.kind}
+        initialScrollAtEnd={initialScrollAtEnd}
+        initialScrollIndex={initialScrollAtEnd ? undefined : {
+          index: entryTargetIndex,
+          viewOffset: timelineView.entry.target.kind === 'turn'
+            ? timelineView.entry.target.offset
+            : 0,
+          viewPosition: 0,
+        }}
+        itemsAreEqual={(previous, item) => previous === item}
+        keyExtractor={(item) => item.id}
+        maintainScrollAtEnd={timelineView.scrollMode === 'following-end'
+          ? { animated: false }
+          : false}
+        maintainVisibleContentPosition={{ data: true, size: true }}
+        onFirstVisibleItemChanged={({ index }) => {
+          firstVisibleIndexRef.current = index;
+          captureViewport();
+        }}
+        onItemSizeChanged={({ itemKey }) => {
+          if (itemKey === timelineView.newTurn?.turnId) correctAnchoredTurn();
+        }}
+        onKeyDownCapture={(event) => {
+          if (PI_TIMELINE_SCROLL_KEYS.has(event.key) && !isInteractiveKeyTarget(event.target)) {
+            takeManualOwnership();
+          }
+        }}
+        onLoad={() => {
+          listLoadedRef.current = true;
+          applyEntryIntent();
+        }}
+        onScroll={handleScroll}
+        onTouchMoveCapture={(event) => {
+          const y = event.touches[0]?.clientY ?? null;
+          const previous = touchYRef.current;
+          touchYRef.current = y;
+          if (y !== null && previous !== null && Math.abs(y - previous) > 0.5) {
+            takeManualOwnership();
+          }
+        }}
+        onTouchStartCapture={(event) => {
+          touchYRef.current = event.touches[0]?.clientY ?? null;
+        }}
+        onWheelCapture={(event) => {
+          if (!event.ctrlKey && event.deltaY !== 0) takeManualOwnership();
+        }}
+        recycleItems={false}
+        renderItem={renderItem}
+        data-pi-timeline="true"
+        tabIndex={0}
+      />
+      {timelineView.scrollMode === 'free-scrolling' ? (
+        <button
+          type="button"
+          onClick={handleReturnToLatest}
+          className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/70 bg-background/95 px-3 py-1.5 typography-meta text-foreground shadow-lg backdrop-blur hover:bg-interactive-hover"
+          aria-label={t('chat.scrollToBottom.aria')}
+          title={t('chat.scrollToBottom.aria')}
+        >
+          <Icon name="arrow-down" className="size-3.5" />
+          {t('chat.scrollToBottom.aria')}
+        </button>
+      ) : null}
+    </div>
   );
 };

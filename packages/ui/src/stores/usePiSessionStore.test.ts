@@ -280,11 +280,30 @@ describe('Pi session event state', () => {
       open: true,
       sessionId,
       snapshot: snapshot(sessionId),
+      submission: {
+        entryIdsAtSubmit: new Set<string>(),
+        id: 'submission-a',
+        message: { content: 'hello', role: 'user' as const, timestamp: 5 },
+        mode: 'prompt' as const,
+        status: 'dispatching' as const,
+      },
       toolExecutions: {},
+      view: {
+        entry: { epoch: 0, generation: 1, target: { kind: 'end' as const } },
+        generation: 1,
+        newTurn: {
+          generation: 1,
+          previousMode: 'following-end' as const,
+          submissionId: 'submission-a',
+          turnId: 'turn:live-user:5',
+        },
+        scrollMode: 'anchoring-new-turn' as const,
+      },
     };
     const message = { content: 'hello', role: 'user' as const, timestamp: 7 };
     const started = reducePiAgentEvent(initial, { message, type: 'message_start' });
     expect(started.liveUser).toEqual(message);
+    expect(started.view?.newTurn?.turnId).toBe('turn:live-user:7');
 
     const entry: PiSessionEntry = {
       id: 'user-entry',
@@ -296,6 +315,7 @@ describe('Pi session event state', () => {
     const persisted = reducePiAgentEvent(started, { entry, type: 'entry_appended' });
     expect(persisted.liveUser).toBeUndefined();
     expect(persisted.branchEntries?.entries).toEqual([entry]);
+    expect(persisted.view?.newTurn?.turnId).toBe('turn:user-entry');
   });
 
   test('projects queue and lifecycle events into the native snapshot', () => {
@@ -384,6 +404,13 @@ describe('Pi session store', () => {
     expect(store.getState().records['session-a']?.submission?.id).toBe(id);
     expect(store.getState().records['session-a']?.submission?.mode).toBe('prompt');
     expect(store.getState().records['session-a']?.submission?.status).toBe('preparing');
+    expect(store.getState().records['session-a']?.view?.newTurn).toEqual({
+      generation: 1,
+      previousMode: 'following-end',
+      submissionId: id,
+      turnId: 'turn:live-user:1',
+    });
+    expect(store.getState().records['session-a']?.view?.scrollMode).toBe('anchoring-new-turn');
 
     store.getState().updateSubmission('session-a', id, {
       dispatchedText: 'hello',
@@ -397,8 +424,78 @@ describe('Pi session store', () => {
       { content: 'later', role: 'user', timestamp: 2 },
       'followUp',
     );
+    expect(store.getState().records['session-a']?.view?.newTurn).toBeUndefined();
+    expect(store.getState().records['session-a']?.view?.scrollMode).toBe('following-end');
     store.getState().updateSubmission('session-a', followUpId, { status: 'accepted' });
     expect(store.getState().records['session-a']?.submission).toBeUndefined();
+  });
+
+  test('captures attention before selection clears it and restores only an unchanged viewport', () => {
+    const store = createPiSessionStore(new FakeRuntime());
+    store.setState({
+      attentionBySession: {
+        'session-a': { kind: 'complete', updatedAt: 1 },
+      },
+      currentSessionId: 'session-b',
+      records: {
+        'session-a': {
+          branchEntries: branch('session-a', [{
+            id: 'leaf-1',
+            message: { content: 'done', role: 'user', timestamp: 1 },
+            parentId: null,
+            timestamp: '1',
+            type: 'message',
+          }]),
+          extensionStates: {},
+          open: true,
+          sessionId: 'session-a',
+          toolExecutions: {},
+          view: {
+            entry: { epoch: 1, generation: 1, target: { kind: 'end' } },
+            generation: 1,
+            observedLeafId: 'leaf-1',
+            scrollMode: 'free-scrolling',
+            viewport: { itemId: 'turn:leaf-1', mode: 'free-scrolling', offset: -10 },
+          },
+        },
+      },
+    });
+
+    store.getState().setCurrentSession('session-a');
+    expect(store.getState().attentionBySession['session-a']).toBeUndefined();
+    expect(store.getState().records['session-a']?.view?.entry.target).toEqual({ kind: 'end' });
+
+    store.getState().setCurrentSession('session-b');
+    store.getState().setCurrentSession('session-a');
+    expect(store.getState().records['session-a']?.view?.entry.target).toEqual({
+      itemId: 'turn:leaf-1',
+      kind: 'turn',
+      offset: -10,
+    });
+  });
+
+  test('invalidates a stale return-to-latest completion after user navigation', () => {
+    const store = createPiSessionStore(new FakeRuntime());
+    store.setState({
+      records: {
+        'session-a': {
+          extensionStates: {},
+          open: true,
+          sessionId: 'session-a',
+          toolExecutions: {},
+          view: {
+            entry: { epoch: 1, generation: 1, target: { kind: 'end' } },
+            generation: 1,
+            scrollMode: 'free-scrolling',
+          },
+        },
+      },
+    });
+
+    const token = store.getState().requestTimelineReturn('session-a');
+    store.getState().cancelTimelineAutomation('session-a');
+    store.getState().completeTimelineReturn('session-a', token);
+    expect(store.getState().records['session-a']?.view?.scrollMode).toBe('free-scrolling');
   });
 
   test('ignores a stale submission completion after the runtime record is reset', () => {
@@ -885,6 +982,54 @@ describe('Pi session store', () => {
     await opening;
     await flushAsync();
     expect(store.getState().openingSessionId).toBeNull();
+  });
+
+  test('replaces a restored preview viewport when the runtime reports a newer idle leaf', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method, params) => {
+      const sessionId = (params as { sessionId?: string }).sessionId ?? 'session-a';
+      if (method === 'session.open') return { ...snapshot(sessionId), leafId: 'leaf-new' };
+      if (method === 'session.entries') return branch(sessionId, [{
+        id: 'leaf-new',
+        message: { content: 'new', role: 'user', timestamp: 2 },
+        parentId: 'leaf-old',
+        timestamp: '2',
+        type: 'message',
+      }]);
+      if (method === 'recovery.status') return recoveryStatus;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({
+      records: {
+        'session-a': {
+          branchEntries: branch('session-a', [{
+            id: 'leaf-old',
+            message: { content: 'old', role: 'user', timestamp: 1 },
+            parentId: null,
+            timestamp: '1',
+            type: 'message',
+          }]),
+          branchEntriesSource: 'preview',
+          extensionStates: {},
+          open: false,
+          sessionId: 'session-a',
+          toolExecutions: {},
+          view: {
+            entry: { epoch: 1, generation: 1, target: { kind: 'end' } },
+            generation: 1,
+            observedLeafId: 'leaf-old',
+            scrollMode: 'free-scrolling',
+            viewport: { itemId: 'turn:leaf-old', mode: 'free-scrolling', offset: -8 },
+          },
+        },
+      },
+    });
+
+    await store.getState().openSession({ sessionId: 'session-a' });
+
+    expect(store.getState().records['session-a']?.view?.entry.target).toEqual({ kind: 'end' });
+    expect(store.getState().records['session-a']?.view?.scrollMode).toBe('following-end');
   });
 
   test('deduplicates cold preview reads without selecting or opening the session', async () => {

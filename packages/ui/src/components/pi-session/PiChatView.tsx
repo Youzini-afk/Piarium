@@ -706,9 +706,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 </div>
               )}>
                 <LazyPiTimeline
+                  key={`${runtimeKey}:${currentSessionId}`}
                   cwd={sessionCwd}
                   entries={entries}
                   hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}
+                  leafId={currentRecord.branchEntries.leafId}
                   liveAssistant={currentRecord.liveAssistant}
                   liveUser={transientUser}
                   liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
