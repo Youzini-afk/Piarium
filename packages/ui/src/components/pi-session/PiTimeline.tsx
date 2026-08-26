@@ -38,6 +38,7 @@ import {
   type SubagentRunPresentation,
   type SubagentStatus,
 } from './extensionPresentation';
+import { projectPiTimeline } from './piTimelineProjection';
 
 interface PiTimelineProps {
   cwd: string;
@@ -78,6 +79,15 @@ const formatToolEnd = (endMs: number): string => (
     ? new Date(endMs).toLocaleTimeString()
     : `${formatDuration(endMs)} elapsed`
 );
+
+const thinkingPreview = (value: string): string => {
+  const normalized = value
+    .replace(/[`*_>#-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length <= 80) return normalized;
+  return `${normalized.slice(0, 79).trimEnd()}…`;
+};
 
 const PiUserContentView: React.FC<{
   content: string | PiUserContent[];
@@ -248,7 +258,7 @@ const SubagentNotificationsView: React.FC<{
   messageId: string;
   notifications: SubagentNotificationPresentation[];
 }> = ({ content, details, messageId, notifications }) => (
-  <article className="mr-auto w-full max-w-[52rem] space-y-2 rounded-lg border border-border/60 bg-muted/15 px-3 py-2" style={{ contentVisibility: 'auto' }}>
+  <article className="w-full space-y-2 rounded-lg border border-border/60 bg-muted/15 px-3 py-2" style={{ contentVisibility: 'auto' }}>
     <div className="flex items-center gap-2 typography-ui-label text-foreground">
       <Icon name="ai-agent" className="size-3.5" />
       <span>Background Agent Task</span>
@@ -329,12 +339,12 @@ const PiToolCard: React.FC<{
     <details
       className={cn(
         'group',
-        'my-2 overflow-hidden rounded-lg border bg-muted/20',
-        status === 'error' ? 'border-[var(--status-error)]/40' : 'border-border/70',
+        'my-1',
+        status === 'error' && 'text-[var(--status-error)]',
       )}
       open={status === 'running'}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 typography-ui-label text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
         <Icon
           name={status === 'running' ? 'loader-4' : status === 'error' ? 'error-warning' : 'check'}
           className={cn(
@@ -344,11 +354,11 @@ const PiToolCard: React.FC<{
             status === 'success' && 'text-[var(--status-success)]',
           )}
         />
-        <span className="min-w-0 flex-1 truncate font-mono">{call.name}</span>
-        <span className="typography-micro text-muted-foreground">{status}</span>
+        <span className="min-w-0 flex-1 truncate font-mono font-medium text-foreground">{call.name}</span>
+        <span className="typography-micro">{status}</span>
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      <div className="space-y-3 border-t border-border/60 px-3 py-2">
+      <div className="ml-2 space-y-3 border-l border-border/60 py-2 pl-3">
         <div>
           <p className="mb-1 typography-micro font-medium text-muted-foreground">arguments</p>
           <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">
@@ -457,13 +467,25 @@ const AssistantMessage: React.FC<{
         );
       }
       if (content.type === 'thinking') {
+        const preview = content.redacted ? '' : thinkingPreview(content.thinking);
         return (
-          <details key={`${entryId}:thinking:${index}`} className="my-2 rounded-lg border border-border/60 bg-muted/15">
-            <summary className="cursor-pointer select-none px-3 py-2 typography-meta text-muted-foreground">
-              {hiddenThinkingLabel || 'Thinking'}{content.redacted ? ' (redacted)' : ''}
+          <details
+            key={`${entryId}:thinking:${index}`}
+            className="group/thinking my-1"
+            open={streaming && !content.redacted ? true : undefined}
+          >
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-xl py-1.5 pr-2 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
+              <Icon name="brain" className="size-3.5 shrink-0" />
+              <span className="shrink-0 font-medium text-foreground/80">
+                {hiddenThinkingLabel || 'Thinking'}{content.redacted ? ' (redacted)' : ''}
+              </span>
+              {!streaming && preview
+                ? <span className="min-w-0 flex-1 truncate opacity-75">{preview}</span>
+                : <span className="min-w-0 flex-1" />}
+              <Icon name="arrow-right-s" className="size-3.5 shrink-0 transition-transform group-open/thinking:rotate-90" />
             </summary>
             {!content.redacted && (
-              <div className="border-t border-border/60 px-3 py-2 text-muted-foreground">
+              <div className="ml-2 border-l border-border/60 py-1 pl-3 text-muted-foreground">
                 <MarkdownRenderer
                   content={content.thinking}
                   messageId={`${entryId}:thinking:${index}`}
@@ -516,48 +538,16 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
   }>('message-renderer', 'chat.timeline.entries');
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const followTailRef = React.useRef(true);
-  const resultByCallId = React.useMemo(() => {
-    const results = new Map<string, PiToolResultMessage>();
-    for (const entry of entries) {
-      if (entry.type === 'message' && entry.message.role === 'toolResult') {
-        results.set(entry.message.toolCallId, entry.message);
-      }
-    }
-    return results;
-  }, [entries]);
-  const knownToolCallIds = React.useMemo(() => {
-    const ids = new Set<string>();
-    for (const entry of entries) {
-      if (entry.type !== 'message' || entry.message.role !== 'assistant') continue;
-      for (const content of entry.message.content) {
-        if (content.type === 'toolCall') ids.add(content.id);
-      }
-    }
-    if (liveAssistant) {
-      for (const content of liveAssistant.content) {
-        if (content.type === 'toolCall') ids.add(content.id);
-      }
-    }
-    return ids;
-  }, [entries, liveAssistant]);
+  const projection = React.useMemo(
+    () => projectPiTimeline(entries, liveAssistant),
+    [entries, liveAssistant],
+  );
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element || !followTailRef.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [entries, liveAssistant, toolExecutions]);
-
-  const renderedEntries = entries.filter((entry) => {
-    if (entry.type === 'custom' && entry.customType === 'piarium.session-features/v1') return false;
-    if (entry.type === 'custom_message' && !entry.display) return false;
-    if (entry.type === 'message' && entry.message.role === 'custom' && !entry.message.display) return false;
-    if (
-      entry.type === 'message'
-      && entry.message.role === 'toolResult'
-      && knownToolCallIds.has(entry.message.toolCallId)
-    ) return false;
-    return true;
-  });
+  }, [entries, projection.liveAssistant, toolExecutions]);
 
   return (
     <div
@@ -568,10 +558,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
         const element = event.currentTarget;
         followTailRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
       }}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-5"
     >
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
-        {renderedEntries.map((entry) => {
+      <div className="chat-message-column flex flex-col gap-3">
+        {projection.entries.map((entry) => {
           const extensionRendered = renderFirstWorkbenchMatch(messageRenderers, { cwd, entry, sessionId });
           if (extensionRendered !== undefined) {
             return <React.Fragment key={entry.id}>{extensionRendered}</React.Fragment>;
@@ -581,8 +571,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             if (message.role === 'user') {
               const pinned = pinnedEntryIds.has(entry.id);
               return (
-                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message ml-auto max-w-[min(85%,48rem)]" style={{ contentVisibility: 'auto' }}>
-                  <div className="rounded-2xl rounded-br-md bg-primary/10 px-4 py-3 text-foreground">
+                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message ml-auto max-w-[85%]" style={{ contentVisibility: 'auto' }}>
+                  <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
                     <PiUserContentView content={message.content} messageId={entry.id} />
                   </div>
                   <div className="mt-1 flex h-6 items-center justify-end opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
@@ -633,7 +623,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             if (message.role === 'assistant') {
               const pinned = pinnedEntryIds.has(entry.id);
               return (
-                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
+                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message w-full" style={{ contentVisibility: 'auto' }}>
                   <AssistantMessage
                     cwd={cwd}
                     editor={editor}
@@ -641,7 +631,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                     executionById={toolExecutions}
                     hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
                     message={message}
-                    resultByCallId={resultByCallId}
+                    resultByCallId={projection.resultByCallId}
                   />
                   <div className="mt-1 flex h-6 items-center opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
                     <Tooltip>
@@ -673,7 +663,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
             }
             if (message.role === 'toolResult') {
               return (
-                <article key={entry.id} className="mr-auto w-full max-w-[52rem] rounded-lg border border-border/60 bg-muted/15 px-3 py-2" style={{ contentVisibility: 'auto' }}>
+                <article key={entry.id} className="w-full rounded-lg border border-border/60 bg-muted/15 px-3 py-2" style={{ contentVisibility: 'auto' }}>
                   <div className="mb-2 flex items-center gap-2 typography-ui-label text-foreground">
                     <Icon name={message.isError ? 'error-warning' : 'check'} className="size-3.5" />
                     <span className="font-mono">{message.toolName}</span>
@@ -724,14 +714,14 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
                 : undefined;
               if (subagentRun) {
                 return (
-                  <article key={entry.id} className="mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
+                  <article key={entry.id} className="w-full" style={{ contentVisibility: 'auto' }}>
                     <SubagentRunView messageId={entry.id} presentation={subagentRun} />
                   </article>
                 );
               }
               const extensionStatus = parseExtensionStatus(message.customType, message.details);
               if (extensionStatus) {
-                return <PiExtensionStatusCard key={entry.id} className="mx-auto max-w-[52rem]" messageId={entry.id} status={extensionStatus} />;
+                return <PiExtensionStatusCard key={entry.id} messageId={entry.id} status={extensionStatus} />;
               }
               return (
                 <MetaEntry key={entry.id} icon="plug-2">
@@ -780,14 +770,14 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
               : undefined;
             if (subagentRun) {
               return (
-                <article key={entry.id} className="mr-auto w-full max-w-[52rem]" style={{ contentVisibility: 'auto' }}>
+                <article key={entry.id} className="w-full" style={{ contentVisibility: 'auto' }}>
                   <SubagentRunView messageId={entry.id} presentation={subagentRun} />
                 </article>
               );
             }
             const extensionStatus = parseExtensionStatus(entry.customType, entry.details);
             if (extensionStatus) {
-              return <PiExtensionStatusCard key={entry.id} className="mx-auto max-w-[52rem]" messageId={entry.id} status={extensionStatus} />;
+              return <PiExtensionStatusCard key={entry.id} messageId={entry.id} status={extensionStatus} />;
             }
             return (
               <MetaEntry key={entry.id} icon="plug-2">
@@ -808,22 +798,13 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
               </article>
             );
           }
-          if (entry.type === 'model_change') {
-            return <MetaEntry key={entry.id} icon="sparkling">Model: {entry.provider}/{entry.modelId}</MetaEntry>;
-          }
-          if (entry.type === 'thinking_level_change') {
-            return <MetaEntry key={entry.id} icon="brain">Thinking: {entry.thinkingLevel}</MetaEntry>;
-          }
-          if (entry.type === 'session_info') {
-            return <MetaEntry key={entry.id} icon="pencil-ai">Session name: {entry.name ?? 'Untitled'}</MetaEntry>;
-          }
           if (entry.type === 'label') {
             return <MetaEntry key={entry.id} icon="target">{entry.label ?? 'Label'} → {entry.targetId}</MetaEntry>;
           }
           if (entry.type === 'custom') {
             const extensionStatus = parseExtensionStatus(entry.customType, entry.data);
             if (extensionStatus) {
-              return <PiExtensionStatusCard key={entry.id} className="mx-auto max-w-[52rem]" messageId={entry.id} status={extensionStatus} />;
+              return <PiExtensionStatusCard key={entry.id} messageId={entry.id} status={extensionStatus} />;
             }
             return (
               <details key={entry.id} className="mx-auto max-w-full rounded-md bg-muted/30 px-3 py-1.5 typography-meta text-muted-foreground">
@@ -842,16 +823,16 @@ export const PiTimeline: React.FC<PiTimelineProps> = ({
           );
         })}
 
-        {liveAssistant && (
-          <article className="mr-auto w-full max-w-[52rem]" aria-live="polite">
+        {projection.liveAssistant && (
+          <article className="w-full" aria-live="polite">
             <AssistantMessage
               cwd={cwd}
               editor={editor}
               entryId={`live:${sessionId}`}
               executionById={toolExecutions}
               hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
-              message={liveAssistant}
-              resultByCallId={resultByCallId}
+              message={projection.liveAssistant}
+              resultByCallId={projection.resultByCallId}
               streaming
             />
           </article>

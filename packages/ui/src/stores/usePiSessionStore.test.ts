@@ -232,6 +232,31 @@ describe('Pi session event state', () => {
     expect(persisted.liveAssistant).toBeUndefined();
   });
 
+  test('does not restore a persisted assistant when message_end arrives after entry_appended', () => {
+    const sessionId = 'session-a';
+    const message = assistant('done', 'stop');
+    const entry: PiSessionEntry = {
+      id: 'entry-a',
+      message,
+      parentId: null,
+      timestamp: '2026-08-02T00:00:00.000Z',
+      type: 'message',
+    };
+    const initial = {
+      branchEntries: branch(sessionId),
+      extensionStates: {},
+      open: true,
+      sessionId,
+      snapshot: snapshot(sessionId),
+      toolExecutions: {},
+    };
+    const persisted = reducePiAgentEvent(initial, { entry, type: 'entry_appended' });
+    const ended = reducePiAgentEvent(persisted, { message: { ...message }, type: 'message_end' });
+
+    expect(ended.branchEntries?.entries).toHaveLength(1);
+    expect(ended.liveAssistant).toBeUndefined();
+  });
+
   test('projects queue and lifecycle events into the native snapshot', () => {
     const initial = {
       extensionStates: {},

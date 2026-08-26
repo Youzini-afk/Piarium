@@ -30,10 +30,14 @@ export const configurePiComposerSession = async (
 ): Promise<SessionSnapshot> => {
   let snapshot = initialSnapshot;
   const model = config.model ?? fallbackModel;
-  if (model) {
+  if (
+    model
+    && (snapshot.model?.id !== model.id || snapshot.model?.provider !== model.provider)
+  ) {
     snapshot = await actions.selectModel(snapshot.sessionId, model);
   }
   if (!config.thinkingLevel) return snapshot;
+  if (snapshot.thinkingLevel === config.thinkingLevel) return snapshot;
 
   const supported = snapshot.model?.supportedThinkingLevels ?? [];
   if (supported.length > 0 && !supported.includes(config.thinkingLevel)) {

@@ -3247,17 +3247,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.recovery.toast.cancelled': '{provider} cancelou a recuperação',
   'contextPanel.recovery.toast.delegated': 'A recuperação foi delegada a {provider}; a extensão informará o resultado final',
   'contextPanel.recovery.destructive.description': 'O reparo destrutivo regrava o histórico da sessão do Pi. Isso não pode ser desfeito e não reverte arquivos nem efeitos externos.',
-  'chat.workStatus.title': 'Status do trabalho',
-  'chat.workStatus.section.session': 'Sessão',
-  'chat.workStatus.section.activity': 'Atividade',
-  'chat.workStatus.section.pinned': 'Contexto fixado',
-  'chat.workStatus.toolCalls': 'Chamadas de ferramentas',
-  'chat.workStatus.tokens': 'Tokens',
-  'chat.workStatus.queue': 'Fila',
-  'chat.workStatus.state.working': 'Em andamento',
-  'chat.workStatus.state.compacting': 'Compactando',
-  'chat.workStatus.state.retrying': 'Tentando novamente',
-  'chat.workStatus.state.idle': 'Ocioso',
 
 
   "contextPanel.mode.walkthrough": "Percurso",

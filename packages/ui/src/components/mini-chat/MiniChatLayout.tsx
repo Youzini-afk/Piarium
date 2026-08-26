@@ -221,7 +221,7 @@ export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({
             </div>
           </div>
         ) : (
-          <PiChatView active autoOpenDraft={autoOpenDraft} showHeader={false} />
+          <PiChatView active autoOpenDraft={autoOpenDraft} />
         )}
       </main>
     </div>

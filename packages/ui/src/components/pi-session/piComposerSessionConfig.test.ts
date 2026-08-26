@@ -81,6 +81,24 @@ describe('Pi composer session configuration', () => {
     expect(calls).toEqual(['anthropic/project-model']);
   });
 
+  test('does not append model or thinking history for unchanged defaults', async () => {
+    const calls: string[] = [];
+    const current = model('openai', 'gpt-5', ['low', 'high']);
+    const result = await configurePiComposerSession(
+      { ...snapshot(current), thinkingLevel: 'high' },
+      { thinkingLevel: 'high' },
+      { id: current.id, provider: current.provider },
+      {
+        selectModel: async () => { calls.push('model'); return snapshot(current); },
+        selectThinking: async () => { calls.push('thinking'); return snapshot(current); },
+      },
+    );
+
+    expect(calls).toEqual([]);
+    expect(result.model).toEqual(current);
+    expect(result.thinkingLevel).toBe('high');
+  });
+
   test('rejects an explicit thinking level unsupported by the selected model', async () => {
     await expect(configurePiComposerSession(
       snapshot(model('openai', 'small', ['off', 'low'])),

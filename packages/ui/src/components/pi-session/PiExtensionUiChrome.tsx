@@ -42,7 +42,10 @@ export const PiExtensionUiChrome: React.FC<PiExtensionUiChromeProps> = ({
 
   const widgets = Object.entries(sessionUi.widgets)
     .filter(([, widget]) => widget.placement === placement);
-  const statuses = Object.entries(sessionUi.statuses);
+  const statuses = Object.entries(sessionUi.statuses)
+    // The maintained MCP adapter already has a first-class header popover.
+    // Its Pi TUI footer string is not a second chat-composer control.
+    .filter(([key]) => key !== 'mcp');
   const showWorking = placement === 'aboveEditor'
     && sessionUi.workingVisible !== false
     && (

@@ -51,7 +51,6 @@ import { PiComposer } from './PiComposer';
 import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
-import { piSessionTitle } from './sessionPresentation';
 import { renderPiComposerSubmission } from './piComposerSubmission';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import {
@@ -68,17 +67,10 @@ const LazyPiTimeline = React.lazy(async () => {
   return { default: module.PiTimeline };
 });
 
-const LazyPiWorkStatusPanel = React.lazy(async () => {
-  const module = await import('./PiWorkStatusPanel');
-  return { default: module.PiWorkStatusPanel };
-});
-
 interface PiChatViewProps {
   active?: boolean;
   autoOpenDraft?: boolean;
   readOnly?: boolean;
-  showHeader?: boolean;
-  showWorkStatus?: boolean;
 }
 
 const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
@@ -100,18 +92,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   active = true,
   autoOpenDraft = true,
   readOnly = false,
-  showHeader = true,
-  showWorkStatus = false,
 }) => {
   const { t } = useI18n();
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const currentRecord = usePiSessionStore((state) => (
     state.currentSessionId === null ? undefined : state.records[state.currentSessionId]
-  ));
-  const currentSummary = usePiSessionStore((state) => (
-    state.currentSessionId === null
-      ? undefined
-      : state.summaries.find((summary) => summary.id === state.currentSessionId)
   ));
   const openingSessionId = usePiSessionStore((state) => state.openingSessionId);
   const lastError = usePiSessionStore((state) => state.lastError);
@@ -178,7 +163,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
   const [pinBusyEntryId, setPinBusyEntryId] = React.useState<string | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
-  const untitled = t('sessions.sidebar.session.untitled');
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
     setPiDraft(sessionId, update, runtimeKey);
   }, [runtimeKey, setPiDraft]);
@@ -544,21 +528,10 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
 
   const { snapshot } = currentRecord;
   const entries = currentRecord.branchEntries?.entries ?? [];
-  const title = extensionUi?.title?.trim() || (currentSummary
-    ? piSessionTitle(currentSummary, untitled)
-    : snapshot.name?.trim() || untitled);
   return (
     <TooltipProvider>
       <div className={cn('@container flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className="flex min-w-0 flex-1 flex-col">
-          {showHeader ? <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-2 sm:px-6">
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate typography-ui-label font-medium text-foreground">{title}</h2>
-            <p className="truncate typography-micro text-muted-foreground">{snapshot.cwd}</p>
-          </div>
-          {snapshot.busy ? <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" /> : null}
-        </div> : null}
-
         {entries.length === 0 && !currentRecord.liveAssistant ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
             <div className="max-w-md">
@@ -640,11 +613,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         )}
           <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} />
         </div>
-        {showWorkStatus ? (
-          <React.Suspense fallback={null}>
-            <LazyPiWorkStatusPanel sessionId={currentSessionId} />
-          </React.Suspense>
-        ) : null}
       </div>
 
       <Dialog open={recoveryEntry !== null} onOpenChange={(open) => { if (!open) setRecoveryEntry(null); }}>

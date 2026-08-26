@@ -829,7 +829,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   <WorkbenchContributionSlot kind="view" slot={PIARIUM_WORKBENCH_SLOTS.secondarySidebarViews} />
                   <div className="h-full min-h-0">
                     <ErrorBoundary>
-                      <ChatView active showWorkStatus />
+                      <ChatView active />
                     </ErrorBoundary>
                   </div>
                   {sessionPickerOpen ? (

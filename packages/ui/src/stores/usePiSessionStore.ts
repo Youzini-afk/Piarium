@@ -382,13 +382,32 @@ export const reducePiAgentEvent = (
       return next;
     case 'message_start':
     case 'message_update':
-    case 'message_end':
-      if (event.message.role === 'assistant') next.liveAssistant = event.message;
+    case 'message_end': {
+      const message = event.message;
+      if (
+        message.role === 'assistant'
+        && ![current.branchEntries, current.allEntries].some((result) => (
+          result?.entries.some((entry) => (
+            entry.type === 'message'
+            && entry.message.role === 'assistant'
+            && entry.message.timestamp === message.timestamp
+            && entry.message.provider === message.provider
+            && entry.message.model === message.model
+          ))
+        ))
+      ) next.liveAssistant = message;
       return next;
+    }
     case 'entry_appended':
       next.branchEntries = appendEntry(current.branchEntries, event.entry);
       next.allEntries = appendEntry(current.allEntries, event.entry);
-      if (event.entry.type === 'message' && event.entry.message.role === 'assistant') {
+      if (
+        event.entry.type === 'message'
+        && event.entry.message.role === 'assistant'
+        && current.liveAssistant?.timestamp === event.entry.message.timestamp
+        && current.liveAssistant.provider === event.entry.message.provider
+        && current.liveAssistant.model === event.entry.message.model
+      ) {
         delete next.liveAssistant;
       }
       return next;
