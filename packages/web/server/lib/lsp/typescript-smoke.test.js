@@ -68,7 +68,8 @@ describe('typescript language server smoke', () => {
         position: { line: 0, character: 6 },
       });
       expect(hover.status).toBe('ready');
-      expect(hover.value).toMatch(/greeting|number|string/i);
+      expect(hover.value).toMatchObject({ contents: expect.any(Array) });
+      expect(JSON.stringify(hover.value.contents)).toMatch(/greeting|number|string/i);
       const completion = await language.completion({
         resource,
         languageId: 'typescript',

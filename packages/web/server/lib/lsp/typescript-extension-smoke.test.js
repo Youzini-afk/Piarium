@@ -84,6 +84,14 @@ describe('built-in TypeScript language extension', () => {
         reason: 'open',
         content: 'const value = gre\n',
       })).toMatchObject({ status: 'synced' });
+      // didOpen is a notification. Wait for the server's first project-backed result before
+      // exercising auto-import resolution, whose details depend on the completed project graph.
+      const utilityDiagnostic = await waitUntil(() => events.find((event) => (
+        event.kind === 'diagnostics'
+        && event.resourceId === 'util.ts'
+        && event.items.some((item) => /string|number|assignable/i.test(item.message))
+      )));
+      expect(utilityDiagnostic.items.length).toBeGreaterThan(0);
 
       const completion = await language.completion({
         resource: main,
@@ -94,13 +102,14 @@ describe('built-in TypeScript language extension', () => {
       expect(completion.status).toBe('ready');
       const greetCompletion = completion.value.find((item) => item.label === 'greet');
       expect(greetCompletion).toBeTruthy();
+      expect(greetCompletion.resolveToken).toEqual(expect.any(String));
       const resolvedCompletion = await language.completionResolve({
         resource: main,
         languageId: 'typescript',
         documentVersion: 1,
         resolveToken: greetCompletion.resolveToken,
       });
-      expect(resolvedCompletion).toMatchObject({ status: 'ready' });
+      expect(resolvedCompletion.status, resolvedCompletion.message).toBe('ready');
       expect(resolvedCompletion.value.additionalTextEdits?.length).toBeGreaterThan(0);
 
       const mainContent = "import { greet } from './util';\nconst value = greet('Piarium');\n";
@@ -138,13 +147,6 @@ describe('built-in TypeScript language extension', () => {
         documentVersion: 2,
         formatting: { tabSize: 2, insertSpaces: true },
       })).toMatchObject({ status: 'ready', value: expect.any(Array) });
-
-      const utilityDiagnostic = await waitUntil(() => events.find((event) => (
-        event.kind === 'diagnostics'
-        && event.resourceId === 'util.ts'
-        && event.items.some((item) => /string|number|assignable/i.test(item.message))
-      )));
-      expect(utilityDiagnostic.items.length).toBeGreaterThan(0);
 
       const missingImportContent = "const value = greet('Piarium');\n";
       await language.syncDocument({
