@@ -49,6 +49,11 @@ without reading `turn-snapshots.json` or any other private file.
 `pi-wtf` claim combined file recovery; that capability remains attributed to the provider that
 actually owns workspace snapshots.
 
+Piarium absorbs `pi-workspace-history`'s unconditional first-turn initialization preflight notice:
+the active turn already shows that work is in progress, and the notice otherwise repeats for every
+new session without offering an action. A later notification that the initial snapshot is still
+blocking, plus all plugin warnings and errors, remains visible.
+
 ## Recovery bridge v1
 
 The shared Pi event bus is the extension point. A provider listens on
