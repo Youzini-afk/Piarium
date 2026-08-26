@@ -1,8 +1,8 @@
 # Pi-native conversation experience
 
-Status: implementation contract
+Status: delivered; real-device and browser profiling remain release hardening
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## 1. Outcome
 
@@ -36,7 +36,8 @@ Each session record owns four distinguishable layers:
 1. `preview`: persisted branch entries read without starting the worker;
 2. `live`: worker snapshot plus canonical entry stream;
 3. `submission`: renderer-owned pending user submission until Pi appends or rejects it;
-4. `view`: scroll mode, active turn, expanded activity, and transient animation state.
+4. `view`: entry intent, scroll mode, active turn, observed leaf, viewport checkpoint, and stale-command
+   generation.
 
 Preview and live entries merge by entry ID while preserving entries appended during an in-flight read.
 An optimistic submission is never written to JSONL by the renderer. It reconciles only after a new Pi
@@ -108,23 +109,27 @@ accessory stack. There is no independent bar for each feature.
 ## 8. Message presentation
 
 - A user prompt is the visual turn anchor and may stick at the top on desktop; mobile uses normal flow.
-- One assistant header identifies the turn. Model, provider, Agent, duration, token use, and changed-file
-  facts appear once in turn metadata/footer instead of floating system pills.
+- One assistant header identifies the turn. The actual provider/model appears once; trustworthy tool and
+  token facts appear in the footer. Piarium does not infer a fake duration from Pi's request-start timestamp.
 - Thinking and tool activity use a progressive activity group. The final assistant answer remains readable
   without repeated tool-result cards.
-- Copy, context pin, recover, and branch/fork actions remain attached to the message that owns them.
+- Copy, context pin, and recover actions remain attached to the message that owns them. Additional
+  branch/fork actions should appear only when their Pi operation and ownership are wired end to end.
 - Streaming text is throttled and revealed by committed blocks. Virtualized remounts do not replay reveal
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.
 
 ## 9. Delivery phases
 
-1. Submission transaction and authoritative Queue/Steer presentation.
-2. Preview-backed switching, prefetch, hydration skeleton, and session-scoped view state.
-3. Pi turn projector and one virtualized timeline.
-4. Single scroll controller, send anchoring, and return-to-latest navigation.
-5. Message activity/footer actions and unified Composer accessory stack.
-6. Mobile, accessibility, extension seam, performance instrumentation, and documentation convergence.
+1. Delivered: submission transaction and authoritative Queue/Steer presentation.
+2. Delivered: preview-backed switching, prefetch, hydration skeleton, and worker-readiness gates.
+3. Delivered: Pi turn projector, tool-result ownership, and one virtualized timeline.
+4. Delivered: session-scoped view state, a single scroll controller, send anchoring, viewport restore, and
+   tokenized return-to-latest navigation.
+5. Delivered: turn header/footer, copy actions, sent-prompt history, real mobile-mode behavior, and one
+   ordered Composer accessory region.
+6. Release hardening: real-device touch/pixel review and browser render-count/timing profiles. These
+   measurements may tune presentation and estimates but must not create guessed hard ceilings.
 
 Each phase lands independently on `main`. Focused tests must cover stale completion, rapid session switch,
 optimistic reconciliation, deterministic failure restoration, ambiguous send, turn grouping, tool/result
