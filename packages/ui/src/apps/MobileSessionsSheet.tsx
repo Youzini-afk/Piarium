@@ -878,8 +878,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const handleSelectSession = (session: SessionSummary) => {
     const directory = getSessionDirectory(session) || null;
+    onOpenChange(false);
     void openPiSessionFromNavigation({ directory, sessionId: session.id })
-      .then(() => onOpenChange(false))
       .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
 

@@ -129,6 +129,8 @@ const deferred = <T>() => {
   return { promise, reject, resolve };
 };
 
+const flushAsync = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 class FakeRuntime implements PiSessionStoreRuntime {
   key = 'runtime-a';
   readonly calls: Array<{ method: RuntimeMethod; params: unknown }> = [];
@@ -413,6 +415,7 @@ describe('Pi session store', () => {
     const store = createPiSessionStore(runtime);
 
     await store.getState().openSession({ cwd: 'D:/work', sessionId: 'session-a' });
+    await flushAsync();
     runtime.event('agent.event', {
       event: { type: 'agent_start' } satisfies PiAgentEvent,
       sessionId: 'session-a',
@@ -676,12 +679,55 @@ describe('Pi session store', () => {
     const openA = store.getState().openSession({ sessionId: 'session-a' });
     const openB = store.getState().openSession({ sessionId: 'session-b' });
 
+    expect(store.getState().currentSessionId).toBe('session-b');
+    expect(store.getState().openingSessionId).toBe('session-b');
+
     second.resolve(snapshot('session-b'));
     await openB;
     first.resolve(snapshot('session-a'));
     await openA;
 
     expect(store.getState().currentSessionId).toBe('session-b');
+  });
+
+  test('returns from session open without waiting for history hydration', async () => {
+    const runtime = new FakeRuntime();
+    const entries = deferred<SessionEntriesResult>();
+    runtime.handler = (method, params) => {
+      const sessionId = (params as { sessionId?: string }).sessionId ?? 'session-a';
+      if (method === 'session.open') return snapshot(sessionId);
+      if (method === 'session.entries') return entries.promise;
+      if (method === 'recovery.status') return recoveryStatus;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    const opened = await store.getState().openSession({ sessionId: 'session-a' });
+    expect(opened.sessionId).toBe('session-a');
+    expect(store.getState().currentSessionId).toBe('session-a');
+    expect(store.getState().openingSessionId).toBe('session-a');
+    expect(store.getState().records['session-a']?.branchEntries).toBeUndefined();
+
+    entries.resolve(branch('session-a'));
+    await flushAsync();
+    expect(store.getState().openingSessionId).toBeNull();
+    expect(store.getState().records['session-a']?.branchEntries?.entries).toEqual([]);
+  });
+
+  test('restores the previous selection when the latest open fails', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.open') throw new Error('open failed');
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({ currentSessionId: 'session-a' });
+
+    const opening = store.getState().openSession({ sessionId: 'session-b' });
+    expect(store.getState().currentSessionId).toBe('session-b');
+    await expect(opening).rejects.toThrow('open failed');
+    expect(store.getState().currentSessionId).toBe('session-a');
+    expect(store.getState().openingSessionId).toBeNull();
   });
 
   test('does not let an older navigation completion reclaim the current session', async () => {

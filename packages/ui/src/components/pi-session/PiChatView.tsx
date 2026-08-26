@@ -125,6 +125,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const followUp = usePiSessionStore((state) => state.followUp);
   const abort = usePiSessionStore((state) => state.abort);
   const mutateFeatures = usePiSessionStore((state) => state.mutateFeatures);
+  const refreshEntries = usePiSessionStore((state) => state.refreshEntries);
   const recoverTo = usePiSessionStore((state) => state.recoverTo);
   const selectModel = usePiSessionStore((state) => state.selectModel);
   const selectThinking = usePiSessionStore((state) => state.selectThinking);
@@ -494,6 +495,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       setPendingSubmission(null);
     }
   }, [currentRecord?.liveUser, currentSessionId, pendingEntryCommitted, pendingSubmission]);
+  const sessionOpening = openingSessionId !== null && openingSessionId === currentSessionId;
 
   if (pendingDraftOpen) {
     const projectLabel = activeProject
@@ -582,11 +584,35 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     );
   }
 
-  if (!currentRecord?.snapshot) {
+  if (!currentRecord?.snapshot || (sessionOpening && !currentRecord.branchEntries)) {
     return (
       <div className="flex h-full items-center justify-center bg-background text-muted-foreground">
         <Icon name="loader-4" className="mr-2 size-4 animate-spin" />
         {openingSessionId ? t('sessions.sidebar.group.empty.loadingSessions') : lastError}
+      </div>
+    );
+  }
+
+  if (!currentRecord.branchEntries && lastError) {
+    return (
+      <div className="flex h-full items-center justify-center bg-background px-6">
+        <div className="max-w-sm text-center">
+          <h2 className="typography-ui-label font-semibold text-foreground">
+            {t('chat.container.sessionLoadError.title')}
+          </h2>
+          <p className="mt-2 typography-meta text-muted-foreground">
+            {t('chat.container.sessionLoadError.description')}
+          </p>
+          <button
+            type="button"
+            onClick={() => void refreshEntries(currentSessionId).catch((error) => {
+              toast.error(error instanceof Error ? error.message : String(error));
+            })}
+            className="mt-4 inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover"
+          >
+            {t('chat.container.sessionLoadError.retry')}
+          </button>
+        </div>
       </div>
     );
   }
@@ -663,7 +689,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 followUpBehavior={followUpBehavior}
                 selectedModel={snapshot.model}
                 selectedThinkingLevel={snapshot.thinkingLevel}
-                sending={creating || sending}
+                sending={creating || sending || sessionOpening}
                 sessionId={snapshot.sessionId}
                 snapshot={snapshot}
                 onAbort={async () => { await abort(currentSessionId); }}

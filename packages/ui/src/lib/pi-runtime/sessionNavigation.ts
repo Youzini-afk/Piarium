@@ -131,12 +131,16 @@ export const openPiSessionFromNavigation = async (
   const summary = state.summaries.find((candidate) => candidate.id === sessionId);
   const cwd = target.directory?.trim() || summary?.cwd;
   const existing = state.records[sessionId];
-  const snapshot = state.currentSessionId === sessionId && existing?.open && existing.snapshot
-    ? existing.snapshot
-    : await state.openSession({
-        ...(cwd ? { cwd } : {}),
-        sessionId,
-      });
+  let snapshot: SessionSnapshot;
+  if (existing?.open && existing.snapshot && existing.branchEntries) {
+    state.setCurrentSession(sessionId);
+    snapshot = existing.snapshot;
+  } else {
+    snapshot = await state.openSession({
+      ...(cwd ? { cwd } : {}),
+      sessionId,
+    });
+  }
   applyPiSessionLocation(snapshot.cwd, undefined, snapshot.workspace ?? summary?.workspace);
   return snapshot;
 };

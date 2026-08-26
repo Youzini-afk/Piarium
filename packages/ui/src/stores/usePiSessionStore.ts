@@ -1039,9 +1039,14 @@ export const createPiSessionStore = (
       },
 
       openSession: async (params) => {
+        const previousSessionId = get().currentSessionId;
         const selectionIntent = beginSelectionIntent();
         const openingSessionId = params.sessionId ?? null;
-        set({ openingSessionId, lastError: null });
+        set((state) => ({
+          currentSessionId: openingSessionId ?? state.currentSessionId,
+          openingSessionId,
+          lastError: null,
+        }));
         try {
           const { result, runtimeKey } = await request('session.open', params);
           set((state) => ({
@@ -1051,22 +1056,33 @@ export const createPiSessionStore = (
             currentSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
               ? result.sessionId
               : state.currentSessionId,
-            openingSessionId: selectionIntentIsCurrent(selectionIntent, runtimeKey)
-              ? null
-              : state.openingSessionId,
             records: upsertRecord(state.records, result.sessionId, (current) => ({
               ...current,
               open: true,
               snapshot: preserveSnapshotWorkspace(result, current.snapshot),
             })),
           }));
-          await Promise.all([
-            get().refreshEntries(result.sessionId),
-            get().refreshRecoveryStatus(result.sessionId).catch(() => undefined),
-          ]);
+          void get().refreshEntries(result.sessionId)
+            .catch(() => undefined)
+            .finally(() => {
+              if (!selectionIntentIsCurrent(selectionIntent, runtimeKey)) return;
+              set((state) => ({
+                openingSessionId: state.openingSessionId === result.sessionId
+                  ? null
+                  : state.openingSessionId,
+              }));
+            });
+          void get().refreshRecoveryStatus(result.sessionId).catch(() => undefined);
           return result;
         } catch (error) {
-          if (selectionIntent === selectionGeneration) set({ openingSessionId: null });
+          if (selectionIntent === selectionGeneration) {
+            set((state) => ({
+              currentSessionId: state.currentSessionId === openingSessionId
+                ? previousSessionId
+                : state.currentSessionId,
+              openingSessionId: null,
+            }));
+          }
           commitError(runtime.currentKey(), error);
           throw error;
         }

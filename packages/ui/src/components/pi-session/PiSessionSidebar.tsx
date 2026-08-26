@@ -419,10 +419,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   }, [query, untitled, workspaceGroups]);
 
   const handleSelect = React.useCallback(async (session: SessionSummary) => {
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
     try {
       await openPiSessionFromNavigation({ directory: session.cwd, sessionId: session.id });
-      if (mobileVariant) setSessionSwitcherOpen(false);
-      onRequestClose?.();
     } catch (error) {
       console.error('Failed to open Pi session:', error);
       toast.error(error instanceof Error ? error.message : String(error));
