@@ -22,12 +22,25 @@ import type { ModelMetadata } from '@/types';
 interface ModelSelectorProps {
     providerId: string;
     modelId: string;
-    onChange: (providerId: string, modelId: string) => void;
+    onChange: (providerId: string, modelId: string) => Promise<void> | void;
     className?: string;
     allowedProviderIds?: string[];
     placeholder?: string;
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
+    /** Runtime directory whose provider catalog should be shown. */
+    cwd?: string;
+    /** Whether the picker exposes an inherited/not-selected choice. */
+    allowNone?: boolean;
+    /** Effective model shown while the stored selection is inherited. */
+    displayProviderId?: string;
+    displayModelId?: string;
+    defaultSelectionLabel?: string;
+    disabled?: boolean;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    align?: 'start' | 'center' | 'end';
+    variant?: 'field' | 'composer';
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -39,6 +52,16 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     placeholder,
     tooltipsEnabled = true,
     dropdownPortalToBody = false,
+    cwd,
+    allowNone = true,
+    displayProviderId,
+    displayModelId,
+    defaultSelectionLabel,
+    disabled = false,
+    open,
+    onOpenChange,
+    align = 'start',
+    variant = 'field',
 }) => {
     const { t } = useI18n();
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -49,9 +72,10 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     );
     const providersLoaded = usePiProviderStore((state) => state.loaded);
     const providersLoading = usePiProviderStore((state) => state.isLoading);
+    const providersCwd = usePiProviderStore((state) => state.cwd);
     const providerError = usePiProviderStore((state) => state.error);
     const loadProviders = usePiProviderStore((state) => state.load);
-    const isReady = providersLoaded && !providersLoading;
+    const isReady = providersLoaded && !providersLoading && providersCwd === (cwd ?? currentDirectory);
     const isUnavailable = Boolean(providerError) && !providersLoading;
     const modelsMetadata = React.useMemo(() => new Map<string, ModelMetadata>(), []);
     const isMobile = useUIStore((state) => state.isMobile);
@@ -67,28 +91,53 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const [isMobilePanelOpen, setIsMobilePanelOpen] = React.useState(false);
     const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
     const [searchQuery, setSearchQuery] = React.useState('');
+    const [isSelecting, setIsSelecting] = React.useState(false);
+    const targetDirectory = cwd ?? currentDirectory;
+    const pickerOpen = open ?? (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen);
+
+    const setPickerOpen = React.useCallback((nextOpen: boolean) => {
+        onOpenChange?.(nextOpen);
+        if (open !== undefined) return;
+        if (isActuallyMobile) setIsMobilePanelOpen(nextOpen);
+        else setIsDropdownOpen(nextOpen);
+    }, [isActuallyMobile, onOpenChange, open]);
 
     React.useEffect(() => {
-        if (!currentDirectory) return;
-        void loadProviders(currentDirectory).catch(() => undefined);
-    }, [currentDirectory, loadProviders]);
+        if (!targetDirectory) return;
+        void loadProviders(targetDirectory).catch(() => undefined);
+    }, [loadProviders, targetDirectory]);
 
     const closePicker = React.useCallback(() => {
-        setIsMobilePanelOpen(false);
-        setIsDropdownOpen(false);
+        setPickerOpen(false);
         setSearchQuery('');
-    }, []);
+    }, [setPickerOpen]);
 
-    const handleSelect = React.useCallback((entry: ModelPickerEntry) => {
-        onChange(entry.providerID, entry.modelID);
-        addRecentModel(entry.providerID, entry.modelID);
-        closePicker();
-    }, [addRecentModel, closePicker, onChange]);
+    const handleSelect = React.useCallback(async (entry: ModelPickerEntry) => {
+        if (disabled || isSelecting) return;
+        setIsSelecting(true);
+        try {
+            await onChange(entry.providerID, entry.modelID);
+            addRecentModel(entry.providerID, entry.modelID);
+            closePicker();
+        } catch {
+            // The owner reports selection failures and keeps the picker open.
+        } finally {
+            setIsSelecting(false);
+        }
+    }, [addRecentModel, closePicker, disabled, isSelecting, onChange]);
 
-    const handleSelectNone = React.useCallback(() => {
-        onChange('', '');
-        closePicker();
-    }, [closePicker, onChange]);
+    const handleSelectNone = React.useCallback(async () => {
+        if (disabled || isSelecting) return;
+        setIsSelecting(true);
+        try {
+            await onChange('', '');
+            closePicker();
+        } catch {
+            // The owner reports selection failures and keeps the picker open.
+        } finally {
+            setIsSelecting(false);
+        }
+    }, [closePicker, disabled, isSelecting, onChange]);
 
     const labels = React.useMemo(() => ({
         searchPlaceholder: t('settings.agents.modelSelector.searchPlaceholder'),
@@ -107,16 +156,24 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         costPerMillion: t('chat.modelControls.costPerMillion'),
     }), [placeholder, t]);
 
-    const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
+    const selectedModel = React.useMemo(
+        () => providerId && modelId ? { providerID: providerId, modelID: modelId } : null,
+        [modelId, providerId],
+    );
+    const effectiveProviderId = displayProviderId ?? providerId;
+    const effectiveModelId = displayModelId ?? modelId;
     // Show the model's display name (as in the picker list), not the raw provider/model id.
     const triggerLabel = React.useMemo(() => {
-        if (!providerId || !modelId) {
+        if (!effectiveProviderId || !effectiveModelId) {
             return placeholder || t('settings.agents.modelSelector.notSelected');
         }
-        const provider = providers.find((entry) => entry.id === providerId);
-        const model = provider?.models?.find((entry) => entry.id === modelId);
-        return (typeof model?.name === 'string' && model.name.trim()) || modelId;
-    }, [modelId, placeholder, providerId, providers, t]);
+        const provider = providers.find((entry) => entry.id === effectiveProviderId);
+        const model = provider?.models?.find((entry) => entry.id === effectiveModelId);
+        const modelLabel = (typeof model?.name === 'string' && model.name.trim()) || effectiveModelId;
+        return !selectedModel && defaultSelectionLabel
+            ? `${defaultSelectionLabel} · ${modelLabel}`
+            : modelLabel;
+    }, [defaultSelectionLabel, effectiveModelId, effectiveProviderId, placeholder, providers, selectedModel, t]);
 
     const picker = (
         <ModelPickerList
@@ -132,10 +189,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             selectedModel={selectedModel}
             hiddenModels={hiddenModels}
             allowedProviderIds={allowedProviderIds}
-            includeNotSelected
-            onSelectNone={handleSelectNone}
+            includeNotSelected={allowNone}
+            onSelectNone={allowNone ? () => { void handleSelectNone(); } : undefined}
             onEscape={closePicker}
-            tooltipsEnabled={tooltipsEnabled && (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen)}
+            tooltipsEnabled={tooltipsEnabled && pickerOpen}
+            disabled={disabled || isSelecting}
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
         />
@@ -146,11 +204,17 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <>
                 <button
                     type="button"
-                    onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
-                    disabled={!isReady}
+                    onClick={isReady && !disabled ? () => setPickerOpen(true) : undefined}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onPointerDownCapture={(event) => {
+                        if (event.pointerType === 'touch') event.preventDefault();
+                    }}
+                    disabled={!isReady || disabled}
                     className={cn(
-                        dropdownTriggerVariants(),
-                        'w-full',
+                        variant === 'composer'
+                            ? 'flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 overflow-hidden rounded-md px-2 typography-meta text-foreground hover:bg-interactive-hover/60'
+                            : dropdownTriggerVariants(),
+                        variant === 'field' && 'w-full',
                         className,
                     )}
                 >
@@ -160,8 +224,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                 <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
-                        ) : providerId ? (
-                            <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" />
+                        ) : effectiveProviderId ? (
+                            <ProviderLogo providerId={effectiveProviderId} className="h-3.5 w-3.5 flex-shrink-0" />
                         ) : (
                             <Icon name="pencil-ai" className="h-3 w-3 text-muted-foreground" />
                         )}
@@ -170,7 +234,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                 </button>
                 <MobileOverlayPanel
-                    open={isMobilePanelOpen}
+                    open={isReady && pickerOpen}
                     onClose={closePicker}
                     title={t('settings.agents.modelSelector.title')}
                 >
@@ -181,12 +245,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }
 
     return (
-        <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
+        <DropdownMenu open={isReady && pickerOpen} onOpenChange={isReady && !disabled ? setPickerOpen : undefined}>
             <DropdownMenuTrigger asChild>
-                <div className={cn(
-                    dropdownTriggerVariants({ size: 'sm' }),
-                    'min-w-0 w-fit overflow-hidden',
-                    !isReady && 'opacity-60 cursor-not-allowed',
+                <button type="button" disabled={!isReady || disabled} className={cn(
+                    variant === 'composer'
+                        ? 'flex h-8 min-w-0 w-fit max-w-[240px] items-center gap-1.5 overflow-hidden rounded-md px-2 typography-meta text-foreground hover:bg-interactive-hover/60'
+                        : dropdownTriggerVariants({ size: 'sm' }),
+                    variant === 'field' && 'min-w-0 w-fit overflow-hidden',
+                    (!isReady || disabled) && 'opacity-60 cursor-not-allowed',
                     className,
                 )}>
                     {!isReady ? (
@@ -198,14 +264,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         </>
                     ) : (
                         <>
-                            {providerId ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
+                            {effectiveProviderId ? <ProviderLogo providerId={effectiveProviderId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
                             <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
                         </>
                     )}
                     <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
-                </div>
+                </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start" portalToBody={dropdownPortalToBody}>
+            <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align={align} portalToBody={dropdownPortalToBody}>
                 {picker}
             </DropdownMenuContent>
         </DropdownMenu>

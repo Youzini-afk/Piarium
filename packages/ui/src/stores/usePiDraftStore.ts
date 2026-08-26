@@ -1,4 +1,4 @@
-import type { ImageAttachment } from '@piarium/protocol';
+import type { ImageAttachment, ModelDescriptor, ThinkingLevel } from '@piarium/protocol';
 import { create } from 'zustand';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -6,7 +6,11 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 export interface PiDraftState {
   images: ImageAttachment[];
   instructions?: string;
+  /** Explicit next-session model. Undefined means inherit the effective default. */
+  model?: Pick<ModelDescriptor, 'id' | 'provider'>;
   text: string;
+  /** Explicit next-session thinking level. Undefined means inherit the effective default. */
+  thinkingLevel?: ThinkingLevel;
 }
 
 interface PiDraftStoreState {

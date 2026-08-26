@@ -1,8 +1,10 @@
 import React from 'react';
 import { PiRuntimeAmbiguousRequestError } from '@piarium/runtime-client';
 import type {
+  ModelDescriptor,
   PiSessionMessageEntry,
   RecoveryMode,
+  ThinkingLevel,
 } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
@@ -57,11 +59,9 @@ import {
   WORKBENCH_REPLACEMENT_TARGETS,
 } from '@/lib/extensions/workbench-registry';
 import { getResolvedWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
-
-const LazyPiModelSelectorDialog = React.lazy(async () => {
-  const module = await import('./PiModelSelectorDialog');
-  return { default: module.PiModelSelectorDialog };
-});
+import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { usePiComposerDefaults } from './usePiComposerDefaults';
+import { configurePiComposerSession } from './piComposerSessionConfig';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -123,6 +123,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const abort = usePiSessionStore((state) => state.abort);
   const mutateFeatures = usePiSessionStore((state) => state.mutateFeatures);
   const recoverTo = usePiSessionStore((state) => state.recoverTo);
+  const selectModel = usePiSessionStore((state) => state.selectModel);
+  const selectThinking = usePiSessionStore((state) => state.selectThinking);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -139,8 +141,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     recoveryPreference,
     currentRecord?.recoveryStatus,
   );
-  const isModelSelectorOpen = useUIStore((state) => state.isModelSelectorOpen);
-  const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
   const extensionUi = usePiInteractionStore((state) => (
     currentSessionId === null ? undefined : state.sessions[currentSessionId]
   ));
@@ -152,6 +152,14 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       : { kind: 'unbound' as const }
   ), [activeProject]);
   const pendingDraftOpen = currentSessionId === null && autoOpenDraft && !readOnly && Boolean(pendingCwd);
+  const pendingDefaults = usePiComposerDefaults(
+    pendingDraftOpen ? pendingCwd : '',
+    activeProject?.defaultModel,
+  );
+  const projectDefaultModel = React.useMemo(() => {
+    const parsed = parseModelIdentifier(activeProject?.defaultModel);
+    return parsed ? { id: parsed.modelId, provider: parsed.providerId } : undefined;
+  }, [activeProject?.defaultModel]);
   const currentDraftKey = currentSessionId === null
     ? pendingDraftOpen && pendingCwd
       ? piPendingDraftKey(pendingCwd, runtimeKey)
@@ -179,6 +187,16 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     setPendingPiDraft(pendingCwd, update, runtimeKey);
   }, [pendingCwd, runtimeKey, setPendingPiDraft]);
 
+  const configureNewSession = React.useCallback(async (
+    initialSnapshot: Awaited<ReturnType<typeof createSession>>,
+    config: Pick<PiDraftState, 'model' | 'thinkingLevel'>,
+  ) => configurePiComposerSession(
+    initialSnapshot,
+    config,
+    projectDefaultModel,
+    { selectModel, selectThinking },
+  ), [projectDefaultModel, selectModel, selectThinking]);
+
   React.useEffect(() => {
     if (!currentSessionId || !extensionUi?.editorText) return;
     const { revision, text } = extensionUi.editorText;
@@ -194,15 +212,16 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     setCreating(true);
     try {
       setDirectory(cwd, { showOverlay: false });
-      await createSession(cwd, undefined, undefined, activeProject
+      const snapshot = await createSession(cwd, undefined, undefined, activeProject
         ? { id: activeProject.id, kind: 'workspace' }
         : { kind: 'unbound' });
+      await configureNewSession(snapshot, {});
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setCreating(false);
     }
-  }, [activeProjectId, createSession, currentDirectory, homeDirectory, projects, setDirectory]);
+  }, [activeProjectId, configureNewSession, createSession, currentDirectory, homeDirectory, projects, setDirectory]);
 
   const sendDraft = React.useCallback(async (
     sessionId: string,
@@ -327,13 +346,28 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         snapshot.sessionId,
         draftRuntimeKey,
       );
+      await configureNewSession(snapshot, transferredDraft);
       await sendDraft(snapshot.sessionId, transferredDraft, draftRuntimeKey);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setCreating(false);
     }
-  }, [createSession, creating, pendingCwd, pendingWorkspace, runtimeKey, sendDraft, sending, setDirectory, transferPendingPiDraft]);
+  }, [configureNewSession, createSession, creating, pendingCwd, pendingWorkspace, runtimeKey, sendDraft, sending, setDirectory, transferPendingPiDraft]);
+
+  const handleCurrentModelChange = React.useCallback(async (
+    model: Pick<ModelDescriptor, 'id' | 'provider'> | undefined,
+  ) => {
+    if (!currentSessionId || !model) return;
+    await selectModel(currentSessionId, model);
+  }, [currentSessionId, selectModel]);
+
+  const handleCurrentThinkingChange = React.useCallback(async (
+    level: ThinkingLevel | undefined,
+  ) => {
+    if (!currentSessionId || !level) return;
+    await selectThinking(currentSessionId, level);
+  }, [currentSessionId, selectThinking]);
 
   const handlePendingDictationSend = React.useCallback(async (transcript: string) => {
     if (!pendingCwd) return;
@@ -444,14 +478,22 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
             fallback={(
               <PiComposer
+                active={active}
+                allowModelInheritance
                 cwd={pendingCwd}
                 draft={draft.text}
+                effectiveModel={draft.model ?? pendingDefaults.model}
+                effectiveThinkingLevel={draft.thinkingLevel ?? pendingDefaults.thinkingLevel}
                 images={draft.images}
                 followUpBehavior={followUpBehavior}
+                selectedModel={draft.model}
+                selectedThinkingLevel={draft.thinkingLevel}
                 sending={creating || sending}
                 sessionId={null}
                 onChangeDraft={(text) => updatePendingDraft({ text })}
                 onChangeImages={(images) => updatePendingDraft({ images })}
+                onChangeModel={(model) => updatePendingDraft({ model })}
+                onChangeThinkingLevel={(thinkingLevel) => updatePendingDraft({ thinkingLevel })}
                 onSendText={handlePendingDictationSend}
                 onSend={submitPendingDraft}
               />
@@ -514,25 +556,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             <h2 className="truncate typography-ui-label font-medium text-foreground">{title}</h2>
             <p className="truncate typography-micro text-muted-foreground">{snapshot.cwd}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-2 typography-micro text-muted-foreground">
-            {snapshot.model && (
-              <button
-                type="button"
-                onClick={() => setModelSelectorOpen(true)}
-                className="hidden max-w-56 truncate rounded-md bg-muted/40 px-2 py-1 hover:bg-interactive-hover sm:inline"
-              >
-                {snapshot.model.provider}/{snapshot.model.id}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setModelSelectorOpen(true)}
-              className="rounded-md bg-muted/40 px-2 py-1 hover:bg-interactive-hover"
-            >
-              {snapshot.thinkingLevel}
-            </button>
-            {snapshot.busy && <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />}
-          </div>
+          {snapshot.busy ? <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" /> : null}
         </div> : null}
 
         {entries.length === 0 && !currentRecord.liveAssistant ? (
@@ -590,16 +614,24 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             target={WORKBENCH_REPLACEMENT_TARGETS.chatComposer}
             fallback={(
               <PiComposer
+                active={active}
+                allowModelInheritance={false}
                 cwd={snapshot.cwd}
                 draft={draft.text}
+                effectiveModel={snapshot.model}
+                effectiveThinkingLevel={snapshot.thinkingLevel}
                 images={draft.images}
                 followUpBehavior={followUpBehavior}
+                selectedModel={snapshot.model}
+                selectedThinkingLevel={snapshot.thinkingLevel}
                 sending={creating || sending}
                 sessionId={snapshot.sessionId}
                 snapshot={snapshot}
                 onAbort={async () => { await abort(currentSessionId); }}
                 onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
                 onChangeImages={(images) => updateDraft(currentSessionId, { images })}
+                onChangeModel={handleCurrentModelChange}
+                onChangeThinkingLevel={handleCurrentThinkingChange}
                 onSendText={handleDictationSend}
                 onSend={handleSend}
               />
@@ -615,11 +647,6 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         ) : null}
       </div>
 
-      {isModelSelectorOpen ? (
-        <React.Suspense fallback={null}>
-          <LazyPiModelSelectorDialog />
-        </React.Suspense>
-      ) : null}
       <Dialog open={recoveryEntry !== null} onOpenChange={(open) => { if (!open) setRecoveryEntry(null); }}>
         <DialogContent showCloseButton={false} className="max-w-md gap-5">
           <DialogHeader>

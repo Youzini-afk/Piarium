@@ -1,130 +1,79 @@
 # Composer
 
-The chat composer: the prompt language, the editor that renders it, and
-everything between typing and sending.
+The shared Pi prompt composer is orchestrated by
+`components/pi-session/PiComposer.tsx`. Agent Profile, IDE Profile, desktop,
+Web, mobile, mini chat, and the VS Code companion all reach the same component
+through `PiChatView`; they do not own separate send semantics.
 
-`ChatInput.tsx` (one directory up) is the orchestrator. It holds the composer's
-own state and wires these modules together; it should not grow logic that
-belongs to one of them.
+## Ownership
 
-## Layers
-
-| Directory | Owns |
+| Area | Owner |
 |---|---|
-| `language/` | What the text *means*: `@` references, `/` and `#` tokens, markdown, and which picker a caret asks for |
-| `editor/` | The CodeMirror view that renders the language and owns the caret |
-| `state/` | Composer state with a lifecycle: drafts, mobile shell, history, popup placement, draft targeting |
-| `submit/` | Turning what the user has into what gets sent |
-| `attachments/` | Files: paths, drop payloads |
-| `ui/` | Presentation |
-| `text.ts` | How inserted text meets the text already there |
+| Prompt text, images, and pending first-turn configuration | `usePiDraftStore` |
+| Existing session model and thinking level | Pi runtime `SessionSnapshot` |
+| Provider/model catalog | `usePiProviderStore` and `ModelPickerList` |
+| New-session defaults | Pi settings, with Piarium project metadata allowed to override the model |
+| Prompt parsing and rendering | `language/`, `editor/`, and `piComposerSubmission.ts` |
+| Process execution and model mutation | Pi Host through `usePiSessionStore` |
 
-## The prompt language
+The UI may stage a model or thinking choice for a session that does not exist
+yet. It must not pretend that choice is live: `PiChatView` creates the session,
+applies the staged model, applies a compatible explicit thinking level, and
+only then sends the first prompt. Once the session exists, the returned
+`SessionSnapshot` is authoritative.
 
-`language/` is the single source of truth for composer syntax. Everything that
-needs to know what a token means — highlighting, send-time resolution, and the
-autocomplete triggers — goes through it.
+`undefined` in a pending draft means “inherit”. It is not copied into a second
+global settings system. The composer displays the effective Pi/project default
+while retaining that distinction, so selecting “Default” remains meaningful.
 
-**This is the invariant that matters most in this module.** Before it existed,
-the `@` rule was written four times with divergent cleanup and the `/` rule
-three times with different valid character sets, so a token could be painted as
-a reference and then not resolve as one. Adding a construct meant finding every
-copy.
+## Prompt language and editor
 
-- `mentions.ts` — `@` references. The `start..end` span is the reference
-  itself and is what gets highlighted; in `see @a/b.ts,` the comma is sentence
-  punctuation, not part of the file being referenced. Mentions are plain
-  editable text: deleting a character edits the token and reopens the mention
-  picker, the same way `/skill` tokens behave — not an atomic delete.
-- `prefixTokens.ts` — `/command`, `/skill`, `#snippet`. Scanning is deliberately
-  generous; **membership in the command, skill or snippet registry is the
-  authority**, not the pattern. An unknown `/token` stays plain prose.
-- `triggers.ts` — which picker a caret position asks for. Exactly one can be
-  active, with precedence `command > skill > snippet > mention`.
-- `tokenize.ts` — one pass producing every highlight range. Adding a construct
-  to the language means adding it here, once.
+`language/` is the single source of truth for composer syntax. It recognizes
+known `/command`, `/skill`, and `#snippet` tokens plus prompt markdown and path
+references. Unknown tokens remain ordinary prose.
 
-## The editor
+`editor/ComposerEditor.tsx` wraps CodeMirror, but its document is still a plain
+string. The imperative surface is intentionally limited to caret operations
+needed by autocomplete, dictation, and restored drafts; model selection and
+send policy stay outside the editor.
 
-`editor/` wraps CodeMirror. The document is a plain string: `getValue()` is
-exactly what gets sent, so nothing downstream serializes a rich document model
-back into a prompt.
+CodeMirror owns text, selection, wrapping, undo history, and prompt
+decorations. The native-selection overlay in `editor/theme.ts` is retained for
+iOS handles and for selections over decorated tokens. Do not replace it with a
+textarea/mirror pair: those two layers drift when typography changes and on
+mobile wrapping.
 
-The composer previously painted a transparent `<textarea>` over a mirror
-`<div>`. That restricted highlighting to styles which do not change glyph
-advance width — colour, background, underline — because anything else made the
-mirror drift out from under the caret. Bold and italic were impossible, and the
-overlay was disabled outright on mobile, where wrapped text drifted anyway.
-**Those constraints are gone**; adding a width-affecting style is now a
-question of design, not of feasibility.
+## Model and thinking controls
 
-Selection rendering: every device runs CodeMirror's `drawSelection()` — it
-keeps typing on the drawn-selection code path, and removing it makes
-CodeMirror enforce cursor association on the native selection, which iOS
-answers with severe input lag. Every device also layers
-`composerNativeSelectionExtension` (`editor/theme.ts`) on top: it re-shows
-the native selection, and — only while a range is selected — the native caret,
-hiding the painted layers those replace. The native selection is the one that
-shows for two reasons: the painted layer sits behind the content, so tokens
-with their own background (inline code, fences) cover it completely; and
-iOS's selection drag handles attach to the visible native selection and take
-their colour from the caret, so a transparent caret means invisible handles.
-The range-only caret scoping is load-bearing — a native caret visible while
-typing makes WebKit re-render its caret UI after every keystroke, felt as
-severe input lag. The selection tint comes from `--primary`, not the selection
-token:
-themes define `--interactive-selection` with its own alpha, so a translucent
-mix of it is nearly invisible.
+`PiComposerModelControls` is part of the composer rather than the chat header.
+The model trigger reuses the shared searchable model catalog, favorites,
+recents, provider ordering, availability filtering, and mobile overlay. The
+thinking menu is derived from the effective model's
+`supportedThinkingLevels`; a stale explicit level is cleared when the user
+chooses a model that cannot run it.
 
-`composerLanguage.ts` retokenizes the whole document on every change. The
-composer holds a prompt, not a source file: it is short enough that a full pass
-is cheaper and far simpler than incremental mapping, and it keeps the editor
-and the send path reading the same grammar.
+The global `open_model_selector` shortcut controls the picker anchored to the
+active composer. Inactive profile surfaces must not mount a competing modal.
 
-## Ordering rules worth knowing
+## Submission order
 
-- `editor/ComposerEditor.tsx` forwards a click on the composer's padding by
-  focusing the view *before* setting the selection: CodeMirror reveals its
-  drawn caret through a class it only writes while applying an update, so the
-  selection has to be the update that follows the focus.
-- `submit/buildOutgoingMessage.ts` flattens queued messages, the composer text,
-  inline comments and context into OpenCode's one-primary-plus-parts shape. The
-  oldest queued message becomes primary; **inline comments attach to the last
-  body the user authored** rather than becoming their own part; PR instructions
-  precede the PR diff.
-- `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
-  session) identity. Writes are debounced while typing but forced at every edge
-  where the page may stop running, because a pending timer is not a saved
-  draft. Two orderings are load-bearing: the debounced write is skipped once
-  while a draft is being restored, and a deleted draft's empty signature is
-  recorded before a queued write could resurrect it.
-- `state/useDraftTarget.ts` — the draft can target a directory that does not
-  exist yet (a worktree being created). It must survive not appearing in the
-  branch list, or the selector snaps back to the project root mid-creation.
+For a first prompt:
 
-## Mobile
+1. Create the Pi session in the chosen workspace.
+2. Transfer the pending draft to the new session so a later configuration
+   failure cannot orphan the user's text.
+3. Apply the explicit draft model, or the Piarium project model when present.
+4. Apply an explicit thinking level after checking the selected model.
+5. Render Piarium magic prompts, snippets, inline comments, editor context, and
+   goal state.
+6. Send through Pi `prompt`.
 
-`state/useMobileComposerShell.ts` and `state/useMobileViewportPin.ts` are
-mostly not state machines but corrections for specific platform behaviors:
-mobile browsers dismissing the keyboard before a tap's click lands, iOS
-refusing programmatic focus outside a gesture, WebKit leaving the layout
-viewport panned after the keyboard hides, overlay chains handing off through a
-frame where nothing is open.
+For an existing busy session, the configured follow-up behavior decides between
+Pi `steer` and `followUp`. The composer never emulates those queues locally.
 
-**Every timeout and `flushSync` in them has a reason recorded next to it, and
-none of them is verifiable outside a real device.** Change them only against
-hardware.
+## Verification
 
-## Testing
-
-The package has no DOM test environment, so coverage stops at the state and
-logic layers: the language, the submit assembly, path and drop handling, text
-splicing, message history, and the CodeMirror language extension at the
-`EditorState` level.
-
-Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
-tests** and are verified by hand. Do not report a change to them as validated
-on the strength of type-check and unit tests.
-
-Run tests per file (`bun test <path>`): `mock.module` is process-global, so
-suites that install module mocks are order-dependent.
+Pure configuration/default resolution and submission assembly are unit tested.
+Rendering, focus, IME, mobile keyboards, clipboard images, and overlay handoff
+still require a real browser or shell check; type-checking alone does not prove
+those behaviors.
