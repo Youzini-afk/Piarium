@@ -6,6 +6,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { Button } from '@/components/ui/button';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
@@ -119,67 +126,75 @@ export const EditorGroupTabs: React.FC<EditorGroupTabsProps> = ({
           const tabName = tab.resourceId.split('/').pop() ?? tab.resourceId;
           const path = workspacePathFromResourceId(workspaceRoot, tab.resourceId);
           return (
-            <div
-              key={tab.tabId}
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.setData('text/piarium-tab', tab.tabId);
-                event.dataTransfer.effectAllowed = 'move';
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.dataTransfer.dropEffect = 'move';
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                const moved = event.dataTransfer.getData('text/piarium-tab');
-                if (moved && onMoveToGroup) onMoveToGroup(moved, group.groupId);
-              }}
-              title={path}
-              className={cn(
-                'group inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-ui-label transition-colors whitespace-nowrap',
-                tab.preview && 'italic',
-                isActive
-                  ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
-                  : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
-              )}
-            >
-              {tab.pinned ? <Icon name="pushpin-2" className="size-3 shrink-0" /> : null}
-              <FileTypeIcon filePath={tab.resourceId} className="size-3.5 flex-shrink-0" />
-              <button type="button" onClick={() => onActivate(tab.tabId)} className="max-w-[12rem] truncate text-left">
-                {tabName}
-              </button>
-              {dirtyResourceIds.has(tab.resourceId) ? (
-                <span className="size-1.5 shrink-0 rounded-full bg-[var(--status-warning)]" />
-              ) : null}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
+            <ContextMenu key={tab.tabId}>
+              <ContextMenuTrigger
+                render={(
+                  <div
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/piarium-tab', tab.tabId);
+                      event.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const moved = event.dataTransfer.getData('text/piarium-tab');
+                      if (moved && onMoveToGroup) onMoveToGroup(moved, group.groupId);
+                    }}
+                    title={path}
                     className={cn(
-                      'rounded-sm p-0.5 text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
-                      !isActive && !alwaysShowActions && 'opacity-0 group-hover:opacity-100',
+                      'group inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-ui-label transition-colors whitespace-nowrap',
+                      tab.preview && 'italic',
+                      isActive
+                        ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
+                        : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
                     )}
-                    aria-label={t('filesView.editor.controlsTitle')}
-                  >
-                    <Icon name="more-2-fill" className="size-3.5" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => onPin(tab.tabId, !tab.pinned)}>
-                    {t(tab.pinned ? 'filesView.editor.unpinTab' : 'filesView.editor.pinTab')}
-                  </DropdownMenuItem>
-                  {otherGroupIds?.map((target) => (
-                    <DropdownMenuItem key={target.groupId} onSelect={() => onMoveToGroup?.(tab.tabId, target.groupId)}>
-                      {t('filesView.editor.moveTab')} · {target.label}
-                    </DropdownMenuItem>
-                  ))}
-                  <DropdownMenuItem onSelect={() => onClose(tab.tabId)}>
-                    {t('filesView.editor.closeFileAria', { name: tabName })}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                  />
+                )}
+              >
+                {tab.pinned ? <Icon name="pushpin-2" className="size-3 shrink-0" /> : null}
+                <FileTypeIcon filePath={tab.resourceId} className="size-3.5 flex-shrink-0" />
+                <button type="button" onClick={() => onActivate(tab.tabId)} className="max-w-[12rem] truncate text-left">
+                  {tabName}
+                </button>
+                {dirtyResourceIds.has(tab.resourceId) ? (
+                  <span className="size-1.5 shrink-0 rounded-full bg-[var(--status-warning)]" />
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className={cn(
+                    'w-6 text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
+                    !isActive && !alwaysShowActions && 'opacity-0 group-hover:opacity-100',
+                  )}
+                  aria-label={t('filesView.editor.closeFileAria', { name: tabName })}
+                  title={t('filesView.editor.closeFileAria', { name: tabName })}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClose(tab.tabId);
+                  }}
+                >
+                  <Icon name="close" className="size-3.5" />
+                </Button>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onClick={() => onPin(tab.tabId, !tab.pinned)}>
+                  {t(tab.pinned ? 'filesView.editor.unpinTab' : 'filesView.editor.pinTab')}
+                </ContextMenuItem>
+                {otherGroupIds?.map((target) => (
+                  <ContextMenuItem key={target.groupId} onClick={() => onMoveToGroup?.(tab.tabId, target.groupId)}>
+                    {t('filesView.editor.moveTab')} · {target.label}
+                  </ContextMenuItem>
+                ))}
+                <ContextMenuItem onClick={() => onClose(tab.tabId)}>
+                  {t('filesView.editor.closeFileAria', { name: tabName })}
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           );
         })}
       </div>
