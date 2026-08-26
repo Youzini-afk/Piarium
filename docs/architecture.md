@@ -100,6 +100,12 @@ Tool permission is not a cosmetic Piarium mode: an enforcing Pi extension must o
 gate, while its Piarium adapter may contribute status or controls through the composer action seam.
 No shield control is shown when no enforcing plugin is installed.
 
+The conversation renderer follows the Pi-native interaction contract in
+[chat-experience.md](chat-experience.md): one session record owns preview/live/optimistic/view projections,
+messages project into stable turns, the timeline has one virtual-list and scroll owner, and Queue/Steer
+state comes only from the Pi runtime. OpenChamber's current chat is reference evidence rather than a
+second renderer or state layer.
+
 VS Code active-editor state is transient Piarium view state, not an OpenCode attachment contract.
 The Pi composer turns an accepted selection into the same session-scoped structured context used by
 file/diff comments, preserving the relative path and line range; accepting the whole file adds an
