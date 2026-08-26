@@ -45,7 +45,11 @@ const POLICY_SURFACES = [
   'mcp',
   'skill',
   'path',
+  'path_read',
+  'path_write',
   'external_directory',
+  'external_directory_read',
+  'external_directory_write',
 ] as const;
 
 const FIELD_LABEL_KEYS: Readonly<Record<string, I18nKey>> = {
@@ -79,6 +83,25 @@ const policyLabelKey = (surface: typeof POLICY_SURFACES[number]): I18nKey => (
   FIELD_LABEL_KEYS[`permission.${surface}`]
   ?? 'settings.piarium.pluginSettings.permissionSystem.field.permissionPolicy'
 );
+
+const policyLabel = (
+  surface: typeof POLICY_SURFACES[number],
+  t: ReturnType<typeof useI18n>['t'],
+): string => {
+  if (surface === 'path_read') {
+    return `${t('settings.piarium.pluginSettings.permissionSystem.policy.path')} · ${t('settings.piarium.pluginSettings.permissionSystem.policy.read')}`;
+  }
+  if (surface === 'path_write') {
+    return `${t('settings.piarium.pluginSettings.permissionSystem.policy.path')} · ${t('settings.piarium.pluginSettings.permissionSystem.policy.write')}`;
+  }
+  if (surface === 'external_directory_read') {
+    return `${t('settings.piarium.pluginSettings.permissionSystem.policy.externalDirectory')} · ${t('settings.piarium.pluginSettings.permissionSystem.policy.read')}`;
+  }
+  if (surface === 'external_directory_write') {
+    return `${t('settings.piarium.pluginSettings.permissionSystem.policy.externalDirectory')} · ${t('settings.piarium.pluginSettings.permissionSystem.policy.write')}`;
+  }
+  return t(policyLabelKey(surface));
+};
 
 const issueLabelKey = (field: string): I18nKey => {
   if (FIELD_LABEL_KEYS[field]) return FIELD_LABEL_KEYS[field];
@@ -154,7 +177,7 @@ const QuickSettings: React.FC<{
             key={surface}
             {...fields}
             path={['permission', surface]}
-            label={t(policyLabelKey(surface))}
+            label={policyLabel(surface, t)}
             options={actionOptions}
             preserveUnsupportedUntilSelection
             unsetLabel={notSet}

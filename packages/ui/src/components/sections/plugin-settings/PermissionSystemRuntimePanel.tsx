@@ -13,6 +13,10 @@ import {
   permissionSystemCommandObserved,
   permissionSystemRuntimeState,
 } from './permission-system-runtime';
+import {
+  parsePermissionSystemStatus,
+  PERMISSION_SYSTEM_STATUS_CHANNEL,
+} from '@/components/pi-session/permissionSystemStatus';
 
 interface PermissionSystemRuntimePanelProps {
   runtimeTarget: RuntimeContextTarget;
@@ -29,6 +33,10 @@ export const PermissionSystemRuntimePanel: React.FC<PermissionSystemRuntimePanel
   const sessionBusy = usePiSessionStore((state) => (
     sessionId ? state.records[sessionId]?.snapshot?.busy === true : false
   ));
+  const rawStatus = usePiSessionStore((state) => (
+    sessionId ? state.records[sessionId]?.extensionStates[PERMISSION_SYSTEM_STATUS_CHANNEL] : undefined
+  ));
+  const liveStatus = React.useMemo(() => parsePermissionSystemStatus(rawStatus), [rawStatus]);
   const [commandObserved, setCommandObserved] = React.useState(false);
   const [loading, setLoading] = React.useState(sessionId !== null);
   const [error, setError] = React.useState<string | null>(null);
@@ -84,14 +92,14 @@ export const PermissionSystemRuntimePanel: React.FC<PermissionSystemRuntimePanel
   }, [refresh, sessionId, targetKey]);
 
   const state = permissionSystemRuntimeState({
-    commandObserved,
+    commandObserved: commandObserved || liveStatus !== null,
     commandsChecked: !loading && error === null,
     commandsFailed: error !== null,
     hasActiveSession: sessionId !== null,
   });
 
   const showActiveSettings = React.useCallback(async (): Promise<void> => {
-    if (!sessionId || sessionBusy || running || !commandObserved) return;
+    if (!sessionId || sessionBusy || running || (!commandObserved && !liveStatus)) return;
     const generation = generationRef.current;
     const runtimeKey = getRuntimeKey();
     const actionTargetKey = targetKey;
@@ -115,7 +123,7 @@ export const PermissionSystemRuntimePanel: React.FC<PermissionSystemRuntimePanel
         && runtimeKey === getRuntimeKey()
       ) setRunning(false);
     }
-  }, [commandObserved, executeCommand, running, sessionBusy, sessionId, t, targetKey]);
+  }, [commandObserved, executeCommand, liveStatus, running, sessionBusy, sessionId, t, targetKey]);
 
   return (
     <div className="space-y-4 border-t border-border/60 pt-6">
@@ -147,17 +155,39 @@ export const PermissionSystemRuntimePanel: React.FC<PermissionSystemRuntimePanel
           </p>
         ) : null}
         {state === 'available' ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            title="/permission-system show"
-            disabled={sessionBusy || running}
-            onClick={() => void showActiveSettings()}
-          >
-            {running ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
-            {t('settings.piarium.pluginSettings.permissionSystem.runtime.showActiveSettings')}
-          </Button>
+          <div className="space-y-3">
+            {liveStatus?.pending.at(-1) ? (
+              <div className="rounded-md border border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5 px-3 py-2">
+                <p className="typography-meta font-medium text-[var(--status-warning)]">
+                  {t('chat.modelControls.permissionLabel.ask')}
+                </p>
+                <p className="mt-1 break-all font-mono typography-micro text-muted-foreground">
+                  {[liveStatus.pending.at(-1)?.surface, liveStatus.pending.at(-1)?.value]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              </div>
+            ) : null}
+            {liveStatus?.lastDecision ? (
+              <p className="break-all typography-meta text-muted-foreground">
+                {t(liveStatus.lastDecision.result === 'allow'
+                  ? 'chat.modelControls.permissionLabel.allow'
+                  : 'chat.modelControls.permissionLabel.deny')}
+                {' · '}{liveStatus.lastDecision.surface}{' · '}{liveStatus.lastDecision.value}
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              title="/permission-system show"
+              disabled={sessionBusy || running}
+              onClick={() => void showActiveSettings()}
+            >
+              {running ? <Icon name="loader-4" className="size-4 animate-spin" /> : null}
+              {t('settings.piarium.pluginSettings.permissionSystem.runtime.showActiveSettings')}
+            </Button>
+          </div>
         ) : null}
         {sessionBusy && state === 'available' ? (
           <p className="typography-meta text-[var(--status-warning)]">

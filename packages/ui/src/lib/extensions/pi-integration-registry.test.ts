@@ -171,6 +171,11 @@ test('maps @gotgenes/pi-permission-system to its built-in settings adapter', asy
     piPackage,
     pluginSettingsAdaptersFromSnapshot(runtime.getSnapshot()),
   )?.adapterId).toBe('permission-system');
+  const composerContribution = runtime.getSnapshot().visibleContributions.find((candidate) => (
+    candidate.descriptor.kind === 'composer-action'
+    && candidate.descriptor.placement?.slot === 'chat.composer.actions.leading'
+  ));
+  expect(composerContribution?.descriptor.data.contract).toBe('pi-permission-system-composer/v1');
   await handle.deactivate(2, 2);
 });
 

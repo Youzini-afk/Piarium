@@ -75,4 +75,21 @@ describe('permission-system config model', () => {
     ))).toBe(true);
     expect(draft.futureRuntimeKnob).toEqual({ mode: 'later' });
   });
+
+  test('accepts the 27.0.1 directional surfaces and rejects misspellings that would be inert', () => {
+    const valid = {
+      permission: {
+        external_directory_read: 'ask',
+        external_directory_write: 'deny',
+        path_read: 'allow',
+        path_write: 'ask',
+      },
+    } as const;
+    expect(permissionSystemDraftIssues(valid, JSON.stringify(valid))).toEqual([]);
+
+    const invalid = { permission: { path_wrote: 'allow' } } as const;
+    expect(permissionSystemDraftIssues(invalid, JSON.stringify(invalid)).some((issue) => (
+      issue.code === 'invalid-value' && issue.field === 'permission.path_wrote'
+    ))).toBe(true);
+  });
 });

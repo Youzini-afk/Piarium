@@ -13,6 +13,12 @@ export interface PermissionSystemDraftIssue {
 }
 
 const PERMISSION_STATES = new Set(['allow', 'ask', 'deny']);
+const DIRECTIONAL_PERMISSION_SURFACES = new Set([
+  'path_read',
+  'path_write',
+  'external_directory_read',
+  'external_directory_write',
+]);
 const BOOLEAN_FIELDS = [
   'debugLog',
   'permissionReviewLog',
@@ -77,6 +83,13 @@ const validatePermission = (
     const field = `permission.${surface}`;
     if (!surface) {
       push(issues, 'invalid-value', 'permission');
+      continue;
+    }
+    if (
+      /^(path|external_directory)_/.test(surface)
+      && !DIRECTIONAL_PERMISSION_SURFACES.has(surface)
+    ) {
+      push(issues, 'invalid-value', field);
       continue;
     }
     if (isPermissionState(surfaceValue)) continue;

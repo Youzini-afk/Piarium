@@ -150,6 +150,34 @@ describe('Pi interaction state', () => {
     expect(store.getState().dialogs.map((candidate) => candidate.method)).toEqual(['custom']);
   });
 
+  test('returns a permission plugin select choice unchanged to its owning Pi request', async () => {
+    const runtime = new FakeRuntime();
+    const store = createPiInteractionStore(runtime);
+    await store.getState().connect();
+    const source = { role: 'session' as const, sessionId: 'session-a', workerId: 'worker-a' };
+    runtime.event('extension.ui.request', {
+      id: 'permission-select-1',
+      method: 'select',
+      payload: {
+        options: ['Yes', 'Yes, for this session', 'No', 'No, provide reason'],
+        title: 'Permission Required\ntool : bash\nvalue : git status',
+      },
+      sessionId: 'session-a',
+    }, source);
+
+    expect(await store.getState().respondDialog('permission-select-1', 'Yes, for this session')).toBe(true);
+    expect(runtime.calls.at(-1)).toEqual({
+      method: 'extension.ui.respond',
+      params: {
+        response: {
+          requestId: 'permission-select-1',
+          value: 'Yes, for this session',
+        },
+        sessionId: 'session-a',
+      },
+    });
+  });
+
   test('projects persistent extension chrome and editor text without plugin whitelists', async () => {
     const runtime = new FakeRuntime();
     const store = createPiInteractionStore(runtime);

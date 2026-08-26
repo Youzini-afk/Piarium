@@ -102,6 +102,8 @@ export const PiInteractionHost: React.FC = () => {
   const dialogBusy = dialog ? responding[piDialogResponseKey(dialog.id)] === true : false;
   const dialogPayload = dialog ? payloadRecord(dialog.payload) : {};
   const dialogTitle = stringValue(dialogPayload, 'title') || t('pi.interaction.extensionFallback');
+  const [dialogHeading, ...dialogDetailLines] = dialogTitle.split('\n');
+  const dialogDetails = dialogDetailLines.join('\n').trim();
 
   return (
     <>
@@ -172,12 +174,17 @@ export const PiInteractionHost: React.FC = () => {
           className={dialog?.method === 'custom' ? 'max-w-4xl gap-5' : 'max-w-lg gap-5'}
         >
           <DialogHeader>
-            <DialogTitle>{dialogTitle}</DialogTitle>
+            <DialogTitle>{dialogHeading}</DialogTitle>
             {dialog?.method === 'confirm' && (
               <DialogDescription className="whitespace-pre-wrap">
                 {stringValue(dialogPayload, 'message')}
               </DialogDescription>
             )}
+            {dialog?.method !== 'confirm' && dialogDetails ? (
+              <DialogDescription className="max-h-[40vh] overflow-auto whitespace-pre-wrap font-mono typography-meta text-left">
+                {dialogDetails}
+              </DialogDescription>
+            ) : null}
           </DialogHeader>
 
           {dialog?.method === 'select' && (

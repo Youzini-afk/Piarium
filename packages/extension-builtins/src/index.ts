@@ -297,6 +297,32 @@ const pluginAdapter = (
   });
 };
 
+const permissionSystemAdapterExtension = (): PiariumBuiltinExtensionDefinition => {
+  const id = "piarium.builtin.plugin-adapter.permission-system";
+  return definition({
+    id,
+    displayName: "Permission System Adapter",
+    piPackages: ["@gotgenes/pi-permission-system"],
+    contributions: [
+      pluginAdapterContribution(
+        id,
+        "permission-system",
+        "shield-keyhole",
+        ["@gotgenes/pi-permission-system"],
+      ),
+      {
+        contractVersion: 1,
+        data: { contract: "pi-permission-system-composer/v1" },
+        entrypoint: PIARIUM_INTEGRATION_ENTRYPOINT_ID,
+        id: `${id}.composer`,
+        kind: "composer-action",
+        placement: { order: 20, slot: "chat.composer.actions.leading" },
+        supports: PIARIUM_INTEGRATION_SURFACES,
+      },
+    ],
+  });
+};
+
 export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
   pluginAdapter("mcp", "pi-mcp-adapter Settings Adapter", "mcp", "server", ["pi-mcp-adapter"]),
   pluginAdapter("subagents", "pi-subagents Settings Adapter", "subagents", "robot-2", ["pi-subagents"]),
@@ -309,7 +335,7 @@ export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
   pluginAdapter("context-mode", "Context Mode Integration Adapter", "context-mode", "database-2", ["context-mode"]),
   pluginAdapter("aft", "AFT Settings Adapter", "aft", "tools", ["@cortexkit/aft-pi"]),
   pluginAdapter("pi-lens", "pi-lens Settings Adapter", "pi-lens", "pulse", ["pi-lens"]),
-  pluginAdapter("permission-system", "Permission System Settings Adapter", "permission-system", "shield-keyhole", ["@gotgenes/pi-permission-system"]),
+  permissionSystemAdapterExtension(),
   pluginAdapter("hermes-memory", "Hermes Memory Settings Adapter", "hermes-memory", "brain", ["pi-hermes-memory"]),
   pluginAdapter("rtk", "RTK Optimizer Settings Adapter", "rtk", "terminal-box", ["pi-rtk-optimizer"]),
 ] as const;

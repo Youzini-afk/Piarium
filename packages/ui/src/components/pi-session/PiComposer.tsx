@@ -526,7 +526,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.leading"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, footerIconButtonClass, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
               />
               <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} />
               {inlineDraftCount > 0 && (

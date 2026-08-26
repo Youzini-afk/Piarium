@@ -91,6 +91,7 @@ import { ConfigTextFileEditor } from "./config-text-file-editor.js";
 import { resolveConfigTextAuthority } from "./config-text-authority-resolver.js";
 import { ConfigWatchManager } from "./config-watch-manager.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
+import { createPermissionSystemStateBridgeExtension } from "./permission-system-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
@@ -2285,6 +2286,11 @@ export class SessionHost {
               factory: createExtensionStateBridgeExtension(this.#emit),
               hidden: true,
               name: "piarium-extension-state-bridge",
+            },
+            {
+              factory: createPermissionSystemStateBridgeExtension(this.#emit),
+              hidden: true,
+              name: "piarium-permission-system-state-bridge",
             },
             {
               factory: createFleetRegistryExtension(fleet),

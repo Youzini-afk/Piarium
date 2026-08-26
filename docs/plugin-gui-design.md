@@ -555,18 +555,26 @@ Authority:
 - project configuration only after the Host reports the project trusted;
 - the active session's registered `permission-system` command for showing the plugin's resolved
   active settings;
-- no `permissions:*` event, review log, debug log, or command output as Piarium state.
+- the plugin's public `permissions:ready`, `permissions:ui_prompt`, and `permissions:decision`
+  EventBus channels for transient session status;
+- the plugin's own `ctx.ui.select` / `ctx.ui.input` request for every interactive decision. Piarium
+  renders and returns that request through the generic Extension UI bridge; it does not decide or
+  reproduce policy.
 
 The global and project documents are independent JSONC drafts. Comments and surrounding formatting
 survive structured edits, while a second strict parse rejects trailing commas because the plugin's
 loader does not accept them. Quick controls show user tasks rather than configuration keys. A scalar
 permission can be left unset or set to allow, ask, or deny; an existing pattern map is shown as a
 disabled custom-rule sentinel and remains unchanged in the shared draft until the user chooses a
-scalar replacement or edits it in Advanced. The current 27.0.0 schema is strict: an unknown top-level
+scalar replacement or edits it in Advanced. The current 27.0.1 schema is strict: an unknown top-level
 key would invalidate the entire scope, so Piarium preserves it visibly in the draft but diagnoses and
 blocks saving until it is removed or the adapter is updated for a plugin version that owns it. Known
 booleans, positive integers, permission maps, shell aliases, string arrays, and the optional schema
-reference are validated before save without materializing defaults.
+reference are validated before save without materializing defaults. The quick policy view includes
+the directional `path_read`, `path_write`, `external_directory_read`, and
+`external_directory_write` surfaces while preserving arbitrary third-party tool surfaces in the
+advanced document. Directional-looking misspellings are rejected at parity with the plugin because
+they would otherwise leave an intended restriction inert.
 
 Saving goes through the Host's normal revision check, atomic write, and active-Host reload. That
 reload is the persistence boundary, not a claim that every runtime value changes immediately. The
@@ -575,23 +583,29 @@ preparation are read on the next `before_agent_start`, while session-owned compo
 on the next `session_start` (or a later plugin-owned resource reload where documented). The UI does
 not synthesize an immediate effective-state result.
 
-Runtime observation is deliberately narrow. Piarium lists commands for the active session and marks
-the adapter available only when `permission-system` is present. The one runtime action dispatches
-exactly `/permission-system show`, whose public notification reports the plugin's resolved active
-settings; the custom TUI settings modal is not advertised because Piarium's RPC custom-component
-bridge is read-only. Busy sessions and transport failures remain explicit. Command output is not
-parsed into state, and permission events are not bridged into statistics or an audit dashboard.
+Runtime observation remains non-authoritative. A hidden Host adapter folds the three public event
+channels into `pi-permission-system/status/v1`: whether the plugin announced readiness, active prompts,
+and the last decision. It never reads private logs, never responds to a prompt, and never turns those
+events into a second permission engine. The Composer shield appears only after a live session announces
+the plugin, highlights a pending ask, and opens the installed plugin's settings. The active-settings
+action still dispatches exactly `/permission-system show`; command output is not parsed into state.
+The plugin's non-TUI select/input flow is the approval authority, so approve once, approve for the
+session, deny, denial reasons, and forwarded-subagent scope choices are returned unchanged to the
+plugin. Review/debug logs remain private plugin artifacts, not Piarium statistics or an audit database.
 
 Acceptance:
 
 - both scopes preserve comments, pattern maps, revisions, dirty drafts,
   external-change conflicts, and project trust behavior;
-- missing fields stay absent, while invalid known values, unknown 27.0.0 top-level keys, and trailing
+- missing fields stay absent, while invalid known values, unknown 27.0.1 top-level keys, malformed
+  directional surfaces, and trailing
   commas block save with localized diagnostics;
 - `yoloMode` explains that ask decisions are approved automatically if the selected source becomes
   effective, while explicit deny decisions still apply;
-- the active-settings button appears only after `command.list` observes `permission-system` and
-  dispatches exactly `/permission-system show`;
+- the Composer and runtime status appear only after the installed, enabled plugin announces a live
+  session; pending asks clear only on the matching public decision event;
+- `ask` choices are answered through `extension.ui.respond` to the plugin's own select/input request,
+  while the active-settings button dispatches exactly `/permission-system show`;
 - Host reload after save and the plugin's next-lifecycle reread are not described as immediate
   runtime state.
 
