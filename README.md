@@ -254,10 +254,12 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 发生变化时，Docker 工作流只验证容器契约，并构建配套的精简与工具链基础镜像及应用镜像；两个
 候选应用都通过不可变摘要烟测后，才会提升可安装标签。
 
-参与贡献前，请阅读[贡献指南](.github/CONTRIBUTING.md)和仓库专用规则 [AGENTS.md](AGENTS.md)。
+参与贡献前，请阅读[工程开发指南](docs/development.md)、[贡献指南](.github/CONTRIBUTING.md)和精简的
+仓库边界说明 [AGENTS.md](AGENTS.md)。
 
 ## 设计与运维文档
 
+- [工程开发与知识导航](docs/development.md)
 - [架构](docs/architecture.md)
 - [路线图](docs/roadmap.md)
 - [可组合工作台与 IDE 约定](docs/composable-workbench-execution-plan.md)

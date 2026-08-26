@@ -58,7 +58,7 @@ The host dispatcher restricts tunneled traffic to explicit path allowlists (one 
 - The tunnel is **transport only**. The Piarium server still authenticates every tunneled request
   exactly as it authenticates a direct remote client. The relay path grants reachability, not
   authorization.
-- Clients carry their normal credential. HTTP and SSE requests authenticate with the client's bearer token (a header). **WebSocket upgrades cannot send headers**, so they authenticate with a short-lived URL-scoped token minted beforehand and passed as a query parameter. This asymmetry is important when adding new WebSocket features (see the skill).
+- Clients carry their normal credential. HTTP and SSE requests authenticate with the client's bearer token (a header). **WebSocket upgrades cannot send headers**, so they authenticate with a short-lived URL-scoped token minted beforehand and passed as a query parameter. This asymmetry is important when adding new WebSocket features.
 - The host authenticates itself to the relay with a signed handshake using its long-lived signing key.
 - Enabling the relay is explicit opt-in and disabled by default; disabling it severs all relay reachability immediately.
 
@@ -99,6 +99,28 @@ The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/rela
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 
+### Adding a realtime endpoint
+
+Features open runtime sockets through `openRuntimeWebSocket`, not a raw browser `WebSocket` built from a
+runtime string. The shared helper resolves direct, Electron-proxied, and relay-backed transports and
+uses the runtime auth layer to mint the short-lived URL token.
+
+A new WebSocket path has two independent admission points:
+
+1. `ALLOWED_WS_PATHS` in `tunnel-host.js` permits it through the encrypted relay dispatcher.
+2. `isUrlAuthWebSocketPath` in `../ui-auth/ui-auth.js` permits the scoped URL token on the real server
+   upgrade.
+
+Both gates remain narrow. The dispatcher does not add credentials, and the server still checks its
+normal authentication and origin policy. The relay host connects to loopback with the loopback origin;
+client-supplied `window.location.origin` is not forwarded because Capacitor custom-scheme pages may
+have a null origin.
+
+Wire-format, frame-type, handshake, encryption-counter, fragmentation, or batching changes update the
+TypeScript client and JavaScript host together and keep `cross-compat.test.js` green. Reconnect loops
+use failure-aware backoff and respond to online/visibility/abort lifecycle rather than polling forever
+at one short interval.
+
 ## Design invariants (do not regress)
 
 - The relay never sees plaintext application traffic; it sees only routing metadata (routing id, connection identifiers, timestamps, coarse counts).
@@ -106,5 +128,3 @@ Relay mode plugs into the existing client transport layer rather than a parallel
 - The host dispatcher never injects credentials; the server authenticates each tunneled request.
 - The tunnel is transparent to the app: adding relay support to a feature should not require the feature to know the relay exists — it goes through the shared runtime transport helpers.
 - The two implementations stay byte-compatible and the wire format is versioned/negotiated so mixed client/host app versions degrade gracefully rather than break.
-
-For the operational rules that keep future changes (new WebSocket endpoints, transport refactors, terminal/voice porting) from breaking this, load the `relay-transport` skill.

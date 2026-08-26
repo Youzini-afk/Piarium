@@ -34,6 +34,18 @@
 - Session methods use the typed Pi runtime dispatcher. Product REST routes are reserved for Piarium-owned services such as settings, worktrees, schedules, pairing, and tunnels.
 - Cross-command dependencies are injected from `cli.js`; modules in this directory must not import `cli.js`.
 
+## Interaction modes
+
+`@clack/prompts` is the human presentation layer; it is not where command policy lives. Required input,
+validation, authorization, and failure exit codes apply equally to interactive, fully flagged,
+non-TTY, quiet, and JSON use. `cli-output.js` centralizes the mode decisions, prompt gate, JSON output,
+status lines, and progress helpers so commands do not invent their own terminal mode detection.
+
+Prompts are an optional way to collect missing input when `canPrompt(options)` says the current output
+mode and terminal support them. In non-interactive modes, missing required input becomes a deterministic
+error that names the needed flag. JSON results include machine-readable warnings/errors without human
+framing; quiet results retain the essential value rather than becoming silent success.
+
 ## Verification
 
 From `packages/web`:
@@ -42,4 +54,4 @@ From `packages/web`:
 bun run test -- bin/cli.test.js
 ```
 
-Before a release, also run the repository typecheck, build, dead-code audit, and the full Pi test suite.
+Release-wide verification is selected from the root release and CI scripts rather than repeated here.

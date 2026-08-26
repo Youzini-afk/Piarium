@@ -1,109 +1,77 @@
 # Piarium contributor guide
 
-## Product and source boundary
+## Start from current authority
 
-- Piarium is a Pi-native direct refactor of the maintainer's OpenChamber fork.
-- A local read-only OpenChamber checkout outside this repository is source material only.
-  Never edit, switch branches, commit, or push there for Piarium work.
-- All imports, deletions, rewrites, commits, and pushes happen in this repository.
-- The OpenCode cutover is complete. Do not reintroduce OpenCode contracts, dual implementations, or
-  compatibility shims. There is one canonical set of Piarium-owned Pi types and services.
-- Preserve the fork capabilities listed in `docs/openchamber-pi-migration.md` unless a reviewed
-  Pi-native implementation is behaviorally and security-equivalent.
+Piarium keeps project knowledge in ordinary repository documentation, next to the code it describes.
+Start with [docs/development.md](docs/development.md), [docs/architecture.md](docs/architecture.md), and
+the nearest `README.md` or `DOCUMENTATION.md` in the owning package or module.
 
-## Runtime boundaries
+Code, types, tests, schemas, and `package.json` scripts are executable authority. Documentation explains
+ownership and intent. If prose and implementation disagree, inspect recent commits and callers, decide
+which behavior is current, and update the stale side in the same change. Historical plans and the local
+OpenChamber checkouts are reference material, not current authority.
 
-- `packages/ui`: shared React UI, Pi domain state/sync, the Document Registry, the Editor Workbench
-  Kernel, and runtime contracts.
-- `packages/web`: web/remote surfaces and the trusted application host. It owns the Pi runtime
-  service plus the document, search, language, task, debug, and test authorities.
-- `packages/electron`: native desktop shell and privileged Electron boundary. It reuses the Web
-  application host in-process and must not grow a parallel backend.
-- `packages/vscode`: companion extension host, webview, and runtime bridge. Not a second workbench.
-- `packages/mobile`: Capacitor iOS/Android shell connected to a Piarium server.
-- `packages/protocol`, `packages/pi-host`: versioned Pi worker protocol, worker lifecycle, and the
-  extension bridge.
-- `packages/runtime-broker`, `packages/runtime-client`: catalog/session worker orchestration and the
-  browser-safe surface client.
-- `packages/extension-contract`, `-surface`, `-sdk`, `-react`, `-cli`: published Piarium extension
-  platform contracts and author tooling.
-- `packages/extension-host`, `-loader`, `-builtins`: privileged application-host catalog, the
-  authenticated renderer module loader, and built-in extension manifests.
+The repository deliberately has no project-local workflow Skills. Do not add one merely to repeat a
+module document, prescribe routine steps, or encode a one-off failure. A Skill is justified only when
+the user explicitly wants a reusable, tool-specific operation that cannot be made clearer or more
+reliable as code, a script, or normal documentation.
 
-Never execute Pi extensions in a renderer. Keep Electron preload APIs explicit and typed, validate
-all process/network input, keep Pi session JSONL authoritative, and never log credentials, prompt
-bodies, bearer/pairing data, or file contents.
+## Product boundary
 
-## Workbench and document ownership
+- Piarium is a Pi-native direct refactor of the maintainer's OpenChamber fork. All Piarium edits,
+  commits, and pushes happen in this repository; external OpenChamber checkouts remain read-only.
+- The OpenCode cutover is complete. Do not restore OpenCode contracts, compatibility facades, parallel
+  implementations, or dead migration paths.
+- Preserve the fork capabilities recorded in
+  [docs/openchamber-pi-migration.md](docs/openchamber-pi-migration.md) unless a reviewed Pi-native
+  implementation is behaviorally and security-equivalent.
+- Do not add speculative restrictions. A limit needs a concrete protocol, platform, safety, data, or
+  measured resource failure behind it; defaults, warnings, and configurable budgets are distinct from
+  hard rejection.
 
-Piarium's UI is composable: Agent Workspace (`default` profile) and IDE Workbench (`piarium.ide`)
-are ordinary built-in Piarium extensions selected through a Workbench Profile, not hard-coded modes.
-See [docs/composable-workbench-execution-plan.md](docs/composable-workbench-execution-plan.md).
+## Ownership and trust boundaries
 
-- Do not add an `ideMode`/`agentMode` global branch or a third ownership path beside profiles.
-- `packages/extension-contract` is the only owner of workbench target, slot, and context-key
-  constants. Do not redeclare them in a shell or in `packages/ui`.
-- Shells own presentation and layout only. Documents, editor groups, terminals, Git, profile state,
-  and runtime identity belong to the shared kernel.
-- Commit a profile or shell selection only after the candidate is ready; a failed or superseded
-  candidate must leave the previous generation active.
-- DocumentsAPI is the single text content authority. `FilesAPI` stays browse/binary/CRUD and
-  `WorkspaceAPI` stays project/tree/git/upload; do not reintroduce a duplicate text read/write path.
-- All document and profile mutations are expected-revision checked. Keep missing, empty, binary,
-  unsupported-encoding, deleted, failed, and conflicting states distinguishable from each other.
-- The application host owns LSP, DAP, test, and task subprocesses. Renderers send typed requests and
-  never start a process. Hidden views must do no background work.
-- Agent file writes go through expected-revision document writes and must never silently overwrite a
-  dirty buffer.
-- The approved editor migration gives desktop/Web Agent and IDE one shared Monaco file path, while
-  mobile and embedded editors keep purpose-specific CodeMirror adapters. Implement it phase by
-  phase; until the cutover, preserve the current path without creating a long-lived dual engine.
-  Do not add a second Agent/IDE document or editing authority, do not load the IDE workbench into the
-  VS Code companion, and do not fork Code OSS. Follow `docs/unified-file-editor-platform.md`.
+- `packages/ui` owns shared React presentation, runtime-facing client contracts, Pi domain state, the
+  Document Registry, and the Editor Workbench Kernel. It does not own privileged processes.
+- `packages/web` owns Web/remote surfaces and the trusted application host, including document, search,
+  language, task, debug, test, and Pi runtime services.
+- `packages/electron` is the native shell. It hosts the Web application host in-process and must not
+  grow a parallel backend.
+- `packages/vscode` is a companion extension and runtime bridge, not a second workbench.
+- `packages/mobile` is a Capacitor client connected to a Piarium server.
+- Runtime, protocol, and extension packages own their named process and contract boundaries as mapped in
+  [docs/architecture.md](docs/architecture.md).
 
-## Required project guidance
+Never execute Pi extensions in a renderer. Keep privileged filesystem, network, credential, shell, and
+process behavior in the application host, Electron main/preload, VS Code extension host, or Pi host as
+appropriate. Validate untrusted process/network input and never log credentials, prompt bodies,
+bearer/pairing data, or file contents.
 
-Before changing code, read the nearest package `README.md` and `DOCUMENTATION.md`, then load every
-matching `.agents/skills/*/SKILL.md`. At minimum:
+## Workbench and data invariants
 
-- any code/dependency/export/build change: `piarium-change-discipline`;
-- shared runtime APIs/routes: `ui-api-decoupling`;
-- session state/sync: `sync-state-invariants`;
-- Electron/packaging/processes: `desktop-shell`;
-- relay/SSE/WebSocket: `relay-transport`;
-- interaction, render, event, polling, or synchronization cost: `performance-engineering`;
-- UI styling/text/settings: `theme-system`, `locale-ui-patterns`, `settings-ui-patterns`;
-- CLI commands and prompts: `clack-cli-patterns`;
-- sortable/drag-to-reorder behavior: `drag-to-reorder`;
-- iOS Simulator work without Xcode: `serve-sim`.
+- Agent Workspace (`default`) and IDE Workbench (`piarium.ide`) are extension-provided shells selected
+  through Workbench Profiles. Do not add a global `agentMode`/`ideMode` ownership branch.
+- Shells own presentation. Documents, editor groups, terminals, Git, profiles, and runtime identity
+  remain in the shared kernel or their trusted host authority.
+- `DocumentsAPI` is the single text-content path. `FilesAPI` remains browse/binary/CRUD and
+  `WorkspaceAPI` remains project/tree/Git/upload.
+- Desktop/Web Agent and IDE share the Monaco document path. Mobile and embedded editors use their
+  purpose-specific CodeMirror adapters; VS Code keeps its host editor. None creates another buffer,
+  dirty-state, save, or language-process authority.
+- Pi session JSONL, Pi settings/packages, and plugin-native configuration remain their documented
+  authorities. Missing, empty, malformed, stale, failed, and conflicting states must not collapse into
+  the same successful empty result.
+- Commit a profile, shell, provider, or owner generation only after its candidate is ready. Failed or
+  superseded work leaves the previous authoritative generation active.
 
-Package-local `DOCUMENTATION.md` files are authoritative for their module's invariants. The
-document, editor-workbench, and agent-editor modules each carry one, and they record behavior that
-is not restated here.
+## Changes, verification, and Git
 
-Keep authoritative failure distinct from successful empty state, preserve runtime parity, enforce
-privilege at trusted boundaries, and make partial failure/rollback behavior explicit.
+Inspect the owning implementation, consumers, and focused tests before changing behavior. Choose
+verification by what could actually regress: a local change needs focused evidence; a shared contract
+needs its real consumers; packaging and platform behavior need the relevant runtime or smoke check.
+Do not repeat broad checks that cannot change the decision. The command source of truth is the nearest
+`package.json`; repository development and validation details live in
+[docs/development.md](docs/development.md).
 
-## Commands and commits
-
-Use root/package `package.json` scripts as the command source of truth. The repository uses Bun
-`1.3.14`. Run focused tests while iterating, workspace-wide checks for shared contracts, and
-`bun run dead-code` after adding/deleting/renaming source or changing exports/import shapes.
-
-There are two lockfiles. The workspace `bun.lock` covers development, and
-`scripts/cloud-runtime.bun.lock` pins the production cloud runtime graph, which CI verifies frozen.
-Changing a dependency that reaches that graph also needs `bun run update:cloud-runtime-lock`
-committed, or the container and production-build jobs fail while every source check passes. The
-`Cloud runtime lockfile` workflow does this for a Dependabot pull request on dispatch, because
-Dependabot maintains only the first lockfile.
-
-Two coverage gaps are real and must not be mistaken for passing verification. `@piarium/ui` runs
-under Vitest and is collected by `bun run test:pi`, but `packages/ui/vitest.config.ts` excludes a
-named list of suites that cannot pass yet; treat that list as the remaining gap, keep each entry's
-recorded cause accurate, and shrink it rather than adding to it. `packages/electron` `type-check`
-only runs `node --check` on its entry `.mjs` files and its `lint` is a no-op, so root
-`type-check`/`lint` prove nothing about the desktop shell; verify it with the Electron tests and a
-bundled or packaged smoke instead.
-
-Each roadmap phase is independently tested, committed, and pushed after its acceptance checks pass.
-Preserve unrelated user changes and report exactly which runtime/build checks were and were not run.
+Preserve unrelated user changes and avoid destructive Git operations. Keep coherent phases reviewable,
+commit and push completed phases, and report what was and was not verified.

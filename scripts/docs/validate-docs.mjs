@@ -170,11 +170,11 @@ async function validateEngineeringDocs(errors) {
 }
 
 /**
- * Reference targets from outside the engineering docs: the docs site, skills, and source comments
- * all legitimately anchor a document.
+ * Reference targets from outside the engineering docs: the docs site and GitHub-maintained metadata
+ * can also legitimately anchor a document.
  */
 async function extraReferenceSources() {
-  const listed = await git(["ls-files", "packages/docs", ".agents", ".github"])
+  const listed = await git(["ls-files", "packages/docs", ".github"])
   if (listed === null) return []
   const paths = listed.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
   const referenced = new Set()

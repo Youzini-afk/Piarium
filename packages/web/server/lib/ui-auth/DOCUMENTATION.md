@@ -7,6 +7,17 @@ Trusted-device access has one durable credential model: a remote client bearer t
 
 Pairing v2 is implemented by `packages/web/server/lib/client-auth/pairing.js`. It stores short-lived one-time pairing sessions with hashed secrets, exposes create/cancel/redeem routes under `/api/client-auth/pairing/*`, and redeems a valid pairing secret into the same remote client token used by password/passkey trusted-device flows.
 
+Browser-owned URLs are a separate presentation of the same authenticated authority. Elements such as
+iframes, downloads, SSE, and WebSocket upgrades cannot attach the normal `Authorization` header, so
+`ui-auth.js` can mint short-lived `piarium_url_token` credentials scoped to explicit readable or
+realtime paths. Callers obtain them through the shared runtime auth/URL helpers; long-lived client
+bearer tokens are never placed in URLs. Unknown paths and legacy token query parameters are rejected
+rather than becoming a compatibility write path.
+
+WebSocket URL-token paths are enumerated by `isUrlAuthWebSocketPath`. Relay reachability has its own
+independent allowlist in `packages/web/server/lib/relay/tunnel-host.js`; adding a realtime endpoint
+requires both gates while leaving the normal origin and server authentication checks intact.
+
 ## Entrypoints and structure
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI auth controller runtime, cookie/session issuance, rate limiting, and auth route handlers.
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: passkey store and WebAuthn registration/authentication verification helpers.
