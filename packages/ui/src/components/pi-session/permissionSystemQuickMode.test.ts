@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { PiConfigTextDocumentSnapshot } from '@piarium/protocol';
 import {
+  isPermissionSystemPackageInstalled,
   permissionSystemQuickModeContent,
   resolvePermissionSystemQuickMode,
 } from './permissionSystemQuickMode';
@@ -22,6 +23,19 @@ const snapshot = (
 });
 
 describe('permission-system quick mode', () => {
+  test('only exposes the draft control for the installed and enabled package', () => {
+    const packageEntry = {
+      enabled: true,
+      installed: true,
+      name: '@gotgenes/pi-permission-system',
+      scope: 'global' as const,
+      source: 'npm:@gotgenes/pi-permission-system',
+      structured: true,
+    };
+    expect(isPermissionSystemPackageInstalled([packageEntry])).toBe(true);
+    expect(isPermissionSystemPackageInstalled([{ ...packageEntry, enabled: false }])).toBe(false);
+  });
+
   test('uses the trusted project as the Composer write scope while inheriting global mode', () => {
     const state = resolvePermissionSystemQuickMode(
       snapshot('{ "yoloMode": true }\n', 'agent'),

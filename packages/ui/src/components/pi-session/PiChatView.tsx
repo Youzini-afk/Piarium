@@ -554,6 +554,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 selectedThinkingLevel={draft.thinkingLevel}
                 sending={creating || sending}
                 sessionId={null}
+                workspace={pendingWorkspace}
                 onChangeAgent={(agent) => updatePendingDraft({ agent })}
                 onChangeDraft={(text) => updatePendingDraft({ text })}
                 onChangeImages={(images) => updatePendingDraft({ images })}
@@ -707,6 +708,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 sending={creating || sending || sessionOpening}
                 sessionId={snapshot.sessionId}
                 snapshot={snapshot}
+                workspace={snapshot.workspace}
                 onAbort={async () => { await abort(currentSessionId); }}
                 onChangeAgent={(agent) => updateDraft(currentSessionId, { agent })}
                 onChangeDraft={(text) => updateDraft(currentSessionId, { text })}

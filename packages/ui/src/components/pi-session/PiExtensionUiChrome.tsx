@@ -6,6 +6,7 @@ import {
   type PiWorkingIndicator,
   usePiInteractionStore,
 } from '@/stores/usePiInteractionStore';
+import { shouldRenderPiExtensionStatus } from './piExtensionUiStatus';
 
 interface PiExtensionUiChromeProps {
   placement: 'aboveEditor' | 'belowEditor';
@@ -43,9 +44,9 @@ export const PiExtensionUiChrome: React.FC<PiExtensionUiChromeProps> = ({
   const widgets = Object.entries(sessionUi.widgets)
     .filter(([, widget]) => widget.placement === placement);
   const statuses = Object.entries(sessionUi.statuses)
-    // The maintained MCP adapter already has a first-class header popover.
-    // Its Pi TUI footer string is not a second chat-composer control.
-    .filter(([key]) => key !== 'mcp');
+    // Maintained adapters already expose these states through first-class controls.
+    // Their Pi TUI footer strings are not additional chat-composer controls.
+    .filter(([key]) => shouldRenderPiExtensionStatus(key));
   const showWorking = placement === 'aboveEditor'
     && sessionUi.workingVisible !== false
     && (

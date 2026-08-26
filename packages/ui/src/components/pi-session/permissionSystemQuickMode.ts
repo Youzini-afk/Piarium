@@ -1,4 +1,5 @@
 import type {
+  PackageDescriptor,
   PiConfigTextDocumentSnapshot,
   RuntimeContextTarget,
 } from '@piarium/protocol';
@@ -7,6 +8,7 @@ import {
   updatePiConfigTextDocument,
 } from '@/lib/pi-runtime/config-documents';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
+import { piPackageNameFromSource } from '@/lib/pi-runtime/packages';
 import { parseJsoncObject, updateJsoncPath } from '@/components/sections/plugin-settings/plugin-config-model';
 import { permissionSystemDraftIssues } from '@/components/sections/plugin-settings/permission-system-config-model';
 
@@ -26,6 +28,17 @@ interface PermissionSystemConfigSource {
 
 const GLOBAL_PATH = 'extensions/pi-permission-system/config.json';
 const PROJECT_PATH = '.pi/extensions/pi-permission-system/config.json';
+
+export const isPermissionSystemPackageInstalled = (
+  packages: readonly PackageDescriptor[],
+): boolean => packages.some((candidate) => (
+  candidate.installed
+  && candidate.enabled
+  && (
+    candidate.name === '@gotgenes/pi-permission-system'
+    || piPackageNameFromSource(candidate.source) === '@gotgenes/pi-permission-system'
+  )
+));
 
 const readConfigSource = (snapshot: PiConfigTextDocumentSnapshot): PermissionSystemConfigSource => {
   const draft = parseJsoncObject(snapshot.content);

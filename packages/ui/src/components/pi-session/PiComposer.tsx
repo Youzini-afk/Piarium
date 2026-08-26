@@ -2,6 +2,7 @@ import React from 'react';
 import type {
   ImageAttachment,
   SessionSnapshot,
+  SessionWorkspaceBinding,
   ThinkingLevel,
 } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
@@ -79,6 +80,7 @@ interface PiComposerProps {
   sending: boolean;
   sessionId?: string | null;
   snapshot?: SessionSnapshot;
+  workspace?: SessionWorkspaceBinding;
 }
 
 const attachmentUrl = (attachment: ImageAttachment): string => (
@@ -138,6 +140,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   sending,
   sessionId,
   snapshot,
+  workspace,
 }) => {
   const { t } = useI18n();
   const inputRef = React.useRef<ComposerEditorHandle>(null);
@@ -526,7 +529,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.leading"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, footerIconButtonClass, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, footerIconButtonClass, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
               />
               <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} />
               {inlineDraftCount > 0 && (
@@ -548,7 +551,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.trailing"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
               />
               <ComposerDictation
                 disabled={sending}

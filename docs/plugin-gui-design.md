@@ -586,8 +586,9 @@ not synthesize an immediate effective-state result.
 Runtime observation remains non-authoritative. A hidden Host adapter folds the three public event
 channels into `pi-permission-system/status/v1`: whether the plugin announced readiness, active prompts,
 and the last decision. It never reads private logs, never responds to a prompt, and never turns those
-events into a second permission engine. The Composer shield appears only after a live session announces
-the plugin, highlights a pending ask, and toggles `Ask` / `Auto` directly from the shield by editing the
+events into a second permission engine. An active session shows the Composer shield after the plugin
+announces readiness; a new-session draft shows it when the package catalog confirms the plugin is
+installed and enabled. It highlights a pending ask and toggles `Ask` / `Auto` directly from the shield by editing the
 plugin-owned `yoloMode`. A trusted bound workspace writes the project scope; an unbound or untrusted session writes
 the global scope. The active-settings
 action still dispatches exactly `/permission-system show`; command output is not parsed into state.
@@ -604,8 +605,9 @@ Acceptance:
   commas block save with localized diagnostics;
 - `yoloMode` explains that ask decisions are approved automatically if the selected source becomes
   effective, while explicit deny decisions still apply;
-- the Composer and runtime status appear only after the installed, enabled plugin announces a live
-  session; pending asks clear only on the matching public decision event;
+- active-session Composer and runtime status appear only after the installed, enabled plugin announces
+  a live session; the new-session Composer uses installed/enabled package state and writes the native
+  config before creating that session; pending asks clear only on the matching public decision event;
 - Composer `Ask` / `Auto` preserves comments and unrelated policy fields, uses revision-checked writes,
   and never overwrites an invalid or externally changed native config;
 - `ask` choices are answered through `extension.ui.respond` to the plugin's own select/input request,
