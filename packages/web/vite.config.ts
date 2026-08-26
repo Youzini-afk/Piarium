@@ -129,6 +129,7 @@ export default defineConfig({
       '/api': {
         target: `http://127.0.0.1:${process.env.PIARIUM_PORT || 3001}`,
         changeOrigin: true,
+        rewriteWsOrigin: true,
         ws: true,
       },
     },
