@@ -2,8 +2,11 @@ import type { ImageAttachment, ModelDescriptor, ThinkingLevel } from '@piarium/p
 import { create } from 'zustand';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 
 export interface PiDraftState {
+  /** Optional provider-native Agent target for the next submitted message. */
+  agent?: PiComposerAgentSelection;
   images: ImageAttachment[];
   instructions?: string;
   /** Explicit next-session model. Undefined means inherit the effective default. */

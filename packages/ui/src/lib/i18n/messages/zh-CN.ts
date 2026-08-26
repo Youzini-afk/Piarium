@@ -2076,6 +2076,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.queueFollowUp': '将后续消息加入队列',
   'chat.piComposer.steerCurrentRun': '调整当前运行',
   'chat.piComposer.sendResultUnknown': '消息发送后连接中断，结果尚不确定。草稿已保留，请先检查会话再决定是否重发。',
+  'chat.piComposer.agent.imageUnsupported': '所选智能体无法接收图片附件。请移除图片或改用 Pi。',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',
   'chat.draftPresets.weigh.label': 'Weigh my options',

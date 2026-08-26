@@ -117,21 +117,18 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
   const displayedThinkingLabel = thinkingLabel(displayedThinking);
   const thinkingTriggerLabel = explicitThinking
     ? thinkingLabel(selectedThinkingLevel)
-    : displayedThinkingLabel
-      ? `${t('chat.modelControls.default')} · ${displayedThinkingLabel}`
-      : t('chat.modelControls.default');
+    : displayedThinkingLabel || t('chat.modelControls.default');
 
   return (
     <div
-      className="flex min-w-0 items-center justify-end gap-1"
+      className="flex min-w-0 items-center justify-end gap-2.5"
       data-pi-composer-model-controls="true"
     >
       <ModelSelector
         align="end"
         allowNone={allowInherit}
-        className="max-w-[min(240px,42vw)]"
+        className="order-2 max-w-[min(220px,42vw)]"
         cwd={cwd}
-        defaultSelectionLabel={t('chat.modelControls.default')}
         disabled={disabled}
         displayModelId={effectiveModel?.id}
         displayProviderId={effectiveModel?.provider}
@@ -157,7 +154,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => setThinkingPanelOpen(true)}
             className={cn(
-              'flex h-8 max-w-[180px] min-w-0 items-center gap-1.5 rounded-md px-2 typography-meta hover:bg-interactive-hover/60',
+              'order-1 flex h-8 max-w-[140px] min-w-0 items-center gap-1.5 px-1 typography-meta transition-opacity hover:opacity-70',
               explicitThinking && selectedThinkingLevel !== 'off'
                 ? 'text-[var(--status-info)]'
                 : 'text-muted-foreground',
@@ -167,7 +164,6 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
           >
             <Icon name="brain-ai-3" className="size-4 shrink-0" />
             <span className="truncate font-medium">{thinkingTriggerLabel}</span>
-            <Icon name="arrow-down-s" className="size-3.5 shrink-0 opacity-60" />
           </button>
           <MobileOverlayPanel
             open={thinkingPanelOpen}
@@ -224,7 +220,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
               type="button"
               disabled={disabled}
               className={cn(
-                'flex h-8 max-w-[180px] min-w-0 items-center gap-1.5 rounded-md px-2 typography-meta hover:bg-interactive-hover/60',
+                'order-1 flex h-8 max-w-[140px] min-w-0 items-center gap-1.5 px-1 typography-meta transition-opacity hover:opacity-70',
                 explicitThinking && selectedThinkingLevel !== 'off'
                   ? 'text-[var(--status-info)]'
                   : 'text-muted-foreground',
@@ -234,7 +230,6 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
             >
               <Icon name="brain-ai-3" className="size-4 shrink-0" />
               <span className="truncate font-medium">{thinkingTriggerLabel}</span>
-              <Icon name="arrow-down-s" className="size-3.5 shrink-0 opacity-60" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[min(200px,calc(100vw-2rem))]" portalToBody>

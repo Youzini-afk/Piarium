@@ -27,7 +27,14 @@ import {
   SnippetAutocomplete,
   type SnippetAutocompleteHandle,
 } from '@/components/chat/SnippetAutocomplete';
-import { resolveAutocompleteTrigger } from '@/components/chat/composer/language/triggers';
+import {
+  FileMentionAutocomplete,
+  type FileMentionHandle,
+} from '@/components/chat/FileMentionAutocomplete';
+import {
+  resolveAutocompleteTrigger,
+  type FileMentionAutocompleteInputSource,
+} from '@/components/chat/composer/language/triggers';
 import {
   ComposerEditor,
   type ComposerEditorHandle,
@@ -45,6 +52,9 @@ import { PiGoalButton } from './PiGoalControls';
 import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 import { PiComposerModelControls } from './PiComposerModelControls';
 import type { PiComposerModelSelection } from './piComposerSessionConfig';
+import { insertPiComposerMention } from './piComposerMentions';
+import { PiComposerAgentControl } from './PiComposerAgentControl';
+import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 
 interface PiComposerProps {
   active: boolean;
@@ -56,6 +66,7 @@ interface PiComposerProps {
   followUpBehavior: FollowUpBehavior;
   images: ImageAttachment[];
   onAbort?(): Promise<void> | void;
+  onChangeAgent(value: PiComposerAgentSelection | undefined): void;
   onChangeDraft(value: string): void;
   onChangeImages(value: ImageAttachment[]): void;
   onChangeModel(value: PiComposerModelSelection | undefined): Promise<void> | void;
@@ -63,6 +74,7 @@ interface PiComposerProps {
   onSend(): Promise<void> | void;
   onSendText(value: string): Promise<void> | void;
   selectedModel?: PiComposerModelSelection;
+  selectedAgent?: PiComposerAgentSelection;
   selectedThinkingLevel?: ThinkingLevel;
   sending: boolean;
   sessionId?: string | null;
@@ -99,7 +111,7 @@ const PIARIUM_COMMANDS: readonly CommandInfo[] = MAGIC_PROMPT_COMMANDS.map((comm
 }));
 
 type PiComposerAutocomplete = {
-  kind: 'command' | 'skill' | 'snippet';
+  kind: 'command' | 'mention' | 'skill' | 'snippet';
   query: string;
 } | null;
 
@@ -113,6 +125,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   followUpBehavior,
   images,
   onAbort,
+  onChangeAgent,
   onChangeDraft,
   onChangeImages,
   onChangeModel,
@@ -120,6 +133,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   onSend,
   onSendText,
   selectedModel,
+  selectedAgent,
   selectedThinkingLevel,
   sending,
   sessionId,
@@ -130,8 +144,11 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const commandRef = React.useRef<CommandAutocompleteHandle>(null);
   const skillRef = React.useRef<SkillAutocompleteHandle>(null);
   const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
+  const mentionRef = React.useRef<FileMentionHandle>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [autocomplete, setAutocomplete] = React.useState<PiComposerAutocomplete>(null);
+  const [confirmedMentions, setConfirmedMentions] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [knownAgentNames, setKnownAgentNames] = React.useState<ReadonlySet<string>>(() => new Set());
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
@@ -143,35 +160,46 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     inlineDraftKey ? state.drafts[inlineDraftKey]?.length ?? 0 : 0
   ));
   const canSend = draft.trim().length > 0 || images.length > 0 || inlineDraftCount > 0;
-  const footerIconButtonClass = 'flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';
+  const footerIconButtonClass = 'flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
   const snippets = useSnippetsStore((state) => state.snippets);
   const languageContext = React.useMemo<ComposerLanguageContext>(() => ({
     attachmentFilenames: [],
-    confirmedMentions: new Set(),
+    confirmedMentions,
     inputMode: 'normal',
-    knownAgentNames: new Set(),
+    knownAgentNames,
     knownSlashNames: new Set(PIARIUM_COMMANDS.map((command) => command.name.toLowerCase())),
     knownSnippetTriggers: new Set(snippets.flatMap((snippet) => [snippet.name, ...snippet.aliases]).map((value) => value.toLowerCase())),
-  }), [snippets]);
+  }), [confirmedMentions, knownAgentNames, snippets]);
   const modelControls = (
-    <PiComposerModelControls
-      active={active}
-      allowInherit={allowModelInheritance}
-      cwd={cwd}
-      disabled={sending}
-      effectiveModel={effectiveModel}
-      effectiveThinkingLevel={effectiveThinkingLevel}
-      onModelChange={onChangeModel}
-      onThinkingChange={onChangeThinkingLevel}
-      selectedModel={selectedModel}
-      selectedThinkingLevel={selectedThinkingLevel}
-    />
+    <div className="flex min-w-0 items-center justify-end gap-2.5">
+      <PiComposerModelControls
+        active={active}
+        allowInherit={allowModelInheritance}
+        cwd={cwd}
+        disabled={sending}
+        effectiveModel={effectiveModel}
+        effectiveThinkingLevel={effectiveThinkingLevel}
+        onModelChange={onChangeModel}
+        onThinkingChange={onChangeThinkingLevel}
+        selectedModel={selectedModel}
+        selectedThinkingLevel={selectedThinkingLevel}
+      />
+      <PiComposerAgentControl
+        active={active}
+        cwd={cwd}
+        disabled={sending}
+        onChange={onChangeAgent}
+        selectedAgent={selectedAgent}
+        sessionId={sessionId}
+      />
+    </div>
   );
 
   React.useEffect(() => {
     if (autocomplete?.kind === 'command' && !draft.startsWith('/')) setAutocomplete(null);
     if (autocomplete?.kind === 'skill' && !draft.includes('/')) setAutocomplete(null);
     if (autocomplete?.kind === 'snippet' && !draft.includes('#')) setAutocomplete(null);
+    if (autocomplete?.kind === 'mention' && !draft.includes('@')) setAutocomplete(null);
   }, [autocomplete?.kind, draft]);
 
   const addFiles = React.useCallback(async (files: Iterable<File>) => {
@@ -196,9 +224,18 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [draft, onChangeDraft]);
 
-  const updateAutocomplete = React.useCallback((value: string, cursorPosition: number) => {
-    const trigger = resolveAutocompleteTrigger(value, cursorPosition, { inputMode: 'normal' });
-    if (trigger?.kind === 'command' || trigger?.kind === 'skill' || trigger?.kind === 'snippet') {
+  const updateAutocomplete = React.useCallback((
+    value: string,
+    cursorPosition: number,
+    inputSource: FileMentionAutocompleteInputSource = 'manual',
+    insertedText?: string,
+  ) => {
+    const trigger = resolveAutocompleteTrigger(value, cursorPosition, {
+      inputMode: 'normal',
+      inputSource,
+      ...(insertedText === undefined ? {} : { insertedText }),
+    });
+    if (trigger) {
       setAutocomplete({ kind: trigger.kind, query: trigger.query });
       return;
     }
@@ -251,6 +288,35 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     });
   }, [draft, onChangeDraft]);
 
+  const applyMention = React.useCallback((mention: string, kind: 'agent' | 'file') => {
+    const cursor = inputRef.current?.getSelection().start ?? draft.length;
+    const insertion = insertPiComposerMention(draft, cursor, mention);
+    if (kind === 'agent') {
+      setKnownAgentNames((current) => new Set(current).add(mention.toLowerCase()));
+    } else {
+      setConfirmedMentions((current) => new Set(current).add(mention));
+    }
+    onChangeDraft(insertion.text);
+    setAutocomplete(null);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelection(insertion.cursor);
+    });
+  }, [draft, onChangeDraft]);
+
+  const handleFileSelect = React.useCallback((file: {
+    name: string;
+    path: string;
+    relativePath?: string;
+  }) => {
+    const mention = file.relativePath?.trim() || file.path.replace(/\\/g, '/') || file.name;
+    applyMention(mention, 'file');
+  }, [applyMention]);
+
+  const handleAgentSelect = React.useCallback((agentName: string) => {
+    applyMention(agentName, 'agent');
+  }, [applyMention]);
+
   const handleEditorKeyDown = React.useCallback((event: KeyboardEvent): boolean => {
     if (
       autocomplete !== null
@@ -262,7 +328,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     ) {
       if (autocomplete.kind === 'command') commandRef.current?.handleKeyDown(event.key);
       else if (autocomplete.kind === 'skill') skillRef.current?.handleKeyDown(event.key);
-      else snippetRef.current?.handleKeyDown(event.key);
+      else if (autocomplete.kind === 'snippet') snippetRef.current?.handleKeyDown(event.key);
+      else mentionRef.current?.handleKeyDown(event.key);
       return true;
     }
     if (
@@ -318,7 +385,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
         <div
           className={cn(
-            'relative rounded-xl border border-border/70 bg-[var(--surface-elevated)] transition-colors focus-within:border-primary/50',
+            'relative flex flex-col overflow-visible rounded-2xl border border-border/80 bg-[var(--surface-subtle)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] transition-[border-color,box-shadow] focus-within:ring-1 focus-within:ring-primary/50',
             sending && 'opacity-80',
           )}
           data-pi-composer-input-frame="true"
@@ -342,7 +409,12 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             value={draft}
             onChange={(change) => {
               onChangeDraft(change.value);
-              updateAutocomplete(change.value, change.selection.end);
+              updateAutocomplete(
+                change.value,
+                change.selection.end,
+                change.fromPaste ? 'paste' : 'manual',
+                change.insertedText,
+              );
             }}
             onSelectionChange={(selection) => {
               updateAutocomplete(draft, selection.end);
@@ -357,7 +429,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             languageContext={languageContext}
             placeholder={t('chat.chatInput.placeholder.chat')}
             className={cn(
-              'min-h-20 w-full px-3 pb-2 pt-3 typography-ui-label text-foreground',
+              'min-h-[52px] w-full px-3 pb-2 pt-4 typography-markdown text-foreground md:typography-ui-label',
               isExpandedInput ? 'min-h-[40vh]' : 'max-h-[40vh]',
             )}
             maxLines={isExpandedInput ? 24 : 9}
@@ -371,6 +443,16 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               sessionId={sessionId}
               searchQuery={autocomplete.query}
               onCommandSelect={handleCommandSelect}
+              onClose={() => setAutocomplete(null)}
+            />
+          ) : null}
+
+          {autocomplete?.kind === 'mention' ? (
+            <FileMentionAutocomplete
+              ref={mentionRef}
+              searchQuery={autocomplete.query}
+              onAgentSelect={handleAgentSelect}
+              onFileSelect={handleFileSelect}
               onClose={() => setAutocomplete(null)}
             />
           ) : null}
@@ -395,13 +477,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             />
           ) : null}
 
-          <div data-chat-input-footer="true" className="flex items-center justify-between gap-2 px-2 pb-2">
-            <div className="flex min-w-0 items-center gap-1">
-              <WorkbenchContributionSlot
-                kind="composer-action"
-                slot="chat.composer.actions.leading"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
-              />
+          <div data-chat-input-footer="true" className="flex items-center justify-between gap-3 px-3 pb-2.5 pt-0.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -419,10 +496,10 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                    className={footerIconButtonClass}
                     aria-label={t('chat.chatInput.actions.addAttachment')}
                   >
-                    <Icon name="attachment-2" className="size-4" />
+                    <Icon name="add-circle" className="size-4" />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">{t('chat.chatInput.actions.attachFiles')}</TooltipContent>
@@ -446,18 +523,12 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                     : t('filesView.editor.fullscreen')}
                 </TooltipContent>
               </Tooltip>
-              <ComposerDictation
-                disabled={sending}
-                footerIconButtonClass={footerIconButtonClass}
-                footerPaddingClass="px-2 pb-2"
-                iconSizeClass="size-4"
-                isMobile={isMobile}
-                onInsert={insertTranscript}
-                onInsertAndSend={onSendText}
-                radius="0.75rem"
-                sendIconSizeClass="size-4"
+              <WorkbenchContributionSlot
+                kind="composer-action"
+                slot="chat.composer.actions.leading"
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
               />
-              {snapshot ? <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} /> : null}
+              <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} />
               {inlineDraftCount > 0 && (
                 <span className="truncate px-1 typography-micro text-muted-foreground">
                   {t('chat.piComposer.attachedContext', { count: inlineDraftCount })}
@@ -472,12 +543,23 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               )}
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex min-w-0 shrink-0 items-center justify-end gap-2.5">
               {!isMobile ? modelControls : null}
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.trailing"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot }}
+              />
+              <ComposerDictation
+                disabled={sending}
+                footerIconButtonClass={footerIconButtonClass}
+                footerPaddingClass="px-3 pb-2.5"
+                iconSizeClass="size-4"
+                isMobile={isMobile}
+                onInsert={insertTranscript}
+                onInsertAndSend={onSendText}
+                radius="1rem"
+                sendIconSizeClass="size-4"
               />
               {busy && onAbort && (
                 <Tooltip>
@@ -485,7 +567,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                     <button
                       type="button"
                       onClick={() => void onAbort()}
-                      className="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                      className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
                       aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
                     >
                       <Icon name="stop" className="size-3.5" />
@@ -498,7 +580,12 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 type="button"
                 onClick={() => void onSend()}
                 disabled={!canSend || sending}
-                className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                className={cn(
+                  'flex size-8 items-center justify-center rounded-lg transition-colors',
+                  canSend && !sending
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    : 'cursor-not-allowed bg-transparent text-muted-foreground/35',
+                )}
                 aria-label={t('chat.chatInput.actions.sendMessageAria')}
               >
                 <Icon name={sending ? 'loader-4' : 'arrow-up'} className={cn('size-4', sending && 'animate-spin')} />

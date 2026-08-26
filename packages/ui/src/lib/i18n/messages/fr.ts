@@ -1823,6 +1823,7 @@ export const dict = {
   'chat.piComposer.queueFollowUp': 'Mettre le suivi en file d\'attente',
   'chat.piComposer.steerCurrentRun': 'Rediriger l\'exécution en cours',
   'chat.piComposer.sendResultUnknown': 'La connexion a été perdue après l’envoi. Le brouillon a été conservé ; vérifiez la session avant de renvoyer.',
+  'chat.piComposer.agent.imageUnsupported': 'L’agent sélectionné ne peut pas recevoir d’images. Supprimez-les ou utilisez Pi.',
   'chat.scrollToBottom.aria': 'Faire défiler vers le bas',
   'chat.promptNavigator.aria': 'Navigation des prompts',
   'chat.promptNavigator.currentPrompt': 'Prompt actuel',

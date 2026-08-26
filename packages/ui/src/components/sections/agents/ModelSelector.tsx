@@ -212,7 +212,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     disabled={!isReady || disabled}
                     className={cn(
                         variant === 'composer'
-                            ? 'flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 overflow-hidden rounded-md px-2 typography-meta text-foreground hover:bg-interactive-hover/60'
+                            ? 'flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 overflow-hidden px-1 typography-meta text-foreground transition-opacity hover:opacity-70'
                             : dropdownTriggerVariants(),
                         variant === 'field' && 'w-full',
                         className,
@@ -231,7 +231,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         )}
                         {isReady ? <span className="typography-meta font-medium text-foreground truncate">{triggerLabel}</span> : null}
                     </div>
-                    <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                    {variant !== 'composer' ? <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" /> : null}
                 </button>
                 <MobileOverlayPanel
                     open={isReady && pickerOpen}
@@ -249,7 +249,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <DropdownMenuTrigger asChild>
                 <button type="button" disabled={!isReady || disabled} className={cn(
                     variant === 'composer'
-                        ? 'flex h-8 min-w-0 w-fit max-w-[240px] items-center gap-1.5 overflow-hidden rounded-md px-2 typography-meta text-foreground hover:bg-interactive-hover/60'
+                        ? 'flex h-8 min-w-0 w-fit max-w-[220px] items-center gap-1.5 overflow-hidden px-1 typography-meta text-foreground transition-opacity hover:opacity-70'
                         : dropdownTriggerVariants({ size: 'sm' }),
                     variant === 'field' && 'min-w-0 w-fit overflow-hidden',
                     (!isReady || disabled) && 'opacity-60 cursor-not-allowed',
@@ -268,7 +268,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                             <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
                         </>
                     )}
-                    <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
+                    {variant !== 'composer' ? <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" /> : null}
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align={align} portalToBody={dropdownPortalToBody}>

@@ -2088,6 +2088,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.queueFollowUp": "Додати продовження в чергу",
   "chat.piComposer.steerCurrentRun": "Скоригувати поточне виконання",
   "chat.piComposer.sendResultUnknown": "Після надсилання з’єднання було втрачено. Чернетку збережено; перевірте сесію перед повторним надсиланням.",
+  "chat.piComposer.agent.imageUnsupported": "Вибраний агент не може отримувати вкладені зображення. Видаліть зображення або скористайтеся Pi.",
   "chat.draftPresets.explore.label": "Огляд кодової бази",
   "chat.draftPresets.catchup.label": "Повернутись у контекст",
   "chat.draftPresets.weigh.label": "Зважити варіанти",

@@ -71,6 +71,13 @@ describe('Pi draft store', () => {
 
   test('clears the complete draft after a successful send', () => {
     usePiDraftStore.getState().setDraft('session-1', {
+      agent: {
+        description: 'Gather context',
+        id: 'scout',
+        invocation: { command: 'run', kind: 'slash-command', taskSeparator: 'space' },
+        name: 'scout',
+        providerId: 'pi-subagents',
+      },
       images: [{ data: 'image', mimeType: 'image/png' }],
       instructions: 'Hidden context',
       text: 'Prompt',

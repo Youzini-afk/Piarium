@@ -62,6 +62,7 @@ import { getResolvedWorkbenchWorkspaceId } from '@/lib/extensions/workbench-work
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { usePiComposerDefaults } from './usePiComposerDefaults';
 import { configurePiComposerSession } from './piComposerSessionConfig';
+import { renderPiComposerAgentInvocation } from '@/lib/pi-runtime/composerAgent';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -249,7 +250,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     try {
       const rendered = await renderPiComposerSubmission(currentDraft.text);
       let promptText = rendered.text;
-      const instructions = joinPiDraftInstructions(
+      let instructions = joinPiDraftInstructions(
         currentDraft.instructions,
         rendered.instructions,
       );
@@ -266,10 +267,21 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
         getResolvedWorkbenchWorkspaceId(snapshot.cwd),
       );
       promptText = projectEditorContextAttachments(promptText, editorAttachments);
+      if (currentDraft.agent) {
+        promptText = renderPiComposerAgentInvocation(
+          promptText,
+          currentDraft.agent,
+          instructions,
+        );
+        instructions = undefined;
+      }
       if (!promptText.trim() && currentDraft.images.length === 0) {
         inlineDraftStore.restoreDrafts(inlineDraftTarget, inlineDrafts);
         restoreEditorContextAttachments(editorAttachments);
         return;
+      }
+      if (currentDraft.agent && currentDraft.images.length > 0) {
+        throw new Error(t('chat.piComposer.agent.imageUnsupported'));
       }
       const activity = projectPiSessionActivity(snapshot);
       if (!activity.isWorking) {
@@ -537,10 +549,12 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 effectiveThinkingLevel={draft.thinkingLevel ?? pendingDefaults.thinkingLevel}
                 images={draft.images}
                 followUpBehavior={followUpBehavior}
+                selectedAgent={draft.agent}
                 selectedModel={draft.model}
                 selectedThinkingLevel={draft.thinkingLevel}
                 sending={creating || sending}
                 sessionId={null}
+                onChangeAgent={(agent) => updatePendingDraft({ agent })}
                 onChangeDraft={(text) => updatePendingDraft({ text })}
                 onChangeImages={(images) => updatePendingDraft({ images })}
                 onChangeModel={(model) => updatePendingDraft({ model })}
@@ -687,12 +701,14 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 effectiveThinkingLevel={snapshot.thinkingLevel}
                 images={draft.images}
                 followUpBehavior={followUpBehavior}
+                selectedAgent={draft.agent}
                 selectedModel={snapshot.model}
                 selectedThinkingLevel={snapshot.thinkingLevel}
                 sending={creating || sending || sessionOpening}
                 sessionId={snapshot.sessionId}
                 snapshot={snapshot}
                 onAbort={async () => { await abort(currentSessionId); }}
+                onChangeAgent={(agent) => updateDraft(currentSessionId, { agent })}
                 onChangeDraft={(text) => updateDraft(currentSessionId, { text })}
                 onChangeImages={(images) => updateDraft(currentSessionId, { images })}
                 onChangeModel={handleCurrentModelChange}

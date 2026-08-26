@@ -166,14 +166,14 @@ const PiGoalDialog: React.FC<{
 
 export const PiGoalButton: React.FC<{
   footerIconButtonClass: string;
-  snapshot: SessionSnapshot;
+  snapshot?: SessionSnapshot;
 }> = ({ footerIconButtonClass, snapshot }) => {
   const { t } = useI18n();
   const enabled = useUIStore((state) => state.sessionGoalEnabled);
   const armed = useSessionGoalArmStore((state) => state.armed);
   const setArmed = useSessionGoalArmStore((state) => state.setArmed);
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const goal = snapshot.features.goal;
+  const goal = snapshot?.features.goal;
   if (!enabled) return null;
 
   const label = goal

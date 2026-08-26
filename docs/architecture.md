@@ -92,6 +92,14 @@ Recent even when its runtime cwd happens to sit below a registered workspace. Th
 picker, grouping rules, and navigation path are used by Web, Electron, mobile, the IDE shell, and
 the VS Code companion instead of keeping platform-specific workspace state.
 
+The composer keeps three different controls semantically separate. Model and thinking mutate the Pi
+session or seed its creation. An Agent target applies only to the next draft and is rendered through
+that Agent Provider's declared invocation contract; `Pi` remains the ordinary main-session target.
+File and Agent `@` mentions use the shared provider/file catalog rather than a hard-coded role list.
+Tool permission is not a cosmetic Piarium mode: an enforcing Pi extension must own the `tool_call`
+gate, while its Piarium adapter may contribute status or controls through the composer action seam.
+No shield control is shown when no enforcing plugin is installed.
+
 VS Code active-editor state is transient Piarium view state, not an OpenCode attachment contract.
 The Pi composer turns an accepted selection into the same session-scoped structured context used by
 file/diff comments, preserving the relative path and line range; accepting the whole file adds an

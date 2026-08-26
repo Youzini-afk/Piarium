@@ -2088,6 +2088,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.queueFollowUp": "Poner el seguimiento en cola",
   "chat.piComposer.steerCurrentRun": "Redirigir la ejecución actual",
   "chat.piComposer.sendResultUnknown": "La conexión se perdió después del envío. El borrador se conservó; revisa la sesión antes de volver a enviarlo.",
+  "chat.piComposer.agent.imageUnsupported": "El agente seleccionado no puede recibir imágenes adjuntas. Elimina las imágenes o usa Pi.",
   "chat.draftPresets.explore.label": "Explore the codebase",
   "chat.draftPresets.catchup.label": "Catch me up",
   "chat.draftPresets.weigh.label": "Weigh my options",
