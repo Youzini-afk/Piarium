@@ -34,8 +34,10 @@ export interface SplashCanvasPlayback {
 
 export interface SplashTile {
   readonly breatheDelayMs: number | null;
+  readonly col: number;
   readonly delayMs: number;
   readonly key: string;
+  readonly row: number;
   readonly scatterXPx: number;
   readonly scatterYPx: number;
   /** Centre of this tile in floor coordinates. The cube's footprint is tile `0:0`. */
@@ -98,6 +100,31 @@ export interface SplashCanvasController {
 const STANDARD_MAX_DELAY_MS = splashTilePlaybackTiming('standard').maxDelayMs;
 const DEFAULT_BREATHE_SHARE = 0.1;
 const DEFAULT_RANDOM_SEED = 0x02f6e2b1;
+
+/**
+ * Pick whether one tile breathes during one of its local pulse cycles.
+ *
+ * The hash is deterministic for a coordinate/cycle/seed tuple so a viewport rebuild does not pop the
+ * field into a new state, while the cycle index changes the chosen set over time. The visual result is
+ * random motion without calling Math.random on every frame or changing a tile halfway through its fade.
+ */
+export function splashTileBreathesInCycle(
+  row: number,
+  col: number,
+  cycleIndex: number,
+  breatheShare: number,
+  randomSeed: number,
+): boolean {
+  const share = Math.min(1, Math.max(0, breatheShare));
+  if (share <= 0) return false;
+  if (share >= 1) return true;
+  let value = randomSeed ^ 0x6d2b79f5;
+  value = Math.imul(value ^ row, 0x45d9f3b);
+  value = Math.imul(value ^ col, 0x119de1f3);
+  value = Math.imul(value ^ cycleIndex, 0x27d4eb2d);
+  value ^= value >>> 16;
+  return (value >>> 0) / 0x1_0000_0000 < share;
+}
 
 export const resolveSplashCanvasPlayback = (input: {
   leaving?: boolean;
@@ -252,14 +279,14 @@ export function buildAdaptiveSplashTiles(input: SplashTileFieldInput): SplashTil
         : cellPx * (0.18 + 0.36 * clamp(radius / 6, 0, 1));
       const scatterXPx = radius === 0 ? 0 : Math.round(col / radius * magnitude);
       const scatterYPx = radius === 0 ? 0 : Math.round(row / radius * magnitude);
-      const breathes = input.breatheShare > 0
-        && randomAt(row, col, 0x68bc21eb) < clamp(input.breatheShare, 0, 1);
       tiles.push({
-        breatheDelayMs: breathes
+        breatheDelayMs: input.breatheShare > 0
           ? Math.round(randomAt(row, col, 0x02e5be93) * breatheSpreadMs)
           : null,
+        col,
         delayMs: Math.round(clamp(fraction, 0, 1) * maxDelayMs),
         key: `${row}:${col}`,
+        row,
         scatterXPx,
         scatterYPx,
         xPx: col * cellPx,
@@ -282,6 +309,13 @@ export function mountSplashTileCanvas(
   canvas: HTMLCanvasElement,
   options: SplashCanvasMountOptions,
   buildTileField: (input: SplashTileFieldInput) => SplashTileField = buildAdaptiveSplashTiles,
+  breathesInCycle: (
+    row: number,
+    col: number,
+    cycleIndex: number,
+    breatheShare: number,
+    randomSeed: number,
+  ) => boolean = splashTileBreathesInCycle,
 ): SplashCanvasController {
   const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
   const mix = (from: number, to: number, progress: number): number => from + (to - from) * progress;
@@ -289,6 +323,16 @@ export function mountSplashTileCanvas(
     const progress = clamp((value - from) / Math.max(1e-6, to - from), 0, 1);
     return progress * progress * (3 - 2 * progress);
   };
+  // Keep the generated script byte-stable while giving each mounted boot scene its own breathing sequence.
+  // The seed is chosen once per controller, never per frame, so resize and animation frames remain coherent.
+  let breathingRandomSeed = options.field.randomSeed ^ (Math.floor(performance.timeOrigin || Date.now()) >>> 0);
+  try {
+    const entropy = new Uint32Array(1);
+    canvas.ownerDocument.defaultView?.crypto.getRandomValues(entropy);
+    breathingRandomSeed ^= entropy[0] ?? 0;
+  } catch {
+    // The time-origin mix above remains a per-page fallback where Web Crypto is unavailable.
+  }
   const cubicCoordinate = (a: number, b: number, value: number): number => {
     const inverse = 1 - value;
     return 3 * inverse * inverse * value * a + 3 * inverse * value * value * b + value * value * value;
@@ -746,8 +790,17 @@ void main() {
       if (playback.kind === 'idle' && !playback.reducedMotion && tile.breatheDelayMs !== null) {
         const breathingElapsed = elapsed - 1_200 - tile.breatheDelayMs;
         if (breathingElapsed >= 0) {
-          const cycle = (breathingElapsed % 2_800) / 2_800;
-          frame.fillMix = (1 - Math.cos(cycle * Math.PI * 2)) / 2;
+          const cycleIndex = Math.floor(breathingElapsed / 2_800);
+          if (breathesInCycle(
+            tile.row,
+            tile.col,
+            cycleIndex,
+            options.field.breatheShare,
+            breathingRandomSeed,
+          )) {
+            const cycle = (breathingElapsed % 2_800) / 2_800;
+            frame.fillMix = (1 - Math.cos(cycle * Math.PI * 2)) / 2;
+          }
         }
       }
     }
@@ -907,8 +960,9 @@ canvas.className='pi-splash-ground-canvas';
 canvas.setAttribute('aria-hidden','true');
 horizon.insertBefore(canvas,horizon.firstChild);
 var build=(${buildAdaptiveSplashTiles.toString()});
+var breathes=(${splashTileBreathesInCycle.toString()});
 var mount=(${mountSplashTileCanvas.toString()});
-var controller=mount(canvas,${JSON.stringify(options)},build);
+var controller=mount(canvas,${JSON.stringify(options)},build,breathes);
 var reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 var observer=new MutationObserver(function(){
 if(!splash||splash.getAttribute('data-leaving')!=='true')return;
