@@ -19,18 +19,29 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
+import {
+  canUseElectronDesktopIPC,
+  invokeDesktop,
+  isDesktopLocalOriginActive,
+} from '@/lib/desktop';
 import {
   openPiSessionFromNavigation,
   startPiSessionDraftFromNavigation,
 } from '@/lib/pi-runtime/sessionNavigation';
 import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { cn, formatDirectoryName } from '@/lib/utils';
+import { cn, formatDirectoryName, getRevealLabelKey } from '@/lib/utils';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import {
   selectActivePiSessions,
@@ -71,11 +82,35 @@ interface PiSessionSidebarProps {
   onRequestClose?: () => void;
 }
 
-interface ConfirmationState {
-  action: 'archive' | 'delete';
-  ids: string[];
-  title: string;
-}
+type ConfirmationState =
+  | {
+      scope: 'session';
+      action: 'archive' | 'delete';
+      ids: string[];
+      title: string;
+    }
+  | {
+      scope: 'project';
+      action: 'archive';
+      ids: string[];
+      title: string;
+    }
+  | {
+      scope: 'project';
+      action: 'remove';
+      projectId: string;
+      title: string;
+    };
+
+const collectPiSessionForestIds = (nodes: readonly PiSessionNode[]): string[] => {
+  const ids: string[] = [];
+  const visit = (node: PiSessionNode): void => {
+    ids.push(node.session.id);
+    node.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  return ids;
+};
 
 interface SessionRowProps {
   attentionBySession: Readonly<Record<string, PiSessionAttentionState>>;
@@ -303,7 +338,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   onRequestClose,
 }) => {
   const { t } = useI18n();
-  const { runtime } = useRuntimeAPIs();
+  const { files, runtime } = useRuntimeAPIs();
   const summaries = usePiSessionStore((state) => state.summaries);
   const activeSessions = usePiSessionStore(selectActivePiSessions);
   const archivedSessions = usePiSessionStore(selectArchivedPiSessions);
@@ -327,11 +362,15 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     return counts;
   }, [pendingDialogs]);
   const projects = useProjectsStore((state) => state.projects);
+  const removeProject = useProjectsStore((state) => state.removeProject);
+  const reorderProjects = useProjectsStore((state) => state.reorderProjects);
   const pinnedIds = useSessionPinnedStore((state) => state.ids);
   const togglePinned = useSessionPinnedStore((state) => state.toggle);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
   const [query, setQuery] = React.useState('');
   const [showArchived, setShowArchived] = React.useState(false);
   const [collapsedGroupIds, setCollapsedGroupIds] = React.useState<Set<string>>(() => new Set());
@@ -350,29 +389,34 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     isSessionPinned(pinnedIds, session.cwd, session.id)
   ), [pinnedIds]);
 
-  const groups = React.useMemo(() => {
+  const workspaceGroups = React.useMemo(() => {
     const source = showArchived ? archivedSessions : activeSessions;
     const forest = buildPiSessionForest(source, isPinned);
-    const normalizedQuery = query.trim().toLocaleLowerCase();
     return groupPiSessionForestByWorkspace(forest, projects, isPinned, {
       includeEmptyProjects: !showArchived,
-    }).flatMap((group) => {
+    }).map((group) => {
       const label = group.project?.label?.trim()
         || (group.path ? formatDirectoryName(group.path, null) || group.path : null)
         || t('sessions.sidebar.grouping.recent');
+      return { ...group, label };
+    });
+  }, [activeSessions, archivedSessions, isPinned, projects, showArchived, t]);
+
+  const groups = React.useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return workspaceGroups.flatMap((group) => {
       const groupMatches = normalizedQuery.length > 0
-        && `${label}\n${group.path ?? ''}`.toLocaleLowerCase().includes(normalizedQuery);
+        && `${group.label}\n${group.path ?? ''}`.toLocaleLowerCase().includes(normalizedQuery);
       const filteredForest = groupMatches
         ? group.forest
         : filterPiSessionForest(group.forest, query, untitled);
       if (normalizedQuery.length > 0 && !groupMatches && filteredForest.length === 0) return [];
       return [{
         ...group,
-        label,
         forest: filteredForest,
       }];
     });
-  }, [activeSessions, archivedSessions, isPinned, projects, query, showArchived, t, untitled]);
+  }, [query, untitled, workspaceGroups]);
 
   const handleSelect = React.useCallback(async (session: SessionSummary) => {
     try {
@@ -401,6 +445,34 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     setSettingsDialogOpen(true);
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen, setSettingsDialogOpen]);
 
+  const handleOpenProjectSettings = React.useCallback((projectId: string) => {
+    setSettingsProjectsSelectedId(projectId);
+    setSettingsPage('projects');
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
+    setSettingsDialogOpen(true);
+  }, [
+    mobileVariant,
+    onRequestClose,
+    setSessionSwitcherOpen,
+    setSettingsDialogOpen,
+    setSettingsPage,
+    setSettingsProjectsSelectedId,
+  ]);
+
+  const canRevealProject = Boolean(files.revealPath)
+    && (runtime.platform === 'vscode' || isDesktopLocalOriginActive());
+
+  const handleRevealProject = React.useCallback(async (path: string) => {
+    if (!files.revealPath) return;
+    try {
+      const result = await files.revealPath(path);
+      if (!result.success) throw new Error('reveal-failed');
+    } catch {
+      toast.error(t('sessions.sidebar.project.reveal.error'));
+    }
+  }, [files, t]);
+
   const handleOpenMiniChat = React.useCallback((session: SessionSummary) => {
     void invokeDesktop('desktop_open_session_mini_chat_window', {
       apiBaseUrl: getRuntimeApiBaseUrl(),
@@ -428,12 +500,19 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     if (!confirmation) return;
     setActionPending(true);
     try {
+      if (confirmation.scope === 'project' && confirmation.action === 'remove') {
+        removeProject(confirmation.projectId);
+        toast.success(t('mobile.sessions.toast.projectRemoved', { label: confirmation.title }));
+        setConfirmation(null);
+        return;
+      }
+
       const results = await Promise.allSettled(confirmation.ids.map((sessionId) => (
         confirmation.action === 'archive'
           ? archiveSession(sessionId)
           : deleteSession(sessionId)
       )));
-      if (confirmation.action === 'delete') {
+      if (confirmation.scope === 'session' && confirmation.action === 'delete') {
         results.forEach((result, index) => {
           if (result.status !== 'fulfilled' || result.value !== true) return;
           const sessionId = confirmation.ids[index];
@@ -448,6 +527,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               ? t('sessions.sidebar.session.archive.error')
               : t('sessions.sidebar.session.delete.error'))
           : t('sessions.sidebar.dialogs.deleteResult.tryAgain'));
+      } else if (confirmation.scope === 'project') {
+        toast.success(confirmation.ids.length === 1
+          ? t('sessions.sidebar.bulkActions.archivedSingle', { count: 1 })
+          : t('sessions.sidebar.bulkActions.archivedPlural', { count: confirmation.ids.length }));
       } else {
         toast.success(confirmation.action === 'archive'
           ? t('sessions.sidebar.session.archive.success')
@@ -457,7 +540,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     } finally {
       setActionPending(false);
     }
-  }, [archiveSession, clearPinnedSession, confirmation, deleteSession, runtimeKey, summaries, t]);
+  }, [archiveSession, clearPinnedSession, confirmation, deleteSession, removeProject, runtimeKey, summaries, t]);
 
   const visibleCount = React.useMemo(() => {
     const countNodes = (nodes: PiSessionNode[]): number => nodes.reduce(
@@ -466,6 +549,71 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     );
     return groups.reduce((count, group) => count + countNodes(group.forest), 0);
   }, [groups]);
+
+  const confirmationCopy = (() => {
+    if (!confirmation) {
+      return { title: '', description: '', actionLabel: '' };
+    }
+    if (confirmation.scope === 'project' && confirmation.action === 'remove') {
+      return {
+        title: t('sessions.sidebar.dialogs.removeProject.title'),
+        description: t('sessions.sidebar.dialogs.removeProject.description', {
+          projectTitle: confirmation.title,
+        }),
+        actionLabel: t('sessions.sidebar.project.actions.remove'),
+      };
+    }
+    if (confirmation.scope === 'project') {
+      return {
+        title: t('sessions.sidebar.dialogs.archiveSessions.title'),
+        description: confirmation.ids.length === 1
+          ? t('sessions.sidebar.dialogs.archiveSessions.singleDescription', { count: 1 })
+          : t('sessions.sidebar.dialogs.archiveSessions.pluralDescription', {
+              count: confirmation.ids.length,
+            }),
+        actionLabel: t('sessions.sidebar.bulkActions.archive'),
+      };
+    }
+    if (confirmation.ids.length > 1) {
+      const count = confirmation.ids.length - 1;
+      return confirmation.action === 'archive'
+        ? {
+            title: t('sessions.sidebar.dialogs.archiveSession.title'),
+            description: t(count === 1
+              ? 'sessions.sidebar.dialogs.archiveSession.withOneSubtask'
+              : 'sessions.sidebar.dialogs.archiveSession.withManySubtasks', {
+              count,
+              sessionTitle: confirmation.title,
+            }),
+            actionLabel: t('sessions.sidebar.bulkActions.archive'),
+          }
+        : {
+            title: t('sessions.sidebar.dialogs.deleteSession.title'),
+            description: t(count === 1
+              ? 'sessions.sidebar.dialogs.deleteSession.withOneSubtask'
+              : 'sessions.sidebar.dialogs.deleteSession.withManySubtasks', {
+              count,
+              sessionTitle: confirmation.title,
+            }),
+            actionLabel: t('sessions.sidebar.bulkActions.delete'),
+          };
+    }
+    return confirmation.action === 'archive'
+      ? {
+          title: t('sessions.sidebar.dialogs.archiveSession.title'),
+          description: t('sessions.sidebar.dialogs.archiveSession.single', {
+            sessionTitle: confirmation.title || untitled,
+          }),
+          actionLabel: t('sessions.sidebar.bulkActions.archive'),
+        }
+      : {
+          title: t('sessions.sidebar.dialogs.deleteSession.title'),
+          description: t('sessions.sidebar.dialogs.deleteSession.single', {
+            sessionTitle: confirmation.title || untitled,
+          }),
+          actionLabel: t('sessions.sidebar.bulkActions.delete'),
+        };
+  })();
 
   return (
     <TooltipProvider>
@@ -596,9 +744,15 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
           ) : (
             groups.map((group) => {
               const expanded = query.trim().length > 0 || !collapsedGroupIds.has(group.id);
-              return (
-              <section key={group.id} className="group/workspace mb-2">
-                <div className="flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground">
+              const sourceGroup = workspaceGroups.find((candidate) => candidate.id === group.id);
+              const projectSessionIds = sourceGroup ? collectPiSessionForestIds(sourceGroup.forest) : [];
+              const project = group.project;
+              const projectIndex = project
+                ? projects.findIndex((candidate) => candidate.id === project.id)
+                : -1;
+              const canManageProject = project !== null && !runtime.isVSCode;
+              const groupHeaderContent = (
+                <>
                   <button
                     type="button"
                     onClick={() => setCollapsedGroupIds((current) => {
@@ -640,7 +794,90 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       </TooltipContent>
                     </Tooltip>
                   ) : null}
-                </div>
+                </>
+              );
+              return (
+                <section key={group.id} className="group/workspace mb-2">
+                {project ? (
+                  <ContextMenu>
+                    <ContextMenuTrigger
+                      render={(
+                        <div
+                          className="flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground"
+                          aria-label={t('sessions.sidebar.project.actions.projectMenu')}
+                        />
+                      )}
+                    >
+                      {groupHeaderContent}
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="min-w-52">
+                      {canManageProject ? (
+                        <>
+                          <ContextMenuItem
+                            disabled={projectIndex <= 0}
+                            onClick={() => {
+                              if (projectIndex > 0) reorderProjects(projectIndex, 0);
+                            }}
+                          >
+                            <Icon name="pushpin" className="mr-2 size-4" />
+                            {t('sessions.sidebar.project.actions.pin')}
+                          </ContextMenuItem>
+                          <ContextMenuItem onClick={() => handleOpenProjectSettings(project.id)}>
+                            <Icon name="pencil-ai" className="mr-2 size-4" />
+                            {t('sessions.sidebar.project.actions.edit')}
+                          </ContextMenuItem>
+                        </>
+                      ) : null}
+                      {canRevealProject ? (
+                        <>
+                          {canManageProject ? <ContextMenuSeparator /> : null}
+                          <ContextMenuItem onClick={() => void handleRevealProject(project.path)}>
+                            <Icon name="folder-open" className="mr-2 size-4" />
+                            {t(getRevealLabelKey())}
+                          </ContextMenuItem>
+                        </>
+                      ) : null}
+                      {!showArchived ? (
+                        <>
+                          {(canManageProject || canRevealProject) ? <ContextMenuSeparator /> : null}
+                          <ContextMenuItem
+                            disabled={projectSessionIds.length === 0}
+                            onClick={() => setConfirmation({
+                              scope: 'project',
+                              action: 'archive',
+                              ids: projectSessionIds,
+                              title: group.label,
+                            })}
+                          >
+                            <Icon name="inbox-archive" className="mr-2 size-4" />
+                            {t('sessions.sidebar.project.actions.archiveChats')}
+                          </ContextMenuItem>
+                        </>
+                      ) : null}
+                      {canManageProject ? (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem
+                            onClick={() => setConfirmation({
+                              scope: 'project',
+                              action: 'remove',
+                              projectId: project.id,
+                              title: group.label,
+                            })}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Icon name="close" className="mr-2 size-4" />
+                            {t('sessions.sidebar.project.actions.remove')}
+                          </ContextMenuItem>
+                        </>
+                      ) : null}
+                    </ContextMenuContent>
+                  </ContextMenu>
+                ) : (
+                  <div className="flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground">
+                    {groupHeaderContent}
+                  </div>
+                )}
                 {expanded ? <div className="space-y-0.5 pl-2">
                   {group.forest.map((node) => (
                     <PiSessionRow
@@ -679,11 +916,13 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                         sessionId: session.id,
                       })}
                       onArchive={(selected) => setConfirmation({
+                        scope: 'session',
                         action: 'archive',
                         ids: collectPiSessionSubtreeIds(summaries, selected.session.id),
                         title: piSessionTitle(selected.session, untitled),
                       })}
                       onDelete={(selected) => setConfirmation({
+                        scope: 'session',
                         action: 'delete',
                         ids: collectPiSessionSubtreeIds(summaries, selected.session.id),
                         title: piSessionTitle(selected.session, untitled),
@@ -699,7 +938,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                     />
                   ))}
                 </div> : null}
-              </section>
+                </section>
               );
             })
           )}
@@ -723,40 +962,8 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
       <Dialog open={confirmation !== null} onOpenChange={(open) => { if (!open) setConfirmation(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">
           <DialogHeader>
-            <DialogTitle>
-              {confirmation?.action === 'archive'
-                ? t('sessions.sidebar.dialogs.archiveSession.title')
-                : t('sessions.sidebar.dialogs.deleteSession.title')}
-            </DialogTitle>
-            <DialogDescription>
-              {confirmation && confirmation.ids.length > 1
-                ? confirmation.action === 'archive'
-                  ? confirmation.ids.length === 2
-                    ? t('sessions.sidebar.dialogs.archiveSession.withOneSubtask', {
-                        count: 1,
-                        sessionTitle: confirmation.title,
-                      })
-                    : t('sessions.sidebar.dialogs.archiveSession.withManySubtasks', {
-                        count: confirmation.ids.length - 1,
-                        sessionTitle: confirmation.title,
-                      })
-                  : confirmation.ids.length === 2
-                    ? t('sessions.sidebar.dialogs.deleteSession.withOneSubtask', {
-                        count: 1,
-                        sessionTitle: confirmation.title,
-                      })
-                    : t('sessions.sidebar.dialogs.deleteSession.withManySubtasks', {
-                        count: confirmation.ids.length - 1,
-                        sessionTitle: confirmation.title,
-                      })
-                : confirmation?.action === 'archive'
-                  ? t('sessions.sidebar.dialogs.archiveSession.single', {
-                      sessionTitle: confirmation?.title ?? untitled,
-                    })
-                  : t('sessions.sidebar.dialogs.deleteSession.single', {
-                      sessionTitle: confirmation?.title ?? untitled,
-                    })}
-            </DialogDescription>
+            <DialogTitle>{confirmationCopy.title}</DialogTitle>
+            <DialogDescription>{confirmationCopy.description}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <button
@@ -774,9 +981,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
             >
               {actionPending && <Icon name="loader-4" className="size-3.5 animate-spin" />}
-              {confirmation?.action === 'archive'
-                ? t('sessions.sidebar.bulkActions.archive')
-                : t('sessions.sidebar.bulkActions.delete')}
+              {confirmationCopy.actionLabel}
             </button>
           </DialogFooter>
         </DialogContent>
