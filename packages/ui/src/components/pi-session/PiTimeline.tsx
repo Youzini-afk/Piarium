@@ -9,7 +9,9 @@ import type { PiAssistantMessage, PiSessionEntry } from '@piarium/protocol';
 import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useUIStore } from '@/stores/useUIStore';
 import {
   DEFAULT_PI_TIMELINE_VIEW,
   getPiAnchoredTurnCorrection,
@@ -23,10 +25,11 @@ import {
   projectPiTimeline,
   type PiTimelineItem,
   type PiTimelineProjection,
+  type PiTimelineTurn,
 } from './piTimelineProjection';
 import {
-  PiLiveUserTurnHeader,
   PiTimelineEntryList,
+  PiTurnUserMessage,
   type PiTimelineProps,
 } from './PiTimelineEntries';
 
@@ -34,6 +37,7 @@ interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
   'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'
 > {
+  isMobile: boolean;
   item: PiTimelineItem;
 }
 
@@ -64,9 +68,50 @@ const toolCallIdsForItem = (item: PiTimelineItem): readonly string[] => {
   return result;
 };
 
+const PiTurnAssistantChrome: React.FC<{
+  footer?: boolean;
+  turn: PiTimelineTurn;
+}> = ({ footer = false, turn }) => {
+  const { t } = useI18n();
+  const assistants = turn.entries.flatMap((entry) => (
+    entry.type === 'message' && entry.message.role === 'assistant' ? [entry.message] : []
+  ));
+  if (turn.liveAssistant) assistants.push(turn.liveAssistant);
+  const last = assistants.at(-1);
+  if (!last) return null;
+  const toolCount = assistants.reduce((count, message) => (
+    count + message.content.filter((content) => content.type === 'toolCall').length
+  ), 0);
+  const tokens = assistants.reduce((count, message) => count + message.usage.totalTokens, 0);
+
+  if (footer) {
+    if (toolCount === 0 && tokens === 0) return null;
+    return (
+      <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 typography-micro text-muted-foreground/70">
+        {toolCount > 0 ? (
+          <span>{toolCount} {t('contextSidebar.breakdown.toolCalls')}</span>
+        ) : null}
+        {tokens > 0 ? <span>{t('chat.goal.usage.tokens', { used: new Intl.NumberFormat().format(tokens) })}</span> : null}
+      </footer>
+    );
+  }
+
+  return (
+    <header className="flex min-h-6 items-center gap-2 typography-meta text-muted-foreground">
+      <Icon name="ai-agent" className="size-3.5 shrink-0" />
+      <span className="font-medium text-foreground/85">Pi</span>
+      <span className="truncate">{last.provider}/{last.responseModel || last.model}</span>
+      {turn.liveAssistant?.stopReason === 'pending' ? (
+        <span className="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+      ) : null}
+    </header>
+  );
+};
+
 const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   cwd,
   hiddenThinkingLabel,
+  isMobile,
   item,
   liveUserStatus,
   onRecover,
@@ -129,16 +174,28 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   }
 
   const { turn } = item;
-  const turnEntries: PiSessionEntry[] = turn.userEntry
-    ? [turn.userEntry, ...turn.entries]
-    : [...turn.entries];
+  const turnEntries: PiSessionEntry[] = [...turn.entries];
   return (
     <div
       className="chat-message-column flex flex-col gap-3 py-1.5"
       data-turn-id={turn.id}
       data-turn-entry={turn.id}
     >
-      {turn.liveUser ? <PiLiveUserTurnHeader message={turn.user} status={liveUserStatus} /> : null}
+      <div className={cn(
+        !isMobile && 'sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-sm',
+      )}>
+        <PiTurnUserMessage
+          entry={turn.userEntry}
+          message={turn.user}
+          onRecover={onRecover}
+          onTogglePinned={onTogglePinned}
+          pinBusyEntryId={pinBusyEntryId}
+          pinnedEntryIds={pinnedEntryIds}
+          recoveryBusyEntryId={recoveryBusyEntryId}
+          status={turn.liveUser ? liveUserStatus : undefined}
+        />
+      </div>
+      <PiTurnAssistantChrome turn={turn} />
       <PiTimelineEntryList
         cwd={cwd}
         entries={turnEntries}
@@ -153,6 +210,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         sessionId={sessionId}
         toolExecutions={toolExecutions}
       />
+      <PiTurnAssistantChrome footer turn={turn} />
     </div>
   );
 };
@@ -174,6 +232,7 @@ const PI_TIMELINE_SCROLL_KEYS = new Set([
 
 export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const { t } = useI18n();
+  const isMobile = useUIStore((state) => state.isMobile);
   const listRef = React.useRef<LegendListRef>(null);
   const projectionRef = React.useRef<PiTimelineProjection | undefined>(undefined);
   const projectionSessionRef = React.useRef(props.sessionId);
@@ -420,6 +479,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
 
   const extraData = React.useMemo(() => ({
     hiddenThinkingLabel: props.hiddenThinkingLabel,
+    isMobile,
     liveUserStatus: props.liveUserStatus,
     onRecover: props.onRecover,
     onTogglePinned: props.onTogglePinned,
@@ -428,6 +488,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     recoveryBusyEntryId: props.recoveryBusyEntryId,
   }), [
     props.hiddenThinkingLabel,
+    isMobile,
     props.liveUserStatus,
     props.onRecover,
     props.onTogglePinned,
@@ -439,6 +500,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     <PiTimelineItemView
       cwd={props.cwd}
       hiddenThinkingLabel={props.hiddenThinkingLabel}
+      isMobile={isMobile}
       item={item}
       liveUserStatus={props.liveUserStatus}
       onRecover={props.onRecover}
@@ -451,6 +513,7 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   ), [
     props.cwd,
     props.hiddenThinkingLabel,
+    isMobile,
     props.liveUserStatus,
     props.onRecover,
     props.onTogglePinned,

@@ -56,6 +56,7 @@ import type { PiComposerModelSelection } from './piComposerSessionConfig';
 import { insertPiComposerMention } from './piComposerMentions';
 import { PiComposerAgentControl } from './PiComposerAgentControl';
 import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
+import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 
 interface PiComposerProps {
   active: boolean;
@@ -66,6 +67,7 @@ interface PiComposerProps {
   effectiveThinkingLevel?: ThinkingLevel;
   followUpBehavior: FollowUpBehavior;
   images: ImageAttachment[];
+  messageHistory: readonly string[];
   onAbort?(): Promise<void> | void;
   onClearQueue?(): Promise<void> | void;
   onChangeAgent(value: PiComposerAgentSelection | undefined): void;
@@ -127,6 +129,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   effectiveThinkingLevel,
   followUpBehavior,
   images,
+  messageHistory: sentMessageHistory,
   onAbort,
   onClearQueue,
   onChangeAgent,
@@ -151,10 +154,12 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
   const mentionRef = React.useRef<FileMentionHandle>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const pendingHistoryTextRef = React.useRef<string | null>(null);
   const [autocomplete, setAutocomplete] = React.useState<PiComposerAutocomplete>(null);
   const [confirmedMentions, setConfirmedMentions] = React.useState<ReadonlySet<string>>(() => new Set());
   const [knownAgentNames, setKnownAgentNames] = React.useState<ReadonlySet<string>>(() => new Set());
   const [clearingQueue, setClearingQueue] = React.useState(false);
+  const messageHistory = useMessageHistory(sentMessageHistory);
   const isMobile = useUIStore((state) => state.isMobile);
   const isExpandedInput = useUIStore((state) => state.isExpandedInput);
   const toggleExpandedInput = useUIStore((state) => state.toggleExpandedInput);
@@ -337,6 +342,25 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     applyMention(agentName, 'agent');
   }, [applyMention]);
 
+  const applyHistoryText = React.useCallback((value: string) => {
+    pendingHistoryTextRef.current = value;
+    onChangeDraft(value);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelection(value.length);
+    });
+  }, [onChangeDraft]);
+
+  const submit = React.useCallback(() => {
+    messageHistory.reset();
+    return onSend();
+  }, [messageHistory, onSend]);
+
+  const submitText = React.useCallback((value: string) => {
+    messageHistory.reset();
+    return onSendText(value);
+  }, [messageHistory, onSendText]);
+
   const handleEditorKeyDown = React.useCallback((event: KeyboardEvent): boolean => {
     if (
       autocomplete !== null
@@ -353,13 +377,36 @@ export const PiComposer: React.FC<PiComposerProps> = ({
       return true;
     }
     if (
+      !event.altKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && !event.shiftKey
+      && !isIMECompositionEvent(event)
+      && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+    ) {
+      const selection = inputRef.current?.getSelection();
+      if (selection && selection.start === selection.end) {
+        const recalled = event.key === 'ArrowUp' && selection.start === 0
+          ? messageHistory.older(draft)
+          : event.key === 'ArrowDown'
+            && selection.end === draft.length
+            && messageHistory.isBrowsing
+            ? messageHistory.newer()
+            : null;
+        if (recalled !== null) {
+          applyHistoryText(recalled);
+          return true;
+        }
+      }
+    }
+    if (
       event.key !== 'Enter'
       || event.shiftKey
       || isIMECompositionEvent(event)
     ) return false;
-    if (canSend && !sending) void onSend();
+    if (canSend && !sending) void submit();
     return true;
-  }, [autocomplete, canSend, onSend, sending]);
+  }, [applyHistoryText, autocomplete, canSend, draft, messageHistory, sending, submit]);
 
   return (
     <div className={cn(
@@ -467,6 +514,12 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             ref={inputRef}
             value={draft}
             onChange={(change) => {
+              if (pendingHistoryTextRef.current === change.value) {
+                pendingHistoryTextRef.current = null;
+                return;
+              }
+              pendingHistoryTextRef.current = null;
+              if (messageHistory.isBrowsing) messageHistory.reset();
               onChangeDraft(change.value);
               updateAutocomplete(
                 change.value,
@@ -476,6 +529,10 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               );
             }}
             onSelectionChange={(selection) => {
+              if (messageHistory.isBrowsing) {
+                setAutocomplete(null);
+                return;
+              }
               updateAutocomplete(draft, selection.end);
             }}
             onPaste={(event) => {
@@ -585,7 +642,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.leading"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, footerIconButtonClass, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, footerIconButtonClass, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend: submit, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
               />
               <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} />
               {inlineDraftCount > 0 && (
@@ -607,7 +664,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.trailing"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend: submit, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
               />
               <ComposerDictation
                 disabled={sending}
@@ -616,7 +673,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                 iconSizeClass="size-4"
                 isMobile={isMobile}
                 onInsert={insertTranscript}
-                onInsertAndSend={onSendText}
+                onInsertAndSend={submitText}
                 radius="1rem"
                 sendIconSizeClass="size-4"
               />
@@ -637,7 +694,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               )}
               <button
                 type="button"
-                onClick={() => void onSend()}
+                onClick={() => void submit()}
                 disabled={!canSend || sending}
                 className={cn(
                   'flex size-8 items-center justify-center rounded-lg transition-colors',

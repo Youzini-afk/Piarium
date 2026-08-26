@@ -10,6 +10,7 @@ import type {
   PiUserMessage,
 } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
+import { toast } from '@/components/ui';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
 import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
@@ -18,12 +19,14 @@ import { useI18n } from '@/lib/i18n';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
 import type { EditorAPI } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { PatchHunkReview } from '@/components/workbench/PatchHunkReview';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
+import { useUIStore } from '@/stores/useUIStore';
 import type {
   PiSessionSubmissionStatus,
   PiToolExecutionState,
@@ -525,15 +528,144 @@ const AssistantMessage: React.FC<{
   </div>
 );
 
-export const PiTimelineEntryList: React.FC<PiTimelineProps & {
+export const PiTurnUserMessage: React.FC<{
+  entry?: PiSessionMessageEntry;
+  message: PiUserMessage;
+  onRecover?(entry: PiSessionMessageEntry): void;
+  onTogglePinned?(entry: PiSessionMessageEntry, pinned: boolean): void;
+  pinBusyEntryId?: string | null;
+  pinnedEntryIds: ReadonlySet<string>;
+  recoveryBusyEntryId?: string | null;
+  status?: PiSessionSubmissionStatus;
+}> = ({
+  entry,
+  message,
+  onRecover,
+  onTogglePinned,
+  pinBusyEntryId,
+  pinnedEntryIds,
+  recoveryBusyEntryId,
+  status,
+}) => {
+  const { t } = useI18n();
+  const isMobile = useUIStore((state) => state.isMobile);
+  const messageId = entry?.id ?? `live-user:${message.timestamp}`;
+  const pinned = entry ? pinnedEntryIds.has(entry.id) : false;
+  const messageText = piContentText(message.content).trim();
+  const copyMessage = React.useCallback(() => {
+    if (!messageText) return;
+    void copyTextToClipboard(messageText).then((result) => {
+      if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
+      else toast.error(result.error);
+    });
+  }, [messageText, t]);
+  return (
+    <article id={entry ? `pi-entry-${entry.id}` : undefined} className="group/message ml-auto max-w-[85%]">
+      <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
+        <PiUserContentView content={message.content} messageId={messageId} />
+      </div>
+      {status ? (
+        <div
+          className={cn(
+            'mt-1 flex items-center justify-end gap-1.5 px-1 typography-micro text-muted-foreground',
+            status === 'failed' && 'text-[var(--status-error)]',
+            status === 'uncertain' && 'text-[var(--status-warning)]',
+          )}
+          data-pi-submission-status={status}
+        >
+          <Icon
+            name={status === 'preparing' || status === 'dispatching'
+              ? 'loader-4'
+              : status === 'accepted'
+                ? 'check'
+                : 'error-warning'}
+            className={cn(
+              'size-3',
+              (status === 'preparing' || status === 'dispatching') && 'animate-spin',
+            )}
+          />
+          {t(`chat.piComposer.submission.${status}`)}
+        </div>
+      ) : null}
+      {messageText || (entry && (onTogglePinned || onRecover)) ? (
+        <div className={cn(
+          'mt-1 flex h-6 items-center justify-end transition-opacity',
+          isMobile
+            ? 'opacity-100'
+            : 'opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100',
+        )}>
+          {messageText ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={copyMessage}
+                  className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                  aria-label={t('chat.messageBody.actions.copyMessageAria')}
+                >
+                  <Icon name="file-copy" className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
+            </Tooltip>
+          ) : null}
+          {entry && onTogglePinned ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => onTogglePinned(entry, !pinned)}
+                  disabled={pinBusyEntryId !== null && pinBusyEntryId !== undefined}
+                  className={cn(
+                    'flex size-6 items-center justify-center rounded hover:bg-interactive-hover hover:text-foreground disabled:opacity-50',
+                    pinned ? 'text-[var(--status-info)]' : 'text-muted-foreground',
+                  )}
+                  aria-label={t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                  aria-pressed={pinned}
+                >
+                  <Icon
+                    name={pinBusyEntryId === entry.id ? 'loader-4' : pinned ? 'pushpin-2-fill' : 'pushpin-2'}
+                    className={cn('size-3.5', pinBusyEntryId === entry.id && 'animate-spin')}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+          {entry && onRecover ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => onRecover(entry)}
+                  disabled={recoveryBusyEntryId !== null && recoveryBusyEntryId !== undefined}
+                  className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+                  aria-label={t('chat.messageBody.actions.revertAria')}
+                >
+                  <Icon
+                    name={recoveryBusyEntryId === entry.id ? 'loader-4' : 'history'}
+                    className={cn('size-3.5', recoveryBusyEntryId === entry.id && 'animate-spin')}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t('chat.messageBody.actions.revert')}</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+};
+
+export const PiTimelineEntryList: React.FC<Omit<PiTimelineProps, 'liveUser' | 'liveUserStatus'> & {
   projectedResultByCallId?: ReadonlyMap<string, PiToolResultMessage>;
 }> = ({
   cwd,
   entries,
   hiddenThinkingLabel,
   liveAssistant,
-  liveUser,
-  liveUserStatus,
   onRecover,
   onTogglePinned,
   pinBusyEntryId,
@@ -544,6 +676,7 @@ export const PiTimelineEntryList: React.FC<PiTimelineProps & {
   toolExecutions,
 }) => {
   const { t } = useI18n();
+  const isMobile = useUIStore((state) => state.isMobile);
   const { editor } = useRuntimeAPIs();
   const messageRenderers = useWorkbenchMatchRenderers<{
     cwd: string;
@@ -551,8 +684,8 @@ export const PiTimelineEntryList: React.FC<PiTimelineProps & {
     sessionId: string;
   }>('message-renderer', 'chat.timeline.entries');
   const projection = React.useMemo(
-    () => projectPiTimeline(entries, liveAssistant, liveUser),
-    [entries, liveAssistant, liveUser],
+    () => projectPiTimeline(entries, liveAssistant),
+    [entries, liveAssistant],
   );
   const resultByCallId = projectedResultByCallId ?? projection.resultByCallId;
 
@@ -566,14 +699,64 @@ export const PiTimelineEntryList: React.FC<PiTimelineProps & {
           if (entry.type === 'message') {
             const { message } = entry;
             if (message.role === 'user') {
-              const pinned = pinnedEntryIds.has(entry.id);
               return (
-                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message ml-auto max-w-[85%]">
-                  <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
-                    <PiUserContentView content={message.content} messageId={entry.id} />
-                  </div>
-                  {onTogglePinned || onRecover ? (
-                  <div className="mt-1 flex h-6 items-center justify-end opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+                <PiTurnUserMessage
+                  key={entry.id}
+                  entry={entry}
+                  message={message}
+                  onRecover={onRecover}
+                  onTogglePinned={onTogglePinned}
+                  pinBusyEntryId={pinBusyEntryId}
+                  pinnedEntryIds={pinnedEntryIds}
+                  recoveryBusyEntryId={recoveryBusyEntryId}
+                />
+              );
+            }
+            if (message.role === 'assistant') {
+              const pinned = pinnedEntryIds.has(entry.id);
+              const assistantText = message.content
+                .filter((content) => content.type === 'text')
+                .map((content) => content.text)
+                .join('\n')
+                .trim();
+              return (
+                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message w-full">
+                  <AssistantMessage
+                    cwd={cwd}
+                    editor={editor}
+                    entryId={entry.id}
+                    executionById={toolExecutions}
+                    hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
+                    message={message}
+                    resultByCallId={resultByCallId}
+                  />
+                  {assistantText || onTogglePinned ? (
+                  <div className={cn(
+                    'mt-1 flex h-6 items-center transition-opacity',
+                    isMobile
+                      ? 'opacity-100'
+                      : 'opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100',
+                  )}>
+                    {assistantText ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void copyTextToClipboard(assistantText).then((result) => {
+                                if (result.ok) toast.success(t('sessions.sidebar.session.menu.copied'));
+                                else toast.error(result.error);
+                              });
+                            }}
+                            className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                            aria-label={t('chat.messageBody.actions.copyAnswer')}
+                          >
+                            <Icon name="file-copy" className="size-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
+                      </Tooltip>
+                    ) : null}
                     {onTogglePinned ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -599,68 +782,6 @@ export const PiTimelineEntryList: React.FC<PiTimelineProps & {
                       </TooltipContent>
                     </Tooltip>
                     ) : null}
-                    {onRecover ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => onRecover(entry)}
-                          disabled={recoveryBusyEntryId !== null && recoveryBusyEntryId !== undefined}
-                          className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
-                          aria-label={t('chat.messageBody.actions.revertAria')}
-                        >
-                          <Icon
-                            name={recoveryBusyEntryId === entry.id ? 'loader-4' : 'history'}
-                            className={cn('size-3.5', recoveryBusyEntryId === entry.id && 'animate-spin')}
-                          />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">{t('chat.messageBody.actions.revert')}</TooltipContent>
-                    </Tooltip>
-                    ) : null}
-                  </div>
-                  ) : null}
-                </article>
-              );
-            }
-            if (message.role === 'assistant') {
-              const pinned = pinnedEntryIds.has(entry.id);
-              return (
-                <article id={`pi-entry-${entry.id}`} key={entry.id} className="group/message w-full">
-                  <AssistantMessage
-                    cwd={cwd}
-                    editor={editor}
-                    entryId={entry.id}
-                    executionById={toolExecutions}
-                    hiddenThinkingLabel={hiddenThinkingLabel || t('chat.reasoningTrace.thinking')}
-                    message={message}
-                    resultByCallId={resultByCallId}
-                  />
-                  {onTogglePinned ? (
-                  <div className="mt-1 flex h-6 items-center opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => onTogglePinned(entry, !pinned)}
-                          disabled={pinBusyEntryId !== null && pinBusyEntryId !== undefined}
-                          className={cn(
-                            'flex size-6 items-center justify-center rounded hover:bg-interactive-hover hover:text-foreground disabled:opacity-50',
-                            pinned ? 'text-[var(--status-info)]' : 'text-muted-foreground',
-                          )}
-                          aria-label={t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
-                          aria-pressed={pinned}
-                        >
-                          <Icon
-                            name={pinBusyEntryId === entry.id ? 'loader-4' : pinned ? 'pushpin-2-fill' : 'pushpin-2'}
-                            className={cn('size-3.5', pinBusyEntryId === entry.id && 'animate-spin')}
-                          />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
-                      </TooltipContent>
-                    </Tooltip>
                   </div>
                   ) : null}
                 </article>
@@ -828,40 +949,6 @@ export const PiTimelineEntryList: React.FC<PiTimelineProps & {
           );
         })}
 
-        {projection.liveUser && (
-          <article className="ml-auto max-w-[85%]" aria-live="polite">
-            <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
-              <PiUserContentView
-                content={projection.liveUser.content}
-                messageId={`live-user:${projection.liveUser.timestamp}`}
-              />
-            </div>
-            {liveUserStatus ? (
-              <div
-                className={cn(
-                  'mt-1 flex items-center justify-end gap-1.5 px-1 typography-micro text-muted-foreground',
-                  liveUserStatus === 'failed' && 'text-[var(--status-error)]',
-                  liveUserStatus === 'uncertain' && 'text-[var(--status-warning)]',
-                )}
-                data-pi-submission-status={liveUserStatus}
-              >
-                <Icon
-                  name={liveUserStatus === 'preparing' || liveUserStatus === 'dispatching'
-                    ? 'loader-4'
-                    : liveUserStatus === 'accepted'
-                      ? 'check'
-                      : 'error-warning'}
-                  className={cn(
-                    'size-3',
-                    (liveUserStatus === 'preparing' || liveUserStatus === 'dispatching') && 'animate-spin',
-                  )}
-                />
-                {t(`chat.piComposer.submission.${liveUserStatus}`)}
-              </div>
-            ) : null}
-          </article>
-        )}
-
         {projection.liveAssistant && (
           <article className="w-full" aria-live="polite">
             <AssistantMessage
@@ -877,45 +964,5 @@ export const PiTimelineEntryList: React.FC<PiTimelineProps & {
           </article>
         )}
     </div>
-  );
-};
-
-export const PiLiveUserTurnHeader: React.FC<{
-  message: PiUserMessage;
-  status?: PiSessionSubmissionStatus;
-}> = ({ message, status }) => {
-  const { t } = useI18n();
-  return (
-    <article className="ml-auto max-w-[85%]" aria-live="polite">
-      <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
-        <PiUserContentView
-          content={message.content}
-          messageId={`live-user:${message.timestamp}`}
-        />
-      </div>
-      {status ? (
-        <div
-          className={cn(
-            'mt-1 flex items-center justify-end gap-1.5 px-1 typography-micro text-muted-foreground',
-            status === 'failed' && 'text-[var(--status-error)]',
-            status === 'uncertain' && 'text-[var(--status-warning)]',
-          )}
-          data-pi-submission-status={status}
-        >
-          <Icon
-            name={status === 'preparing' || status === 'dispatching'
-              ? 'loader-4'
-              : status === 'accepted'
-                ? 'check'
-                : 'error-warning'}
-            className={cn(
-              'size-3',
-              (status === 'preparing' || status === 'dispatching') && 'animate-spin',
-            )}
-          />
-          {t(`chat.piComposer.submission.${status}`)}
-        </div>
-      ) : null}
-    </article>
   );
 };

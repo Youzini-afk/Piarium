@@ -67,6 +67,7 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { usePiComposerDefaults } from './usePiComposerDefaults';
 import { configurePiComposerSession } from './piComposerSessionConfig';
 import { renderPiComposerAgentInvocation } from '@/lib/pi-runtime/composerAgent';
+import { projectPiMessageHistory } from './piMessageHistory';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -80,6 +81,7 @@ interface PiChatViewProps {
 }
 
 const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
+const EMPTY_PI_MESSAGE_HISTORY: readonly string[] = [];
 
 const pendingUserMessage = (draft: PiDraftState): PiUserMessage => ({
   content: draft.images.length === 0
@@ -532,6 +534,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const pinnedEntryIds = React.useMemo(() => new Set(
     currentRecord?.snapshot?.features.pinnedContext.map((entry) => entry.entryId) ?? [],
   ), [currentRecord?.snapshot?.features.pinnedContext]);
+  const sentMessageHistory = React.useMemo(() => (
+    projectPiMessageHistory(currentRecord?.branchEntries?.entries ?? [])
+  ), [currentRecord?.branchEntries?.entries]);
   const transientUser = currentRecord?.liveUser ?? (
     submission?.mode === 'prompt'
       ? submission.message
@@ -578,6 +583,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 effectiveModel={draft.model ?? pendingDefaults.model}
                 effectiveThinkingLevel={draft.thinkingLevel ?? pendingDefaults.thinkingLevel}
                 images={draft.images}
+                messageHistory={EMPTY_PI_MESSAGE_HISTORY}
                 followUpBehavior={followUpBehavior}
                 selectedAgent={draft.agent}
                 selectedModel={draft.model}
@@ -726,6 +732,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           )}
         />
 
+        <section className="shrink-0" data-pi-composer-region="true">
         {!previewOnly ? <PiExtensionUiChrome placement="aboveEditor" sessionId={currentSessionId} /> : null}
 
         {!previewOnly && snapshot ? (
@@ -742,7 +749,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           </>
         ) : null}
 
-        {!previewOnly ? <AutoReviewBanner /> : null}
+        {!previewOnly ? (
+          <div className="chat-input-column">
+            <AutoReviewBanner />
+          </div>
+        ) : null}
 
         {!readOnly && previewOnly ? (
           <WorkbenchReplacement
@@ -763,6 +774,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 effectiveModel={snapshot.model}
                 effectiveThinkingLevel={snapshot.thinkingLevel}
                 images={draft.images}
+                messageHistory={sentMessageHistory}
                 followUpBehavior={followUpBehavior}
                 selectedAgent={draft.agent}
                 selectedModel={snapshot.model}
@@ -785,6 +797,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           />
         ) : null}
           {!previewOnly ? <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} /> : null}
+        </section>
         </div>
       </div>
 
