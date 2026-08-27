@@ -48,7 +48,11 @@ test("session.resolve reads the selected Pi SDK header without opening or rewrit
   await writeFile(emptyCwdFile, emptyCwdContent, "utf8");
 
   const transport = new MemoryHostTransport();
-  const controller = new HostController({ agentDir: join(root, "agent"), transport });
+  const controller = new HostController({
+    agentDir: join(root, "agent"),
+    transport,
+    workerRole: "catalog",
+  });
   controller.start();
   try {
     transport.receive(createRequest("valid", "session.resolve", { sessionFile: validFile }));
@@ -138,6 +142,7 @@ test("session.resolve loads the session reader from the selected external Pi pac
     agentDir: join(root, "agent"),
     packageRoot,
     transport,
+    workerRole: "catalog",
   });
   controller.start();
   try {

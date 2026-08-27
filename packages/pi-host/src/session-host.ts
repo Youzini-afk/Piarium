@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, type Dirent } from "node:fs";
+import { existsSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
