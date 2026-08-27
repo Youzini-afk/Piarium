@@ -393,6 +393,24 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
 Disabling a package keeps its installation and native configuration intact, filters all Pi resource
 types from that package, and restores the package's previous native filters when enabled again.
 
+Piarium provisions four global foundational Pi packages when a runtime generation first becomes
+available: the maintained `pi-mcp-adapter`, `@gotgenes/pi-permission-system`,
+`pi-workspace-history`, and `pi-wtf`. This is a broker-owned bootstrap layered on top of the same Pi
+package operations, not a second package manager. It does not block the Host handshake or cloud
+health endpoint; the first newly created session waits for the bootstrap, while sessions already
+bound to a worker keep running. Existing enabled or disabled packages are adopted as-is. A configured
+source whose artifact is missing is reported as broken rather than silently repaired. Explicit
+disable remains ordinary Pi package state, and explicit removal records user intent before removal so
+later starts do not reinstall it. Settings can explicitly restore an item or opt out of automatically
+adding integrations introduced by a future manifest revision. Piarium does not auto-update these
+packages or materialize plugin configuration defaults.
+
+The provisioning receipt is Piarium application policy stored under the canonical agent directory at
+`piarium/package-provisioning.json`. It records only integration identity, intent, and observation;
+plugin versions, configuration, credentials, and private state remain Pi-owned. All package writes
+for one agent directory share the same cross-process lock and reconcile the receipt after Pi reports
+the resulting package catalog.
+
 ### 7.2 First-class adapters
 
 - **pi-subagents:** task tree and controls from its event bus; lifecycle artifacts for restart and

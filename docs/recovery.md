@@ -92,6 +92,13 @@ reload, capability discovery runs against the new extension instance. Command re
 `pi-wtf` are discovered from Pi source metadata and the plugin's public base/`?`/`!` command set
 rather than hard-coded to `/fuck` or coupled to English description text.
 
+Both recovery providers are in Piarium's foundational package manifest, so a missing first-time
+global installation is provisioned in the background. This changes discovery, not ownership: either
+package can be disabled or removed through Pi Packages, removal remains suppressed across restarts,
+and explicit Restore is required before Piarium installs it again. Existing plugin configuration and
+history are never copied into the provisioning receipt, and Piarium does not auto-update either
+package.
+
 Piarium persists only application policy such as the default recovery mode and view state. Session
 history stays in Pi JSONL; workspace snapshots and retention stay with the workspace-history
 provider; repair behavior stays with `pi-wtf`.
@@ -104,9 +111,9 @@ and project `magic-context.jsonc` files retain comments and trailing commas and 
 with revision conflict detection. Piarium does not duplicate any plugin's schema, defaults,
 validation, or migrations, so new fields remain owned by the updated plugin.
 
-The Sessions settings page persists that policy as `conversation`, `both`, or `ask` and keeps
-focused install/update controls for the two recovery packages. The general Plugins page exposes the
-same typed `package.list/install/update/remove` operations for all Pi packages and arbitrary
+The Sessions settings page persists that policy as `conversation`, `both`, or `ask` and links to the
+two recovery packages. The general Plugins page exposes the same typed
+`package.list/install/update/remove` operations for all Pi packages and arbitrary
 Pi-supported sources. Package cards deliberately distinguish “configured for this workspace context” from
 “active in an open session”; command and bridge capabilities remain authoritative and are
 rediscovered after Pi reloads the package.

@@ -74,6 +74,13 @@ The persistent paths are:
 | `data/cloudflared` | `/home/piarium/.cloudflared` | managed-local Cloudflare configuration and credentials |
 | `workspaces` | `/home/piarium/workspaces` | user projects |
 
+On the first runtime generation, Piarium may download any missing foundational Pi packages into the
+agent directory inside `data/piarium`. This bootstrap is deliberately outside `/health`, so a slow or
+temporarily unavailable package source does not make the Web service unhealthy. Creating the first
+new session waits for the bootstrap result and exposes any per-package failure in Pi Packages;
+existing sessions are not restarted. Keep the data mount persistent so user disable/removal intent
+and installed package artifacts survive container replacement.
+
 Verify both the HTTP service and bundled Pi worker:
 
 ```bash

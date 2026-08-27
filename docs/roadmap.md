@@ -220,6 +220,10 @@ the integration surface each adapter consumes is recorded in
   package manager. It lists configured sources, updates one or all packages, removes packages, and
   passes arbitrary npm, Git, local-path, or future Pi sources directly to `PackageManager`. The
   recommended integration cards are convenience entries, not an allowlist.
+- Implemented: provision the maintained MCP adapter, permission system, workspace history, and WTF
+  as global foundational Pi packages without turning them into Piarium extensions. Startup remains
+  non-blocking; user disable/removal is respected; broken configured artifacts are reported rather
+  than repaired; explicit restore and the future-manifest policy are available in Pi Packages.
 - Implemented: connect timeline recovery to the selected policy with Pi entry IDs. Conversation
   navigation remains Pi-native; combined/files recovery, checkpoint, undo/redo, and repair are
   delegated to the installed `pi-workspace-history` / `pi-wtf` providers through their public

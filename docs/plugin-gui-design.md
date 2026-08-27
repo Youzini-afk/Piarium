@@ -77,6 +77,14 @@ The current catalog surfaces follow those boundaries directly:
   Pi's update operation is
   truthfully described as source-wide across user and project scopes; the scope selector applies to
   installation and removal, not to a fictional scoped update implementation.
+- Pi Packages also presents the four global foundational integrations maintained by Piarium: MCP,
+  permission policy, workspace history, and prompt repair. Missing items are installed in the
+  background on first observation, but they remain normal Pi packages with the same enable, disable,
+  update, configuration, and removal controls. User removal is sticky until Restore; an existing
+  disabled item is never treated as missing; a configured source with missing files is diagnosed
+  instead of overwritten. Foundational items do not also appear in Recommended Integrations.
+  “Automatically add future foundational integrations” applies only to entries added by later
+  manifest revisions and does not update, enable, or reinstall current entries.
 - Commands projects each extension, prompt, or skill command's native source path, scope, origin,
   source identifier, and prompt argument hint. It remains read-only and links resource commands to
   Prompts or Skills instead of editing them in place.
