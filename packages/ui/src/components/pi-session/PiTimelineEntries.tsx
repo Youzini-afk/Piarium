@@ -49,6 +49,7 @@ import {
   projectPiTimeline,
 } from './piTimelineProjection';
 import type { PiAssistantWaitingPresentation } from './piAssistantWaiting';
+import { PiAssistantUsageFooter } from './PiAssistantUsageFooter';
 
 export interface PiTimelineProps {
   assistantWaiting?: PiAssistantWaitingPresentation;
@@ -526,6 +527,7 @@ const AssistantMessage: React.FC<{
         {message.errorMessage}
       </div>
     )}
+    {!streaming ? <PiAssistantUsageFooter usage={message.usage} /> : null}
   </div>
 );
 

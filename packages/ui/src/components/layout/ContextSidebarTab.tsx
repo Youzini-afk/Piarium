@@ -2,66 +2,38 @@ import React from 'react';
 import type {
   PiSessionEntry,
   PiSessionMessageEntry,
-  PiUsage,
 } from '@piarium/protocol';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { Icon } from '@/components/icon/Icon';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
+import { piSessionContextUsage } from '@/lib/pi-runtime/sessionStats';
+import {
+  latestAssistantUsage,
+  projectPiUsagePresentation,
+  type PiUsageMetricKey,
+} from '@/lib/pi-runtime/usagePresentation';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
-interface TokenBreakdown {
-  cacheRead: number;
-  cacheWrite: number;
-  input: number;
-  output: number;
-  reasoning: number;
-  total: number;
-}
-
-const EMPTY_BREAKDOWN: TokenBreakdown = {
+const EMPTY_USAGE_VALUES = {
   cacheRead: 0,
   cacheWrite: 0,
+  cacheWrite1h: 0,
   input: 0,
   output: 0,
   reasoning: 0,
   total: 0,
 };
 
-const nonNegative = (value: unknown): number => (
-  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
-);
-
-const usageBreakdown = (usage: PiUsage | undefined): TokenBreakdown => {
-  if (!usage) return EMPTY_BREAKDOWN;
-  return {
-    cacheRead: nonNegative(usage.cacheRead),
-    cacheWrite: nonNegative(usage.cacheWrite),
-    input: nonNegative(usage.input),
-    output: nonNegative(usage.output),
-    reasoning: nonNegative(usage.reasoning),
-    total: nonNegative(usage.totalTokens),
-  };
-};
-
-const entryUsage = (entry: PiSessionEntry): PiUsage | undefined => {
-  if (entry.type === 'message') {
-    const { message } = entry;
-    if (message.role === 'assistant' || message.role === 'toolResult') return message.usage;
-    return undefined;
-  }
-  if (entry.type === 'compaction' || entry.type === 'branch_summary') return entry.usage;
-  return undefined;
-};
-
-const latestUsage = (entries: PiSessionEntry[]): PiUsage | undefined => {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const usage = entryUsage(entries[index]);
-    if (usage) return usage;
-  }
-  return undefined;
+const USAGE_LABEL_KEYS: Record<PiUsageMetricKey, I18nKey> = {
+  cacheRead: 'contextSidebar.tokens.cacheRead',
+  cacheWrite: 'contextSidebar.tokens.cacheWrite',
+  cacheWrite1h: 'contextSidebar.tokens.cacheWrite1h',
+  input: 'contextSidebar.tokens.input',
+  output: 'contextSidebar.tokens.output',
+  reasoning: 'contextSidebar.tokens.reasoning',
 };
 
 const timestampOf = (entry: PiSessionEntry): number | null => {
@@ -190,14 +162,12 @@ export const ContextPanelContent: React.FC = () => {
 
   const entries = record?.branchEntries?.entries ?? [];
   const stats = record?.stats;
-  const usage = latestUsage(entries);
-  const tokens = usageBreakdown(usage);
-  const contextLimit = record?.snapshot?.model?.contextWindow ?? null;
-  const usagePercent = contextLimit && contextLimit > 0
-    ? Math.min(100, (tokens.total / contextLimit) * 100)
-    : 0;
-  const cacheInput = tokens.input + tokens.cacheRead + tokens.cacheWrite;
-  const cacheHitPercent = cacheInput > 0 ? (tokens.cacheRead / cacheInput) * 100 : null;
+  const usagePresentation = projectPiUsagePresentation(latestAssistantUsage(entries));
+  const tokens = usagePresentation?.values ?? EMPTY_USAGE_VALUES;
+  const contextUsage = piSessionContextUsage(stats, record?.snapshot);
+  const contextLimit = contextUsage?.contextLimit ?? null;
+  const contextTokens = contextUsage?.totalTokens ?? 0;
+  const usagePercent = Math.min(100, contextUsage?.percentage ?? 0);
   const sessionTitle = record?.snapshot?.name?.trim()
     || summary?.name?.trim()
     || summary?.firstMessage?.split(/\r?\n/).find((line) => line.trim())?.trim()
@@ -210,8 +180,30 @@ export const ContextPanelContent: React.FC = () => {
     { color: 'var(--primary-base)', key: 'output', label: t('contextSidebar.tokens.output'), value: tokens.output },
     { color: 'var(--status-warning)', key: 'cacheRead', label: t('contextSidebar.tokens.cacheRead'), value: tokens.cacheRead },
     { color: 'var(--surface-muted-foreground)', key: 'cacheWrite', label: t('contextSidebar.tokens.cacheWrite'), value: tokens.cacheWrite },
-  ];
+  ].filter((segment) => segment.value > 0);
   const segmentTotal = segments.reduce((sum, segment) => sum + segment.value, 0);
+  const messageUsageRows = usagePresentation
+    ? [
+        ...usagePresentation.metrics.map((metric) => ({
+          key: metric.key,
+          label: t(USAGE_LABEL_KEYS[metric.key]),
+          suffix: '',
+          value: metric.value,
+        })),
+        ...(usagePresentation.total === undefined ? [] : [{
+          key: 'total',
+          label: t('contextSidebar.tokens.total'),
+          suffix: '',
+          value: usagePresentation.total,
+        }]),
+        ...(usagePresentation.cacheHitPercent === undefined ? [] : [{
+          key: 'cacheHit',
+          label: t('contextSidebar.tokens.cacheHit'),
+          suffix: '%',
+          value: usagePresentation.cacheHitPercent,
+        }]),
+      ]
+    : [];
 
   return (
     <div className="h-full overflow-y-auto bg-background">
@@ -235,28 +227,30 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="flex items-baseline justify-between">
-            <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
-            <span className="typography-micro tabular-nums text-muted-foreground/70">
-              {formatNumber(tokens.total)}{contextLimit ? ` / ${formatNumber(contextLimit)}` : ''}
-            </span>
+        {contextUsage ? (
+          <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
+            <div className="flex items-baseline justify-between">
+              <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.context')}</span>
+              <span className="typography-micro tabular-nums text-muted-foreground/70">
+                {formatNumber(contextTokens)}{contextLimit ? ` / ${formatNumber(contextLimit)}` : ''}
+              </span>
+            </div>
+            <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+              {usagePercent > 0 && (
+                <div
+                  className="rounded-full transition-all duration-300"
+                  style={{
+                    backgroundColor: usagePercent > 80 ? 'var(--status-warning)' : 'var(--primary-base)',
+                    width: `${Math.max(0.5, usagePercent)}%`,
+                  }}
+                />
+              )}
+            </div>
+            <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
+              {t('contextSidebar.context.percentUsed', { percent: usagePercent.toFixed(1) })}
+            </div>
           </div>
-          <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-            {usagePercent > 0 && (
-              <div
-                className="rounded-full transition-all duration-300"
-                style={{
-                  backgroundColor: usagePercent > 80 ? 'var(--status-warning)' : 'var(--primary-base)',
-                  width: `${Math.max(0.5, usagePercent)}%`,
-                }}
-              />
-            )}
-          </div>
-          <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
-            {t('contextSidebar.context.percentUsed', { percent: usagePercent.toFixed(1) })}
-          </div>
-        </div>
+        ) : null}
 
         <div className="mb-5 grid grid-cols-2 gap-2">
           {[
@@ -272,47 +266,44 @@ export const ContextPanelContent: React.FC = () => {
           ))}
         </div>
 
-        <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="mb-2.5 typography-micro text-muted-foreground">{t('contextSidebar.section.lastAssistantMessage')}</div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
-            {[
-              { label: t('contextSidebar.tokens.input'), value: tokens.input, suffix: '' },
-              { label: t('contextSidebar.tokens.output'), value: tokens.output, suffix: '' },
-              { label: t('contextSidebar.tokens.reasoning'), value: tokens.reasoning, suffix: '' },
-              { label: t('contextSidebar.tokens.cacheRead'), value: tokens.cacheRead, suffix: '' },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: tokens.cacheWrite, suffix: '' },
-              { label: t('contextSidebar.tokens.cacheHit'), value: cacheHitPercent, suffix: '%' },
-            ].map((item) => (
-              <div key={item.label}>
-                <div className="typography-micro text-muted-foreground/70">{item.label}</div>
-                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
-                  {item.value === null ? '-' : `${item.suffix ? item.value.toFixed(1) : formatNumber(item.value)}${item.suffix}`}
+        {messageUsageRows.length > 0 ? (
+          <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
+            <div className="mb-2.5 typography-micro text-muted-foreground">{t('contextSidebar.section.lastAssistantMessage')}</div>
+            <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
+              {messageUsageRows.map((item) => (
+                <div key={item.key}>
+                  <div className="typography-micro text-muted-foreground/70">{item.label}</div>
+                  <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
+                    {`${item.suffix ? item.value.toFixed(1) : formatNumber(item.value)}${item.suffix}`}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        <div className="mb-6">
-          <div className="flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-            {segments.map((segment) => segment.value > 0 && segmentTotal > 0 ? (
-              <div
-                key={segment.key}
-                style={{ backgroundColor: segment.color, width: `${(segment.value / segmentTotal) * 100}%` }}
-              />
-            ) : null)}
+        {segments.length > 0 ? (
+          <div className="mb-6">
+            <div className="flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+              {segments.map((segment) => (
+                <div
+                  key={segment.key}
+                  style={{ backgroundColor: segment.color, width: `${(segment.value / segmentTotal) * 100}%` }}
+                />
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+              {segments.map((segment) => (
+                <div key={segment.key} className="inline-flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full" style={{ backgroundColor: segment.color }} />
+                  <span className="typography-micro text-muted-foreground/70">
+                    {segment.label} <span className="tabular-nums">{((segment.value / segmentTotal) * 100).toFixed(0)}%</span>
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-            {segments.map((segment) => (
-              <div key={segment.key} className="inline-flex items-center gap-1.5">
-                <span className="size-1.5 rounded-full" style={{ backgroundColor: segment.color }} />
-                <span className="typography-micro text-muted-foreground/70">
-                  {segment.label} <span className="tabular-nums">{segmentTotal > 0 ? ((segment.value / segmentTotal) * 100).toFixed(0) : '0'}%</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        ) : null}
 
         <div>
           <div className="typography-micro text-muted-foreground">{t('contextSidebar.section.rawMessages')}</div>

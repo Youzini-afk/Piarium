@@ -111,6 +111,9 @@ accessory stack. There is no independent bar for each feature.
 - A user prompt is the visual turn anchor and may stick at the top on desktop; mobile uses normal flow.
 - One assistant header identifies the turn. The actual provider/model appears once; trustworthy tool and
   token facts appear in the footer. Piarium does not infer a fake duration from Pi's request-start timestamp.
+- Each completed assistant message may show the exact positive usage fields Pi reported: input, output,
+  reasoning, cache read, cache write, optional one-hour cache write, and the provider-owned total. Missing
+  or all-zero usage stays absent; Piarium does not reconstruct unsupported fields or sum a turn into context use.
 - Before the first assistant entry arrives, the newest unanswered turn shows the session model and a neutral
   working animation. It is presentation state, not a fabricated assistant message or progress phase.
 - Thinking and tool activity use a progressive activity group. The final assistant answer remains readable

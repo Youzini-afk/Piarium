@@ -13,6 +13,7 @@ import {
 const usage = {
   cacheRead: 2,
   cacheWrite: 3,
+  cacheWrite1h: 4,
   cost: { cacheRead: 0.2, cacheWrite: 0.3, input: 0.1, output: 0.4, total: 1 },
   input: 10,
   output: 20,
@@ -56,6 +57,27 @@ describe("Pi protocol projector", () => {
     assert.doesNotMatch(serialized, /private-|must-not-cross|provider-internal-response/);
     assert.match(serialized, /hidden reasoning/);
     assert.match(serialized, /Infinity/);
+    if (projected.role !== "assistant") return;
+    assert.deepEqual(projected.usage, usage);
+  });
+
+  it("does not invent optional usage fields the provider omitted", () => {
+    const withoutOptionalUsage = {
+      ...assistant,
+      usage: {
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+        input: 10,
+        output: 2,
+        totalTokens: 12,
+      },
+    } as unknown as AgentMessage;
+    const projected = projectMessage(withoutOptionalUsage);
+    assert.equal(projected.role, "assistant");
+    if (projected.role !== "assistant") return;
+    assert.equal("reasoning" in projected.usage, false);
+    assert.equal("cacheWrite1h" in projected.usage, false);
   });
 
   it("projects streaming updates once without duplicating raw partial messages", () => {
