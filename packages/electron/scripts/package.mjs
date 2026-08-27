@@ -59,11 +59,16 @@ if (process.platform === 'linux' && !builderArgs.some((argument) => (
 }
 
 if (process.platform === 'darwin') {
-  execFileSync(process.execPath, [path.join(electronDir, 'scripts', 'generate-macos-icon-assets.cjs')], {
-    cwd: electronDir,
-    env,
-    stdio: 'inherit',
-  });
+  const compiledIconAssets = path.join(electronDir, 'resources', 'icons', 'Assets.car');
+  if (fs.existsSync(compiledIconAssets) && fs.statSync(compiledIconAssets).size > 0) {
+    console.log(`[electron] using versioned macOS icon assets at ${compiledIconAssets}`);
+  } else {
+    execFileSync(process.execPath, [path.join(electronDir, 'scripts', 'generate-macos-icon-assets.cjs')], {
+      cwd: electronDir,
+      env,
+      stdio: 'inherit',
+    });
+  }
 }
 
 const child = spawn(bunBinary, ['x', 'electron-builder', ...builderArgs], {
