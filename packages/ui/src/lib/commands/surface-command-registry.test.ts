@@ -15,6 +15,7 @@ test('withdraws and restores built-in command contributions without a document r
     'new-session',
     'new-worktree',
     'add-project',
+    'workspace-search',
     'toggle-sidebar',
     'toggle-terminal',
     'context-usage',
@@ -45,7 +46,8 @@ test('withdraws and restores built-in command contributions without a document r
   expect(registrations.map((registration) => registration.meta.commandId)).toEqual(expectedCommandIds);
   expect(registrations.find((registration) => registration.meta.commandId === 'editor.saveAll')?.contributionId)
     .toBe('piarium.builtin.commands.editor.save-all');
-  expect(registrations[3]?.meta.mobileTitleKey).toBe('commandPalette.item.showSessionSwitcher');
+  expect(registrations.find((registration) => registration.meta.commandId === 'toggle-sidebar')?.meta.mobileTitleKey)
+    .toBe('commandPalette.item.showSessionSwitcher');
 
   await setBuiltinWorkbenchCommandsEnabled(false);
   expect(workbenchCommandRegistrationsFromSnapshot(piariumSurfaceRuntime.getSnapshot())).toEqual([]);
