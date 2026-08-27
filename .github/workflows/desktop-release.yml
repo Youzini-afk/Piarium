@@ -96,6 +96,17 @@ jobs:
         with:
           node-version: 24
 
+      - name: Select Xcode with Icon Composer support
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcode_path="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -print | sort | tail -n 1)"
+          test -n "$xcode_path"
+          export DEVELOPER_DIR="$xcode_path/Contents/Developer"
+          echo "DEVELOPER_DIR=$xcode_path/Contents/Developer" >> "$GITHUB_ENV"
+          xcrun --find actool
+
       - name: Install Linux display dependencies
         if: matrix.platform == 'linux'
         shell: bash
