@@ -298,15 +298,8 @@ Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md) and the rep
 
 ## Lineage and license
 
-Piarium is a direct Pi-native refactor of the maintainer's OpenChamber fork. That fork is the
-product and UI lineage, not a runtime dependency: obsolete OpenCode processes, clients, schemas,
-and compatibility paths are removed as their Pi-native replacements become authoritative.
+Piarium is a Pi-native refactor of the maintainer's OpenChamber fork.
 
 Piarium as a combined work is distributed under the
 [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Modified versions offered to
 users over a network must make their corresponding source available as required by the license.
-
-Imported permissively licensed material remains under its original notices; retaining those notices
-does not make Piarium as a whole available under the MIT License. See
-[Third-party notices](THIRD_PARTY_NOTICES.md). Pi and third-party Pi packages are independent
-projects distributed under their own licenses.

@@ -322,17 +322,9 @@ dépôt dans [AGENTS.md](../../AGENTS.md).
 
 ## Filiation et licence
 
-Piarium est une refonte Pi-native directe du fork OpenChamber du mainteneur. Ce fork est la filiation
-produit et interface, pas une dépendance d'exécution : les processus, clients, schémas et chemins de
-compatibilité OpenCode devenus obsolètes sont supprimés à mesure que leurs remplacements Pi-natifs
-deviennent la référence.
+Piarium est une refonte Pi-native du fork OpenChamber du mainteneur.
 
 Piarium, en tant qu'œuvre combinée, est distribué sous la
 [GNU Affero General Public License v3.0](../../LICENSE) (`AGPL-3.0-only`). Les versions modifiées proposées
 à des utilisateurs via un réseau doivent rendre disponible le code source correspondant, comme
 l'exige la licence.
-
-Les éléments importés sous licence permissive restent soumis à leurs mentions d'origine ; conserver
-ces mentions ne rend pas Piarium disponible dans son ensemble sous licence MIT. Voir les
-[mentions de tiers](../../THIRD_PARTY_NOTICES.md). Pi et les paquets Pi tiers sont des projets indépendants
-distribués sous leurs propres licences.

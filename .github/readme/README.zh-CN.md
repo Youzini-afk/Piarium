@@ -274,13 +274,8 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 
 ## 项目沿革与许可证
 
-Piarium 是维护者 OpenChamber fork 的直接 Pi 原生重构。该 fork 是产品和 UI 的来源，不是运行时
-依赖：随着 Pi 原生实现成为权威，过时的 OpenCode 进程、客户端、Schema 和兼容路径会被删除。
+Piarium 是维护者 OpenChamber fork 的 Pi 原生重构。
 
 Piarium 作为组合后的完整作品，按照
 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）发布。通过网络向用户提供
 修改版时，必须按照许可证要求向这些用户提供对应源码。
-
-导入的宽松许可证代码仍保留其原始声明；保留这些声明不代表 Piarium 整体仍可按 MIT License 使用。
-详情见[第三方声明](../../THIRD_PARTY_NOTICES.md)。Pi 和第三方 Pi 包是独立项目，并分别遵循它们自己的
-许可证。
