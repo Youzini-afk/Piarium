@@ -69,8 +69,7 @@ coverage gaps instead of converting them into a false pass.
 - The workspace uses Bun `1.3.14`; root and package `package.json` scripts are the command authority.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
-- `@piarium/ui` runs under Vitest as part of `bun run test:pi`. Its Vitest config names remaining
-  excluded suites; do not silently expand that list.
+- `@piarium/ui` runs under Vitest as part of `bun run test:pi`.
 - Electron's package `type-check` and `lint` are intentionally shallow. Desktop startup, preload,
   process, native-module, and packaging claims require Electron tests or an actual smoke.
 - Engineering docs are checked by `bun run test:docs`; public docs-site content is checked by
