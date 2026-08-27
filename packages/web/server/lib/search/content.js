@@ -30,11 +30,16 @@ const parseRipgrepMatch = (line, workspaceId, root, pathModule) => {
   const resourceId = toResourceId(root, absolutePath, pathModule);
   if (!resourceId) return null;
   const lineNumber = Number(payload.data.line_number);
-  const preview = typeof payload.data.lines?.text === 'string'
-    ? payload.data.lines.text.replace(/\r?\n$/, '')
-    : '';
-  const column = Array.isArray(payload.data.submatches) && payload.data.submatches[0]
-    ? Number(payload.data.submatches[0].start) + 1
+  const lineText = typeof payload.data.lines?.text === 'string' ? payload.data.lines.text : '';
+  const preview = lineText.replace(/\r?\n$/, '');
+  const byteOffset = Array.isArray(payload.data.submatches) && payload.data.submatches[0]
+    ? Number(payload.data.submatches[0].start)
+    : 0;
+  // ripgrep reports UTF-8 byte offsets while Monaco columns are UTF-16 code
+  // units. Decode the matched line prefix so non-ASCII text lands on the exact
+  // result instead of drifting right by its additional UTF-8 bytes.
+  const column = Number.isFinite(byteOffset) && byteOffset > 0
+    ? Buffer.from(lineText, 'utf8').subarray(0, byteOffset).toString('utf8').length + 1
     : 1;
   if (!Number.isFinite(lineNumber) || lineNumber < 1) return null;
   return {

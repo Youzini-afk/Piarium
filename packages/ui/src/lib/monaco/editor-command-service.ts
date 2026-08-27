@@ -48,11 +48,14 @@ type FileEditorCommandTarget = {
   ownerId: string;
   getSettings(): FileEditorSettings;
   getShortcutOverrides(): Record<string, ShortcutCombo>;
+  onCommandError?(commandId: FileEditorCommandId, error: unknown): void;
+  onCommandUnavailable?(commandId: FileEditorCommandId): void;
   updateSettings(patch: FileEditorSettingsPatch): void;
   viewId: string;
 };
 
 const targets = new Map<string, FileEditorCommandTarget>();
+const pendingNavigation = new Map<string, { column: number; line: number }>();
 let activeOwnerId: string | null = null;
 const bridgeDisposers: Array<() => void> = [];
 const targetListeners = new Set<() => void>();
@@ -90,6 +93,54 @@ const targetForIdentity = (identity: DocumentIdentity, viewId?: string): FileEdi
   )) ?? null
 );
 
+const identityKey = (identity: DocumentIdentity): string => (
+  `${identity.workspaceId}\0${identity.resourceId}`
+);
+
+const navigationKey = (identity: DocumentIdentity, viewId?: string): string => (
+  `${identityKey(identity)}\0${viewId ?? ''}`
+);
+
+const activateTarget = (target: FileEditorCommandTarget, focus = false): void => {
+  activeOwnerId = target.ownerId;
+  setActiveWorkbenchEditorView(target.identity.workspaceId, target.viewId);
+  if (focus) target.editor.focus();
+  refreshContext(true);
+};
+
+const revealTargetPosition = (
+  target: FileEditorCommandTarget,
+  line: number,
+  column: number,
+): void => {
+  const model = target.editor.getModel();
+  if (!model) return;
+  const lineNumber = Math.min(Math.max(1, Math.floor(line)), model.getLineCount());
+  const position = {
+    lineNumber,
+    column: Math.min(Math.max(1, Math.floor(column)), model.getLineMaxColumn(lineNumber)),
+  };
+  activateTarget(target, true);
+  target.editor.setPosition(position);
+  target.editor.revealPositionInCenter(position);
+};
+
+export const requestFileEditorNavigation = (
+  identity: DocumentIdentity,
+  line: number,
+  column: number,
+  viewId?: string,
+): boolean => {
+  const target = targetForIdentity(identity, viewId);
+  if (!target) {
+    pendingNavigation.set(navigationKey(identity, viewId), { column, line });
+    return false;
+  }
+  pendingNavigation.delete(navigationKey(identity, viewId));
+  revealTargetPosition(target, line, column);
+  return true;
+};
+
 const setContext = (key: string, value: string | boolean | number): void => {
   setWorkbenchContextKey(key, value);
 };
@@ -112,9 +163,11 @@ const refreshContext = (focused = getWorkbenchContextKey('editorTextFocus') === 
   setContext('editorMinimap', raw.minimap?.enabled === true);
 };
 
-const runAction = async (target: FileEditorCommandTarget, actionId: string): Promise<void> => {
+const runAction = async (target: FileEditorCommandTarget, actionId: string): Promise<boolean> => {
   const action = target.editor.getAction(actionId);
-  if (action?.isSupported()) await action.run();
+  if (!action?.isSupported()) return false;
+  await action.run();
+  return true;
 };
 
 export const saveFileEditorDocument = async (identity: DocumentIdentity): Promise<void> => {
@@ -171,75 +224,67 @@ export const executeFileEditorCommand = async (
 ): Promise<boolean> => {
   const target = targetForIdentity(identity, viewId);
   if (!target) return false;
-  activeOwnerId = target.ownerId;
-  setActiveWorkbenchEditorView(target.identity.workspaceId, target.viewId);
-  refreshContext(true);
-  return executeActiveFileEditorCommand(commandId);
+  activateTarget(target);
+  return executeFileEditorCommandOnTarget(target, commandId);
+};
+
+const executeFileEditorCommandOnTarget = async (
+  target: FileEditorCommandTarget,
+  commandId: FileEditorCommandId,
+): Promise<boolean> => {
+  switch (commandId) {
+    case FILE_EDITOR_COMMAND_IDS.save:
+      await saveTarget(target);
+      return true;
+    case FILE_EDITOR_COMMAND_IDS.saveAll:
+      await saveAll();
+      return true;
+    case FILE_EDITOR_COMMAND_IDS.find:
+      return runAction(target, 'actions.find');
+    case FILE_EDITOR_COMMAND_IDS.replace:
+      return runAction(target, 'editor.action.startFindReplaceAction');
+    case FILE_EDITOR_COMMAND_IDS.goToLine:
+      return runAction(target, 'editor.action.gotoLine');
+    case FILE_EDITOR_COMMAND_IDS.goToSymbol:
+      return runAction(target, 'editor.action.quickOutline');
+    case FILE_EDITOR_COMMAND_IDS.format:
+      return runAction(target, 'editor.action.formatDocument');
+    case FILE_EDITOR_COMMAND_IDS.rename:
+      return runAction(target, 'editor.action.rename');
+    case FILE_EDITOR_COMMAND_IDS.quickFix:
+      return runAction(target, 'editor.action.quickFix');
+    case FILE_EDITOR_COMMAND_IDS.definition:
+      return runAction(target, 'editor.action.revealDefinition');
+    case FILE_EDITOR_COMMAND_IDS.references:
+      return runAction(target, 'editor.action.referenceSearch.trigger');
+    case FILE_EDITOR_COMMAND_IDS.fold:
+      return runAction(target, 'editor.fold');
+    case FILE_EDITOR_COMMAND_IDS.unfold:
+      return runAction(target, 'editor.unfold');
+    case FILE_EDITOR_COMMAND_IDS.toggleWrap:
+      toggleSetting(target, 'wordWrap');
+      return true;
+    case FILE_EDITOR_COMMAND_IDS.toggleMinimap:
+      toggleSetting(target, 'minimap');
+      return true;
+    case FILE_EDITOR_COMMAND_IDS.cursorAbove:
+      return runAction(target, 'editor.action.insertCursorAbove');
+    case FILE_EDITOR_COMMAND_IDS.cursorBelow:
+      return runAction(target, 'editor.action.insertCursorBelow');
+    case FILE_EDITOR_COMMAND_IDS.focusPreviousGroup:
+      focusAdjacentGroup(-1);
+      return true;
+    case FILE_EDITOR_COMMAND_IDS.focusNextGroup:
+      focusAdjacentGroup(1);
+      return true;
+  }
+  return false;
 };
 
 export const executeActiveFileEditorCommand = async (commandId: FileEditorCommandId): Promise<boolean> => {
   const target = activeTarget();
   if (!target) return false;
-  switch (commandId) {
-    case FILE_EDITOR_COMMAND_IDS.save:
-      await saveTarget(target);
-      break;
-    case FILE_EDITOR_COMMAND_IDS.saveAll:
-      await saveAll();
-      break;
-    case FILE_EDITOR_COMMAND_IDS.find:
-      await runAction(target, 'actions.find');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.replace:
-      await runAction(target, 'editor.action.startFindReplaceAction');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.goToLine:
-      await runAction(target, 'editor.action.gotoLine');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.goToSymbol:
-      await runAction(target, 'editor.action.quickOutline');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.format:
-      await runAction(target, 'editor.action.formatDocument');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.rename:
-      await runAction(target, 'editor.action.rename');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.quickFix:
-      await runAction(target, 'editor.action.quickFix');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.definition:
-      await runAction(target, 'editor.action.revealDefinition');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.references:
-      await runAction(target, 'editor.action.referenceSearch.trigger');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.fold:
-      await runAction(target, 'editor.fold');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.unfold:
-      await runAction(target, 'editor.unfold');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.toggleWrap:
-      toggleSetting(target, 'wordWrap');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.toggleMinimap:
-      toggleSetting(target, 'minimap');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.cursorAbove:
-      await runAction(target, 'editor.action.insertCursorAbove');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.cursorBelow:
-      await runAction(target, 'editor.action.insertCursorBelow');
-      break;
-    case FILE_EDITOR_COMMAND_IDS.focusPreviousGroup:
-      focusAdjacentGroup(-1);
-      break;
-    case FILE_EDITOR_COMMAND_IDS.focusNextGroup:
-      focusAdjacentGroup(1);
-      break;
-  }
-  return true;
+  return executeFileEditorCommandOnTarget(target, commandId);
 };
 
 const shortcutCommands: ReadonlyArray<[shortcutId: string, commandId: FileEditorCommandId]> = [
@@ -292,6 +337,37 @@ export const registerFileEditorCommandTarget = (target: FileEditorCommandTarget)
   refreshContext();
   emitTargetChange();
 
+  const domNode = target.editor.getDomNode();
+  const handleShortcut = (browserEvent: KeyboardEvent): void => {
+    if (browserEvent.isComposing) return;
+    for (const [shortcutId, commandId] of shortcutCommands) {
+      const combo = getEffectiveShortcutCombo(shortcutId, target.getShortcutOverrides());
+      if (!combo || !eventMatchesShortcut(browserEvent, combo)) continue;
+      browserEvent.preventDefault();
+      browserEvent.stopPropagation();
+      activateTarget(target);
+      void executeFileEditorCommandOnTarget(target, commandId).then((available) => {
+        if (!available) target.onCommandUnavailable?.(commandId);
+      }).catch((error) => target.onCommandError?.(commandId, error));
+      return;
+    }
+  };
+  domNode?.addEventListener('keydown', handleShortcut, true);
+
+  const exactNavigationKey = navigationKey(target.identity, target.viewId);
+  const fallbackNavigationKey = navigationKey(target.identity);
+  const navigation = pendingNavigation.get(exactNavigationKey)
+    ?? pendingNavigation.get(fallbackNavigationKey);
+  if (navigation) {
+    pendingNavigation.delete(exactNavigationKey);
+    pendingNavigation.delete(fallbackNavigationKey);
+    queueMicrotask(() => {
+      if (targets.get(target.ownerId) === target) {
+        revealTargetPosition(target, navigation.line, navigation.column);
+      }
+    });
+  }
+
   const disposables = [
     target.editor.onDidFocusEditorText(() => {
       activeOwnerId = target.ownerId;
@@ -310,21 +386,10 @@ export const registerFileEditorCommandTarget = (target: FileEditorCommandTarget)
     target.editor.onDidChangeModelLanguage(() => {
       if (activeOwnerId === target.ownerId) refreshContext(true);
     }),
-    target.editor.onKeyDown((event) => {
-      const browserEvent = event.browserEvent;
-      if (browserEvent.isComposing || browserEvent.defaultPrevented) return;
-      for (const [shortcutId, commandId] of shortcutCommands) {
-        const combo = getEffectiveShortcutCombo(shortcutId, target.getShortcutOverrides());
-        if (!combo || !eventMatchesShortcut(browserEvent, combo)) continue;
-        event.preventDefault();
-        event.stopPropagation();
-        void executeActiveFileEditorCommand(commandId);
-        return;
-      }
-    }),
   ];
 
   return () => {
+    domNode?.removeEventListener('keydown', handleShortcut, true);
     for (const disposable of disposables) disposable.dispose();
     if (targets.get(target.ownerId) !== target) return;
     const removedActiveTarget = activeOwnerId === target.ownerId;
@@ -338,6 +403,7 @@ export const registerFileEditorCommandTarget = (target: FileEditorCommandTarget)
 
 export const resetFileEditorCommandServiceForTests = (): void => {
   targets.clear();
+  pendingNavigation.clear();
   activeOwnerId = null;
   uninstallWorkbenchProjection();
   refreshContext(false);

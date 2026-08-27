@@ -15,6 +15,7 @@ import { projectPiSessionActivity } from '@/lib/pi-runtime/sessionActivity';
 import { nextPiFavoriteModel, nextPiThinkingLevel } from '@/lib/pi-runtime/keyboardActions';
 import { listPiModels } from '@/lib/pi-runtime/providers';
 import { addPiSelectionToChat } from '@/lib/pi-runtime/addSelectionToChat';
+import { requestIdeSearch } from '@/lib/workbench/ide-search-events';
 
 const focusPiTimeline = (): void => {
   const timeline = document.querySelector<HTMLElement>('[data-pi-timeline="true"]');
@@ -381,12 +382,17 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('open_right_sidebar_files'))) {
+      if (
+        eventMatchesShortcut(e, combo('toggle_files'))
+        || eventMatchesShortcut(e, combo('open_right_sidebar_files'))
+      ) {
         const state = useUIStore.getState();
-        if (state.isMobile || !currentDirectory) {
+        if (state.isMobile) {
           return;
         }
         e.preventDefault();
+        if (requestIdeSearch({ mode: 'content' })) return;
+        if (!currentDirectory) return;
         state.openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'file');
         return;
       }

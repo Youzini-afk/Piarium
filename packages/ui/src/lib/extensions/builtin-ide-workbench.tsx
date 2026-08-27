@@ -69,11 +69,17 @@ import { useGitRepositorySelectionStore } from '@/stores/useGitRepositorySelecti
 import { useUIStore } from '@/stores/useUIStore';
 import type { FileSearchResult, WorkspaceContentSearchHit } from '@/lib/api/types';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
+import { activeEditorTab } from '@/lib/workbench/editors/groups';
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
 import { IdeRunPanel } from '@/components/workbench/IdeRunPanel';
 import { EditorWorkbenchArea } from '@/components/workbench/EditorWorkbenchArea';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { resolveGitTopLevel } from '@/lib/gitApi';
+import {
+  subscribeIdeSearchRequests,
+  type IdeSearchMode,
+} from '@/lib/workbench/ide-search-events';
+import { requestFileEditorNavigation } from '@/lib/monaco/editor-command-service';
 import {
   gitRepositoryRootWithinWorkspace,
   resolveIdeGitResourceId,
@@ -81,8 +87,7 @@ import {
 
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((module) => ({ default: module.GitView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then((module) => ({ default: module.SettingsWindow })));
-type SearchMode = 'files' | 'content';
-type IdeSearchDraft = { mode: SearchMode; query: string };
+type IdeSearchDraft = { mode: IdeSearchMode; query: string };
 
 type FileSearchViewState =
   | { status: 'idle' }
@@ -99,7 +104,7 @@ type ContentSearchViewState =
   | { status: 'failure'; message: string };
 
 const IdeSearchResults: React.FC<{
-  mode: SearchMode;
+  mode: IdeSearchMode;
   fileHits: FileSearchResult[];
   contentHits: WorkspaceContentSearchHit[];
   onOpenFile: (path: string) => void;
@@ -155,17 +160,25 @@ const ACTIVITIES: ReadonlyArray<{ id: IdeWorkbenchActivityId; icon: IconName; la
 
 const IdeSearchPanel: React.FC<{
   directory: string | undefined;
-  mode: SearchMode;
+  focusRequestId: number;
+  mode: IdeSearchMode;
   query: string;
-  onModeChange(mode: SearchMode): void;
+  onModeChange(mode: IdeSearchMode): void;
   onQueryChange(query: string): void;
-}> = ({ directory, mode, query, onModeChange, onQueryChange }) => {
+}> = ({ directory, focusRequestId, mode, query, onModeChange, onQueryChange }) => {
   const { t } = useI18n();
   const files = useRuntimeAPIs().files;
   const workspaceSearch = useRuntimeAPIs().workspaceSearch;
   const workspaceId = useWorkbenchWorkspaceId();
+  const inputRef = React.useRef<HTMLInputElement>(null);
   const [fileState, setFileState] = React.useState<FileSearchViewState>({ status: 'idle' });
   const [contentState, setContentState] = React.useState<ContentSearchViewState>({ status: 'idle' });
+
+  React.useEffect(() => {
+    if (focusRequestId <= 0) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [focusRequestId]);
 
   React.useEffect(() => {
     const normalized = query.trim();
@@ -256,7 +269,13 @@ const IdeSearchPanel: React.FC<{
 
   const openContentHit = (hit: WorkspaceContentSearchHit) => {
     if (!directory || !workspaceId) return;
-    openWorkbenchEditor(workspaceId, hit.resource.resourceId);
+    const opened = openWorkbenchEditor(workspaceId, hit.resource.resourceId);
+    requestFileEditorNavigation(
+      hit.resource,
+      hit.line,
+      hit.column,
+      activeEditorTab(opened)?.viewId,
+    );
   };
 
   const activeState = mode === 'files' ? fileState : contentState;
@@ -285,6 +304,7 @@ const IdeSearchPanel: React.FC<{
           </Button>
         </div>
         <Input
+          ref={inputRef}
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t(mode === 'files' ? 'workbench.ide.search.placeholder' : 'workbench.ide.search.contentPlaceholder')}
@@ -410,9 +430,11 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
   const [sessionPickerOpen, setSessionPickerOpen] = React.useState(false);
   const [searchDraftByDirectory, setSearchDraftByDirectory] = React.useState<Record<string, IdeSearchDraft>>({});
+  const [searchFocusRequestId, setSearchFocusRequestId] = React.useState(0);
   const layoutState = useIdeWorkbenchLayout(workspaceId);
   const layoutDocument = layoutState?.document ?? DEFAULT_IDE_WORKBENCH_LAYOUT;
   const layout = React.useMemo(() => projectIdeWorkbenchLayout(layoutDocument), [layoutDocument]);
+  const shellRootRef = React.useRef<HTMLDivElement>(null);
   const mainAreaRef = React.useRef<HTMLDivElement>(null);
   const searchDirectoryKey = directory || '__no-workspace__';
   const searchDraft = searchDraftByDirectory[searchDirectoryKey] ?? { mode: 'files', query: '' };
@@ -484,6 +506,15 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
       return next;
     });
   }, [workspaceId]);
+
+  React.useEffect(() => subscribeIdeSearchRequests(({ mode }) => {
+    const root = shellRootRef.current;
+    if (!root?.isConnected || root.closest('[data-piarium-workbench-shell-staging]')) return false;
+    patchLayout({ activity: 'search', primaryVisible: true });
+    updateSearchDraft({ mode });
+    setSearchFocusRequestId((current) => current + 1);
+    return true;
+  }), [patchLayout, updateSearchDraft]);
 
   // The picker covers the Agent column rather than floating over the workbench, so it only has
   // somewhere to render once that column is visible. Opening it reveals the column; hiding the
@@ -562,6 +593,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
   return (
     <DiffWorkerProvider>
       <div
+        ref={shellRootRef}
         data-page-scroll-lock="true"
         className="flex h-[100dvh] min-h-0 flex-col bg-background"
       >
@@ -746,6 +778,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
                   <IdeSearchPanel
                     key={searchDirectoryKey}
                     directory={directory}
+                    focusRequestId={searchFocusRequestId}
                     mode={searchDraft.mode}
                     query={searchDraft.query}
                     onModeChange={(mode) => updateSearchDraft({ mode })}

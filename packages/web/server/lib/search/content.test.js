@@ -23,13 +23,13 @@ const finishWithOutput = (child, output, code = 0) => {
   child.stdout.end(output);
 };
 
-const matchLine = (absolutePath, preview) => JSON.stringify({
+const matchLine = (absolutePath, preview, start = 0) => JSON.stringify({
   type: 'match',
   data: {
     path: { text: absolutePath },
     line_number: 2,
     lines: { text: `${preview}\n` },
-    submatches: [{ start: 0, end: 4 }],
+    submatches: [{ start, end: start + 4 }],
   },
 });
 
@@ -127,6 +127,38 @@ describe('workspace content search', () => {
       controller.abort();
       await expect(pending).resolves.toEqual({ status: 'cancelled', generation: 4 });
       expect(child.killed).toBe(true);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it('converts ripgrep UTF-8 byte offsets to Monaco UTF-16 columns', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    try {
+      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+      const notePath = path.join(workspace.root, 'unicode.txt');
+      const prefix = '中文🙂';
+      const search = createWorkspaceContentSearch({
+        documents: harness.authority,
+        pathModule: path,
+        spawn: () => {
+          const child = createFakeChild();
+          queueMicrotask(() => {
+            finishWithOutput(child, `${matchLine(notePath, `${prefix}match`, Buffer.byteLength(prefix, 'utf8'))}\n`);
+          });
+          return child;
+        },
+      });
+
+      const result = await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: 'match',
+      }, { generation: 4 });
+
+      expect(result).toMatchObject({
+        status: 'ready',
+        hits: [{ column: prefix.length + 1, line: 2, preview: `${prefix}match` }],
+      });
     } finally {
       await harness.cleanup();
     }

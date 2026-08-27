@@ -4656,7 +4656,7 @@ const buildMacMenu = () => {
       submenu: [
         { label: 'Toggle Right Sidebar', accelerator: 'Cmd+B', click: () => dispatchAction('toggle-right-sidebar') },
         { label: 'Open Git Sidebar', accelerator: 'Cmd+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
-        { label: 'Open Files Sidebar', accelerator: 'Cmd+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { label: 'Search Workspace', accelerator: 'Cmd+Shift+F', registerAccelerator: false, click: () => dispatchAction('workspace-search') },
         { type: 'separator' },
         { label: 'Toggle Terminal Dock', accelerator: 'Cmd+J', click: () => dispatchAction('toggle-terminal') },
         { label: 'Toggle Terminal Expanded', accelerator: 'Cmd+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
@@ -4682,8 +4682,8 @@ const buildMacMenu = () => {
     {
       label: 'Help',
       submenu: [
-        { label: 'Keyboard Shortcuts', accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
-        { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('show-diagnostics') },
+        { label: 'Keyboard Shortcuts', accelerator: 'Cmd+Shift+.', registerAccelerator: false, click: () => dispatchAction('help-dialog') },
+        { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+O', registerAccelerator: false, click: () => dispatchAction('show-diagnostics') },
         { label: 'Toggle Developer Tools', accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
@@ -4757,7 +4757,7 @@ const buildAutoHiddenMenu = () => {
         { type: 'separator' },
         { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
         { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
-        { label: 'Open Files Sidebar', accelerator: 'Ctrl+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { label: 'Search Workspace', accelerator: 'Ctrl+Shift+F', registerAccelerator: false, click: () => dispatchAction('workspace-search') },
         { type: 'separator' },
         { label: 'Toggle Terminal Dock', accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
         { label: 'Toggle Terminal Expanded', accelerator: 'Ctrl+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
@@ -4774,14 +4774,14 @@ const buildAutoHiddenMenu = () => {
     {
       label: 'Go',
       submenu: [
-        { label: 'Back', accelerator: 'Ctrl+[', click: () => dispatchAction('go-back') },
-        { label: 'Forward', accelerator: 'Ctrl+]', click: () => dispatchAction('go-forward') },
+        { label: 'Back', accelerator: 'Alt+Left', click: () => dispatchAction('go-back') },
+        { label: 'Forward', accelerator: 'Alt+Right', click: () => dispatchAction('go-forward') },
         { type: 'separator' },
         { label: 'Previous Session', accelerator: 'Alt+Up', click: () => dispatchAction('previous-session') },
         { label: 'Next Session', accelerator: 'Alt+Down', click: () => dispatchAction('next-session') },
         { type: 'separator' },
-        { label: 'Previous Project', accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
-        { label: 'Next Project', accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+        { label: 'Previous Project', click: () => dispatchAction('previous-project') },
+        { label: 'Next Project', click: () => dispatchAction('next-project') },
       ],
     },
     {
@@ -4796,8 +4796,8 @@ const buildAutoHiddenMenu = () => {
     {
       label: 'Help',
       submenu: [
-        { label: 'Keyboard Shortcuts', accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
-        { label: 'Show Diagnostics', accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('show-diagnostics') },
+        { label: 'Keyboard Shortcuts', accelerator: 'Ctrl+Shift+.', registerAccelerator: false, click: () => dispatchAction('help-dialog') },
+        { label: 'Show Diagnostics', accelerator: 'Ctrl+Shift+O', registerAccelerator: false, click: () => dispatchAction('show-diagnostics') },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },

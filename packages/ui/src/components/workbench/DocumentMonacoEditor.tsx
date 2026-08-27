@@ -35,7 +35,11 @@ import { registerPiariumMonacoTheme } from '@/lib/monaco/theme';
 import { applyMonacoEditorViewState, captureMonacoEditorViewState } from '@/lib/monaco/view-state';
 import { createPiariumMonacoVimAdapter } from '@/lib/monaco/vim-adapter';
 import { applyMonacoModelSettings, createMonacoEditorOptions } from '@/lib/monaco/editor-options';
-import { registerFileEditorCommandTarget, saveFileEditorDocument } from '@/lib/monaco/editor-command-service';
+import {
+  FILE_EDITOR_COMMAND_IDS,
+  registerFileEditorCommandTarget,
+  saveFileEditorDocument,
+} from '@/lib/monaco/editor-command-service';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { languageIdsFromResourceId, languageIdFromResourceId } from '@/lib/language-services/language-id';
 import { registerMonacoExtensionView } from '@/lib/monaco/extension-service';
@@ -358,6 +362,14 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
       getSettings: () => useUIStore.getState().fileEditorSettings,
       getShortcutOverrides: () => useUIStore.getState().shortcutOverrides,
       updateSettings: updateFileEditorSettings,
+      onCommandError: (commandId, error) => {
+        toast.error(commandId === FILE_EDITOR_COMMAND_IDS.save
+          ? t('filesView.toast.saveFailed')
+          : t('common.unavailable'), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      },
+      onCommandUnavailable: () => toast.message(t('common.unavailable')),
       viewId,
     });
   }, [
@@ -365,6 +377,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     identity,
     monaco,
     ownerId,
+    t,
     updateFileEditorSettings,
     viewId,
   ]);

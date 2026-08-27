@@ -120,14 +120,14 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   },
   {
     id: 'editor_replace',
-    defaultCombo: 'mod+h',
+    defaultCombo: isMacOS() ? 'mod+alt+f' : 'mod+h',
     label: 'Replace in active file',
     description: 'Open find and replace in the active file editor',
     customizable: true,
   },
   {
     id: 'open_go_to_line',
-    defaultCombo: 'alt+g',
+    defaultCombo: 'mod+g',
     label: 'Go to line (files editor)',
     description: 'Open go to line in the files editor',
     customizable: true,
@@ -211,8 +211,9 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'toggle_files',
     defaultCombo: 'mod+shift+f',
-    label: 'Toggle files',
-    description: 'Toggle the files panel',
+    label: 'Search workspace',
+    description: 'Open workspace text search in IDE, or Files in Agent view',
+    customizable: true,
   },
   {
     id: 'toggle_sidebar',
@@ -251,7 +252,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   },
   {
     id: 'open_right_sidebar_files',
-    defaultCombo: 'mod+shift+f',
+    defaultCombo: UNASSIGNED_SHORTCUT,
     label: 'Open right sidebar Files tab',
     description: 'Open right sidebar and select Files',
     customizable: true,
@@ -309,7 +310,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   },
   {
     id: 'open_help',
-    defaultCombo: 'mod+.',
+    defaultCombo: 'mod+shift+period',
     label: 'Open keyboard shortcuts',
     description: 'Show the keyboard shortcuts help',
     customizable: true,
@@ -323,7 +324,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   },
   {
     id: 'toggle_services_menu',
-    defaultCombo: 'mod+shift+s',
+    defaultCombo: 'mod+alt+s',
     label: 'Toggle services menu',
     description: 'Open or close the services menu',
     customizable: true,
@@ -586,7 +587,7 @@ export function isRiskyBrowserShortcut(combo: ShortcutCombo): boolean {
   }
 
   const key = parsed.key.toLowerCase();
-  const dangerousPrimary = new Set(['w', 't', 'r', 'p', 's', 'f', 'l', 'n']);
+  const dangerousPrimary = new Set(['w', 't', 'r', 'p', 's', 'f', 'h', 'l', 'n']);
   return dangerousPrimary.has(key) && !parsed.modifiers.has('shift') && !parsed.modifiers.has('alt');
 }
 

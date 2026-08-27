@@ -13,6 +13,7 @@ import {
   splitActiveEditor,
 } from '@/lib/workbench/editors/session';
 import type { WorkbenchCommandImplementation, WorkbenchCommandMeta } from './surface-command-types';
+import { requestIdeSearch } from '@/lib/workbench/ide-search-events';
 import {
   executeActiveFileEditorCommand,
   FILE_EDITOR_COMMAND_IDS,
@@ -67,6 +68,10 @@ const BUILTIN_WORKBENCH_COMMANDS: readonly BuiltinCommandDefinition[] = [
   }),
   command({ commandId: 'add-project', titleKey: 'commandPalette.item.addProject', icon: 'folder-add', keywords: ['add', 'project', 'workspace'], order: 2 }, () => {
     workspaceEvents.requestDirectoryDialog();
+  }),
+  command({ commandId: 'workspace-search', titleKey: 'workbench.ide.activity.search', icon: 'search', shortcutId: 'toggle_files', keywords: ['search', 'workspace', 'text', 'files'], order: 2.5 }, ({ currentDirectory }) => {
+    if (requestIdeSearch({ mode: 'content' })) return;
+    if (currentDirectory) useUIStore.getState().openContextSurface(currentDirectory, 'file');
   }),
   command({ commandId: 'toggle-sidebar', titleKey: 'commandPalette.item.toggleSidebar', mobileTitleKey: 'commandPalette.item.showSessionSwitcher', icon: 'layout-left', shortcutId: 'toggle_sidebar', keywords: ['sidebar', 'session switcher'], order: 3 }, ({ isMobile }) => {
     const state = useUIStore.getState();

@@ -13,6 +13,7 @@ import {
 } from '@/lib/pi-runtime/sessionNavigation';
 import { createPiWorktreeSession } from '@/lib/pi-runtime/worktreeSession';
 import { addPiSelectionToChat } from '@/lib/pi-runtime/addSelectionToChat';
+import { requestIdeSearch } from '@/lib/workbench/ide-search-events';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -77,6 +78,7 @@ type MenuAction =
   | 'toggle-right-sidebar'
   | 'open-right-sidebar-git'
   | 'open-right-sidebar-files'
+  | 'workspace-search'
   | 'toggle-terminal'
   | 'toggle-terminal-expanded'
   | 'copy'
@@ -238,6 +240,15 @@ export const useMenuActions = (options: { enabled?: boolean } = {}) => {
           const directory = useDirectoryStore.getState().currentDirectory;
           if (!directory) break;
           useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'file');
+          break;
+        }
+
+        case 'workspace-search': {
+          if (requestIdeSearch({ mode: 'content' })) break;
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (directory) {
+            useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'file');
+          }
           break;
         }
 
