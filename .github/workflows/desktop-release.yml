@@ -110,6 +110,8 @@ jobs:
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'macos' && 'false' || '' }}
+          # The Monaco production bundle exceeds V8's ~2 GiB default heap on the macOS ARM runner.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           set -euo pipefail
           bun run --cwd packages/electron build:web-assets
