@@ -5,6 +5,32 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.2
+
+Piarium 0.9.2 makes project navigation, Pi runtime isolation, custom providers, and the IDE editing
+workflow substantially more dependable.
+
+- Refine custom provider model capabilities with explicit image, tool-calling, reasoning, supported
+  thinking-level, and custom thinking-level controls
+- Isolate catalog, workspace, package, and session workers so a stalled extension cannot block the
+  session list, another workspace, or recovery through Pi package management
+- Rework the session navigator around project-first conversation groups, compact actions, search,
+  batch selection, project sorting, tree/flat display, and a quieter context rail
+- Make current-file find/replace and related Monaco shortcuts target the editor that received the key,
+  remove conflicting desktop accelerators, and open IDE workspace search with `Ctrl/Cmd+Shift+F`
+- Jump workspace text results to the exact match, including lines containing Chinese, emoji, or other
+  multibyte text
+- Make English the default community documentation language and keep the contributor guides and code
+  of conduct available in five languages
+
+## 0.9.1
+
+- Provision MCP, permission management, workspace history, and prompt repair for new Pi runtime
+  environments while keeping each integration removable and independently configurable
+- Use the Piarium-maintained MCP adapter package and preserve existing compatible installations
+- Improve foundational package recovery, concurrent package operations, and native desktop release
+  packaging across Windows, macOS, and Linux
+
 ## 0.9.0
 
 Piarium 0.9.0 turns the Agent Workspace and IDE Workbench into a more cohesive daily workspace,
