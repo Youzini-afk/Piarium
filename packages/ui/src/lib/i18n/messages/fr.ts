@@ -274,7 +274,7 @@ export const dict = {
   'sessions.archivePage.allWorkspaces': 'Tous les espaces de travail',
   'sessions.sidebar.header.displayMode.stickyHeaders': 'Épingler les en-têtes de projet',
   'sessions.sidebar.header.grouping.label': 'Regrouper les sessions',
-  'sessions.sidebar.header.grouping.byWorktree': 'Par worktree',
+  'sessions.sidebar.header.grouping.byWorktree': 'Vue arborescente',
   'sessions.sidebar.header.grouping.flat': 'Liste plate',
   'sessions.sidebar.project.actions.manageWorktrees': 'Gérer les worktrees',
   'sessions.worktreesPage.title': 'Worktrees dans {project}',

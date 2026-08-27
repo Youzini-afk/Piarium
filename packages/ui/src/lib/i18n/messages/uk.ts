@@ -464,7 +464,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.archivePage.allWorkspaces": "Усі робочі області",
   "sessions.sidebar.header.displayMode.stickyHeaders": "Липкі заголовки проектів",
   "sessions.sidebar.header.grouping.label": "Групування сесій",
-  "sessions.sidebar.header.grouping.byWorktree": "За worktree",
+  "sessions.sidebar.header.grouping.byWorktree": "Деревом",
   "sessions.sidebar.header.grouping.flat": "Плаский список",
   "sessions.sidebar.project.actions.manageWorktrees": "Керувати worktree",
   "sessions.worktreesPage.title": "Worktree у {project}",

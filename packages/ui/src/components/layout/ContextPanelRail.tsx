@@ -17,6 +17,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
+import { DiffIcon } from '@/components/icons/DiffIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
@@ -78,15 +79,28 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             className={cn(
               'flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors',
               isActive
-                ? 'text-primary'
+                ? 'bg-interactive-active text-primary'
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            <Icon name={surface.icon} className="h-[18px] w-[18px]" />
+            {isActive ? (
+              <span aria-hidden="true" className="absolute -left-1 h-4 w-0.5 rounded-full bg-primary" />
+            ) : null}
+            {surface.id === 'diff' ? (
+              <DiffIcon className="h-[18px] w-[18px]" />
+            ) : (
+              <Icon name={surface.icon} className="h-[18px] w-[18px]" />
+            )}
             {badgeCount !== undefined && badgeCount > 0 ? (
               <span
                 aria-hidden="true"
-                className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-muted px-1 text-[0.625rem] font-medium leading-none text-muted-foreground"
+                // The count is a live signal; keep it legible on top of the icon
+                // with its own status-info chip instead of muted text on the rail.
+                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold leading-none"
+                style={{
+                  backgroundColor: 'var(--status-info-background)',
+                  color: 'var(--status-info)',
+                }}
               >
                 {formatBadgeCount(badgeCount)}
               </span>

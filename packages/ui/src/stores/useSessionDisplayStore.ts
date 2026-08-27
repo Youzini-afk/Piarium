@@ -4,8 +4,8 @@ import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 
-// 'by-worktree' keeps per-worktree sub-headers inside each project zone
-// (parallel-work overview); 'flat' merges everything into one recency list.
+// 'by-worktree' is the persisted legacy value for the hierarchical session tree;
+// 'flat' removes parent/child indentation while preserving project ownership.
 type SessionGroupingMode = 'by-worktree' | 'flat';
 
 type SessionDisplayStore = {

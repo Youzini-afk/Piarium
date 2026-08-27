@@ -461,7 +461,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.archivePage.allWorkspaces": "Todos os espaços de trabalho",
   "sessions.sidebar.header.displayMode.stickyHeaders": "Cabeçalhos de projeto fixos",
   "sessions.sidebar.header.grouping.label": "Agrupar sessões",
-  "sessions.sidebar.header.grouping.byWorktree": "Por worktree",
+  "sessions.sidebar.header.grouping.byWorktree": "Em árvore",
   "sessions.sidebar.header.grouping.flat": "Lista plana",
   "sessions.sidebar.project.actions.manageWorktrees": "Gerenciar worktrees",
   "sessions.worktreesPage.title": "Worktrees em {project}",

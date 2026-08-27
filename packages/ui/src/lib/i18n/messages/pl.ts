@@ -244,7 +244,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.allWorkspaces': 'Wszystkie obszary robocze',
   'sessions.sidebar.header.displayMode.stickyHeaders': 'Przyklejone nagłówki projektów',
   'sessions.sidebar.header.grouping.label': 'Grupowanie sesji',
-  'sessions.sidebar.header.grouping.byWorktree': 'Według worktree',
+  'sessions.sidebar.header.grouping.byWorktree': 'Widok drzewa',
   'sessions.sidebar.header.grouping.flat': 'Płaska lista',
   'sessions.sidebar.project.actions.manageWorktrees': 'Zarządzaj worktree',
   'sessions.worktreesPage.title': 'Worktree w {project}',

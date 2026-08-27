@@ -434,7 +434,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.allWorkspaces': 'すべてのワークスペース',
   'sessions.sidebar.header.displayMode.stickyHeaders': 'プロジェクトヘッダーを固定',
   'sessions.sidebar.header.grouping.label': 'セッションのグループ化',
-  'sessions.sidebar.header.grouping.byWorktree': 'ワークツリー別',
+  'sessions.sidebar.header.grouping.byWorktree': 'ツリー表示',
   'sessions.sidebar.header.grouping.flat': 'フラットリスト',
   'sessions.sidebar.project.actions.manageWorktrees': 'ワークツリーを管理',
   'sessions.worktreesPage.title': '{project} のワークツリー',

@@ -434,7 +434,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.allWorkspaces': '모든 워크스페이스',
   'sessions.sidebar.header.displayMode.stickyHeaders': '프로젝트 헤더 고정',
   'sessions.sidebar.header.grouping.label': '세션 그룹화',
-  'sessions.sidebar.header.grouping.byWorktree': '워크트리별',
+  'sessions.sidebar.header.grouping.byWorktree': '트리 목록',
   'sessions.sidebar.header.grouping.flat': '평면 목록',
   'sessions.sidebar.project.actions.manageWorktrees': '워크트리 관리',
   'sessions.worktreesPage.title': '{project}의 워크트리',

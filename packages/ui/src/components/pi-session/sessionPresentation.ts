@@ -7,8 +7,10 @@ export interface PiSessionNode {
 }
 
 export interface PiSessionWorkspaceProject {
+  addedAt?: number;
   id: string;
   label?: string | null;
+  lastOpenedAt?: number;
   path: string;
   worktrees?: readonly { path: string }[];
 }
@@ -21,6 +23,45 @@ export interface PiSessionWorkspaceGroup {
 }
 
 export type PiSessionPinnedPredicate = (session: SessionSummary) => boolean;
+
+export type PiSessionProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
+
+const projectLabel = (project: PiSessionWorkspaceProject): string => (
+  project.label?.trim() || project.path
+);
+
+/**
+ * Sorts project entries while preserving the caller's order for ties. The
+ * manual order is the order supplied by the projects store; every other mode
+ * is deterministic and keeps the project's identity as the final tie-breaker.
+ */
+export const sortPiSessionWorkspaceProjects = <T extends PiSessionWorkspaceProject>(
+  projects: readonly T[],
+  order: PiSessionProjectSortOrder,
+): T[] => {
+  if (order === 'manual') return [...projects];
+  return projects
+    .map((project, index) => ({ index, project }))
+    .sort((left, right) => {
+      if (order === 'a-z' || order === 'z-a') {
+        const compared = projectLabel(left.project).localeCompare(projectLabel(right.project), undefined, {
+          sensitivity: 'base',
+          numeric: true,
+        });
+        if (compared !== 0) return order === 'a-z' ? compared : -compared;
+      } else {
+        const leftValue = order === 'recent'
+          ? (left.project.lastOpenedAt ?? left.project.addedAt ?? 0)
+          : (left.project.addedAt ?? 0);
+        const rightValue = order === 'recent'
+          ? (right.project.lastOpenedAt ?? right.project.addedAt ?? 0)
+          : (right.project.addedAt ?? 0);
+        if (leftValue !== rightValue) return rightValue - leftValue;
+      }
+      return left.index - right.index;
+    })
+    .map(({ project }) => project);
+};
 
 export const countPiSessionSubtreeValues = (
   node: PiSessionNode,
@@ -97,6 +138,18 @@ export const collectPiSessionSubtreeIds = (
   return ids;
 };
 
+/** Collect selected roots and their descendants once, even when both are selected. */
+export const collectPiSessionSelectionSubtreeIds = (
+  summaries: SessionSummary[],
+  selectedIds: ReadonlySet<string>,
+): string[] => {
+  const ids = new Set<string>();
+  for (const sessionId of selectedIds) {
+    collectPiSessionSubtreeIds(summaries, sessionId).forEach((id) => ids.add(id));
+  }
+  return [...ids];
+};
+
 const createsParentCycle = (
   sessionId: string,
   parentId: string,
@@ -149,6 +202,21 @@ export const buildPiSessionForest = (
   };
   sortNodes(roots);
   return roots;
+};
+
+/** Return every node as a root, sorted with the same rules as the tree view. */
+export const flattenPiSessionForest = (
+  nodes: readonly PiSessionNode[],
+  isPinned: PiSessionPinnedPredicate = () => false,
+): PiSessionNode[] => {
+  const flattened: PiSessionNode[] = [];
+  const visit = (node: PiSessionNode): void => {
+    flattened.push({ children: [], session: node.session });
+    node.children.forEach(visit);
+  };
+  nodes.forEach(visit);
+  flattened.sort((left, right) => comparePiSessions(left.session, right.session, isPinned));
+  return flattened;
 };
 
 const comparablePath = (path: string): string => (
@@ -215,7 +283,10 @@ export const groupPiSessionForestByWorkspace = (
   forest: PiSessionNode[],
   projects: PiSessionWorkspaceProject[],
   isPinned: PiSessionPinnedPredicate = () => false,
-  options: { includeEmptyProjects?: boolean } = {},
+  options: {
+    includeEmptyProjects?: boolean;
+    showRecentSection?: boolean;
+  } = {},
 ): PiSessionWorkspaceGroup[] => {
   const normalizedProjects = normalizeWorkspaceProjects(projects);
   const groups = new Map<string, PiSessionWorkspaceGroup>();
@@ -244,6 +315,12 @@ export const groupPiSessionForestByWorkspace = (
     parentGroupId: string | null,
   ): void => {
     const project = resolveNormalizedWorkspaceProject(node.session, normalizedProjects);
+    if (project === null && options.showRecentSection === false) {
+      // Hiding the unbound zone must not hide a descendant that has explicit
+      // ownership in a project. Revisit descendants as roots of their own zone.
+      node.children.forEach((child) => visit(child, null, null));
+      return;
+    }
     const group = ensureGroup(project);
     const clone: PiSessionNode = { children: [], session: node.session };
     if (parent !== null && parentGroupId === group.id) parent.children.push(clone);

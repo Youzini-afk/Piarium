@@ -2,13 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import type { SessionSummary } from '@piarium/protocol';
 import {
   buildPiSessionForest,
+  collectPiSessionSelectionSubtreeIds,
   collectPiSessionSubtreeIds,
   countPiSessionSubtreeValues,
   comparePiSessions,
+  flattenPiSessionForest,
   filterPiSessionForest,
   groupPiSessionForestByWorkspace,
   piSessionTitle,
   resolvePiSessionWorkspaceProject,
+  sortPiSessionWorkspaceProjects,
 } from './sessionPresentation';
 
 const session = (
@@ -177,6 +180,68 @@ describe('Pi session presentation', () => {
 
     expect(groups.map((group) => group.id)).toEqual(['workspace:first', 'workspace:second']);
     expect(groups.every((group) => group.forest.length === 0)).toBe(true);
+  });
+
+  test('sorts projects by label, date added, and recent activity', () => {
+    const projects = [
+      { id: 'manual-first', label: 'Zeta', path: 'D:/z', addedAt: 10, lastOpenedAt: 100 },
+      { id: 'manual-second', label: 'Alpha', path: 'D:/a', addedAt: 30, lastOpenedAt: 10 },
+      { id: 'manual-third', label: 'Beta', path: 'D:/b', addedAt: 20, lastOpenedAt: 200 },
+    ];
+    expect(sortPiSessionWorkspaceProjects(projects, 'manual').map((project) => project.id))
+      .toEqual(['manual-first', 'manual-second', 'manual-third']);
+    expect(sortPiSessionWorkspaceProjects(projects, 'a-z').map((project) => project.id))
+      .toEqual(['manual-second', 'manual-third', 'manual-first']);
+    expect(sortPiSessionWorkspaceProjects(projects, 'z-a').map((project) => project.id))
+      .toEqual(['manual-first', 'manual-third', 'manual-second']);
+    expect(sortPiSessionWorkspaceProjects(projects, 'date-added').map((project) => project.id))
+      .toEqual(['manual-second', 'manual-third', 'manual-first']);
+    expect(sortPiSessionWorkspaceProjects(projects, 'recent').map((project) => project.id))
+      .toEqual(['manual-third', 'manual-first', 'manual-second']);
+  });
+
+  test('keeps recent/unbound last and can hide it without projecting project sessions', () => {
+    const projects = [{ id: 'repo', label: 'Repo', path: 'D:/work/repo' }];
+    const forest = buildPiSessionForest([
+      session('recent', { workspace: { kind: 'unbound' } }),
+      session('project', { workspace: { id: 'repo', kind: 'workspace' } }),
+    ]);
+    const groups = groupPiSessionForestByWorkspace(forest, projects);
+    expect(groups.map((group) => group.id)).toEqual(['workspace:repo', 'recent']);
+    expect(groups.at(-1)?.forest.map((node) => node.session.id)).toEqual(['recent']);
+    expect(groupPiSessionForestByWorkspace(forest, projects, undefined, {
+      showRecentSection: false,
+    }).map((group) => group.id)).toEqual(['workspace:repo']);
+
+    const boundChild = buildPiSessionForest([
+      session('unbound-parent', { workspace: { kind: 'unbound' } }),
+      session('bound-child', { parentId: 'unbound-parent', workspace: { id: 'repo', kind: 'workspace' } }),
+    ]);
+    expect(groupPiSessionForestByWorkspace(boundChild, projects, undefined, {
+      showRecentSection: false,
+    })[0]?.forest.map((node) => node.session.id)).toEqual(['bound-child']);
+  });
+
+  test('flattens parent and child sessions without losing either row', () => {
+    const forest = buildPiSessionForest([
+      session('parent', { updatedAt: '2026-08-01T00:00:01.000Z' }),
+      session('child', { parentId: 'parent', updatedAt: '2026-08-01T00:00:02.000Z' }),
+    ]);
+    const flat = flattenPiSessionForest(forest);
+    expect(flat.map((node) => node.session.id)).toEqual(['child', 'parent']);
+    expect(flat.every((node) => node.children.length === 0)).toBe(true);
+  });
+
+  test('deduplicates descendants selected together with their parent', () => {
+    const summaries = [
+      session('parent'),
+      session('child', { parentId: 'parent' }),
+      session('sibling'),
+    ];
+    expect(collectPiSessionSelectionSubtreeIds(
+      summaries,
+      new Set(['parent', 'child', 'sibling']),
+    )).toEqual(['parent', 'child', 'sibling']);
   });
 
   test('detaches children whose workspace differs from their parent', () => {

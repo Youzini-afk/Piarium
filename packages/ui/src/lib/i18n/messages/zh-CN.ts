@@ -437,7 +437,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.archivePage.allWorkspaces': '全部工作区',
   'sessions.sidebar.header.displayMode.stickyHeaders': '固定项目标题',
   'sessions.sidebar.header.grouping.label': '会话分组',
-  'sessions.sidebar.header.grouping.byWorktree': '按工作树',
+  'sessions.sidebar.header.grouping.byWorktree': '树状列表',
   'sessions.sidebar.header.grouping.flat': '平铺列表',
   'sessions.sidebar.project.actions.manageWorktrees': '管理工作树',
   'sessions.worktreesPage.title': '{project} 的工作树',

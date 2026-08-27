@@ -432,7 +432,7 @@ export const dict = {
   'sessions.archivePage.allWorkspaces': 'All workspaces',
   'sessions.sidebar.header.displayMode.stickyHeaders': 'Sticky project headers',
   'sessions.sidebar.header.grouping.label': 'Group sessions',
-  'sessions.sidebar.header.grouping.byWorktree': 'By worktree',
+  'sessions.sidebar.header.grouping.byWorktree': 'Tree',
   'sessions.sidebar.header.grouping.flat': 'Flat list',
   'sessions.sidebar.project.actions.manageWorktrees': 'Manage worktrees',
   'sessions.worktreesPage.title': 'Worktrees in {project}',

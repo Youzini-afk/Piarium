@@ -16,6 +16,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -59,11 +62,14 @@ import { formatSessionCompactDateLabel } from '@/lib/sessionDateLabels';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import {
   buildPiSessionForest,
+  collectPiSessionSelectionSubtreeIds,
   collectPiSessionSubtreeIds,
   countPiSessionSubtreeValues,
   filterPiSessionForest,
+  flattenPiSessionForest,
   groupPiSessionForestByWorkspace,
   piSessionTitle,
+  sortPiSessionWorkspaceProjects,
   type PiSessionNode,
 } from './sessionPresentation';
 import { PiSessionActivityDuration } from './PiSessionActivityDuration';
@@ -71,6 +77,7 @@ import {
   renderFirstWorkbenchMatch,
   useWorkbenchMatchRenderers,
 } from '@/lib/extensions/workbench-registry';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 interface PiSessionSidebarProps {
   isVisible?: boolean;
@@ -86,6 +93,7 @@ type ConfirmationState =
   | {
       scope: 'session';
       action: 'archive' | 'delete';
+      bulk?: boolean;
       ids: string[];
       title: string;
     }
@@ -134,7 +142,10 @@ interface SessionRowProps {
   onUnarchive(session: SessionSummary): void;
   pendingDialogCountBySession: Readonly<Record<string, number>>;
   pinnedIds: Set<string>;
+  selectedIds: ReadonlySet<string>;
+  selectionMode: boolean;
   untitled: string;
+  onToggleSelection(session: SessionSummary): void;
 }
 
 const PiSessionRow: React.FC<SessionRowProps> = (props) => {
@@ -156,6 +167,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
     hasChildren && !expanded,
   );
   const attention = props.attentionBySession[session.id];
+  const selected = props.selectedIds.has(session.id);
   const archived = session.archivedAt !== undefined;
   const pendingRenameRef = React.useRef(false);
   const decorationRenderers = useWorkbenchMatchRenderers<{
@@ -179,8 +191,28 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
         className={cn(
           'group/session flex min-h-8 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors',
           isCurrent ? 'bg-interactive-active text-foreground' : 'hover:bg-interactive-hover/60 hover:text-foreground',
+          selected && 'bg-interactive-selection text-foreground',
         )}
+        onClick={(event) => {
+          if (!props.selectionMode) return;
+          const target = event.target;
+          if (target instanceof HTMLElement && target.closest('button')) return;
+          props.onToggleSelection(session);
+        }}
       >
+        {props.selectionMode ? (
+          <button
+            type="button"
+            onClick={() => props.onToggleSelection(session)}
+            className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+            aria-label={`${t(selected
+              ? 'sessions.sidebar.header.actions.exitSelection'
+              : 'sessions.sidebar.header.actions.selectSessions')}: ${title}`}
+            aria-pressed={selected}
+          >
+            <Icon name={selected ? 'checkbox' : 'checkbox-blank'} className="size-3.5" />
+          </button>
+        ) : null}
         {hasChildren ? (
           <button
             type="button"
@@ -263,7 +295,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
           </button>
         )}
 
-        <DropdownMenu
+        {!props.selectionMode ? <DropdownMenu
           onOpenChangeComplete={(open) => {
             if (!open && pendingRenameRef.current) {
               pendingRenameRef.current = false;
@@ -321,7 +353,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
               {t('sessions.sidebar.bulkActions.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
+        </DropdownMenu> : null}
       </div>
 
       {hasChildren && expanded && (
@@ -372,39 +404,86 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const togglePinned = useSessionPinnedStore((state) => state.toggle);
   const clearPinnedSession = useSessionPinnedStore((state) => state.clearPinnedSession);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
+  const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
+  const setScheduledTasksDialogOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
+  const setArchivePageOpen = useUIStore((state) => state.setArchivePageOpen);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
+  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
+  const setSessionGroupingMode = useSessionDisplayStore((state) => state.setSessionGroupingMode);
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+  const toggleStickyZoneHeaders = useSessionDisplayStore((state) => state.toggleStickyZoneHeaders);
+  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
+  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const [query, setQuery] = React.useState('');
-  const [showArchived, setShowArchived] = React.useState(false);
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const [selectionMode, setSelectionMode] = React.useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = React.useState<Set<string>>(() => new Set());
   const [collapsedGroupIds, setCollapsedGroupIds] = React.useState<Set<string>>(() => new Set());
   const [expandedIds, setExpandedIds] = React.useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editingName, setEditingName] = React.useState('');
   const [confirmation, setConfirmation] = React.useState<ConfirmationState | null>(null);
   const [actionPending, setActionPending] = React.useState(false);
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
   const untitled = t('sessions.sidebar.session.untitled');
+
+  const showArchived = runtime.isVSCode && showArchivedSessions;
 
   React.useEffect(() => {
     void loadCatalog();
   }, [loadCatalog, runtimeKey]);
 
+  React.useEffect(() => {
+    if (!searchOpen) return;
+    searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  React.useEffect(() => {
+    setQuery('');
+    setSearchOpen(false);
+    setSelectionMode(false);
+    setSelectedSessionIds(new Set());
+  }, [runtimeKey]);
+
   const isPinned = React.useCallback((session: SessionSummary) => (
     isSessionPinned(pinnedIds, session.cwd, session.id)
   ), [pinnedIds]);
 
+  const orderedProjects = React.useMemo(
+    () => sortPiSessionWorkspaceProjects(projects, projectSortOrder),
+    [projectSortOrder, projects],
+  );
+
+  const closeSearch = React.useCallback(() => {
+    setQuery('');
+    setSearchOpen(false);
+  }, []);
+
   const workspaceGroups = React.useMemo(() => {
     const source = showArchived ? archivedSessions : activeSessions;
     const forest = buildPiSessionForest(source, isPinned);
-    return groupPiSessionForestByWorkspace(forest, projects, isPinned, {
+    return groupPiSessionForestByWorkspace(forest, orderedProjects, isPinned, {
       includeEmptyProjects: !showArchived,
+      showRecentSection,
     }).map((group) => {
       const label = group.project?.label?.trim()
         || (group.path ? formatDirectoryName(group.path, null) || group.path : null)
         || t('sessions.sidebar.grouping.recent');
-      return { ...group, label };
+      return {
+        ...group,
+        forest: sessionGroupingMode === 'flat'
+          ? flattenPiSessionForest(group.forest, isPinned)
+          : group.forest,
+        label,
+      };
     });
-  }, [activeSessions, archivedSessions, isPinned, projects, showArchived, t]);
+  }, [activeSessions, archivedSessions, isPinned, orderedProjects, sessionGroupingMode, showArchived, showRecentSection, t]);
 
   const groups = React.useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -446,6 +525,62 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
       toast.error(error instanceof Error ? error.message : String(error));
     }
   }, [mobileVariant, onRequestClose, setSessionSwitcherOpen]);
+
+  const toggleSelection = React.useCallback((session: SessionSummary) => {
+    setSelectedSessionIds((current) => {
+      const next = new Set(current);
+      if (next.has(session.id)) next.delete(session.id);
+      else next.add(session.id);
+      return next;
+    });
+  }, []);
+
+  const enterSelectionMode = React.useCallback(() => {
+    setSelectionMode(true);
+  }, []);
+
+  const exitSelectionMode = React.useCallback(() => {
+    setSelectionMode(false);
+    setSelectedSessionIds(new Set());
+  }, []);
+
+  const selectedSubtreeIds = React.useMemo(
+    () => collectPiSessionSelectionSubtreeIds(summaries, selectedSessionIds),
+    [selectedSessionIds, summaries],
+  );
+
+  const requestBulkAction = React.useCallback((action: 'archive' | 'delete') => {
+    if (selectedSubtreeIds.length === 0) return;
+    setConfirmation({
+      scope: 'session',
+      action,
+      bulk: true,
+      ids: selectedSubtreeIds,
+      title: t('sessions.sidebar.bulkActions.selectedCount', { count: selectedSessionIds.size }),
+    });
+  }, [selectedSessionIds.size, selectedSubtreeIds, t]);
+
+  const handleOpenScheduledTasks = React.useCallback(() => {
+    setScheduledTasksDialogOpen(true);
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
+  }, [mobileVariant, onRequestClose, setScheduledTasksDialogOpen, setSessionSwitcherOpen]);
+
+  const handleOpenMultiRun = React.useCallback(() => {
+    openMultiRunLauncher();
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
+  }, [mobileVariant, onRequestClose, openMultiRunLauncher, setSessionSwitcherOpen]);
+
+  const handleOpenArchive = React.useCallback(() => {
+    if (runtime.isVSCode) {
+      toggleArchivedSessions();
+      return;
+    }
+    setArchivePageOpen(true);
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    onRequestClose?.();
+  }, [mobileVariant, onRequestClose, runtime.isVSCode, setArchivePageOpen, setSessionSwitcherOpen, toggleArchivedSessions]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) setSessionSwitcherOpen(false);
@@ -528,17 +663,37 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
           if (sessionId && summary) clearPinnedSession(runtimeKey, summary.cwd, sessionId);
         });
       }
-      const failed = results.filter((result) => result.status === 'rejected');
+      const failed = results.filter((result) => (
+        result.status === 'rejected'
+        || (confirmation.action === 'delete' && result.value !== true)
+      ));
       if (failed.length > 0) {
-        toast.error(failed.length === 1
-          ? (confirmation.action === 'archive'
-              ? t('sessions.sidebar.session.archive.error')
-              : t('sessions.sidebar.session.delete.error'))
-          : t('sessions.sidebar.dialogs.deleteResult.tryAgain'));
+        toast.error(confirmation.scope === 'session' && confirmation.bulk
+          ? t(confirmation.action === 'archive'
+            ? (failed.length === 1
+              ? 'sessions.sidebar.bulkActions.failedArchiveSingle'
+              : 'sessions.sidebar.bulkActions.failedArchivePlural')
+            : (failed.length === 1
+              ? 'sessions.sidebar.bulkActions.failedDeleteSingle'
+              : 'sessions.sidebar.bulkActions.failedDeletePlural'), { count: failed.length })
+          : failed.length === 1
+            ? (confirmation.action === 'archive'
+                ? t('sessions.sidebar.session.archive.error')
+                : t('sessions.sidebar.session.delete.error'))
+            : t('sessions.sidebar.dialogs.deleteResult.tryAgain'));
       } else if (confirmation.scope === 'project') {
         toast.success(confirmation.ids.length === 1
           ? t('sessions.sidebar.bulkActions.archivedSingle', { count: 1 })
           : t('sessions.sidebar.bulkActions.archivedPlural', { count: confirmation.ids.length }));
+      } else if (confirmation.bulk) {
+        toast.success(t(confirmation.action === 'archive'
+          ? (confirmation.ids.length === 1
+            ? 'sessions.sidebar.bulkActions.archivedSingle'
+            : 'sessions.sidebar.bulkActions.archivedPlural')
+          : (confirmation.ids.length === 1
+            ? 'sessions.sidebar.bulkActions.deletedSingle'
+            : 'sessions.sidebar.bulkActions.deletedPlural'), { count: confirmation.ids.length }));
+        exitSelectionMode();
       } else {
         toast.success(confirmation.action === 'archive'
           ? t('sessions.sidebar.session.archive.success')
@@ -548,7 +703,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
     } finally {
       setActionPending(false);
     }
-  }, [archiveSession, clearPinnedSession, confirmation, deleteSession, removeProject, runtimeKey, summaries, t]);
+  }, [archiveSession, clearPinnedSession, confirmation, deleteSession, exitSelectionMode, removeProject, runtimeKey, summaries, t]);
 
   const visibleCount = React.useMemo(() => {
     const countNodes = (nodes: PiSessionNode[]): number => nodes.reduce(
@@ -580,6 +735,25 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               count: confirmation.ids.length,
             }),
         actionLabel: t('sessions.sidebar.bulkActions.archive'),
+      };
+    }
+    if (confirmation.bulk) {
+      return {
+        title: t(confirmation.action === 'archive'
+          ? 'sessions.sidebar.dialogs.archiveSessions.title'
+          : 'sessions.sidebar.dialogs.deleteSessions.title'),
+        description: t(confirmation.action === 'archive'
+          ? (confirmation.ids.length === 1
+            ? 'sessions.sidebar.dialogs.archiveSessions.singleDescription'
+            : 'sessions.sidebar.dialogs.archiveSessions.pluralDescription')
+          : (confirmation.ids.length === 1
+            ? 'sessions.sidebar.dialogs.deleteSessions.singleDescription'
+            : 'sessions.sidebar.dialogs.deleteSessions.pluralDescription'), {
+          count: confirmation.ids.length,
+        }),
+        actionLabel: t(confirmation.action === 'archive'
+          ? 'sessions.sidebar.bulkActions.archive'
+          : 'sessions.sidebar.bulkActions.delete'),
       };
     }
     if (confirmation.ids.length > 1) {
@@ -624,7 +798,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   })();
 
   return (
-    <TooltipProvider>
+    <TooltipProvider delayDuration={400} skipDelayDuration={150}>
       <div
         className={cn(
           'flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground',
@@ -641,22 +815,9 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
             <Icon name="chat-new" className="size-4 shrink-0" />
             <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
           </button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => setShowArchived((current) => !current)}
-                className={cn(
-                  'flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
-                  showArchived && 'bg-interactive-active text-foreground',
-                )}
-                aria-label={t('sessions.sidebar.nav.archive')}
-              >
-                <Icon name="archive" className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t('sessions.sidebar.nav.archive')}</TooltipContent>
-          </Tooltip>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1 px-2.5 pb-1 pt-0.5">
           {!runtime.isVSCode ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -676,46 +837,197 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => void loadCatalog()}
-                disabled={catalogLoading}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
-                aria-label={t('sessions.sidebar.group.empty.retry')}
+                onClick={handleOpenScheduledTasks}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
               >
-                <Icon name="refresh" className={cn('size-4', catalogLoading && 'animate-spin')} />
+                <Icon name="calendar-schedule" className="size-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">{t('sessions.sidebar.group.empty.retry')}</TooltipContent>
+            <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.scheduledTasks')}</TooltipContent>
           </Tooltip>
-        </div>
-
-        <div className="shrink-0 px-2.5 py-2">
-          <div className="relative">
-            <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('sessions.sidebar.header.search.placeholder')}
-              className="h-8 pl-8 pr-8 typography-ui-label"
-            />
-            {query && (
+          <Tooltip>
+            <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setQuery('')}
-                className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                aria-label={t('sessions.sidebar.header.search.clear')}
+                onClick={handleOpenMultiRun}
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                aria-label={t('sessions.sidebar.header.actions.newMultiRun')}
+              >
+                <Icon name="git-merge" className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.newMultiRun')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleOpenArchive}
+                className={cn(
+                  'flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                  showArchived && 'bg-interactive-active text-foreground',
+                )}
+                aria-label={t('sessions.sidebar.nav.archive')}
+              >
+                <Icon name="archive" className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('sessions.sidebar.nav.archive')}</TooltipContent>
+          </Tooltip>
+          <span className="min-w-0 flex-1" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => {
+                  if (searchOpen) closeSearch();
+                  else setSearchOpen(true);
+                }}
+                className={cn(
+                  'flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                  searchOpen && 'bg-interactive-active text-foreground',
+                )}
+                aria-label={t('sessions.sidebar.header.actions.searchSessions')}
+                aria-expanded={searchOpen}
+              >
+                <Icon name="search" className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.searchSessions')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={selectionMode ? exitSelectionMode : enterSelectionMode}
+                className={cn(
+                  'flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                  selectionMode && 'bg-interactive-active text-foreground',
+                )}
+                aria-label={t(selectionMode
+                  ? 'sessions.sidebar.header.actions.exitSelection'
+                  : 'sessions.sidebar.header.actions.selectSessions')}
+                aria-pressed={selectionMode}
+              >
+                <Icon name={selectionMode ? 'checkbox' : 'checkbox-multiple'} className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t(selectionMode
+              ? 'sessions.sidebar.header.actions.exitSelection'
+              : 'sessions.sidebar.header.actions.selectSessions')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                aria-label={t('sessions.sidebar.header.actions.sessionDisplayMode')}
+              >
+                <Icon name="equalizer-2" className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-56">
+              <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={projectSortOrder}
+                onValueChange={(value) => {
+                  if (value === 'manual' || value === 'a-z' || value === 'z-a' || value === 'date-added' || value === 'recent') {
+                    setProjectSortOrder(value);
+                  }
+                }}
+              >
+                <DropdownMenuRadioItem value="manual">{t('sessions.sidebar.header.projectSort.manual')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="a-z">{t('sessions.sidebar.header.projectSort.aToZ')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="z-a">{t('sessions.sidebar.header.projectSort.zToA')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="date-added">{t('sessions.sidebar.header.projectSort.dateAdded')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="recent">{t('sessions.sidebar.header.projectSort.recent')}</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>{t('sessions.sidebar.header.grouping.label')}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={sessionGroupingMode}
+                onValueChange={(value) => {
+                  if (value === 'by-worktree' || value === 'flat') setSessionGroupingMode(value);
+                }}
+              >
+                <DropdownMenuRadioItem value="by-worktree">{t('sessions.sidebar.header.grouping.byWorktree')}</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="flat">{t('sessions.sidebar.header.grouping.flat')}</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              {runtime.isVSCode ? (
+                <DropdownMenuItem onClick={toggleArchivedSessions}>
+                  <Icon name={showArchived ? 'check' : 'checkbox-blank'} className="mr-2 size-4" />
+                  {t('sessions.sidebar.header.displayMode.showArchived')}
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem onClick={toggleRecentSection}>
+                <Icon name={showRecentSection ? 'check' : 'checkbox-blank'} className="mr-2 size-4" />
+                {t('sessions.sidebar.header.displayMode.showRecent')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={toggleStickyZoneHeaders}>
+                <Icon name={stickyZoneHeaders ? 'check' : 'checkbox-blank'} className="mr-2 size-4" />
+                {t('sessions.sidebar.header.displayMode.stickyHeaders')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => {
+                setCollapsedGroupIds(new Set(workspaceGroups.map((group) => group.id)));
+                setExpandedIds(new Set());
+              }}>
+                <Icon name="arrow-right-s" className="mr-2 size-4" />
+                {t('sessions.sidebar.header.displayMode.collapseAll')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => {
+                setCollapsedGroupIds(new Set());
+                setExpandedIds(new Set(collectPiSessionForestIds(workspaceGroups.flatMap((group) => group.forest))));
+              }}>
+                <Icon name="arrow-down-s" className="mr-2 size-4" />
+                {t('sessions.sidebar.header.displayMode.expandAll')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {searchOpen ? (
+          <div className="shrink-0 px-2.5 pb-2 pt-0.5">
+            <div className="mb-1 flex items-center justify-between px-0.5 typography-micro text-muted-foreground/80">
+              {query ? (
+                <span>{visibleCount === 1
+                  ? t('sessions.sidebar.header.search.matchCountSingle', { count: visibleCount })
+                  : t('sessions.sidebar.header.search.matchCountPlural', { count: visibleCount })}</span>
+              ) : <span />}
+              <span>{t('sessions.sidebar.header.search.escapeHint')}</span>
+            </div>
+            <div className="relative">
+              <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={searchInputRef}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape') return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (query) setQuery('');
+                  else closeSearch();
+                }}
+                placeholder={t('sessions.sidebar.header.search.placeholder')}
+                className="h-8 w-full pl-8 pr-8 typography-ui-label"
+                aria-label={t('sessions.sidebar.header.actions.searchSessions')}
+              />
+              <button
+                type="button"
+                onClick={query ? () => setQuery('') : closeSearch}
+                className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground"
+                aria-label={query
+                  ? t('sessions.sidebar.header.search.clear')
+                  : t('sessions.sidebar.header.actions.searchSessions')}
               >
                 <Icon name="close" className="size-3.5" />
               </button>
-            )}
+            </div>
           </div>
-          {query && (
-            <p className="mt-1 px-1 typography-micro text-muted-foreground">
-              {visibleCount === 1
-                ? t('sessions.sidebar.header.search.matchCountSingle', { count: visibleCount })
-                : t('sessions.sidebar.header.search.matchCountPlural', { count: visibleCount })}
-            </p>
-          )}
-        </div>
+        ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {catalogLoading && summaries.length === 0 ? (
@@ -811,7 +1123,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                     <ContextMenuTrigger
                       render={(
                         <div
-                          className="flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground"
+                          className={cn(
+                            'flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+                            stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
+                          )}
                           aria-label={t('sessions.sidebar.project.actions.projectMenu')}
                         />
                       )}
@@ -824,7 +1139,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                           <ContextMenuItem
                             disabled={projectIndex <= 0}
                             onClick={() => {
-                              if (projectIndex > 0) reorderProjects(projectIndex, 0);
+                              if (projectIndex > 0) {
+                                reorderProjects(projectIndex, 0);
+                                setProjectSortOrder('manual');
+                              }
                             }}
                           >
                             <Icon name="pushpin" className="mr-2 size-4" />
@@ -882,7 +1200,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                     </ContextMenuContent>
                   </ContextMenu>
                 ) : (
-                  <div className="flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground">
+                  <div className={cn(
+                    'flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+                    stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
+                  )}>
                     {groupHeaderContent}
                   </div>
                 )}
@@ -898,8 +1219,14 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       expandedIds={expandedIds}
                       pendingDialogCountBySession={pendingDialogCountBySession}
                       pinnedIds={pinnedIds}
+                      selectedIds={selectedSessionIds}
+                      selectionMode={selectionMode}
                       untitled={untitled}
-                      onSelect={(session) => void handleSelect(session)}
+                      onToggleSelection={toggleSelection}
+                      onSelect={(session) => {
+                        if (selectionMode) toggleSelection(session);
+                        else void handleSelect(session);
+                      }}
                       onPrefetch={handlePrefetch}
                       onToggleExpanded={(sessionId) => setExpandedIds((current) => {
                         const next = new Set(current);
@@ -954,6 +1281,48 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
         </div>
 
         <div className="shrink-0 border-t border-border/60 px-2.5 py-2 pb-[max(0.5rem,var(--oc-safe-area-bottom-visual,0px))]">
+          {selectionMode ? (
+            <div className="mb-1.5 flex items-center gap-1">
+              <span className="min-w-0 flex-1 truncate px-1 typography-micro text-muted-foreground">
+                {t('sessions.sidebar.bulkActions.selectedCount', { count: selectedSessionIds.size })}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={selectedSessionIds.size === 0 || showArchived}
+                onClick={() => requestBulkAction('archive')}
+                className="h-7 px-2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                aria-label={t('sessions.sidebar.bulkActions.archive')}
+              >
+                <Icon name="inbox-archive" className="size-3.5" />
+                <span className="sr-only">{t('sessions.sidebar.bulkActions.archive')}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={selectedSessionIds.size === 0}
+                onClick={() => requestBulkAction('delete')}
+                className="h-7 px-2 text-destructive hover:text-destructive disabled:opacity-50"
+                aria-label={t('sessions.sidebar.bulkActions.delete')}
+              >
+                <Icon name="delete-bin" className="size-3.5" />
+                <span className="sr-only">{t('sessions.sidebar.bulkActions.delete')}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={exitSelectionMode}
+                className="h-7 px-2 text-muted-foreground hover:text-foreground"
+                aria-label={t('sessions.sidebar.header.actions.exitSelection')}
+              >
+                <Icon name="close" className="size-3.5" />
+                <span className="sr-only">{t('sessions.sidebar.header.actions.exitSelection')}</span>
+              </Button>
+            </div>
+          ) : null}
           <Button
             type="button"
             variant="ghost"
