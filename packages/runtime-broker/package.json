@@ -31,7 +31,8 @@
   },
   "dependencies": {
     "@piarium/pi-host": "0.1.0",
-    "@piarium/protocol": "0.1.0"
+    "@piarium/protocol": "0.1.0",
+    "@piarium/settings-store": "0.7.0"
   },
   "engines": {
     "node": ">=22.19.0"

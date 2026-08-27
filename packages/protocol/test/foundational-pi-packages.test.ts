@@ -1,0 +1,112 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import {
+  FOUNDATIONAL_PI_PACKAGE_IDS,
+  FOUNDATIONAL_PI_PACKAGE_INTENTS,
+  FOUNDATIONAL_PI_PACKAGE_MANIFEST,
+  FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
+  FOUNDATIONAL_PI_PACKAGE_OBSERVED_STATES,
+  FOUNDATIONAL_PI_PACKAGE_OPERATION_STATES,
+  FOUNDATIONAL_PI_PACKAGE_PROVENANCES,
+  FOUNDATIONAL_PI_PACKAGE_STATUS_STATES,
+  type FoundationalPiPackageStatusSnapshot,
+} from "../src/index.js";
+
+describe("foundational Pi package manifest", () => {
+  it("publishes revision 1 with the four stable identities and current sources", () => {
+    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION, 1);
+    assert.equal(FOUNDATIONAL_PI_PACKAGE_MANIFEST.revision, 1);
+    assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_IDS, [
+      "mcp",
+      "permission-system",
+      "workspace-history",
+      "wtf",
+    ]);
+
+    const integrations = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations;
+    assert.equal(new Set(integrations.map((entry) => entry.id)).size, 4);
+    assert.equal(new Set(integrations.map((entry) => entry.source)).size, 4);
+    const aliases = integrations.flatMap((entry) => [...entry.packageAliases]);
+    assert.equal(new Set(aliases).size, aliases.length);
+    assert.ok(integrations.every((entry) => entry.introducedRevision === 1));
+    assert.deepEqual(
+      Object.fromEntries(integrations.map((entry) => [entry.id, entry.source])),
+      {
+        mcp: "https://github.com/Youzini-afk/pi-mcp-adapter.git",
+        "permission-system": "npm:@gotgenes/pi-permission-system",
+        "workspace-history": "npm:pi-workspace-history",
+        wtf: "npm:pi-wtf",
+      },
+    );
+    assert.deepEqual(
+      Object.fromEntries(integrations.map((entry) => [entry.id, entry.packageName])),
+      {
+        mcp: "pi-mcp-adapter",
+        "permission-system": "@gotgenes/pi-permission-system",
+        "workspace-history": "pi-workspace-history",
+        wtf: "pi-wtf",
+      },
+    );
+    assert.ok(
+      integrations.every((entry) =>
+        entry.packageAliases.some((alias) => alias === entry.packageName),
+      ),
+    );
+    assert.ok(
+      integrations
+        .find((entry) => entry.id === "permission-system")
+        ?.packageAliases.includes("pi-permission-system"),
+    );
+  });
+
+  it("defines a browser-safe status snapshot across all independent state axes", () => {
+    assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_INTENTS, [
+      "eligible",
+      "suppressed",
+      "policy_skipped",
+    ]);
+    assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_PROVENANCES, ["none", "auto_managed", "adopted"]);
+    assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_OBSERVED_STATES, [
+      "missing",
+      "enabled",
+      "disabled",
+      "configured_broken",
+      "incompatible",
+      "source_conflict",
+    ]);
+    assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_OPERATION_STATES, [
+      "idle",
+      "planned",
+      "mutating",
+      "verifying",
+      "failed_retryable",
+      "action_required",
+    ]);
+    assert.deepEqual(FOUNDATIONAL_PI_PACKAGE_STATUS_STATES, [
+      "idle",
+      "running",
+      "ready",
+      "degraded",
+    ]);
+
+    const snapshot: FoundationalPiPackageStatusSnapshot = {
+      autoInstallNew: false,
+      entries: [
+        {
+          error: "Configured package could not be loaded",
+          id: "mcp",
+          intent: "policy_skipped",
+          observed: "source_conflict",
+          operation: "action_required",
+          provenance: "adopted",
+          source: "npm:pi-mcp-adapter",
+        },
+      ],
+      manifestRevision: 1,
+      revision: 3,
+      state: "degraded",
+    };
+
+    assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot);
+  });
+});
