@@ -1,10 +1,12 @@
 import { PiRuntimeBroker, resolveBundledPiHostEntry } from '@piarium/runtime-broker';
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
 
 export function createWebPiRuntimeBroker({
   agentDir,
   clientVersion,
   cwd,
   emit = () => {},
+  foundationalPackages = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
   hostEntry,
   nodePath,
   packageRoot,
@@ -19,6 +21,7 @@ export function createWebPiRuntimeBroker({
     },
     ...(typeof cwd === 'string' && cwd ? { cwd } : {}),
     emit,
+    foundationalPackages,
     hostEntry: hostEntry || resolveBundledPiHostEntry(),
     ...(nodePath ? { nodePath } : {}),
     ...(packageRoot ? { packageRoot } : {}),

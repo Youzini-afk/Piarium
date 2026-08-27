@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { PiRuntimeBroker, resolveBundledPiHostEntry } from '@piarium/runtime-broker';
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
 
 const PI_HOST_PACKAGE_ENTRY = path.join(
   'node_modules',
@@ -51,6 +52,7 @@ export const createDesktopPiRuntimeBroker = ({
   agentDir,
   clientVersion,
   emit,
+  foundationalPackages = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
   nodePath,
   packaged,
   packageRoot,
@@ -65,6 +67,7 @@ export const createDesktopPiRuntimeBroker = ({
     mode: 'desktop',
   },
   emit,
+  foundationalPackages,
   hostEntry: resolveElectronPiHostEntry({
     packaged,
     resourcesPath,

@@ -847,7 +847,9 @@ export class HostController {
         );
       }
       case "package.list":
-        return this.#sessionHost.listPackages();
+        return this.#sessionHost.refreshPackages();
+      case "package.bootstrap":
+        return this.#sessionHost.bootstrapPackages(readStringList(params, "sources"));
       case "package.install":
         return this.#sessionHost.installPackage(
           readString(params, "source"),

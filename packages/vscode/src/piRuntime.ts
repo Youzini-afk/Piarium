@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as vscode from 'vscode';
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST } from '@piarium/protocol';
 import {
   PiRuntimeBroker,
   type PiRuntimeBrokerEvent,
@@ -216,6 +217,7 @@ export class VSCodePiRuntime implements vscode.Disposable {
       emit: (event) => {
         if (this.#broker === broker) this.#handleBrokerEvent(event);
       },
+      foundationalPackages: FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations,
       hostEntry,
       nodePath,
     });

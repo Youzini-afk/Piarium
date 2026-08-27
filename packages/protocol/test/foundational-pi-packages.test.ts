@@ -9,6 +9,8 @@ import {
   FOUNDATIONAL_PI_PACKAGE_OPERATION_STATES,
   FOUNDATIONAL_PI_PACKAGE_PROVENANCES,
   FOUNDATIONAL_PI_PACKAGE_STATUS_STATES,
+  foundationalPackageIdentity,
+  matchesFoundationalPackage,
   type FoundationalPiPackageStatusSnapshot,
 } from "../src/index.js";
 
@@ -108,5 +110,22 @@ describe("foundational Pi package manifest", () => {
     };
 
     assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot);
+  });
+
+  it("matches scoped npm versions and Git basenames without replacing the observed source", () => {
+    const permission = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[1];
+    const mcp = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0];
+    assert.ok(permission);
+    assert.ok(mcp);
+    assert.equal(foundationalPackageIdentity("npm:@gotgenes/pi-permission-system@2.4.0"), "@gotgenes/pi-permission-system");
+    assert.equal(foundationalPackageIdentity("git@github.com:fork/pi-mcp-adapter.git"), "pi-mcp-adapter");
+    assert.equal(matchesFoundationalPackage(permission, {
+      name: "@gotgenes/pi-permission-system",
+      source: "npm:@gotgenes/pi-permission-system@2.4.0",
+    }), true);
+    assert.equal(matchesFoundationalPackage(mcp, {
+      name: "pi-mcp-adapter",
+      source: "https://github.com/example/pi-mcp-adapter.git",
+    }), true);
   });
 });

@@ -83,6 +83,9 @@ describe("surface runtime protocol", () => {
     assert.equal(isRuntimeMethod("config.watch"), true);
     assert.equal(isRuntimeMethod("mcp.config.snapshot"), true);
     assert.equal(isRuntimeMethod("package.setEnabled"), true);
+    assert.equal(isRuntimeMethod("package.foundation.status"), true);
+    assert.equal(isRuntimeMethod("package.foundation.restore"), true);
+    assert.equal(isRuntimeMethod("package.foundation.setAutoInstallNew"), true);
     assert.equal(isRuntimeMethod("session.tree"), true);
     assert.equal(isRuntimeMethod("session.features.get"), true);
     assert.equal(isRuntimeMethod("session.features.mutate"), true);
@@ -141,6 +144,7 @@ describe("surface runtime protocol", () => {
 
   it("rejects worker-only methods and unrouted events", () => {
     assert.equal(isRuntimeMethod("host.shutdown"), false);
+    assert.equal(isRuntimeMethod("package.bootstrap"), false);
     assert.equal(isRuntimeMethod("session.resolve"), false);
     assert.throws(
       () =>

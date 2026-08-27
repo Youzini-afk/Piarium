@@ -1,5 +1,7 @@
 import {
   PIARIUM_PROTOCOL_VERSION,
+  FOUNDATIONAL_PI_PACKAGE_IDS,
+  type FoundationalPiPackageId,
   type ExtensionUiResponse,
   type HostMode,
   type HostMethodParams,
@@ -103,6 +105,17 @@ function requireStringList(record: Record<string, unknown>, key: string): string
     throw new RuntimeDispatchError("invalid_params", `${key} must be an array of strings`);
   }
   return value;
+}
+
+function optionalFoundationalPackageIds(
+  record: Record<string, unknown>,
+): FoundationalPiPackageId[] | undefined {
+  if (record.ids === undefined) return undefined;
+  const ids = requireStringList(record, "ids");
+  if (ids.some((id) => !FOUNDATIONAL_PI_PACKAGE_IDS.includes(id as FoundationalPiPackageId))) {
+    throw new RuntimeDispatchError("invalid_params", "ids contains an unknown foundational package id");
+  }
+  return ids as FoundationalPiPackageId[];
 }
 
 function requireEnum<T extends string>(
@@ -668,15 +681,27 @@ async function dispatchRuntimeRequestUnchecked(
     case "package.list": {
       return requestForRuntimeContext(broker, requireRuntimeContext(input), "package.list", {});
     }
+    case "package.foundation.status": {
+      rejectUnknownKeys(input, [], "package.foundation.status");
+      return broker.foundationalPackageStatus();
+    }
+    case "package.foundation.restore": {
+      rejectUnknownKeys(input, ["ids"], "package.foundation.restore");
+      return broker.restoreFoundationalPackages(optionalFoundationalPackageIds(input));
+    }
+    case "package.foundation.setAutoInstallNew": {
+      rejectUnknownKeys(input, ["enabled"], "package.foundation.setAutoInstallNew");
+      return broker.setAutoInstallNewFoundationalPackages(requireBoolean(input, "enabled"));
+    }
     case "package.install":
     case "package.remove": {
-      return requestForRuntimeContext(broker, requireRuntimeContext(input), method, {
+      return broker.mutatePackage(requireRuntimeContext(input), method, {
         scope: requireEnum(input, "scope", ["global", "project"] as const),
         source: requireString(input, "source"),
       });
     }
     case "package.setEnabled": {
-      return requestForRuntimeContext(broker, requireRuntimeContext(input), method, {
+      return broker.mutatePackage(requireRuntimeContext(input), method, {
         enabled: requireBoolean(input, "enabled"),
         scope: requireEnum(input, "scope", ["global", "project"] as const),
         source: requireString(input, "source"),
@@ -684,7 +709,7 @@ async function dispatchRuntimeRequestUnchecked(
     }
     case "package.update": {
       const source = optionalString(input, "source");
-      return requestForRuntimeContext(broker, requireRuntimeContext(input), "package.update", {
+      return broker.mutatePackage(requireRuntimeContext(input), "package.update", {
         ...(source === undefined ? {} : { source }),
       });
     }

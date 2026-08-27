@@ -27,6 +27,7 @@ import type {
   ImageAttachment,
   JsonValue,
   ModelDescriptor,
+  PackageBootstrapResult,
   PackageDescriptor,
   PiCommandDescriptor,
   PiPackageScope,
@@ -298,17 +299,25 @@ function packageNameFromSource(source: string): string {
   return normalized.slice(normalized.lastIndexOf("/") + 1).replace(/\.git$/i, "") || value;
 }
 
-function packageVersionFromPath(installedPath: string | undefined): string | undefined {
-  if (!installedPath) return undefined;
+function packageManifestFromPath(
+  installedPath: string | undefined,
+): { name?: string; version?: string } {
+  if (!installedPath) return {};
   try {
     const manifest = JSON.parse(readFileSync(join(installedPath, "package.json"), "utf8")) as {
+      name?: unknown;
       version?: unknown;
     };
-    return typeof manifest.version === "string" && manifest.version.trim().length > 0
-      ? manifest.version
-      : undefined;
+    return {
+      ...(typeof manifest.name === "string" && manifest.name.trim().length > 0
+        ? { name: manifest.name.trim() }
+        : {}),
+      ...(typeof manifest.version === "string" && manifest.version.trim().length > 0
+        ? { version: manifest.version.trim() }
+        : {}),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -1554,7 +1563,7 @@ export class SessionHost {
   listPackages(): PackageDescriptor[] {
     const manager = this.#packageManager();
     return manager.listConfiguredPackages().map((entry) => {
-      const version = packageVersionFromPath(entry.installedPath);
+      const manifest = packageManifestFromPath(entry.installedPath);
       const settings = entry.scope === "project"
         ? this.runtime.services.settingsManager.getProjectSettings()
         : this.runtime.services.settingsManager.getGlobalSettings();
@@ -1564,20 +1573,64 @@ export class SessionHost {
       return {
         enabled: configured === undefined ? true : packageSourceEnabled(configured),
         installed: entry.installedPath !== undefined && existsSync(entry.installedPath),
-        name: packageNameFromSource(entry.source),
+        name: manifest.name ?? packageNameFromSource(entry.source),
         ...(entry.installedPath === undefined ? {} : { resolvedPath: entry.installedPath }),
         scope: entry.scope === "project" ? "project" : "global",
         source: entry.source,
         structured: entry.filtered,
-        ...(version === undefined ? {} : { version }),
+        ...(manifest.version === undefined ? {} : { version: manifest.version }),
       };
     });
   }
 
+  async refreshPackages(): Promise<PackageDescriptor[]> {
+    await this.#reloadPackageSettings();
+    return this.listPackages();
+  }
+
+  async bootstrapPackages(sources: readonly string[]): Promise<PackageBootstrapResult> {
+    await this.#reloadPackageSettings();
+    const manager = this.#packageManager();
+    const results: PackageBootstrapResult["results"] = [];
+    let changed = false;
+    for (const source of sources) {
+      const sourceIdentity = packageNameFromSource(source).toLowerCase();
+      const configured = this.listPackages().some((entry) => (
+        entry.scope === "global"
+        && (
+          entry.source === source
+          || entry.name.toLowerCase() === sourceIdentity
+          || packageNameFromSource(entry.source).toLowerCase() === sourceIdentity
+        )
+      ));
+      if (configured) {
+        results.push({ source, status: "already_configured" });
+        continue;
+      }
+      try {
+        await manager.installAndPersist(source, { local: false });
+        changed = true;
+        results.push({ source, status: "installed" });
+      } catch (error) {
+        results.push({
+          error: error instanceof Error ? error.message : String(error),
+          source,
+          status: "failed",
+        });
+      }
+    }
+    if (changed) {
+      await this.#flushPackageSettings();
+      await this.session.reload();
+    }
+    return { packages: this.listPackages(), results };
+  }
+
   async installPackage(source: string, scope: PiPackageScope): Promise<PackageDescriptor> {
+    await this.#reloadPackageSettings();
     const manager = this.#packageManager();
     await manager.installAndPersist(source, { local: scope === "project" });
-    await this.runtime.services.settingsManager.flush();
+    await this.#flushPackageSettings();
     await this.session.reload();
     const resolvedPath = manager.getInstalledPath(source, scope === "project" ? "project" : "user");
     return this.listPackages().find((entry) => (
@@ -1599,6 +1652,7 @@ export class SessionHost {
     scope: PiPackageScope,
     enabled: boolean,
   ): Promise<PackageDescriptor> {
+    await this.#reloadPackageSettings();
     const settings = this.runtime.services.settingsManager;
     const current = scope === "project"
       ? settings.getProjectSettings().packages ?? []
@@ -1631,6 +1685,7 @@ export class SessionHost {
   }
 
   async removePackage(source: string, scope: PiPackageScope): Promise<boolean> {
+    await this.#reloadPackageSettings();
     const manager = this.#packageManager();
     const local = scope === "project";
     const configured = manager.listConfiguredPackages().find((entry) => (
@@ -1661,12 +1716,13 @@ export class SessionHost {
         removed = true;
       }
     }
-    await this.runtime.services.settingsManager.flush();
+    await this.#flushPackageSettings();
     await this.session.reload();
     return removed;
   }
 
   async updatePackages(source?: string): Promise<PackageDescriptor[]> {
+    await this.#reloadPackageSettings();
     const manager = this.#packageManager();
     await manager.update(source);
     await this.session.reload();
@@ -2446,6 +2502,30 @@ export class SessionHost {
       });
     });
     return manager;
+  }
+
+  async #reloadPackageSettings(): Promise<void> {
+    const settings = this.runtime.services.settingsManager;
+    await settings.reload();
+    const errors = settings.drainErrors();
+    if (errors.length > 0) {
+      throw new HostError(
+        "settings_read_failed",
+        errors.map((entry) => entry.error.message).join("; "),
+      );
+    }
+  }
+
+  async #flushPackageSettings(): Promise<void> {
+    const settings = this.runtime.services.settingsManager;
+    await settings.flush();
+    const errors = settings.drainErrors();
+    if (errors.length === 0) return;
+    await settings.reload();
+    throw new HostError(
+      "settings_write_failed",
+      errors.map((entry) => entry.error.message).join("; "),
+    );
   }
 
   async #listAllFromAgentDir() {
