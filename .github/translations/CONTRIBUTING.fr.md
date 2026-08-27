@@ -48,17 +48,13 @@ unique et un seul contrat d'exécution préliminaire actuel.
    ensemble. Supprimez les chemins OpenCode obsolètes et les anciens chemins Piarium dès que le remplacement est
    accepté ; n'accumulez pas de couches de compatibilité de type protocole v13/v14 sans besoin réel de données
    persistées ou de client externe.
-4. **Préservez délibérément le comportement.** Le fork OpenChamber du mainteneur est un support de référence en
-   lecture seule. Conservez ses comportements utiles liés à l'espace de travail, aux fournisseurs, au cloud, au
-   distant, aux sessions et à la sécurité, sauf si le remplacement natif Pi est manifestement équivalent ou si la
-   décision produit les modifie explicitement.
-5. **Appliquez les privilèges à la frontière de confiance.** Les renderers et les clients distants ne peuvent pas
+4. **Appliquez les privilèges à la frontière de confiance.** Les renderers et les clients distants ne peuvent pas
    s'autoriser eux-mêmes. Validez les opérations sur le système de fichiers, les processus, le réseau, la confiance
    dans le projet et les identifiants dans l'hôte qui possède la capacité.
-6. **N'ajoutez pas de limites arbitraires au produit.** Évitez la troncature silencieuse, les plafonds de nombre de
+5. **N'ajoutez pas de limites arbitraires au produit.** Évitez la troncature silencieuse, les plafonds de nombre de
    modèles, les délais d'attente courts ou les plafonds de concurrence cachés. Les budgets opérationnels doivent être
    des options de déploiement explicites, avec une sémantique d'échec visible.
-7. **Gardez les échecs fidèles à la réalité.** Un échec faisant autorité n'est pas une réponse vide réussie. Rendez
+6. **Gardez les échecs fidèles à la réalité.** Un échec faisant autorité n'est pas une réponse vide réussie. Rendez
    visibles l'annulation, l'échec partiel, le nettoyage, la nouvelle tentative, le retour arrière et les
    capacités indisponibles.
 

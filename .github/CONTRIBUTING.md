@@ -47,17 +47,13 @@ one current pre-release runtime contract.
 3. **Avoid compatibility sediment.** During pre-1.0 development, all product surfaces move together.
    Remove obsolete OpenCode and superseded Piarium paths once the replacement is accepted; do not
    accumulate protocol v13/v14-style shims without a real persisted-data or external-client need.
-4. **Preserve behavior deliberately.** The maintainer's OpenChamber fork is read-only reference
-   material. Keep its valuable workspace, provider, cloud, remote, session, and security behavior
-   unless the Pi-native replacement is demonstrably equivalent or the product decision explicitly
-   changes it.
-5. **Enforce privilege at the trusted boundary.** Renderers and remote clients cannot authorize
+4. **Enforce privilege at the trusted boundary.** Renderers and remote clients cannot authorize
    themselves. Validate filesystem, process, network, project-trust, and credential operations in
    the host that owns the capability.
-6. **Do not add arbitrary product limits.** Avoid silent truncation, model-count caps, short timeouts,
+5. **Do not add arbitrary product limits.** Avoid silent truncation, model-count caps, short timeouts,
    or hidden concurrency ceilings. Operational budgets should be explicit deployment opt-ins with
    visible failure semantics.
-7. **Keep failures truthful.** An authoritative failure is not a successful empty response. Make
+6. **Keep failures truthful.** An authoritative failure is not a successful empty response. Make
    cancellation, partial failure, cleanup, retry, rollback, and unavailable capabilities visible.
 
 Read [Architecture](../docs/architecture.md), [Plugin GUI design](../docs/plugin-gui-design.md),
