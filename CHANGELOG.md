@@ -5,6 +5,11 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.0
+
+Piarium 0.9.0 turns the Agent Workspace and IDE Workbench into a more cohesive daily workspace,
+with a unified editor platform and a substantially refined Pi-native conversation experience.
+
 - Fix packaged desktop language services by resolving built-in ASAR assets to their physical unpacked
   directory, launching Electron-backed language processes in Node mode, and shipping self-contained
   TypeScript runtime metadata
@@ -16,6 +21,17 @@ private runtime protocol and product surfaces still move together.
   through the Piarium extension tooling contract
 - Keep Monaco lazy from ordinary Web, mobile, and mini-chat entrypoints and verify cold/warm editor,
   worker, bundle, and owner cleanup behavior in production artifacts
+- Make sends transactional, switch and preview sessions without blocking navigation, virtualize long
+  conversations, preserve reading position, and keep session actions responsive
+- Rework the composer around Pi's real model, thinking, Agent, and permission capabilities; show an
+  honest assistant working state and provider-reported input, output, reasoning, cache, and total token
+  usage only when those fields are available
+- Group conversations by product workspace while retaining explicit general chats, and let the IDE
+  select nested Git repositories without creating another workspace authority
+- Update the supported Pi runtime to 0.84.3, improve global runtime discovery and Windows upgrades, and
+  make packaged TypeScript language services start from their real distribution assets
+- Unify Piarium branding around the startup cube and refine the adaptive splash and Workbench transition
+  lifecycle across desktop and Web
 
 ## 0.8.0
 
