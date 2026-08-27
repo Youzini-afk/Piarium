@@ -359,11 +359,15 @@ export class PiRuntimeLifecycle {
     const unsubscribe = broker.subscribe((event) => {
       this.#workerGenerations.set(event.workerId, id);
       const eventSessionId = "sessionId" in event ? event.sessionId : undefined;
-      if (eventSessionId) this.#sessionGenerations.set(eventSessionId, id);
+      if (event.role === "session" && eventSessionId) {
+        this.#sessionGenerations.set(eventSessionId, id);
+      }
       for (const listener of this.#brokerListeners) listener(event);
       if (event.kind === "worker.exit") {
         this.#workerGenerations.delete(event.workerId);
-        if (eventSessionId) this.#sessionGenerations.delete(eventSessionId);
+        if (event.role === "session" && eventSessionId) {
+          this.#sessionGenerations.delete(eventSessionId);
+        }
       }
       if (event.kind === "worker.exit" && event.role === "session") {
         void this.#retireIdleGeneration(id);

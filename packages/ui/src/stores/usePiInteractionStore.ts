@@ -169,7 +169,7 @@ export const createPiInteractionStore = (
   let activeClient: PiInteractionRuntimeClient | null = null;
   let unsubscribeEvents: (() => void) | null = null;
   let editorRevision = 0;
-  const catalogSessionByWorker = new Map<string, string>();
+  const workspaceSessionByWorker = new Map<string, string>();
 
   const store = create<PiInteractionStoreState>((set, get) => {
     const contextIsCurrent = (runtimeKey: string): boolean => (
@@ -389,10 +389,10 @@ export const createPiInteractionStore = (
           }));
           return;
         case 'session.snapshot': {
-          if (envelope.source.role !== 'catalog') return;
-          const previousSessionId = catalogSessionByWorker.get(envelope.source.workerId);
+          if (envelope.source.role !== 'workspace') return;
+          const previousSessionId = workspaceSessionByWorker.get(envelope.source.workerId);
           const nextSessionId = envelope.data.sessionId;
-          catalogSessionByWorker.set(envelope.source.workerId, nextSessionId);
+          workspaceSessionByWorker.set(envelope.source.workerId, nextSessionId);
           if (!previousSessionId || previousSessionId === nextSessionId) return;
           set((state) => ({
             dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== previousSessionId),
@@ -402,8 +402,8 @@ export const createPiInteractionStore = (
         }
         case 'session.closed': {
           const { sessionId } = envelope.data;
-          if (envelope.source.role === 'catalog') {
-            catalogSessionByWorker.delete(envelope.source.workerId);
+          if (envelope.source.role === 'workspace') {
+            workspaceSessionByWorker.delete(envelope.source.workerId);
           }
           set((state) => ({
             dialogs: state.dialogs.filter((dialog) => dialog.sessionId !== sessionId),
@@ -474,7 +474,7 @@ export const createPiInteractionStore = (
       },
 
       reset: () => {
-        catalogSessionByWorker.clear();
+        workspaceSessionByWorker.clear();
         unsubscribeEvents?.();
         unsubscribeEvents = null;
         activeClient = null;

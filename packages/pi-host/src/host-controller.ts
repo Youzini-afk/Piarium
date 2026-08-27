@@ -12,6 +12,7 @@ import {
   type HostCapabilities,
   type HostEvent,
   type HostEventData,
+  type HostMethod,
   type ImageAttachment,
   type JsonValue,
   parsePiSessionFeatureMutation,
@@ -32,11 +33,13 @@ import {
   type PiPackageScope,
   type RuntimeDescriptor,
   type RuntimeSourceKind,
+  type RuntimeWorkerRole,
   THINKING_LEVELS,
   type ThinkingLevel,
   type WireEnvelope,
 } from "@piarium/protocol";
 import { HostError, toProtocolError } from "./errors.js";
+import { PackageAuthorityHost } from "./package-authority-host.js";
 import { expectRecord, readBoolean, readJson, readString } from "./params.js";
 import { resolvePiSdkSpecifier } from "./pi-sdk-packages.js";
 import { SessionHost } from "./session-host.js";
@@ -65,6 +68,30 @@ const OUT_OF_BAND_METHODS = new Set([
   "extension.ui.respond",
   "provider.auth.respond",
   "project.trust.respond",
+]);
+
+const COMMON_ROLE_METHODS = new Set<HostMethod>(["host.handshake", "host.shutdown"]);
+const CATALOG_ROLE_METHODS = new Set<HostMethod>([
+  ...COMMON_ROLE_METHODS,
+  "session.entries.read",
+  "session.list",
+  "session.rename",
+  "session.resolve",
+]);
+const PACKAGE_ROLE_METHODS = new Set<HostMethod>([
+  ...COMMON_ROLE_METHODS,
+  "package.bootstrap",
+  "package.install",
+  "package.list",
+  "package.remove",
+  "package.setEnabled",
+  "package.update",
+]);
+const CONTEXT_FORBIDDEN_METHODS = new Set<HostMethod>([
+  "package.bootstrap",
+  "session.entries.read",
+  "session.list",
+  "session.resolve",
 ]);
 
 interface PiSessionFileModule {
@@ -124,6 +151,7 @@ export interface HostControllerOptions {
   projectTrustOverride?: boolean;
   runtimeSource?: RuntimeSourceKind;
   transport: HostTransport;
+  workerRole?: RuntimeWorkerRole;
 }
 
 function readImages(record: Record<string, unknown>): ImageAttachment[] | undefined {
@@ -277,9 +305,11 @@ function readConfigWatchTarget(value: unknown): PiConfigWatchTarget {
 export class HostController {
   readonly #agentDir: string;
   readonly #packageRoot: string | undefined;
+  readonly #packageAuthority: PackageAuthorityHost | undefined;
   readonly #runtimeSource: RuntimeSourceKind;
   readonly #sessionHost: SessionHost;
   readonly #transport: HostTransport;
+  readonly #workerRole: RuntimeWorkerRole;
   #disposed = false;
   #requestQueue: Promise<void> = Promise.resolve();
   #sequence = 0;
@@ -290,6 +320,17 @@ export class HostController {
     this.#packageRoot = options.packageRoot ? resolve(options.packageRoot) : undefined;
     this.#runtimeSource = options.runtimeSource ?? (this.#packageRoot ? "custom" : "bundled");
     this.#transport = options.transport;
+    this.#workerRole = options.workerRole ?? "session";
+    this.#packageAuthority = this.#workerRole === "package"
+      ? new PackageAuthorityHost({
+          agentDir: this.#agentDir,
+          cwd: process.cwd(),
+          emitProgress: (data) => this.emit("package.progress", data),
+          ...(options.projectTrustOverride === undefined
+            ? {}
+            : { projectTrustOverride: options.projectTrustOverride }),
+        })
+      : undefined;
     this.#sessionHost = new SessionHost({
       agentDir: this.#agentDir,
       emit: (event, data) => this.emit(event, data),
@@ -366,6 +407,13 @@ export class HostController {
       });
       return;
     }
+    if (!this.#methodAllowed(envelope.method)) {
+      this.#transport.send(createErrorResponse(envelope.id, {
+        code: "worker_role_violation",
+        message: `Pi ${this.#workerRole} worker cannot handle ${envelope.method}`,
+      }));
+      return;
+    }
     let shutdownAfterResponse = false;
     try {
       const result = await this.#dispatch(envelope);
@@ -381,6 +429,13 @@ export class HostController {
       this.#transport.send(createErrorResponse(envelope.id, toProtocolError(error)));
     }
     if (shutdownAfterResponse) await this.dispose();
+  }
+
+  #methodAllowed(method: HostMethod): boolean {
+    if (this.#workerRole === "catalog") return CATALOG_ROLE_METHODS.has(method);
+    if (this.#workerRole === "package") return PACKAGE_ROLE_METHODS.has(method);
+    if (method === "catalog.context.open") return this.#workerRole === "workspace";
+    return !CONTEXT_FORBIDDEN_METHODS.has(method);
   }
 
   async #handleFatalError(error: unknown): Promise<void> {
@@ -847,29 +902,47 @@ export class HostController {
         );
       }
       case "package.list":
-        return this.#sessionHost.refreshPackages();
+        return this.#packageAuthority
+          ? this.#packageAuthority.refreshPackages()
+          : this.#sessionHost.refreshPackages();
       case "package.bootstrap":
-        return this.#sessionHost.bootstrapPackages(readStringList(params, "sources"));
-      case "package.install":
-        return this.#sessionHost.installPackage(
-          readString(params, "source"),
-          readPackageScope(params),
-        );
-      case "package.remove":
+        return this.#packageAuthority
+          ? this.#packageAuthority.bootstrapPackages(readStringList(params, "sources"))
+          : this.#sessionHost.bootstrapPackages(readStringList(params, "sources"));
+      case "package.install": {
+        const scope = readPackageScope(params);
+        if (this.#packageAuthority) {
+          return this.#packageAuthority.installPackage(readString(params, "source"), scope);
+        }
+        return this.#sessionHost.installPackage(readString(params, "source"), scope);
+      }
+      case "package.remove": {
+        const scope = readPackageScope(params);
         return {
-          removed: await this.#sessionHost.removePackage(
-            readString(params, "source"),
-            readPackageScope(params),
-          ),
+          removed: await (this.#packageAuthority
+            ? this.#packageAuthority.removePackage(readString(params, "source"), scope)
+            : this.#sessionHost.removePackage(readString(params, "source"), scope)),
         };
-      case "package.setEnabled":
+      }
+      case "package.setEnabled": {
+        const scope = readPackageScope(params);
+        if (this.#packageAuthority) {
+          return this.#packageAuthority.setPackageEnabled(
+            readString(params, "source"),
+            scope,
+            readBoolean(params, "enabled"),
+          );
+        }
         return this.#sessionHost.setPackageEnabled(
           readString(params, "source"),
-          readPackageScope(params),
+          scope,
           readBoolean(params, "enabled"),
         );
+      }
       case "package.update":
-        return this.#sessionHost.updatePackages(optionalString(params, "source"));
+        return this.#packageAuthority
+          ? this.#packageAuthority.updatePackages(optionalString(params, "source"))
+          : this.#sessionHost.updatePackages(optionalString(params, "source"));
       case "extension.ui.respond": {
         const cancelled = readBoolean(params, "cancelled", { optional: true });
         const response: ExtensionUiResponse = {

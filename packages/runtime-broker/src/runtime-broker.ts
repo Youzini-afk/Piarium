@@ -14,6 +14,7 @@ import type {
   PiConfigWatchTarget,
   RuntimeContextTarget,
   RuntimeSourceKind,
+  RuntimeWorkerRole,
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
@@ -47,18 +48,24 @@ interface PendingProjectTrust {
   client: PiHostClient;
 }
 
+interface WorkspaceWorkerContext {
+  client: PiHostClient;
+  cwd: string;
+  ready: Promise<{ client: PiHostClient; sessionId: string }>;
+}
+
 export type PiRuntimeBrokerEvent =
   | {
       kind: "diagnostic";
       level: "error" | "info";
       message: string;
-      role: "catalog" | "session";
+      role: RuntimeWorkerRole;
       workerId: string;
     }
   | {
       envelope: EventEnvelope;
       kind: "host";
-      role: "catalog" | "session";
+      role: RuntimeWorkerRole;
       sessionId?: string;
       workerId: string;
     }
@@ -66,7 +73,7 @@ export type PiRuntimeBrokerEvent =
       code: number | null;
       expected: boolean;
       kind: "worker.exit";
-      role: "catalog" | "session";
+      role: RuntimeWorkerRole;
       sequence: number;
       sessionId?: string;
       signal: NodeJS.Signals | null;
@@ -150,10 +157,9 @@ export class PiRuntimeBroker {
   readonly #pendingWorkspaceBindings = new Map<string, SessionWorkspaceBinding>();
   readonly #pendingProjectTrust = new Map<string, PendingProjectTrust>();
   readonly #foundationalPackages: readonly FoundationalPiPackageManifestEntry[];
+  readonly #workspaceContexts = new Map<string, WorkspaceWorkerContext>();
+  readonly #workspaceSessions = new Map<string, PiHostClient>();
   #catalog: PiHostClient | undefined;
-  #catalogContextCwd: string | undefined;
-  #catalogContextQueue: Promise<void> = Promise.resolve();
-  #catalogContextSessionId: string | undefined;
   #catalogPromise: Promise<PiHostClient> | undefined;
   #disposed = false;
   #foundationalBootstrapStarted = false;
@@ -209,7 +215,7 @@ export class PiRuntimeBroker {
 
   async warmup(): Promise<HostHandshakeResult> {
     const worker = await this.#getCatalog();
-    this.#startFoundationalBootstrap(worker);
+    this.#startFoundationalBootstrap();
     return worker.handshake;
   }
 
@@ -254,6 +260,12 @@ export class PiRuntimeBroker {
     method: M,
     params: HostMethodParams<M>,
   ): Promise<HostMethodResult<M>> {
+    if (method === "package.list") {
+      return this.#withPackageAuthority(
+        (worker) => worker.request(method, params),
+        cwd,
+      );
+    }
     if (PACKAGE_MUTATION_METHODS.has(method)) {
       return this.mutatePackage(
         { cwd },
@@ -261,41 +273,12 @@ export class PiRuntimeBroker {
         params as HostMethodParams<PiPackageMutationMethod>,
       ) as Promise<HostMethodResult<M>>;
     }
-    const normalizedCwd = resolve(cwd);
-    const request = this.#catalogContextQueue.then(async () => {
-      const worker = await this.#getCatalog();
-      if (this.#catalogContextCwd !== normalizedCwd) {
-        const snapshot = await worker.request("catalog.context.open", { cwd: normalizedCwd });
-        this.#catalogContextCwd = snapshot.cwd;
-        this.#catalogContextSessionId = snapshot.sessionId;
-      }
-      return worker.request(method, params);
-    });
-    this.#catalogContextQueue = request.then(
-      () => undefined,
-      () => undefined,
-    );
-    return request;
+    return this.#getWorkspaceContext(cwd).then(({ client }) => client.request(method, params));
   }
 
-  listCommandsForWorkspace(cwd: string): Promise<HostMethodResult<"command.list">> {
-    const normalizedCwd = resolve(cwd);
-    const request = this.#catalogContextQueue.then(async () => {
-      const worker = await this.#getCatalog();
-      if (this.#catalogContextCwd !== normalizedCwd) {
-        const snapshot = await worker.request("catalog.context.open", { cwd: normalizedCwd });
-        this.#catalogContextCwd = snapshot.cwd;
-        this.#catalogContextSessionId = snapshot.sessionId;
-      }
-      const sessionId = this.#catalogContextSessionId;
-      if (!sessionId) throw new PiRuntimeBrokerError("catalog_context_missing", "Pi catalog context is unavailable");
-      return worker.request("command.list", { sessionId });
-    });
-    this.#catalogContextQueue = request.then(
-      () => undefined,
-      () => undefined,
-    );
-    return request;
+  async listCommandsForWorkspace(cwd: string): Promise<HostMethodResult<"command.list">> {
+    const context = await this.#getWorkspaceContext(cwd);
+    return context.client.request("command.list", { sessionId: context.sessionId });
   }
 
   async listSessions(cwd?: string): Promise<SessionSummary[]> {
@@ -492,7 +475,24 @@ export class PiRuntimeBroker {
       const reconcileAfterMutation = method !== "settings.update"
         || ("set" in params && Object.hasOwn(params.set, "packages"))
         || ("remove" in params && params.remove.includes("packages"));
+      const invalidatesGlobalPackages = method === "package.update"
+        || (scope === "global" && reconcileAfterMutation);
       try {
+        if (method !== "settings.update" && scope === "global") {
+          return await this.#withPackageAuthority(async (worker) => {
+            const foundational = source === undefined
+              ? undefined
+              : await this.#foundationalPackageForMutation(worker, source);
+            return this.#coordinatePackageMutation(
+              receipt,
+              method,
+              scope,
+              foundational,
+              source,
+              () => worker.request(method, params),
+            );
+          });
+        }
         if ("sessionId" in target) {
           const worker = this.#workerForSession(target.sessionId);
           const foundational = source === undefined || scope !== "global"
@@ -507,7 +507,7 @@ export class PiRuntimeBroker {
             () => worker.request(method, params),
           );
         }
-        return await this.#withCatalogContext(resolve(target.cwd), async (worker) => {
+        return await this.#withWorkspaceContext(resolve(target.cwd), async (worker) => {
           const foundational = source === undefined || scope !== "global"
             ? undefined
             : await this.#foundationalPackageForMutation(worker, source);
@@ -521,6 +521,7 @@ export class PiRuntimeBroker {
           );
         });
       } finally {
+        if (invalidatesGlobalPackages) this.#invalidateWorkspaceContexts();
         if (reconcileAfterMutation) await this.#enqueueFoundationalReconcile({});
       }
     });
@@ -541,24 +542,9 @@ export class PiRuntimeBroker {
       worker = this.#workerForSession(target.sessionId);
       subscription = await worker.request("config.watch", { target: watchTarget });
     } else {
-      const normalizedCwd = resolve(target.cwd);
-      const request = this.#catalogContextQueue.then(async () => {
-        const catalog = await this.#getCatalog();
-        if (this.#catalogContextCwd !== normalizedCwd) {
-          const snapshot = await catalog.request("catalog.context.open", { cwd: normalizedCwd });
-          this.#catalogContextCwd = snapshot.cwd;
-          this.#catalogContextSessionId = snapshot.sessionId;
-        }
-        return {
-          subscription: await catalog.request("config.watch", { target: watchTarget }),
-          worker: catalog,
-        };
-      });
-      this.#catalogContextQueue = request.then(
-        () => undefined,
-        () => undefined,
-      );
-      ({ subscription, worker } = await request);
+      const context = await this.#getWorkspaceContext(target.cwd);
+      worker = context.client;
+      subscription = await worker.request("config.watch", { target: watchTarget });
     }
     if (!this.#clients.has(worker)) {
       throw new PiRuntimeBrokerError(
@@ -744,8 +730,8 @@ export class PiRuntimeBroker {
     this.#pendingWorkspaceBindings.clear();
     this.#pendingProjectTrust.clear();
     this.#catalog = undefined;
-    this.#catalogContextCwd = undefined;
-    this.#catalogContextSessionId = undefined;
+    this.#workspaceContexts.clear();
+    this.#workspaceSessions.clear();
     this.#metadata = undefined;
     this.#listeners.clear();
   }
@@ -763,7 +749,7 @@ export class PiRuntimeBroker {
           throw new Error("Pi runtime broker was disposed during startup");
         }
         this.#catalog = client;
-        this.#startFoundationalBootstrap(client);
+        this.#startFoundationalBootstrap();
         return client;
       } catch (error) {
         this.#clients.delete(client);
@@ -778,6 +764,51 @@ export class PiRuntimeBroker {
     }
   }
 
+  async #getWorkspaceContext(cwd: string): Promise<{ client: PiHostClient; sessionId: string }> {
+    if (this.#disposed) throw new Error("Pi runtime broker is disposed");
+    const normalizedCwd = resolve(cwd);
+    const key = this.#pathKey(normalizedCwd);
+    const existing = this.#workspaceContexts.get(key);
+    if (existing) return existing.ready;
+
+    const client = this.#createClient("workspace", normalizedCwd);
+    this.#clients.add(client);
+    const ready = (async () => {
+      await client.start();
+      const snapshot = await client.request("catalog.context.open", { cwd: normalizedCwd });
+      if (this.#disposed || this.#workspaceContexts.get(key)?.client !== client) {
+        throw new Error("Pi workspace worker was superseded during startup");
+      }
+      this.#bindWorkspaceContext(client, snapshot.sessionId);
+      return { client, sessionId: snapshot.sessionId };
+    })();
+    const context: WorkspaceWorkerContext = { client, cwd: normalizedCwd, ready };
+    this.#workspaceContexts.set(key, context);
+    try {
+      return await ready;
+    } catch (error) {
+      if (this.#workspaceContexts.get(key) === context) this.#workspaceContexts.delete(key);
+      await this.#removeWorker(client);
+      throw error;
+    }
+  }
+
+  async #spawnAuxiliaryWorker(
+    role: Extract<RuntimeWorkerRole, "package">,
+    cwd: string,
+  ): Promise<PiHostClient> {
+    if (this.#disposed) throw new Error("Pi runtime broker is disposed");
+    const worker = this.#createClient(role, cwd);
+    this.#clients.add(worker);
+    try {
+      await worker.start();
+      return worker;
+    } catch (error) {
+      await this.#removeWorker(worker);
+      throw error;
+    }
+  }
+
   async #metadataFor(worker?: PiHostClient): Promise<SessionMetadataStore> {
     if (this.#metadata) return this.#metadata;
     const catalog = worker ?? (await this.#getCatalog());
@@ -785,7 +816,7 @@ export class PiRuntimeBroker {
     return this.#metadata;
   }
 
-  #startFoundationalBootstrap(worker: PiHostClient): void {
+  #startFoundationalBootstrap(): void {
     if (this.#foundationalBootstrapStarted || this.#disposed) return;
     this.#foundationalBootstrapStarted = true;
     if (this.#foundationalPackages.length === 0) {
@@ -796,7 +827,7 @@ export class PiRuntimeBroker {
       };
       return;
     }
-    void this.#enqueueFoundationalReconcile({}, worker);
+    void this.#enqueueFoundationalReconcile({});
   }
 
   async #ensureFoundationalBootstrap(): Promise<void> {
@@ -812,8 +843,8 @@ export class PiRuntimeBroker {
       }
       return;
     }
-    const worker = await this.#getCatalog();
-    this.#startFoundationalBootstrap(worker);
+    await this.#getCatalog();
+    this.#startFoundationalBootstrap();
     await this.#foundationalTail;
   }
 
@@ -822,7 +853,6 @@ export class PiRuntimeBroker {
       restoreIds?: ReadonlySet<FoundationalPiPackageId>;
       setAutoInstallNew?: boolean;
     },
-    existingWorker?: PiHostClient,
   ): Promise<void> {
     if (this.#foundationalPackages.length === 0) {
       if (options.setAutoInstallNew !== undefined) {
@@ -849,22 +879,20 @@ export class PiRuntimeBroker {
         state: "running",
       };
       try {
-        const worker = existingWorker ?? await this.#getCatalog();
-        const receipt = await this.#receiptFor(worker);
-        const result = await this.#withCatalogContext(
-          resolve(this.#options.cwd ?? process.cwd()),
-          (catalog) => reconcileFoundationalPackages({
-            bootstrapPackages: (sources) => catalog.request("package.bootstrap", { sources }),
+        const result = await this.#withPackageAuthority(async (worker) => {
+          const receipt = await this.#receiptFor(worker);
+          return reconcileFoundationalPackages({
+            bootstrapPackages: (sources) => worker.request("package.bootstrap", { sources }),
             integrations: this.#foundationalPackages,
-            listPackages: () => catalog.request("package.list", {}),
+            listPackages: () => worker.request("package.list", {}),
             manifestRevision: FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
             receiptStore: receipt,
             ...(options.restoreIds === undefined ? {} : { restoreIds: options.restoreIds }),
             ...(options.setAutoInstallNew === undefined
               ? {}
               : { setAutoInstallNew: options.setAutoInstallNew }),
-          }),
-        );
+          });
+        });
         if (this.#disposed) return;
         this.#foundationalStatus = {
           autoInstallNew: result.autoInstallNew,
@@ -895,25 +923,50 @@ export class PiRuntimeBroker {
     await this.#foundationalTail;
   }
 
-  #withCatalogContext<Result>(
+  async #withWorkspaceContext<Result>(
     cwd: string,
     operation: (worker: PiHostClient) => Promise<Result>,
   ): Promise<Result> {
-    const normalizedCwd = resolve(cwd);
-    const request = this.#catalogContextQueue.then(async () => {
-      const worker = await this.#getCatalog();
-      if (this.#catalogContextCwd !== normalizedCwd) {
-        const snapshot = await worker.request("catalog.context.open", { cwd: normalizedCwd });
-        this.#catalogContextCwd = snapshot.cwd;
-        this.#catalogContextSessionId = snapshot.sessionId;
-      }
-      return operation(worker);
-    });
-    this.#catalogContextQueue = request.then(
-      () => undefined,
-      () => undefined,
-    );
-    return request;
+    const context = await this.#getWorkspaceContext(cwd);
+    return operation(context.client);
+  }
+
+  async #withPackageAuthority<Result>(
+    operation: (worker: PiHostClient) => Promise<Result>,
+    cwd?: string,
+  ): Promise<Result> {
+    const catalog = await this.#getCatalog();
+    const packageCwd = resolve(cwd ?? catalog.handshake.runtime.agentDir);
+    const worker = await this.#spawnAuxiliaryWorker("package", packageCwd);
+    try {
+      return await operation(worker);
+    } finally {
+      await this.#removeWorker(worker);
+    }
+  }
+
+  #invalidateWorkspaceContexts(): void {
+    const workers = [...new Set(
+      [...this.#workspaceContexts.values()].map((context) => context.client),
+    )];
+    this.#workspaceContexts.clear();
+    for (const [sessionId, worker] of this.#workspaceSessions) {
+      if (workers.includes(worker)) this.#workspaceSessions.delete(sessionId);
+    }
+    for (const worker of workers) {
+      this.#clearConfigWatchesForClient(worker);
+      void this.#removeWorker(worker).catch((error) => {
+        this.#emit({
+          kind: "diagnostic",
+          level: "error",
+          message: `Failed to retire stale Pi workspace worker: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          role: "workspace",
+          workerId: worker.id,
+        });
+      });
+    }
   }
 
   async #receiptFor(worker?: PiHostClient): Promise<PackageProvisioningReceiptStore> {
@@ -1174,8 +1227,8 @@ export class PiRuntimeBroker {
     }
   }
 
-  #createClient(role: "catalog" | "session", sessionCwd?: string): PiHostClient {
-    const cwd = role === "catalog" ? this.#options.cwd : sessionCwd;
+  #createClient(role: RuntimeWorkerRole, workerCwd?: string): PiHostClient {
+    const cwd = role === "catalog" ? this.#options.cwd : workerCwd;
     const client = new PiHostClient({
       ...(this.#options.agentDir === undefined ? {} : { agentDir: this.#options.agentDir }),
       ...(cwd === undefined ? {} : { cwd }),
@@ -1193,6 +1246,7 @@ export class PiRuntimeBroker {
       ...(this.#options.shutdownTimeoutMs === undefined
         ? {}
         : { shutdownTimeoutMs: this.#options.shutdownTimeoutMs }),
+      workerRole: role,
       onDiagnostic: (level, message) => {
         this.#emit({ kind: "diagnostic", level, message, role, workerId: client.id });
       },
@@ -1205,6 +1259,9 @@ export class PiRuntimeBroker {
         }
         if (role === "session" && envelope.event === "session.snapshot") {
           this.#bindSession(client, envelope.data.sessionId);
+        }
+        if (role === "workspace" && envelope.event === "session.snapshot") {
+          this.#bindWorkspaceContext(client, envelope.data.sessionId);
         }
         if (envelope.event === "project.trust.request") {
           this.#pendingProjectTrust.set(envelope.data.id, { client });
@@ -1232,7 +1289,7 @@ export class PiRuntimeBroker {
 
   async #resolveProjectTrust(
     client: PiHostClient,
-    role: "catalog" | "session",
+    role: RuntimeWorkerRole,
     request: ProjectTrustRequest,
   ): Promise<void> {
     let decision: ProjectTrustDecision = { remember: false, trusted: false };
@@ -1269,6 +1326,15 @@ export class PiRuntimeBroker {
     this.#sessions.set(sessionId, client);
   }
 
+  #bindWorkspaceContext(client: PiHostClient, sessionId: string): void {
+    for (const [mappedSessionId, worker] of this.#workspaceSessions) {
+      if (worker === client && mappedSessionId !== sessionId) {
+        this.#workspaceSessions.delete(mappedSessionId);
+      }
+    }
+    this.#workspaceSessions.set(sessionId, client);
+  }
+
   #workerForSession(sessionId: string): PiHostClient {
     const worker = this.#sessions.get(sessionId);
     if (!worker) throw new Error(`Session is not active: ${sessionId}`);
@@ -1278,7 +1344,8 @@ export class PiRuntimeBroker {
   #workerForInteractiveContext(sessionId: string): PiHostClient {
     const worker = this.#sessions.get(sessionId);
     if (worker) return worker;
-    if (this.#catalog && this.#catalogContextSessionId === sessionId) return this.#catalog;
+    const workspace = this.#workspaceSessions.get(sessionId);
+    if (workspace) return workspace;
     throw new Error(`Session or workspace context is not active: ${sessionId}`);
   }
 
@@ -1286,11 +1353,15 @@ export class PiRuntimeBroker {
     this.#clients.delete(worker);
     if (this.#catalog === worker) {
       this.#catalog = undefined;
-      this.#catalogContextCwd = undefined;
-      this.#catalogContextSessionId = undefined;
+    }
+    for (const [key, context] of this.#workspaceContexts) {
+      if (context.client === worker) this.#workspaceContexts.delete(key);
     }
     for (const [sessionId, candidate] of this.#sessions) {
       if (candidate === worker) this.#sessions.delete(sessionId);
+    }
+    for (const [sessionId, candidate] of this.#workspaceSessions) {
+      if (candidate === worker) this.#workspaceSessions.delete(sessionId);
     }
     this.#clearProjectTrustForClient(worker);
     this.#clearConfigWatchesForClient(worker);
@@ -1299,19 +1370,23 @@ export class PiRuntimeBroker {
 
   #handleExit(
     client: PiHostClient,
-    role: "catalog" | "session",
+    role: RuntimeWorkerRole,
     exit: PiHostExit,
   ): void {
     const sessionId = client.sessionId;
     const expected = this.#disposed || client.disposing;
     if (client === this.#catalog) {
       this.#catalog = undefined;
-      this.#catalogContextCwd = undefined;
-      this.#catalogContextSessionId = undefined;
+    }
+    for (const [key, context] of this.#workspaceContexts) {
+      if (context.client === client) this.#workspaceContexts.delete(key);
     }
     this.#clients.delete(client);
     for (const [mappedSessionId, worker] of this.#sessions) {
       if (worker === client) this.#sessions.delete(mappedSessionId);
+    }
+    for (const [mappedSessionId, worker] of this.#workspaceSessions) {
+      if (worker === client) this.#workspaceSessions.delete(mappedSessionId);
     }
     this.#clearProjectTrustForClient(client);
     this.#clearConfigWatchesForClient(client);

@@ -13,6 +13,7 @@ import {
   PIARIUM_PROTOCOL_VERSION,
   type ResponseEnvelope,
   type RuntimeSourceKind,
+  type RuntimeWorkerRole,
   type WireEnvelope,
 } from "@piarium/protocol";
 
@@ -44,6 +45,7 @@ export interface PiHostClientOptions {
   requestTimeoutMs?: number | null;
   shutdownTimeoutMs?: number;
   startupTimeoutMs?: number;
+  workerRole?: RuntimeWorkerRole;
 }
 
 export class PiHostRequestError extends Error {
@@ -133,6 +135,9 @@ export class PiHostClient {
       ...(this.#options.runtimeSource ? ["--runtime-source", this.#options.runtimeSource] : []),
       ...(this.#options.projectTrustOverride === true ? ["--trust-project"] : []),
       ...(this.#options.projectTrustOverride === false ? ["--deny-project"] : []),
+      ...(this.#options.workerRole === undefined
+        ? []
+        : ["--worker-role", this.#options.workerRole]),
     ];
     const child = spawn(this.#options.nodePath ?? process.execPath, args, {
       ...(this.#options.cwd === undefined ? {} : { cwd: this.#options.cwd }),

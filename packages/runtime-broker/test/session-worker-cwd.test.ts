@@ -6,6 +6,9 @@ import { test } from "node:test";
 import { PiRuntimeBroker } from "../src/runtime-broker.js";
 
 const HOST_ENTRY = resolve(import.meta.dirname, "../../pi-host/src/main.ts");
+const delay = (milliseconds: number) => new Promise((resolveDelay) => {
+  setTimeout(resolveDelay, milliseconds);
+});
 
 interface CwdRecord {
   factoryCwd: string;
@@ -80,7 +83,7 @@ async function writeSessionHeader(
   );
 }
 
-test("session workers use project cwd while the reused catalog worker keeps broker cwd", async () => {
+test("catalog, workspace, and session workers keep independent cwd ownership", async () => {
   const root = await mkdtemp(join(tmpdir(), "piarium-worker-cwd-create-"));
   const agentDir = join(root, "agent");
   const catalogCwd = join(root, "catalog");
@@ -101,21 +104,28 @@ test("session workers use project cwd while the reused catalog worker keeps brok
     assert.ok((await broker.listCommandsForWorkspace(workspaceB)).some(
       (command) => command.name === "record-factory-cwd",
     ));
-    assert.equal(broker.workerCount, 1, "workspace switches reuse the catalog worker");
-    const catalogRecords = await readCwdRecords(logFile);
-    assert.ok(catalogRecords.some((record) => record.label === "a"));
-    assert.ok(catalogRecords.some((record) => record.label === "b"));
-    assert.ok(catalogRecords.every((record) => record.factoryCwd === resolve(catalogCwd)));
+    assert.equal(broker.workerCount, 3, "catalog and both workspace owners remain isolated");
+    const workspaceRecords = await readCwdRecords(logFile);
+    assert.ok(workspaceRecords.some(
+      (record) => record.label === "a" && record.factoryCwd === resolve(workspaceA),
+    ));
+    assert.ok(workspaceRecords.some(
+      (record) => record.label === "b" && record.factoryCwd === resolve(workspaceB),
+    ));
+    assert.equal(
+      workspaceRecords.some((record) => record.factoryCwd === resolve(catalogCwd)),
+      false,
+    );
 
     await writeFile(logFile, "", "utf8");
     const createdA = await broker.createSession(workspaceA);
     const createdB = await broker.createSession(workspaceB);
     assert.equal(createdA.cwd, resolve(workspaceA));
     assert.equal(createdB.cwd, resolve(workspaceB));
-    assert.equal(broker.workerCount, 3);
+    assert.equal(broker.workerCount, 5);
     assert.ok(createdA.sessionFile);
     await broker.openSession({ sessionFile: createdA.sessionFile, sessionId: createdA.sessionId });
-    assert.equal(broker.workerCount, 3, "reopening an active session reuses its worker");
+    assert.equal(broker.workerCount, 5, "reopening an active session reuses its worker");
 
     const sessionRecords = await readCwdRecords(logFile);
     assert.ok(sessionRecords.some(
@@ -273,6 +283,61 @@ test("a missing child cwd leaves no failed session worker behind", async () => {
     assert.deepEqual(broker.activeSessionIds, []);
   } finally {
     await broker.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("a blocked workspace extension cannot stall the catalog or another workspace", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-workspace-isolation-"));
+  const agentDir = join(root, "agent");
+  const catalogCwd = join(root, "catalog");
+  const blockedWorkspace = join(root, "blocked");
+  const healthyWorkspace = join(root, "healthy");
+  await Promise.all([
+    mkdir(agentDir, { recursive: true }),
+    mkdir(catalogCwd, { recursive: true }),
+    mkdir(join(blockedWorkspace, ".pi", "extensions"), { recursive: true }),
+    mkdir(join(healthyWorkspace, ".pi", "extensions"), { recursive: true }),
+  ]);
+  await writeFile(
+    join(blockedWorkspace, ".pi", "extensions", "blocked.ts"),
+    "await new Promise<void>(() => {});\nexport default function () {}\n",
+    "utf8",
+  );
+  await writeFile(
+    join(healthyWorkspace, ".pi", "extensions", "healthy.ts"),
+    "export default function (pi: any) { pi.registerCommand('healthy', { description: 'healthy', handler() {} }); }\n",
+    "utf8",
+  );
+  const broker = new PiRuntimeBroker({
+    agentDir,
+    client: { clientName: "workspace-isolation-test", clientVersion: "0.1.0", mode: "test" },
+    cwd: catalogCwd,
+    execArgv: ["--import", import.meta.resolve("tsx")],
+    hostEntry: HOST_ENTRY,
+    projectTrustOverride: true,
+    shutdownTimeoutMs: 100,
+  });
+  let blocked: Promise<unknown> | undefined;
+  try {
+    await broker.warmup();
+    blocked = broker.listCommandsForWorkspace(blockedWorkspace);
+    await delay(50);
+    assert.deepEqual(
+      await Promise.race([
+        broker.listSessions(),
+        delay(5_000).then(() => { throw new Error("session catalog was blocked"); }),
+      ]),
+      [],
+    );
+    const commands = await Promise.race([
+      broker.listCommandsForWorkspace(healthyWorkspace),
+      delay(5_000).then(() => { throw new Error("healthy workspace was blocked"); }),
+    ]);
+    assert.ok(commands.some((command) => command.name === "healthy"));
+  } finally {
+    await broker.dispose();
+    await blocked?.catch(() => undefined);
     await rm(root, { force: true, recursive: true });
   }
 });

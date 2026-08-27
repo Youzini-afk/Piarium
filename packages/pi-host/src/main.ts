@@ -25,6 +25,7 @@ async function run(): Promise<void> {
       : { projectTrustOverride: args.projectTrustOverride }),
     ...runtime,
     transport: createProcessTransport(args.forceStdio),
+    workerRole: args.workerRole,
   });
   controller.start();
 

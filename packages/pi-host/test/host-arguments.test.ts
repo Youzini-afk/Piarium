@@ -11,14 +11,22 @@ describe("host arguments", () => {
       "system",
       "--agent-dir",
       "D:\\pi\\agent",
+      "--worker-role",
+      "workspace",
     ]);
     assert.equal(args.packageRoot, "D:\\pi\\package");
     assert.equal(args.runtimeSource, "system");
     assert.equal(args.agentDir, "D:\\pi\\agent");
+    assert.equal(args.workerRole, "workspace");
   });
 
   it("rejects unknown runtime sources instead of inventing a compatible range", () => {
     assert.throws(() => parseHostArguments(["--runtime-source", "compatible"]), /Unknown runtime source/);
+  });
+
+  it("defaults to a session worker and rejects unknown worker roles", () => {
+    assert.equal(parseHostArguments([]).workerRole, "session");
+    assert.throws(() => parseHostArguments(["--worker-role", "everything"]), /worker-role/);
   });
 
   it("reads package root from the environment when the flag is omitted", () => {

@@ -1,4 +1,9 @@
-import { RUNTIME_SOURCE_KINDS, type RuntimeSourceKind } from "@piarium/protocol";
+import {
+  RUNTIME_SOURCE_KINDS,
+  RUNTIME_WORKER_ROLES,
+  type RuntimeSourceKind,
+  type RuntimeWorkerRole,
+} from "@piarium/protocol";
 
 export interface HostArguments {
   agentDir?: string;
@@ -6,6 +11,7 @@ export interface HostArguments {
   packageRoot?: string;
   projectTrustOverride?: boolean;
   runtimeSource?: RuntimeSourceKind;
+  workerRole: RuntimeWorkerRole;
 }
 
 function parseRuntimeSource(value: string): RuntimeSourceKind {
@@ -16,7 +22,7 @@ function parseRuntimeSource(value: string): RuntimeSourceKind {
 }
 
 export function parseHostArguments(argv: string[]): HostArguments {
-  const result: HostArguments = { forceStdio: false };
+  const result: HostArguments = { forceStdio: false, workerRole: "session" };
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index];
     if (argument === "--stdio") {
@@ -37,6 +43,12 @@ export function parseHostArguments(argv: string[]): HostArguments {
       const value = argv[++index];
       if (!value) throw new Error("--runtime-source requires a value");
       result.runtimeSource = parseRuntimeSource(value);
+    } else if (argument === "--worker-role") {
+      const value = argv[++index];
+      if (!value || !RUNTIME_WORKER_ROLES.includes(value as RuntimeWorkerRole)) {
+        throw new Error(`--worker-role must be one of: ${RUNTIME_WORKER_ROLES.join(", ")}`);
+      }
+      result.workerRole = value as RuntimeWorkerRole;
     } else {
       throw new Error(`Unknown argument: ${argument}`);
     }

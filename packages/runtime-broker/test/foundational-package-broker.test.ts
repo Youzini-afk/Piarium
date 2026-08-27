@@ -11,7 +11,7 @@ const delay = (milliseconds: number) => new Promise((resolveDelay) => {
   setTimeout(resolveDelay, milliseconds);
 });
 
-test("foundational provisioning stays behind the first-session barrier and respects removal", async () => {
+test("foundational package authority reconciles before a new session executes extensions", async () => {
   const root = await mkdtemp(join(tmpdir(), "piarium-foundation-broker-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
@@ -86,17 +86,29 @@ export default function (pi: any) {
 
   try {
     await broker.warmup();
-    for (let attempt = 0; attempt < 100 && broker.foundationalPackageStatus().state !== "running"; attempt += 1) {
-      await delay(10);
-    }
-    assert.equal(broker.foundationalPackageStatus().state, "running");
+    await Promise.race([
+      broker.restoreFoundationalPackages(),
+      delay(15_000).then(() => {
+        throw new Error("foundational package authority did not reach a terminal state");
+      }),
+    ]);
+    assert.equal(broker.foundationalPackageStatus().state, "ready");
+    assert.deepEqual(
+      await Promise.race([
+        broker.listSessions(),
+        delay(1_000).then(() => {
+          throw new Error("session catalog was blocked by foundational provisioning");
+        }),
+      ]),
+      [],
+    );
 
     let sessionSettled = false;
     const sessionPromise = broker.createSession(workspace).finally(() => {
       sessionSettled = true;
     });
     await delay(50);
-    assert.equal(sessionSettled, false, "a new session must wait for foundational provisioning");
+    assert.equal(sessionSettled, false, "the real session worker must still observe extension startup");
 
     await writeFile(gate, "ready\n", "utf8");
     const session = await sessionPromise;
@@ -169,12 +181,76 @@ export default function (pi: any) {
   }
 });
 
-test("dispose force-stops a foundational bootstrap whose extension never finishes loading", async () => {
-  const root = await mkdtemp(join(tmpdir(), "piarium-foundation-dispose-"));
+test("foundational package authority never loads project extensions from the server cwd", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-foundation-neutral-cwd-"));
+  const serverCwd = join(root, "server-project");
+  const agentDir = join(root, "agent");
+  const homeDir = join(root, "home");
+  const packageRoot = join(root, "foundation-package");
+  await Promise.all([
+    mkdir(join(serverCwd, ".pi", "extensions"), { recursive: true }),
+    mkdir(agentDir, { recursive: true }),
+    mkdir(homeDir, { recursive: true }),
+    mkdir(packageRoot, { recursive: true }),
+  ]);
+  await writeFile(
+    join(serverCwd, ".pi", "extensions", "blocking-project-extension.ts"),
+    "await new Promise<void>(() => {});\nexport default function () {}\n",
+    "utf8",
+  );
+  await writeFile(
+    join(packageRoot, "package.json"),
+    `${JSON.stringify({
+      name: "pi-mcp-adapter",
+      version: "2.29.0-neutral-cwd",
+      pi: { extensions: ["./index.ts"] },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+  await writeFile(join(packageRoot, "index.ts"), "export default function () {}\n", "utf8");
+
+  const broker = new PiRuntimeBroker({
+    agentDir,
+    client: {
+      clientName: "foundation-neutral-cwd-test",
+      clientVersion: "0.1.0",
+      mode: "test",
+    },
+    cwd: serverCwd,
+    environment: { HOME: homeDir },
+    execArgv: ["--import", import.meta.resolve("tsx")],
+    foundationalPackages: [{
+      id: "mcp",
+      introducedRevision: 1,
+      packageAliases: ["pi-mcp-adapter"],
+      packageName: "pi-mcp-adapter",
+      source: packageRoot,
+    }],
+    hostEntry: HOST_ENTRY,
+    projectTrustOverride: true,
+  });
+
+  try {
+    await broker.warmup();
+    await Promise.race([
+      broker.restoreFoundationalPackages(),
+      delay(15_000).then(() => {
+        throw new Error("package authority was blocked by the server cwd");
+      }),
+    ]);
+    assert.equal(broker.foundationalPackageStatus().state, "ready");
+    assert.deepEqual(await broker.listSessions(), []);
+  } finally {
+    await broker.dispose();
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("a broken global extension remains removable through the package authority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "piarium-package-recovery-"));
   const workspace = join(root, "workspace");
   const agentDir = join(root, "agent");
   const packageRoot = join(root, "blocking-package");
-  const gate = join(root, "gate-that-is-never-created");
   await Promise.all([
     mkdir(workspace, { recursive: true }),
     mkdir(agentDir, { recursive: true }),
@@ -184,29 +260,19 @@ test("dispose force-stops a foundational bootstrap whose extension never finishe
     join(packageRoot, "package.json"),
     `${JSON.stringify({
       name: "pi-mcp-adapter",
-      version: "2.27.0-blocking",
+      version: "2.29.0-blocking",
       pi: { extensions: ["./index.ts"] },
     }, null, 2)}\n`,
     "utf8",
   );
   await writeFile(
     join(packageRoot, "index.ts"),
-    `import { existsSync } from "node:fs";
-await new Promise<void>((resolve) => {
-  const poll = () => existsSync(${JSON.stringify(gate)}) ? resolve() : setTimeout(poll, 10);
-  poll();
-});
-export default function () {}
-`,
+    "await new Promise<void>(() => {});\nexport default function () {}\n",
     "utf8",
   );
   const broker = new PiRuntimeBroker({
     agentDir,
-    client: {
-      clientName: "foundation-dispose-test",
-      clientVersion: "0.1.0",
-      mode: "test",
-    },
+    client: { clientName: "package-recovery-test", clientVersion: "0.1.0", mode: "test" },
     cwd: workspace,
     execArgv: ["--import", import.meta.resolve("tsx")],
     foundationalPackages: [{
@@ -220,21 +286,32 @@ export default function () {}
     projectTrustOverride: true,
     shutdownTimeoutMs: 100,
   });
-
+  let blocked: Promise<{ error?: unknown; status: "fulfilled" | "rejected" }> | undefined;
   try {
     await broker.warmup();
-    for (let attempt = 0; attempt < 100 && broker.foundationalPackageStatus().state !== "running"; attempt += 1) {
-      await delay(10);
-    }
-    assert.equal(broker.foundationalPackageStatus().state, "running");
     await Promise.race([
-      broker.dispose(),
-      delay(3_000).then(() => {
-        throw new Error("broker disposal remained blocked behind foundational provisioning");
-      }),
+      broker.restoreFoundationalPackages(),
+      delay(15_000).then(() => { throw new Error("foundation reconcile did not finish"); }),
     ]);
+    blocked = broker.listCommandsForWorkspace(workspace).then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ error, status: "rejected" as const }),
+    );
+    await delay(50);
+    const removed = await Promise.race([
+      dispatchRuntimeRequest(broker, "package.remove", {
+        cwd: workspace,
+        scope: "global",
+        source: packageRoot,
+      }),
+      delay(15_000).then(() => { throw new Error("package recovery was blocked by its extension"); }),
+    ]);
+    assert.equal(removed.removed, true);
+    assert.equal((await blocked).status, "rejected");
+    assert.deepEqual(await broker.listSessions(), []);
   } finally {
     await broker.dispose();
+    await blocked;
     await rm(root, { force: true, recursive: true });
   }
 });

@@ -99,6 +99,7 @@ import { toJsonValue } from "./json.js";
 import { ProjectTrustController } from "./project-trust-controller.js";
 import { FleetProviderRegistry, createFleetRegistryExtension } from "./fleet/registry.js";
 import { PiBackgroundTasksFleetAdapter } from "./fleet/pi-background-tasks-adapter.js";
+import { packageManifestFromPath, packageNameFromSource } from "./package-descriptor.js";
 import { PiSubagentsFleetBridge } from "./pi-subagents-fleet-bridge.js";
 import {
   createPiMcpConfigBridgeExtension,
@@ -285,40 +286,6 @@ function editableRecoveryContent(entry: NativeSessionEntry | undefined): {
     ...(editorImages.length === 0 ? {} : { editorImages }),
     ...(text.length === 0 ? {} : { editorText: text }),
   };
-}
-
-function packageNameFromSource(source: string): string {
-  const value = source.startsWith("npm:") ? source.slice(4) : source;
-  if (value.startsWith("@")) {
-    const slash = value.indexOf("/");
-    const version = slash === -1 ? -1 : value.indexOf("@", slash);
-    return version === -1 ? value : value.slice(0, version);
-  }
-  if (/^[A-Za-z0-9_.-]+(?:@[^@]+)?$/.test(value)) return value.split("@")[0] ?? value;
-  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
-  return normalized.slice(normalized.lastIndexOf("/") + 1).replace(/\.git$/i, "") || value;
-}
-
-function packageManifestFromPath(
-  installedPath: string | undefined,
-): { name?: string; version?: string } {
-  if (!installedPath) return {};
-  try {
-    const manifest = JSON.parse(readFileSync(join(installedPath, "package.json"), "utf8")) as {
-      name?: unknown;
-      version?: unknown;
-    };
-    return {
-      ...(typeof manifest.name === "string" && manifest.name.trim().length > 0
-        ? { name: manifest.name.trim() }
-        : {}),
-      ...(typeof manifest.version === "string" && manifest.version.trim().length > 0
-        ? { version: manifest.version.trim() }
-        : {}),
-    };
-  } catch {
-    return {};
-  }
 }
 
 function isMissingPathError(error: unknown): boolean {
@@ -2535,8 +2502,11 @@ export class SessionHost {
       directories = (await readdir(root, { withFileTypes: true }))
         .filter((entry) => entry.isDirectory())
         .map((entry) => join(root, entry.name));
-    } catch {
-      return [];
+    } catch (error) {
+      if (isMissingPathError(error)) return [];
+      throw new HostError("session_list_failed", `Unable to read Pi session root: ${root}`, {
+        cause: error,
+      });
     }
     const groups = await Promise.all(
       directories.map((directory) => SessionManager.listAll(directory)),

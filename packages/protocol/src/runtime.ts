@@ -269,7 +269,9 @@ export function isRuntimeMethod(value: unknown): value is RuntimeMethod {
   return typeof value === "string" && RUNTIME_METHOD_SET.has(value);
 }
 
-export type RuntimeWorkerRole = "catalog" | "session";
+export const RUNTIME_WORKER_ROLES = ["catalog", "workspace", "package", "session"] as const;
+
+export type RuntimeWorkerRole = (typeof RUNTIME_WORKER_ROLES)[number];
 
 export interface RuntimeEventSource {
   role: RuntimeWorkerRole;
@@ -377,7 +379,7 @@ export function isRuntimeEventEnvelope(
   if (typeof source !== "object" || source === null || Array.isArray(source)) return false;
   const record = source as Record<string, unknown>;
   return (
-    (record.role === "catalog" || record.role === "session") &&
+    RUNTIME_WORKER_ROLES.includes(record.role as RuntimeWorkerRole) &&
     typeof record.workerId === "string" &&
     record.workerId.length > 0 &&
     (record.sessionId === undefined ||

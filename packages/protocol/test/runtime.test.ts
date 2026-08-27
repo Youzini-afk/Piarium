@@ -130,7 +130,7 @@ describe("surface runtime protocol", () => {
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(extensionState)), extensionState);
 
     const configChanged = createRuntimeEvent(
-      { role: "catalog", workerId: "worker-2" },
+      { role: "workspace", workerId: "worker-2" },
       14,
       "config.changed",
       {
@@ -140,6 +140,14 @@ describe("surface runtime protocol", () => {
       },
     );
     assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(configChanged)), configChanged);
+
+    const packageProgress = createRuntimeEvent(
+      { role: "package", workerId: "worker-3" },
+      15,
+      "package.progress",
+      { message: "Installing", operation: "install", source: "npm:pi-mcp-adapter" },
+    );
+    assert.deepEqual(decodeRuntimeEnvelope(encodeRuntimeEnvelope(packageProgress)), packageProgress);
   });
 
   it("rejects worker-only methods and unrouted events", () => {

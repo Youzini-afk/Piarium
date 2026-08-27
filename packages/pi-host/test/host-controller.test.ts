@@ -767,4 +767,44 @@ describe("HostController", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("enforces catalog and package worker ownership inside the Host", async () => {
+    const root = await mkdtemp(join(tmpdir(), "piarium-host-role-"));
+    const agentDir = join(root, "agent");
+    await mkdir(agentDir, { recursive: true });
+
+    const catalogTransport = new MemoryHostTransport();
+    const catalog = new HostController({ agentDir, transport: catalogTransport, workerRole: "catalog" });
+    catalog.start();
+    const packageTransport = new MemoryHostTransport();
+    const packageWorker = new HostController({
+      agentDir,
+      transport: packageTransport,
+      workerRole: "package",
+    });
+    packageWorker.start();
+    try {
+      catalogTransport.receive(createRequest("catalog-list", "session.list", {}));
+      const catalogList = await catalogTransport.waitFor((entry) => isResponse(entry, "catalog-list"));
+      assert.ok(catalogList.kind === "response" && catalogList.ok);
+
+      catalogTransport.receive(createRequest("catalog-context", "catalog.context.open", { cwd: root }));
+      const catalogDenied = await catalogTransport.waitFor((entry) => isResponse(entry, "catalog-context"));
+      assert.ok(catalogDenied.kind === "response" && !catalogDenied.ok);
+      assert.equal(catalogDenied.error.code, "worker_role_violation");
+
+      packageTransport.receive(createRequest("package-list", "package.list", {}));
+      const packages = await packageTransport.waitFor((entry) => isResponse(entry, "package-list"));
+      assert.ok(packages.kind === "response" && packages.ok);
+      assert.deepEqual(packages.result, []);
+
+      packageTransport.receive(createRequest("package-session", "session.list", {}));
+      const packageDenied = await packageTransport.waitFor((entry) => isResponse(entry, "package-session"));
+      assert.ok(packageDenied.kind === "response" && !packageDenied.ok);
+      assert.equal(packageDenied.error.code, "worker_role_violation");
+    } finally {
+      await Promise.all([catalog.dispose(), packageWorker.dispose()]);
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });

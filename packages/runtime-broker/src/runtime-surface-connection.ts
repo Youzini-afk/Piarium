@@ -117,6 +117,9 @@ export class PiRuntimeSurfaceConnection {
         return;
       }
       if (event.kind !== "host") return;
+      // Foundation workers intentionally load and mutate global Pi packages in isolation. Their
+      // in-memory session and extension events are implementation detail, not a user workspace.
+      if (event.role === "package") return;
       if (
         event.envelope.event === "config.changed"
         && !this.#dispatchContext.configWatchIds.has(event.envelope.data.watchId)
