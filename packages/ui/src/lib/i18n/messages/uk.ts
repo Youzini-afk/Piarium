@@ -2093,6 +2093,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.submission.accepted": "Надіслано",
   "chat.piComposer.submission.uncertain": "Результат надсилання невідомий",
   "chat.piComposer.submission.failed": "Не надіслано",
+  "chat.piAssistant.working": "Опрацювання",
   "chat.piComposer.agent.imageUnsupported": "Вибраний агент не може отримувати вкладені зображення. Видаліть зображення або скористайтеся Pi.",
   "chat.draftPresets.explore.label": "Огляд кодової бази",
   "chat.draftPresets.catchup.label": "Повернутись у контекст",

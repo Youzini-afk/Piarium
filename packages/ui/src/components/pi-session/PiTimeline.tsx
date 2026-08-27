@@ -25,18 +25,23 @@ import {
   projectPiTimeline,
   type PiTimelineItem,
   type PiTimelineProjection,
-  type PiTimelineTurn,
 } from './piTimelineProjection';
 import {
   PiTimelineEntryList,
   PiTurnUserMessage,
   type PiTimelineProps,
 } from './PiTimelineEntries';
+import {
+  findPiAssistantWaitingTurnId,
+  type PiAssistantWaitingPresentation,
+} from './piAssistantWaiting';
+import { PiTurnAssistantChrome } from './PiTurnAssistantChrome';
 
 interface PiTimelineItemViewProps extends Omit<
   PiTimelineProps,
-  'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'
+  'assistantWaiting' | 'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'
 > {
+  assistantWaiting?: PiAssistantWaitingPresentation;
   isMobile: boolean;
   item: PiTimelineItem;
 }
@@ -68,47 +73,8 @@ const toolCallIdsForItem = (item: PiTimelineItem): readonly string[] => {
   return result;
 };
 
-const PiTurnAssistantChrome: React.FC<{
-  footer?: boolean;
-  turn: PiTimelineTurn;
-}> = ({ footer = false, turn }) => {
-  const { t } = useI18n();
-  const assistants = turn.entries.flatMap((entry) => (
-    entry.type === 'message' && entry.message.role === 'assistant' ? [entry.message] : []
-  ));
-  if (turn.liveAssistant) assistants.push(turn.liveAssistant);
-  const last = assistants.at(-1);
-  if (!last) return null;
-  const toolCount = assistants.reduce((count, message) => (
-    count + message.content.filter((content) => content.type === 'toolCall').length
-  ), 0);
-  const tokens = assistants.reduce((count, message) => count + message.usage.totalTokens, 0);
-
-  if (footer) {
-    if (toolCount === 0 && tokens === 0) return null;
-    return (
-      <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 typography-micro text-muted-foreground/70">
-        {toolCount > 0 ? (
-          <span>{toolCount} {t('contextSidebar.breakdown.toolCalls')}</span>
-        ) : null}
-        {tokens > 0 ? <span>{t('chat.goal.usage.tokens', { used: new Intl.NumberFormat().format(tokens) })}</span> : null}
-      </footer>
-    );
-  }
-
-  return (
-    <header className="flex min-h-6 items-center gap-2 typography-meta text-muted-foreground">
-      <Icon name="ai-agent" className="size-3.5 shrink-0" />
-      <span className="font-medium text-foreground/85">Pi</span>
-      <span className="truncate">{last.provider}/{last.responseModel || last.model}</span>
-      {turn.liveAssistant?.stopReason === 'pending' ? (
-        <span className="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-      ) : null}
-    </header>
-  );
-};
-
 const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
+  assistantWaiting,
   cwd,
   hiddenThinkingLabel,
   isMobile,
@@ -195,7 +161,7 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
           status={turn.liveUser ? liveUserStatus : undefined}
         />
       </div>
-      <PiTurnAssistantChrome turn={turn} />
+      <PiTurnAssistantChrome turn={turn} waiting={assistantWaiting} />
       <PiTimelineEntryList
         cwd={cwd}
         entries={turnEntries}
@@ -247,6 +213,10 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     projectionRef.current,
   ), [props.entries, props.liveAssistant, props.liveUser]);
   projectionRef.current = projection;
+  const assistantWaitingTurnId = React.useMemo(() => findPiAssistantWaitingTurnId(
+    projection.items,
+    props.assistantWaiting !== undefined,
+  ), [projection.items, props.assistantWaiting]);
 
   const timelineView = usePiSessionStore(useShallow((state) => (
     state.records[props.sessionId]?.view ?? DEFAULT_PI_TIMELINE_VIEW
@@ -478,6 +448,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   }, [completeTimelineReturn, props.sessionId, requestTimelineReturn]);
 
   const extraData = React.useMemo(() => ({
+    assistantWaiting: props.assistantWaiting,
+    assistantWaitingTurnId,
     hiddenThinkingLabel: props.hiddenThinkingLabel,
     isMobile,
     liveUserStatus: props.liveUserStatus,
@@ -487,6 +459,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     pinnedEntryIds: props.pinnedEntryIds,
     recoveryBusyEntryId: props.recoveryBusyEntryId,
   }), [
+    props.assistantWaiting,
+    assistantWaitingTurnId,
     props.hiddenThinkingLabel,
     isMobile,
     props.liveUserStatus,
@@ -498,6 +472,9 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   ]);
   const renderItem = React.useCallback(({ item }: { item: PiTimelineItem }) => (
     <PiTimelineItemView
+      {...(item.id === assistantWaitingTurnId && props.assistantWaiting
+        ? { assistantWaiting: props.assistantWaiting }
+        : {})}
       cwd={props.cwd}
       hiddenThinkingLabel={props.hiddenThinkingLabel}
       isMobile={isMobile}
@@ -511,6 +488,8 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
       sessionId={props.sessionId}
     />
   ), [
+    props.assistantWaiting,
+    assistantWaitingTurnId,
     props.cwd,
     props.hiddenThinkingLabel,
     isMobile,

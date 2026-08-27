@@ -48,8 +48,10 @@ import {
 import {
   projectPiTimeline,
 } from './piTimelineProjection';
+import type { PiAssistantWaitingPresentation } from './piAssistantWaiting';
 
 export interface PiTimelineProps {
+  assistantWaiting?: PiAssistantWaitingPresentation;
   cwd: string;
   entries: PiSessionEntry[];
   hiddenThinkingLabel?: string;
@@ -659,7 +661,10 @@ export const PiTurnUserMessage: React.FC<{
   );
 };
 
-export const PiTimelineEntryList: React.FC<Omit<PiTimelineProps, 'liveUser' | 'liveUserStatus'> & {
+export const PiTimelineEntryList: React.FC<Omit<
+  PiTimelineProps,
+  'assistantWaiting' | 'liveUser' | 'liveUserStatus'
+> & {
   projectedResultByCallId?: ReadonlyMap<string, PiToolResultMessage>;
 }> = ({
   cwd,

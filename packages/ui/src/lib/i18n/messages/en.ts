@@ -2010,6 +2010,7 @@ export const dict = {
   'chat.piComposer.submission.accepted': 'Sent',
   'chat.piComposer.submission.uncertain': 'Send result unknown',
   'chat.piComposer.submission.failed': 'Not sent',
+  'chat.piAssistant.working': 'Working',
   'chat.piComposer.agent.imageUnsupported': 'The selected Agent cannot receive image attachments. Remove the images or use Pi.',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',

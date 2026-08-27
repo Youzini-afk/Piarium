@@ -2090,6 +2090,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.piComposer.submission.accepted": "Enviado",
   "chat.piComposer.submission.uncertain": "Resultado do envio desconhecido",
   "chat.piComposer.submission.failed": "Não enviado",
+  "chat.piAssistant.working": "Processando",
   "chat.piComposer.agent.imageUnsupported": "O agente selecionado não pode receber imagens anexadas. Remova as imagens ou use o Pi.",
   "chat.draftPresets.explore.label": "Explore the codebase",
   "chat.draftPresets.catchup.label": "Catch me up",

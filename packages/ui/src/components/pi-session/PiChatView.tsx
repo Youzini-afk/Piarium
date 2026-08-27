@@ -68,6 +68,7 @@ import { usePiComposerDefaults } from './usePiComposerDefaults';
 import { configurePiComposerSession } from './piComposerSessionConfig';
 import { renderPiComposerAgentInvocation } from '@/lib/pi-runtime/composerAgent';
 import { projectPiMessageHistory } from './piMessageHistory';
+import { projectPiAssistantWaiting } from './piAssistantWaiting';
 
 const LazyPiTimeline = React.lazy(async () => {
   const module = await import('./PiTimeline');
@@ -542,6 +543,13 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       ? submission.message
       : undefined
   );
+  const assistantWaiting = React.useMemo(() => {
+    return projectPiAssistantWaiting({
+      ...(currentRecord?.liveUser ? { liveUser: currentRecord.liveUser } : {}),
+      ...(currentRecord?.snapshot ? { snapshot: currentRecord.snapshot } : {}),
+      ...(submission ? { submission } : {}),
+    });
+  }, [currentRecord?.liveUser, currentRecord?.snapshot, submission]);
   const sessionOpening = openingSessionId !== null && openingSessionId === currentSessionId;
 
   if (pendingDraftOpen) {
@@ -713,6 +721,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
               )}>
                 <LazyPiTimeline
                   key={`${runtimeKey}:${currentSessionId}`}
+                  {...(assistantWaiting ? { assistantWaiting } : {})}
                   cwd={sessionCwd}
                   entries={entries}
                   hiddenThinkingLabel={extensionUi?.hiddenThinkingLabel}

@@ -1981,6 +1981,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.accepted': '已傳送',
   'chat.piComposer.submission.uncertain': '傳送結果未知',
   'chat.piComposer.submission.failed': '未傳送',
+  'chat.piAssistant.working': '處理中',
   'chat.piComposer.agent.imageUnsupported': '所選智慧體無法接收圖片附件。請移除圖片或改用 Pi。',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',

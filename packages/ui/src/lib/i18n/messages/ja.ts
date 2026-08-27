@@ -2007,6 +2007,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.accepted': '送信済み',
   'chat.piComposer.submission.uncertain': '送信結果は不明',
   'chat.piComposer.submission.failed': '未送信',
+  'chat.piAssistant.working': '処理中',
   'chat.piComposer.agent.imageUnsupported': '選択したエージェントは画像添付を受け取れません。画像を削除するか Pi を使用してください。',
   'chat.draftPresets.explore.label': 'コードベースを探索',
   'chat.draftPresets.catchup.label': '状況を把握',

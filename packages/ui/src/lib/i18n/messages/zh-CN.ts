@@ -2081,6 +2081,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.piComposer.submission.accepted': '已发送',
   'chat.piComposer.submission.uncertain': '发送结果未知',
   'chat.piComposer.submission.failed': '未发送',
+  'chat.piAssistant.working': '处理中',
   'chat.piComposer.agent.imageUnsupported': '所选智能体无法接收图片附件。请移除图片或改用 Pi。',
   'chat.draftPresets.explore.label': 'Explore the codebase',
   'chat.draftPresets.catchup.label': 'Catch me up',

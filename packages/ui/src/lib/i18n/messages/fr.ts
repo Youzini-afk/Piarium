@@ -1828,6 +1828,7 @@ export const dict = {
   'chat.piComposer.submission.accepted': 'Envoyé',
   'chat.piComposer.submission.uncertain': 'Résultat de l’envoi inconnu',
   'chat.piComposer.submission.failed': 'Non envoyé',
+  'chat.piAssistant.working': 'Traitement',
   'chat.piComposer.agent.imageUnsupported': 'L’agent sélectionné ne peut pas recevoir d’images. Supprimez-les ou utilisez Pi.',
   'chat.scrollToBottom.aria': 'Faire défiler vers le bas',
   'chat.promptNavigator.aria': 'Navigation des prompts',
