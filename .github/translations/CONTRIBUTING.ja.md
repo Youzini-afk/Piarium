@@ -1,4 +1,4 @@
-[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING.zh-CN.md) | [繁體中文](CONTRIBUTING.zh-TW.md) | [Français](CONTRIBUTING.fr.md) | 日本語
+[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.fr.md) | 日本語
 
 # Piarium への貢献
 
@@ -7,7 +7,7 @@ Piarium の改善にご協力いただきありがとうございます。Pi の
 領域での貢献を歓迎します。
 
 このガイドでは、公開されている貢献ワークフローを説明します。実装作業についての詳細なリポジトリ規則は、
-[AGENTS.md](../AGENTS.md)、最寄りのパッケージの README、および担当するアーキテクチャドキュメントに記載されています。
+[AGENTS.md](../../AGENTS.md)、最寄りのパッケージの README、および担当するアーキテクチャドキュメントに記載されています。
 
 ## ドキュメントの言語
 
@@ -23,7 +23,7 @@ Piarium の改善にご協力いただきありがとうございます。Pi の
 
 - [行動規範](CODE_OF_CONDUCT.ja.md)を読んでください。
 - 再現可能なバグ、機能提案、焦点の定まった技術的な議論には [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) を使用してください。
-- 脆弱性は [SECURITY.md](SECURITY.md) に記載された非公開の手順で送ってください。issue、ディスカッション、pull request、ログ、スクリーンショットに悪用の詳細を公開しないでください。
+- 脆弱性は [SECURITY.md](../SECURITY.md) に記載された非公開の手順で送ってください。issue、ディスカッション、pull request、ログ、スクリーンショットに悪用の詳細を公開しないでください。
 - 重複する変更を始める前に、既存の issue と pull request を検索してください。
 - 大規模な製品変更またはアーキテクチャ変更では、完全な実装に取りかかる前に、ユーザーにとっての成果と
   影響を受ける境界を説明してください。トレードオフを評価しやすくするプロトタイプは歓迎します。
@@ -55,8 +55,8 @@ Piarium は複数のコーディングエージェント CLI をまとめる汎�
 7. **失敗をありのままに扱う。** 権威ある失敗は、成功した空のレスポンスではありません。キャンセル、部分的な
    失敗、クリーンアップ、リトライ、ロールバック、利用できない機能を明示してください。
 
-該当する境界に関わる場合は、[アーキテクチャ](../docs/architecture.md)、[プラグイン GUI 設計](../docs/plugin-gui-design.md)、
-[リカバリー](../docs/recovery.md)、[セキュリティモデル](../docs/security.md)を読んでください。
+該当する境界に関わる場合は、[アーキテクチャ](../../docs/architecture.md)、[プラグイン GUI 設計](../../docs/plugin-gui-design.md)、
+[リカバリー](../../docs/recovery.md)、[セキュリティモデル](../../docs/security.md)を読んでください。
 
 ## 開発環境のセットアップ
 
@@ -238,6 +238,6 @@ pull request は、レビュー担当者が調査を再現しなくても結果�
 ## ライセンス
 
 貢献を提出することにより、Piarium の
-[GNU Affero General Public License v3.0](../LICENSE)（`AGPL-3.0-only`）の下で配布されること、および
-インポートされたサードパーティ素材が [サードパーティ通知](../THIRD_PARTY_NOTICES.md) によって求められる
+[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）の下で配布されること、および
+インポートされたサードパーティ素材が [サードパーティ通知](../../THIRD_PARTY_NOTICES.md) によって求められる
 通知を保持することに同意するものとします。

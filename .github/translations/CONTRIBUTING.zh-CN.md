@@ -1,11 +1,11 @@
-[English](CONTRIBUTING.md) | 简体中文 | [繁體中文](CONTRIBUTING.zh-TW.md) | [Français](CONTRIBUTING.fr.md) | [日本語](CONTRIBUTING.ja.md)
+[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | 简体中文 | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
 # 为 Piarium 贡献
 
 感谢你帮助改进 Piarium。无论是 Pi 运行时边界、桌面与远程端、扩展集成、文档、测试、无障碍，
 还是平台支持，都欢迎贡献。
 
-本文说明公开的贡献流程。具体实现工作还需要遵循 [AGENTS.md](../AGENTS.md)、离改动最近的包 README，
+本文说明公开的贡献流程。具体实现工作还需要遵循 [AGENTS.md](../../AGENTS.md)、离改动最近的包 README，
 以及负责该能力的架构文档。
 
 ## 文档语言
@@ -48,8 +48,8 @@ Piarium 不是套在多个编程智能体 CLI 外面的通用壳。它只有一�
 7. **如实表达失败。** 权威来源失败不等于成功返回空数据。取消、部分失败、清理、重试、回滚和能力
    不可用都应被明确呈现。
 
-改动涉及相应边界时，请阅读[架构](../docs/architecture.md)、[插件 GUI 设计](../docs/plugin-gui-design.md)、
-[恢复](../docs/recovery.md)和[安全模型](../docs/security.md)。
+改动涉及相应边界时，请阅读[架构](../../docs/architecture.md)、[插件 GUI 设计](../../docs/plugin-gui-design.md)、
+[恢复](../../docs/recovery.md)和[安全模型](../../docs/security.md)。
 
 ## 开发环境
 
@@ -220,5 +220,5 @@ Pull Request 应使审查者无需重走你的调查过程，就能验证结果�
 ## 许可证
 
 提交贡献即表示你同意相关内容可以按照 Piarium 的
-[GNU Affero General Public License v3.0](../LICENSE)（`AGPL-3.0-only`）分发；导入的第三方内容仍应
-保留[第三方声明](../THIRD_PARTY_NOTICES.md)所要求的署名和许可证文本。
+[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）分发；导入的第三方内容仍应
+保留[第三方声明](../../THIRD_PARTY_NOTICES.md)所要求的署名和许可证文本。

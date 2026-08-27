@@ -1,4 +1,4 @@
-[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING.zh-CN.md) | [繁體中文](CONTRIBUTING.zh-TW.md) | Français | [日本語](CONTRIBUTING.ja.md)
+[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | [繁體中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-TW.md) | Français | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
 # Contribuer à Piarium
 
@@ -6,7 +6,7 @@ Merci de contribuer à l'amélioration de Piarium. Les contributions sont les bi
 limite d'exécution Pi, interfaces de bureau et distantes, intégrations d'extensions, documentation, tests,
 accessibilité et prise en charge des plateformes.
 
-Ce guide décrit le processus public de contribution. [AGENTS.md](../AGENTS.md), le README du package le plus proche
+Ce guide décrit le processus public de contribution. [AGENTS.md](../../AGENTS.md), le README du package le plus proche
 et les documents d'architecture responsables de la fonctionnalité contiennent les règles détaillées applicables au
 travail d'implémentation dans le dépôt.
 
@@ -26,7 +26,7 @@ de langue afin que les lecteurs n'aient jamais besoin de revenir à l'index du d
 - Lisez le [Code de conduite](CODE_OF_CONDUCT.fr.md).
 - Utilisez les [Issues GitHub](https://github.com/Youzini-afk/Piarium/issues) pour les bugs reproductibles, les
   propositions de fonctionnalités et les discussions techniques ciblées.
-- Envoyez les vulnérabilités via le processus privé décrit dans [SECURITY.md](SECURITY.md). Ne publiez pas de
+- Envoyez les vulnérabilités via le processus privé décrit dans [SECURITY.md](../SECURITY.md). Ne publiez pas de
   détails d'exploitation dans une issue, une discussion, une pull request, un journal ou une capture d'écran.
 - Recherchez les issues et pull requests existantes avant de commencer une modification en double.
 - Pour une modification importante du produit ou de l'architecture, décrivez le résultat utilisateur et les limites
@@ -62,8 +62,8 @@ unique et un seul contrat d'exécution préliminaire actuel.
    visibles l'annulation, l'échec partiel, le nettoyage, la nouvelle tentative, le retour arrière et les
    capacités indisponibles.
 
-Lisez [Architecture](../docs/architecture.md), [Conception de l'interface graphique des plugins](../docs/plugin-gui-design.md),
-[Récupération](../docs/recovery.md) et [Modèle de sécurité](../docs/security.md) lorsque ces limites s'appliquent.
+Lisez [Architecture](../../docs/architecture.md), [Conception de l'interface graphique des plugins](../../docs/plugin-gui-design.md),
+[Récupération](../../docs/recovery.md) et [Modèle de sécurité](../../docs/security.md) lorsque ces limites s'appliquent.
 
 ## Configuration du développement
 
@@ -254,5 +254,5 @@ Vous pouvez également aider en :
 ## Licence
 
 En soumettant une contribution, vous acceptez qu'elle puisse être distribuée sous la
-[GNU Affero General Public License v3.0](../LICENSE) de Piarium (`AGPL-3.0-only`) et que le matériel tiers importé
-conserve les mentions requises par les [avis sur les composants tiers](../THIRD_PARTY_NOTICES.md).
+[GNU Affero General Public License v3.0](../../LICENSE) de Piarium (`AGPL-3.0-only`) et que le matériel tiers importé
+conserve les mentions requises par les [avis sur les composants tiers](../../THIRD_PARTY_NOTICES.md).

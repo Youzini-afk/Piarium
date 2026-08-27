@@ -210,7 +210,7 @@ Pi 工作进程异常也不会让渲染器一同崩溃。跨进程传输的是 P
 
 第三方 Pi 包是拥有当前用户操作系统权限的可执行代码。Piarium 会展示观察到的能力，并对项目内
 可执行资源设置授权门槛，但不会把受信任扩展宣传成完整的沙箱。在公开远程实例或安装陌生代码之前，
-请阅读[安全策略](../../.github/SECURITY.zh-CN.md)和[安全模型](../../docs/security.md)。
+请阅读[安全策略](../translations/SECURITY.zh-CN.md)和[安全模型](../../docs/security.md)。
 
 ## 仓库结构
 
@@ -254,7 +254,7 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 发生变化时，Docker 工作流只验证容器契约，并构建配套的精简与工具链基础镜像及应用镜像；两个
 候选应用都通过不可变摘要烟测后，才会提升可安装标签。
 
-参与贡献前，请阅读[工程开发指南](../../docs/development.md)、[贡献指南](../../.github/CONTRIBUTING.zh-CN.md)和精简的
+参与贡献前，请阅读[工程开发指南](../../docs/development.md)、[贡献指南](../translations/CONTRIBUTING.zh-CN.md)和精简的
 仓库边界说明 [AGENTS.md](../../AGENTS.md)。
 
 ## 设计与运维文档

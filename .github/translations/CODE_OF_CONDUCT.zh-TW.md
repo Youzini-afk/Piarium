@@ -1,4 +1,4 @@
-[English](CODE_OF_CONDUCT.md) | [简体中文](CODE_OF_CONDUCT.zh-CN.md) | 繁體中文 | [Français](CODE_OF_CONDUCT.fr.md) | [日本語](CODE_OF_CONDUCT.ja.md)
+[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CODE_OF_CONDUCT.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CODE_OF_CONDUCT.ja.md)
 
 # Contributor Covenant 行為準則
 

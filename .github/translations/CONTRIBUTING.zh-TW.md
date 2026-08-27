@@ -1,11 +1,11 @@
-[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING.zh-CN.md) | 繁體中文 | [Français](CONTRIBUTING.fr.md) | [日本語](CONTRIBUTING.ja.md)
+[English](https://github.com/Youzini-afk/Piarium/blob/main/.github/CONTRIBUTING.md) | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.zh-CN.md) | 繁體中文 | [Français](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.fr.md) | [日本語](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/CONTRIBUTING.ja.md)
 
 # 為 Piarium 貢獻
 
 感謝你協助改進 Piarium。無論是 Pi 執行時期邊界、桌面與遠端介面、擴充功能整合、文件、測試、無障礙功能，
 還是平台支援，都歡迎貢獻。
 
-本指南說明公開的貢獻工作流程。具體實作工作的詳細儲存庫規則，請參閱 [AGENTS.md](../AGENTS.md)、最近的套件
+本指南說明公開的貢獻工作流程。具體實作工作的詳細儲存庫規則，請參閱 [AGENTS.md](../../AGENTS.md)、最近的套件
 README，以及負責該功能的架構文件。
 
 ## 文件語言
@@ -21,7 +21,7 @@ README，以及負責該功能的架構文件。
 
 - 閱讀[行為準則](CODE_OF_CONDUCT.zh-TW.md)。
 - 使用 [GitHub Issues](https://github.com/Youzini-afk/Piarium/issues) 回報可重現的錯誤、提出功能建議，以及進行聚焦的技術討論。
-- 請依照 [SECURITY.md](SECURITY.md) 中的私人流程提交漏洞。不要在 issue、討論、pull request、日誌或螢幕截圖中公開漏洞利用細節。
+- 請依照 [SECURITY.md](../SECURITY.md) 中的私人流程提交漏洞。不要在 issue、討論、pull request、日誌或螢幕截圖中公開漏洞利用細節。
 - 開始重複性的變更之前，先搜尋現有的 issue 和 pull request。
 - 對於大型產品或架構變更，投入完整實作之前，先說明使用者成果和受影響的邊界。如果原型有助於評估取捨，歡迎先提供原型。
 
@@ -43,8 +43,8 @@ Piarium 不是圍繞多個程式設計代理 CLI 的通用包裝器。它有一�
    並具有可見的失敗語義。
 7. **讓失敗如實呈現。** 權威來源的失敗不是成功的空回應。請讓取消、部分失敗、清理、重試、回滾和不可用的功能都清楚可見。
 
-在適用的邊界涉及這些內容時，請閱讀[架構](../docs/architecture.md)、[外掛程式 GUI 設計](../docs/plugin-gui-design.md)、
-[復原](../docs/recovery.md)和[安全性模型](../docs/security.md)。
+在適用的邊界涉及這些內容時，請閱讀[架構](../../docs/architecture.md)、[外掛程式 GUI 設計](../../docs/plugin-gui-design.md)、
+[復原](../../docs/recovery.md)和[安全性模型](../../docs/security.md)。
 
 ## 開發環境設定
 
@@ -208,5 +208,5 @@ Pull request 應讓審查者無需重新拼湊你的調查過程就能驗證結�
 ## 授權條款
 
 提交貢獻即表示你同意該貢獻可以依 Piarium 的
-[GNU Affero General Public License v3.0](../LICENSE)（`AGPL-3.0-only`）散布，且匯入的第三方資料會保留
-[第三方通知](../THIRD_PARTY_NOTICES.md)所要求的聲明。
+[GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）散布，且匯入的第三方資料會保留
+[第三方通知](../../THIRD_PARTY_NOTICES.md)所要求的聲明。

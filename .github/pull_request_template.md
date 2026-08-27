@@ -5,7 +5,7 @@
 
 ## 校验 / Verification
 
-请遵循[简体中文贡献指南](CONTRIBUTING.zh-CN.md)。只勾选你实际跑过的项。
+请遵循[简体中文贡献指南](translations/CONTRIBUTING.zh-CN.md)。只勾选你实际跑过的项。
 Follow [CONTRIBUTING.md](CONTRIBUTING.md). Check only what you actually ran.
 
 - [ ] `bun run type-check`

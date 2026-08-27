@@ -1,4 +1,4 @@
-English | [简体中文](SECURITY.zh-CN.md)
+English | [简体中文](https://github.com/Youzini-afk/Piarium/blob/main/.github/translations/SECURITY.zh-CN.md)
 
 # Piarium security policy
 
