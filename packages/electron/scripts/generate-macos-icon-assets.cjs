@@ -1,4 +1,4 @@
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -22,25 +22,44 @@ if (!fs.existsSync(sourceIconPath)) {
   throw new Error(`Missing Icon Composer source at ${sourceIconPath}`);
 }
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-app-icon-'));
-try {
-  execFileSync(resolveActool(), [
-    sourceIconPath,
-    '--compile', tmpDir,
-    '--app-icon', iconName,
-    '--platform', 'macosx',
-    '--target-device', 'mac',
-    '--minimum-deployment-target', '13.0',
-    '--output-partial-info-plist', path.join(tmpDir, 'partial.plist'),
-  ], { stdio: 'inherit' });
+const actoolPath = resolveActool();
+const retryableActoolFailure = /IBPlatformToolFailureException|AssetCatalogAgent|tool closed the connection|model configuration used to open the store is incompatible/i;
 
-  const generatedAssetsPath = path.join(tmpDir, 'Assets.car');
-  if (!fs.existsSync(generatedAssetsPath)) {
-    throw new Error(`actool did not generate Assets.car at ${generatedAssetsPath}`);
+for (let attempt = 1; attempt <= 3; attempt += 1) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-app-icon-'));
+  try {
+    const result = spawnSync(actoolPath, [
+      sourceIconPath,
+      '--compile', tmpDir,
+      '--app-icon', iconName,
+      '--platform', 'macosx',
+      '--target-device', 'mac',
+      '--minimum-deployment-target', '13.0',
+      '--output-partial-info-plist', path.join(tmpDir, 'partial.plist'),
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.error) throw result.error;
+
+    if (result.status !== 0) {
+      const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+      if (attempt < 3 && retryableActoolFailure.test(output)) {
+        console.warn(`[electron] actool infrastructure failed on attempt ${attempt}; retrying with a fresh output directory.`);
+        continue;
+      }
+      throw new Error(`actool failed with exit code ${result.status ?? 'unknown'}`);
+    }
+
+    const generatedAssetsPath = path.join(tmpDir, 'Assets.car');
+    if (!fs.existsSync(generatedAssetsPath)) {
+      throw new Error(`actool did not generate Assets.car at ${generatedAssetsPath}`);
+    }
+
+    fs.copyFileSync(generatedAssetsPath, outputAssetsPath);
+    console.log(`Generated ${outputAssetsPath}`);
+    break;
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
-
-  fs.copyFileSync(generatedAssetsPath, outputAssetsPath);
-  console.log(`Generated ${outputAssetsPath}`);
-} finally {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
 }
