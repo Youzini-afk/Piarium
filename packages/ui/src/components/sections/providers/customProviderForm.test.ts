@@ -3,9 +3,13 @@ import {
   createCustomProviderFormStateFromConfig,
   createEmptyCustomProviderState,
   createPiProviderConfigFromForm,
+  ensureExtendedThinkingLevels,
+  isCustomProviderThinkingLevelEnabled,
   mergeCustomProviderModelRows,
   normalizeCustomProviderModelRows,
   resolveCustomProviderApiKey,
+  setCustomProviderThinkingLevelEnabled,
+  setCustomProviderThinkingLevelMapping,
 } from './customProviderForm';
 
 describe('Pi custom provider form', () => {
@@ -46,7 +50,7 @@ describe('Pi custom provider form', () => {
         maxTokens: 32000,
         name: 'Model A',
         reasoning: true,
-        thinkingLevelMap: { high: 'high', off: null },
+        thinkingLevelMap: { high: 'high', max: 'max', off: null, xhigh: 'xhigh' },
       },
     ]);
   });
@@ -90,6 +94,7 @@ describe('Pi custom provider form', () => {
         input: ['text', 'image'],
         maxTokens: 64000,
         reasoning: true,
+        thinkingLevelMap: { max: 'max', xhigh: 'xhigh' },
       }],
       name: 'LAN Provider',
     });
@@ -150,5 +155,37 @@ describe('Pi custom provider form', () => {
       baseUrl: 'http://127.0.0.1:11434/v1',
       id: 'inherited-provider',
     });
+  });
+
+  test('exposes every Pi thinking level for a reasoning-capable custom model', () => {
+    expect(ensureExtendedThinkingLevels(undefined)).toEqual({
+      max: 'max',
+      xhigh: 'xhigh',
+    });
+    expect(ensureExtendedThinkingLevels({ high: null, max: null })).toEqual({
+      high: null,
+      max: null,
+      xhigh: 'xhigh',
+    });
+  });
+
+  test('persists level exclusions and provider-native effort mappings', () => {
+    const disabled = setCustomProviderThinkingLevelEnabled(
+      { max: 'max', xhigh: 'xhigh' },
+      'medium',
+      false,
+    );
+    expect(disabled).toEqual({ max: 'max', medium: null, xhigh: 'xhigh' });
+    expect(isCustomProviderThinkingLevelEnabled(disabled, 'medium')).toBe(false);
+
+    const reenabled = setCustomProviderThinkingLevelEnabled(disabled, 'medium', true);
+    expect(reenabled).toEqual({ max: 'max', xhigh: 'xhigh' });
+    expect(isCustomProviderThinkingLevelEnabled(reenabled, 'medium')).toBe(true);
+
+    expect(setCustomProviderThinkingLevelMapping(reenabled, 'max', 'ultra')).toEqual({
+      max: 'ultra',
+      xhigh: 'xhigh',
+    });
+    expect(setCustomProviderThinkingLevelMapping({ high: 'very-high' }, 'high', '')).toBeUndefined();
   });
 });

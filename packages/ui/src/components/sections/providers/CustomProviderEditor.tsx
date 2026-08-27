@@ -4,6 +4,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -33,6 +34,7 @@ import {
   createEmptyCustomProviderModel,
   createEmptyCustomProviderState,
   createPiProviderConfigFromForm,
+  ensureExtendedThinkingLevels,
   mergeCustomProviderModelRows,
   resolveCustomProviderApiKey,
 } from './customProviderForm';
@@ -40,6 +42,7 @@ import type {
   CustomProviderEditableFormState,
   CustomProviderModelRowInput,
 } from './customProviderForm';
+import { CustomProviderReasoningLevels } from './CustomProviderReasoningLevels';
 
 interface CustomProviderEditorProps {
   mode: 'create' | 'edit';
@@ -57,8 +60,8 @@ const MODEL_IMPORT_SORT_OPTIONS = [
 ] as const;
 type ModelImportSortValue = typeof MODEL_IMPORT_SORT_OPTIONS[number]['value'];
 
-const shouldIgnoreToggleRowClick = (target: EventTarget | null): boolean => (
-  target instanceof HTMLElement && Boolean(target.closest('[data-checkbox-control="true"]'))
+const shouldIgnoreCapabilityCardClick = (target: EventTarget | null): boolean => (
+  target instanceof HTMLElement && Boolean(target.closest('[data-capability-control="true"]'))
 );
 
 export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
@@ -123,6 +126,17 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
       const nextModels = prev.models.map((row, i) => (i === index ? { ...row, [field]: value } : row));
       return { ...prev, models: nextModels, modelsDefined: true };
     });
+  };
+
+  const updateModelFields = (
+    index: number,
+    fields: Partial<CustomProviderEditableFormState['models'][number]>,
+  ) => {
+    setState((prev) => ({
+      ...prev,
+      models: prev.models.map((row, rowIndex) => (rowIndex === index ? { ...row, ...fields } : row)),
+      modelsDefined: true,
+    }));
   };
 
   const addModel = () => {
@@ -591,60 +605,73 @@ export const CustomProviderEditor: React.FC<CustomProviderEditorProps> = ({
                   </div>
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-4">
-                  <label
-                    className="flex cursor-pointer items-center gap-2"
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => {
-                      if (shouldIgnoreToggleRowClick(event.target)) return;
-                      updateModel(index, 'attachment', !row.attachment);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
+                <div className="mt-3 space-y-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div
+                      className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-lg border border-[var(--surface-subtle)] px-3 py-2 transition-colors hover:bg-interactive-hover"
+                      onClick={(event) => {
+                        if (shouldIgnoreCapabilityCardClick(event.target)) return;
                         updateModel(index, 'attachment', !row.attachment);
-                      }
-                    }}
-                  >
-                    <span data-checkbox-control="true">
-                      <Checkbox
-                        checked={row.attachment}
-                        onChange={(checked) => updateModel(index, 'attachment', checked)}
-                        ariaLabel={t('settings.providers.page.models.capability.imageInput')}
-                      />
-                    </span>
-                    <span className="typography-ui-label font-normal text-foreground">
-                      {t('settings.providers.page.models.capability.imageInput')}
-                    </span>
-                  </label>
+                      }}
+                    >
+                      <span className="typography-ui-label font-normal text-foreground">
+                        {t('settings.providers.page.models.capability.imageInput')}
+                      </span>
+                      <span data-capability-control="true" className="flex shrink-0">
+                        <Switch
+                          checked={row.attachment}
+                          onCheckedChange={(checked) => updateModel(index, 'attachment', checked)}
+                          aria-label={t('settings.providers.page.models.capability.imageInput')}
+                        />
+                      </span>
+                    </div>
 
-                  <label
-                    className="flex cursor-pointer items-center gap-2"
-                    role="button"
-                    tabIndex={0}
-                    onClick={(event) => {
-                      if (shouldIgnoreToggleRowClick(event.target)) return;
-                      updateModel(index, 'reasoning', !row.reasoning);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        updateModel(index, 'reasoning', !row.reasoning);
-                      }
-                    }}
+                    <div
+                      className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-lg border border-[var(--surface-subtle)] px-3 py-2 transition-colors hover:bg-interactive-hover"
+                      onClick={(event) => {
+                        if (shouldIgnoreCapabilityCardClick(event.target)) return;
+                        const reasoning = !row.reasoning;
+                        updateModelFields(index, {
+                          reasoning,
+                          ...(reasoning
+                            ? { thinkingLevelMap: ensureExtendedThinkingLevels(row.thinkingLevelMap) }
+                            : {}),
+                        });
+                      }}
+                    >
+                      <span className="typography-ui-label font-normal text-foreground">
+                        {t('settings.providers.page.models.capability.reasoning')}
+                      </span>
+                      <span data-capability-control="true" className="flex shrink-0">
+                        <Switch
+                          checked={row.reasoning}
+                          onCheckedChange={(reasoning) => updateModelFields(index, {
+                            reasoning,
+                            ...(reasoning
+                              ? { thinkingLevelMap: ensureExtendedThinkingLevels(row.thinkingLevelMap) }
+                              : {}),
+                          })}
+                          aria-label={t('settings.providers.page.models.capability.reasoning')}
+                        />
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    aria-hidden={!row.reasoning}
+                    className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
+                      row.reasoning
+                        ? 'grid-rows-[1fr] opacity-100'
+                        : 'pointer-events-none grid-rows-[0fr] opacity-0'
+                    }`}
                   >
-                    <span data-checkbox-control="true">
-                      <Checkbox
-                        checked={row.reasoning}
-                        onChange={(checked) => updateModel(index, 'reasoning', checked)}
-                        ariaLabel={t('settings.providers.page.models.capability.reasoning')}
+                    <div className="min-h-0 overflow-hidden">
+                      <CustomProviderReasoningLevels
+                        value={row.thinkingLevelMap}
+                        onChange={(thinkingLevelMap) => updateModel(index, 'thinkingLevelMap', thinkingLevelMap)}
                       />
-                    </span>
-                    <span className="typography-ui-label font-normal text-foreground">
-                      {t('settings.providers.page.models.capability.reasoning')}
-                    </span>
-                  </label>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-3 flex justify-end">

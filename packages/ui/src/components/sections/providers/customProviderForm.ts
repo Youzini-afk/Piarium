@@ -1,8 +1,9 @@
-import type {
-  DiscoverableProviderApi,
-  ProviderConfigInput,
-  ProviderConfigScope,
-  ProviderModelConfigInput,
+import {
+  type ThinkingLevel,
+  type DiscoverableProviderApi,
+  type ProviderConfigInput,
+  type ProviderConfigScope,
+  type ProviderModelConfigInput,
 } from '@piarium/protocol';
 
 type ApiKeyInputLike = { value?: string | null } | null | undefined;
@@ -47,6 +48,76 @@ export const COMMON_PROVIDER_APIS: DiscoverableProviderApi[] = [
   'anthropic-messages',
   'google-generative-ai',
 ];
+
+const requiresExplicitThinkingLevelMapping = (level: ThinkingLevel): boolean => (
+  level === 'xhigh' || level === 'max'
+);
+
+const compactThinkingLevelMap = (
+  map: ProviderModelConfigInput['thinkingLevelMap'],
+): ProviderModelConfigInput['thinkingLevelMap'] => (
+  map && Object.keys(map).length > 0 ? map : undefined
+);
+
+/**
+ * Pi exposes the five common levels by default, but only exposes xhigh/max when a model maps them.
+ * A custom provider marked as reasoning-capable should therefore make the full Pi control surface
+ * available unless the user has explicitly disabled a level with `null`.
+ */
+export const ensureExtendedThinkingLevels = (
+  map: ProviderModelConfigInput['thinkingLevelMap'],
+): ProviderModelConfigInput['thinkingLevelMap'] => {
+  const next = { ...(map ?? {}) };
+  if (next.xhigh === undefined) next.xhigh = 'xhigh';
+  if (next.max === undefined) next.max = 'max';
+  return next;
+};
+
+export const isCustomProviderThinkingLevelEnabled = (
+  map: ProviderModelConfigInput['thinkingLevelMap'],
+  level: ThinkingLevel,
+): boolean => map?.[level] !== null;
+
+export const setCustomProviderThinkingLevelEnabled = (
+  map: ProviderModelConfigInput['thinkingLevelMap'],
+  level: ThinkingLevel,
+  enabled: boolean,
+): ProviderModelConfigInput['thinkingLevelMap'] => {
+  const next = { ...(map ?? {}) };
+  if (!enabled) {
+    next[level] = null;
+    return next;
+  }
+
+  if (next[level] === null) {
+    if (requiresExplicitThinkingLevelMapping(level)) {
+      next[level] = level;
+    } else {
+      delete next[level];
+    }
+  } else if (next[level] === undefined && requiresExplicitThinkingLevelMapping(level)) {
+    next[level] = level;
+  }
+  return compactThinkingLevelMap(next);
+};
+
+/** Maps a fixed Pi level to an arbitrary provider-native effort string. */
+export const setCustomProviderThinkingLevelMapping = (
+  map: ProviderModelConfigInput['thinkingLevelMap'],
+  level: ThinkingLevel,
+  providerValue: string,
+): ProviderModelConfigInput['thinkingLevelMap'] => {
+  const value = providerValue.trim();
+  const next = { ...(map ?? {}) };
+  if (value) {
+    next[level] = value;
+  } else if (requiresExplicitThinkingLevelMapping(level)) {
+    next[level] = level;
+  } else {
+    delete next[level];
+  }
+  return compactThinkingLevelMap(next);
+};
 
 const trimString = (value: unknown): string => (
   typeof value === 'string' ? value.trim() : ''
@@ -116,6 +187,9 @@ export const normalizeCustomProviderModelRows = (
   const baseUrl = trimString(row.baseUrl);
   const contextWindow = positiveInteger(row.context);
   const maxTokens = positiveInteger(row.output);
+  const thinkingLevelMap = row.reasoning
+    ? ensureExtendedThinkingLevels(row.thinkingLevelMap)
+    : row.thinkingLevelMap;
   return [{
     ...(api ? { api } : {}),
     ...(baseUrl ? { baseUrl } : {}),
@@ -126,7 +200,7 @@ export const normalizeCustomProviderModelRows = (
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(name ? { name } : {}),
     reasoning: row.reasoning,
-    ...(row.thinkingLevelMap === undefined ? {} : { thinkingLevelMap: row.thinkingLevelMap }),
+    ...(thinkingLevelMap === undefined ? {} : { thinkingLevelMap }),
   }];
 });
 
