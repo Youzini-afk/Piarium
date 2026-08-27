@@ -49,7 +49,6 @@ const goal = {
 const createHarness = ({ audit = { note: 'Verified.', verdict: 'complete' }, withGoal = true } = {}) => {
   let features = {
     ...(withGoal ? { goal: { ...goal } } : {}),
-    pinnedContext: [],
     revision: 1,
     schemaVersion: 1,
   };

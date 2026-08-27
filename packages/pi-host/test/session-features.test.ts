@@ -5,7 +5,6 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   createSessionFeaturesExtension,
   mutateSessionFeatures,
-  PIARIUM_PINNED_CONTEXT_MESSAGE_TYPE,
   PIARIUM_SESSION_FEATURES_ENTRY_TYPE,
   readSessionFeatures,
   SessionFeatureConflictError,
@@ -29,12 +28,6 @@ describe("Piarium session features", () => {
     assert.equal(started.goal?.tokenBudget, 40_000);
     assert.equal(started.revision, 1);
 
-    const pinned = mutateSessionFeatures(manager, {
-      entryId: userEntryId,
-      pinned: true,
-      type: "context.set",
-    });
-    assert.deepEqual(pinned.pinnedContext.map((entry) => entry.entryId), [userEntryId]);
     assert.equal(
       manager.buildSessionContext().messages.some((message) => (
         message.role === "custom"
@@ -45,7 +38,6 @@ describe("Piarium session features", () => {
 
     manager.branch(userEntryId);
     assert.deepEqual(readSessionFeatures(manager), {
-      pinnedContext: [],
       revision: 0,
       schemaVersion: 1,
     });
@@ -81,7 +73,31 @@ describe("Piarium session features", () => {
     assert.equal(unchanged.goal?.id, started.goal?.id);
   });
 
-  it("injects missing pinned messages and the active goal through native Pi hooks", async () => {
+  it("ignores retired pinned-context data without discarding Goal or Assist state", () => {
+    const manager = SessionManager.inMemory("/workspace");
+    manager.appendCustomEntry(PIARIUM_SESSION_FEATURES_ENTRY_TYPE, {
+      assist: {
+        forEntryId: "assistant-1",
+        generatedAt: 1,
+        suggestion: "Continue",
+      },
+      pinnedContext: [{ entryId: "user-1", pinnedAt: 1, role: "user" }],
+      revision: 7,
+      schemaVersion: 1,
+    });
+
+    assert.deepEqual(readSessionFeatures(manager), {
+      assist: {
+        forEntryId: "assistant-1",
+        generatedAt: 1,
+        suggestion: "Continue",
+      },
+      revision: 7,
+      schemaVersion: 1,
+    });
+  });
+
+  it("injects only the active goal through the native Pi hook", async () => {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const api = {
       on: (event: string, handler: (...args: unknown[]) => unknown) => handlers.set(event, handler),
@@ -89,33 +105,14 @@ describe("Piarium session features", () => {
     await createSessionFeaturesExtension()(api);
 
     const manager = SessionManager.inMemory("/workspace");
-    const pinnedEntryId = manager.appendMessage({
-      content: "Pinned evidence",
-      role: "user",
-      timestamp: Date.now(),
-    });
-    mutateSessionFeatures(manager, { entryId: pinnedEntryId, pinned: true, type: "context.set" });
     mutateSessionFeatures(manager, { objective: "Preserve every custom capability", type: "goal.start" });
-
-    const sessionManager = {
-      buildContextEntries: () => [],
-      getBranch: () => manager.getBranch(),
-      getEntry: (entryId: string) => manager.getEntry(entryId),
-    };
-    const contextHandler = handlers.get("context");
-    assert.ok(contextHandler);
-    const contextResult = await contextHandler(
-      { messages: [], type: "context" },
-      { sessionManager } as unknown as ExtensionContext,
-    ) as { messages: Array<{ content: string; customType: string }> };
-    assert.equal(contextResult.messages[0]?.customType, PIARIUM_PINNED_CONTEXT_MESSAGE_TYPE);
-    assert.match(contextResult.messages[0]?.content ?? "", /Pinned evidence/);
+    assert.equal(handlers.has("context"), false);
 
     const goalHandler = handlers.get("before_agent_start");
     assert.ok(goalHandler);
     const goalResult = await goalHandler(
       { systemPrompt: "base", type: "before_agent_start" },
-      { sessionManager } as unknown as ExtensionContext,
+      { sessionManager: manager } as unknown as ExtensionContext,
     ) as { systemPrompt: string };
     assert.match(goalResult.systemPrompt, /base/);
     assert.match(goalResult.systemPrompt, /Preserve every custom capability/);

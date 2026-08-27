@@ -9,8 +9,8 @@ second session model.
 `@piarium/pi-host` stores `PiSessionFeatureState` as append-only custom
 entries named `piarium.session-features/v1` in the Pi session JSONL. The
 entries do not participate in model context. Because each update is a normal
-tree entry, Goal, Assist, and pinned-context state follows conversation
-branches and is restored by Pi navigation.
+tree entry, Goal and Assist states follow conversation branches and are restored
+by Pi navigation.
 
 The renderer receives the state on every `session.snapshot` and mutates it
 through `session.features.mutate`. The broker and host both parse this union
@@ -48,18 +48,10 @@ message are stored with the assistant entry ID. The renderer shows them only
 while that entry is still the latest completed assistant reply, so a new user
 message invalidates stale assistance without a clearing write.
 
-## Pinned context
-
-Message pinning records Pi entry IDs in the same branch-aware feature state.
-The hidden host extension uses Pi's `context` hook. If a pinned entry is no
-longer part of `buildContextEntries()` after compaction, it injects the full
-text as a hidden `piarium.pinned-context/v1` custom message for that model
-call. Messages still present in the native context are not duplicated.
-
 ## Tests
 
 - `packages/pi-host/test/session-features.test.ts` covers persistence,
-  branching, stale writes, and both Pi hooks.
+  branching, stale writes, and the Goal prompt hook.
 - `packages/web/server/lib/pi-session-automation/runtime.test.js` covers Goal
   settlement/continuation and Assist writes.
 - `packages/runtime-broker/test/runtime-broker.test.ts` exercises the feature

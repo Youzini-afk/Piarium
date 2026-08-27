@@ -20,7 +20,7 @@ const assistant = (stopReason: PiAssistantMessage['stopReason']): PiAssistantMes
     cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
     input: 0,
     output: 0,
-    totalTokens: 0,
+    totalTokens: 16_024,
   },
 });
 
@@ -63,6 +63,7 @@ describe('Pi turn assistant chrome', () => {
     expect(markup.match(/<header/g)).toHaveLength(1);
     expect(markup).toContain('runtime-provider/runtime-model');
     expect(markup).not.toContain('snapshot-provider/snapshot-model');
+    expect(markup).not.toContain('16,024');
     expect(markup.match(/animate-busy-pulse/g)).toHaveLength(3);
   });
 

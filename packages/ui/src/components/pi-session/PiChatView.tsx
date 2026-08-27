@@ -57,7 +57,6 @@ import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
 import { renderPiComposerSubmission } from './piComposerSubmission';
-import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import {
   WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
@@ -170,6 +169,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const prompt = usePiSessionStore((state) => state.prompt);
   const steer = usePiSessionStore((state) => state.steer);
   const followUp = usePiSessionStore((state) => state.followUp);
+  const forkSession = usePiSessionStore((state) => state.forkSession);
   const abort = usePiSessionStore((state) => state.abort);
   const mutateFeatures = usePiSessionStore((state) => state.mutateFeatures);
   const refreshEntries = usePiSessionStore((state) => state.refreshEntries);
@@ -227,7 +227,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [creating, setCreating] = React.useState(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
-  const [pinBusyEntryId, setPinBusyEntryId] = React.useState<string | null>(null);
+  const [forkBusyEntryId, setForkBusyEntryId] = React.useState<string | null>(null);
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const submission = currentRecord?.submission;
   const sending = submission?.status === 'preparing' || submission?.status === 'dispatching';
@@ -511,30 +511,19 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     void runRecovery(entry, preferredRecoveryMode);
   }, [preferredRecoveryMode, runRecovery]);
 
-  const handleTogglePinned = React.useCallback(async (
-    entry: PiSessionMessageEntry,
-    pinned: boolean,
-  ) => {
-    if (!currentSessionId || pinBusyEntryId) return;
-    setPinBusyEntryId(entry.id);
+  const handleFork = React.useCallback(async (entry: PiSessionMessageEntry) => {
+    if (!currentSessionId || forkBusyEntryId) return;
+    setForkBusyEntryId(entry.id);
     try {
-      await mutateFeatures(currentSessionId, {
-        entryId: entry.id,
-        pinned,
-        type: 'context.set',
-      });
-      requestAnimationFrame(focusChatInput);
+      await forkSession(currentSessionId, entry.id, 'at');
     } catch (error) {
-      console.warn('[pi-session] context pin failed:', error);
-      toast.error(t('chat.messageBody.actions.contextPinFailed'));
+      console.warn('[pi-session] fork failed:', error);
+      toast.error(error instanceof Error ? error.message : t('chat.messageBody.actions.forkFailed'));
     } finally {
-      setPinBusyEntryId(null);
+      setForkBusyEntryId(null);
     }
-  }, [currentSessionId, mutateFeatures, pinBusyEntryId, t]);
+  }, [currentSessionId, forkBusyEntryId, forkSession, t]);
 
-  const pinnedEntryIds = React.useMemo(() => new Set(
-    currentRecord?.snapshot?.features.pinnedContext.map((entry) => entry.entryId) ?? [],
-  ), [currentRecord?.snapshot?.features.pinnedContext]);
   const sentMessageHistory = React.useMemo(() => (
     projectPiMessageHistory(currentRecord?.branchEntries?.entries ?? [])
   ), [currentRecord?.branchEntries?.entries]);
@@ -729,10 +718,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                   liveAssistant={currentRecord.liveAssistant}
                   liveUser={transientUser}
                   liveUserStatus={currentRecord.liveUser ? undefined : submission?.status}
+                  forkBusyEntryId={forkBusyEntryId}
+                  onFork={previewOnly ? undefined : handleFork}
                   onRecover={previewOnly ? undefined : handleRecover}
-                  onTogglePinned={previewOnly ? undefined : handleTogglePinned}
-                  pinBusyEntryId={pinBusyEntryId}
-                  pinnedEntryIds={pinnedEntryIds}
                   recoveryBusyEntryId={recoveryBusyEntryId}
                   sessionId={currentSessionId}
                   toolExecutions={currentRecord.toolExecutions}

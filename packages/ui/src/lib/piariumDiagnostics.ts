@@ -237,7 +237,6 @@ const summarizeSessionFeatures = (features: PiSessionFeatureState) => ({
         updatedAt: features.goal.updatedAt,
       }
     : null,
-  pinnedContextCount: features.pinnedContext.length,
   revision: features.revision,
   schemaVersion: features.schemaVersion,
 });

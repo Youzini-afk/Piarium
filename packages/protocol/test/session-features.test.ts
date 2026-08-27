@@ -32,8 +32,8 @@ describe("Pi session feature protocol", () => {
       /status must be one of/,
     );
     assert.throws(
-      () => parsePiSessionFeatureMutation({ entryId: "entry", pinned: "yes", type: "context.set" }),
-      /pinned must be a boolean/,
+      () => parsePiSessionFeatureMutation({ entryId: "entry", pinned: true, type: "context.set" }),
+      /Unsupported session feature mutation/,
     );
   });
 });

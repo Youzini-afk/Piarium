@@ -35,16 +35,9 @@ export interface PiSessionAssistState {
   suggestion?: string;
 }
 
-export interface PiPinnedContextEntry {
-  entryId: string;
-  pinnedAt: number;
-  role: "assistant" | "user";
-}
-
 export interface PiSessionFeatureState {
   assist?: PiSessionAssistState;
   goal?: PiSessionGoalState;
-  pinnedContext: PiPinnedContextEntry[];
   revision: number;
   schemaVersion: typeof PIARIUM_SESSION_FEATURES_SCHEMA_VERSION;
 }
@@ -86,11 +79,6 @@ export type PiSessionFeatureMutation =
       field?: "all" | "recap" | "suggestion";
       forEntryId?: string;
       type: "assist.clear";
-    }
-  | {
-      entryId: string;
-      pinned: boolean;
-      type: "context.set";
     };
 
 export class PiSessionFeatureValidationError extends Error {
@@ -236,16 +224,6 @@ export function parsePiSessionFeatureMutation(value: unknown): PiSessionFeatureM
       return {
         ...(fieldValue === undefined ? {} : { field: fieldValue }),
         ...(forEntryId === undefined ? {} : { forEntryId }),
-        type,
-      };
-    }
-    case "context.set": {
-      if (typeof source.pinned !== "boolean") {
-        throw new PiSessionFeatureValidationError("pinned must be a boolean");
-      }
-      return {
-        entryId: stringValue(source, "entryId") as string,
-        pinned: source.pinned,
         type,
       };
     }

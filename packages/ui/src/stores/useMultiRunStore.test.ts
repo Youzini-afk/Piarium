@@ -23,7 +23,7 @@ const snapshot = (cwd: string, sessionId: string): SessionSnapshot => ({
   activeTools: [],
   busy: false,
   cwd,
-  features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
+  features: { revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: 'all',
   isCompacting: false,

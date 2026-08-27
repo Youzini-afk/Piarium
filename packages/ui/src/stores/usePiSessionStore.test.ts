@@ -28,7 +28,7 @@ const snapshot = (sessionId: string, cwd = 'D:/work'): SessionSnapshot => ({
   activeTools: [],
   busy: false,
   cwd,
-  features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
+  features: { revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: 'all',
   isCompacting: false,
@@ -847,7 +847,6 @@ describe('Pi session store', () => {
         turnsUsed: 0,
         updatedAt: 1,
       },
-      pinnedContext: [],
       revision: 1,
       schemaVersion: 1 as const,
     };
@@ -882,6 +881,30 @@ describe('Pi session store', () => {
       },
     });
     expect(store.getState().records['session-a']?.snapshot?.features).toEqual(features);
+  });
+
+  test('forks at the owning message and activates the Pi-native child session', async () => {
+    const runtime = new FakeRuntime();
+    runtime.handler = (method) => {
+      if (method === 'session.fork') {
+        return { cancelled: false, snapshot: snapshot('session-fork') };
+      }
+      if (method === 'session.entries') return branch('session-fork');
+      if (method === 'session.list') return [];
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+    store.setState({ currentSessionId: 'session-a' });
+
+    const result = await store.getState().forkSession('session-a', 'assistant-entry', 'at');
+
+    expect(result.cancelled).toBe(false);
+    expect(runtime.calls[0]).toEqual({
+      method: 'session.fork',
+      params: { entryId: 'assistant-entry', position: 'at', sessionId: 'session-a' },
+    });
+    expect(store.getState().currentSessionId).toBe('session-fork');
+    expect(store.getState().records['session-fork']?.branchEntries?.entries).toEqual([]);
   });
 
   test('ignores ephemeral catalog-worker session events', async () => {

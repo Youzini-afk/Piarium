@@ -315,7 +315,6 @@ test("broker owns catalog and per-session Pi workers", async () => {
       kind: "workspace",
     });
     assert.deepEqual(created.features, {
-      pinnedContext: [],
       revision: 0,
       schemaVersion: 1,
     });

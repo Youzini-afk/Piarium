@@ -1,13 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   ExtensionFactory,
-  SessionEntry,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
   PIARIUM_SESSION_FEATURES_SCHEMA_VERSION,
-  type PiPinnedContextEntry,
   type PiSessionAssistState,
   type PiSessionFeatureMutation,
   type PiSessionFeatureState,
@@ -16,7 +13,6 @@ import {
 } from "@piarium/protocol";
 
 export const PIARIUM_SESSION_FEATURES_ENTRY_TYPE = "piarium.session-features/v1";
-export const PIARIUM_PINNED_CONTEXT_MESSAGE_TYPE = "piarium.pinned-context/v1";
 
 const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
@@ -109,30 +105,6 @@ function parseAssist(value: unknown): PiSessionAssistState | undefined {
   };
 }
 
-function parsePinnedContext(value: unknown): PiPinnedContextEntry[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const parsed: PiPinnedContextEntry[] = [];
-  for (const candidate of value) {
-    if (!isRecord(candidate)) continue;
-    const entryId = optionalText(candidate.entryId);
-    if (
-      !entryId
-      || seen.has(entryId)
-      || (candidate.role !== "assistant" && candidate.role !== "user")
-    ) {
-      continue;
-    }
-    seen.add(entryId);
-    parsed.push({
-      entryId,
-      pinnedAt: nonNegativeInteger(candidate.pinnedAt),
-      role: candidate.role,
-    });
-  }
-  return parsed.sort((left, right) => left.pinnedAt - right.pinnedAt);
-}
-
 function parseStoredState(value: unknown): PiSessionFeatureState | undefined {
   if (!isRecord(value) || value.schemaVersion !== PIARIUM_SESSION_FEATURES_SCHEMA_VERSION) {
     return undefined;
@@ -142,7 +114,6 @@ function parseStoredState(value: unknown): PiSessionFeatureState | undefined {
   return {
     ...(assist === undefined ? {} : { assist }),
     ...(goal === undefined ? {} : { goal }),
-    pinnedContext: parsePinnedContext(value.pinnedContext),
     revision: nonNegativeInteger(value.revision),
     schemaVersion: PIARIUM_SESSION_FEATURES_SCHEMA_VERSION,
   };
@@ -150,7 +121,6 @@ function parseStoredState(value: unknown): PiSessionFeatureState | undefined {
 
 export function emptySessionFeatures(): PiSessionFeatureState {
   return {
-    pinnedContext: [],
     revision: 0,
     schemaVersion: PIARIUM_SESSION_FEATURES_SCHEMA_VERSION,
   };
@@ -199,7 +169,7 @@ function appendState(
 }
 
 export function mutateSessionFeatures(
-  manager: Pick<SessionManager, "appendCustomEntry" | "getBranch" | "getEntry">,
+  manager: Pick<SessionManager, "appendCustomEntry" | "getBranch">,
   mutation: PiSessionFeatureMutation,
   options: { tokenBaseline?: number } = {},
 ): PiSessionFeatureState {
@@ -224,7 +194,6 @@ export function mutateSessionFeatures(
       return appendState(manager, current, {
         ...current,
         goal,
-        pinnedContext: current.pinnedContext,
       });
     }
     case "goal.update": {
@@ -253,7 +222,6 @@ export function mutateSessionFeatures(
       return appendState(manager, current, {
         ...current,
         goal,
-        pinnedContext: current.pinnedContext,
       });
     }
     case "goal.clear": {
@@ -265,7 +233,6 @@ export function mutateSessionFeatures(
       delete update.goal;
       return appendState(manager, current, {
         ...update,
-        pinnedContext: current.pinnedContext,
       });
     }
     case "assist.set": {
@@ -285,7 +252,6 @@ export function mutateSessionFeatures(
       return appendState(manager, current, {
         ...current,
         assist,
-        pinnedContext: current.pinnedContext,
       });
     }
     case "assist.clear": {
@@ -299,7 +265,6 @@ export function mutateSessionFeatures(
         delete update.assist;
         return appendState(manager, current, {
           ...update,
-          pinnedContext: current.pinnedContext,
         });
       }
       const assist = { ...current.assist };
@@ -309,55 +274,14 @@ export function mutateSessionFeatures(
         delete update.assist;
         return appendState(manager, current, {
           ...update,
-          pinnedContext: current.pinnedContext,
         });
       }
       return appendState(manager, current, {
         ...current,
         assist,
-        pinnedContext: current.pinnedContext,
-      });
-    }
-    case "context.set": {
-      const existing = current.pinnedContext.find((entry) => entry.entryId === mutation.entryId);
-      if (mutation.pinned && existing) return current;
-      if (!mutation.pinned && !existing) return current;
-      let pinnedContext = current.pinnedContext.filter((entry) => entry.entryId !== mutation.entryId);
-      if (mutation.pinned) {
-        const entry = manager.getEntry(mutation.entryId);
-        const role = entry?.type === "message" ? entry.message.role : undefined;
-        if (role !== "assistant" && role !== "user") {
-          throw new SessionFeatureConflictError("Only user and assistant messages can be pinned");
-        }
-        pinnedContext = [...pinnedContext, { entryId: mutation.entryId, pinnedAt: now, role }];
-      }
-      return appendState(manager, current, {
-        ...current,
-        pinnedContext,
       });
     }
   }
-}
-
-function messageText(entry: SessionEntry | undefined): string {
-  if (entry?.type !== "message") return "";
-  const message = entry.message;
-  if (message.role === "user") {
-    if (typeof message.content === "string") return message.content.trim();
-    return message.content
-      .map((part) => part.type === "text" ? part.text : "")
-      .filter(Boolean)
-      .join("\n")
-      .trim();
-  }
-  if (message.role === "assistant") {
-    return message.content
-      .map((part) => part.type === "text" ? part.text : "")
-      .filter(Boolean)
-      .join("\n")
-      .trim();
-  }
-  return "";
 }
 
 function escapeXml(value: string): string {
@@ -365,36 +289,6 @@ function escapeXml(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-}
-
-function buildPinnedContextMessage(
-  manager: Pick<SessionManager, "buildContextEntries" | "getEntry">,
-  state: PiSessionFeatureState,
-): AgentMessage | undefined {
-  const activeEntryIds = new Set(manager.buildContextEntries().map((entry) => entry.id));
-  const missing = state.pinnedContext
-    .filter((pinned) => !activeEntryIds.has(pinned.entryId))
-    .map((pinned) => ({ ...pinned, text: messageText(manager.getEntry(pinned.entryId)) }))
-    .filter((pinned) => pinned.text.length > 0);
-  if (missing.length === 0) return undefined;
-  const content = [
-    "<piarium-pinned-context>",
-    "The user explicitly pinned the following earlier messages. Treat them as required context for this turn.",
-    ...missing.flatMap((entry) => [
-      `<message role="${entry.role}" entry-id="${escapeXml(entry.entryId)}">`,
-      escapeXml(entry.text),
-      "</message>",
-    ]),
-    "</piarium-pinned-context>",
-  ].join("\n");
-  return {
-    content,
-    customType: PIARIUM_PINNED_CONTEXT_MESSAGE_TYPE,
-    details: { entryIds: missing.map((entry) => entry.entryId) },
-    display: false,
-    role: "custom",
-    timestamp: Date.now(),
-  };
 }
 
 function goalSystemReminder(goal: PiSessionGoalState): string {
@@ -414,13 +308,6 @@ function goalSystemReminder(goal: PiSessionGoalState): string {
 
 export function createSessionFeaturesExtension(): ExtensionFactory {
   return (pi) => {
-    pi.on("context", (event, ctx) => {
-      const state = readSessionFeatures(ctx.sessionManager);
-      const pinnedContext = buildPinnedContextMessage(ctx.sessionManager, state);
-      if (!pinnedContext) return undefined;
-      return { messages: [...event.messages, pinnedContext] };
-    });
-
     pi.on("before_agent_start", (event, ctx) => {
       const goal = readSessionFeatures(ctx.sessionManager).goal;
       if (!goal || goal.status !== "active") return undefined;

@@ -26,7 +26,7 @@ const snapshot = (
   activeTools: [],
   busy: false,
   cwd: `D:/work/${sessionId}`,
-  features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
+  features: { revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: 'all',
   isCompacting: false,

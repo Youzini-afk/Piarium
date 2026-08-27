@@ -54,15 +54,14 @@ export interface PiTimelineProps {
   assistantWaiting?: PiAssistantWaitingPresentation;
   cwd: string;
   entries: PiSessionEntry[];
+  forkBusyEntryId?: string | null;
   hiddenThinkingLabel?: string;
   leafId?: string | null;
   liveAssistant?: PiAssistantMessage;
   liveUser?: PiUserMessage;
   liveUserStatus?: PiSessionSubmissionStatus;
+  onFork?(entry: PiSessionMessageEntry): void;
   onRecover?(entry: PiSessionMessageEntry): void;
-  onTogglePinned?(entry: PiSessionMessageEntry, pinned: boolean): void;
-  pinBusyEntryId?: string | null;
-  pinnedEntryIds: ReadonlySet<string>;
   recoveryBusyEntryId?: string | null;
   sessionId: string;
   toolExecutions: Record<string, PiToolExecutionState>;
@@ -532,27 +531,24 @@ const AssistantMessage: React.FC<{
 
 export const PiTurnUserMessage: React.FC<{
   entry?: PiSessionMessageEntry;
+  forkBusyEntryId?: string | null;
   message: PiUserMessage;
+  onFork?(entry: PiSessionMessageEntry): void;
   onRecover?(entry: PiSessionMessageEntry): void;
-  onTogglePinned?(entry: PiSessionMessageEntry, pinned: boolean): void;
-  pinBusyEntryId?: string | null;
-  pinnedEntryIds: ReadonlySet<string>;
   recoveryBusyEntryId?: string | null;
   status?: PiSessionSubmissionStatus;
 }> = ({
   entry,
+  forkBusyEntryId,
   message,
+  onFork,
   onRecover,
-  onTogglePinned,
-  pinBusyEntryId,
-  pinnedEntryIds,
   recoveryBusyEntryId,
   status,
 }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
   const messageId = entry?.id ?? `live-user:${message.timestamp}`;
-  const pinned = entry ? pinnedEntryIds.has(entry.id) : false;
   const messageText = piContentText(message.content).trim();
   const copyMessage = React.useCallback(() => {
     if (!messageText) return;
@@ -589,7 +585,7 @@ export const PiTurnUserMessage: React.FC<{
           {t(`chat.piComposer.submission.${status}`)}
         </div>
       ) : null}
-      {messageText || (entry && (onTogglePinned || onRecover)) ? (
+      {messageText || (entry && (onFork || onRecover)) ? (
         <div className={cn(
           'mt-1 flex h-6 items-center justify-end transition-opacity',
           isMobile
@@ -611,29 +607,23 @@ export const PiTurnUserMessage: React.FC<{
               <TooltipContent side="bottom">{t('chat.messageBody.actions.copyMessage')}</TooltipContent>
             </Tooltip>
           ) : null}
-          {entry && onTogglePinned ? (
+          {entry && onFork ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => onTogglePinned(entry, !pinned)}
-                  disabled={pinBusyEntryId !== null && pinBusyEntryId !== undefined}
-                  className={cn(
-                    'flex size-6 items-center justify-center rounded hover:bg-interactive-hover hover:text-foreground disabled:opacity-50',
-                    pinned ? 'text-[var(--status-info)]' : 'text-muted-foreground',
-                  )}
-                  aria-label={t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
-                  aria-pressed={pinned}
+                  onClick={() => onFork(entry)}
+                  disabled={forkBusyEntryId !== null && forkBusyEntryId !== undefined}
+                  className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+                  aria-label={t('chat.messageBody.actions.forkAria')}
                 >
                   <Icon
-                    name={pinBusyEntryId === entry.id ? 'loader-4' : pinned ? 'pushpin-2-fill' : 'pushpin-2'}
-                    className={cn('size-3.5', pinBusyEntryId === entry.id && 'animate-spin')}
+                    name={forkBusyEntryId === entry.id ? 'loader-4' : 'git-branch'}
+                    className={cn('size-3.5', forkBusyEntryId === entry.id && 'animate-spin')}
                   />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
-              </TooltipContent>
+              <TooltipContent side="bottom">{t('chat.messageBody.actions.fork')}</TooltipContent>
             </Tooltip>
           ) : null}
           {entry && onRecover ? (
@@ -669,12 +659,11 @@ export const PiTimelineEntryList: React.FC<Omit<
 }> = ({
   cwd,
   entries,
+  forkBusyEntryId,
   hiddenThinkingLabel,
   liveAssistant,
+  onFork,
   onRecover,
-  onTogglePinned,
-  pinBusyEntryId,
-  pinnedEntryIds,
   projectedResultByCallId,
   recoveryBusyEntryId,
   sessionId,
@@ -708,17 +697,15 @@ export const PiTimelineEntryList: React.FC<Omit<
                 <PiTurnUserMessage
                   key={entry.id}
                   entry={entry}
+                  forkBusyEntryId={forkBusyEntryId}
                   message={message}
+                  onFork={onFork}
                   onRecover={onRecover}
-                  onTogglePinned={onTogglePinned}
-                  pinBusyEntryId={pinBusyEntryId}
-                  pinnedEntryIds={pinnedEntryIds}
                   recoveryBusyEntryId={recoveryBusyEntryId}
                 />
               );
             }
             if (message.role === 'assistant') {
-              const pinned = pinnedEntryIds.has(entry.id);
               const assistantText = message.content
                 .filter((content) => content.type === 'text')
                 .map((content) => content.text)
@@ -735,7 +722,7 @@ export const PiTimelineEntryList: React.FC<Omit<
                     message={message}
                     resultByCallId={resultByCallId}
                   />
-                  {assistantText || onTogglePinned ? (
+                  {assistantText || onFork ? (
                   <div className={cn(
                     'mt-1 flex h-6 items-center transition-opacity',
                     isMobile
@@ -762,29 +749,23 @@ export const PiTimelineEntryList: React.FC<Omit<
                         <TooltipContent side="bottom">{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
                       </Tooltip>
                     ) : null}
-                    {onTogglePinned ? (
+                    {onFork ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
                           type="button"
-                          onClick={() => onTogglePinned(entry, !pinned)}
-                          disabled={pinBusyEntryId !== null && pinBusyEntryId !== undefined}
-                          className={cn(
-                            'flex size-6 items-center justify-center rounded hover:bg-interactive-hover hover:text-foreground disabled:opacity-50',
-                            pinned ? 'text-[var(--status-info)]' : 'text-muted-foreground',
-                          )}
-                          aria-label={t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
-                          aria-pressed={pinned}
+                          onClick={() => onFork(entry)}
+                          disabled={forkBusyEntryId !== null && forkBusyEntryId !== undefined}
+                          className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+                          aria-label={t('chat.messageBody.actions.forkAria')}
                         >
                           <Icon
-                            name={pinBusyEntryId === entry.id ? 'loader-4' : pinned ? 'pushpin-2-fill' : 'pushpin-2'}
-                            className={cn('size-3.5', pinBusyEntryId === entry.id && 'animate-spin')}
+                            name={forkBusyEntryId === entry.id ? 'loader-4' : 'git-branch'}
+                            className={cn('size-3.5', forkBusyEntryId === entry.id && 'animate-spin')}
                           />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {t(pinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
-                      </TooltipContent>
+                      <TooltipContent side="bottom">{t('chat.messageBody.actions.fork')}</TooltipContent>
                     </Tooltip>
                     ) : null}
                   </div>

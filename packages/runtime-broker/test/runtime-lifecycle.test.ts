@@ -80,7 +80,6 @@ const sessionSnapshot = (sessionId: string): SessionSnapshot => ({
   busy: false,
   cwd: "C:\\workspace",
   features: {
-    pinnedContext: [],
     revision: 0,
     schemaVersion: 1,
   },

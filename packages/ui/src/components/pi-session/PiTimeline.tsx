@@ -76,14 +76,13 @@ const toolCallIdsForItem = (item: PiTimelineItem): readonly string[] => {
 const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
   assistantWaiting,
   cwd,
+  forkBusyEntryId,
   hiddenThinkingLabel,
   isMobile,
   item,
   liveUserStatus,
+  onFork,
   onRecover,
-  onTogglePinned,
-  pinBusyEntryId,
-  pinnedEntryIds,
   recoveryBusyEntryId,
   sessionId,
 }) => {
@@ -104,12 +103,11 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         <PiTimelineEntryList
           cwd={cwd}
           entries={[]}
+          forkBusyEntryId={forkBusyEntryId}
           hiddenThinkingLabel={hiddenThinkingLabel}
           liveAssistant={item.message}
+          onFork={onFork}
           onRecover={onRecover}
-          onTogglePinned={onTogglePinned}
-          pinBusyEntryId={pinBusyEntryId}
-          pinnedEntryIds={pinnedEntryIds}
           projectedResultByCallId={item.resultByCallId}
           recoveryBusyEntryId={recoveryBusyEntryId}
           sessionId={sessionId}
@@ -125,11 +123,10 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
         <PiTimelineEntryList
           cwd={cwd}
           entries={[item.entry]}
+          forkBusyEntryId={forkBusyEntryId}
           hiddenThinkingLabel={hiddenThinkingLabel}
+          onFork={onFork}
           onRecover={onRecover}
-          onTogglePinned={onTogglePinned}
-          pinBusyEntryId={pinBusyEntryId}
-          pinnedEntryIds={pinnedEntryIds}
           projectedResultByCallId={item.resultByCallId}
           recoveryBusyEntryId={recoveryBusyEntryId}
           sessionId={sessionId}
@@ -152,11 +149,10 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
       )}>
         <PiTurnUserMessage
           entry={turn.userEntry}
+          forkBusyEntryId={forkBusyEntryId}
           message={turn.user}
+          onFork={onFork}
           onRecover={onRecover}
-          onTogglePinned={onTogglePinned}
-          pinBusyEntryId={pinBusyEntryId}
-          pinnedEntryIds={pinnedEntryIds}
           recoveryBusyEntryId={recoveryBusyEntryId}
           status={turn.liveUser ? liveUserStatus : undefined}
         />
@@ -165,18 +161,16 @@ const PiTimelineItemView: React.FC<PiTimelineItemViewProps> = ({
       <PiTimelineEntryList
         cwd={cwd}
         entries={turnEntries}
+        forkBusyEntryId={forkBusyEntryId}
         hiddenThinkingLabel={hiddenThinkingLabel}
         liveAssistant={turn.liveAssistant}
+        onFork={onFork}
         onRecover={onRecover}
-        onTogglePinned={onTogglePinned}
-        pinBusyEntryId={pinBusyEntryId}
-        pinnedEntryIds={pinnedEntryIds}
         projectedResultByCallId={item.turn.resultByCallId}
         recoveryBusyEntryId={recoveryBusyEntryId}
         sessionId={sessionId}
         toolExecutions={toolExecutions}
       />
-      <PiTurnAssistantChrome footer turn={turn} />
     </div>
   );
 };
@@ -450,24 +444,22 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
   const extraData = React.useMemo(() => ({
     assistantWaiting: props.assistantWaiting,
     assistantWaitingTurnId,
+    forkBusyEntryId: props.forkBusyEntryId,
     hiddenThinkingLabel: props.hiddenThinkingLabel,
     isMobile,
     liveUserStatus: props.liveUserStatus,
+    onFork: props.onFork,
     onRecover: props.onRecover,
-    onTogglePinned: props.onTogglePinned,
-    pinBusyEntryId: props.pinBusyEntryId,
-    pinnedEntryIds: props.pinnedEntryIds,
     recoveryBusyEntryId: props.recoveryBusyEntryId,
   }), [
     props.assistantWaiting,
     assistantWaitingTurnId,
+    props.forkBusyEntryId,
     props.hiddenThinkingLabel,
     isMobile,
     props.liveUserStatus,
+    props.onFork,
     props.onRecover,
-    props.onTogglePinned,
-    props.pinBusyEntryId,
-    props.pinnedEntryIds,
     props.recoveryBusyEntryId,
   ]);
   const renderItem = React.useCallback(({ item }: { item: PiTimelineItem }) => (
@@ -476,14 +468,13 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
         ? { assistantWaiting: props.assistantWaiting }
         : {})}
       cwd={props.cwd}
+      forkBusyEntryId={props.forkBusyEntryId}
       hiddenThinkingLabel={props.hiddenThinkingLabel}
       isMobile={isMobile}
       item={item}
       liveUserStatus={props.liveUserStatus}
+      onFork={props.onFork}
       onRecover={props.onRecover}
-      onTogglePinned={props.onTogglePinned}
-      pinBusyEntryId={props.pinBusyEntryId}
-      pinnedEntryIds={props.pinnedEntryIds}
       recoveryBusyEntryId={props.recoveryBusyEntryId}
       sessionId={props.sessionId}
     />
@@ -491,13 +482,12 @@ export const PiTimeline: React.FC<PiTimelineProps> = (props) => {
     props.assistantWaiting,
     assistantWaitingTurnId,
     props.cwd,
+    props.forkBusyEntryId,
     props.hiddenThinkingLabel,
     isMobile,
     props.liveUserStatus,
+    props.onFork,
     props.onRecover,
-    props.onTogglePinned,
-    props.pinBusyEntryId,
-    props.pinnedEntryIds,
     props.recoveryBusyEntryId,
     props.sessionId,
   ]);

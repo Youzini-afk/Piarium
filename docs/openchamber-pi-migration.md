@@ -82,20 +82,18 @@ session UI store.
 
 ## Pi-native session features
 
-Protocol version 1 owns Goal, Assist, pinned-context state, parent-session creation, and scoped Pi
-package lifecycle operations as Piarium's native runtime ABI. Goal, Assist, and pinned-context state use
-`PiSessionFeatureState`. The Pi
+Protocol version 1 owns Goal, Assist, parent-session creation, and scoped Pi package lifecycle operations
+as Piarium's native runtime ABI. Goal and Assist use `PiSessionFeatureState`. The Pi
 host persists each change as a versioned, append-only custom entry in the session JSONL and reads
 the newest state visible from the active branch. Feature state is therefore branch-aware, travels
 with the Pi session, and does not depend on OpenCode metadata, sidecar goal files, or projected
 messages. A goal records its native cumulative token baseline so budget accounting remains stable
 across restarts and compaction.
 
-The host installs a hidden Pi extension for the two model-facing behaviors. `before_agent_start`
-adds an active goal's objective to the effective system prompt, while the `context` hook restores
-only pinned user or assistant entries that Pi compaction has removed. Pinned entries already in the
-native context are not duplicated, and bookkeeping entries never enter model context or the visible
-timeline.
+The host installs a hidden Pi extension for the Goal behavior. `before_agent_start` adds an active
+goal's objective to the effective system prompt. Bookkeeping entries never enter model context or the
+visible timeline. Piarium deliberately does not retain a message-pin/context hook: compaction, memory,
+and context reinjection remain owned by Pi and its installed packages.
 
 The Web/Desktop server subscribes to the Pi runtime broker and implements one event-driven
 automation loop. It audits quiet goal turns, persists progress before continuing, stops on errors,

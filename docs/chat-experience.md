@@ -115,8 +115,8 @@ accessory stack. There is no independent bar for each feature.
   working animation. It is presentation state, not a fabricated assistant message or progress phase.
 - Thinking and tool activity use a progressive activity group. The final assistant answer remains readable
   without repeated tool-result cards.
-- Copy, context pin, and recover actions remain attached to the message that owns them. Additional
-  branch/fork actions should appear only when their Pi operation and ownership are wired end to end.
+- Copy, recover, and branch/fork actions remain attached to the message that owns them and call Pi's
+  native session operations. Piarium does not pin messages or inject a second context layer over Pi packages.
 - Streaming text is throttled and revealed by committed blocks. Virtualized remounts do not replay reveal
   animations.
 - Unknown Pi/extension entries remain usable through generic renderers and raw detail disclosure.

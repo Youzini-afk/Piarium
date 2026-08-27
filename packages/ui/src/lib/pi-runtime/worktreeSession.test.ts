@@ -23,7 +23,7 @@ const session: SessionSnapshot = {
   activeTools: [],
   busy: false,
   cwd: worktree.path,
-  features: { pinnedContext: [], revision: 0, schemaVersion: 1 },
+  features: { revision: 0, schemaVersion: 1 },
   followUp: [],
   followUpMode: 'all',
   isCompacting: false,

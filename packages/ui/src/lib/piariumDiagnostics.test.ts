@@ -277,7 +277,6 @@ mock.module('@/stores/usePiSessionStore', () => ({
                 turnsUsed: 2,
                 updatedAt: 2,
               },
-              pinnedContext: [{ entryId: 'entry-1', pinnedAt: 1, role: 'user' }],
               revision: 1,
               schemaVersion: 1,
             },
