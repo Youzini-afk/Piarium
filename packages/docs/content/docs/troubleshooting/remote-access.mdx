@@ -1,47 +1,47 @@
 ---
-title: 远程访问
-description: 修复隧道、远程实例，以及从另一台设备访问 Piarium 的问题。
+title: Remote Access
+description: Fix tunnels, remote instances, and reaching Piarium from another device.
 ---
 
-# 远程访问
+# Remote Access
 
-当你无法从手机或另一台机器访问 Piarium 时，修复方法取决于你的连接方式。
+When you can't reach Piarium from your phone or another machine, the fix depends on how you're connecting.
 
-## 先检查基础项
+## Check the basics first
 
-- 先在同一台电脑上打开 `http://localhost:3000` — 如果这都失败，那就不是远程问题；参阅 [问题排查](/troubleshooting/)
-- 用 `piarium status` 确认服务器正在运行
+- open `http://localhost:3000` on the same computer first — if that fails, it's not a remote problem; see [troubleshooting](/troubleshooting/)
+- confirm the server is running with `piarium status`
 
-## 已配对设备无法连接
+## Paired device won't connect
 
-- 二维码 / 配对链接**只能使用一次** — 如果它已被扫描过（或已过期），从 **添加设备** 创建一个新的
-- 如果设备是用 **仅家庭网络** 配对的，它无法从该网络之外连接 — 用 **任何地方** 重新配对
-- 对于 **任何地方** 配对，检查服务器上的 **Settings → Remote Instances → Piarium Relay**：它应显示 **已连接**；如果不是，停用后再重新启用
-- 如果设备已被**撤销**，它的令牌就永久失效了 — 用新的二维码重新配对
+- the QR code / pairing link is **single-use** — if it was already scanned (or expired), create a new one from **Add a device**
+- if the device was paired with **Home network only**, it can't connect from outside that network — pair it again with **Anywhere**
+- for **Anywhere** pairing, check **Settings → Remote Instances → Piarium Relay** on the server: it should say **Connected**; if not, disable and re-enable it
+- if a device was **revoked**, its token is gone for good — pair it again with a new QR code
 
-关于这些连接的工作原理，参阅 [连接设备](/connect-devices/) 和 [Private Relay](/private-relay/)。
+See [Connect a Device](/connect-devices/) and [Private Relay](/private-relay/) for how these connections work.
 
-## 隧道链接无法使用
+## Tunnel link doesn't work
 
-- 运行 `piarium tunnel status --all`
-- 从同一个实例和端口重启隧道
-- 如果之前的连接链接已被使用过，重新生成它
+- run `piarium tunnel status --all`
+- restart the tunnel from the same instance and port
+- regenerate the connect link if the previous one was already used
 
-完整设置请参阅 [隧道](/tunnels/)。
+See [Tunnels](/tunnels/) for the full setup.
 
-## 远程实例无法连接（桌面端）
+## Remote instance won't connect (desktop)
 
-当某个 [远程实例](/remote-instances/) 停滞时，Piarium 会指出失败的步骤：
+When a [remote instance](/remote-instances/) stalls, Piarium names the step that failed:
 
-- **auth** — 你的 SSH 或 UI 密码被拒绝；重新输入它
-- **install / start** — Piarium 无法在远程机器上设置或启动服务器；检查该机器的要求
-- **forwarding** — 连接已建立但端口没有到达你；尝试一个不同的本地端口
+- **auth** — your SSH or UI password was rejected; re-enter it
+- **install / start** — Piarium couldn't set up or start the server on the remote machine; check that machine's requirements
+- **forwarding** — the connection is up but the port isn't reaching you; try a different local port
 
-## 在你自己的服务器后面
+## Behind your own server
 
-如果你把 Piarium 放在反向代理后面，而它加载异常或无法连接，请参阅 [反向代理](/reverse-proxy/)。
+If you put Piarium behind a reverse proxy and it loads oddly or won't connect, see [Reverse Proxy](/reverse-proxy/).
 
-## 相关内容
+## Related
 
-- [连接设备](/connect-devices/) · [Private Relay](/private-relay/) · [隧道](/tunnels/) · [远程实例](/remote-instances/) · [反向代理](/reverse-proxy/)
-- [安全](/security/) — 在公开 UI 之前保护它
+- [Connect a Device](/connect-devices/) · [Private Relay](/private-relay/) · [Tunnels](/tunnels/) · [Remote Instances](/remote-instances/) · [Reverse Proxy](/reverse-proxy/)
+- [Security](/security/) — protect the UI before exposing it

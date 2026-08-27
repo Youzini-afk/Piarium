@@ -1,90 +1,90 @@
 ---
-title: 环境变量
-description: 用环境变量配置 Piarium 服务器、终端、Git、语音和隧道。
+title: Environment Variables
+description: Configure the Piarium server, terminals, Git, voice, and tunnels with environment variables.
 ---
 
-# 环境变量
+# Environment Variables
 
-Piarium 会在启动时读取这些环境变量。对于开机启动服务，`piarium startup enable` 默认会保存当前环境的快照，所以如果你改了希望服务使用的变量，请重新运行它。
+Piarium reads these environment variables at startup. For startup services, `piarium startup enable` snapshots the current environment by default, so rerun it after changing variables you want the service to use.
 
-Piarium 内嵌 Pi 运行时。没有单独的 OpenCode 服务器，也没有 `OPENCODE_*` 集成变量。
+Piarium embeds the Pi runtime. There is no separate OpenCode server and no `OPENCODE_*` integration variables.
 
-## Piarium 服务器
+## Piarium server
 
 ### `PIARIUM_HOST`
 
-Piarium Web 服务器的绑定地址。使用 `0.0.0.0` 可允许其他机器访问。
+Bind address for the Piarium web server. Use `0.0.0.0` to allow access from other machines.
 
 ### `PIARIUM_UI_PASSWORD`
 
-浏览器 UI 的密码。当你绑定到 localhost 之外、使用隧道或运行在反向代理后面时，请设置它。
+Password for the browser UI. Use this when binding outside localhost, using tunnels, or running behind a reverse proxy.
 
 ### `PIARIUM_API_ONLY`
 
-设为 `true` 或 `1` 时，以无界面模式启动 Piarium。API 路由仍可供桌面和移动客户端使用，但不提供浏览器 UI。
+Starts Piarium in headless mode when set to `true` or `1`. API routes stay available for desktop and mobile clients, but the browser UI is not served.
 
 ### `PIARIUM_DATA_DIR`
 
-覆盖 Piarium 数据目录。默认是 `~/.config/piarium`。
+Overrides the Piarium data directory. The default is `~/.config/piarium`.
 
 ### `PIARIUM_COMPRESS_API`
 
-控制 API 响应压缩。用 `true` 或 `1` 强制开启，用 `false` 或 `0` 强制关闭。
+Controls API response compression. Use `true` or `1` to force it on, `false` or `0` to force it off.
 
 ### `PIARIUM_SKIP_API_COMPRESSION`
 
-设为 `true` 或 `1` 时禁用 API 响应压缩。此设置优先于 `PIARIUM_COMPRESS_API`。
+Disables API response compression when set to `true` or `1`. This takes precedence over `PIARIUM_COMPRESS_API`.
 
 ### `PIARIUM_VERBOSE_REQUEST_LOGS`
 
-设为 `true` 或 `1` 时启用详细的 HTTP 请求日志。
+Enables verbose HTTP request logs when set to `true` or `1`.
 
 ### `PIARIUM_UPDATE_API_URL`
 
-覆盖更新检查 API 端点。大多数用户应保持未设置。
+Overrides the update-check API endpoint. Most users should leave this unset.
 
 ### `PIARIUM_PACKAGE_MANAGER`
 
-当自动检测出错时，强制更新操作使用的包管理器。
+Forces the package manager used by update operations when auto-detection is wrong.
 
-## 终端和 Git
+## Terminal and Git
 
 ### `PIARIUM_TERMINAL_SHELL`
 
-Piarium 终端会话使用的 shell 可执行文件。
+Shell executable used for Piarium terminal sessions.
 
 ### `PIARIUM_GIT_BINARY`
 
-Piarium Git 功能使用的 Git 可执行文件。
+Git executable used by Piarium Git features.
 
 ### `GIT_BINARY`
 
-备用的 Git 可执行文件覆盖。Piarium 专用配置请优先使用 `PIARIUM_GIT_BINARY`。
+Alternative Git executable override. Prefer `PIARIUM_GIT_BINARY` for Piarium-specific configuration.
 
 ### `PIARIUM_GIT_READ_CACHE_TTL_MS`
 
-缓存的 Git 文件读取的存活时间（毫秒）。设为 `0` 可在调试时禁用此缓存。
+Time-to-live, in milliseconds, for cached Git-backed file reads. Set `0` to disable this cache while debugging.
 
-## 语音和隧道
+## Voice and tunnels
 
 ### `OPENAI_API_KEY`
 
-Piarium 语音功能调用 OpenAI 兼容服务时使用的 API 密钥。
+API key used by Piarium voice features that call OpenAI-compatible services.
 
 ### `PIARIUM_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
 
-设为 `true` 或 `1` 时，允许语音功能使用远程 OpenAI 兼容 base URL。
+Allows remote OpenAI-compatible base URLs for voice features when set to `true` or `1`.
 
 ### `NGROK_AUTHTOKEN`
 
-Piarium 隧道命令使用的 ngrok auth token。你也可以用 `ngrok config add-authtoken <token>` 配置 ngrok。
+ngrok auth token used by Piarium tunnel commands. You can also configure ngrok with `ngrok config add-authtoken <token>`.
 
-## 运行时辅助
+## Runtime helpers
 
 ### `BUN_BINARY`
 
-Piarium 在启动守护进程时应使用的 Bun 可执行文件。
+Bun executable Piarium should use when spawning daemon processes.
 
 ### `BUN_INSTALL`
 
-Bun 安装根目录。Piarium 用它查找 `bin/bun`，用于守护进程启动和更新。
+Bun installation root. Piarium uses it to find `bin/bun` for daemon startup and updates.

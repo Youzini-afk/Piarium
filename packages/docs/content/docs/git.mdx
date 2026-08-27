@@ -1,41 +1,41 @@
 ---
-title: Git 与 GitHub 工作流
-description: 无需离开 Piarium 即可暂存、提交和管理分支。
+title: Git & GitHub Workflows
+description: Stage, commit, and manage branches without leaving Piarium.
 ---
 
-# Git 与 GitHub 工作流
+# Git & GitHub Workflows
 
-Piarium 内置了 git 视图，让你可以审阅变更、提交并管理分支，而无需切换到终端。从右侧边栏的 **Git** 标签页打开它。
+Piarium has a built-in git view so you can review changes, commit, and manage branches without switching to a terminal. Open it from the **Git** tab in the right sidebar.
 
-## 审阅与提交
+## Review and commit
 
-git 视图将你的变更分为 **staged** 和 **unstaged**：
+The git view splits your changes into **staged** and **unstaged**:
 
-- 点击文件的 **+** 可暂存它，或点击 **−** 取消暂存
-- 一次性暂存或取消暂存某个分组中的所有内容
-- 点击文件可查看它的 diff
+- click a file's **+** to stage it, or **−** to unstage it
+- stage or unstage everything in a group at once
+- click a file to see its diff
 
-然后编写提交信息并提交。你可以让 Piarium 从你已暂存的变更中 **生成提交信息** — 它使用当前会话的模型，因此你需要打开一个会话。
+Then write a commit message and commit. You can have Piarium **generate a commit message** from your staged changes — it uses the current session's model, so you need a session open.
 
-## 分支与历史
+## Branches and history
 
-git 视图也涵盖了 git 日常的其余操作：
+The git view also covers the everyday rest of git:
 
-- 创建、切换、重命名和删除分支
-- 推送、拉取和获取
-- 浏览历史和每次提交的 diff
-- 暂存（stash）和恢复变更
+- create, switch, rename, and delete branches
+- push, pull, and fetch
+- browse history and per-commit diffs
+- stash and restore changes
 
-## 拉取请求
+## Pull requests
 
-连接 GitHub（参阅 [GitHub Issue 与 PR](/github/)），**PR** 标签页让你可以打开拉取请求、更新它、将其标记为就绪或合并它 — 并以与提交信息相同的方式生成它的标题和描述。
+Connect GitHub (see [GitHub Issues & PRs](/github/)) and the **PR** tab lets you open a pull request, update it, mark it ready, or merge it — and generate its title and description the same way as commit messages.
 
-## 处理冲突
+## Bringing in conflicts
 
-如果一次合并、变基或集成遇到冲突，Piarium 会显示卡住的内容并让你解决它 — 包括把它交给智能体。
+If a merge, rebase, or integrate hits a conflict, Piarium shows what's stuck and lets you resolve it — including handing it to the agent.
 
-## 相关内容
+## Related
 
-- [GitHub Issue 与 PR](/github/) — 连接 GitHub 并从 issue 开始工作
-- [Worktree 会话](/worktrees/) — 在独立文件夹中隔离一个分支
-- [Git 身份](/git-identities/) — 在每个仓库中以正确的身份提交
+- [GitHub Issues & PRs](/github/) — connect GitHub and start work from issues
+- [Worktree Sessions](/worktrees/) — isolate a branch in its own folder
+- [Git Identities](/git-identities/) — commit as the right person per repo

@@ -1,35 +1,35 @@
 ---
-title: Worktree 与 Git
-description: 修复常见的 worktree 和 git 问题。
+title: Worktrees & Git
+description: Fix common worktree and git problems.
 ---
 
-# Worktree 与 Git
+# Worktrees & Git
 
-[worktree 会话](/worktrees/) 和 [git 视图](/git/) 中可能出现的问题，以及如何清除它们。
+Issues that come up with [worktree sessions](/worktrees/) and the [git view](/git/), and how to clear them.
 
-## worktree 需要关注
+## A worktree needs attention
 
-Piarium 会在出现异常时标记某个 worktree：
+Piarium flags a worktree when something's off:
 
-- **folder missing** — worktree 的文件夹在 Piarium 之外被删除或移动了；移除该会话并创建一个新的 worktree
-- **detached or unborn branch** — worktree 不在正常的分支上；将它检出到一个分支上
-- **merge, rebase, or cherry-pick in progress** — 某个操作处于半完成状态；在 git 视图中完成或中止它
+- **folder missing** — the worktree's folder was deleted or moved outside Piarium; remove the session and create a fresh worktree
+- **detached or unborn branch** — the worktree isn't on a normal branch; check it out onto one
+- **merge, rebase, or cherry-pick in progress** — an operation was left half-finished; finish or abort it from the git view
 
-## 无法创建 worktree
+## Can't create a worktree
 
-- **branch already exists** — 选择一个不同的分支名，或使用现有分支选项
-- **name already in use** — 选择一个不同的 worktree 名称
+- **branch already exists** — pick a different branch name, or use the existing-branch option
+- **name already in use** — choose a different worktree name
 
-## 提交信息或 PR 生成失败
+## Commit or PR generation fails
 
-生成提交信息或 PR 描述会在你的活动会话中运行，因此你需要打开一个会话，并选中一个可用的模型。打开或选择一个会话，然后重试。
+Generating a commit message or PR description runs in your active session, so you need a session open with a working model selected. Open or pick a session and try again.
 
-## SSH 或 Windows 路径问题
+## SSH or Windows path issues
 
-- 确保仓库所使用的 SSH 密钥就是你在 [git 身份](/git-identities/) 中设置的那个
-- 在 Windows 上，git 使用 Unix 风格的路径（比如 `/c/Users/...`）— Piarium 会处理这一点，但自定义的 SSH 密钥路径应遵循相同的形式
+- make sure the SSH key the repo uses is the one set in your [git identity](/git-identities/)
+- on Windows, git uses Unix-style paths (like `/c/Users/...`) — Piarium handles this, but custom SSH key paths should follow the same form
 
-## 相关内容
+## Related
 
-- [Worktree 会话](/worktrees/) — worktree 如何被创建和移除
-- [Git 身份](/git-identities/) — 为每个仓库设置正确的密钥和身份
+- [Worktree Sessions](/worktrees/) — how worktrees are created and removed
+- [Git Identities](/git-identities/) — set the right key and identity per repo

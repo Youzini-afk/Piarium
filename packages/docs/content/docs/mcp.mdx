@@ -1,30 +1,30 @@
 ---
 title: MCP Servers
-description: 添加 MCP 服务器，为智能体提供额外工具。
+description: Add MCP servers to give agents extra tools.
 ---
 
 # MCP Servers
 
-MCP 服务器为你的智能体提供额外的工具 — 比如搜索数据库、调用 API，或读取你使用的某个服务。在 **Settings → MCP** 中添加它们。
+An MCP server gives your agents extra tools — things like searching a database, calling an API, or reading a service you use. Add them in **Settings → MCP**.
 
-## 添加服务器
+## Add a server
 
-1. 打开 **Settings → MCP**。
-2. 添加一个服务器并选择它的类型：
-   - **local** — Piarium 在你的机器上运行一个命令。你需要提供要运行的命令，以及（如有需要）环境变量。
-   - **remote** — Piarium 连接到由他人托管的 URL。你需要提供该 URL 以及它所需的任何请求头（例如鉴权令牌）。
-3. 保存。服务器默认开启；你可以将其关闭而不删除它。
+1. Open **Settings → MCP**.
+2. Add a server and choose its type:
+   - **local** — Piarium runs a command on your machine. You give it the command to run and, if needed, environment variables.
+   - **remote** — Piarium connects to a URL someone else hosts. You give it the URL and any headers it needs (for example an auth token).
+3. Save. The server is on by default; you can turn it off without deleting it.
 
-## 适用范围
+## Where it applies
 
-添加服务器时选择适用范围：
+Pick the scope when you add a server:
 
-- **personal** — 在每个项目中都可用
-- **project** — 仅在当前项目中可用，并与项目的其他设置一起保存
+- **personal** — available in every project
+- **project** — available only in the current project, and saved alongside the project's other settings
 
-服务器名称使用小写字母、数字、连字符和下划线。
+Server names use lowercase letters, numbers, hyphens, and underscores.
 
-## 相关内容
+## Related
 
-- [提供商、模型与智能体](/providers/) — 先连接一个模型
-- [Skills](/skills/) — 另一种扩展智能体能力的方式
+- [Providers, Models & Agents](/providers/) — connect a model first
+- [Skills](/skills/) — another way to extend what agents can do

@@ -1,27 +1,31 @@
-[English](DEPLOYMENT.en.md) | 简体中文
+English | [简体中文](DEPLOYMENT.zh-CN.md)
 
-# 文档源码发布
+# Docs Source Deployment
 
-本仓库持有 Piarium 文档**源码**。公开文档站的渲染和托管尚未在此自动化。
+This repository owns Piarium docs **source**. Rendering and hosting for a public
+docs site are not automated here yet.
 
-默认语言是简体中文：`content/docs/*.mdx` 是中文源页，英文在 `content/docs/en/`。
+The default language is English: `content/docs/*.mdx` is the English source, and
+Simplified Chinese lives in `content/docs/zh-cn/`.
 
-## 当前已有
+## What exists today
 
-- 内容在 `packages/docs/content/docs/`
-- 导航在 `packages/docs/sidebar.config.json`（`label` 为中文）
-- 每次 Pull Request 和推送到 `main` 时，CI 会运行 `bun run docs:validate`
+- Content lives in `packages/docs/content/docs/`
+- Navigation lives in `packages/docs/sidebar.config.json` (`label` is English)
+- CI runs `bun run docs:validate` on every pull request and push to `main`
 
-## 尚未具备
+## What does not exist yet
 
 - `.github/workflows/docs-source.yml`
-- 独立的网站仓库
-- 自动同步到托管的 Starlight/Astro 站点
+- A separate website repository
+- Automatic sync to a hosted Starlight/Astro site
 
-以后增加文档站时，把本目录作为内容源，继续用 `docs:validate` 做门禁，并在这里写明渲染器仓库。
-Starlight 的根 locale 应设为简体中文（`lang: "zh-CN"`），英文为 `en`。
+When a docs site is added, package this directory as the content source, keep
+`docs:validate` as the gate, and document the renderer repository here. Starlight
+should use English as the root locale (`lang: "en"`) and Simplified Chinese as
+`zh-CN`.
 
-## 本地检查
+## Local check
 
 ```bash
 bun run docs:validate

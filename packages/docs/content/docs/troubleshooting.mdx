@@ -1,41 +1,41 @@
 ---
-title: 问题排查
-description: 常见的设置与运行问题及快速解决方法。
+title: Troubleshooting
+description: Common setup and runtime issues with quick fixes.
 ---
 
-# 问题排查
+# Troubleshooting
 
-遇到问题了？在下面找到对应的现象，试试相应的解决方法。
+Hit a snag? Find the symptom below and try the fix.
 
-## Piarium 命令退出或无法启动
+## Piarium command exits or fails to start
 
-- 确认 Node.js `>=22.19`（Node.js 24 是受支持的开发基线）
-- 在源码检出中，运行 `bun run dev` 或 `bun run start:web`
-- 如果你有已发布的 CLI，运行 `piarium --version`，必要时重新安装
+- confirm Node.js `>=22.19` (Node.js 24 is the supported development baseline)
+- from a source checkout, run `bun run dev` or `bun run start:web`
+- if you have a published CLI, run `piarium --version` and reinstall if needed
 
-## 无法访问 Web UI
+## Web UI is not reachable
 
-- 在源码检出中，查看启动 `bun run dev` 的那个终端
-- 如果你有已发布的 CLI，用 `piarium logs` 查看服务器日志
-- 确认活动端口（开发使用 Vite URL；服务器默认是 `3000`）
-- 在测试隧道链接之前，先直接打开 `http://localhost:3000`
+- from a source checkout, read the terminal that started `bun run dev`
+- if you have a published CLI, check server logs with `piarium logs`
+- verify the active port (development uses the Vite URL; the server default is `3000`)
+- open `http://localhost:3000` directly first before testing tunnel links
 
-## 远程/隧道链接无法使用
+## Remote/tunnel link does not work
 
-- 在已安装 CLI 时运行 `piarium tunnel status --all`
-- 从同一实例/端口重启隧道
-- 如果之前的令牌已被使用，请重新生成连接链接
+- run `piarium tunnel status --all` when the CLI is installed
+- restart the tunnel from the same instance/port
+- regenerate the connect link if the previous token was already used
 
-完整设置请参阅[隧道](/tunnels/)；如果你使用反向代理，请参阅[反向代理](/reverse-proxy/)。
+See [Tunnels](/tunnels/) for the full setup, and [Reverse Proxy](/reverse-proxy/) if you run one.
 
-## VS Code 扩展无法连接
+## VS Code extension does not connect
 
-- 确认 Piarium 服务器正在运行
-- 从此仓库重新构建或更新扩展
-- 重新加载 VS Code 窗口并重试连接
+- confirm the Piarium server is running
+- rebuild or update the extension from this repository
+- reload the VS Code window and retry the connection
 
-## 相关内容
+## Related
 
-- [快速开始](/quickstart/)
-- [隧道](/tunnels/)
-- [反向代理](/reverse-proxy/)
+- [Quickstart](/quickstart/)
+- [Tunnels](/tunnels/)
+- [Reverse Proxy](/reverse-proxy/)

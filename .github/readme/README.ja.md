@@ -1,4 +1,4 @@
-[简体中文](../../README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [Français](README.fr.md) | 日本語
+[English](../../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [Français](README.fr.md) | 日本語
 
 # Piarium
 
@@ -73,7 +73,7 @@ Piarium はこれらの拡張を fork せず、そのプライベートな状態
 | `@cortexkit/pi-magic-context` | ネイティブなユーザー/プロジェクト JSONC 設定、登録済みコマンド、ステータス、公開エントリ |
 | `pi-workspace-history` | 会話とワークスペースをまとめた復元、undo、redo、名前付きチェックポイント |
 | `pi-wtf` | プロンプト修復アクションと拡張が所有する `wtf.json` 設定 |
-| `pi-mcp-adapter` | アダプターが所有する実効サーバーカタログ、公開ステータス/アクション、リビジョン付きネイティブソース編集 |
+| `@piarium/pi-mcp-adapter` | アダプターが所有する実効サーバーカタログ、公開ステータス/アクション、リビジョン付きネイティブソース編集 |
 | `pi-web-access` | ネイティブな `web-search.json`、Curator とアカウント操作、保存済み結果の移動 |
 | `pi-openai-codex-compat` | ネイティブなグローバル/プロジェクトのリクエスト、推論、リモートコンパクション、Codex ツール設定 |
 | `pi-observational-memory` | ネイティブなグローバル/プロジェクトの観測、リフレクション、コンパクション、プール、ワーカー設定 |
@@ -232,7 +232,7 @@ flowchart LR
 サードパーティの Pi パッケージは、ユーザーの OS 権限で動く実行可能コードです。Piarium は観測された
 ケイパビリティを表示し、プロジェクトローカルな実行可能リソースにゲートを設けますが、信頼された拡張を
 完全なサンドボックスに変えるとは主張しません。リモートインスタンスを公開したり、見慣れないコードを
-インストールしたりする前に、[セキュリティポリシー](../../.github/SECURITY.en.md)と
+インストールしたりする前に、[セキュリティポリシー](../../.github/SECURITY.md)と
 [セキュリティモデル](../../docs/security.md)を読んでください。
 
 ## リポジトリ構成
@@ -279,7 +279,7 @@ Ubuntu の本番ビルドです。型チェック、lint、ワークスペース
 Docker ワークフローがコンテナ契約を検証し、対になるスリムと toolbelt のベース/アプリケーションイメージを
 ビルドし、不変ダイジェストで両方をスモークし、両候補が通ってからタグを昇格させます。
 
-貢献する前に [CONTRIBUTING.en.md](../../.github/CONTRIBUTING.en.md) と、リポジトリ固有のルールである
+貢献する前に [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) と、リポジトリ固有のルールである
 [AGENTS.md](../../AGENTS.md) を読んでください。
 
 ## 設計と運用のドキュメント

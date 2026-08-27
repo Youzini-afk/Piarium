@@ -1,43 +1,43 @@
 ---
-title: 移动应用与 PWA
-description: 在 iOS 或 Android 上安装 Piarium 应用，并把它连接到你的服务器。
+title: Mobile Apps & PWA
+description: Install the Piarium app on iOS or Android and connect it to your server.
 ---
 
-# 移动应用与 PWA
+# Mobile Apps & PWA
 
-Piarium 提供 iPhone 和 Android 原生应用，让你可以在手机上查看会话、回复代理并管理工作 — 在家通过 Wi-Fi，外出时通过 [Private Relay](/private-relay/)。
+Piarium has native apps for iPhone and Android, so you can watch sessions, reply to agents, and manage work from your phone — at home over Wi-Fi or from anywhere over the [Private Relay](/private-relay/).
 
-## 安装应用
+## Install the app
 
-- **iPhone/iPad** — 加入 [TestFlight 测试版](https://testflight.apple.com/join/5ek6GU1E)
-- **Android** — 从 [最新发布版本](https://github.com/Youzini-afk/Piarium/releases/latest) 下载 APK
+- **iPhone/iPad** — join the [TestFlight beta](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — download the APK from the [latest release](https://github.com/Youzini-afk/Piarium/releases/latest)
 
-## 连接到你的服务器
+## Connect it to your server
 
-1. 在运行 Piarium 的电脑上，打开 **Settings → Remote Instances → 连接到此服务器**，然后按 **添加设备**。
-2. 选择 **任何地方**（如果只在家里用手机，可选 **仅家庭网络**），然后按 **创建二维码**。
-3. 在移动应用中点击 **扫描二维码**，用相机对准它。
+1. On the computer running Piarium, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
+2. Pick **Anywhere** (or **Home network only** if you'll only use the phone at home) and press **Create QR code**.
+3. In the mobile app, tap **Scan QR code** and point the camera at it.
 
-应用会连接并记住这台服务器。二维码只能使用一次，每台设备都会获得自己的可撤销令牌 — 关于配对为何安全，参阅 [连接设备](/connect-devices/)。
+The app connects and remembers the server. The QR code is single-use and each device gets its own revocable token — see [Connect a Device](/connect-devices/) for how pairing stays safe.
 
-你可以把应用与多台服务器配对，并在实例列表中随意切换；应用会为每台服务器显示它是否可达，以及你是通过本地网络还是中继连接的。
+You can pair the app with several servers and switch between them from the instances list; the app shows for each one whether it's reachable and whether you're connected over the local network or the relay.
 
-## PWA（浏览器安装）
+## PWA (browser install)
 
-完全不想经过应用商店？网页应用可以直接从浏览器安装：
+Prefer no app store at all? The web app installs straight from the browser:
 
-- **桌面浏览器** — 使用地址栏中的 **Install** 选项
-- **iPhone/iPad（Safari）** — 分享 → **Add to Home Screen**
-- **Android（Chrome）** — 菜单 → **Install app** / **Add to Home Screen**
+- **desktop browser** — use the **Install** option in the address bar
+- **iPhone/iPad (Safari)** — Share → **Add to Home Screen**
+- **Android (Chrome)** — menu → **Install app** / **Add to Home Screen**
 
-要在你的网络之外访问 PWA，需要一个 [隧道](/tunnels/) 和一个强 [UI 密码](/security/) — 原生应用则通过中继替你处理好这一切。
+To reach the PWA from outside your network you'll need a [tunnel](/tunnels/) and a strong [UI password](/security/) — the native apps handle this for you via the relay.
 
-## 移动端设置
+## Mobile settings
 
-在 **Settings → Piarium** 下，有几个选项可以调整移动端和已安装应用的体验 — 应用的安装名称、屏幕方向，以及屏幕键盘的行为方式。
+Under **Settings → Piarium**, a few options tune the mobile and installed experience — the app's installed name, screen orientation, and how the on-screen keyboard behaves.
 
-## 相关内容
+## Related
 
-- [连接设备](/connect-devices/) — 配对、一次性二维码与设备管理
-- [Private Relay](/private-relay/) — “任何地方”访问的工作原理
-- [安全](/security/) — 在公开 UI 之前保护它
+- [Connect a Device](/connect-devices/) — pairing, one-time QR codes, and managing devices
+- [Private Relay](/private-relay/) — how "Anywhere" access works
+- [Security](/security/) — protect the UI before exposing it

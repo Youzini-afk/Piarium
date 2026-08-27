@@ -1,48 +1,48 @@
 ---
-title: 远程实例
-description: 通过 SSH 将桌面应用连接到另一台机器上的 Piarium。
+title: Remote Instances
+description: Connect the desktop app to Piarium on another machine over SSH.
 ---
 
-# 远程实例
+# Remote Instances
 
-桌面应用可以通过 SSH 连接到运行在另一台机器上的 Piarium — 工作服务器、云主机、家庭实验室 — 并把它的 UI 带到你的屏幕上，仿佛它在本地一样。在 **Settings → Remote Instances** 中设置它。
+The desktop app can connect to Piarium running on another machine over SSH — a work server, a cloud box, a homelab — and bring its UI to your screen as if it were local. Set this up at **Settings → Remote Instances**.
 
-> 远程实例是一项**仅限桌面**的功能。在网页端或 VS Code 中，请通过[隧道](/tunnels/)、[反向代理](/reverse-proxy/)或[配对](/connect-devices/)连接到远程 Piarium 服务器。
+> Remote instances are a **desktop-only** feature. On the web or in VS Code, connect to a remote Piarium server with a [tunnel](/tunnels/), a [reverse proxy](/reverse-proxy/), or [pairing](/connect-devices/).
 
-## 添加远程实例
+## Add a remote instance
 
-1. 打开 **Settings → Remote Instances** 并添加一个。
-2. 给它你通常用来访问该机器的 SSH 命令，外加一个昵称。
-3. 选择 Piarium 在那里如何运行：
-   - **managed** — Piarium 在远程机器上安装并启动它自己
-   - **external** — 连接到一个已经运行的实例
-4. 连接。
+1. Open **Settings → Remote Instances** and add one.
+2. Give it the SSH command you'd normally use to reach the machine, plus a nickname.
+3. Choose how Piarium runs there:
+   - **managed** — Piarium installs and starts itself on the remote machine
+   - **external** — connect to one that's already running
+4. Connect.
 
-Piarium 会引导你完成各个步骤 — 检查连接、设置远程、启动服务器并转发端口 — 并在每个阶段显示进度。当它到达 **ready** 时，远程 UI 会在本地加载。
+Piarium walks through the steps — checking the connection, setting up the remote, starting the server, and forwarding the port — and shows where it is at each stage. When it reaches **ready**, the remote UI loads locally.
 
-## 凭证
+## Credentials
 
-你来决定是保存 SSH 和 UI 密码，还是每次都输入它们。如果连接断开，Piarium 会报告哪一步失败了，以便你修复它 — 参阅 [远程访问](/troubleshooting/remote-access/)。
+You decide whether to save the SSH and UI passwords or enter them each time. If the connection drops, Piarium reports which step failed so you can fix it — see [Remote access](/troubleshooting/remote-access/).
 
-## 连接链接
+## Connection links
 
-如果远程机器已经在运行 Piarium，把桌面应用连上去的最简单方式是配对链接。在远程服务器的 UI 中，打开 **Settings → Remote Instances → 连接到此服务器 → 添加设备**，创建一个链接，然后在你的桌面应用的 **Settings → Remote Instances → 其他 Piarium 服务器 → 导入链接** 中导入它。完整流程参阅 [连接设备](/connect-devices/)。
+If a remote machine already runs Piarium, the easiest way to connect the desktop app is a pairing link. On the remote server's UI, open **Settings → Remote Instances → Connect to this server → Add a device**, create a link, and import it on your desktop at **Settings → Remote Instances → Other Piarium servers → Import Link**. See [Connect a Device](/connect-devices/) for the full flow.
 
-用 **任何地方** 创建的链接同时携带直接地址和一条 [Private Relay](/private-relay/) 路由：当桌面应用能直接访问服务器时（同一网络）走直连，外出时回退到端到端加密的中继。每个已保存服务器旁边的状态会显示当前使用的是哪条路由。
+A link created with **Anywhere** carries both a direct address and a [Private Relay](/private-relay/) route: the desktop connects directly when it can reach the server (same network), and falls back to the end-to-end encrypted relay when you're away. The status next to each saved server shows which route is in use.
 
-你也可以在远程机器的终端里创建链接：
+You can also create a link from a terminal on the remote machine:
 
 ```bash
 piarium connect-url --port 3000 --server http://your-host:3000 --qr
 ```
 
-如果该端口上没有服务器，`connect-url` 会先启动服务器。使用 `--api-only` 可启动 headless 服务器，`--lan` 可在启动时绑定到 LAN，`--ui-password` 可保护浏览器访问，`--name` 可为保存的连接命名。加上 `--relay` 可生成一条在本地网络之外也能使用的链接：设备在可达时优先直连，否则回退到 [Private Relay](/private-relay/) — 实例会自行启动中继。
+`connect-url` starts the server first if nothing is running on that port. Add `--api-only` for a headless server, `--lan` to bind to the LAN when starting, `--ui-password` to protect browser access, and `--name` to label the saved connection. Add `--relay` for a link that also works away from the local network: the device prefers the direct connection when reachable and falls back to the [Private Relay](/private-relay/) — the instance brings the relay up on its own.
 
-生成的链接包含一个一次性配对密钥。导入后，设备会持有自己的 client token — 独立于浏览器 UI 密码 — 它会在服务器重启后继续有效，直到你在签发它的服务器上撤销它。
+The generated link contains a single-use pairing secret. Once imported, the device holds its own client token — separate from the browser UI password — which survives server restarts until you revoke it on the issuing server.
 
-## 相关内容
+## Related
 
-- [连接设备](/connect-devices/) — 配对链接、二维码与设备管理
-- [Private Relay](/private-relay/) — “任何地方”连接的工作原理
-- [隧道](/tunnels/) — 在网页端或 VS Code 中连接到远程 Piarium 服务器
-- [远程访问](/troubleshooting/remote-access/) — 当连接无法完成时
+- [Connect a Device](/connect-devices/) — pairing links, QR codes, and managing devices
+- [Private Relay](/private-relay/) — how "Anywhere" connections work
+- [Tunnels](/tunnels/) — connect to a remote Piarium server on web or VS Code
+- [Remote access](/troubleshooting/remote-access/) — when a connection won't complete

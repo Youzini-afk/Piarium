@@ -1,32 +1,32 @@
 ---
-title: 预览与开发服务器
-description: 在 Piarium 内部打开正在运行的开发服务器。
+title: Preview & Dev Servers
+description: Open a running dev server inside Piarium.
 ---
 
-# 预览与开发服务器
+# Preview & Dev Servers
 
-当你启动开发服务器时，Piarium 可以直接在应用内部打开它，而不是在单独的浏览器标签页中 — 这样你就可以在聊天旁边查看你的站点、捕获它的控制台，并指向元素来询问相关问题。
+When you start a dev server, Piarium can open it right inside the app instead of a separate browser tab — so you can see your site next to the chat, capture its console, and point at elements to ask about them.
 
-## 打开预览
+## Open a preview
 
-Piarium 会监视终端输出中的本地地址（像 Vite、Next.js 或 Astro 这类工具打印的 `Local:` 行）。当它发现一个时：
+Piarium watches terminal output for a local address (the `Local:` line that tools like Vite, Next.js, or Astro print). When it spots one:
 
-- 终端中会出现一个 **Open preview** 按钮
-- 一个开启了自动打开的 [项目操作](/project-actions/) 会为你打开它
-- 聊天消息中的本地链接也可以打开它
+- in the terminal, an **Open preview** button appears
+- a [project action](/project-actions/) with auto-open turned on opens it for you
+- a local link in a chat message can open it too
 
-站点会在侧面板中加载。只有本地地址（在你自己的机器上）才能被预览。
+The site loads in the side panel. Only local addresses (on your own machine) can be previewed.
 
-## 控制台与检查
+## Console and inspect
 
-在预览面板中你可以：
+In the preview panel you can:
 
-- 查看页面的**控制台** — 错误、警告和日志，可按你喜欢的方式筛选
-- 开启 **inspect**，点击任意元素，并将关于它的说明 — 选择器、样式、位置和一张截图 — 直接发送到聊天
+- watch the page's **console** — errors, warnings, and logs, filtered however you like
+- turn on **inspect**, click any element, and send a note about it — selector, styles, position, and a screenshot — straight into chat
 
-这是告诉智能体“就这个按钮，这里”而无需描述它的最快方式。
+This is the fastest way to tell the agent "this button, here" without describing it.
 
-## 相关内容
+## Related
 
-- [项目操作](/project-actions/) — 启动服务器时自动打开它
-- [桌面浏览器](/desktop-browser/) — 在桌面端为任意页面提供相同的工具
+- [Project Actions](/project-actions/) — auto-open a server when you start it
+- [Desktop Browser](/desktop-browser/) — the same tools for any page, on desktop

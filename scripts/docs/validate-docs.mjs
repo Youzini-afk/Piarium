@@ -64,14 +64,13 @@ async function git(args) {
 /**
  * Engineering docs are the repo-level contracts, not the user-facing docs site.
  *
- * The README translations live in `.github/readme/` rather than the repository root, which GitHub
- * would otherwise list five near-identical files in. They are covered here so a new language is
- * validated the day it is added rather than the day someone notices its links rotted, and because
- * their links are all two levels relative and therefore the easiest kind to get wrong.
+ * README translations live in `.github/readme/` rather than the repository root, which GitHub would
+ * otherwise list five near-identical files in. GitHub community files and docs-package guides are
+ * included for the same reason: their language switchers and relative policy links must not drift.
  */
 async function engineeringDocPaths() {
   const tracked = await git([
-    "ls-files", "--", "AGENTS.md", "README.md", ".github/readme", "docs",
+    "ls-files", "--", "AGENTS.md", "README.md", ".github", "docs",
   ])
   if (tracked === null) return null
   return tracked
@@ -217,6 +216,13 @@ async function run() {
   const locales = await siteLocales()
   const pages = []
 
+  if (locales.includes("en")) {
+    errors.push("English is the default docs locale and must live at content/docs/, not content/docs/en/")
+  }
+  if (!locales.includes("zh-cn")) {
+    errors.push("Simplified Chinese must live at the translated locale path content/docs/zh-cn/")
+  }
+
   for (const filePath of filePaths) {
     const body = await readFile(filePath, "utf8")
     const relative = toPosix(path.relative(repoRoot, filePath))
@@ -254,6 +260,23 @@ async function run() {
 
   const sidebarRaw = await readFile(sidebarPath, "utf8")
   const sidebar = JSON.parse(sidebarRaw)
+  const validateSidebarLocales = (value, owner = "sidebar") => {
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => validateSidebarLocales(entry, `${owner}[${index}]`))
+      return
+    }
+    if (value === null || typeof value !== "object") return
+    if (typeof value.label === "string") {
+      if (typeof value.translations?.["zh-CN"] !== "string") {
+        errors.push(`${owner}: missing Simplified Chinese sidebar translation`)
+      }
+      if (Object.hasOwn(value.translations ?? {}, "en")) {
+        errors.push(`${owner}: English is the default sidebar label and must not remain in translations.en`)
+      }
+    }
+    for (const [key, child] of Object.entries(value)) validateSidebarLocales(child, `${owner}.${key}`)
+  }
+  validateSidebarLocales(sidebar)
   const links = (sidebar.sections ?? [])
     .flatMap((section) => section.items ?? [])
     .map((item) => item.link)

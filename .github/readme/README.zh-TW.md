@@ -1,4 +1,4 @@
-[简体中文](../../README.md) | 繁體中文 | [English](README.en.md) | [Français](README.fr.md) | [日本語](README.ja.md)
+[English](../../README.md) | [简体中文](README.zh-CN.md) | 繁體中文 | [Français](README.fr.md) | [日本語](README.ja.md)
 
 # Piarium
 
@@ -64,7 +64,7 @@ Piarium 不會 fork 這些擴充，也不會複製它們的私有狀態。整合
 | `@cortexkit/pi-magic-context` | 原生使用者/專案 JSONC 設定、已註冊命令、狀態和公開項目 |
 | `pi-workspace-history` | 對話與工作區聯合還原、復原、重做和具名檢查點 |
 | `pi-wtf` | 提示詞修復操作和外掛自有的 `wtf.json` 設定 |
-| `pi-mcp-adapter` | 外掛計算的有效服務目錄、公開狀態與操作，以及帶版本校驗的原生設定來源編輯 |
+| `@piarium/pi-mcp-adapter` | 外掛計算的有效服務目錄、公開狀態與操作，以及帶版本校驗的原生設定來源編輯 |
 | `pi-web-access` | 原生 `web-search.json`、Curator 與帳號操作、已儲存結果導覽 |
 | `pi-openai-codex-compat` | 原生的全域/專案請求、推理、遠端壓縮和 Codex 工具設定 |
 | `pi-observational-memory` | 原生的全域/專案觀察、反思、壓縮、集區和工作程序設定 |

@@ -1,0 +1,41 @@
+---
+title: 问题排查
+description: 常见的设置与运行问题及快速解决方法。
+---
+
+# 问题排查
+
+遇到问题了？在下面找到对应的现象，试试相应的解决方法。
+
+## Piarium 命令退出或无法启动
+
+- 确认 Node.js `>=22.19`（Node.js 24 是受支持的开发基线）
+- 在源码检出中，运行 `bun run dev` 或 `bun run start:web`
+- 如果你有已发布的 CLI，运行 `piarium --version`，必要时重新安装
+
+## 无法访问 Web UI
+
+- 在源码检出中，查看启动 `bun run dev` 的那个终端
+- 如果你有已发布的 CLI，用 `piarium logs` 查看服务器日志
+- 确认活动端口（开发使用 Vite URL；服务器默认是 `3000`）
+- 在测试隧道链接之前，先直接打开 `http://localhost:3000`
+
+## 远程/隧道链接无法使用
+
+- 在已安装 CLI 时运行 `piarium tunnel status --all`
+- 从同一实例/端口重启隧道
+- 如果之前的令牌已被使用，请重新生成连接链接
+
+完整设置请参阅[隧道](/zh-cn/tunnels/)；如果你使用反向代理，请参阅[反向代理](/zh-cn/reverse-proxy/)。
+
+## VS Code 扩展无法连接
+
+- 确认 Piarium 服务器正在运行
+- 从此仓库重新构建或更新扩展
+- 重新加载 VS Code 窗口并重试连接
+
+## 相关内容
+
+- [快速开始](/zh-cn/quickstart/)
+- [隧道](/zh-cn/tunnels/)
+- [反向代理](/zh-cn/reverse-proxy/)

@@ -1,4 +1,4 @@
-[简体中文](../../README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | Français | [日本語](README.ja.md)
+[English](../../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | Français | [日本語](README.ja.md)
 
 # Piarium
 
@@ -84,7 +84,7 @@ permet à ces paquets de continuer à évoluer de leur côté.
 | `@cortexkit/pi-magic-context` | Configuration JSONC natives utilisateur/projet, commandes enregistrées, état et entrées publiques |
 | `pi-workspace-history` | Restauration conjointe conversation/espace de travail, annulation, rétablissement et points de contrôle nommés |
 | `pi-wtf` | Actions de réparation de prompt et configuration `wtf.json` détenue par l'extension |
-| `pi-mcp-adapter` | Catalogue de serveurs effectif détenu par l'adaptateur, état et actions publics, édition versionnée de la source native |
+| `@piarium/pi-mcp-adapter` | Catalogue de serveurs effectif détenu par l'adaptateur, état et actions publics, édition versionnée de la source native |
 | `pi-web-access` | `web-search.json` natif, actions Curator et compte, navigation dans les résultats enregistrés |
 | `pi-openai-codex-compat` | Configuration native globale/projet des requêtes, du raisonnement, de la compaction distante et des outils Codex |
 | `pi-observational-memory` | Configuration native globale/projet de l'observation, de la réflexion, de la compaction, du pool et des workers |
@@ -255,7 +255,7 @@ boîtes de dialogue, franchissent la frontière du preload Electron.
 Les paquets Pi tiers sont du code exécutable disposant des permissions système de l'utilisateur.
 Piarium affiche les capacités observées et conditionne l'accès aux ressources exécutables locales au
 projet, mais il ne prétend pas transformer des extensions de confiance en bac à sable complet. Lisez
-la [politique de sécurité](../../.github/SECURITY.en.md) et le [modèle de sécurité](../../docs/security.md) avant
+la [politique de sécurité](../../.github/SECURITY.md) et le [modèle de sécurité](../../docs/security.md) avant
 d'exposer une instance distante ou d'installer du code inconnu.
 
 ## Organisation du dépôt
@@ -304,7 +304,7 @@ entrées cloud/exécution changent, le workflow Docker vérifie le contrat de co
 images de base et applicatives allégée et toolbelt associées, teste les deux applications par digest
 immuable, et ne promeut les tags qu'après le passage des deux candidates.
 
-Avant de contribuer, lisez [CONTRIBUTING.en.md](../../.github/CONTRIBUTING.en.md) et les règles propres au
+Avant de contribuer, lisez [CONTRIBUTING.md](../../.github/CONTRIBUTING.md) et les règles propres au
 dépôt dans [AGENTS.md](../../AGENTS.md).
 
 ## Documentation de conception et d'exploitation
