@@ -21,6 +21,13 @@ describe('MCP settings package availability', () => {
       entry({ installed: true, name: 'pi-mcp-adapter', source: 'npm:pi-mcp-adapter@2' }),
     ])).toBe(true);
     expect(isPiMcpAdapterInstalled([
+      entry({
+        installed: true,
+        name: '@piarium/pi-mcp-adapter',
+        source: 'npm:@piarium/pi-mcp-adapter@2.29.0-piarium.1',
+      }),
+    ])).toBe(true);
+    expect(isPiMcpAdapterInstalled([
       entry({ enabled: false, installed: true, name: 'pi-mcp-adapter', source: 'npm:pi-mcp-adapter@2' }),
     ])).toBe(false);
     expect(isPiMcpAdapterInstalled([

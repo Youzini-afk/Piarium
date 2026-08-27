@@ -34,7 +34,7 @@ describe("foundational Pi package manifest", () => {
     assert.deepEqual(
       Object.fromEntries(integrations.map((entry) => [entry.id, entry.source])),
       {
-        mcp: "https://github.com/Youzini-afk/pi-mcp-adapter.git",
+        mcp: "npm:@piarium/pi-mcp-adapter",
         "permission-system": "npm:@gotgenes/pi-permission-system",
         "workspace-history": "npm:pi-workspace-history",
         wtf: "npm:pi-wtf",
@@ -43,7 +43,7 @@ describe("foundational Pi package manifest", () => {
     assert.deepEqual(
       Object.fromEntries(integrations.map((entry) => [entry.id, entry.packageName])),
       {
-        mcp: "pi-mcp-adapter",
+        mcp: "@piarium/pi-mcp-adapter",
         "permission-system": "@gotgenes/pi-permission-system",
         "workspace-history": "pi-workspace-history",
         wtf: "pi-wtf",
@@ -126,6 +126,10 @@ describe("foundational Pi package manifest", () => {
     assert.equal(matchesFoundationalPackage(mcp, {
       name: "pi-mcp-adapter",
       source: "https://github.com/example/pi-mcp-adapter.git",
+    }), true);
+    assert.equal(matchesFoundationalPackage(mcp, {
+      name: "@piarium/pi-mcp-adapter",
+      source: "npm:@piarium/pi-mcp-adapter@2.29.0-piarium.1",
     }), true);
   });
 });

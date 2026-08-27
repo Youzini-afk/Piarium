@@ -45,9 +45,9 @@ export const FOUNDATIONAL_PI_PACKAGE_MANIFEST = {
     {
       id: "mcp",
       introducedRevision: 1,
-      packageAliases: ["pi-mcp-adapter"],
-      packageName: "pi-mcp-adapter",
-      source: "https://github.com/Youzini-afk/pi-mcp-adapter.git",
+      packageAliases: ["@piarium/pi-mcp-adapter", "pi-mcp-adapter"],
+      packageName: "@piarium/pi-mcp-adapter",
+      source: "npm:@piarium/pi-mcp-adapter",
     },
     {
       id: "permission-system",

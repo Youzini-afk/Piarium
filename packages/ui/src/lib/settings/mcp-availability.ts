@@ -1,6 +1,11 @@
 import { useSyncExternalStore } from 'react';
-import type { PackageDescriptor, RuntimeContextTarget } from '@piarium/protocol';
-import { listPiPackages, piPackageNameFromSource } from '@/lib/pi-runtime/packages';
+import {
+  FOUNDATIONAL_PI_PACKAGE_MANIFEST,
+  matchesFoundationalPackage,
+  type PackageDescriptor,
+  type RuntimeContextTarget,
+} from '@piarium/protocol';
+import { listPiPackages } from '@/lib/pi-runtime/packages';
 import { subscribePiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
@@ -22,6 +27,7 @@ let state = EMPTY_STATE;
 let generation = 0;
 let lastTarget: { key: string; target: RuntimeContextTarget } | null = null;
 const listeners = new Set<() => void>();
+const MCP_FOUNDATIONAL_PACKAGE = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations.find((entry) => entry.id === 'mcp');
 
 const publish = (next: McpSettingsAvailabilityState): void => {
   state = next;
@@ -32,10 +38,8 @@ export const isPiMcpAdapterInstalled = (packages: readonly PackageDescriptor[]):
   packages.some((candidate) => (
     candidate.installed
     && candidate.enabled
-    && (
-      candidate.name === 'pi-mcp-adapter'
-      || piPackageNameFromSource(candidate.source) === 'pi-mcp-adapter'
-    )
+    && MCP_FOUNDATIONAL_PACKAGE !== undefined
+    && matchesFoundationalPackage(MCP_FOUNDATIONAL_PACKAGE, candidate)
   ))
 );
 
