@@ -199,6 +199,21 @@ describe("foundational package reconcile", () => {
     });
     assert.equal(installs, 0);
     assert.equal(result.entries[0]?.intent, "policy_skipped");
+
+    const installed = descriptor(integration.source);
+    const restored = await reconcileFoundationalPackages({
+      bootstrapPackages: async () => ({
+        packages: [installed],
+        results: [{ source: integration.source, status: "installed" }],
+      }),
+      integrations: [integration],
+      listPackages: async () => [],
+      manifestRevision: 1,
+      receiptStore: receipt.store,
+      restoreIds: new Set(["mcp"]),
+    });
+    assert.equal(restored.entries[0]?.intent, "eligible");
+    assert.equal(restored.entries[0]?.observed, "enabled");
   });
 
   it("records the current cutoff before disabling future automatic additions", async () => {

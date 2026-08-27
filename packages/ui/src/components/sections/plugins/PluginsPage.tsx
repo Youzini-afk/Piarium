@@ -1,5 +1,13 @@
 import React from 'react';
-import type { PackageDescriptor, PiPackageScope, RuntimeContextTarget } from '@piarium/protocol';
+import {
+  FOUNDATIONAL_PI_PACKAGE_MANIFEST,
+  matchesFoundationalPackage,
+  type FoundationalPiPackageId,
+  type FoundationalPiPackageStatusSnapshot,
+  type PackageDescriptor,
+  type PiPackageScope,
+  type RuntimeContextTarget,
+} from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,12 +27,15 @@ import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import {
   findPiPackage,
+  getPiFoundationalPackageStatus,
   isPiPackageUpdatable,
   installPiPackage,
   listPiPackages,
   piPackageNameFromSource,
   removePiPackage,
+  restorePiFoundationalPackages,
   setPiPackageEnabled,
+  setPiFoundationalAutoInstallNew,
   updatePiPackages,
 } from '@/lib/pi-runtime/packages';
 import { notifyPiRuntimeCatalogChanged } from '@/lib/pi-runtime/catalog-events';
@@ -32,6 +43,12 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { requestPluginSettingsTarget } from '@/lib/settings/plugin-settings-navigation';
 import { RECOMMENDED_PACKAGES } from './recommended-packages';
+import {
+  foundationalRestoreSucceeded,
+  foundationalSnapshotStatusKey,
+  hasFoundationalPackageRestoreAction,
+  projectFoundationalPackageStatus,
+} from './foundational-package-presentation';
 
 type PackageAction = 'install' | 'remove' | 'set-enabled' | 'update' | 'update-all';
 
@@ -87,6 +104,130 @@ const PackageStatus: React.FC<{ packageInfo?: PackageDescriptor }> = ({ packageI
   );
 };
 
+type FoundationBusyAction =
+  | { action: 'restore'; id?: FoundationalPiPackageId }
+  | { action: 'set-auto' };
+
+interface FoundationalIntegrationSectionProps {
+  busyAction: FoundationBusyAction | null;
+  error: string | null;
+  loading: boolean;
+  onRestore(id?: FoundationalPiPackageId): void;
+  onSetAutoInstallNew(enabled: boolean): void;
+  status?: FoundationalPiPackageStatusSnapshot;
+}
+
+const FoundationalIntegrationSection: React.FC<FoundationalIntegrationSectionProps> = ({
+  busyAction,
+  error,
+  loading,
+  onRestore,
+  onSetAutoInstallNew,
+  status,
+}) => {
+  const { t } = useI18n();
+  const canRestore = hasFoundationalPackageRestoreAction(status);
+  const restoreAllBusy = busyAction?.action === 'restore' && busyAction.id === undefined;
+  return (
+    <SettingsSection
+      settingsItem="plugins.foundation"
+      title={t('settings.piarium.plugins.foundation.title')}
+      headerAction={canRestore ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          disabled={busyAction !== null || loading}
+          onClick={() => onRestore()}
+          className="!font-normal"
+        >
+          {restoreAllBusy
+            ? t('settings.piarium.plugins.foundation.actions.restoring')
+            : t('settings.piarium.plugins.foundation.actions.restoreMissing')}
+        </Button>
+      ) : null}
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-2.5">
+          <span className="typography-meta text-foreground">
+            {t('settings.piarium.plugins.foundation.actions.autoInstallNew')}
+          </span>
+          <Switch
+            checked={status?.autoInstallNew ?? true}
+            disabled={busyAction !== null || loading || status === undefined}
+            onCheckedChange={onSetAutoInstallNew}
+            aria-label={t('settings.piarium.plugins.foundation.actions.autoInstallNew')}
+          />
+        </div>
+
+        {FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations.map((integration) => {
+          const entry = status?.entries.find((candidate) => candidate.id === integration.id);
+          const presentation = projectFoundationalPackageStatus(entry);
+          const rowBusy = busyAction?.action === 'restore' && busyAction.id === integration.id;
+          const actionLabel = presentation.action === 'retry'
+            ? t('settings.piarium.plugins.foundation.actions.retry')
+            : t('settings.piarium.plugins.foundation.actions.restore');
+          return (
+            <div key={integration.id} className="rounded-lg border border-border/60 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="typography-ui-label text-foreground">{integration.packageName}</span>
+                  <span className={presentation.tone === 'success'
+                    ? 'typography-micro text-[var(--status-success)]'
+                    : presentation.tone === 'error'
+                      ? 'typography-micro text-[var(--status-error)]'
+                      : presentation.tone === 'warning'
+                        ? 'typography-micro text-[var(--status-warning)]'
+                        : 'typography-micro text-muted-foreground'}>
+                    {presentation.running ? <Icon name="loader-4" className="mr-1 inline-block size-3 animate-spin" /> : null}
+                    {t(presentation.statusKey)}
+                  </span>
+                </div>
+                {presentation.action !== 'none' ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={busyAction !== null || loading}
+                    onClick={() => onRestore(integration.id)}
+                    className="!font-normal"
+                    aria-label={t('settings.piarium.plugins.foundation.actions.itemAria', {
+                      action: actionLabel,
+                      name: integration.packageName,
+                    })}
+                  >
+                    {rowBusy
+                      ? t('settings.piarium.plugins.foundation.actions.restoring')
+                      : actionLabel}
+                  </Button>
+                ) : null}
+              </div>
+              {entry?.source ? (
+                <p className="mt-1 break-all font-mono typography-micro text-muted-foreground">{entry.source}</p>
+              ) : null}
+              {entry?.error ? (
+                <p className="mt-1 break-words typography-micro text-[var(--status-error)]">{entry.error}</p>
+              ) : null}
+            </div>
+          );
+        })}
+
+        {status?.state === 'running' || status?.state === 'degraded' ? (
+          <p className="typography-micro text-muted-foreground">
+            {t(foundationalSnapshotStatusKey(status.state))}
+          </p>
+        ) : null}
+        {error ? (
+          <div className="flex items-start gap-2 rounded-lg bg-[var(--status-error)]/10 px-3 py-2 text-[var(--status-error)]">
+            <Icon name="error-warning" className="mt-0.5 size-4 shrink-0" />
+            <p className="min-w-0 break-words typography-meta">{error}</p>
+          </div>
+        ) : null}
+      </div>
+    </SettingsSection>
+  );
+};
+
 export const PluginsPage: React.FC = () => {
   const { t } = useI18n();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -94,11 +235,12 @@ export const PluginsPage: React.FC = () => {
     const sessionId = state.currentSessionId;
     return sessionId && state.records[sessionId]?.open ? sessionId : null;
   });
+  const runtimeKey = usePiSessionStore((state) => state.runtimeKey);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const runtimeTarget = React.useMemo<RuntimeContextTarget>(() => (
     activeSessionId ? { sessionId: activeSessionId } : { cwd: currentDirectory }
   ), [activeSessionId, currentDirectory]);
-  const targetKey = activeSessionId ? `session:${activeSessionId}` : `cwd:${currentDirectory}`;
+  const targetKey = `${runtimeKey}:${activeSessionId ? `session:${activeSessionId}` : `cwd:${currentDirectory}`}`;
   const targetKeyRef = React.useRef(targetKey);
   targetKeyRef.current = targetKey;
 
@@ -106,6 +248,9 @@ export const PluginsPage: React.FC = () => {
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [foundationStatus, setFoundationStatus] = React.useState<FoundationalPiPackageStatusSnapshot>();
+  const [foundationLoading, setFoundationLoading] = React.useState(false);
+  const [foundationError, setFoundationError] = React.useState<string | null>(null);
   const [customSource, setCustomSource] = React.useState('');
   const [installScope, setInstallScope] = React.useState<PiPackageScope>('global');
   const [recommendedExpanded, setRecommendedExpanded] = React.useState(false);
@@ -114,48 +259,149 @@ export const PluginsPage: React.FC = () => {
     scope?: PiPackageScope;
     source?: string;
   } | null>(null);
+  const [foundationBusyAction, setFoundationBusyAction] = React.useState<FoundationBusyAction | null>(null);
   const refreshGenerationRef = React.useRef(0);
+  const foundationPollTimerRef = React.useRef<number | null>(null);
+  const foundationPollCancelRef = React.useRef<(() => void) | null>(null);
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = React.useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
     const actionTargetKey = targetKey;
-    const runtimeKey = getRuntimeKey();
+    const requestRuntimeKey = runtimeKey;
+    foundationPollCancelRef.current?.();
+    foundationPollCancelRef.current = null;
+    if (foundationPollTimerRef.current !== null) {
+      window.clearTimeout(foundationPollTimerRef.current);
+      foundationPollTimerRef.current = null;
+    }
     setLoading(true);
     setLoadError(null);
-    try {
-      const next = await listPiPackages(runtimeTarget);
-      if (
-        generation !== refreshGenerationRef.current
-        || actionTargetKey !== targetKeyRef.current
-        || runtimeKey !== getRuntimeKey()
-      ) return;
+    setFoundationLoading(true);
+    setFoundationError(null);
+
+    const isCurrent = () => (
+      generation === refreshGenerationRef.current
+      && actionTargetKey === targetKeyRef.current
+      && requestRuntimeKey === getRuntimeKey()
+    );
+    const setPackageList = (next: PackageDescriptor[]) => {
       setPackages([...next].sort((left, right) => (
         left.scope.localeCompare(right.scope)
         || left.name.localeCompare(right.name)
         || left.source.localeCompare(right.source)
       )));
       setLoaded(true);
-    } catch (error) {
-      if (
-        generation !== refreshGenerationRef.current
-        || actionTargetKey !== targetKeyRef.current
-        || runtimeKey !== getRuntimeKey()
-      ) return;
-      setLoadError(error instanceof Error ? error.message : String(error));
+    };
+    const pollFoundationStatus = async (
+      initial: FoundationalPiPackageStatusSnapshot,
+    ): Promise<FoundationalPiPackageStatusSnapshot | null> => {
+      let current = initial;
+      while (current.state === 'running' && isCurrent()) {
+        const next = await new Promise<FoundationalPiPackageStatusSnapshot | null>((resolve) => {
+          let settled = false;
+          const finish = (value: FoundationalPiPackageStatusSnapshot | null) => {
+            if (settled) return;
+            settled = true;
+            if (foundationPollCancelRef.current === cancel) foundationPollCancelRef.current = null;
+            if (foundationPollTimerRef.current === timer) foundationPollTimerRef.current = null;
+            resolve(value);
+          };
+          const timer = window.setTimeout(() => {
+            if (!isCurrent()) {
+              finish(null);
+              return;
+            }
+            void getPiFoundationalPackageStatus().then(finish).catch((error) => {
+              if (isCurrent()) setFoundationError(error instanceof Error ? error.message : String(error));
+              finish(null);
+            });
+          }, 500);
+          const cancel = () => {
+            window.clearTimeout(timer);
+            finish(null);
+          };
+          foundationPollTimerRef.current = timer;
+          foundationPollCancelRef.current = cancel;
+        });
+        if (!next || !isCurrent()) return null;
+        current = next;
+        setFoundationStatus(current);
+      }
+      return isCurrent() ? current : null;
+    };
+
+    const results = await Promise.allSettled([
+      getPiFoundationalPackageStatus(),
+      listPiPackages(runtimeTarget),
+    ]);
+    if (!isCurrent()) return;
+
+    const foundationResult = results[0];
+    const packagesResult = results[1];
+    if (packagesResult.status === 'fulfilled') {
+      setPackageList(packagesResult.value);
+    } else {
+      setLoadError(packagesResult.reason instanceof Error ? packagesResult.reason.message : String(packagesResult.reason));
       setLoaded(false);
-    } finally {
-      if (
-        generation === refreshGenerationRef.current
-        && actionTargetKey === targetKeyRef.current
-        && runtimeKey === getRuntimeKey()
-      ) setLoading(false);
     }
-  }, [runtimeTarget, targetKey]);
+
+    let finalFoundation: FoundationalPiPackageStatusSnapshot | null = null;
+    if (foundationResult.status === 'fulfilled') {
+      setFoundationStatus(foundationResult.value);
+      finalFoundation = await pollFoundationStatus(foundationResult.value);
+      if (!isCurrent()) return;
+      setFoundationLoading(false);
+    } else {
+      setFoundationError(
+        foundationResult.reason instanceof Error ? foundationResult.reason.message : String(foundationResult.reason),
+      );
+      setFoundationLoading(false);
+    }
+
+    if (
+      foundationResult.status === 'fulfilled'
+      && foundationResult.value.state === 'running'
+      && finalFoundation
+      && finalFoundation.state !== 'running'
+      && isCurrent()
+    ) {
+      try {
+        setPackageList(await listPiPackages(runtimeTarget));
+      } catch (error) {
+        if (isCurrent()) {
+          setLoadError(error instanceof Error ? error.message : String(error));
+          setLoaded(false);
+        }
+      }
+    }
+    if (isCurrent()) setLoading(false);
+  }, [runtimeKey, runtimeTarget, targetKey]);
 
   React.useEffect(() => {
     setPackages([]);
     setLoaded(false);
+    setFoundationStatus(undefined);
+    setFoundationError(null);
+    setBusyAction(null);
+    setFoundationBusyAction(null);
     void refresh();
+    return () => {
+      refreshGenerationRef.current += 1;
+      foundationPollCancelRef.current?.();
+      foundationPollCancelRef.current = null;
+      if (foundationPollTimerRef.current !== null) {
+        window.clearTimeout(foundationPollTimerRef.current);
+        foundationPollTimerRef.current = null;
+      }
+    };
   }, [refresh]);
 
   const runPackageAction = React.useCallback(async (
@@ -166,7 +412,14 @@ export const PluginsPage: React.FC = () => {
   ) => {
     if (action !== 'update-all' && !source) return;
     const actionTargetKey = targetKey;
-    const runtimeKey = getRuntimeKey();
+    const actionGeneration = refreshGenerationRef.current;
+    const requestRuntimeKey = runtimeKey;
+    const isCurrent = () => (
+      mountedRef.current
+      && actionGeneration === refreshGenerationRef.current
+      && actionTargetKey === targetKeyRef.current
+      && requestRuntimeKey === getRuntimeKey()
+    );
     setBusyAction(source
       ? action === 'update'
         ? { action, source }
@@ -186,19 +439,89 @@ export const PluginsPage: React.FC = () => {
         await updatePiPackages(runtimeTarget);
       }
       notifyPiRuntimeCatalogChanged('package');
-      if (actionTargetKey === targetKeyRef.current && runtimeKey === getRuntimeKey()) {
+      if (isCurrent()) {
+        setBusyAction(null);
+        if (action !== 'set-enabled') toast.success(t(PACKAGE_ACTION_SUCCESS_KEYS[action]));
         await refresh();
       }
-      if (action !== 'set-enabled') toast.success(t(PACKAGE_ACTION_SUCCESS_KEYS[action]));
     } catch (error) {
       console.error(`Failed to ${action} Pi package:`, error);
-      toast.error(t('settings.piarium.plugins.toast.failed'), {
-        description: error instanceof Error ? error.message : String(error),
-      });
+      if (isCurrent()) {
+        toast.error(t('settings.piarium.plugins.toast.failed'), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
     } finally {
-      setBusyAction(null);
+      if (
+        mountedRef.current
+        && actionGeneration === refreshGenerationRef.current
+        && actionTargetKey === targetKeyRef.current
+        && requestRuntimeKey === getRuntimeKey()
+      ) setBusyAction(null);
     }
-  }, [installScope, refresh, runtimeTarget, t, targetKey]);
+  }, [installScope, refresh, runtimeKey, runtimeTarget, t, targetKey]);
+
+  const runFoundationAction = React.useCallback(async (
+    action: 'restore' | 'set-auto',
+    idOrEnabled?: FoundationalPiPackageId | boolean,
+  ) => {
+    const actionTargetKey = targetKey;
+    const actionGeneration = refreshGenerationRef.current;
+    const requestRuntimeKey = runtimeKey;
+    const isCurrent = () => (
+      mountedRef.current
+      && actionGeneration === refreshGenerationRef.current
+      && actionTargetKey === targetKeyRef.current
+      && requestRuntimeKey === getRuntimeKey()
+    );
+    const id = action === 'restore' && typeof idOrEnabled === 'string' ? idOrEnabled : undefined;
+    const enabled = action === 'set-auto' && typeof idOrEnabled === 'boolean' ? idOrEnabled : undefined;
+    setFoundationBusyAction(action === 'restore' ? { action, ...(id === undefined ? {} : { id }) } : { action });
+    try {
+      let result: FoundationalPiPackageStatusSnapshot;
+      if (action === 'restore') {
+        result = await restorePiFoundationalPackages(id === undefined ? undefined : [id]);
+      } else {
+        result = await setPiFoundationalAutoInstallNew(enabled === true);
+      }
+      notifyPiRuntimeCatalogChanged('package');
+      if (isCurrent()) {
+        setFoundationStatus(result);
+        setFoundationBusyAction(null);
+        if (action === 'restore' && !foundationalRestoreSucceeded(result, id === undefined ? undefined : [id])) {
+          const failed = result.entries.find((entry) => (
+            (id === undefined || entry.id === id)
+            && projectFoundationalPackageStatus(entry).action !== 'none'
+          ));
+          toast.error(t('settings.piarium.plugins.foundation.toast.failed'), {
+            ...(failed?.error ? { description: failed.error } : {}),
+          });
+        } else {
+          toast.success(t(
+            action === 'restore'
+              ? 'settings.piarium.plugins.foundation.toast.restored'
+              : 'settings.piarium.plugins.foundation.toast.autoInstallUpdated',
+          ));
+        }
+        await refresh();
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        toast.error(t('settings.piarium.plugins.foundation.toast.failed'), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } finally {
+      if (
+        mountedRef.current
+        && actionGeneration === refreshGenerationRef.current
+        && actionTargetKey === targetKeyRef.current
+        && requestRuntimeKey === getRuntimeKey()
+      ) {
+        setFoundationBusyAction(null);
+      }
+    }
+  }, [refresh, runtimeKey, t, targetKey]);
 
   const openPackageConfiguration = React.useCallback((entry: PackageDescriptor) => {
     requestPluginSettingsTarget(entry.name, undefined, `${entry.scope}:${entry.source}`);
@@ -294,6 +617,9 @@ export const PluginsPage: React.FC = () => {
         ) : null}
 
         {packages.map((entry) => {
+          const foundationalPackage = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations.find((integration) => (
+            matchesFoundationalPackage(integration, entry)
+          ));
           const matchingAction = busyAction?.source === entry.source
             && (busyAction.action === 'update' || busyAction.scope === entry.scope)
             ? busyAction.action
@@ -314,6 +640,11 @@ export const PluginsPage: React.FC = () => {
                     />
                     <span className="typography-ui-label text-foreground">{entry.name}</span>
                     <PackageStatus packageInfo={entry} />
+                    {foundationalPackage ? (
+                      <span className="rounded-md bg-primary/10 px-1.5 py-0.5 typography-micro text-primary">
+                        {t('settings.piarium.plugins.foundation.badge')}
+                      </span>
+                    ) : null}
                     <span className="rounded-md bg-interactive-hover px-1.5 py-0.5 typography-micro text-muted-foreground">
                       {entry.scope === 'project' ? 'project' : 'user'}
                     </span>
@@ -391,6 +722,15 @@ export const PluginsPage: React.FC = () => {
           </div>
         ) : null}
       </SettingsSection>
+
+      <FoundationalIntegrationSection
+        busyAction={foundationBusyAction}
+        error={foundationError}
+        loading={foundationLoading}
+        onRestore={(id) => void runFoundationAction('restore', id)}
+        onSetAutoInstallNew={(enabled) => void runFoundationAction('set-auto', enabled)}
+        status={foundationStatus}
+      />
 
       <SettingsSection
         settingsItem="plugins.source"

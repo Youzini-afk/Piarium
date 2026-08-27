@@ -148,7 +148,7 @@ export async function reconcileFoundationalPackages(
     const preparedEntries: PackageProvisioningReceiptEntries = { ...persisted.entries };
     for (const id of restored) {
       const prior = asReceiptEntry(preparedEntries[id]);
-      if (prior?.intent !== "suppressed") continue;
+      if (prior?.intent !== "suppressed" && prior?.intent !== "policy_skipped") continue;
       preparedEntries[id] = {
         ...prior,
         intent: "eligible",
@@ -220,7 +220,11 @@ export async function reconcileFoundationalPackages(
         });
         continue;
       }
-      if (prior?.intent === "policy_skipped" && !current.autoInstallNew) {
+      if (
+        prior?.intent === "policy_skipped"
+        && !current.autoInstallNew
+        && !restored.has(entry.id)
+      ) {
         statuses.set(entry.id, {
           id: entry.id,
           intent: "policy_skipped",

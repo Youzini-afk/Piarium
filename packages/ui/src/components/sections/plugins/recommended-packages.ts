@@ -50,11 +50,6 @@ export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
     descriptionKey: 'settings.piarium.plugins.package.piLens',
   },
   {
-    name: '@gotgenes/pi-permission-system',
-    source: 'npm:@gotgenes/pi-permission-system',
-    descriptionKey: 'settings.piarium.plugins.package.permissionSystem',
-  },
-  {
     name: 'pi-hermes-memory',
     source: 'npm:pi-hermes-memory',
     descriptionKey: 'settings.piarium.plugins.package.hermesMemory',
@@ -65,23 +60,8 @@ export const RECOMMENDED_PACKAGES: readonly RecommendedPackage[] = [
     descriptionKey: 'settings.piarium.plugins.package.rtk',
   },
   {
-    name: 'pi-mcp-adapter',
-    source: 'https://github.com/Youzini-afk/pi-mcp-adapter.git',
-    descriptionKey: 'settings.piarium.plugins.package.mcp',
-  },
-  {
     name: 'pi-web-access',
     source: 'npm:pi-web-access',
     descriptionKey: 'settings.piarium.plugins.package.webAccess',
-  },
-  {
-    name: 'pi-workspace-history',
-    source: 'npm:pi-workspace-history',
-    descriptionKey: 'settings.piarium.plugins.package.workspaceHistory',
-  },
-  {
-    name: 'pi-wtf',
-    source: 'npm:pi-wtf',
-    descriptionKey: 'settings.piarium.plugins.package.wtf',
   },
 ];
