@@ -97,4 +97,29 @@ describe('workspace path safety', () => {
     expect(result.rootRealPath).toBe('/canonical/workspace');
     expect(result.realPath).toBe('/canonical/workspace/note.txt');
   });
+
+  it('canonicalizes a missing child through the nearest existing parent identity', async () => {
+    const { canonicalizePathIdentity } = await loadPathSafetyModule();
+    const fsPromises = {
+      realpath: async (targetPath) => {
+        if (targetPath === '/short/workspace') return '/canonical/workspace';
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      },
+    };
+
+    await expect(canonicalizePathIdentity('/short/workspace/new/note.txt', {
+      allowMissing: true,
+      fsPromises,
+      pathModule: path.posix,
+    })).resolves.toBe('/canonical/workspace/new/note.txt');
+  });
+
+  it('normalizes Windows namespace prefixes and case for identity keys', async () => {
+    const { normalizePathIdentity } = await loadPathSafetyModule();
+
+    expect(normalizePathIdentity('\\\\?\\C:\\Users\\Runner\\Repo', {
+      pathModule: path.win32,
+      platform: 'win32',
+    })).toBe('c:\\users\\runner\\repo');
+  });
 });

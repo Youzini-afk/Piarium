@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import { DocumentPathError } from './errors.js';
 
 const SCHEMA_VERSION = 1;
 
 const normalizeComparePath = (value, pathModule) => {
-  const resolved = pathModule.resolve(value);
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  return normalizePathIdentity(value, { pathModule });
 };
 
 const canonicalWorkspaceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -42,15 +42,23 @@ export const createWorkspaceRegistry = ({
         document = empty();
         return document;
       }
+      const validWorkspaces = raw.workspaces.filter((entry) => (
+        entry
+        && looksLikeCanonicalWorkspaceId(entry.workspaceId)
+        && typeof entry.canonicalPath === 'string'
+        && entry.canonicalPath.length > 0
+      ));
       document = {
         schemaVersion: SCHEMA_VERSION,
         hostId,
-        workspaces: raw.workspaces.filter((entry) => (
-          entry
-          && looksLikeCanonicalWorkspaceId(entry.workspaceId)
-          && typeof entry.canonicalPath === 'string'
-          && entry.canonicalPath.length > 0
-        )),
+        workspaces: await Promise.all(validWorkspaces.map(async (entry) => ({
+          ...entry,
+          canonicalPath: await canonicalizePathIdentity(entry.canonicalPath, {
+            allowMissing: true,
+            fsPromises,
+            pathModule,
+          }),
+        }))),
       };
       return document;
     } catch (error) {
@@ -109,20 +117,25 @@ export const createWorkspaceRegistry = ({
         return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
       }
       if (!canonicalPath) throw new DocumentPathError('Workspace path is required', 400);
+      const resolvedCanonicalPath = await canonicalizePathIdentity(canonicalPath, {
+        allowMissing: true,
+        fsPromises,
+        pathModule,
+      });
       const current = await read();
-      const existing = findByPath(current, canonicalPath);
+      const existing = findByPath(current, resolvedCanonicalPath);
       if (existing) {
         return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
       }
       if (!create) return null;
       return mutate((current) => {
-        const currentExisting = findByPath(current, canonicalPath);
+        const currentExisting = findByPath(current, resolvedCanonicalPath);
         if (currentExisting) {
           return { workspaceId: currentExisting.workspaceId, canonicalPath: currentExisting.canonicalPath, hostId };
         }
         const created = {
           workspaceId: randomUUID(),
-          canonicalPath,
+          canonicalPath: resolvedCanonicalPath,
           createdAt: new Date().toISOString(),
         };
         current.workspaces.push(created);
@@ -138,8 +151,13 @@ export const createWorkspaceRegistry = ({
     },
 
     async findContaining(canonicalPath) {
+      const resolvedCanonicalPath = await canonicalizePathIdentity(canonicalPath, {
+        allowMissing: true,
+        fsPromises,
+        pathModule,
+      });
       const current = await read();
-      const existing = findContainingPath(current, canonicalPath);
+      const existing = findContainingPath(current, resolvedCanonicalPath);
       if (!existing) return null;
       return { workspaceId: existing.workspaceId, canonicalPath: existing.canonicalPath, hostId };
     },

@@ -277,7 +277,7 @@ export const createDocumentAuthority = (options) => {
       // mkdir, rename destination). A registered containing workspace is
       // already sufficient for mutation accounting; this does not grant file
       // access, which remains with the calling route's existing checks.
-      const containing = await registry.findContaining(pathModule.resolve(scopeId));
+      const containing = await registry.findContaining(scopeId);
       if (containing) return containing.workspaceId;
       const canonicalPath = await realpath(scopeId);
       if (!await isAllowedRoot(canonicalPath)) return null;

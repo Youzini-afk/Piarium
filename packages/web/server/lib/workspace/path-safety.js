@@ -11,9 +11,48 @@ export class WorkspacePathError extends Error {
 
 const isWinDriveAbsolute = (value) => /^[A-Za-z]:[\\/]/.test(value);
 
+const stripWindowsNamespacePrefix = (value) => {
+  if (value.startsWith('\\\\?\\UNC\\')) return `\\\\${value.slice(8)}`;
+  if (value.startsWith('\\\\?\\')) return value.slice(4);
+  return value;
+};
+
+export const normalizePathIdentity = (
+  value,
+  { pathModule = path, platform = process.platform } = {},
+) => {
+  const resolved = pathModule.resolve(value);
+  if (platform !== 'win32') return resolved;
+  return pathModule.normalize(stripWindowsNamespacePrefix(resolved)).toLowerCase();
+};
+
+export const canonicalizePathIdentity = async (
+  value,
+  {
+    allowMissing = false,
+    fsPromises = fs.promises,
+    pathModule = path,
+  } = {},
+) => {
+  const suffix = [];
+  let current = pathModule.resolve(value);
+
+  for (;;) {
+    try {
+      const canonicalParent = await fsPromises.realpath(current);
+      return pathModule.resolve(canonicalParent, ...suffix.reverse());
+    } catch (error) {
+      if (!allowMissing || error?.code !== 'ENOENT') throw error;
+      const parent = pathModule.dirname(current);
+      if (parent === current) throw error;
+      suffix.push(pathModule.basename(current));
+      current = parent;
+    }
+  }
+};
+
 const normalizeForCompare = (value, pathModule) => {
-  const normalized = pathModule.resolve(value);
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  return normalizePathIdentity(value, { pathModule });
 };
 
 export const isPathWithinRoot = (candidatePath, rootPath, pathModule = path) => {

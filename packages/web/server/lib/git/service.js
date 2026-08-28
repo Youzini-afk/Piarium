@@ -6,6 +6,7 @@ import * as childProcess from 'child_process';
 import { promisify } from 'util';
 import { resolvePiariumDataDir } from '../platform/data-paths.js';
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 
 const fsp = fs.promises;
 const execFileAsync = (...args) => {
@@ -696,9 +697,12 @@ const parseWorktreePorcelain = (raw) => {
 
 const canonicalPath = async (input) => {
   const absolutePath = path.resolve(input);
-  const realPath = await fsp.realpath(absolutePath).catch(() => absolutePath);
-  const normalized = path.normalize(realPath);
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  const canonical = await canonicalizePathIdentity(absolutePath, {
+    allowMissing: true,
+    fsPromises: fsp,
+    pathModule: path,
+  });
+  return normalizePathIdentity(canonical, { pathModule: path });
 };
 
 const checkPathExists = async (targetPath) => {
@@ -1792,12 +1796,6 @@ const runWorktreeStartScript = async (directory, startCommand) => {
   }
 };
 
-const worktreeWriterScopeKey = (value) => {
-  if (typeof value !== 'string' || !value.trim()) return '';
-  const normalized = path.resolve(value.trim());
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-};
-
 const acquireWorktreeWriters = async (documents, scopes, owner, purpose, seen = new Set()) => {
   if (typeof documents?.registerWriterForScope !== 'function') return [];
   const writers = [];
@@ -1806,7 +1804,9 @@ const acquireWorktreeWriters = async (documents, scopes, owner, purpose, seen = 
       const workspaceId = typeof documents.resolveScopeId === 'function'
         ? await documents.resolveScopeId(scope)
         : null;
-      const pathKey = worktreeWriterScopeKey(scope);
+      const pathKey = workspaceId || typeof scope !== 'string' || !scope.trim()
+        ? ''
+        : await canonicalPath(scope.trim());
       const key = workspaceId ? `workspace:${workspaceId}` : (pathKey ? `path:${pathKey}` : '');
       if (!key || seen.has(key)) continue;
       seen.add(key);

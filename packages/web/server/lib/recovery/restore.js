@@ -10,6 +10,7 @@ import {
 } from './catalog.js';
 import { RecoveryPrimitiveError, recoveryFailure } from './errors.js';
 import { writeRecoveryJsonAtomic } from './locations.js';
+import { portableSymlinkTarget } from './symlink-target.js';
 
 const OPERATION_SCHEMA_VERSION = 1;
 const PRE_DECISION_STATES = new Set(['planned', 'staged']);
@@ -335,7 +336,7 @@ export const createWorkspaceRestoreManager = ({
         await fsPromises.mkdir(pathModule.dirname(target), { recursive: true, mode: 0o700 });
         const row = record.targetEntries[operation.path];
         await fsPromises.symlink(row.symlink_target, target);
-        if (await fsPromises.readlink(target) !== row.symlink_target) {
+        if (portableSymlinkTarget(await fsPromises.readlink(target)) !== row.symlink_target) {
           throw new RecoveryPrimitiveError('unsupported-metadata', `Symlink staging failed: ${operation.path}`);
         }
       }
@@ -496,7 +497,8 @@ export const createWorkspaceRestoreManager = ({
         throw new RecoveryPrimitiveError('needs-attention', `Restored directory has the wrong kind: ${operation.path}`);
       }
       if (row.kind === 'symlink') {
-        if (!stat.isSymbolicLink() || await fsPromises.readlink(target) !== row.symlink_target) {
+        if (!stat.isSymbolicLink()
+          || portableSymlinkTarget(await fsPromises.readlink(target)) !== row.symlink_target) {
           throw new RecoveryPrimitiveError('needs-attention', `Restored symlink differs: ${operation.path}`);
         }
       }

@@ -1,6 +1,7 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import nodeFsPromises from 'node:fs/promises';
 import nodePath from 'node:path';
+import { canonicalizePathIdentity } from '../workspace/path-safety.js';
 
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
@@ -910,13 +911,15 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const writePath = await fsPromises.realpath(resolved.resolved).catch((error) => {
-        if (error && typeof error === 'object' && error.code === 'ENOENT') {
-          return resolved.resolved;
-        }
-        throw error;
+      const writePath = await canonicalizePathIdentity(resolved.resolved, {
+        allowMissing: true,
+        fsPromises,
+        pathModule: path,
       });
-      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      const canonicalBase = await canonicalizePathIdentity(resolved.base, {
+        fsPromises,
+        pathModule: path,
+      });
       if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
         return res.status(403).json({ error: 'Access denied' });
       }

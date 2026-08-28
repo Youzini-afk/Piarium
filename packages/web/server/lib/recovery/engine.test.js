@@ -126,7 +126,7 @@ describe('native workspace recovery Phase 1 engine', () => {
       },
     };
     const { engine, harness } = await createHarness({ fsPromises: wrapped });
-    workspaceRoot = harness.workspaceRoot;
+    workspaceRoot = await fs.promises.realpath(harness.workspaceRoot);
     await fs.promises.writeFile(path.join(harness.workspaceRoot, 'unsupported.special'), 'x');
     const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
     expect(captured.status).toBe('captured');
@@ -155,7 +155,7 @@ describe('native workspace recovery Phase 1 engine', () => {
       },
     };
     const { engine, harness } = await createHarness({ fsPromises: wrapped });
-    workspaceRoot = path.resolve(harness.workspaceRoot);
+    workspaceRoot = await fs.promises.realpath(harness.workspaceRoot);
     await fs.promises.writeFile(path.join(harness.workspaceRoot, 'before.txt'), 'before');
 
     const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
@@ -311,6 +311,8 @@ describe('native workspace recovery Phase 1 engine', () => {
       const custom = path.join(root, 'custom');
       const defaultRoot = path.join(root, 'default');
       await Promise.all([workspace, custom, defaultRoot].map((directory) => fs.promises.mkdir(directory, { recursive: true })));
+      const canonicalCustomRoot = await fs.promises.realpath(custom);
+      const canonicalDefaultRoot = await fs.promises.realpath(defaultRoot);
       const identity = {
         authorityId: 'authority-1',
         canonicalRoot: workspace,
@@ -321,10 +323,10 @@ describe('native workspace recovery Phase 1 engine', () => {
         dataDir: path.join(root, 'data'),
         defaultRecoveryDir: defaultRoot,
       });
-      expect(await registry.resolve(identity, { mode: 'application-data' })).toBe(path.join(defaultRoot, 'authority-1', 'workspace-1', 'v1'));
+      expect(await registry.resolve(identity, { mode: 'application-data' })).toBe(path.join(canonicalDefaultRoot, 'authority-1', 'workspace-1', 'v1'));
       expect(await registry.resolve(identity, { mode: 'workspace-local' })).toBe(path.join(workspace, '.piarium', 'recovery', 'v1'));
       expect(await registry.resolve(identity, { mode: 'workspace-adjacent' })).toBe(path.join(root, '.piarium-recovery', 'workspace-1', 'v1'));
-      expect(await registry.resolve(identity, { mode: 'custom', customRoot: custom })).toBe(path.join(custom, 'authority-1', 'workspace-1', 'v1'));
+      expect(await registry.resolve(identity, { mode: 'custom', customRoot: custom })).toBe(path.join(canonicalCustomRoot, 'authority-1', 'workspace-1', 'v1'));
     } finally {
       await fs.promises.rm(root, { force: true, recursive: true });
     }

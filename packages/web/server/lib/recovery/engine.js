@@ -18,6 +18,7 @@ import { createRecoveryLocationRegistry, writeRecoveryJsonAtomic } from './locat
 import { createRecoveryBindingStore } from './bindings.js';
 import { createCombinedRecoveryManager } from './combined.js';
 import { createWorkspaceRestoreManager } from './restore.js';
+import { portableSymlinkTarget } from './symlink-target.js';
 
 const POLICY_REVISION = 'phase1-default-v1';
 const EXCLUDED_VCS_NAMES = new Set(['.git', '.hg', '.svn']);
@@ -476,7 +477,7 @@ export const createWorkspaceRecoveryEngine = ({
         const metadata = metadataFromStat(stat);
         if (stat.isSymbolicLink()) {
           try {
-            const symlinkTarget = await fsPromises.readlink(absolutePath);
+            const symlinkTarget = portableSymlinkTarget(await fsPromises.readlink(absolutePath));
             insertEntry(database, captureId, {
               ...metadata,
               comparisonKey: comparisonKey(portablePath),
