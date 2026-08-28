@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveWorkspacePath, WorkspacePathError } from '../workspace/path-safety.js';
-import { DocumentAuthorityError, DocumentPathError, DocumentUntrustedError, isDocumentAuthorityError } from './errors.js';
+import { canonicalizePathIdentity, resolveWorkspacePath, WorkspacePathError } from '../workspace/path-safety.js';
+import {
+  DocumentAuthorityError,
+  DocumentPathError,
+  DocumentUntrustedError,
+  DocumentWorkspaceUnavailableError,
+  isDocumentAuthorityError,
+} from './errors.js';
 import { encodeDocumentText, inspectDocumentBytes, revisionFromBytes } from './inspect.js';
 import { createWorkspaceMutationAuthority } from './mutation-authority.js';
 import { createRecoveryJournalStore } from './recovery-journal.js';
@@ -73,15 +79,6 @@ export const createDocumentAuthority = (options) => {
     pathModule,
   });
 
-  const realpath = async (target, allowMissing = false) => {
-    try {
-      return await fsPromises.realpath(target);
-    } catch (error) {
-      if (allowMissing && error?.code === 'ENOENT') return pathModule.resolve(target);
-      throw error;
-    }
-  };
-
   const loadWorkspace = async (workspaceId) => {
     const mapping = await registry.get(workspaceId);
     if (!mapping) {
@@ -92,12 +89,9 @@ export const createDocumentAuthority = (options) => {
     }
     let root;
     try {
-      root = await realpath(mapping.canonicalPath);
+      root = await canonicalizePathIdentity(mapping.canonicalPath, { fsPromises, pathModule });
     } catch (error) {
-      if (error?.code === 'ENOENT') {
-        throw new DocumentAuthorityError('Workspace root is unavailable', { code: 'failed', statusCode: 500 });
-      }
-      throw error;
+      throw new DocumentWorkspaceUnavailableError(undefined, { cause: error });
     }
     if (!await isAllowedRoot(root)) {
       throw new DocumentPathError('Workspace root is not allowed');
@@ -244,7 +238,7 @@ export const createDocumentAuthority = (options) => {
       }
       let canonicalPath;
       try {
-        canonicalPath = await realpath(rawPath);
+        canonicalPath = await canonicalizePathIdentity(rawPath, { fsPromises, pathModule });
       } catch (error) {
         if (error?.code === 'ENOENT') {
           throw new DocumentAuthorityError('Workspace path does not exist', { code: 'failed', statusCode: 404 });
@@ -277,9 +271,14 @@ export const createDocumentAuthority = (options) => {
       // mkdir, rename destination). A registered containing workspace is
       // already sufficient for mutation accounting; this does not grant file
       // access, which remains with the calling route's existing checks.
-      const containing = await registry.findContaining(scopeId);
+      const canonicalPath = await canonicalizePathIdentity(scopeId, {
+        allowMissing: true,
+        fsPromises,
+        pathModule,
+      });
+      const containing = await registry.findContaining(canonicalPath);
       if (containing) return containing.workspaceId;
-      const canonicalPath = await realpath(scopeId);
+      await fsPromises.stat(canonicalPath);
       if (!await isAllowedRoot(canonicalPath)) return null;
       const mapping = await registry.resolve({ canonicalPath, create: true });
       return mapping?.workspaceId ?? null;

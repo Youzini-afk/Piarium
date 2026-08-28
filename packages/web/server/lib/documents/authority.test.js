@@ -13,6 +13,44 @@ const createPeerAuthority = (harness) => createDocumentAuthority({
   isAllowedRoot: async () => true,
 });
 
+it('keeps a persisted workspace identity available while its root is temporarily offline', async () => {
+  const harness = await createDocumentAuthorityHarness();
+  const offlineRoot = `${harness.workspaceRoot}.offline`;
+  let peer;
+  try {
+    await fs.promises.rename(harness.workspaceRoot, offlineRoot);
+    peer = createPeerAuthority(harness);
+    const onlineRoot = path.join(harness.root, 'online-workspace');
+    await fs.promises.mkdir(onlineRoot);
+
+    await expect(peer.resolveWorkspace({ workspaceId: harness.identity.workspaceId })).resolves.toMatchObject({
+      workspaceId: harness.identity.workspaceId,
+      hostId: harness.identity.hostId,
+      epoch: harness.identity.epoch,
+    });
+    await expect(peer.inspectWorkspace(harness.identity.workspaceId)).rejects.toMatchObject({
+      code: 'workspace-unavailable',
+      statusCode: 503,
+    });
+    const onlineIdentity = await peer.resolveWorkspace({ path: onlineRoot });
+    expect(onlineIdentity.workspaceId).not.toBe(harness.identity.workspaceId);
+    await expect(peer.inspectWorkspace(onlineIdentity.workspaceId)).resolves.toMatchObject({
+      root: await fs.promises.realpath(onlineRoot),
+    });
+
+    await fs.promises.rename(offlineRoot, harness.workspaceRoot);
+    await expect(peer.inspectWorkspace(harness.identity.workspaceId)).resolves.toMatchObject({
+      workspaceId: harness.identity.workspaceId,
+      root: await fs.promises.realpath(harness.workspaceRoot),
+    });
+  } finally {
+    if (fs.existsSync(offlineRoot) && !fs.existsSync(harness.workspaceRoot)) {
+      await fs.promises.rename(offlineRoot, harness.workspaceRoot);
+    }
+    await Promise.allSettled([peer?.dispose(), harness.cleanup()]);
+  }
+});
+
 it('coordinates writer, maintenance, and epoch fencing across authority instances', async () => {
   const harness = await createDocumentAuthorityHarness();
   const peer = createPeerAuthority(harness);

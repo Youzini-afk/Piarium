@@ -17,6 +17,14 @@ export class DocumentUntrustedError extends DocumentAuthorityError {
   }
 }
 
+export class DocumentWorkspaceUnavailableError extends DocumentAuthorityError {
+  constructor(message = 'Workspace root is temporarily unavailable', options = {}) {
+    super(message, { code: 'workspace-unavailable', statusCode: 503 });
+    this.name = 'DocumentWorkspaceUnavailableError';
+    if (options.cause !== undefined) this.cause = options.cause;
+  }
+}
+
 export class DocumentPathError extends DocumentAuthorityError {
   constructor(message = 'Path is outside workspace', statusCode = 403) {
     super(message, { code: 'path-escape', statusCode });
