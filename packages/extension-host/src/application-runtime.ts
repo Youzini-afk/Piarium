@@ -398,7 +398,7 @@ export class ApplicationExtensionRuntime {
       return this.supervisor.invokeStagedService(parsed, signal);
     }
     if (providerId) return this.services.invoke(parsed, signal);
-    return this.supervisor.activateForService(parsed).then(async () => {
+    return this.#ensureBuiltinServiceArtifacts(parsed).then(() => this.supervisor.activateForService(parsed)).then(async () => {
       this.#publish();
       return this.#invokeRegisteredService(parsed, signal);
     });
@@ -538,6 +538,21 @@ export class ApplicationExtensionRuntime {
     if (!definition) return;
     const snapshot = await this.catalog.snapshot();
     await this.packages.reconcileBuiltinArtifacts([definition], snapshot);
+  }
+
+  async #ensureBuiltinServiceArtifacts(request: PiariumExtensionServiceInvocationRequest): Promise<void> {
+    const snapshot = await this.catalog.snapshot();
+    const enabled = new Set(snapshot.extensions
+      .filter((entry) => entry.desired.enabled)
+      .map((entry) => entry.manifest.id));
+    const definitions = PIARIUM_BUILTIN_EXTENSION_DEFINITIONS.filter((definition) => (
+      enabled.has(definition.manifest.id)
+      && definition.manifest.entrypoints?.host
+      && definition.manifest.provides?.services?.some((service) => (
+        service.id === request.serviceId && service.version === request.version
+      ))
+    ));
+    if (definitions.length > 0) await this.packages.reconcileBuiltinArtifacts(definitions, snapshot);
   }
 
   #mutate<T>(operation: () => Promise<T>): Promise<T> {

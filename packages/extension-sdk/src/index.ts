@@ -364,6 +364,7 @@ export const PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY = "workspace.language";
 export const PIARIUM_WORKSPACE_TASKS_CAPABILITY = "workspace.tasks";
 export const PIARIUM_WORKSPACE_DEBUG_CAPABILITY = "workspace.debug";
 export const PIARIUM_WORKSPACE_TEST_CAPABILITY = "workspace.test";
+export const PIARIUM_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY = "workspace.recovery-primitives";
 
 export {
   PIARIUM_EDITOR_MONACO_SERVICE_ID,
@@ -446,6 +447,12 @@ export const callWorkspaceLanguage = (
   method: string,
   params: JsonValue,
 ): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_LANGUAGE_CAPABILITY, method, params);
+
+export const callWorkspaceRecoveryPrimitives = (
+  capabilities: PiariumIsolatedCapabilityClient | PiariumHostCapabilityClient,
+  method: string,
+  params: JsonValue,
+): Promise<JsonValue> => capabilities.call(PIARIUM_WORKSPACE_RECOVERY_PRIMITIVES_CAPABILITY, method, params);
 
 export interface PiariumWorkspaceDocumentsClient {
   delete(request: JsonObject): Promise<JsonValue>;

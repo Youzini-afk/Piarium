@@ -1,6 +1,9 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID } from "./index.js";
+import {
+  PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
+  PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
+} from "./index.js";
 
 const ASAR_DIRECTORY_SEGMENT = /(^|[\\/])([^\\/]+\.asar)([\\/])/i;
 
@@ -29,6 +32,12 @@ export const PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string
     PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
     resolvePiariumBuiltinPackageRoot(
       fileURLToPath(new URL("./builtin-packages/typescript-language/", import.meta.url)),
+    ),
+  ],
+  [
+    PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
+    resolvePiariumBuiltinPackageRoot(
+      fileURLToPath(new URL("./builtin-packages/recovery/", import.meta.url)),
     ),
   ],
 ]);

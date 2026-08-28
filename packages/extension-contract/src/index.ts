@@ -6,3 +6,4 @@ export * from "./service-routing.js";
 export * from "./discovery.js";
 export * from "./motion.js";
 export * from "./editor.js";
+export * from "./recovery.js";

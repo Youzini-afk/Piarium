@@ -1,0 +1,431 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
+import { objectPath, openRecoveryCatalog, recordCatalogOperation } from './catalog.js';
+import { createWorkspaceRecoveryEngine } from './engine.js';
+import { createRecoveryLocationRegistry } from './locations.js';
+
+const harnesses = new Set();
+
+const createHarness = async (options = {}) => {
+  const harness = await createDocumentAuthorityHarness();
+  harnesses.add(harness);
+  const engine = createWorkspaceRecoveryEngine({
+    authorityId: harness.authority.hostId,
+    dataDir: harness.dataDir,
+    documents: harness.authority,
+    ...options,
+  });
+  return { engine, harness };
+};
+
+const applicationDataRoot = (harness) => path.join(
+  harness.dataDir,
+  'extensions',
+  'storage',
+  'piarium.builtin.recovery',
+  'recovery',
+  'v1',
+  harness.authority.hostId,
+  harness.identity.workspaceId,
+);
+
+afterEach(async () => {
+  await Promise.all([...harnesses].map((harness) => harness.cleanup()));
+  harnesses.clear();
+});
+
+describe('native workspace recovery Phase 1 engine', () => {
+  it('round-trips files, empty directories, symlinks, readonly metadata, exclusions, and diffs', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.mkdir(path.join(harness.workspaceRoot, 'empty'), { recursive: true });
+    await fs.promises.mkdir(path.join(harness.workspaceRoot, 'nested'), { recursive: true });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'nested', 'note.txt'), 'one\n');
+    await fs.promises.chmod(path.join(harness.workspaceRoot, 'nested', 'note.txt'), 0o444);
+    await fs.promises.mkdir(path.join(harness.workspaceRoot, '.git'), { recursive: true });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, '.git', 'HEAD'), 'must-not-be-read');
+    await fs.promises.mkdir(path.join(harness.workspaceRoot, '.piarium', 'recovery'), { recursive: true });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, '.piarium', 'recovery', 'private'), 'must-not-be-read');
+    let symlinkCreated = true;
+    try {
+      await fs.promises.symlink('nested/note.txt', path.join(harness.workspaceRoot, 'note-link'));
+    } catch (error) {
+      if (error?.code === 'EPERM') symlinkCreated = false;
+      else throw error;
+    }
+
+    const first = await engine.captureSnapshot({ source: 'manual', workspaceId: harness.identity.workspaceId });
+    expect(first.status).toBe('captured');
+    expect(first.snapshot.availability).toBe('ready');
+    const read = await engine.readSnapshot({
+      snapshotId: first.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(read.status).toBe('ready');
+    const byPath = new Map(read.manifest.entries.map((entry) => [entry.path, entry]));
+    expect(byPath.get('empty')).toMatchObject({ kind: 'directory', coverage: 'present' });
+    expect(byPath.get('.git')).toMatchObject({ kind: 'excluded', reason: 'vcs-administrative-store' });
+    expect(byPath.get('.piarium/recovery')).toMatchObject({ kind: 'excluded', reason: 'piarium-recovery-storage' });
+    expect([...byPath.keys()].some((entry) => entry.startsWith('.git/'))).toBe(false);
+    expect([...byPath.keys()].some((entry) => entry.startsWith('.piarium/recovery/'))).toBe(false);
+    expect(byPath.get('nested/note.txt')).toMatchObject({
+      byteLength: 4,
+      kind: 'regular-file',
+      readonly: process.platform === 'win32' ? expect.any(Boolean) : true,
+    });
+    if (symlinkCreated) {
+      expect(byPath.get('note-link')).toMatchObject({
+        kind: 'symlink',
+        symlinkTarget: 'nested/note.txt',
+      });
+    }
+
+    await fs.promises.chmod(path.join(harness.workspaceRoot, 'nested', 'note.txt'), 0o644);
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'nested', 'note.txt'), 'two\n');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'added.txt'), 'added');
+    const second = await engine.captureSnapshot({ source: 'manual', workspaceId: harness.identity.workspaceId });
+    expect(second.status).toBe('captured');
+    const diff = await engine.diffSnapshots({
+      afterSnapshotId: second.snapshot.id,
+      beforeSnapshotId: first.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(diff.status).toBe('ready');
+    expect(diff.diff.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'added.txt', type: 'added' }),
+      expect.objectContaining({ path: 'nested/note.txt', type: 'modified' }),
+    ]));
+  });
+
+  it('publishes incomplete coverage for unsupported entries instead of silently omitting them', async () => {
+    const real = fs.promises;
+    let workspaceRoot = '';
+    const wrapped = {
+      ...real,
+      lstat: async (target, options) => {
+        const stat = await real.lstat(target, options);
+        if (workspaceRoot && path.resolve(target) === path.join(workspaceRoot, 'unsupported.special')) {
+          return new Proxy(stat, {
+            get(value, property) {
+              if (typeof property === 'string' && property.startsWith('is')) return () => false;
+              return Reflect.get(value, property, value);
+            },
+          });
+        }
+        return stat;
+      },
+    };
+    const { engine, harness } = await createHarness({ fsPromises: wrapped });
+    workspaceRoot = harness.workspaceRoot;
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'unsupported.special'), 'x');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(captured.status).toBe('captured');
+    expect(captured.snapshot).toMatchObject({ availability: 'incomplete', consistency: 'incomplete' });
+    const read = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    expect(read.status).toBe('incomplete');
+    expect(read.manifest.entries).toContainEqual(expect.objectContaining({
+      coverage: 'excluded-unknown',
+      kind: 'unsupported',
+      path: 'unsupported.special',
+    }));
+  });
+
+  it('marks a capture incomplete when the workspace root changes during traversal', async () => {
+    const real = fs.promises;
+    let workspaceRoot = '';
+    let rootStats = 0;
+    const wrapped = {
+      ...real,
+      lstat: async (target, options) => {
+        if (workspaceRoot && path.resolve(target) === workspaceRoot) {
+          rootStats += 1;
+          if (rootStats === 2) await real.writeFile(path.join(workspaceRoot, 'arrived-during-capture.txt'), 'late');
+        }
+        return real.lstat(target, options);
+      },
+    };
+    const { engine, harness } = await createHarness({ fsPromises: wrapped });
+    workspaceRoot = path.resolve(harness.workspaceRoot);
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'before.txt'), 'before');
+
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(captured).toMatchObject({ status: 'captured', snapshot: { availability: 'incomplete' } });
+    const read = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    expect(read.manifest.entries).toContainEqual(expect.objectContaining({
+      coverage: 'unstable',
+      path: '.',
+      reason: 'directory-changed-during-capture',
+    }));
+    expect(read.manifest.entries.some((entry) => entry.path === 'arrived-during-capture.txt')).toBe(false);
+  });
+
+  it('does not publish when a referenced object disappears before publication', async () => {
+    const { engine, harness } = await createHarness({
+      faults: {
+        beforePublish: async ({ database, root, captureId }) => {
+          const row = database.prepare(
+            'SELECT object_hash FROM staged_entries WHERE capture_id = ? AND object_hash IS NOT NULL LIMIT 1',
+          ).get(captureId);
+          if (row) await fs.promises.unlink(objectPath(root, row.object_hash));
+        },
+      },
+    });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(captured.status).toBe('failed');
+    expect(captured.failure.code).toBe('object-missing');
+    const listed = await engine.listSnapshots({ workspaceId: harness.identity.workspaceId });
+    expect(listed).toEqual({ page: { nextCursor: null, snapshots: [] }, status: 'ready' });
+  });
+
+  it('recovers abandoned capture staging before serving the store again', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const root = applicationDataRoot(harness);
+    const database = await openRecoveryCatalog(root, { create: false });
+    const captureId = 'abandoned-capture';
+    recordCatalogOperation(database, {
+      createdAt: new Date().toISOString(),
+      data: {},
+      id: captureId,
+      state: 'scanning',
+      type: 'capture',
+      updatedAt: new Date().toISOString(),
+      workspaceId: harness.identity.workspaceId,
+    });
+    database.prepare(`
+      INSERT INTO staged_entries(capture_id, path, comparison_key, kind, coverage)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(captureId, 'partial.txt', 'partial.txt', 'regular-file', 'unstable');
+    database.close();
+    const abandonedFile = path.join(root, 'staging', captureId, 'partial.tmp');
+    await fs.promises.mkdir(path.dirname(abandonedFile), { recursive: true });
+    await fs.promises.writeFile(abandonedFile, 'partial');
+
+    const restarted = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+    });
+    const listed = await restarted.listSnapshots({ workspaceId: harness.identity.workspaceId });
+    expect(listed.status).toBe('ready');
+    const recovered = await openRecoveryCatalog(root, { create: false });
+    expect(recovered.prepare('SELECT state FROM operations WHERE id = ?').get(captureId).state).toBe('failed');
+    expect(recovered.prepare('SELECT COUNT(*) AS count FROM staged_entries').get().count).toBe(0);
+    recovered.close();
+    await expect(fs.promises.stat(abandonedFile)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reports missing and corrupt ready objects as unrestorable', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const read = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    const hash = read.manifest.entries.find((entry) => entry.path === 'note.txt').objectHash;
+    const target = objectPath(applicationDataRoot(harness), hash);
+
+    await fs.promises.writeFile(target, 'different');
+    const corrupt = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    expect(corrupt).toMatchObject({ status: 'corrupt', failure: { code: 'object-corrupt' } });
+
+    await fs.promises.unlink(target);
+    const missing = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    expect(missing).toMatchObject({ status: 'corrupt', failure: { code: 'object-missing' } });
+  });
+
+  it('keeps a missing snapshot distinct from a malformed stored manifest', async () => {
+    const { engine, harness } = await createHarness();
+    const missing = await engine.readSnapshot({
+      snapshotId: 'does-not-exist',
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(missing).toMatchObject({ status: 'missing', failure: { code: 'snapshot-missing' } });
+
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const database = await openRecoveryCatalog(applicationDataRoot(harness), { create: false });
+    database.prepare(
+      "UPDATE snapshot_entries SET platform_json = '{not-json' WHERE snapshot_id = ? AND path = 'note.txt'",
+    ).run(captured.snapshot.id);
+    database.close();
+    const malformed = await engine.readSnapshot({
+      snapshotId: captured.snapshot.id,
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(malformed).toMatchObject({ status: 'malformed', failure: { code: 'snapshot-malformed' } });
+  });
+
+  it('does not misreport a workspace authority failure as a malformed snapshot', async () => {
+    const { engine } = await createHarness();
+    const result = await engine.readSnapshot({ snapshotId: 'unknown', workspaceId: 'unknown-workspace' });
+    expect(result.status).toBe('failed');
+    expect(result.failure.code).not.toBe('snapshot-malformed');
+  });
+
+  it('resolves all storage modes and honors the Host default override', async () => {
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-recovery-locations-'));
+    try {
+      const workspace = path.join(root, 'workspace');
+      const custom = path.join(root, 'custom');
+      const defaultRoot = path.join(root, 'default');
+      await Promise.all([workspace, custom, defaultRoot].map((directory) => fs.promises.mkdir(directory, { recursive: true })));
+      const identity = {
+        authorityId: 'authority-1',
+        canonicalRoot: workspace,
+        workspaceId: 'workspace-1',
+      };
+      const registry = createRecoveryLocationRegistry({
+        authorityId: identity.authorityId,
+        dataDir: path.join(root, 'data'),
+        defaultRecoveryDir: defaultRoot,
+      });
+      expect(await registry.resolve(identity, { mode: 'application-data' })).toBe(path.join(defaultRoot, 'authority-1', 'workspace-1', 'v1'));
+      expect(await registry.resolve(identity, { mode: 'workspace-local' })).toBe(path.join(workspace, '.piarium', 'recovery', 'v1'));
+      expect(await registry.resolve(identity, { mode: 'workspace-adjacent' })).toBe(path.join(root, '.piarium-recovery', 'workspace-1', 'v1'));
+      expect(await registry.resolve(identity, { mode: 'custom', customRoot: custom })).toBe(path.join(custom, 'authority-1', 'workspace-1', 'v1'));
+    } finally {
+      await fs.promises.rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it('keeps recovery storage private to the providing extension', async () => {
+    const { engine, harness } = await createHarness();
+    const other = createWorkspaceRecoveryEngine({
+      authorityId: harness.authority.hostId,
+      dataDir: harness.dataDir,
+      documents: harness.authority,
+      storageOwnerId: 'dev.example.recovery',
+    });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    expect(captured.status).toBe('captured');
+    expect(await other.listSnapshots({ workspaceId: harness.identity.workspaceId })).toEqual({
+      page: { nextCursor: null, snapshots: [] },
+      status: 'ready',
+    });
+  });
+
+  it('keeps the old storage authority when a verified move fails before the registry switch', async () => {
+    const { engine, harness } = await createHarness({
+      faults: { beforeLocationSwitch: async () => { throw new Error('injected move failure'); } },
+    });
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const moved = await engine.setStorageLocation({
+      location: { mode: 'workspace-local' },
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(moved.status).toBe('ready');
+    expect(moved.operation).toMatchObject({ state: 'failed', failure: { code: 'storage-move-failed' } });
+    const status = await engine.storageStatus(harness.identity.workspaceId);
+    expect(status.storage.location).toEqual({ mode: 'application-data' });
+    const read = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    expect(read.status).toBe('ready');
+  });
+
+  it('never performs cleanup from untrusted absolute roots stored in a move record', async () => {
+    const { engine, harness } = await createHarness();
+    const operationId = 'tampered-move';
+    const unrelatedRoot = path.join(path.dirname(harness.dataDir), 'unrelated', 'payload', 'v1');
+    await fs.promises.mkdir(unrelatedRoot, { recursive: true });
+    const sentinel = path.join(unrelatedRoot, 'keep.txt');
+    await fs.promises.writeFile(sentinel, 'keep');
+    const now = new Date().toISOString();
+    await fs.promises.mkdir(engine.locations.operationsRoot, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(engine.locations.operationsRoot, `${operationId}.json`),
+      `${JSON.stringify({
+        authorityId: harness.authority.hostId,
+        backupRoot: `${unrelatedRoot}.move-${operationId}.previous`,
+        byteLength: 0,
+        destinationHadExisting: false,
+        destinationRoot: unrelatedRoot,
+        from: { mode: 'application-data' },
+        id: operationId,
+        sourceRoot: unrelatedRoot,
+        stageRoot: `${unrelatedRoot}.move-${operationId}.staging`,
+        startedAt: now,
+        state: 'copying',
+        switched: false,
+        to: { mode: 'workspace-local' },
+        updatedAt: now,
+        workspaceId: harness.identity.workspaceId,
+      }, null, 2)}\n`,
+    );
+
+    const status = await engine.storageStatus(harness.identity.workspaceId);
+    expect(status).toMatchObject({ status: 'failed', failure: { code: 'storage-malformed' } });
+    await expect(fs.promises.readFile(sentinel, 'utf8')).resolves.toBe('keep');
+    await fs.promises.rm(path.dirname(path.dirname(unrelatedRoot)), { force: true, recursive: true });
+  });
+
+  it('switches authority only after a successful verified storage move', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const moved = await engine.setStorageLocation({
+      location: { mode: 'workspace-adjacent' },
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(moved).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    const status = await engine.storageStatus(harness.identity.workspaceId);
+    expect(status.storage.location).toEqual({ mode: 'workspace-adjacent' });
+    const read = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    expect(read.status).toBe('ready');
+    await expect(fs.promises.stat(applicationDataRoot(harness))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses to overwrite a pre-existing recovery destination', async () => {
+    const { engine, harness } = await createHarness();
+    const destination = path.join(harness.workspaceRoot, '.piarium', 'recovery', 'v1');
+    await fs.promises.mkdir(destination, { recursive: true });
+    await fs.promises.writeFile(path.join(destination, 'keep.txt'), 'existing destination');
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+
+    const moved = await engine.setStorageLocation({
+      location: { mode: 'workspace-local' },
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(moved).toMatchObject({ status: 'ready', operation: { state: 'failed' } });
+    await expect(fs.promises.readFile(path.join(destination, 'keep.txt'), 'utf8')).resolves.toBe('existing destination');
+    const read = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    expect(read.status).toBe('ready');
+  });
+
+  it('rejects a storage move whose destination is nested inside the source payload', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const moved = await engine.setStorageLocation({
+      location: { customRoot: applicationDataRoot(harness), mode: 'custom' },
+      workspaceId: harness.identity.workspaceId,
+    });
+    expect(moved).toMatchObject({ status: 'failed', failure: { code: 'invalid-request' } });
+  });
+
+  it('cleans only unreachable objects and deletes all workspace history explicitly', async () => {
+    const { engine, harness } = await createHarness();
+    await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'content');
+    const captured = await engine.captureSnapshot({ workspaceId: harness.identity.workspaceId });
+    const read = await engine.readSnapshot({ snapshotId: captured.snapshot.id, workspaceId: harness.identity.workspaceId });
+    const reachableHash = read.manifest.entries.find((entry) => entry.path === 'note.txt').objectHash;
+    const root = applicationDataRoot(harness);
+    const orphanHash = `sha256-${'f'.repeat(64)}`;
+    await fs.promises.mkdir(path.dirname(objectPath(root, orphanHash)), { recursive: true });
+    await fs.promises.writeFile(objectPath(root, orphanHash), 'orphan');
+
+    const cleaned = await engine.cleanupStorage({ workspaceId: harness.identity.workspaceId });
+    expect(cleaned).toMatchObject({ status: 'ready', result: { status: 'complete', objectsDeleted: 1 } });
+    await expect(fs.promises.stat(objectPath(root, reachableHash))).resolves.toBeDefined();
+    await expect(fs.promises.stat(objectPath(root, orphanHash))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const deleted = await engine.deleteWorkspaceHistory(harness.identity.workspaceId);
+    expect(deleted).toMatchObject({ status: 'ready', result: { status: 'complete' } });
+    const listed = await engine.listSnapshots({ workspaceId: harness.identity.workspaceId });
+    expect(listed).toEqual({ page: { nextCursor: null, snapshots: [] }, status: 'ready' });
+  });
+});

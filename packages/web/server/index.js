@@ -19,6 +19,8 @@ import {
 import { createDocumentAuthority } from './lib/documents/authority.js';
 import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbench-layout-service.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
+import { createWorkspaceRecoveryEngine } from './lib/recovery/engine.js';
+import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capability.js';
 import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
 import { createRunRuntime } from './lib/run/runtime.js';
@@ -806,6 +808,25 @@ async function main(options = {}) {
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
   });
+  const workspaceRecoveryEngines = new Map();
+  const recoveryEngineForOwner = (context) => {
+    const storageOwnerId = context?.owner?.extensionId;
+    if (typeof storageOwnerId !== 'string' || !storageOwnerId) {
+      throw new Error('Workspace recovery capability requires an extension owner');
+    }
+    let engine = workspaceRecoveryEngines.get(storageOwnerId);
+    if (!engine) {
+      engine = createWorkspaceRecoveryEngine({
+        authorityId: extensionRuntime.services.hostId,
+        dataDir: PIARIUM_DATA_DIR,
+        defaultRecoveryDir: process.env.PIARIUM_RECOVERY_DIR?.trim() || undefined,
+        documents: documentsAuthority,
+        storageOwnerId,
+      });
+      workspaceRecoveryEngines.set(storageOwnerId, engine);
+    }
+    return engine;
+  };
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId) => documentsAuthority.resolveScopeId(scopeId));
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: () => extensionRuntime.activateForEvent('workspace-match'),
@@ -827,6 +848,10 @@ async function main(options = {}) {
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
+  );
+  const unregisterWorkspaceRecoveryCapability = extensionRuntime.capabilities.register(
+    'workspace.recovery-primitives',
+    createWorkspaceRecoveryCapabilityHandler(recoveryEngineForOwner),
   );
   const unregisterSearchCapability = extensionRuntime.capabilities.register(
     'workspace.search',
@@ -1115,6 +1140,7 @@ async function main(options = {}) {
       if (ownsExtensionRuntime) await extensionRuntime.stop();
       unregisterPiRuntimeCapability();
       unregisterDocumentsCapability();
+      unregisterWorkspaceRecoveryCapability();
       unregisterSearchCapability();
       unregisterLanguageCapability();
       unregisterTasksCapability();

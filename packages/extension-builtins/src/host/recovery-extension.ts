@@ -1,0 +1,34 @@
+import type { JsonValue } from "@piarium/extension-contract";
+import {
+  PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
+  PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+} from "@piarium/extension-contract";
+import {
+  callWorkspaceRecoveryPrimitives,
+  defineHostExtension,
+} from "@piarium/extension-sdk";
+
+export default defineHostExtension({
+  activate(context) {
+    const call = (method: string, params: JsonValue): Promise<JsonValue> => (
+      callWorkspaceRecoveryPrimitives(context.capabilities, method, params)
+    );
+    context.services.provide({
+      id: PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
+      multiple: true,
+      version: PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+    }, {
+      captureSnapshot: (input) => call("captureSnapshot", input),
+      cleanupStorage: (input) => call("cleanupStorage", input),
+      deleteWorkspaceHistory: (workspaceId) => call("deleteWorkspaceHistory", { workspaceId }),
+      diffSnapshots: (input) => call("diffSnapshots", input),
+      getStorageMove: (operationId) => call("getStorageMove", { operationId }),
+      listSnapshots: (input) => call("listSnapshots", input),
+      readSnapshot: (input) => call("readSnapshot", input),
+      setStorageLocation: (input) => call("setStorageLocation", input),
+      status: (workspaceId) => call("status", { workspaceId }),
+      storageStatus: (workspaceId) => call("storageStatus", workspaceId === null ? {} : { workspaceId }),
+    });
+  },
+  migrate: ({ data }) => data,
+});

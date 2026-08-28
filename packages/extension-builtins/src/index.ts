@@ -16,6 +16,8 @@ import {
   PIARIUM_TRANSITION_SCENE_DATA_CONTRACT,
   PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
   PIARIUM_CORE_SERVICE_VERSION,
+  PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
+  PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
   PIARIUM_WORKBENCH_LAYOUT_SERVICE_ID,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
 } from "@piarium/extension-contract";
@@ -38,6 +40,7 @@ export const PIARIUM_INTEGRATION_ENTRYPOINT_ID = "main";
 export const PIARIUM_INTEGRATION_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile", "vscode"];
 export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID = "piarium.builtin.typescript-language";
 export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typescript.5.9.3.piarium.1";
+export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "piarium.builtin.recovery";
 
 const pageContribution = (input: {
   group: "pi";
@@ -281,6 +284,33 @@ export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION: PiariumBuiltinExtens
   },
 };
 
+export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: PiariumBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: {
+    capabilities: { host: ["workspace.recovery-primitives"] },
+    displayName: "Piarium Workspace Recovery",
+    engines: { piarium: "*" },
+    entrypoints: {
+      host: {
+        activation: ["service-request"],
+        file: "host.cjs",
+        mode: "brokered",
+      },
+    },
+    id: PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
+    provides: {
+      services: [{
+        id: PIARIUM_WORKSPACE_RECOVERY_SERVICE_ID,
+        multiple: true,
+        version: PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION,
+      }],
+    },
+    schemaVersion: 1,
+    storage: { schemaVersion: 1 },
+    version: PIARIUM_BUILTIN_EXTENSION_VERSION,
+  },
+};
+
 const pluginAdapter = (
   suffix: string,
   displayName: string,
@@ -343,6 +373,7 @@ export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
 export const PIARIUM_BUILTIN_EXTENSION_DEFINITIONS: readonly PiariumBuiltinExtensionDefinition[] = [
   PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION,
   PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
+  PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION,
   PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION,
   PIARIUM_BUILTIN_AGENTS_EXTENSION,
