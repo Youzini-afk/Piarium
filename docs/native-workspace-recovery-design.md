@@ -2,7 +2,7 @@
 
 Status: implementation in progress; Phases 1–7 are implemented, while cross-platform hardening remains pending
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 ## 1. Decision
 
