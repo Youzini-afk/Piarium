@@ -16,6 +16,11 @@ No Pi package is required for either capability.
 foundational auto-provisioning set and are not treated as Piarium recovery authorities. Piarium does
 not import or migrate their private history.
 
+This replaces the recovery role that Piarium previously assembled from those packages; it does not
+clone every feature of either package. Model-assisted typo correction, prompt diagnosis/rewriting,
+custom `wtf.json` command words, and destructive in-place Pi session JSONL rewriting are outside the
+native recovery product scope. Users may still install `pi-wtf` for those independent commands.
+
 The product terms are:
 
 - **conversation rollback**: navigate the Pi session tree and restore the editable user message;
