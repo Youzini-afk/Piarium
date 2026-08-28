@@ -295,20 +295,47 @@ materialization.
 
 ## 9. Content and metadata storage
 
-The default package receives a Host-resolved, extension-owned storage namespace. Its illustrative
-private layout is:
+The Host keeps a small authoritative storage-location registry in the built-in extension namespace.
+Each workspace independently selects one of four payload locations:
 
-```text
-<PIARIUM_DATA_DIR>/extensions/storage/piarium.builtin.recovery/recovery/v1/<authorityId>/<workspaceId>/
-  catalog.sqlite
-  objects/
-  operations/
-  staging/
+```ts
+type RecoveryStorageMode =
+  | 'application-data'
+  | 'workspace-local'
+  | 'workspace-adjacent'
+  | 'custom';
 ```
 
-The physical root is not part of the public service contract. The Host injects the extension namespace
-and provides streamed object and durable-operation handles, so a package cannot select another
-extension's directory or escape the Application Host authority.
+Resolution and illustrative layouts are:
+
+| Mode | Resolved location | Semantics |
+| --- | --- | --- |
+| `application-data` | `<PIARIUM_DATA_DIR>/extensions/storage/piarium.builtin.recovery/recovery/v1/<authorityId>/<workspaceId>` | Default; Host-private and independent of workspace deletion |
+| `workspace-local` | `<workspace>/.piarium/recovery/v1` | Portable with the workspace; deleting the workspace intentionally deletes its history |
+| `workspace-adjacent` | `<workspace-parent>/.piarium-recovery/<workspaceId>/v1` | Same-volume storage without placing history inside the workspace tree |
+| `custom` | `<selected-root>/<authorityId>/<workspaceId>/v1` | User/deployment-selected disk, mount, NAS, or persistent volume |
+
+`PIARIUM_RECOVERY_DIR` may set the Application Host's default payload root; a per-workspace selection
+wins over that default. Without either, `application-data` resolves through `PIARIUM_DATA_DIR`.
+
+Every payload root uses the same private layout:
+
+```text
+catalog.sqlite
+objects/
+operations/
+staging/
+```
+
+The physical root is not part of the public recovery service contract. The Host resolves and validates
+the selected location, injects the extension namespace, and provides streamed object and durable-
+operation handles, so an extension cannot select another extension's directory or escape the
+Application Host authority.
+
+`workspace-local` is an explicit user choice rather than an error condition. Piarium structurally
+excludes `.piarium/recovery` from its own capture, search, watch invalidation, and restore plans. The UI
+explains that moving or deleting the workspace carries or deletes that history and that workspace-
+capable shell processes can also see the directory.
 
 The catalog owns snapshots, manifests, bindings, pins, writer epochs, refcounts, and operation state.
 Large immutable bytes live in a content-addressed object store. Object identity uses SHA-256 over the
@@ -321,6 +348,19 @@ break-even measurements. They do not change snapshot semantics.
 The database and objects follow write-temp, fsync where supported, atomic same-volume rename, and
 post-write verification. A snapshot is published only after its objects and manifest are durable.
 Objects remain pinned while capture, restore, verification, export, or GC uses them.
+
+Changing storage location is itself a durable operation:
+
+1. drain captures, restores, export, and GC for the workspace;
+2. pin the current catalog root and record the source/destination decision;
+3. copy, reflink, or provider-transfer into a destination staging root;
+4. verify the catalog, every referenced object, manifest roots, permissions, and filesystem profile;
+5. atomically switch the Host location registry to the verified destination;
+6. resume the workspace and delete the old payload only after the new root is authoritative.
+
+Failure before the location switch leaves the old store authoritative and removes only destination
+staging. A Host restart resumes or cleans the recorded move; it never guesses from whichever directory
+happens to exist.
 
 Snapshot data can contain source, ignored files, and secrets. Desktop stores use user-only permissions
 and may use an OS-backed encryption provider. Headless/cloud deployments may configure a Host key.
@@ -473,6 +513,10 @@ interface WorkspaceRecoveryAPI {
   pinSnapshot(input: SnapshotPinInput): Promise<SnapshotPinResult>;
   unpinSnapshot(input: SnapshotPinInput): Promise<SnapshotPinResult>;
   storageStatus(workspaceId?: string): Promise<RecoveryStorageStatus>;
+  setStorageLocation(input: SetRecoveryStorageLocationInput): Promise<RecoveryStorageMoveOperation>;
+  getStorageMove(operationId: string): Promise<RecoveryStorageMoveOperation>;
+  cleanupStorage(input: RecoveryStorageCleanupInput): Promise<RecoveryStorageCleanupResult>;
+  deleteWorkspaceHistory(workspaceId: string): Promise<RecoveryStorageCleanupResult>;
 }
 ```
 
@@ -520,6 +564,8 @@ The Recovery panel becomes a workspace timeline:
 - current restore progress and durable operation state;
 - safety and rescue checkpoints;
 - storage health, pins, and GC reachability;
+- storage mode/location, open location, verified transfer, unreachable-data cleanup, and explicit
+  deletion of all recovery history for the workspace;
 - an explicit “restore here” versus “open as new workspace” decision when required.
 
 Agent and IDE shells use the same model. Mobile controls the remote Host. VS Code uses the same service
@@ -574,6 +620,16 @@ Storage policy is user/deployment configurable and pressure-aware. The product f
 workspace distributions, capture latency, deduplication, and free-space behavior before choosing any
 default budget. Named and safety pins are never silently evicted.
 
+Cleanup exposes two different operations:
+
+- **release unreachable data** walks graph reachability and removes only unreferenced manifests/objects;
+- **delete all workspace recovery history** drains the workspace recovery service, deletes its payload,
+  and removes the Host location record. In `workspace-local` mode, deleting the workspace directory has
+  the same expected end result and the Host later removes the stale location record.
+
+Storage transfer and cleanup report progress, reclaimed bytes, retained pins, failures, and their
+durable operation IDs. They cannot race capture, restore, export, or one another.
+
 Secure deletion is a distinct operation because snapshots may retain old secrets; deleting a session
 label alone does not claim that every deduplicated object was physically erased.
 
@@ -589,12 +645,15 @@ Each phase is complete, independently reviewable, and pushed before the next one
   distributed `piarium.builtin.recovery` extension with brokered Host and Surface entrypoints.
 - Introduce the extension-owned snapshot/manifest/CAS schema, consistency/coverage model, pins, WAL
   records, and storage diagnostics.
+- Implement the four storage-location modes, Host location registry, and crash-safe move/cleanup
+  operation records.
 - Implement immutable capture/list/read/diff for a direct test workspace through the service.
 - Replace the dead `CheckpointsAPI` contract rather than extending it.
 
 Acceptance: snapshot round-trip preserves all supported path kinds and metadata; missing/malformed/
 incomplete/corrupt state remains distinct; crash injection cannot publish a snapshot with missing blobs;
-disabling the package withdraws the service/UI while conversation-only recovery remains reachable.
+every failed location move keeps the old store authoritative; disabling the built-in extension
+withdraws the service/UI while conversation-only recovery remains reachable.
 
 ### Phase 2 — Workspace tracker and mutation participants
 
@@ -642,6 +701,8 @@ snapshot; worker crash, Host crash, disconnect, and stale completion preserve th
 - Complete the `piarium.builtin.recovery` Surface entrypoints for per-message revert, chooser, Recovery panel,
   progress, preview, conflict resolution, storage, pins, rescue, and settings over
   `WorkspaceRecoveryAPI`.
+- Add per-workspace storage selection, open location, verified transfer, reachability cleanup, and
+  delete-all-history controls.
 - Share the behavior across Agent/IDE/Web/Electron/mobile and define truthful VS Code behavior.
 - Prove service replacement with a second conformance provider and distribution/user/workspace routing.
 
