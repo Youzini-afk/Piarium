@@ -1,5 +1,9 @@
 # Plugin-backed recovery
 
+> This document describes the current implementation. It is superseded as a target architecture by
+> [Piarium native workspace recovery](native-workspace-recovery-design.md); the plugin-backed paths stay
+> in place only until the native phases replace them completely.
+
 Piarium owns recovery UX, policy, and capability discovery. Pi and its maintained plugins own the
 actual history. Piarium does not keep a second shadow-Git repository, copy a plugin's state files,
 or rewrite that private state into an application database.

@@ -498,6 +498,11 @@ section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md)
 
 ## 8. Recovery model
 
+The following section describes the current plugin-backed implementation. The approved replacement
+direction is the Host-owned design in
+[native-workspace-recovery-design.md](native-workspace-recovery-design.md); current paths remain only
+until its complete phases replace them.
+
 Piarium owns one recovery interaction model, not one recovery storage engine. Conversation-only
 rollback branches Pi's append-only session tree and restores editable user text/images without
 touching files. Combined rollback calls the same Pi tree navigation API and lets
