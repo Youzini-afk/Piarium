@@ -184,13 +184,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
-    id: 'appearance.usage-reports',
-    page: 'general',
-    titleKey: 'settings.piarium.visual.field.sendAnonymousUsageReports',
-    descriptionKey: 'settings.piarium.visual.field.sendAnonymousUsageReportsHint',
-    keywords: ['telemetry', 'analytics'],
-  },
-  {
     id: 'chat.render-mode',
     page: 'chat',
     titleKey: 'settings.piarium.visual.section.chatRenderMode',

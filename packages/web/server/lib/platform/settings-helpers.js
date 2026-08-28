@@ -755,11 +755,6 @@ export const createSettingsHelpers = (dependencies) => {
       }
     }
 
-    // Usage reporting opt-out (default: true/enabled)
-    if (typeof candidate.reportUsage === 'boolean') {
-      result.reportUsage = candidate.reportUsage;
-    }
-
     // Piarium-owned global behavior prompt.
     if (typeof candidate.globalBehaviorPrompt === 'string') {
       const value = candidate.globalBehaviorPrompt;

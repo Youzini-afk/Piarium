@@ -866,8 +866,7 @@ export const Header: React.FC<HeaderProps> = ({
     setRemoteUpdateChecking(true);
     setRemoteUpdateError(null);
     try {
-      // Status-only poll: must not count as usage on the remote server's install id.
-      const params = new URLSearchParams({ appType: 'web', instanceMode: 'remote', reportUsage: 'false' });
+      const params = new URLSearchParams({ appType: 'web' });
       const response = await runtimeFetch(`/api/piarium/update-check?${params.toString()}`, {
         method: 'GET',
         headers: { Accept: 'application/json' },

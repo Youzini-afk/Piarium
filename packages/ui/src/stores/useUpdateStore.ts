@@ -1,13 +1,10 @@
 import { create } from 'zustand';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
-import { getDeviceInfo } from '@/lib/device';
-import { useUIStore } from './useUIStore';
 import { usePreferencesStore } from './usePreferencesStore';
 import {
   checkForDesktopUpdates,
   downloadDesktopUpdate,
   restartToApplyUpdate,
-  isDesktopLocalOriginActive,
   isElectronShell,
   isVSCodeRuntime,
   isWebRuntime,
@@ -39,33 +36,6 @@ interface UpdateStore extends UpdateState {
 }
 
 type ClientRuntime = 'desktop' | 'web' | 'vscode' | 'mobile';
-
-const CLIENT_INSTALL_ID_KEY = 'piarium.update-install-id';
-
-function getClientInstallId(): string | undefined {
-  if (typeof window === 'undefined' || typeof crypto.randomUUID !== 'function') return undefined;
-
-  try {
-    const existing = window.localStorage.getItem(CLIENT_INSTALL_ID_KEY)?.trim();
-    if (existing) return existing;
-
-    const installId = crypto.randomUUID();
-    window.localStorage.setItem(CLIENT_INSTALL_ID_KEY, installId);
-    return installId;
-  } catch {
-    return undefined;
-  }
-}
-
-function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
-  if (typeof window === 'undefined') return 'unknown';
-  try {
-    const { deviceType } = getDeviceInfo();
-    return deviceType;
-  } catch {
-    return 'unknown';
-  }
-}
 
 function detectArch(): 'arm64' | 'x64' | 'unknown' {
   const electronArch = typeof window !== 'undefined'
@@ -103,37 +73,25 @@ function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' | 'android' | '
 }
 
 function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
-  // Check if user has opted out of usage reporting (default: true/enabled from UI store)
-  const shouldReportUsage = useUIStore.getState().reportUsage;
-
-  const params = new URLSearchParams({ reportUsage: shouldReportUsage ? 'true' : 'false' });
-  params.set('deviceClass', detectDeviceClass());
+  const params = new URLSearchParams();
   params.set('arch', detectArch());
   params.set('platform', detectPlatform());
-  if (shouldReportUsage && (runtime === 'desktop' || runtime === 'mobile')) {
-    const installId = getClientInstallId();
-    if (installId) params.set('installId', installId);
-  }
   if (runtime === 'desktop') {
     params.set('appType', 'desktop-electron');
-    params.set('instanceMode', isDesktopLocalOriginActive() ? 'local' : 'remote');
     return params;
   }
 
   if (runtime === 'vscode') {
     params.set('appType', 'vscode');
-    params.set('instanceMode', 'local');
     return params;
   }
 
   if (runtime === 'mobile') {
     params.set('appType', 'mobile-capacitor');
-    params.set('instanceMode', 'remote');
     return params;
   }
 
   params.set('appType', 'web');
-  params.set('instanceMode', 'unknown');
   return params;
 }
 

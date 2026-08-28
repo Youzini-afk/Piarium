@@ -27,30 +27,12 @@ export const registerPiariumRoutes = (app, dependencies) => {
     try {
       const { checkForUpdates } = await import('../package-manager.js');
       const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
-      const parseReportUsage = (value) => {
-        if (typeof value !== 'string') return true;
-        const normalized = value.trim().toLowerCase();
-        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
-        return true;
-      };
-      const inferDeviceClass = (ua) => {
-        const value = (ua || '').toLowerCase();
-        if (!value) return 'unknown';
-        if (value.includes('ipad') || value.includes('tablet')) return 'tablet';
-        if (value.includes('mobi') || value.includes('android') || value.includes('iphone')) return 'mobile';
-        return 'desktop';
-      };
-      const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
 
       const updateInfo = await checkForUpdates({
         appType: parseString(req.query.appType),
-        deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
         platform: parseString(req.query.platform),
         arch: parseString(req.query.arch),
-        instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
-        installId: parseString(req.query.installId),
-        reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
       });
       res.json(updateInfo);
     } catch (error) {

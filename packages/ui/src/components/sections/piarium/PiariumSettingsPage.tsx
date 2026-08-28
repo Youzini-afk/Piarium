@@ -136,7 +136,7 @@ const ShortcutsSectionContent: React.FC = () => {
 };
 
 // General section: app-level settings — startup/tray/network, access password,
-// passkeys, editor behavior, and privacy.
+// passkeys, and editor behavior.
 const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
@@ -157,7 +157,6 @@ const GeneralSectionContent: React.FC = () => {
                 ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
                 ...(!isVSCode ? ['terminalShell' as const] : []),
                 ...(!isVSCode ? ['terminalLoginShell' as const] : []),
-                'reportUsage',
             ]} />
         </>
     );

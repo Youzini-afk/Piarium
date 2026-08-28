@@ -196,8 +196,6 @@ export type DesktopSettings = {
 
   // User-added skills catalogs (persisted to Piarium's settings.json)
   skillCatalogs?: SkillCatalogConfig[];
-  // Opt-in to send anonymous usage reports for update checks (default: true)
-  reportUsage?: boolean;
   // Opt-in to automatic update checks and update notification UI (default: false)
   autoUpdateChecksEnabled?: boolean;
 

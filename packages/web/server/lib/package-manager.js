@@ -1,9 +1,7 @@
 import * as childProcess from 'child_process';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolvePiariumDataDir } from './platform/data-paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,33 +31,6 @@ function getSpawnSyncBaseOptions() {
 }
 const getUpdateCheckUrl = () => process.env.PIARIUM_UPDATE_API_URL?.trim() || null;
 
-function getPiariumConfigDir() {
-  return resolvePiariumDataDir(process);
-}
-
-function sanitizeInstallScope(scope) {
-  if (scope === 'desktop-electron' || scope === 'vscode' || scope === 'web' || scope === 'mobile-capacitor') return scope;
-  return 'web';
-}
-
-function getOrCreateInstallId(scope = 'web') {
-  const configDir = getPiariumConfigDir();
-  const normalizedScope = sanitizeInstallScope(scope);
-  const idPath = path.join(configDir, `install-id-${normalizedScope}`);
-
-  try {
-    const existing = fs.readFileSync(idPath, 'utf8').trim();
-    if (existing) return existing;
-  } catch {
-    // Generate new id.
-  }
-
-  const installId = crypto.randomUUID();
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(idPath, `${installId}\n`, { encoding: 'utf8', mode: 0o600 });
-  return installId;
-}
-
 function mapPlatform(value) {
   if (value === 'darwin') return 'macos';
   if (value === 'win32') return 'windows';
@@ -76,11 +47,6 @@ function mapArch(value) {
 function normalizeAppType(value) {
   if (value === 'web' || value === 'desktop-electron' || value === 'vscode' || value === 'mobile-capacitor') return value;
   return 'web';
-}
-
-function normalizeDeviceClass(value) {
-  if (value === 'mobile' || value === 'tablet' || value === 'desktop' || value === 'unknown') return value;
-  return 'unknown';
 }
 
 function normalizePlatform(value) {
@@ -137,17 +103,12 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const shouldTrustClientPlatform = appType === 'desktop-electron' || appType === 'vscode' || appType === 'mobile-capacitor';
     const platform = shouldTrustClientPlatform ? normalizePlatform(options.platform) : hostPlatform;
     const arch = shouldTrustClientPlatform ? normalizeArch(options.arch) : hostArch;
-    const reportUsage = options.reportUsage !== false;
     const payload = {
       appType,
-      deviceClass: normalizeDeviceClass(options.deviceClass),
       platform,
       arch,
       channel: 'stable',
       currentVersion,
-      installId: reportUsage ? (options.installId || getOrCreateInstallId(appType)) : undefined,
-      instanceMode: options.instanceMode || 'unknown',
-      reportUsage,
     };
 
     const response = await fetch(updateCheckUrl, {

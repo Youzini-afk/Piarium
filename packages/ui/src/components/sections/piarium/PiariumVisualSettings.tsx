@@ -304,7 +304,6 @@ type VisibleSetting =
     | 'fileEditorPreferences'
     | 'persistDraft'
     | 'inputSpellcheck'
-    | 'reportUsage'
     | 'expandedEditorToolbar'
     | 'autoSaveEnabled'
     | 'draftStartersVisible';
@@ -455,14 +454,6 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
     const desktopWindowControlsStyle = useUIStore((state) => state.desktopWindowControlsStyle);
     const setDesktopWindowControlsStyle = useUIStore((state) => state.setDesktopWindowControlsStyle);
     const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
-    const reportUsage = useUIStore(state => state.reportUsage);
-    const setReportUsage = useUIStore(state => state.setReportUsage);
-
-    // Sync reportUsage changes to server settings
-    const handleReportUsageChange = React.useCallback((enabled: boolean) => {
-        setReportUsage(enabled);
-        void updateDesktopSettings({ reportUsage: enabled });
-    }, [setReportUsage]);
 
     const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
         setDesktopWindowControlsPosition(value);
@@ -2001,20 +1992,6 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
                             </>
                         )}
                     </>
-                )}
-
-                {/* --- Privacy & Data --- */}
-                {shouldShow('reportUsage') && (
-                    <SettingsSection title={t('settings.piarium.visual.section.privacy')}>
-                        <SettingsCheckboxRow
-                            checked={reportUsage}
-                            onChange={handleReportUsageChange}
-                            label={t('settings.piarium.visual.field.sendAnonymousUsageReports')}
-                            info={t('settings.piarium.visual.field.sendAnonymousUsageReportsHint')}
-                            ariaLabel={t('settings.piarium.visual.field.sendAnonymousUsageReportsAria')}
-                            settingsItem="appearance.usage-reports"
-                        />
-                    </SettingsSection>
                 )}
 
             </div>
