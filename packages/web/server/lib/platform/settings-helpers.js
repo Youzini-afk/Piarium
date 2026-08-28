@@ -356,6 +356,13 @@ export const createSettingsHelpers = (dependencies) => {
       const normalizedDays = Math.max(1, Math.min(365, Math.round(candidate.autoDeleteAfterDays)));
       result.autoDeleteAfterDays = normalizedDays;
     }
+    if (
+      candidate.recoveryPreference === 'conversation'
+      || candidate.recoveryPreference === 'both'
+      || candidate.recoveryPreference === 'ask'
+    ) {
+      result.recoveryPreference = candidate.recoveryPreference;
+    }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {

@@ -81,6 +81,21 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ wideChatLayoutEnabled: 'true' })).toEqual({});
   });
 
+  it('round-trips only supported recovery preferences', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ recoveryPreference: 'conversation' })).toEqual({
+      recoveryPreference: 'conversation',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ recoveryPreference: 'both' })).toEqual({
+      recoveryPreference: 'both',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ recoveryPreference: 'ask' })).toEqual({
+      recoveryPreference: 'ask',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ recoveryPreference: 'files' })).toEqual({});
+  });
+
   it('accepts messageStreamTransport as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
