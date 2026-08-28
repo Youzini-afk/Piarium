@@ -7,8 +7,8 @@ Last updated: 2026-08-28
 ## 1. Decision
 
 Piarium will own workspace checkpoints and recovery through a versioned Piarium service. The official
-implementation is published as the independently versioned Piarium extension package
-`@piarium/recovery` (manifest ID `org.piarium.recovery`) and selected by the default distribution.
+implementation is the statically distributed built-in Piarium extension
+`piarium.builtin.recovery`, selected by the default distribution.
 
 Pi remains authoritative for its append-only conversation tree. Piarium becomes authoritative for the
 physical workspace timeline and for coordinating a conversation navigation with a workspace restore.
@@ -130,7 +130,7 @@ Application Host fixed safety substrate
           | versioned, capability-gated Host services
           v
 Selected Piarium recovery extension
-  @piarium/recovery by distribution default
+  piarium.builtin.recovery by distribution default
   Recovery coordinator + policy
   Workspace tracker + snapshot/CAS store + operation WAL
           |
@@ -299,7 +299,7 @@ The default package receives a Host-resolved, extension-owned storage namespace.
 private layout is:
 
 ```text
-<PIARIUM_DATA_DIR>/extensions/storage/org.piarium.recovery/recovery/v1/<authorityId>/<workspaceId>/
+<PIARIUM_DATA_DIR>/extensions/storage/piarium.builtin.recovery/recovery/v1/<authorityId>/<workspaceId>/
   catalog.sqlite
   objects/
   operations/
@@ -486,7 +486,7 @@ not the renderer, combines those with workspace operations.
 The existing dead `CheckpointsAPI` DTO and plugin recovery bridge are replaced, not preserved as a
 second implementation or compatibility facade.
 
-The official `@piarium/recovery` package contains:
+The official `piarium.builtin.recovery` implementation contains:
 
 - a brokered Host entrypoint that provides `piarium.workspace-recovery@1`;
 - Surface entrypoints for the per-message action, Recovery panel, settings, progress, preview, and
@@ -494,9 +494,10 @@ The official `@piarium/recovery` package contains:
 - its snapshot catalog, CAS, retention, and operation schemas in extension-owned Host storage;
 - conformance fixtures that every replacement service provider must pass.
 
-It depends on `@piarium/extension-sdk`, not Pi's PackageManager or extension runner. Official releases
-publish it to npm and also bundle a verified artifact in the Piarium distribution for offline and
-first-run reliability. Bundling is a delivery choice, not privileged lifecycle or service semantics.
+It uses the same framework-neutral Extension SDK, manifest, owner generation, Host service, Surface
+contribution, and conformance contracts as external Piarium extensions. Its source stays in this
+repository and its verified artifact ships with Piarium; it is not separately published merely because
+it is replaceable. Only the public contract/SDK must be publishable for external providers.
 
 ## 15. User experience
 
@@ -528,7 +529,7 @@ does not create a second checkpoint store.
 ## 16. Extension points
 
 The complete recovery feature is a selected, replaceable Piarium Host service. Another Piarium
-extension may replace `@piarium/recovery` by providing `piarium.workspace-recovery@1` and passing the
+extension may replace `piarium.builtin.recovery` by providing `piarium.workspace-recovery@1` and passing the
 same safety, crash, storage, and cross-platform conformance suite. Selection uses the existing
 distribution/user/workspace service-routing rules; package load order never chooses the owner.
 
@@ -545,7 +546,7 @@ Providers report consistency, volume, metadata, crash, and materialization capab
 never commit a workspace or navigate Pi directly. The selected recovery service coordinates them
 through fixed Host primitives.
 
-Disabling or replacing `@piarium/recovery` drains active captures/restores first, pins unfinished safety
+Disabling or replacing `piarium.builtin.recovery` drains active captures/restores first, pins unfinished safety
 state, withdraws its UI and service generation atomically, and retains extension data by default. A
 replacement never inherits or silently interprets another provider's private snapshot store; explicit
 export/import is a separate operation.
@@ -584,8 +585,8 @@ Each phase is complete, independently reviewable, and pushed before the next one
 
 - Add fixed Application Host primitives for workspace identity/trust, mutation epochs, streamed object
   handles, fenced materialization, Pi session capability access, and durable operation recovery.
-- Define `piarium.workspace-recovery@1` in `@piarium/extension-contract` and scaffold the published
-  `@piarium/recovery` Piarium extension with brokered Host and Surface entrypoints.
+- Define `piarium.workspace-recovery@1` in `@piarium/extension-contract` and scaffold the statically
+  distributed `piarium.builtin.recovery` extension with brokered Host and Surface entrypoints.
 - Introduce the extension-owned snapshot/manifest/CAS schema, consistency/coverage model, pins, WAL
   records, and storage diagnostics.
 - Implement immutable capture/list/read/diff for a direct test workspace through the service.
@@ -638,7 +639,7 @@ snapshot; worker crash, Host crash, disconnect, and stale completion preserve th
 
 ### Phase 6 — Product UI and policy
 
-- Complete the `@piarium/recovery` Surface entrypoints for per-message revert, chooser, Recovery panel,
+- Complete the `piarium.builtin.recovery` Surface entrypoints for per-message revert, chooser, Recovery panel,
   progress, preview, conflict resolution, storage, pins, rescue, and settings over
   `WorkspaceRecoveryAPI`.
 - Share the behavior across Agent/IDE/Web/Electron/mobile and define truthful VS Code behavior.
@@ -654,8 +655,8 @@ switching providers never mutates Pi packages or selects by load order.
 - Remove workspace-history settings adapter, tree-hook fallback, recovery bridge v1, and old command-owned
   checkpoint paths from Piarium.
 - Keep the packages ordinarily installable and independently usable by Pi CLI users.
-- Select the bundled `@piarium/recovery` package in the default Piarium distribution; do not add it to
-  Pi's settings or package catalog.
+- Select `piarium.builtin.recovery` in the default Piarium distribution; do not add it to Pi's settings,
+  Pi package catalog, or a separate npm publication workflow.
 - Rewrite architecture, recovery, deployment, diagnostics, and user documentation.
 
 Acceptance: a clean Piarium install has complete native conversation/workspace recovery without those
@@ -700,7 +701,8 @@ Settled:
 - Restore is a durable coordinated transition, not falsely advertised universal 2PC.
 - Snapshot consistency and coverage are first-class user-visible facts.
 - New-workspace recovery is the safe path when writers or filesystem semantics cannot be fenced.
-- The official implementation is the published, replaceable `@piarium/recovery` Piarium extension;
+- The official implementation is the statically distributed, replaceable
+  `piarium.builtin.recovery` Piarium extension;
   optional providers may replace it or accelerate its storage, but none bypass the fixed safety
   substrate.
 - No old plugin-state migration or compatibility layer is retained.
